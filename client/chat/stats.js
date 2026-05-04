@@ -138,3 +138,95 @@ window.loadLogs = async function(page = 1) {
     renderPagination('logs', total, page);
 }
 window.exportLogs = () => downloadFileByFetch(`${API_BASE}/admin/logs/export`, 'audit_logs.csv');
+
+window.loadReport = async function() {
+    const unit = document.getElementById('report-unit').value || '';
+    const username = document.getElementById('report-username').value || '';
+    const days = document.getElementById('report-days').value || 30;
+
+    try {
+        const res = await fetch(`${API_BASE}/stats/report?unit=${encodeURIComponent(unit)}&username=${encodeURIComponent(username)}&days=${days}`, { headers: authHeaders() });
+        const data = await res.json();
+        
+        // 动态填充部门下拉框
+        const unitSelect = document.getElementById('report-unit');
+        if (unitSelect.options.length <= 1 && data.units) {
+            data.units.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u; opt.innerText = u;
+                unitSelect.appendChild(opt);
+            });
+            unitSelect.value = unit;
+        }
+
+        renderTrendChart('report-trend-chart', data.trend);
+        renderBarChart('report-user-chart', data.byUser, 'nickname', 'username');
+        renderBarChart('report-unit-chart', data.byUnit, 'unit', 'unit');
+    } catch (e) {
+        showToast('加载报表失败', 'error');
+    }
+}
+
+function renderBarChart(canvasId, data, labelField, fallbackField) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(rect.width || 400, 320);
+    const height = Number(canvas.getAttribute('height')) || 250;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio; canvas.height = height * ratio;
+    canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+    ctx.scale(ratio, ratio);
+    ctx.clearRect(0, 0, width, height);
+
+    const values = data.map(d => Number(d.tokens) || 0);
+    const labels = data.map(d => String(d[labelField] || d[fallbackField] || '未知'));
+    const max = Math.max(...values, 1);
+    const padX = 80; const padY = 20; const chartW = width - padX - 60; const chartH = height - padY * 2;
+
+    if (values.length === 0) {
+        ctx.fillStyle = '#6b7280'; ctx.font = '13px sans-serif';
+        ctx.fillText('暂无数据', padX, height / 2); return;
+    }
+
+    const spacing = chartH / Math.max(values.length, 5);
+    const barHeight = spacing * 0.6;
+
+    ctx.font = '12px sans-serif';
+    ctx.textBaseline = 'middle';
+
+    values.forEach((v, i) => {
+        const y = padY + spacing * i + spacing / 2;
+        
+        // 标签绘制
+        ctx.fillStyle = '#4b5563';
+        let labelText = labels[i];
+        if (labelText.length > 8) labelText = labelText.slice(0, 7) + '...';
+        ctx.textAlign = 'right';
+        ctx.fillText(labelText, padX - 10, y);
+
+        // 条块绘制
+        const barWidth = (v / max) * chartW;
+        ctx.fillStyle = '#10a37f';
+        ctx.beginPath();
+        // 绘制圆角矩形
+        const r = 4;
+        const bx = padX, by = y - barHeight / 2, bw = barWidth, bh = barHeight;
+        ctx.moveTo(bx + r, by);
+        ctx.lineTo(bx + bw - r, by);
+        ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+        ctx.lineTo(bx + bw, by + bh - r);
+        ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+        ctx.lineTo(bx + r, by + bh);
+        ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+        ctx.lineTo(bx, by + r);
+        ctx.quadraticCurveTo(bx, by, bx + r, by);
+        ctx.fill();
+
+        // 数值绘制
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#6b7280';
+        ctx.fillText(v.toLocaleString(), padX + barWidth + 8, y);
+    });
+}

@@ -353,6 +353,7 @@
                     <button id="tab-users"
                         class="admin-tab admin-only hidden">用户管理</button>
                     <button id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
+                    <button id="tab-report" class="admin-tab admin-only hidden">审计报表</button>
                     <button id="tab-stats"
                         class="admin-tab">用量统计</button>
                     <button id="tab-details"
@@ -545,6 +546,40 @@
                             </table>
                         </div>
                         <div id="pagination-logs" class="pagination"></div>
+                    </div>
+
+                    <!-- 审计报表 -->
+                    <div id="tab-content-report" class="admin-tab-content admin-only hidden">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>可视化审计报表</h3>
+                            <div style="display: flex; gap: 10px;">
+                                <select id="report-unit" class="form-input" style="width: 150px; padding: 6px 12px; height: 36px;">
+                                    <option value="">所有部门</option>
+                                </select>
+                                <input type="text" id="report-username" class="form-input" placeholder="搜索用户" style="width: 120px; padding: 6px 12px; height: 36px;">
+                                <select id="report-days" class="form-input" style="width: 120px; padding: 6px 12px; height: 36px;">
+                                    <option value="7">近 7 天</option>
+                                    <option value="30" selected>近 30 天</option>
+                                    <option value="90">近 90 天</option>
+                                    <option value="365">近 1 年</option>
+                                </select>
+                                <button id="report-query-btn" class="btn-primary" style="height: 36px;">生成报表</button>
+                            </div>
+                        </div>
+                        <div class="stat-card" style="margin-bottom: 20px;">
+                            <h4>Token 使用趋势</h4>
+                            <canvas id="report-trend-chart" height="180"></canvas>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="stat-card">
+                                <h4>用户消耗排行 (Top 10)</h4>
+                                <canvas id="report-user-chart" height="250"></canvas>
+                            </div>
+                            <div class="stat-card">
+                                <h4>部门消耗对比</h4>
+                                <canvas id="report-unit-chart" height="250"></canvas>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- 用量统计 -->

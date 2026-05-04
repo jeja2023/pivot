@@ -45,6 +45,49 @@ function createAdminStatsRouter({
         res.json(trend);
     }));
 
+    router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const { unit, username, days = 30 } = req.query;
+        let conditions = ["m.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
+        let params = [parseInt(days, 10) || 30];
+
+        if (unit) {
+            conditions.push("u.unit = ?");
+            params.push(unit);
+        }
+        if (username) {
+            conditions.push("u.username LIKE ?");
+            params.push(`%${username}%`);
+        }
+
+        const whereClause = 'WHERE ' + conditions.join(' AND ');
+
+        const trend = db.prepare(`
+            SELECT date(m.created_at) as day, SUM(m.token_count) as tokens
+            FROM messages m JOIN users u ON m.user_id = u.id
+            ${whereClause}
+            GROUP BY day ORDER BY day
+        `).all(...params);
+
+        const byUser = db.prepare(`
+            SELECT u.username, u.nickname, SUM(m.token_count) as tokens
+            FROM messages m JOIN users u ON m.user_id = u.id
+            ${whereClause}
+            GROUP BY u.id ORDER BY tokens DESC LIMIT 10
+        `).all(...params);
+
+        const byUnit = db.prepare(`
+            SELECT COALESCE(u.unit, '未分配') as unit, SUM(m.token_count) as tokens
+            FROM messages m JOIN users u ON m.user_id = u.id
+            ${whereClause}
+            GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC
+        `).all(...params);
+
+        // Filter out options for select dropdowns
+        const units = db.prepare("SELECT DISTINCT unit FROM users WHERE unit IS NOT NULL AND unit != ''").all().map(r => r.unit);
+
+        res.json({ trend, byUser, byUnit, units });
+    }));
+
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         if (isAdmin) {
