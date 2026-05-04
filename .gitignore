@@ -3,6 +3,7 @@ node_modules/
 data/
 uploads/
 *.log
+*.db
 .DS_Store
 dist/
 build/
