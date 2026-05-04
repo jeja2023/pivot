@@ -37,6 +37,15 @@ const REFRESH_COOKIE_OPTIONS = {
     maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
 };
 
+function hashApiKey(key) {
+    return crypto.createHash('sha256').update(String(key || '')).digest('hex');
+}
+
+function previewApiKey(key) {
+    const text = String(key || '');
+    return text ? `${text.slice(0, 8)}...${text.slice(-4)}` : '';
+}
+
 function generateAccessToken(user) {
     return jwt.sign(
         { id: user.id, username: user.username, role: user.role },
@@ -169,11 +178,14 @@ function authMiddleware(req, res, next) {
             return next();
         }
     } catch (e) {
+        if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
+            return res.status(401).json({ error: 'Token 已过期', code: 'TOKEN_EXPIRED' });
+        }
         // 如果 JWT 验证失败（如过期），继续尝试 API Key 验证
     }
 
     // 2. 尝试 API Key 验证 (主要用于第三方客户端)
-    const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key = ? AND status = 'active'").get(token);
+    const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(hashApiKey(token));
     if (apiKeyData) {
         const user = stmts.getUserById.get(apiKeyData.user_id);
         if (user && user.status !== 'disabled') {
@@ -185,7 +197,7 @@ function authMiddleware(req, res, next) {
         }
     }
 
-    return res.status(401).json({ error: 'Token 无效或已过期' });
+    return res.status(401).json({ error: 'Token 无效或已过期', code: 'TOKEN_INVALID' });
 }
 
 module.exports = { 
@@ -198,5 +210,7 @@ module.exports = {
     AUTH_COOKIE_NAME, 
     REFRESH_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
-    REFRESH_COOKIE_OPTIONS
+    REFRESH_COOKIE_OPTIONS,
+    hashApiKey,
+    previewApiKey
 };

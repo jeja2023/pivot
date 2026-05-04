@@ -1,11 +1,19 @@
 const express = require('express');
+const http = require('http');
+const https = require('https');
 const { asyncHandler } = require('../http');
 const { getAccessibleModel, getModelDailyUsage, getUserAccessibleModels } = require('../services/models');
 const { estimateTokens } = require('../llm');
-const { db } = require('../db');
-const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
+const { aiSemaphore } = require('../services/concurrency');
+const {
+    detectUnsupportedCapability,
+    buildCapabilityFallbackMessage
+} = require('../capabilities');
 const axios = require('axios');
+
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
 
 function createOpenAIRouter({ authMiddleware, logAction }) {
     const router = express.Router();
@@ -30,9 +38,36 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
         const { model, messages, stream, temperature, max_tokens } = req.body;
         const userId = req.user.id;
 
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: { message: 'messages must be a non-empty array.', type: 'invalid_request_error' } });
+        }
+
         // 1. 获取模型配置 (通过模型标识符或 ID)
         const modelCfg = getAccessibleModel(model, req.user);
         if (!modelCfg) return res.status(404).json({ error: { message: `Model '${model}' not found or no access.`, type: 'invalid_request_error' } });
+        if (modelCfg.secret_error) {
+            return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+        }
+
+        const lastUserContent = [...messages].reverse().find(m => m?.role === 'user')?.content;
+        const plainUserContent = Array.isArray(lastUserContent)
+            ? lastUserContent.map(part => typeof part === 'string' ? part : part?.text || '').join('\n')
+            : String(lastUserContent || '');
+        const unsupportedCapability = detectUnsupportedCapability(plainUserContent);
+        if (unsupportedCapability) {
+            const fallback = buildCapabilityFallbackMessage(unsupportedCapability);
+            const promptTokens = estimateTokens(JSON.stringify(messages));
+            const completionTokens = estimateTokens(fallback);
+            logAction(req, 'OpenAI 能力不支持提示', `能力: ${unsupportedCapability.code}, 模型: ${model}`);
+            return res.json({
+                id: `chatcmpl-${Date.now().toString(36)}`,
+                object: 'chat.completion',
+                created: Math.floor(Date.now() / 1000),
+                model: String(model || modelCfg.id),
+                choices: [{ index: 0, message: { role: 'assistant', content: fallback }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
+            });
+        }
         
         // 2. 检查配额
         if (modelCfg.daily_token_limit > 0) {
@@ -43,6 +78,26 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
         }
 
         logAction(req, 'OpenAI 接口调用', `模型: ${model}, 流式: ${!!stream}`);
+        
+        // --- 进入并发控制 ---
+        try {
+            await aiSemaphore.acquire();
+        } catch (e) {
+            return res.status(e.statusCode || 503).json({
+                error: {
+                    message: e.message || 'Model service is busy. Please retry later.',
+                    type: 'server_overloaded',
+                    code: e.code || 'AI_OVERLOADED'
+                }
+            });
+        }
+        let semaphoreReleased = false;
+        const releaseSemaphore = () => {
+            if (!semaphoreReleased) {
+                aiSemaphore.release();
+                semaphoreReleased = true;
+            }
+        };
 
         // 3. 构建下游请求
         const baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
@@ -58,7 +113,9 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
 
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${modelCfg.api_key}`
+            'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined,
+            'x-api-key': modelCfg.api_key || undefined,
+            'User-Agent': 'Pivot-AI-Client/1.0'
         };
 
         try {
@@ -68,7 +125,10 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 data: payload,
                 headers: headers,
                 responseType: stream ? 'stream' : 'json',
-                timeout: 60000
+                timeout: 180000,
+                proxy: false,
+                httpAgent,
+                httpsAgent
             });
 
             if (stream) {
@@ -92,16 +152,28 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
 
                 response.data.on('end', () => {
                     const tokens = estimateTokens(JSON.stringify(messages) + totalContent);
-                    // 记录异步审计，不在此处插入 messages 表，仅记录日志
+                    logAction(req, 'OpenAI 流式调用完成', `模型: ${modelCfg.name}, 估算Tokens: ${tokens}`);
                     res.end();
+                    releaseSemaphore();
+                });
+                response.data.on('error', err => {
+                    logger.error({ err: err.message, model: modelCfg.name }, 'OpenAI 流式转发中断');
+                    if (!res.writableEnded) res.end();
+                    releaseSemaphore();
+                });
+                req.on('close', () => {
+                    if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
+                    releaseSemaphore();
                 });
             } else {
                 res.json(response.data);
+                releaseSemaphore();
             }
         } catch (e) {
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
             res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+            releaseSemaphore();
         }
     }));
 

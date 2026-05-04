@@ -363,6 +363,7 @@
                     <button id="tab-users"
                         class="admin-tab admin-only hidden">用户管理</button>
                     <button id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
+                    <button id="tab-monitor" class="admin-tab admin-only hidden">系统监控</button>
                     <button id="tab-report" class="admin-tab admin-only hidden">审计报表</button>
                     <button id="tab-stats"
                         class="admin-tab">用量统计</button>
@@ -558,6 +559,54 @@
                         </div>
                         <div id="pagination-logs" class="pagination"></div>
                     </div>
+
+                    <section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <div style="text-align: left;">
+                                <h3 style="margin: 0;">系统监控</h3>
+                                <p id="monitor-updated-at" style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.82rem;">等待刷新</p>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <label style="display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.85rem;">
+                                    <input type="checkbox" id="monitor-auto-refresh" checked>
+                                    自动刷新
+                                </label>
+                                <button id="monitor-refresh-btn" class="btn-secondary">刷新</button>
+                            </div>
+                        </div>
+                        <div id="monitor-summary-grid" class="monitor-grid"></div>
+                        <div class="monitor-panels">
+                            <div class="stat-card">
+                                <h4>GPU 与并发保护</h4>
+                                <div id="monitor-gpu-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card">
+                                <h4>系统资源</h4>
+                                <div id="monitor-resource-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card">
+                                <h4>今日模型 Token</h4>
+                                <div id="monitor-model-list" class="monitor-list"></div>
+                            </div>
+                        </div>
+                        <div class="stat-card" style="margin-top: 20px;">
+                            <h4>热点接口</h4>
+                            <div class="table-container" style="max-height: 320px;">
+                                <table class="data-table compact-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 90px;">方法</th>
+                                            <th>接口</th>
+                                            <th style="width: 90px;">状态</th>
+                                            <th style="width: 120px;">请求数</th>
+                                            <th style="width: 140px;">平均延迟</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="monitor-routes-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
 
                     <!-- 审计报表 -->
                     <div id="tab-content-report" class="admin-tab-content admin-only hidden">

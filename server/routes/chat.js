@@ -17,6 +17,7 @@ const {
     getModelDailyUsage
 } = require('../services/models');
 const { logger } = require('../logger');
+const { aiSemaphore } = require('../services/concurrency');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -128,6 +129,26 @@ function createChatRouter({
                 content: assistantContent
             });
         }
+
+        // --- 进入并发控制 ---
+        try {
+            await aiSemaphore.acquire();
+        } catch (e) {
+            const message = e.message || '模型服务当前繁忙，请稍后重试。';
+            logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
+            return res.status(e.statusCode || 503).json({
+                error: message,
+                code: e.code || 'AI_OVERLOADED',
+                retryable: true
+            });
+        }
+        let semaphoreReleased = false;
+        const releaseSemaphore = () => {
+            if (!semaphoreReleased) {
+                aiSemaphore.release();
+                semaphoreReleased = true;
+            }
+        };
 
         let history = await getContext(sessionId, userId, modelCfg);
         if (modelContent && modelContent !== visibleContent) {
@@ -356,12 +377,14 @@ function createChatRouter({
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     writeSse('[DONE]');
                     res.end();
+                    releaseSemaphore(); // 正常结束释放
                 } catch (e) {
                     req.log.error({ err: e.message }, '流结束处理失败');
                     if (!res.writableEnded) {
                         writeSse(JSON.stringify({ error: '保存模型回复失败', detail: e.message }));
                         res.end();
                     }
+                    releaseSemaphore(); // 报错释放
                 }
             });
 
@@ -378,10 +401,12 @@ function createChatRouter({
                     writeSse(JSON.stringify({ error: '流传输中断', detail: err.message }));
                     res.end();
                 }
+                releaseSemaphore(); // 传输错误释放
             });
 
             req.on('close', () => {
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
+                releaseSemaphore(); // 客户端主动断开释放
             });
         } catch (e) {
             const errorData = e.response?.data;
@@ -419,6 +444,7 @@ function createChatRouter({
                 statusCode: statusCode
             }));
             res.end();
+            releaseSemaphore(); // 捕获异常释放
         }
     }));
 

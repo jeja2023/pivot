@@ -1,6 +1,7 @@
 const { db } = require('./connection');
 const logger = require('../logger');
 const { getBeijingTimestamp } = require('../time');
+const crypto = require('crypto');
 
 const ensureColumn = (table, column, definition) => {
     try {
@@ -19,6 +20,13 @@ const recordMigration = (key, value = 'done') => {
       .run(key, value, getBeijingTimestamp());
 };
 
+const hashApiKey = (key) => crypto.createHash('sha256').update(String(key || '')).digest('hex');
+const previewApiKey = (key) => {
+    const text = String(key || '');
+    if (!text) return '';
+    return `${text.slice(0, 8)}...${text.slice(-4)}`;
+};
+
 function runMigrations() {
     ensureColumn('users', 'nickname', 'TEXT');
     ensureColumn('users', 'unit', 'TEXT');
@@ -33,6 +41,8 @@ function runMigrations() {
     ensureColumn('models', 'daily_token_limit', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'allowed_units', "TEXT DEFAULT ''");
     ensureColumn('models', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('models', 'temperature', 'REAL');
+    ensureColumn('models', 'max_tokens', 'INTEGER');
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');
@@ -48,6 +58,46 @@ function runMigrations() {
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");
     ensureColumn('prompts', 'created_at', 'DATETIME');
     db.prepare('UPDATE prompts SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            key_hash TEXT UNIQUE,
+            key_preview TEXT,
+            key TEXT,
+            status TEXT DEFAULT 'active',
+            last_used_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+    `);
+    ensureColumn('api_keys', 'key_hash', 'TEXT');
+    ensureColumn('api_keys', 'key_preview', 'TEXT');
+    ensureColumn('api_keys', 'key', 'TEXT');
+    ensureColumn('api_keys', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('api_keys', 'last_used_at', 'DATETIME');
+    ensureColumn('api_keys', 'created_at', 'DATETIME');
+
+    // 确保字段存在后再创建索引
+    try {
+        db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)");
+        db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)");
+    } catch (e) {
+        logger.warn('API Key 索引创建失败 (可能字段尚未生效)');
+    }
+    db.prepare('UPDATE api_keys SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
+
+    const legacyKeys = db.prepare("SELECT id, key FROM api_keys WHERE key IS NOT NULL AND key != '' AND (key_hash IS NULL OR key_hash = '')").all();
+    if (legacyKeys.length > 0) {
+        const migrateKey = db.prepare('UPDATE api_keys SET key_hash = ?, key_preview = ?, key = NULL WHERE id = ?');
+        const migrateLegacyKeys = db.transaction(() => {
+            legacyKeys.forEach(row => migrateKey.run(hashApiKey(row.key), previewApiKey(row.key), row.id));
+        });
+        migrateLegacyKeys();
+        logger.info({ count: legacyKeys.length }, 'API Key 存储升级：已将明文密钥迁移为哈希');
+    }
 
     // --- 历史时间迁移：旧版本表默认 CURRENT_TIMESTAMP，实际存储 UTC，需要补正为东八区 ---
     const timeMigrationKey = 'utc_timestamp_migrated_to_beijing_v1';

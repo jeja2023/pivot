@@ -113,6 +113,114 @@ window.loadOpsSummary = async function() {
     } catch (e) { showToast('加载概览失败', 'error'); }
 }
 
+let monitorTimer = null;
+const formatMetricNumber = (value, digits = 0) => Number(value || 0).toLocaleString(undefined, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits
+});
+const formatBytes = (bytes) => {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
+    if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+};
+const formatDuration = (seconds) => {
+    const value = Number(seconds) || 0;
+    const days = Math.floor(value / 86400);
+    const hours = Math.floor((value % 86400) / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    if (days > 0) return `${days}天 ${hours}小时`;
+    if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+    return `${minutes}分钟`;
+};
+
+window.loadMonitorSummary = async function() {
+    if (currentUser?.role !== 'admin') return;
+    try {
+        const res = await apiFetch(`${API_BASE}/stats/monitor-summary`);
+        if (!res.ok) throw new Error('系统监控加载失败');
+        const data = await res.json();
+        const memoryUsedRate = data.system.memory.total > 0 ? data.system.memory.used / data.system.memory.total : 0;
+        const errorRate = (data.http.errorRate || 0) * 100;
+        const concurrency = data.concurrency || {};
+        const gpu = data.gpu || {};
+        const gpuMaxRate = Number(gpu.maxRatio || 0) * 100;
+        const cards = [
+            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrency.max)}`, `排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`],
+            ['GPU 显存', gpu.available ? `${gpuMaxRate.toFixed(1)}%` : '未检测到', gpu.overloaded ? '保护中，拒绝新请求' : '运行正常'],
+            ['今日 Token', formatMetricNumber(data.tokens.today), '累计 ' + formatMetricNumber(data.tokens.total)],
+            ['今日消息', formatMetricNumber(data.tokens.todayMessages), '用户与模型消息总量'],
+            ['请求总数', formatMetricNumber(data.http.requests), `错误率 ${errorRate.toFixed(2)}%`],
+            ['平均延迟', `${formatMetricNumber(data.http.avgLatencyMs, 1)} ms`, `P95 ${formatMetricNumber(data.http.p95LatencyMs, 1)} ms`],
+            ['进程内存', formatBytes(data.process.memory.rss), `堆 ${formatBytes(data.process.memory.heapUsed)}`],
+            ['系统负载', data.system.loadAverage.map(v => Number(v).toFixed(2)).join(' / '), `${data.system.cpuCount} 核 CPU`]
+        ];
+        document.getElementById('monitor-summary-grid').innerHTML = cards.map(([label, value, hint]) => `
+            <div class="monitor-card${label === 'GPU 显存' && gpu.overloaded ? ' is-warning' : ''}">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+                <small>${escapeHtml(hint)}</small>
+            </div>
+        `).join('');
+
+        document.getElementById('monitor-resource-list').innerHTML = [
+            ['运行时长', formatDuration(data.process.uptimeSeconds)],
+            ['系统内存', `${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${(memoryUsedRate * 100).toFixed(1)}%)`],
+            ['进程 CPU', `${data.process.cpuSeconds.user.toFixed(2)}s 用户 / ${data.process.cpuSeconds.system.toFixed(2)}s 系统`],
+            ['运行平台', data.system.platform]
+        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
+
+        const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
+            ? gpu.gpus.map(item => {
+                const usedRate = Number(item.ratio || 0) * 100;
+                const utilRate = Number(item.utilization || 0) * 100;
+                return `<div class="monitor-row">
+                    <span>${escapeHtml(`#${item.index} ${item.name || 'GPU'}`)}</span>
+                    <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(1)}%，负载 ${utilRate.toFixed(0)}%)`)}</strong>
+                </div>`;
+            }).join('')
+            : `<div class="monitor-empty">${escapeHtml(gpu.error ? `未获取到 GPU 指标：${gpu.error}` : '未检测到 NVIDIA GPU 指标')}</div>`;
+        document.getElementById('monitor-gpu-list').innerHTML = [
+            `<div class="monitor-row"><span>保护状态</span><strong>${escapeHtml(gpu.overloaded ? '保护中' : '正常')}</strong></div>`,
+            `<div class="monitor-row"><span>拒绝阈值</span><strong>${escapeHtml(`${((gpu.thresholds?.reject || 0) * 100).toFixed(0)}%`)}</strong></div>`,
+            gpuRows
+        ].join('');
+
+        const models = data.tokens.byModel || [];
+        document.getElementById('monitor-model-list').innerHTML = models.length
+            ? models.map(item => `<div class="monitor-row"><span>${escapeHtml(item.model_name)}</span><strong>${formatMetricNumber(item.tokens)}</strong></div>`).join('')
+            : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
+
+        const routes = data.http.routes || [];
+        document.getElementById('monitor-routes-body').innerHTML = routes.length
+            ? routes.map(route => `
+                <tr>
+                    <td>${escapeHtml(route.method)}</td>
+                    <td title="${escapeHtml(route.route)}">${escapeHtml(route.route)}</td>
+                    <td>${escapeHtml(route.status)}</td>
+                    <td>${formatMetricNumber(route.requests)}</td>
+                    <td>${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5" class="text-center">暂无请求数据</td></tr>';
+
+        document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
+        scheduleMonitorRefresh();
+    } catch (e) {
+        showToast(e.message || '系统监控加载失败', 'error');
+    }
+};
+
+function scheduleMonitorRefresh() {
+    clearTimeout(monitorTimer);
+    const visible = !document.getElementById('tab-content-monitor')?.classList.contains('hidden');
+    const enabled = document.getElementById('monitor-auto-refresh')?.checked;
+    if (visible && enabled) {
+        monitorTimer = setTimeout(() => window.loadMonitorSummary(), 10000);
+    }
+}
+
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
 window.exportStats = () => {
     const rows = Array.from(document.querySelectorAll('#stats-list-body tr'));

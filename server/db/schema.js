@@ -66,6 +66,8 @@ function initSchema() {
             daily_token_limit INTEGER DEFAULT 0,
             allowed_units TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
+            temperature REAL,
+            max_tokens INTEGER,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -137,8 +139,22 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            key_hash TEXT UNIQUE,
+            key_preview TEXT,
+            key TEXT,
+            status TEXT DEFAULT 'active',
+            last_used_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+        CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);

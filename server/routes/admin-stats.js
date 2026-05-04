@@ -1,8 +1,12 @@
 /* 管理员运营统计路由 Admin Stats Routes */
 const express = require('express');
 const path = require('path');
+const os = require('os');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
+const { getHttpMetricsSnapshot } = require('../metrics');
+const { aiSemaphore } = require('../services/concurrency');
+const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 
 function createAdminStatsRouter({
     authMiddleware,
@@ -12,6 +16,58 @@ function createAdminStatsRouter({
     getCachedDirSize
 }) {
     const router = express.Router();
+
+    router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const httpMetrics = getHttpMetricsSnapshot();
+        const memory = process.memoryUsage();
+        const cpu = process.cpuUsage();
+        const todayTokens = db.prepare("SELECT COALESCE(SUM(token_count), 0) AS total FROM messages WHERE date(created_at) = date('now', '+8 hours')").get().total || 0;
+        const totalTokens = db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages').get().total || 0;
+        const todayMessages = db.prepare("SELECT COUNT(*) AS count FROM messages WHERE date(created_at) = date('now', '+8 hours')").get().count || 0;
+        const tokenByModel = db.prepare(`
+            SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(m.token_count), 0) AS tokens
+            FROM messages m
+            LEFT JOIN models md ON md.id = m.model_id
+            WHERE date(m.created_at) = date('now', '+8 hours')
+            GROUP BY COALESCE(md.name, '未知模型')
+            ORDER BY tokens DESC
+            LIMIT 8
+        `).all();
+
+        const concurrency = aiSemaphore.getStatus();
+        const gpu = getGpuMonitorStatus();
+
+        res.json({
+            updatedAt: new Date().toISOString(),
+            tokens: {
+                today: todayTokens,
+                total: totalTokens,
+                todayMessages,
+                byModel: tokenByModel
+            },
+            http: httpMetrics,
+            process: {
+                uptimeSeconds: Math.floor(process.uptime()),
+                memory,
+                cpuSeconds: {
+                    user: cpu.user / 1e6,
+                    system: cpu.system / 1e6
+                }
+            },
+            system: {
+                loadAverage: os.loadavg(),
+                memory: {
+                    total: os.totalmem(),
+                    free: os.freemem(),
+                    used: os.totalmem() - os.freemem()
+                },
+                cpuCount: os.cpus().length,
+                platform: os.platform()
+            },
+            concurrency,
+            gpu
+        });
+    }));
 
     router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';

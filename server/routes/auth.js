@@ -13,6 +13,7 @@ const {
 const { asyncHandler } = require('../http');
 const { db, stmts } = require('../db');
 const crypto = require('crypto');
+const { hashApiKey, previewApiKey } = require('../auth');
 
 function createAuthRouter({
     authMiddleware,
@@ -99,19 +100,15 @@ function createAuthRouter({
 
     // --- API Key 管理 ---
     router.get('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
-        const keys = db.prepare('SELECT id, name, key, created_at, last_used_at, status FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
-        // 脱敏处理，只显示前 8 位和后 4 位
-        const maskedKeys = keys.map(k => ({
-            ...k,
-            key: k.key.substring(0, 8) + '...' + k.key.substring(k.key.length - 4)
-        }));
-        res.json(maskedKeys);
+        const keys = db.prepare('SELECT id, name, key_preview, created_at, last_used_at, status FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        res.json(keys.map(k => ({ ...k, key: k.key_preview || 'sk-****' })));
     }));
 
     router.post('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
         const { name } = req.body;
         const key = 'sk-' + crypto.randomBytes(24).toString('hex');
-        db.prepare('INSERT INTO api_keys (user_id, name, key) VALUES (?, ?, ?)').run(req.user.id, name || '未命名密钥', key);
+        db.prepare('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key) VALUES (?, ?, ?, ?, NULL)')
+          .run(req.user.id, name || '未命名密钥', hashApiKey(key), previewApiKey(key));
         logAction(req, '创建 API Key', `名称: ${name}`);
         res.json({ key, name });
     }));

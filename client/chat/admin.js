@@ -69,7 +69,7 @@ document.getElementById('admin-panel-btn').onclick = () => {
 window.closeModal = () => document.getElementById('admin-container').classList.add('hidden');
 
 window.switchTab = async (tab) => {
-    const tabs = ['users', 'models', 'logs', 'stats', 'report', 'keys', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
+    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     
@@ -83,6 +83,7 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'models' && window.loadModels) loadModels(page);
     if (tab === 'users' && window.loadUsers) loadUsers(page);
     if (tab === 'logs' && window.loadLogs) loadLogs(page);
+    if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
     if (tab === 'stats' && window.loadStats) loadStats();
     if (tab === 'report' && window.loadReport) loadReport();
     if (tab === 'prompts' && window.loadPrompts) loadPrompts();

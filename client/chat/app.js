@@ -145,7 +145,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'labs', 'knowledge', 'users', 'logs', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'labs', 'knowledge', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
@@ -154,6 +154,8 @@ bind('logout-btn', () => window.logout());
 
 // 管理操作
 bind('ops-refresh-btn', () => window.loadOpsSummary());
+bind('monitor-refresh-btn', () => window.loadMonitorSummary());
+bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
 bind('labs-refresh-btn', () => window.loadSettings());
 bind('setting-rag-enabled', () => window.saveSettings(), 'change');
 bind('prompt-add-btn', () => window.openPromptModal());

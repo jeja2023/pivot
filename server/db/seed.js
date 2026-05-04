@@ -2,6 +2,17 @@ const { db } = require('./connection');
 const logger = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { recordMigration } = require('./migrate');
+const fs = require('fs');
+const path = require('path');
+
+function validateInitialPassword(password) {
+    if (!password || password.length < 8) {
+        throw new Error('默认管理员密码长度至少需要 8 位');
+    }
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+        throw new Error('默认管理员密码必须同时包含字母和数字');
+    }
+}
 
 function runSeeds() {
     // 预置一些常用指令
@@ -22,14 +33,19 @@ function runSeeds() {
     if (userCount === 0) {
         const bcrypt = require('bcryptjs');
         const crypto = require('crypto');
-        const { validatePassword } = require('../auth');
         const configuredAdminPassword = String(process.env.DEFAULT_ADMIN_PASSWORD || '').trim();
-        if (configuredAdminPassword) validatePassword(configuredAdminPassword);
+        if (configuredAdminPassword) validateInitialPassword(configuredAdminPassword);
         const adminPassword = configuredAdminPassword || crypto.randomBytes(16).toString('base64url');
         const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
         db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
             .run('admin', adminPasswordHash, '系统管理员', '智枢科技', 'admin', getBeijingTimestamp());
-        logger.info({ username: 'admin', password: adminPassword }, '系统初始化：已创建默认管理员账号');
+        if (configuredAdminPassword) {
+            logger.info({ username: 'admin' }, '系统初始化：已使用环境变量 DEFAULT_ADMIN_PASSWORD 创建管理员账号');
+        } else {
+            const credentialPath = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'initial-admin-password.txt');
+            fs.writeFileSync(credentialPath, `username=admin\npassword=${adminPassword}\ncreated_at=${getBeijingTimestamp()}\n`, { mode: 0o600 });
+            logger.warn({ username: 'admin', credentialPath }, '系统初始化：已创建随机管理员密码，请读取该一次性文件后尽快修改密码并删除文件');
+        }
         recordMigration('initial_admin_created_v1', 'done');
     }
 }

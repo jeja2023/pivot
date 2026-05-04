@@ -15,6 +15,11 @@ const fs = require('fs');
 const cors = require('cors');
 const helmet = require('helmet');
 const { logger, httpLogger } = require('./logger');
+const {
+    metricsMiddleware,
+    metricsAuthMiddleware,
+    renderPrometheusMetrics
+} = require('./metrics');
 const { v4: uuidv4 } = require('uuid');
 const { validateConfig } = require('./config');
 const appConfig = validateConfig();
@@ -39,7 +44,7 @@ const {
     escapeCsvCell
 } = require('./security');
 const { getBeijingTimestamp } = require('./time');
-const { createUploadMiddleware } = require('./upload');
+const { createUploadMiddleware, uploadSecurityMiddleware } = require('./upload');
 const { createAuthRouter } = require('./routes/auth');
 const { createAttachmentsRouter } = require('./routes/attachments');
 const { createChatRouter } = require('./routes/chat');
@@ -54,6 +59,10 @@ const { ragRouter, retrieveContext } = require('./rag');
 const {
     migrateModelSecrets
 } = require('./services/models');
+const { startGpuMonitor } = require('./services/gpu-monitor');
+
+// 启动 GPU 监控 (非阻塞)
+startGpuMonitor().catch(() => {});
 
 const getClientIp = (req) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
@@ -104,6 +113,7 @@ async function getCachedDirSize(dir) {
 
 const app = express();
 app.use(httpLogger); // 注入请求日志和请求 ID
+app.use(metricsMiddleware);
 const rateLimit = require('express-rate-limit');
 
 migrateModelSecrets();
@@ -152,6 +162,11 @@ app.get('/api/health', (req, res) => {
     }
 });
 
+app.get('/api/metrics', metricsAuthMiddleware, (req, res) => {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(renderPrometheusMetrics());
+});
+
 // --- 模型接口 ---
 app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }));
 
@@ -179,9 +194,12 @@ app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/
 }));
 app.use(express.static('client', { maxAge: appConfig.staticMaxAge }));
 const upload = createUploadMiddleware();
+const secureUpload = {
+    single: (field) => [upload.single(field), uploadSecurityMiddleware]
+};
 app.use(createAttachmentsRouter({
     authMiddleware,
-    upload,
+    upload: secureUpload,
     normalizePage,
     normalizeLimit,
     logAction
@@ -220,7 +238,7 @@ app.use('/api/stats', createAdminStatsRouter({
 app.use('/api', createAdminUsersRouter({
     authMiddleware,
     adminMiddleware,
-    upload,
+    upload: secureUpload,
     logAction
 }));
 

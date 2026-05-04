@@ -91,6 +91,16 @@ window.sendMessage = async function(isRegenerate = false) {
 
         if (!response.ok) throw new Error(`服务器拒绝 (${response.status})`);
 
+        const responseType = response.headers.get('content-type') || '';
+        if (responseType.includes('application/json')) {
+            const data = await response.json();
+            fullAiContent = data.content || data.error || '';
+            const textBody = aiMsgEl.querySelector('.text-body');
+            if (textBody) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            if (window.loadSessions) window.loadSessions();
+            return;
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
