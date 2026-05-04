@@ -15,6 +15,54 @@ const { getBeijingTimestamp } = require('../time');
 function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }) {
     const router = express.Router();
 
+    router.post('/models/fetch-remote', authMiddleware, asyncHandler(async (req, res) => {
+        let { url, api_key, id } = req.body;
+        if (!url) return res.status(400).json({ error: '请填写接口地址' });
+
+        // 处理掩码情况：如果提供了 ID 且 Key 为掩码，则从数据库加载真实 Key
+        if (id && api_key === '********') {
+            const existing = db.prepare('SELECT api_key FROM models WHERE id = ?').get(id);
+            if (existing && existing.api_key) {
+                const { decryptSecret } = require('../security');
+                try {
+                    api_key = decryptSecret(existing.api_key);
+                } catch (e) {
+                    return res.status(500).json({ error: '解密密钥失败，请手动重新输入' });
+                }
+            }
+        }
+
+        url = url.trim();
+        if (api_key) api_key = api_key.trim();
+
+        // 尝试自动补全 /v1
+        let modelsUrl = url;
+        if (!modelsUrl.includes('/v1') && !modelsUrl.includes('localhost') && !modelsUrl.includes('127.0.0.1')) {
+            modelsUrl = modelsUrl.replace(/\/+$/, '') + '/v1';
+        }
+        if (!modelsUrl.endsWith('/models')) {
+            modelsUrl = modelsUrl.replace(/\/+$/, '') + '/models';
+        }
+
+        try {
+            const response = await axios.get(modelsUrl, {
+                headers: {
+                    'Authorization': api_key ? `Bearer ${api_key}` : undefined,
+                    'x-api-key': api_key || undefined,
+                    'User-Agent': 'Pivot-AI-Client/1.0'
+                },
+                timeout: 10000,
+                proxy: false
+            });
+            const rawModels = response.data.data || [];
+            const modelIds = rawModels.map(m => m.id);
+            res.json({ success: true, models: modelIds });
+        } catch (e) {
+            const errMsg = e.response?.data?.error?.message || e.message || '获取模型列表失败';
+            res.json({ success: false, error: errMsg });
+        }
+    }));
+
     router.post('/models/test', authMiddleware, asyncHandler(async (req, res) => {
         let { id, url, api_key, model_name, source } = req.body;
         const testId = crypto.randomUUID().slice(0, 8);

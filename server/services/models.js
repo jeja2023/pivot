@@ -59,10 +59,33 @@ function migrateModelSecrets() {
     }
 }
 
+function getUserAccessibleModels(user) {
+    let sql = "SELECT * FROM models WHERE status = 'active'";
+    let params = [];
+    if (user.role !== 'admin') {
+        sql += ' AND (user_id IS NULL OR user_id = ?)';
+        params.push(user.id);
+    }
+    let models = db.prepare(sql).all(...params);
+    
+    if (user.role === 'admin') return models;
+
+    return models.filter(m => {
+        if (m.user_id === user.id) return true;
+        if (!m.user_id && m.allowed_units) {
+            const units = m.allowed_units.split(',').map(u => u.trim()).filter(Boolean);
+            const userUnit = (user.unit || '').trim();
+            if (!userUnit || !units.includes(userUnit)) return false;
+        }
+        return true;
+    });
+}
+
 module.exports = {
     modelListFields,
     normalizeTags,
     getAccessibleModel,
     getModelDailyUsage,
+    getUserAccessibleModels,
     migrateModelSecrets
 };

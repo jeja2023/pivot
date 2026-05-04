@@ -160,23 +160,32 @@ function authMiddleware(req, res, next) {
         return res.status(401).json({ error: '未授权访问' });
     }
     
+    // 1. 尝试 JWT 验证 (主要用于前端网页登录)
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = stmts.getUserById.get(decoded.id);
-        if (!user || user.status === 'disabled') {
-            return res.status(401).json({ error: '账号不存在或已被禁用' });
+        if (user && user.status !== 'disabled') {
+            req.user = user;
+            return next();
         }
-        req.user = user;
-        next();
     } catch (e) {
-        if (e.name === 'TokenExpiredError') {
-            return res.status(401).json({ 
-                error: 'Token 已过期', 
-                code: 'TOKEN_EXPIRED' 
-            });
-        }
-        return res.status(401).json({ error: 'Token 无效' });
+        // 如果 JWT 验证失败（如过期），继续尝试 API Key 验证
     }
+
+    // 2. 尝试 API Key 验证 (主要用于第三方客户端)
+    const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key = ? AND status = 'active'").get(token);
+    if (apiKeyData) {
+        const user = stmts.getUserById.get(apiKeyData.user_id);
+        if (user && user.status !== 'disabled') {
+            // 异步更新最后使用时间 (不阻塞请求)
+            db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
+            req.user = user;
+            req.isApiKey = true; // 标记是 API Key 调用
+            return next();
+        }
+    }
+
+    return res.status(401).json({ error: 'Token 无效或已过期' });
 }
 
 module.exports = { 

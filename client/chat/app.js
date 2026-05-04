@@ -141,9 +141,11 @@ bind('modal-rename-save', () => window.saveSessionTitle());
 bind('modal-tags-cancel', () => window.closeTagsModal());
 bind('modal-tags-save', () => window.saveSessionTags());
 bind('report-query-btn', () => window.loadReport());
+bind('create-key-btn', () => window.createApiKey());
+bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'labs', 'knowledge', 'users', 'logs', 'report', 'stats', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'labs', 'knowledge', 'users', 'logs', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());

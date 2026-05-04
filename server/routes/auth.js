@@ -11,13 +11,15 @@ const {
     REFRESH_COOKIE_OPTIONS
 } = require('../auth');
 const { asyncHandler } = require('../http');
-const { stmts } = require('../db');
+const { db, stmts } = require('../db');
+const crypto = require('crypto');
 
 function createAuthRouter({
     authMiddleware,
     loginLimiter,
     isPublicRegistrationEnabled,
-    logAction
+    logAction,
+    publicUrl
 }) {
     const router = express.Router();
 
@@ -33,7 +35,10 @@ function createAuthRouter({
     }));
 
     router.get('/auth/config', (req, res) => {
-        res.json({ allowPublicRegistration: isPublicRegistrationEnabled() });
+        res.json({ 
+            allowPublicRegistration: isPublicRegistrationEnabled(),
+            publicUrl: publicUrl
+        });
     });
 
     router.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
@@ -91,6 +96,32 @@ function createAuthRouter({
         res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
         res.json({ success: true });
     });
+
+    // --- API Key 管理 ---
+    router.get('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
+        const keys = db.prepare('SELECT id, name, key, created_at, last_used_at, status FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        // 脱敏处理，只显示前 8 位和后 4 位
+        const maskedKeys = keys.map(k => ({
+            ...k,
+            key: k.key.substring(0, 8) + '...' + k.key.substring(k.key.length - 4)
+        }));
+        res.json(maskedKeys);
+    }));
+
+    router.post('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
+        const { name } = req.body;
+        const key = 'sk-' + crypto.randomBytes(24).toString('hex');
+        db.prepare('INSERT INTO api_keys (user_id, name, key) VALUES (?, ?, ?)').run(req.user.id, name || '未命名密钥', key);
+        logAction(req, '创建 API Key', `名称: ${name}`);
+        res.json({ key, name });
+    }));
+
+    router.delete('/auth/keys/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const result = db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+        if (result.changes === 0) return res.status(404).json({ error: '密钥不存在' });
+        logAction(req, '删除 API Key', `ID: ${req.params.id}`);
+        res.json({ success: true });
+    }));
 
     return router;
 }

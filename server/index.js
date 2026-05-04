@@ -49,6 +49,7 @@ const { createSessionsRouter } = require('./routes/sessions');
 const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
 const { createSettingsRouter, isSettingEnabled } = require('./routes/settings');
+const { createOpenAIRouter } = require('./routes/openai');
 const { ragRouter, retrieveContext } = require('./rag');
 const {
     migrateModelSecrets
@@ -195,7 +196,8 @@ app.use('/api', createAuthRouter({
     authMiddleware,
     loginLimiter: app.locals.loginLimiter,
     isPublicRegistrationEnabled,
-    logAction
+    logAction,
+    publicUrl: appConfig.publicUrl
 }));
 
 // --- 管理员权限中间件 ---
@@ -254,6 +256,11 @@ app.use('/api', createChatRouter({
     logAction,
     retrieveContext,
     isRagEnabled: () => isSettingEnabled('rag_enabled')
+}));
+
+app.use('/v1', createOpenAIRouter({
+    authMiddleware,
+    logAction
 }));
 
 // --- 全局错误处理中间件 ---

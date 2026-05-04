@@ -7,6 +7,7 @@ async function loadAuthConfig() {
         const res = await fetch(API_BASE + '/auth/config');
         const data = await res.json();
         allowPublicRegistration = data.allowPublicRegistration === true;
+        window.publicUrl = data.publicUrl || '';
         if (!allowPublicRegistration) {
             document.getElementById('auth-toggle').classList.add('hidden');
         }
@@ -84,3 +85,110 @@ document.getElementById('auth-container').addEventListener('keydown', (e) => {
 });
 
 loadAuthConfig();
+
+// --- 账户安全与 API Key 管理 ---
+
+window.loadApiKeys = async function() {
+    try {
+        const res = await apiFetch(`${API_BASE}/auth/keys`);
+        if (!res.ok) throw new Error('加载 API Key 失败');
+        const data = await res.json();
+        const body = document.getElementById('api-keys-body');
+        if (data.length === 0) {
+            body.innerHTML = '<tr><td colspan="5" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
+            return;
+        }
+        body.innerHTML = data.map(k => `
+            <tr>
+                <td>${escapeHtml(k.name)}</td>
+                <td style="font-family: monospace; font-size: 0.85rem;">${k.key}</td>
+                <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
+                <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
+                <td class="text-center">
+                    <button onclick="window.deleteApiKey(${k.id})" class="btn-icon" style="color: var(--danger);" title="删除">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+window.createApiKey = function() {
+    document.getElementById('new-key-name').value = '我的第三方密钥';
+    document.getElementById('key-input-view').classList.remove('hidden');
+    document.getElementById('key-result-view').classList.add('hidden');
+    document.getElementById('key-modal').classList.remove('hidden');
+}
+
+window.confirmCreateKey = async function() {
+    const name = document.getElementById('new-key-name').value || '未命名密钥';
+    try {
+        const res = await apiFetch(`${API_BASE}/auth/keys`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        // 显示结果视图
+        document.getElementById('generated-key-text').innerText = data.key;
+        document.getElementById('key-input-view').classList.add('hidden');
+        document.getElementById('key-result-view').classList.remove('hidden');
+        
+        loadApiKeys();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+window.closeKeyModal = function() {
+    document.getElementById('key-modal').classList.add('hidden');
+}
+
+window.copyGeneratedKey = function() {
+    const text = document.getElementById('generated-key-text').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('密钥已复制到剪贴板');
+    });
+}
+
+window.deleteApiKey = async function(id) {
+    if (!confirm('确定要删除此 API Key 吗？相关服务将无法再通过此密钥访问。')) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/auth/keys/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('密钥已注销');
+            loadApiKeys();
+        }
+    } catch (e) {
+        showToast('操作失败', 'error');
+    }
+}
+
+window.updatePassword = async function() {
+    const oldPassword = document.getElementById('pw-old').value;
+    const newPassword = document.getElementById('pw-new').value;
+    const confirmPassword = document.getElementById('pw-confirm').value;
+
+    if (!oldPassword || !newPassword || !confirmPassword) return showToast('请填写所有密码项');
+    if (newPassword !== confirmPassword) return showToast('新密码两次输入不一致', 'error');
+    if (newPassword.length < 8) return showToast('新密码至少需要 8 位', 'error');
+
+    try {
+        const res = await apiFetch(`${API_BASE}/settings/password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldPassword, newPassword })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast('密码修改成功，请重新登录');
+        setTimeout(() => window.logout(), 1500);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}

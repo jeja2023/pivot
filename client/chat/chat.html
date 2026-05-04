@@ -104,7 +104,17 @@
                 </div>
                 <div class="form-item">
                     <label>模型标识 (Model ID)</label>
-                    <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat">
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat" style="flex: 1;">
+                        <button onclick="window.fetchRemoteModels()" class="btn-secondary" title="从 API 获取模型列表" style="padding: 0 12px; height: 38px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="m-model-select-container" class="hidden" style="margin-top: 8px;">
+                        <select id="m-model-select" class="form-input" style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
+                    </div>
                 </div>
                 <div class="model-form-row">
                     <div class="form-item">
@@ -358,6 +368,7 @@
                         class="admin-tab">用量统计</button>
                     <button id="tab-details"
                         class="admin-tab">用量明细</button>
+                    <button id="tab-keys" class="admin-tab">API 接入</button>
                     <button id="tab-account" class="admin-tab">账户安全</button>
                     <div style="flex: 1;"></div>
 
@@ -634,8 +645,9 @@
                         <div style="margin-bottom: 20px; text-align: left;">
                             <h3>账户安全</h3>
                         </div>
-                        <div class="settings-list">
-                            <div class="stat-card" style="max-width: 460px; padding: 25px; margin: 0 auto;">
+                        <div class="settings-list" style="display: flex; flex-direction: column; gap: 20px; align-items: center;">
+                            <!-- 修改密码卡片 -->
+                            <div class="stat-card" style="width: 100%; max-width: 500px; padding: 25px;">
                                 <h4 style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -645,17 +657,60 @@
                                 </h4>
                                 <div class="form-item" style="margin-bottom: 15px;">
                                     <label>当前密码</label>
-                                    <input type="password" id="pw-old" class="form-input" placeholder="请输入当前正在使用的密码">
+                                    <input type="password" id="pw-old" class="form-input" placeholder="请输入当前密码">
                                 </div>
                                 <div class="form-item" style="margin-bottom: 15px;">
                                     <label>新密码</label>
                                     <input type="password" id="pw-new" class="form-input" placeholder="至少8位，包含字母与数字">
                                 </div>
-                                <div class="form-item" style="margin-bottom: 25px;">
+                                <div class="form-item" style="margin-bottom: 20px;">
                                     <label>确认新密码</label>
                                     <input type="password" id="pw-confirm" class="form-input" placeholder="请再次输入新密码">
                                 </div>
-                                <button id="pw-update-btn" class="btn-primary" style="width: 100%; height: 42px;">立即更新密码</button>
+                                <button id="pw-update-btn" class="btn-primary" style="width: 100%; height: 38px;">立即更新密码</button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="tab-content-keys" class="admin-tab-content hidden">
+                        <div style="margin-bottom: 20px; text-align: left;">
+                            <h3>API 接入管理</h3>
+                        </div>
+                        <div class="settings-list" style="display: flex; flex-direction: column; gap: 20px; align-items: center; max-width: none;">
+                            <div class="stat-card" style="width: 100%; max-width: 1350px; padding: 25px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                    <h4 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3m-3-3l2.5-2.5"></path>
+                                        </svg>
+                                        我的 API Key
+                                    </h4>
+                                    <button id="create-key-btn" class="btn-primary" style="padding: 4px 12px; font-size: 0.8rem; height: 32px;">新建密钥</button>
+                                </div>
+                                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">你可以生成 API Key 用于在第三方应用（如沉浸式翻译、NextChat 等）中调用本系统的模型能力。支持 OpenAI 标准格式调用。</p>
+                                <div class="table-container" style="border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px;">
+                                    <table class="data-table compact-table">
+                                        <thead>
+                                            <tr>
+                                                <th>名称</th>
+                                                <th>密钥 (脱敏)</th>
+                                                <th style="width: 160px;">创建时间</th>
+                                                <th style="width: 160px;">最后使用</th>
+                                                <th style="width: 80px;" class="text-center">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="api-keys-body">
+                                            <tr><td colspan="5" class="text-center" style="padding: 30px; color: var(--text-muted);">正在加载...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div style="margin-top: 30px; padding: 15px; background: rgba(16, 163, 127, 0.05); border-radius: 8px; border-left: 4px solid var(--primary);">
+                                    <h5 style="margin: 0 0 10px 0; color: var(--primary);">接入指南</h5>
+                                    <code style="display: block; font-size: 0.85rem; line-height: 1.6; color: var(--text-main);">
+                                        API Base URL: <span style="color: var(--primary); font-weight: bold;" id="api-base-url-display"></span><br>
+                                        接口协议: OpenAI Chat Completions v1
+                                    </code>
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -671,6 +726,32 @@
     </div>
 
     <!-- 页面逻辑 -->
+
+    <!-- API Key 创建/显示弹窗 -->
+    <div id="key-modal" class="modal-overlay hidden" style="z-index: 5000;">
+        <div class="modal" style="max-width: 450px; padding: 30px; position: relative;">
+            <button class="modal-close-btn" onclick="window.closeKeyModal()">&times;</button>
+            <div id="key-input-view">
+                <h3 style="margin-bottom: 20px;">新建 API Key</h3>
+                <div class="form-item" style="margin-bottom: 20px;">
+                    <label>密钥名称</label>
+                    <input type="text" id="new-key-name" class="form-input" placeholder="例如：沉浸式翻译" style="width: 100%;">
+                </div>
+                <button onclick="window.confirmCreateKey()" class="btn-primary" style="width: 100%; height: 42px;">确定创建</button>
+            </div>
+            <div id="key-result-view" class="hidden">
+                <h3 style="margin-bottom: 15px; color: var(--primary);">创建成功</h3>
+                <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">请立即复制并妥善保存此密钥。出于安全考虑，它将<strong>不会再次完整显示</strong>：</p>
+                <div style="background: rgba(15, 23, 42, 0.04); padding: 16px; border-radius: 10px; font-family: 'Fira Code', monospace; word-break: break-all; border: 1px dashed var(--primary); position: relative; font-size: 0.9rem; color: var(--text-main); margin-bottom: 25px;">
+                    <span id="generated-key-text"></span>
+                    <button onclick="window.copyGeneratedKey()" style="position: absolute; right: 10px; top: 10px; background: white; border: 1px solid var(--border); border-radius: 6px; padding: 4px; color: var(--primary); cursor: pointer; display: flex; align-items: center; justify-content: center;" title="复制到剪贴板">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                    </button>
+                </div>
+                <button onclick="window.closeKeyModal()" class="btn-secondary" style="width: 100%; height: 42px;">我已妥善保存</button>
+            </div>
+        </div>
+    </div>
 
     <!-- 模块化加载业务逻辑 -->
     <script src="/chat/config.js?v=0.0.6"></script>

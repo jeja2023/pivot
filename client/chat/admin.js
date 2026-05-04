@@ -69,7 +69,7 @@ document.getElementById('admin-panel-btn').onclick = () => {
 window.closeModal = () => document.getElementById('admin-container').classList.add('hidden');
 
 window.switchTab = async (tab) => {
-    const tabs = ['users', 'models', 'logs', 'stats', 'report', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
+    const tabs = ['users', 'models', 'logs', 'stats', 'report', 'keys', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     
@@ -91,7 +91,61 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'details' && window.loadDetails) loadDetails(page);
     if (tab === 'labs') loadSettings();
     if (tab === 'knowledge' && window.loadKnowledgeDocs) window.loadKnowledgeDocs();
+    if (tab === 'keys' && window.loadApiKeys) {
+        loadApiKeys();
+        const displayEl = document.getElementById('api-base-url-display');
+        if (displayEl) {
+            // 优先使用后端配置的公网 URL，否则根据当前访问地址智能生成
+            const origin = window.publicUrl || window.location.origin;
+            displayEl.innerText = `${origin}/v1`;
+        }
+    }
 }
+
+// 智能获取远程模型列表
+window.fetchRemoteModels = async function() {
+    const url = document.getElementById('m-url').value;
+    const apiKey = document.getElementById('m-key').value;
+    const id = document.getElementById('m-id').value;
+    const selectContainer = document.getElementById('m-model-select-container');
+    const selectEl = document.getElementById('m-model-select');
+    
+    if (!url) return showToast('请先填写接口地址', 'error');
+
+    try {
+        showToast('正在获取模型列表...', 'info');
+        const res = await apiFetch(`${API_BASE}/models/fetch-remote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, api_key: apiKey, id })
+        });
+        const data = await res.json();
+        
+        if (!data.success) throw new Error(data.error);
+        if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
+
+        // 填充下拉框
+        selectEl.innerHTML = '<option value="">-- 请选择获取到的模型 --</option>' + 
+            data.models.map(m => `<option value="${m}">${m}</option>`).join('');
+        
+        selectContainer.classList.remove('hidden');
+        showToast(`成功获取 ${data.models.length} 个模型`);
+
+        // 绑定选择事件
+        selectEl.onchange = (e) => {
+            if (e.target.value) {
+                document.getElementById('m-model').value = e.target.value;
+                // 尝试自动填充显示名称 (如果是空的)
+                const nameInput = document.getElementById('m-name');
+                if (!nameInput.value) {
+                    nameInput.value = e.target.value;
+                }
+            }
+        };
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+};
 
 async function loadSettings() {
     const ragCheckbox = document.getElementById('setting-rag-enabled');

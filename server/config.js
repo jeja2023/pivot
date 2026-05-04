@@ -47,7 +47,8 @@ function validateConfig() {
         staticMaxAge: process.env.STATIC_MAX_AGE || '1d',
         vendorMaxAge: process.env.VENDOR_STATIC_MAX_AGE || '30d',
         directorySizeCacheMs: Math.max(parseInt(process.env.DIR_SIZE_CACHE_MS || '60000', 10), 0),
-        instanceId: crypto.randomUUID().slice(0, 8)
+        instanceId: crypto.randomUUID().slice(0, 8),
+        publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, '')
     };
 }
 
