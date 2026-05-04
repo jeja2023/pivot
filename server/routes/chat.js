@@ -1,5 +1,7 @@
 /* 对话接口路由 Chat API Routes */
 const axios = require('axios');
+const http = require('http');
+const https = require('https');
 const express = require('express');
 const { StringDecoder } = require('string_decoder');
 const db = require('../db');
@@ -13,6 +15,9 @@ const {
     getAccessibleModel,
     getModelDailyUsage
 } = require('../services/models');
+
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
 
 async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
     try {
@@ -209,7 +214,8 @@ function createChatRouter({
                         response = await axios({
                             method: 'post', url: targetUrl, headers,
                             data: { model: modelName, messages: history, stream: true },
-                            responseType: 'stream', timeout: 90000, proxy: false
+                            responseType: 'stream', timeout: 300000, proxy: false,
+                            httpAgent, httpsAgent
                         });
                         console.log('[请求状态] 降级连接成功 (Chat Completions)');
                     } else {
@@ -221,7 +227,8 @@ function createChatRouter({
                 response = await axios({
                     method: 'post', url: targetUrl, headers,
                     data: { model: modelName, messages: history, stream: true },
-                    responseType: 'stream', timeout: 90000, proxy: false
+                    responseType: 'stream', timeout: 300000, proxy: false,
+                    httpAgent, httpsAgent
                 });
                 console.log('[请求状态] 连接成功');
             }
@@ -335,7 +342,14 @@ function createChatRouter({
             });
 
             response.data.on('error', err => {
-                console.error('[流传输错误]', err);
+                if (res.writableEnded) return; // 如果已经结束，忽略后续网络层错误
+                
+                if (err.code === 'ECONNRESET' || err.message.includes('aborted')) {
+                    console.warn('[流传输提醒] 连接被重置或中止，但可能已完成大部分接收');
+                } else {
+                    console.error('[流传输错误]', err);
+                }
+
                 if (!res.writableEnded) {
                     writeSse(JSON.stringify({ error: '流传输中断', detail: err.message }));
                     res.end();
