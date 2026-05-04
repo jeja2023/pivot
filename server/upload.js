@@ -15,7 +15,7 @@ function createUploadMiddleware() {
         fileFilter: (req, file, cb) => {
             const ext = path.extname(file.originalname || '').toLowerCase();
             const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.txt', '.md', '.pdf', '.csv']);
-            const allowTypes = /^(image\/(png|jpeg|gif|webp)|text\/|application\/pdf|text\/markdown)$/;
+            const allowTypes = /^(image\/(png|jpeg|gif|webp)|text\/|application\/pdf|text\/markdown|text\/csv)$/;
             if (allowedExtensions.has(ext) && allowTypes.test(file.mimetype)) {
                 cb(null, true);
             } else {

@@ -1,6 +1,6 @@
 /* 系统设置路由 System Settings Routes */
 const express = require('express');
-const db = require('../db');
+const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 
@@ -108,6 +108,32 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             personalDefaultModelId: req.user?.default_model_id || null,
             settings
         });
+    }));
+
+    router.post('/settings/password', authMiddleware, asyncHandler(async (req, res) => {
+        const { oldPassword, newPassword } = req.body;
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ error: '旧密码和新密码均不能为空' });
+        }
+
+        const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+        const bcrypt = require('bcryptjs');
+        if (!bcrypt.compareSync(oldPassword, user.password_hash)) {
+            return res.status(400).json({ error: '旧密码错误' });
+        }
+
+        const { validatePassword } = require('../auth');
+        try {
+            validatePassword(newPassword);
+        } catch (e) {
+            return res.status(400).json({ error: e.message });
+        }
+
+        const newHash = bcrypt.hashSync(newPassword, 10);
+        db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+
+        logAction(req, '修改密码', '用户自主修改了登录密码');
+        res.json({ success: true, message: '密码修改成功' });
     }));
 
     return router;

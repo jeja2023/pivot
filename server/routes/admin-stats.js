@@ -1,7 +1,7 @@
 /* 管理员运营统计路由 Admin Stats Routes */
 const express = require('express');
 const path = require('path');
-const db = require('../db');
+const { db } = require('../db');
 const { asyncHandler } = require('../http');
 
 function createAdminStatsRouter({
@@ -13,7 +13,7 @@ function createAdminStatsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/usage', authMiddleware, (req, res) => {
+    router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         const query = `
             SELECT u.username, u.nickname, m.name as model_name,
@@ -29,9 +29,9 @@ function createAdminStatsRouter({
         `;
         const stats = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(stats);
-    });
+    }));
 
-    router.get('/trend', authMiddleware, (req, res) => {
+    router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         const query = `
             SELECT date(created_at) as day, SUM(token_count) as tokens
@@ -43,7 +43,7 @@ function createAdminStatsRouter({
         `;
         const trend = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(trend);
-    });
+    }));
 
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
@@ -77,7 +77,7 @@ function createAdminStatsRouter({
         }
     }));
 
-    router.get('/details', authMiddleware, (req, res) => {
+    router.get('/details', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 20;
@@ -98,9 +98,9 @@ function createAdminStatsRouter({
         const countQuery = `SELECT COUNT(*) as count FROM messages ${isAdmin ? '' : 'WHERE user_id = ?'}`;
         const total = isAdmin ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
         res.json({ data: details, total });
-    });
+    }));
 
-    router.get('/details/export', authMiddleware, (req, res) => {
+    router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         const query = `
             SELECT m.created_at, u.username, u.nickname, md.name as model_name, m.role, m.token_count
@@ -108,7 +108,7 @@ function createAdminStatsRouter({
             JOIN users u ON m.user_id = u.id
             LEFT JOIN models md ON m.model_id = md.id
             ${isAdmin ? '' : 'WHERE m.user_id = ?'}
-            ORDER BY m.created_at DESC
+            ORDER BY m.created_at DESC LIMIT 10000
         `;
         const details = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,消耗Token\n';
@@ -119,7 +119,7 @@ function createAdminStatsRouter({
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=usage_details.csv');
         res.send(csv);
-    });
+    }));
 
 
     return router;

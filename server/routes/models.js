@@ -2,7 +2,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
-const db = require('../db');
+const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { encryptSecret, validateModelUrl } = require('../security');
 const {
@@ -10,6 +10,7 @@ const {
     normalizeTags,
     getAccessibleModel
 } = require('../services/models');
+const { getBeijingTimestamp } = require('../time');
 
 function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }) {
     const router = express.Router();
@@ -56,14 +57,14 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         const testLabel = `${model_name || '未命名'}${id ? `#${id}` : ''}`;
-        console.log(`[模型测试:${testId}] [${testSource}] [${testLabel}] 正在验证地址: ${chatUrl}`);
+        req.log.debug({ testId, testSource, testLabel, chatUrl }, '正在验证模型地址');
         if (chatUrl.includes('localhost') || chatUrl.includes('127.0.0.1')) {
-            console.log(`[模型测试:${testId}] [提示] 检测到 localhost，如果您是在 Docker 中运行，可能需要改为 host.docker.internal`);
+            req.log.debug({ testId }, '检测到 localhost，如果您是在 Docker 中运行，可能需要改为 host.docker.internal');
         }
 
         try {
             const testUrl = chatUrl.replace('/chat/completions', '/models');
-            console.log(`[模型测试:${testId}] [探测路径] ${testUrl}`);
+            req.log.debug({ testId, testUrl }, '探测模型路径');
             const response = await axios.get(testUrl, {
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
@@ -73,18 +74,18 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 timeout: 10000,
                 proxy: false
             });
-            console.log(`[模型测试:${testId}] [${testSource}] [${testLabel}] 连接成功 (HTTP ${response.status})`);
+            req.log.info(`模型测试成功: ${testLabel} (ID: ${testId})`);
             logAction(req, '测试模型', `模型连接成功: ${model_name || url}`);
             res.json({ success: true, requestId: testId, message: '连接成功' });
         } catch (e) {
             const errMsg = e.response?.data?.error?.message || e.message || e.code || '未知连接错误';
-            console.error(`[模型测试:${testId}] [${testSource}] [${testLabel}] 连接失败: ${errMsg}`);
+            req.log.error({ testId, err: errMsg }, '模型连接失败');
             logAction(req, '测试模型失败', `模型: ${model_name || url}，原因: ${errMsg}`);
             res.json({ success: false, requestId: testId, error: errMsg });
         }
     }));
 
-    router.get('/models', authMiddleware, (req, res) => {
+    router.get('/models', authMiddleware, asyncHandler(async (req, res) => {
         const page = normalizePage(req.query.page);
         const limit = normalizeLimit(req.query.limit);
         const offset = (page - 1) * limit;
@@ -96,85 +97,92 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             params = [req.user.id, `,${(req.user.unit || '').trim()},`];
         }
 
-        try {
-            // 为管理员增加过滤：不显示普通用户的私有默认模型
-            let adminFilter = '';
-            if (req.user.role === 'admin') {
-                // 如果模型是私有的 (user_id IS NOT NULL)，且属于普通用户 (role != 'admin')，且是默认模型 (is_default = 1)，则过滤掉
-                // 注意：这里需要左连接 users 表来判断角色
-                where = "WHERE (m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)";
-            }
-
-            const sql = `
-                SELECT 
-                    m.id, m.user_id, m.name, m.url, m.model_name, m.is_default, 
-                    m.daily_token_limit, m.allowed_units, m.created_at,
-                    (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
-                    u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
-                FROM models m
-                LEFT JOIN users u ON m.user_id = u.id
-                ${where} 
-                ORDER BY m.is_default DESC, m.id ASC 
-                LIMIT ? OFFSET ?
-            `;
-            const models = db.prepare(sql).all(...params, limit, offset);
-            const countSql = `
-                SELECT COUNT(*) as count 
-                FROM models m
-                LEFT JOIN users u ON m.user_id = u.id
-                ${where}
-            `;
-            const total = db.prepare(countSql).get(...params).count;
-            res.json({ data: models, total });
-        } catch (e) {
-            console.error(`[模型查询失败] 用户: ${req.user.username}, 角色: ${req.user.role}, 错误: ${e.message}`);
-            res.status(500).json({ error: '获取模型列表失败: ' + e.message });
+        // 为管理员增加过滤：不显示普通用户的私有默认模型
+        if (req.user.role === 'admin') {
+            const adminFilter = "(m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)";
+            where = where ? `${where} AND ${adminFilter}` : `WHERE ${adminFilter}`;
         }
-    });
 
-    router.post('/models', authMiddleware, (req, res) => {
-        const { name, url, api_key, model_name } = req.body;
+        const sql = `
+            SELECT 
+                m.id, m.user_id, m.name, 
+                (CASE 
+                    WHEN ? = 'admin' AND (m.user_id IS NULL OR u.role = 'admin') THEN m.url
+                    WHEN m.user_id = ? THEN m.url
+                    ELSE '********'
+                END) as url,
+                m.model_name, m.is_default, 
+                m.daily_token_limit, m.allowed_units, m.created_at,
+                m.temperature, m.max_tokens,
+                (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
+                u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
+            FROM models m
+            LEFT JOIN users u ON m.user_id = u.id
+            ${where} 
+            ORDER BY m.is_default DESC, m.id ASC 
+            LIMIT ? OFFSET ?
+        `;
+        const models = db.prepare(sql).all(req.user.role, req.user.id, ...params, limit, offset);
+        const countSql = `
+            SELECT COUNT(*) as count 
+            FROM models m
+            LEFT JOIN users u ON m.user_id = u.id
+            ${where}
+        `;
+        const total = db.prepare(countSql).get(...params).count;
+        res.json({ data: models, total });
+    }));
+
+    router.post('/models', authMiddleware, asyncHandler(async (req, res) => {
+        const { name, url, api_key, model_name, temperature, max_tokens } = req.body;
         if (!name || !url) return res.status(400).json({ error: '模型名称和接口地址不能为空' });
-        try {
-            validateModelUrl(url, req.user);
-        } catch (e) {
-            return res.status(400).json({ error: e.message });
-        }
+        validateModelUrl(url, req.user);
 
         const targetUserId = req.user.role === 'admin' ? null : req.user.id;
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
         const allowedUnits = req.user.role === 'admin' ? normalizeTags(req.body.allowed_units) : '';
+        
+        const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
+        const maxTokens = max_tokens !== undefined && max_tokens !== '' ? parseInt(max_tokens, 10) : null;
 
-        const { getBeijingTimestamp } = require('../time');
-        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp());
+        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxTokens);
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
         res.json({ success: true });
-    });
+    }));
 
-    router.put('/models/:id', authMiddleware, (req, res) => {
-        const { name, url, api_key, model_name } = req.body;
+    router.put('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const { name, url, api_key, model_name, temperature, max_tokens } = req.body;
         if (!name || !url) return res.status(400).json({ error: '模型名称和接口地址不能为空' });
-        try {
-            validateModelUrl(url, req.user);
-        } catch (e) {
-            return res.status(400).json({ error: e.message });
-        }
+        validateModelUrl(url, req.user);
 
-        const existing = db.prepare("SELECT * FROM models WHERE id = ? AND (? = 'admin' OR user_id = ?)").get(req.params.id, req.user.role, req.user.id);
-        if (!existing) return res.status(403).json({ error: '无权修改或模型不存在' });
+        let existing;
+        if (req.user.role === 'admin') {
+            existing = db.prepare(`
+                SELECT m.* FROM models m
+                LEFT JOIN users u ON m.user_id = u.id
+                WHERE m.id = ? AND (m.user_id IS NULL OR u.role = 'admin')
+            `).get(req.params.id);
+        } else {
+            existing = db.prepare("SELECT * FROM models WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+        }
+        if (!existing) return res.status(403).json({ error: '无权操作或模型不存在' });
 
         const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
         const allowedUnits = req.user.role === 'admin' ? normalizeTags(req.body.allowed_units) : (existing.allowed_units || '');
+        
+        const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
+        const maxTokens = max_tokens !== undefined && max_tokens !== '' ? parseInt(max_tokens, 10) : null;
+
         let info;
         if (req.user.role === 'admin') {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ? WHERE id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, req.params.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_tokens = ? WHERE id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxTokens, req.params.id);
         } else {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ? WHERE id = ? AND user_id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, req.params.id, req.user.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_tokens = ? WHERE id = ? AND user_id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxTokens, req.params.id, req.user.id);
         }
 
         if (info.changes > 0) {
@@ -183,9 +191,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         } else {
             res.status(403).json({ error: '无权修改或模型不存在' });
         }
-    });
+    }));
 
-    router.delete('/models/:id', authMiddleware, (req, res) => {
+    router.delete('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
         let info;
         if (req.user.role === 'admin') {
             info = db.prepare('DELETE FROM models WHERE id = ?').run(req.params.id);
@@ -198,9 +206,19 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         } else {
             res.status(403).json({ error: '无权删除或模型不存在' });
         }
-    });
+    }));
 
-    router.get('/models/:id/key', authMiddleware, (req, res) => {
+    router.post('/models/:id/key', authMiddleware, asyncHandler(async (req, res) => {
+        const { password } = req.body;
+        if (!password) return res.status(400).json({ error: '需要输入密码进行二次验证' });
+
+        const bcrypt = require('bcryptjs');
+        const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+        if (!bcrypt.compareSync(password, user.password_hash)) {
+            logAction(req, '模型密钥查看失败', `密码验证失败，模型ID: ${req.params.id}`);
+            return res.status(401).json({ error: '密码错误' });
+        }
+
         const model = getAccessibleModel(req.params.id, req.user);
         if (!model) return res.status(403).json({ error: '无权查看或模型不存在' });
         if (model.user_id === null && req.user.role !== 'admin') {
@@ -212,7 +230,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
         logAction(req, '查看模型密钥', `模型ID: ${req.params.id}`);
         res.json({ key: model.api_key || '' });
-    });
+    }));
 
     return router;
 }

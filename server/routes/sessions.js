@@ -1,7 +1,8 @@
 /* 会话管理路由 Session Management Routes */
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const db = require('../db');
+const { db, stmts } = require('../db');
+const { asyncHandler } = require('../http');
 const { removeAttachmentFiles } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 
@@ -20,7 +21,7 @@ function createSessionsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/sessions', authMiddleware, (req, res) => {
+    router.get('/sessions', authMiddleware, asyncHandler(async (req, res) => {
         const page = normalizePage(req.query.page || 1);
         const limit = normalizeLimit(req.query.limit || 20);
         const keyword = String(req.query.keyword || '').trim();
@@ -63,101 +64,116 @@ function createSessionsRouter({
         const total = db.prepare(countQuery).get(...countParams).count;
 
         res.json({ data: sessions, total, hasMore: (offset + sessions.length) < total });
-    });
+    }));
 
-    router.post('/sessions', authMiddleware, (req, res) => {
+    router.post('/sessions', authMiddleware, asyncHandler(async (req, res) => {
         const id = uuidv4();
         const title = req.body.title || '新对话';
         db.prepare('INSERT INTO sessions (id, user_id, title, created_at) VALUES (?, ?, ?, ?)')
           .run(id, req.user.id, title, getBeijingTimestamp());
         logAction(req, '创建对话', `创建对话: ${title}`);
         res.json({ id, title });
-    });
+    }));
 
-    router.get('/sessions/tags/list', authMiddleware, (req, res) => {
+    router.get('/sessions/tags/list', authMiddleware, asyncHandler(async (req, res) => {
         const rows = db.prepare("SELECT tags FROM sessions WHERE user_id = ? AND tags IS NOT NULL AND tags != ''").all(req.user.id);
         const tags = [...new Set(rows.flatMap(row => String(row.tags).split(',').map(tag => tag.trim()).filter(Boolean)))].sort();
         res.json(tags);
-    });
+    }));
 
-    router.get('/sessions/:id', authMiddleware, (req, res) => {
-        const messages = db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC').all(req.params.id, req.user.id);
-        res.json(messages);
-    });
+    router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+        res.json({ session, messages });
+    }));
 
-    router.put('/sessions/:id', authMiddleware, (req, res) => {
+    router.get('/sessions/:id/export', authMiddleware, asyncHandler(async (req, res) => {
+        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+        
+        let content = `# ${session.title}\n\n`;
+        content += `> 导出时间: ${getBeijingTimestamp()}\n\n`;
+        
+        for (const msg of messages) {
+            const role = msg.role === 'user' ? '👤 用户' : '🤖 助手';
+            content += `### ${role}\n\n${msg.content}\n\n---\n\n`;
+        }
+
+        res.setHeader('Content-disposition', `attachment; filename="chat_${req.params.id.slice(0, 8)}.md"`);
+        res.setHeader('Content-type', 'text/markdown; charset=utf-8');
+        res.send(content);
+    }));
+
+    router.put('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { title } = req.body;
         const safeTitle = String(title || '').trim().slice(0, 80);
-        const info = db.prepare('UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?').run(safeTitle, req.params.id, req.user.id);
+        const info = stmts.updateSessionTitle.run(safeTitle, getBeijingTimestamp(), req.params.id, req.user.id);
         if (info.changes > 0) logAction(req, '修改对话名称', `会话ID: ${req.params.id}，新名称: ${safeTitle}`);
         res.json({ success: info.changes > 0 });
-    });
+    }));
 
-    router.put('/sessions/:id/pin', authMiddleware, (req, res) => {
+    router.put('/sessions/:id/pin', authMiddleware, asyncHandler(async (req, res) => {
         const { isPinned } = req.body;
         const stmt = db.prepare('UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ?');
         const info = stmt.run(isPinned ? 1 : 0, req.params.id, req.user.id);
         if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
-    });
+    }));
 
-    router.put('/sessions/:id/archive', authMiddleware, (req, res) => {
+    router.put('/sessions/:id/archive', authMiddleware, asyncHandler(async (req, res) => {
         const isArchived = req.body.isArchived ? 1 : 0;
         const info = db.prepare('UPDATE sessions SET is_archived = ? WHERE id = ? AND user_id = ?')
           .run(isArchived, req.params.id, req.user.id);
         if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, isArchived ? '归档对话' : '恢复对话', `会话ID: ${req.params.id}`);
         res.json({ success: true });
-    });
+    }));
 
-    router.put('/sessions/:id/tags', authMiddleware, (req, res) => {
+    router.put('/sessions/:id/tags', authMiddleware, asyncHandler(async (req, res) => {
         const tags = normalizeTags(req.body.tags);
         const info = db.prepare('UPDATE sessions SET tags = ? WHERE id = ? AND user_id = ?')
           .run(tags, req.params.id, req.user.id);
         if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, '更新对话标签', `会话ID: ${req.params.id}，标签: ${tags || '-'}`);
         res.json({ success: true, tags });
-    });
+    }));
 
-    router.put('/sessions/:id/system-prompt', authMiddleware, (req, res) => {
+    router.put('/sessions/:id/system-prompt', authMiddleware, asyncHandler(async (req, res) => {
         const { systemPrompt } = req.body;
         const stmt = db.prepare('UPDATE sessions SET system_prompt = ? WHERE id = ? AND user_id = ?');
         const info = stmt.run(systemPrompt, req.params.id, req.user.id);
         if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
-    });
+    }));
 
-    router.delete('/messages/:id', authMiddleware, (req, res) => {
+    router.delete('/messages/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { id } = req.params;
         const info = db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(id, req.user.id);
         if (info.changes > 0) logAction(req, '删除消息', `消息ID: ${id}`);
         res.json({ success: info.changes > 0 });
-    });
+    }));
 
-    router.delete('/sessions/:id', authMiddleware, (req, res) => {
+    router.delete('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const sessionId = req.params.id;
         const userId = req.user.id;
         const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
         if (!session) return res.status(403).json({ error: '无权删除或会话不存在' });
 
-        try {
-            const deleteTx = db.transaction(() => {
-                const attachments = db.prepare('SELECT file_path FROM attachments WHERE session_id = ? AND user_id = ?').all(sessionId, userId);
-                db.prepare('DELETE FROM attachments WHERE session_id = ? AND user_id = ?').run(sessionId, userId);
-                db.prepare('DELETE FROM messages WHERE session_id = ? AND user_id = ?').run(sessionId, userId);
-                const info = db.prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?').run(sessionId, userId);
-                removeAttachmentFiles(attachments);
-                return info;
-            });
+        const deleteTx = db.transaction(() => {
+            const attachments = db.prepare('SELECT file_path FROM attachments WHERE session_id = ? AND user_id = ?').all(sessionId, userId);
+            db.prepare('DELETE FROM attachments WHERE session_id = ? AND user_id = ?').run(sessionId, userId);
+            db.prepare('DELETE FROM messages WHERE session_id = ? AND user_id = ?').run(sessionId, userId);
+            const info = db.prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?').run(sessionId, userId);
+            removeAttachmentFiles(attachments);
+            return info;
+        });
 
-            const info = deleteTx();
-            logAction(req, '删除对话', `删除会话ID: ${sessionId}`);
-            res.json({ success: info.changes > 0 });
-        } catch (e) {
-            console.error('删除会话失败:', e);
-            res.status(500).json({ error: '删除会话失败' });
-        }
-    });
+        const info = deleteTx();
+        logAction(req, '删除对话', `删除会话ID: ${sessionId}`);
+        res.json({ success: info.changes > 0 });
+    }));
 
     return router;
 }

@@ -3,8 +3,9 @@ const axios = require('axios');
 const http = require('http');
 const https = require('https');
 const express = require('express');
+const { asyncHandler } = require('../http');
 const { StringDecoder } = require('string_decoder');
-const db = require('../db');
+const { db } = require('../db');
 const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
@@ -15,13 +16,14 @@ const {
     getAccessibleModel,
     getModelDailyUsage
 } = require('../services/models');
+const { logger } = require('../logger');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
 
 async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
     try {
-        console.log(`[标题生成] 正在为会话 ${sessionId} 生成标题...`);
+        logger.info({ sessionId }, '正在生成会话标题');
         const baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
         const targetUrl = baseUrl + (baseUrl.includes('/v1') ? '' : '/v1') + '/chat/completions';
 
@@ -39,15 +41,15 @@ async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
                 ],
                 max_tokens: 20
             },
-            timeout: 10000,
+            timeout: 30000,
             proxy: false
         });
 
         const newTitle = response.data.choices[0]?.message?.content?.trim() || '新对话';
         db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(newTitle, sessionId);
-        console.log(`[标题生成] 已更新标题: ${newTitle}`);
+        logger.info({ sessionId, newTitle }, '会话标题已更新');
     } catch (e) {
-        console.error(`[标题生成] 失败: ${e.message}`);
+        logger.error({ sessionId, err: e.message }, '会话标题生成失败');
     }
 }
 
@@ -60,29 +62,25 @@ function createChatRouter({
 }) {
     const router = express.Router();
 
-    router.post('/chat/stats', authMiddleware, (req, res) => {
+    router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
         const { sessionId, costTime, tps } = req.body;
         const userId = req.user.id;
 
-        try {
-            const lastMsg = db.prepare(`
-                SELECT id FROM messages
-                WHERE session_id = ? AND user_id = ? AND role = 'assistant'
-                ORDER BY id DESC LIMIT 1
-            `).get(sessionId, userId);
+        const lastMsg = db.prepare(`
+            SELECT id FROM messages
+            WHERE session_id = ? AND user_id = ? AND role = 'assistant'
+            ORDER BY id DESC LIMIT 1
+        `).get(sessionId, userId);
 
-            if (lastMsg) {
-                db.prepare('UPDATE messages SET cost_time = ?, tokens_per_sec = ? WHERE id = ?')
-                  .run(costTime, tps, lastMsg.id);
-            }
-            res.json({ success: true });
-        } catch (e) {
-            res.status(500).json({ error: '更新指标失败' });
+        if (lastMsg) {
+            db.prepare('UPDATE messages SET cost_time = ?, tokens_per_sec = ? WHERE id = ?')
+              .run(costTime, tps, lastMsg.id);
         }
-    });
+        res.json({ success: true });
+    }));
 
-    router.post('/chat', authMiddleware, chatLimiter, async (req, res) => {
-        const { sessionId, content, displayContent, modelId } = req.body;
+    router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
+        const { sessionId, content, displayContent, modelId, regenerate } = req.body;
         const userId = req.user.id;
         const modelContent = String(content || '').trim();
         const visibleContent = String(displayContent || modelContent).trim();
@@ -102,11 +100,15 @@ function createChatRouter({
             }
         }
 
-        const userTokens = estimateTokens(modelContent);
-        db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(sessionId, userId, 'user', visibleContent, userTokens, modelCfg.id, getBeijingTimestamp());
+        if (!regenerate) {
+            const userTokens = estimateTokens(modelContent);
+            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(sessionId, userId, 'user', visibleContent, userTokens, modelCfg.id, getBeijingTimestamp());
+        }
 
-        logAction(req, '发送消息', `发送消息到会话: ${sessionId}`);
+        db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(getBeijingTimestamp(), sessionId);
+        
+        logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
 
         const unsupportedCapability = detectUnsupportedCapability(modelContent);
         if (unsupportedCapability) {
@@ -177,9 +179,13 @@ function createChatRouter({
             }
         }
 
-        console.log(`\n[对话请求] 用户ID: ${userId} | 目标模型: ${modelCfg.name} (${modelName})`);
-        console.log(`[目标URL] ${targetUrl}`);
-        console.log(`[API模式] ${isResponsesApi ? 'Responses API' : 'Chat Completions API'}`);
+        req.log.info({
+            userId,
+            model: modelCfg.name,
+            modelName,
+            targetUrl,
+            mode: isResponsesApi ? 'Responses API' : 'Chat Completions API'
+        }, '发起对话请求');
 
         const headers = {
             'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined,
@@ -196,41 +202,59 @@ function createChatRouter({
                 return msg;
             });
 
+            const requestData = { 
+                model: modelName, 
+                stream: true 
+            };
+            if (modelCfg.temperature !== null && modelCfg.temperature !== undefined) {
+                requestData.temperature = modelCfg.temperature;
+            }
+            if (modelCfg.max_tokens !== null && modelCfg.max_tokens !== undefined) {
+                requestData.max_completion_tokens = modelCfg.max_tokens;
+                requestData.max_tokens = modelCfg.max_tokens; // Some APIs use this instead
+            }
+
             if (isResponsesApi) {
-                console.log('[请求状态] 正在建立连接 (Responses API, 流式)...');
+                req.log.info('正在建立连接 (Responses API, 流式)');
                 try {
+                    requestData.input = responsesHistory;
                     response = await axios({
                         method: 'post', url: targetUrl, headers,
-                        data: { model: modelName, input: responsesHistory, stream: true },
+                        data: requestData,
                         responseType: 'stream', timeout: 180000, proxy: false
                     });
-                    console.log('[请求状态] 连接成功 (Responses API)');
+                    req.log.info('连接成功 (Responses API)');
                 } catch (err) {
                     const status = err.response?.status;
                     if ([404, 405, 502, 503].includes(status)) {
-                        console.warn(`[API 降级] Responses API 暂不可用 (${status})，正在自动回退到常规接口...`);
+                        req.log.warn({ status }, 'Responses API 暂不可用，正在自动回退到常规接口');
                         targetUrl = baseUrl.replace(/\/+$/, '');
                         if (!targetUrl.endsWith('/chat/completions')) targetUrl += '/chat/completions';
+                        
+                        delete requestData.input;
+                        requestData.messages = history;
+                        
                         response = await axios({
                             method: 'post', url: targetUrl, headers,
-                            data: { model: modelName, messages: history, stream: true },
+                            data: requestData,
                             responseType: 'stream', timeout: 300000, proxy: false,
                             httpAgent, httpsAgent
                         });
-                        console.log('[请求状态] 降级连接成功 (Chat Completions)');
+                        req.log.info('降级连接成功 (Chat Completions)');
                     } else {
                         throw err;
                     }
                 }
             } else {
-                console.log('[请求状态] 正在建立连接 (Chat Completions API, 流式)...');
+                req.log.info('正在建立连接 (Chat Completions API, 流式)');
+                requestData.messages = history;
                 response = await axios({
                     method: 'post', url: targetUrl, headers,
-                    data: { model: modelName, messages: history, stream: true },
+                    data: requestData,
                     responseType: 'stream', timeout: 300000, proxy: false,
                     httpAgent, httpsAgent
                 });
-                console.log('[请求状态] 连接成功');
+                req.log.info('连接成功');
             }
 
             const decoder = new StringDecoder('utf8');
@@ -329,11 +353,11 @@ function createChatRouter({
                         generateTitle(sessionId, visibleContent, assistantContent, modelCfg);
                     }
 
-                    console.log(`[请求状态] 生成结束，字数: ${assistantContent.length}`);
+                    req.log.info({ length: assistantContent.length }, '生成结束');
                     writeSse('[DONE]');
                     res.end();
                 } catch (e) {
-                    console.error('[流结束处理失败]', e);
+                    req.log.error({ err: e.message }, '流结束处理失败');
                     if (!res.writableEnded) {
                         writeSse(JSON.stringify({ error: '保存模型回复失败', detail: e.message }));
                         res.end();
@@ -345,9 +369,9 @@ function createChatRouter({
                 if (res.writableEnded) return; // 如果已经结束，忽略后续网络层错误
                 
                 if (err.code === 'ECONNRESET' || err.message.includes('aborted')) {
-                    console.warn('[流传输提醒] 连接被重置或中止，但可能已完成大部分接收');
+                    req.log.warn('流传输提醒: 连接被重置或中止，但可能已完成大部分接收');
                 } else {
-                    console.error('[流传输错误]', err);
+                    req.log.error({ err: err.message }, '流传输错误');
                 }
 
                 if (!res.writableEnded) {
@@ -363,18 +387,15 @@ function createChatRouter({
             const errorData = e.response?.data;
             const statusCode = e.response?.status;
 
-            console.error(`\n[模型响应错误] 状态码: ${statusCode}`);
+            req.log.error({ statusCode, err: e.message }, '模型响应错误');
             if (errorData) {
                 if (typeof errorData.on === 'function') {
                     errorData.on('data', d => {
-                        const msg = d.toString();
-                        console.error(`[报错详情 (Stream)]: ${msg}`);
+                        req.log.error({ streamError: d.toString() }, '模型流式报错详情');
                     });
                 } else {
-                    console.error('[报错详情]:', JSON.stringify(errorData, null, 2));
+                    req.log.error({ errorData }, '模型报错详情');
                 }
-            } else {
-                console.error(`[错误简述]: ${e.message}`);
             }
 
             let safeDetail = e.message;
@@ -399,7 +420,7 @@ function createChatRouter({
             }));
             res.end();
         }
-    });
+    }));
 
     return router;
 }

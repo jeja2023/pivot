@@ -5,7 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const pdf = require('pdf-parse');
-const db = require('../db');
+const { db } = require('../db');
+const { asyncHandler } = require('../http');
 const { removeAttachmentFiles } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 
@@ -31,7 +32,7 @@ function createAttachmentsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/uploads/:userId/:sessionId/:filename', authMiddleware, (req, res) => {
+    router.get('/uploads/:userId/:sessionId/:filename', authMiddleware, asyncHandler(async (req, res) => {
         const requestedUserId = parseInt(req.params.userId, 10);
         const { sessionId, filename } = req.params;
 
@@ -39,24 +40,21 @@ function createAttachmentsRouter({
             return res.status(403).json({ error: '无权访问该附件' });
         }
 
-        try {
-            const attachment = db.prepare('SELECT id FROM attachments WHERE user_id = ? AND session_id = ? AND file_path LIKE ?')
-              .get(requestedUserId, sessionId, `%${filename}`);
-            if (!attachment && req.user.role !== 'admin') {
-                return res.status(403).json({ error: '附件归属校验失败' });
-            }
-
-            const { target } = getSafeUploadPath(req.params.userId, req.params.sessionId, req.params.filename);
-            if (!fs.existsSync(target)) return res.status(404).json({ error: '附件文件不存在' });
-
-            res.setHeader('Cache-Control', 'private, max-age=604800');
-            res.sendFile(target);
-        } catch (e) {
-            res.status(400).json({ error: '附件路径无效' });
+        const expectedPath = `uploads/${requestedUserId}/${sessionId}/${filename}`;
+        const attachment = db.prepare('SELECT id FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?')
+            .get(requestedUserId, sessionId, expectedPath);
+        if (!attachment && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '附件归属校验失败' });
         }
-    });
 
-    router.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
+        const { target } = getSafeUploadPath(req.params.userId, req.params.sessionId, req.params.filename);
+        if (!fs.existsSync(target)) return res.status(404).json({ error: '附件文件不存在' });
+
+        res.setHeader('Cache-Control', 'private, max-age=604800');
+        res.sendFile(target);
+    }));
+
+    router.post('/api/upload', authMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
         if (!req.file) return res.status(400).json({ error: '未选择文件' });
 
         const userId = req.user.id;
@@ -104,14 +102,13 @@ function createAttachmentsRouter({
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
             res.json({ url: publicUrl, name: originalName, extractedText });
         } catch (e) {
-            console.error('文件处理失败:', e);
             if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
-            res.status(500).json({ error: '文件处理失败' });
+            throw e; // 转发给全局错误处理器
         }
-    });
+    }));
 
-    router.get('/api/attachments', authMiddleware, (req, res) => {
+    router.get('/api/attachments', authMiddleware, asyncHandler(async (req, res) => {
         const page = normalizePage(req.query.page || 1);
         const limit = normalizeLimit(req.query.limit || 20);
         const keyword = String(req.query.keyword || '').trim();
@@ -135,16 +132,16 @@ function createAttachmentsRouter({
         }));
         const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
         res.json({ data, total, hasMore: offset + data.length < total });
-    });
+    }));
 
-    router.delete('/api/attachments/:id', authMiddleware, (req, res) => {
+    router.delete('/api/attachments/:id', authMiddleware, asyncHandler(async (req, res) => {
         const attachment = db.prepare('SELECT * FROM attachments WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
         if (!attachment) return res.status(404).json({ error: '附件不存在' });
         db.prepare('DELETE FROM attachments WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
         removeAttachmentFiles([attachment]);
         logAction(req, '删除附件', `附件: ${attachment.file_name}`);
         res.json({ success: true });
-    });
+    }));
 
     return router;
 }

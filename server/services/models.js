@@ -1,5 +1,5 @@
 /* 模型业务逻辑层 Model Service Layer */
-const db = require('../db');
+const { db, stmts } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 
 const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
@@ -14,7 +14,11 @@ const normalizeTags = (value) => String(value || '')
 function getAccessibleModel(modelId, user) {
     let model;
     if (modelId) {
-        model = db.prepare('SELECT * FROM models WHERE id = ? AND (user_id IS NULL OR user_id = ?)').get(modelId, user.id);
+        if (user.role === 'admin') {
+            model = db.prepare('SELECT * FROM models WHERE id = ?').get(modelId); // Admin query remains flexible
+        } else {
+            model = db.prepare('SELECT * FROM models WHERE id = ? AND (user_id IS NULL OR user_id = ?)').get(modelId, user.id);
+        }
     } else {
         model = db.prepare('SELECT * FROM models WHERE is_default = 1 AND user_id IS NULL').get();
     }
@@ -49,7 +53,10 @@ function migrateModelSecrets() {
     const models = db.prepare("SELECT id, api_key FROM models WHERE api_key IS NOT NULL AND api_key != '' AND api_key NOT LIKE 'enc:v1:%'").all();
     const update = db.prepare('UPDATE models SET api_key = ? WHERE id = ?');
     models.forEach(model => update.run(encryptSecret(model.api_key), model.id));
-    if (models.length > 0) console.log(`[安全升级] 已加密 ${models.length} 个模型密钥`);
+    if (models.length > 0) {
+        const { logger } = require('../logger');
+        logger.info({ count: models.length }, '安全升级: 模型密钥加密完成');
+    }
 }
 
 module.exports = {

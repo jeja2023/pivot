@@ -1,0 +1,118 @@
+// --- 侧边栏模块 Sidebar (完整功能版) ---
+let sidebarState = { page: 1, limit: 20, hasMore: true, isLoading: false, archived: false };
+
+window.loadSessions = async function(append = false) {
+    if (sidebarState.isLoading) return;
+    
+    const searchVal = document.getElementById('session-search-input')?.value || '';
+    const tagMatch = searchVal.match(/#(\S+)/);
+    const tag = tagMatch ? tagMatch[1] : '';
+    const keyword = searchVal.replace(/#\S+/, '').trim();
+    
+    if (!append) {
+        sidebarState.page = 1;
+        sidebarState.hasMore = true;
+    }
+    if (!sidebarState.hasMore) return;
+    
+    sidebarState.isLoading = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/sessions?page=${sidebarState.page}&limit=${sidebarState.limit}&keyword=${encodeURIComponent(keyword)}&tag=${encodeURIComponent(tag)}&archived=${sidebarState.archived}`);
+        
+        const result = await res.json();
+        const sessions = result.data || [];
+        const hasMore = result.hasMore || false;
+        
+        const list = document.getElementById('session-list');
+        if (!append) list.innerHTML = '';
+        
+        // 绑定无限滚动监听
+        if (!list.dataset.boundLoadMore) {
+            list.dataset.boundLoadMore = '1';
+            list.addEventListener('scroll', () => {
+                if (sidebarState.isLoading || !sidebarState.hasMore) return;
+                if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) {
+                    window.loadSessions(true);
+                }
+            }, { passive: true });
+        }
+        
+        sessions.forEach(s => {
+            const title = s.title || '新对话';
+            const safeTitleStr = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeHTMLTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const tagsHtml = String(s.tags || '').split(',').filter(Boolean).map(t => `<em>${escapeHtml(t)}</em>`).join('');
+            const archiveBadge = s.is_archived ? '<span class="session-badge">已归档</span>' : '';
+            const pinnedBadge = s.is_pinned ? '<span class="session-badge pinned-badge">置顶</span>' : '';
+            
+            const div = document.createElement('div');
+            div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
+            div.innerHTML = `
+                <div class="session-main">
+                    <span class="session-title-text" title="${safeHTMLTitle}">
+                        ${pinnedBadge}${archiveBadge}${tagsHtml ? `<span class="session-tags-inline">${tagsHtml}</span>` : ''}
+                        <span class="session-title-content">${safeHTMLTitle}</span>
+                    </span>
+                    <div class="session-meta"></div>
+                </div>
+                <div class="session-more">
+                    <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0}, '${String(s.tags || '').replace(/'/g, "\\'")}')">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                    </button>
+                </div>
+            `;
+            div.onclick = () => selectSession(s.id, title);
+            list.appendChild(div);
+        });
+        
+        sidebarState.hasMore = hasMore;
+        sidebarState.page++;
+    } catch (e) { console.error('加载会话失败:', e); }
+    finally { sidebarState.isLoading = false; }
+};
+
+window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
+    e.stopPropagation();
+    document.querySelector('.session-dropdown')?.remove();
+    const menu = document.createElement('div');
+    menu.className = 'session-dropdown';
+    menu.innerHTML = `
+        <div class="menu-item" onclick="togglePinSession('${id}', ${isPinned})">${isPinned ? '取消置顶' : '置顶对话'}</div>
+        <div class="menu-item" onclick="renameSession('${id}', '${title}')">重命名</div>
+        <div class="menu-item" onclick="editSessionTags('${id}', '${tags}')">编辑标签</div>
+        <div class="menu-item" onclick="toggleArchiveSession('${id}', ${isArchived})">${isArchived ? '恢复对话' : '归档对话'}</div>
+        <div class="menu-item" onclick="exportSession('${id}')">导出为 Markdown</div>
+        <div class="menu-item danger" onclick="deleteSession('${id}')">删除</div>
+    `;
+    document.body.appendChild(menu);
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 5}px`; menu.style.left = `${rect.right - 120}px`;
+    const close = () => { menu.remove(); document.removeEventListener('click', close); };
+    setTimeout(() => document.addEventListener('click', close), 0);
+};
+
+window.toggleSidebar = () => document.querySelector('.sidebar').classList.toggle('collapsed');
+window.setArchiveFilter = (archived) => { 
+    sidebarState.archived = archived; 
+    document.getElementById('session-active-filter').classList.toggle('active', !archived);
+    document.getElementById('session-archive-filter').classList.toggle('active', archived);
+    window.loadSessions(); 
+};
+
+window.togglePinSession = async (id, currentPinned) => {
+    const res = await apiFetch(`${API_BASE}/sessions/${id}/pin`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isPinned: !currentPinned }) });
+    if (res.ok) { showToast(!currentPinned ? '已置顶' : '已取消置顶'); await window.loadSessions(); }
+};
+
+window.toggleArchiveSession = async (id, currentArchived) => {
+    const res = await apiFetch(`${API_BASE}/sessions/${id}/archive`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: !currentArchived }) });
+    if (res.ok) {
+        showToast(!currentArchived ? '已归档' : '已恢复');
+        if (currentSessionId === id && !sidebarState.archived) {
+            currentSessionId = null;
+            document.getElementById('current-title').innerText = '请选择或新建对话';
+            document.getElementById('message-container').innerHTML = '';
+        }
+        await window.loadSessions();
+    }
+};

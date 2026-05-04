@@ -1,12 +1,13 @@
-/* 知识库与 RAG 核心处理模块 */
+/* 知识库与 RAG 核心处理模块 Knowledge Base & RAG Engine */
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const pdf = require('pdf-parse');
 const axios = require('axios');
-const db = require('./db');
+const { db } = require('./db');
 const { authMiddleware } = require('./auth');
 const { getBeijingTimestamp } = require('./time');
+const { logger } = require('./logger');
 
 const ragRouter = express.Router();
 const upload = multer({
@@ -24,7 +25,7 @@ let isExtractorLoading = false;
 
 // 初始化本地 Transformer Embedding 模型 (注：当前版本已按需禁用)
 async function initLocalExtractor() {
-    console.warn('[系统提示] RAG 向量引擎已关闭。');
+    logger.warn('系统提示: RAG 向量引擎已关闭。');
     throw new Error('RAG 功能未开启。');
 }
 
@@ -64,11 +65,11 @@ async function generateEmbedding(text, mode = null, cloudConfig = null) {
             });
             return res.data.data[0].embedding;
         } catch (e) {
-            console.warn('云端向量化失败:', e.message);
+            logger.warn({ err: e.message }, '云端向量化失败');
             throw e;
         }
     }
-    
+
     if (targetMode === 'local') {
         // 尝试加载本地模型
         const getExtractor = await initLocalExtractor();
@@ -120,9 +121,9 @@ ragRouter.delete('/docs/:id', authMiddleware, (req, res) => {
 // 上传并解析文档
 ragRouter.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请上传文件' });
-    
+
     const fileInfo = db.prepare('INSERT INTO knowledge_docs (user_id, name, status, created_at) VALUES (?, ?, ?, ?)')
-                       .run(req.user.id, req.file.originalname, 'processing', getBeijingTimestamp());
+        .run(req.user.id, req.file.originalname, 'processing', getBeijingTimestamp());
     const docId = fileInfo.lastInsertRowid;
     res.json({ success: true, docId, message: '后台处理中' });
 
@@ -138,17 +139,17 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), async (req, res
         }
 
         const chunks = chunkText(text);
-        
+
         // 自动根据配置选择向量引擎
         for (const chunk of chunks) {
             const vector = await generateEmbedding(chunk);
             db.prepare('INSERT INTO knowledge_chunks (doc_id, content, embedding) VALUES (?, ?, ?)')
-              .run(docId, chunk, JSON.stringify(vector));
+                .run(docId, chunk, JSON.stringify(vector));
         }
 
         db.prepare('UPDATE knowledge_docs SET status = ? WHERE id = ?').run('ready', docId);
     } catch (e) {
-        console.error('RAG 解析失败:', e);
+        logger.error({ err: e.message }, 'RAG 解析失败');
         db.prepare('UPDATE knowledge_docs SET status = ? WHERE id = ?').run('error', docId);
     } finally {
         // 清理本地临时文件
@@ -161,7 +162,7 @@ async function retrieveContext(userId, query, topK = 3) {
     try {
         // 将用户的查询请求也转为向量
         const queryVector = await generateEmbedding(query);
-        
+
         // 提取该用户所有的知识库 Chunks
         // 在生产级应用中，这里应该用专门的向量数据库。SQLite 中我们通过内存计算 (适合小知识库)
         const chunks = db.prepare(`
@@ -189,15 +190,15 @@ async function retrieveContext(userId, query, topK = 3) {
 
         if (topChunks.length === 0) return '';
 
-        let injectedContext = '\\n\\n【参考内部知识库信息如下】：\\n';
+        let injectedContext = '\n\n【参考内部知识库信息如下】：\n';
         topChunks.forEach((c, idx) => {
-            injectedContext += `[引用 ${idx + 1} | 来源: ${c.source}]: ${c.text}\\n`;
+            injectedContext += `[引用 ${idx + 1} | 来源: ${c.source}]: ${c.text}\n`;
         });
-        injectedContext += '请基于上述参考信息回答我的问题，如果没有在参考信息中找到答案，请告知无法在知识库中查阅到该信息。\\n';
+        injectedContext += '请基于上述参考信息回答我的问题，如果没有在参考信息中找到答案，请告知无法在知识库中查阅到该信息。\n';
 
         return injectedContext;
     } catch (e) {
-        console.error('RAG 检索异常:', e);
+        logger.error({ err: e.message }, 'RAG 检索异常');
         return '';
     }
 }

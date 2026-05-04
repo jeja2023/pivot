@@ -2,7 +2,8 @@
 const bcrypt = require('bcryptjs');
 const express = require('express');
 const fs = require('fs');
-const db = require('../db');
+const { db } = require('../db');
+const { asyncHandler } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
     escapeCsvCell,
@@ -19,27 +20,23 @@ function createAdminUsersRouter({
 }) {
     const router = express.Router();
 
-    router.get('/admin/users', authMiddleware, adminMiddleware, (req, res) => {
+    router.get('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
         const users = db.prepare('SELECT id, username, nickname, unit, role, status, created_at, last_login_at FROM users ORDER BY id ASC LIMIT ? OFFSET ?').all(limit, offset);
         const total = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
         res.json({ data: users, total });
-    });
+    }));
 
-    router.post('/admin/users', authMiddleware, adminMiddleware, (req, res) => {
-        try {
-            const { username, password, nickname, unit, role } = req.body;
-            const user = register(username, password, nickname, unit, role);
-            logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
-            res.json({ success: true, user });
-        } catch (e) {
-            res.status(400).json({ error: e.message });
-        }
-    });
+    router.post('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const { username, password, nickname, unit, role } = req.body;
+        const user = register(username, password, nickname, unit, role);
+        logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
+        res.json({ success: true, user });
+    }));
 
-    router.put('/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
+    router.put('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         const { nickname, unit, role, status } = req.body;
         const safeRole = role === 'admin' ? 'admin' : 'user';
@@ -52,25 +49,21 @@ function createAdminUsersRouter({
         if (info.changes === 0) return res.status(404).json({ error: '用户不存在' });
         logAction(req, '修改用户', `用户ID: ${targetUserId}，角色: ${safeRole}，状态: ${safeStatus}`);
         res.json({ success: true });
-    });
+    }));
 
-    router.post('/admin/users/:id/password', authMiddleware, adminMiddleware, (req, res) => {
+    router.post('/admin/users/:id/password', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
-        try {
-            const { password } = req.body;
-            validatePassword(password);
-            const hash = bcrypt.hashSync(password, 10);
-            const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
-            if (info.changes === 0) return res.status(404).json({ error: '用户不存在' });
-            logAction(req, '重置密码', `用户ID: ${targetUserId}`);
-            res.json({ success: true });
-        } catch (e) {
-            res.status(400).json({ error: e.message });
-        }
-    });
+        const { password } = req.body;
+        validatePassword(password);
+        const hash = bcrypt.hashSync(password, 10);
+        const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
+        if (info.changes === 0) return res.status(404).json({ error: '用户不存在' });
+        logAction(req, '重置密码', `用户ID: ${targetUserId}`);
+        res.json({ success: true });
+    }));
 
-    router.get('/admin/logs/export', authMiddleware, adminMiddleware, (req, res) => {
-        const logs = db.prepare('SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ORDER BY al.timestamp DESC').all();
+    router.get('/admin/logs/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const logs = db.prepare('SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ORDER BY al.timestamp DESC LIMIT 10000').all();
         let csv = '\uFEFF序号,时间,用户,IP,操作,详情\n';
         logs.forEach((l, i) => {
             csv += [i + 1, l.timestamp, l.username || '系统', l.ip_address || '-', l.action, l.details || ''].map(escapeCsvCell).join(',') + '\n';
@@ -79,10 +72,10 @@ function createAdminUsersRouter({
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=audit_logs.csv');
         res.send(csv);
-    });
+    }));
 
-    router.get('/admin/users/export', authMiddleware, adminMiddleware, (req, res) => {
-        const users = db.prepare('SELECT * FROM users').all();
+    router.get('/admin/users/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const users = db.prepare('SELECT * FROM users LIMIT 10000').all();
         let csv = '\uFEFFID,用户名,显示名,单位,角色,状态,创建时间\n';
         users.forEach(u => {
             csv += [u.id, u.username, u.nickname || '', u.unit || '', u.role, u.status || 'active', u.created_at].map(escapeCsvCell).join(',') + '\n';
@@ -91,9 +84,9 @@ function createAdminUsersRouter({
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=users.csv');
         res.send(csv);
-    });
+    }));
 
-    router.post('/admin/users/import', authMiddleware, adminMiddleware, upload.single('file'), (req, res) => {
+    router.post('/admin/users/import', authMiddleware, adminMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
         if (!req.file) return res.status(400).json({ error: '请选择 CSV 文件' });
         const content = fs.readFileSync(req.file.path, 'utf-8');
         const lines = content.split('\n').slice(1);
@@ -106,9 +99,6 @@ function createAdminUsersRouter({
             const cleanLine = line.trim();
             if (!cleanLine) return;
             const parts = parseCsvLine(cleanLine);
-            // 智能识别模板格式
-            // 格式 A: id, username, nickname, unit, role, status (导出格式)
-            // 格式 B: username, password, nickname, unit, role (导入模板格式)
             let username, password, nickname, unit, role, status;
             
             const hasIdColumn = /^\d+$/.test(parts[0] || '');
@@ -140,9 +130,9 @@ function createAdminUsersRouter({
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
         res.json({ success: true, count, skipped });
-    });
+    }));
 
-    router.get('/admin/logs', authMiddleware, adminMiddleware, (req, res) => {
+    router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
@@ -155,9 +145,9 @@ function createAdminUsersRouter({
         `).all(limit, offset);
         const total = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get().count;
         res.json({ data: logs, total });
-    });
+    }));
 
-    router.delete('/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
+    router.delete('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         if (targetUserId === req.user.id) return res.status(400).json({ error: '不能删除自己' });
         const targetUser = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetUserId);
@@ -166,7 +156,7 @@ function createAdminUsersRouter({
             const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled'").get().count;
             if (adminCount <= 1) return res.status(400).json({ error: '不能删除最后一个可用管理员' });
         }
-        const deleteUser = db.transaction(() => {
+        const deleteUserTx = db.transaction(() => {
             const attachments = db.prepare('SELECT file_path FROM attachments WHERE user_id = ?').all(targetUserId);
             const docs = db.prepare('SELECT id FROM knowledge_docs WHERE user_id = ?').all(targetUserId);
             docs.forEach(doc => db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(doc.id));
@@ -180,10 +170,10 @@ function createAdminUsersRouter({
             removeAttachmentFiles(attachments);
             return info;
         });
-        deleteUser();
+        deleteUserTx();
         logAction(req, '删除用户', `删除账号: ${targetUser.username} (ID: ${targetUserId})`);
         res.json({ success: true });
-    });
+    }));
 
     return router;
 }

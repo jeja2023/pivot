@@ -16,16 +16,16 @@ async function loadAuthConfig() {
     }
 }
 
-document.getElementById('auth-toggle').onclick = () => {
+document.getElementById('auth-toggle').addEventListener('click', () => {
     if (!allowPublicRegistration) return showToast('企业模式已关闭公开注册，请联系管理员创建账号', 'error');
     isLogin = !isLogin;
     document.getElementById('auth-title').innerText = isLogin ? '智枢' : '智枢 - 注册账号';
     document.getElementById('auth-toggle').innerText = isLogin ? '没有账号？点击注册' : '已有账号？点击登录';
     document.getElementById('auth-submit').innerText = isLogin ? '进入系统' : '立即注册';
     document.querySelectorAll('.reg-only').forEach(el => el.classList.toggle('hidden', isLogin));
-};
+});
 
-document.getElementById('auth-submit').onclick = async () => {
+document.getElementById('auth-submit').addEventListener('click', async () => {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const nickname = document.getElementById('nickname').value;
@@ -54,7 +54,7 @@ document.getElementById('auth-submit').onclick = async () => {
         if (data.error) throw new Error(data.error);
         
         if (isLogin) {
-            token = data.token;
+            token = data.accessToken;
             currentUser = data.user;
             localStorage.setItem('pivot_token', token);
             showApp();
@@ -63,12 +63,11 @@ document.getElementById('auth-submit').onclick = async () => {
             document.getElementById('auth-toggle').click();
         }
     } catch (e) { showToast(e.message, 'error'); }
-};
+});
 
-document.getElementById('logout-btn').onclick = () => {
-    fetch(API_BASE + '/auth/logout', {
-        method: 'POST',
-        headers: authHeaders()
+window.logout = () => {
+    apiFetch(API_BASE + '/auth/logout', {
+        method: 'POST'
     }).catch(() => {});
     localStorage.removeItem('pivot_token');
     token = null;

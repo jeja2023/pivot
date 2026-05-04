@@ -1,6 +1,8 @@
 /* 大模型对接逻辑 */
 const axios = require('axios');
-const db = require('./db');
+const fs = require('fs');
+const path = require('path');
+const { db } = require('./db');
 const { getBeijingTimestamp } = require('./time');
 
 const THRESHOLD = parseInt(process.env.MEMORY_THRESHOLD) || 12000;
@@ -30,9 +32,6 @@ async function getContext(sessionId, userId, modelCfg) {
         await compressMemory(sessionId, userId, messages, modelCfg);
         return getContext(sessionId, userId, modelCfg); // 递归获取压缩后的结果
     }
-
-    const fs = require('fs');
-    const path = require('path');
 
     let history = messages.map(m => {
         let content = m.content;
@@ -108,28 +107,9 @@ async function compressMemory(sessionId, userId, messages, modelCfg) {
         });
         transaction();
     } catch (e) {
-        console.error('Open WebUI 记忆压缩失败:', e.message);
+        const { logger } = require('./logger');
+        logger.error({ err: e.message }, '记忆压缩失败');
     }
 }
 
-// 新增：LLM 驱动的自动标题生成
-async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
-    try {
-        const prompt = `请根据这段对话内容生成一个极其简短的标题（5个字以内）。直接输出标题，不要包含标点：\n用户：${userMsg}\n助手：${aiMsg}`;
-        const response = await axios.post(modelCfg.url, {
-            model: modelCfg.model_name,
-            messages: [{ role: 'user', content: prompt }],
-            stream: false
-        }, {
-            headers: { 'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined }
-        });
-        const title = response.data.choices[0].message.content.replace(/["'#。！？]/g, '').trim();
-        if (title && title.length < 20) {
-            db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, sessionId);
-            return title;
-        }
-    } catch (e) { console.error('自动标题生成失败'); }
-    return null;
-}
-
-module.exports = { estimateTokens, getContext, generateTitle, THRESHOLD };
+module.exports = { estimateTokens, getContext, THRESHOLD };

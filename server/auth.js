@@ -1,24 +1,59 @@
-/* 认证中间件与逻辑 */
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const db = require('./db');
+const crypto = require('crypto');
+const { db, stmts } = require('./db');
 const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
 
+const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET) || JWT_SECRET.includes('please-replace')) {
-    console.error('\\n🚨 [安全警告] JWT_SECRET 未配置或强度不足，系统已拒绝启动。\\n');
+    logger.error('🚨 [安全警告] JWT_SECRET 未配置或强度不足，系统已拒绝启动。');
     process.exit(1);
 }
 
-const AUTH_COOKIE_NAME = 'pivot_token';
+const AUTH_COOKIE_NAME = 'pivot_access_token';
+const REFRESH_COOKIE_NAME = 'pivot_refresh_token';
+
+const ACCESS_TOKEN_EXPIRES = '30m';
+const REFRESH_TOKEN_EXPIRES_DAYS = 7;
+
 const COOKIE_OPTIONS = {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.COOKIE_SECURE === 'true',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+    path: '/',
+    secure: process.env.COOKIE_SECURE === 'true'
 };
+
+const ACCESS_COOKIE_OPTIONS = {
+    ...COOKIE_OPTIONS,
+    maxAge: 30 * 60 * 1000 // 30 分钟
+};
+
+const REFRESH_COOKIE_OPTIONS = {
+    ...COOKIE_OPTIONS,
+    path: '/api/auth/refresh', // 仅刷新接口可见，提高安全性
+    maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
+};
+
+function generateAccessToken(user) {
+    return jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_EXPIRES }
+    );
+}
+
+function generateRefreshToken(userId) {
+    const token = crypto.randomBytes(40).toString('hex');
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
+    // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
+    const expiresAtStr = expiresAt.toISOString().replace('T', ' ').substring(0, 19);
+    
+    stmts.insertRefreshToken.run(userId, token, expiresAtStr);
+    return token;
+}
 
 function validatePassword(password) {
     if (!password || password.length < 8) {
@@ -73,16 +108,46 @@ function login(username, password) {
         throw new Error('账号已被禁用，请联系管理员');
     }
     
-    const token = jwt.sign(
-        { id: user.id, username: user.username, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-    );
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user.id);
     
     // 更新最后登录时间
     db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(getBeijingTimestamp(), user.id);
     
-    return { token, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' } };
+    return { 
+        accessToken, 
+        refreshToken, 
+        user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' } 
+    };
+}
+
+// 刷新 Token
+function refreshTokens(token) {
+    const refreshTokenData = stmts.getRefreshToken.get(token);
+    if (!refreshTokenData) {
+        throw new Error('无效的刷新令牌');
+    }
+
+    // 检查是否过期
+    const now = getBeijingTimestamp();
+    if (refreshTokenData.expires_at < now) {
+        stmts.deleteRefreshToken.run(token);
+        throw new Error('刷新令牌已过期，请重新登录');
+    }
+
+    const user = stmts.getUserById.get(refreshTokenData.user_id);
+    if (!user || user.status === 'disabled') {
+        throw new Error('用户状态异常');
+    }
+
+    // 生成新的 Access Token
+    const accessToken = generateAccessToken(user);
+    
+    // 实施 Refresh Token 轮换（可选，为了更安全，生成一个新的并删除旧的）
+    const newRefreshToken = generateRefreshToken(user.id);
+    stmts.deleteRefreshToken.run(token);
+
+    return { accessToken, refreshToken: newRefreshToken };
 }
 
 // 鉴权中间件
@@ -97,15 +162,32 @@ function authMiddleware(req, res, next) {
     
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = db.prepare('SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ?').get(decoded.id);
+        const user = stmts.getUserById.get(decoded.id);
         if (!user || user.status === 'disabled') {
             return res.status(401).json({ error: '账号不存在或已被禁用' });
         }
         req.user = user;
         next();
     } catch (e) {
-        return res.status(401).json({ error: 'Token 无效或已过期' });
+        if (e.name === 'TokenExpiredError') {
+            return res.status(401).json({ 
+                error: 'Token 已过期', 
+                code: 'TOKEN_EXPIRED' 
+            });
+        }
+        return res.status(401).json({ error: 'Token 无效' });
     }
 }
 
-module.exports = { register, login, authMiddleware, validatePassword, AUTH_COOKIE_NAME, COOKIE_OPTIONS };
+module.exports = { 
+    register, 
+    login, 
+    refreshTokens,
+    authMiddleware, 
+    validatePassword, 
+    getCookie,
+    AUTH_COOKIE_NAME, 
+    REFRESH_COOKIE_NAME,
+    ACCESS_COOKIE_OPTIONS,
+    REFRESH_COOKIE_OPTIONS
+};

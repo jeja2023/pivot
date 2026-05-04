@@ -33,11 +33,12 @@ function validateConfig() {
     const port = parsePort(process.env.PORT);
     const cookieSecure = process.env.COOKIE_SECURE === 'true';
 
+    const { logger } = require('./logger');
     if (process.env.NODE_ENV === 'production' && !cookieSecure) {
-        console.warn('[配置提醒] 生产环境建议在 HTTPS 部署时设置 COOKIE_SECURE=true');
+        logger.warn('配置提醒: 生产环境建议在 HTTPS 部署时设置 COOKIE_SECURE=true');
     }
     if (!process.env.DATA_ENCRYPTION_KEY) {
-        console.warn('[配置提醒] 未配置 DATA_ENCRYPTION_KEY，将从 JWT_SECRET 派生加密密钥；生产环境建议固定配置，避免轮换 JWT_SECRET 后无法解密历史 API Key');
+        logger.warn('配置提醒: 未配置 DATA_ENCRYPTION_KEY，将从 JWT_SECRET 派生加密密钥');
     }
 
     return {

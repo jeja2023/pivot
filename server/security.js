@@ -1,8 +1,9 @@
-/* 安全工具模块 */
+/* 安全工具模块 Security Utilities */
 const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const logger = require('./logger');
 
 const encryptedPrefix = 'enc:v1:';
 const uploadRoot = path.resolve(__dirname, '../uploads');
@@ -134,7 +135,7 @@ function removeAttachmentFiles(attachments) {
                 dir = path.dirname(dir);
             }
         } catch (e) {
-            console.warn(`[附件清理] 删除失败: ${filePath}，原因: ${e.message}`);
+            logger.warn({ filePath, err: e.message }, '附件清理：删除失败');
         }
     }
 }
