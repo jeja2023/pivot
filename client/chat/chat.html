@@ -1,0 +1,569 @@
+<!-- 对话主页面 Chat Main Page -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pivot AI | 智枢</title>
+    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.3">
+    <link rel="stylesheet" href="/chat/chat.css?v=0.0.3">
+    <link rel="stylesheet" href="/common/vendor/github-dark.min.css">
+    <!-- 引用本地第三方脚本 -->
+    <script src="/common/vendor/marked.min.js"></script>
+    <script src="/common/vendor/purify.min.js"></script>
+    <script src="/common/vendor/highlight.min.js"></script>
+    <link rel="icon" type="image/png" href="/favicon.png">
+</head>
+
+<body class="light-mode">
+    <div id="toast-container"></div>
+
+    <!-- 用户认证弹窗 -->
+    <div id="auth-container" class="modal-overlay">
+        <div class="modal">
+            <img src="/common/logo.png" alt="Zhi-Shu Logo" class="auth-logo">
+            <h2 id="auth-title">智枢</h2>
+            <div class="form-group">
+                <input type="text" id="username" class="form-input" placeholder="用户名">
+                <div class="reg-only hidden">
+                    <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
+                    <input type="text" id="unit" class="form-input" placeholder="工作单位">
+                </div>
+                <input type="password" id="password" class="form-input" placeholder="密码">
+                <input type="password" id="confirm-password" class="form-input reg-only hidden" placeholder="确认密码">
+            </div>
+            <button id="auth-submit" class="btn-primary" style="width: 100%;">进入系统</button>
+            <p style="margin-top: 15px; font-size: 0.85rem;">
+                <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
+            </p>
+            <p class="copyright-text auth-copyright"></p>
+        </div>
+    </div>
+
+    <!-- 自定义重命名弹窗 -->
+    <div id="rename-container" class="modal-overlay hidden" style="z-index: 1100;">
+        <div class="modal" style="width: 320px;">
+            <h3>修改对话名称</h3>
+            <div class="form-group" style="margin-top: 15px;">
+                <input type="text" id="new-session-title" class="form-input" placeholder="请输入新名称">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn-secondary" style="flex: 1;" onclick="closeRenameModal()">取消</button>
+                <button class="btn-primary" style="flex: 1;" onclick="saveSessionTitle()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用确认弹窗 -->
+    <div id="confirm-container" class="modal-overlay hidden" style="z-index: 1500;">
+        <div class="modal" style="width: 320px;">
+            <h3 id="confirm-title">确认操作</h3>
+            <p id="confirm-message" style="margin-top: 10px; color: var(--text-muted);"></p>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn-secondary" style="flex: 1;" onclick="closeConfirmModal()">取消</button>
+                <button id="confirm-ok-btn" class="btn-danger" style="flex: 1;">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模型配置弹窗 (Add/Edit Model Modal) -->
+    <div id="model-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3 id="model-modal-title">添加新模型</h3>
+                <p class="model-modal-desc">配置 OpenAI 兼容格式的大模型接口</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="m-id">
+                <div class="form-item">
+                    <label>模型展示名称</label>
+                    <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
+                </div>
+                <div class="form-item">
+                    <label>接口地址 (Endpoint)</label>
+                    <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
+                </div>
+                <div class="form-item">
+                    <label>模型标识 (Model ID)</label>
+                    <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat">
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>每日额度 (Token)</label>
+                        <input type="number" id="m-daily-limit" class="form-input" min="0" step="1000"
+                            placeholder="0 表示不限">
+                    </div>
+                    <div class="form-item">
+                        <label>可见部门</label>
+                        <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                    </div>
+                </div>
+                <div class="form-item">
+                    <label>API Key (可选)</label>
+                    <div style="position: relative;">
+                        <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
+                            style="padding-right: 45px;">
+                        <button type="button" class="btn-toggle-pw" onclick="toggleKeyVisibility()" title="显示/隐藏明文">
+                            <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="model-modal-actions">
+                    <button class="btn-secondary" onclick="closeModelModal()">取消</button>
+                    <button class="btn-secondary" onclick="testModelConfig()"
+                        style="border-color: var(--primary); color: var(--primary); width: auto; padding: 0 15px;">测试连接</button>
+                    <button id="m-submit-btn" class="btn-primary" onclick="addModel()">保存配置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 用户管理弹窗 -->
+    <div id="user-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3 id="user-modal-title">添加用户</h3>
+                <p class="model-modal-desc">维护企业账号、角色与启用状态</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="u-id">
+                <div class="form-item">
+                    <label>用户名</label>
+                    <input type="text" id="u-username" class="form-input" placeholder="3-32 位字母、数字或符号">
+                </div>
+                <div class="form-item" id="u-password-wrap">
+                    <label>初始密码</label>
+                    <input type="password" id="u-password" class="form-input" placeholder="至少 8 位，包含字母和数字">
+                </div>
+                <div class="form-item">
+                    <label>显示名称</label>
+                    <input type="text" id="u-nickname" class="form-input" placeholder="用户显示名称">
+                </div>
+                <div class="form-item">
+                    <label>工作单位</label>
+                    <input type="text" id="u-unit" class="form-input" placeholder="所属单位">
+                </div>
+                <div class="form-item">
+                    <label>角色</label>
+                    <select id="u-role" class="form-input">
+                        <option value="user">普通用户</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>状态</label>
+                    <select id="u-status" class="form-input">
+                        <option value="active">启用</option>
+                        <option value="disabled">禁用</option>
+                    </select>
+                </div>
+                <div class="model-modal-actions">
+                    <button class="btn-secondary" onclick="closeUserModal()">取消</button>
+                    <button class="btn-primary" onclick="saveUser()">保存用户</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 指令模板弹窗 -->
+    <div id="prompt-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3 id="prompt-modal-title">添加指令</h3>
+                <p class="model-modal-desc">保存常用角色、流程和写作模板</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="p-id">
+                <div class="form-item">
+                    <label>名称</label>
+                    <input type="text" id="p-name" class="form-input" placeholder="例如: 会议纪要助手">
+                </div>
+                <div class="form-item">
+                    <label>分类</label>
+                    <input type="text" id="p-category" class="form-input" placeholder="例如: 办公">
+                </div>
+                <div class="form-item">
+                    <label>范围</label>
+                    <select id="p-scope" class="form-input">
+                        <option value="personal">个人</option>
+                        <option value="global">全局</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>指令内容</label>
+                    <textarea id="p-content" class="form-input" style="height: 160px; padding-top: 12px;"
+                        placeholder="输入系统角色或任务流程指令"></textarea>
+                </div>
+                <div class="model-modal-actions">
+                    <button class="btn-secondary" onclick="closePromptModal()">取消</button>
+                    <button class="btn-primary" onclick="savePrompt()">保存指令</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="app" class="hidden">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="app-brand">
+                    <img src="/common/logo.png" alt="Logo" class="brand-logo">
+                    <div class="brand-info">
+                        <span class="brand-text">智枢</span>
+                        <span class="brand-ver">v0.0.4</span>
+                    </div>
+                </div>
+                
+                <button id="new-chat-btn" class="new-chat-btn" onclick="createNewSession()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span>发起新对话</span>
+                </button>
+
+                <div class="sidebar-ctrls">
+                    <div class="search-wrapper">
+                        <input type="text" id="session-search-input" placeholder="搜索标题或 #标签..." class="search-input" oninput="handleSearch()">
+                        <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </div>
+                    
+                    <div class="tab-switcher">
+                        <button id="session-active-filter" class="tab-btn active" onclick="setArchiveFilter(false)">当前</button>
+                        <button id="session-archive-filter" class="tab-btn" onclick="setArchiveFilter(true)">归档</button>
+                    </div>
+                </div>
+            </div>
+            <div id="session-list" class="session-list"></div>
+            <div class="sidebar-footer">
+                <div class="user-row">
+                    <span id="user-info"></span>
+                    <span id="admin-tag" class="admin-badge hidden">管理员</span>
+                </div>
+                <div class="footer-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+                    <button id="admin-panel-btn" class="btn-secondary"
+                        style="flex: 1; padding: 8px 0; font-size: 0.85rem;">系统设置</button>
+                    <button id="logout-btn" class="btn-danger"
+                        style="flex: 1; padding: 8px 0; font-size: 0.85rem;">退出登录</button>
+                </div>
+                <div class="copyright-text sidebar-copyright"></div>
+            </div>
+        </aside>
+
+        <main class="chat-container">
+            <header class="chat-header">
+                <div class="header-left" style="display: flex; align-items: center; gap: 12px;">
+                    <button onclick="toggleSidebar()" class="icon-btn" title="切换侧边栏">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                            <line x1="3" y1="6" x2="21" y2="6" />
+                            <line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                    </button>
+                    <h3 id="current-title">请选择或新建对话</h3>
+                </div>
+                <div class="header-right">
+                    <span style="font-size: 0.85rem; color: var(--text-muted); margin-right: 8px;">当前模型:</span>
+                    <select id="model-selector" class="form-input" style="width: auto;"></select>
+                </div>
+            </header>
+            <div id="message-container" class="message-container"></div>
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <!-- 附件预览区域 -->
+                    <div id="attachment-preview" class="attachment-preview hidden"></div>
+                    <input type="file" id="file-input" class="hidden" accept="image/*,.pdf,.txt,.md,.csv">
+                    <textarea id="user-input" class="form-input" placeholder="输入消息... (Shift+Enter 换行)"></textarea>
+                    <div class="input-actions">
+                        <button id="upload-btn" class="btn-icon" title="上传附件">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                            </svg>
+                        </button>
+                        <button id="stop-btn" class="btn-danger hidden" title="停止生成">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="6" y="6" width="12" height="12" rx="2" />
+                            </svg>
+                        </button>
+                        <button id="send-btn" class="btn-primary" title="发送 (Enter)">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                xmlns="http://www.w3.org/2000/svg">
+                                <path d="M7 11L12 6L17 11M12 18V7" stroke="currentColor" stroke-width="2"
+                                    stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 管理与配置面板 (符合第39条复用规范) -->
+    <div id="admin-container" class="modal-overlay hidden">
+        <div class="modal admin-panel">
+            <button class="modal-close-btn" onclick="closeModal()">&times;</button>
+            <div class="admin-layout">
+                <nav class="admin-sidebar">
+                    <div class="sidebar-brand">
+                        <img src="/common/logo.png" alt="Logo"
+                            style="width: 32px; height: 32px; vertical-align: middle; margin-right: 10px; border-radius: 6px;">
+                        智枢 · 系统设置
+                    </div>
+                    <button onclick="switchTab('ops')" id="tab-ops" class="admin-tab admin-only hidden">运营概览</button>
+                    <button onclick="switchTab('models')" id="tab-models"
+                        class="admin-tab admin-only hidden">模型配置</button>
+                    <button onclick="switchTab('prompts')" id="tab-prompts" class="admin-tab">指令中心</button>
+                    <button onclick="switchTab('attachments')" id="tab-attachments" class="admin-tab">附件库</button>
+                    <!-- 暂时屏蔽 RAG 入口，保留代码待未来使用 -->
+                    <button onclick="switchTab('knowledge')" id="tab-knowledge" class="admin-tab hidden">知识管理
+                        (RAG)</button>
+                    <button onclick="switchTab('users')" id="tab-users"
+                        class="admin-tab admin-only hidden">用户管理</button>
+                    <button onclick="switchTab('logs')" id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
+                    <button onclick="switchTab('stats')" id="tab-stats"
+                        class="admin-tab admin-only hidden">用量统计</button>
+                    <button onclick="switchTab('details')" id="tab-details"
+                        class="admin-tab admin-only hidden">用量明细</button>
+                    <div style="flex: 1;"></div>
+
+                </nav>
+
+                <main class="admin-content">
+                    <!-- 运营概览 -->
+                    <section id="tab-content-ops" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>运营概览</h3>
+                            <button class="btn-secondary" onclick="loadOpsSummary()">刷新</button>
+                        </div>
+                        <div id="ops-summary-grid" class="ops-grid"></div>
+                        <div class="stat-card" style="margin-top: 20px;">
+                            <h4>近 30 天 Token 趋势</h4>
+                            <canvas id="usage-trend-chart" height="180"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- 指令中心 (新增) -->
+                    <section id="tab-content-prompts" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>指令中心 (AI 角色切换)</h3>
+                            <button class="btn-primary" onclick="openPromptModal()">添加指令</button>
+                        </div>
+                        <div id="prompt-grid" class="prompt-grid">
+                            <!-- 指令卡片动态生成 -->
+                        </div>
+                    </section>
+
+                    <!-- 附件库 -->
+                    <section id="tab-content-attachments" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>附件库</h3>
+                            <input id="attachment-search-input" class="form-input"
+                                style="width: 240px; height: 38px; margin: 0;" placeholder="搜索文件名">
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: auto;">文件名</th>
+                                        <th style="width: 170px;">会话</th>
+                                        <th style="width: 120px;">类型</th>
+                                        <th style="width: 90px;">大小</th>
+                                        <th style="width: 190px;">时间</th>
+                                        <th style="width: 120px;" class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="attachment-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-attachments" class="pagination"></div>
+                    </section>
+
+                    <!-- 模型管理 -->
+                    <div id="tab-content-models" class="admin-tab-content">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>模型配置</h3>
+                            <button class="btn-primary" onclick="openModelModal()">+ 添加模型</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 180px;">名称</th>
+                                        <th style="width: auto;">URL</th>
+                                        <th style="width: 100px;">每日额度</th>
+                                        <th style="width: 120px;">可见部门</th>
+                                        <th style="width: 120px;" class="text-center">状态</th>
+                                        <th style="width: 150px;" class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="model-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-models" class="pagination"></div>
+                    </div>
+
+                    <!-- 知识库管理 (RAG) -->
+                    <div id="tab-content-knowledge" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>知识库文档管理</h3>
+                            <div class="footer-actions" style="margin-bottom: 0;">
+                                <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf"
+                                    onchange="uploadKnowledgeDoc()">
+                                <button class="btn-primary"
+                                    onclick="document.getElementById('rag-upload-input').click()">上传文档</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: auto;">文档名称</th>
+                                        <th style="width: 120px;">状态</th>
+                                        <th style="width: 150px;">上传时间</th>
+                                        <th style="width: 100px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rag-docs-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 用户管理 -->
+                    <div id="tab-content-users" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>用户管理</h3>
+                            <div class="footer-actions" style="margin-bottom: 0;">
+                                <input type="file" id="user-import-input" class="hidden" accept=".csv"
+                                    onchange="importUsers()">
+                                <button class="btn-primary" onclick="openUserModal()">添加用户</button>
+                                <button class="btn-secondary"
+                                    onclick="document.getElementById('user-import-input').click()">导入用户</button>
+                                <button class="btn-secondary" onclick="exportUsers()">导出用户</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 70px;">ID</th>
+                                        <th style="width: 120px;">用户名</th>
+                                        <th style="width: 120px;">显示名</th>
+                                        <th style="width: 140px;">单位</th>
+                                        <th style="width: 90px;">角色</th>
+                                        <th style="width: 80px;">状态</th>
+                                        <th style="width: 210px;" class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-users" class="pagination"></div>
+                    </div>
+
+                    <!-- 审计日志 -->
+                    <div id="tab-content-logs" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>审计日志</h3>
+                            <button class="btn-secondary" onclick="exportLogs()">导出日志</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table log-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 60px;" class="text-center">序号</th>
+                                        <th style="width: 180px;">时间</th>
+                                        <th style="width: 110px;">用户</th>
+                                        <th style="width: 140px;">IP 地址</th>
+                                        <th style="width: 160px;">操作</th>
+                                        <th style="width: auto;">详情</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="log-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-logs" class="pagination"></div>
+                    </div>
+
+                    <!-- 用量统计 -->
+                    <div id="tab-content-stats" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>用量汇总统计</h3>
+                            <button class="btn-secondary" onclick="exportStats()">导出汇总</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 150px;">用户</th>
+                                        <th style="width: 150px;">显示名</th>
+                                        <th style="width: 150px;">模型</th>
+                                        <th style="width: 80px;" class="text-center">消息数</th>
+                                        <th style="width: 120px;" class="text-center">总 Token</th>
+                                        <th style="width: auto;">最后活动</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stats-list-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 用量明细 -->
+                    <div id="tab-content-details" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>用量明细流水</h3>
+                            <button class="btn-secondary" onclick="exportDetails()">导出明细</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table detail-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 70px;" class="text-center">序号</th>
+                                        <th style="width: 200px;">时间</th>
+                                        <th style="width: 130px;">用户</th>
+                                        <th style="width: 160px;">模型</th>
+                                        <th style="width: 100px;" class="text-center">角色</th>
+                                        <th style="width: auto;">消耗 Token</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="details-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-details" class="pagination"></div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片全屏查看器 (点击图片看大图) -->
+    <div id="image-viewer-modal" class="hidden" style="z-index: 2000;" onclick="closeImageViewer()">
+        <span class="close-viewer">&times;</span>
+        <img id="viewer-img" src="">
+    </div>
+
+    <!-- 页面逻辑 -->
+
+    <!-- 模块化加载业务逻辑 -->
+    <script src="/chat/config.js?v=0.0.3"></script>
+    <script src="/chat/ui.js?v=0.0.3"></script>
+    <script src="/chat/auth.js?v=0.0.3"></script>
+    <script src="/chat/rag.js?v=0.0.3"></script>
+    <script src="/chat/admin.js?v=0.0.3"></script>
+    <script src="/chat/app.js?v=0.0.3"></script>
+
+</body>
+
+</html>

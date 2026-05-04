@@ -1,0 +1,41 @@
+# Pivot AI 企业智能中枢 - 生产环境部署配置
+# 适用版本: v_0.0.2 (管理与监控增强版)
+
+version: '3.8'
+
+services:
+  pivot:
+    # 镜像名称，需与打包时的标签一致
+    image: pivot
+    container_name: pivot
+
+    # 端口映射: [宿主机端口]:[容器内端口]
+    ports:
+      - "3000:3000"
+
+    # 配置分离: 运行时自动读取同级目录下的 .env 文件
+    env_file:
+      - .env
+
+    # 数据持久化: 确保数据库和上传文件在容器重启或销毁后依然存在
+    volumes:
+      - ./data:/app/data # 数据库及自动备份目录
+      - ./uploads:/app/uploads # 用户上传的隔离资产目录
+
+    # 网络配置: 加入共用网络 ai-bridge
+    networks:
+      - ai-bridge
+
+    # 自启动策略
+    restart: always
+
+    # 日志管理: 防止日志文件无限增长占用磁盘空间
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ai-bridge:
+    external: true

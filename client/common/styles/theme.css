@@ -1,0 +1,94 @@
+/* 全局主题与组件规范 Global Theme & Components */
+
+:root {
+    /* 浅色主题变量 (默认) */
+    --primary: #10a37f;
+    --primary-hover: #0e8c6d;
+    --bg-main: #ffffff;
+    --bg-side: #f9f9f9;
+    --text-main: #374151;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --surface: #ffffff;
+    --danger: #ef4444;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+    
+    /* 尺寸与圆角规范 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    
+    /* 文件上传按钮占位 */
+    --form-file-input-basis: 200px;
+    --form-file-input-min: 150px;
+    --form-file-input-max: 300px;
+}
+
+/* 全局隐藏类 (符合规范第39条) */
+.hidden { display: none !important; }
+
+/* 暗黑主题自动适配 */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-main: #1a1a1b;
+        --bg-side: #202123;
+        --text-main: #ececf1;
+        --text-muted: #c5c5d2;
+        --border: #4d4d4f;
+        --surface: #2d2d2e;
+        --msg-user: #343541;
+        --msg-ai: #444654;
+    }
+}
+
+/* 全局基础样式 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Inter", "Microsoft YaHei", sans-serif; background: var(--bg-main); color: var(--text-main); }
+
+/* --- 规范化全局组件 --- */
+
+/* 按钮组件复用 */
+.btn-primary { 
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 8px 16px; border-radius: var(--radius-sm); border: none;
+    background: var(--primary); color: white; cursor: pointer; font-weight: 500; transition: 0.2s;
+}
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-secondary {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-main); cursor: pointer; transition: 0.2s;
+}
+.btn-secondary:hover { background: var(--bg-side); }
+
+.btn-danger {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--danger);
+    background: transparent; color: var(--danger); cursor: pointer; transition: 0.2s;
+}
+.btn-danger:hover { background: #fee2e2; }
+
+/* 输入框规范 */
+.form-input {
+    width: 100%; padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-main); outline: none; transition: 0.2s;
+}
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1); }
+
+/* 文件选择按钮规范 (符合第42条) */
+input[type="file"]::file-selector-button,
+input[type="file"]::-webkit-file-upload-button {
+    padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--bg-side); color: var(--text-main); cursor: pointer; transition: 0.2s;
+}
+input[type="file"]::file-selector-button:hover { background: var(--border); }
+
+/* Toast 容器 */
+#toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; }
+.toast { padding: 12px 24px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); border-left: 4px solid var(--primary); margin-bottom: 10px; animation: slideDown 0.3s; }
+@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

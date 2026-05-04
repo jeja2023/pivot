@@ -1,0 +1,16 @@
+node_modules/
+data/
+uploads/
+.git/
+.env
+.env.example
+scratch/
+.gemini/
+Dockerfile
+docker-compose.yml
+*.log
+*.md
+*.tar
+*.zip
+*.gz
+scripts/check_syntax.js
