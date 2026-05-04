@@ -56,7 +56,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         const testLabel = `${model_name || '未命名'}${id ? `#${id}` : ''}`;
-        console.log(`\n[模型测试:${testId}] [${testSource}] [${testLabel}] 正在验证地址: ${chatUrl}`);
+        console.log(`[模型测试:${testId}] [${testSource}] [${testLabel}] 正在验证地址: ${chatUrl}`);
         if (chatUrl.includes('localhost') || chatUrl.includes('127.0.0.1')) {
             console.log(`[模型测试:${testId}] [提示] 检测到 localhost，如果您是在 Docker 中运行，可能需要改为 host.docker.internal`);
         }
@@ -92,19 +92,42 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let params = [];
 
         if (req.user.role !== 'admin') {
-            where = "WHERE (user_id = ? OR (user_id IS NULL AND (COALESCE(allowed_units, '') = '' OR instr(',' || allowed_units || ',', ?) > 0)))";
+            where = "WHERE (m.user_id = ? OR (m.user_id IS NULL AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)))";
             params = [req.user.id, `,${(req.user.unit || '').trim()},`];
         }
 
         try {
-            const sql = `SELECT ${modelListFields} FROM models ${where} ORDER BY is_default DESC, id ASC LIMIT ? OFFSET ?`;
+            // 为管理员增加过滤：不显示普通用户的私有默认模型
+            let adminFilter = '';
+            if (req.user.role === 'admin') {
+                // 如果模型是私有的 (user_id IS NOT NULL)，且属于普通用户 (role != 'admin')，且是默认模型 (is_default = 1)，则过滤掉
+                // 注意：这里需要左连接 users 表来判断角色
+                where = "WHERE (m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)";
+            }
+
+            const sql = `
+                SELECT 
+                    m.id, m.user_id, m.name, m.url, m.model_name, m.is_default, 
+                    m.daily_token_limit, m.allowed_units, m.created_at,
+                    (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
+                    u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
+                FROM models m
+                LEFT JOIN users u ON m.user_id = u.id
+                ${where} 
+                ORDER BY m.is_default DESC, m.id ASC 
+                LIMIT ? OFFSET ?
+            `;
             const models = db.prepare(sql).all(...params, limit, offset);
-            const countSql = `SELECT COUNT(*) as count FROM models ${where}`;
+            const countSql = `
+                SELECT COUNT(*) as count 
+                FROM models m
+                LEFT JOIN users u ON m.user_id = u.id
+                ${where}
+            `;
             const total = db.prepare(countSql).get(...params).count;
             res.json({ data: models, total });
         } catch (e) {
             console.error(`[模型查询失败] 用户: ${req.user.username}, 角色: ${req.user.role}, 错误: ${e.message}`);
-            console.error(`[失败 SQL] SELECT ${modelListFields} FROM models ${where}`);
             res.status(500).json({ error: '获取模型列表失败: ' + e.message });
         }
     });
@@ -122,8 +145,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
         const allowedUnits = req.user.role === 'admin' ? normalizeTags(req.body.allowed_units) : '';
 
-        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits);
+        const { getBeijingTimestamp } = require('../time');
+        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp());
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
         res.json({ success: true });

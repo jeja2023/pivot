@@ -1,6 +1,6 @@
 # Pivot (智枢) —— 企业级 AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.4-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.5-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E4%BC%81%E4%B8%9A%E7%BA%A7-blue)
 
 **Pivot (智枢)** 是一款专为企业私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为企业提供一个安全、稳定且美观的 AI 交互门户。
@@ -57,4 +57,4 @@ docker-compose up -d
 - `uploads/`: 用户附件隔离存储
 
 ---
-**当前版本**: v0.0.2 (Management & Analytics Update)
+**当前版本**: v0.0.5 (Thought UI & Streaming Optimization Update)

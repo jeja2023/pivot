@@ -6,8 +6,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pivot AI | 智枢</title>
-    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.3">
-    <link rel="stylesheet" href="/chat/chat.css?v=0.0.3">
+    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.5">
+    <link rel="stylesheet" href="/chat/chat.css?v=0.0.5">
     <link rel="stylesheet" href="/common/vendor/github-dark.min.css">
     <!-- 引用本地第三方脚本 -->
     <script src="/common/vendor/marked.min.js"></script>
@@ -51,6 +51,21 @@
             <div style="display: flex; gap: 10px; margin-top: 20px;">
                 <button class="btn-secondary" style="flex: 1;" onclick="closeRenameModal()">取消</button>
                 <button class="btn-primary" style="flex: 1;" onclick="saveSessionTitle()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义标签编辑弹窗 -->
+    <div id="tags-container" class="modal-overlay hidden" style="z-index: 1100;">
+        <div class="modal" style="width: 340px;">
+            <h3>编辑会话标签</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 5px;">多个标签请使用英文逗号分隔</p>
+            <div class="form-group" style="margin-top: 15px;">
+                <input type="text" id="session-tags-input" class="form-input" placeholder="例如: 工作, 灵感, 重要">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn-secondary" style="flex: 1;" onclick="closeTagsModal()">取消</button>
+                <button class="btn-primary" style="flex: 1;" onclick="saveSessionTags()">保存</button>
             </div>
         </div>
     </div>
@@ -210,42 +225,44 @@
     <div id="app" class="hidden">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="app-brand">
-                    <img src="/common/logo.png" alt="Logo" class="brand-logo">
-                    <div class="brand-info">
-                        <span class="brand-text">智枢</span>
-                        <span class="brand-ver">v0.0.4</span>
+                <div class="header-top">
+                    <div class="app-brand-mini">
+                        <img src="/common/logo.png" alt="Logo" class="brand-logo-mini">
+                        <span class="brand-text-mini">智枢</span>
                     </div>
+                    <button id="new-chat-btn" class="new-chat-circle-btn" onclick="createNewSession()" title="发起新对话">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
                 </div>
                 
-                <button id="new-chat-btn" class="new-chat-btn" onclick="createNewSession()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    <span>发起新对话</span>
-                </button>
-
                 <div class="sidebar-ctrls">
                     <div class="search-wrapper">
-                        <input type="text" id="session-search-input" placeholder="搜索标题或 #标签..." class="search-input" oninput="handleSearch()">
-                        <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="session-search-input" placeholder="搜索..." class="search-input" oninput="handleSearch()">
+                        <svg class="search-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </div>
-                    
-                    <div class="tab-switcher">
-                        <button id="session-active-filter" class="tab-btn active" onclick="setArchiveFilter(false)">当前</button>
-                        <button id="session-archive-filter" class="tab-btn" onclick="setArchiveFilter(true)">归档</button>
+                    <div class="tab-switcher-mini">
+                        <button id="session-active-filter" class="tab-btn-mini active" onclick="setArchiveFilter(false)">当前</button>
+                        <button id="session-archive-filter" class="tab-btn-mini" onclick="setArchiveFilter(true)">归档</button>
                     </div>
                 </div>
             </div>
             <div id="session-list" class="session-list"></div>
             <div class="sidebar-footer">
-                <div class="user-row">
-                    <span id="user-info"></span>
-                    <span id="admin-tag" class="admin-badge hidden">管理员</span>
-                </div>
-                <div class="footer-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-                    <button id="admin-panel-btn" class="btn-secondary"
-                        style="flex: 1; padding: 8px 0; font-size: 0.85rem;">系统设置</button>
-                    <button id="logout-btn" class="btn-danger"
-                        style="flex: 1; padding: 8px 0; font-size: 0.85rem;">退出登录</button>
+                <div class="footer-row">
+                    <div class="footer-user" id="user-info-box">
+                        <span id="user-info" class="user-name-text"></span>
+                        <span id="admin-tag" class="admin-badge hidden">管理员</span>
+                    </div>
+                    <div class="footer-btns">
+                        <button id="admin-panel-btn" class="footer-mini-btn" title="系统设置">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <span>设置</span>
+                        </button>
+                        <button id="logout-btn" class="footer-mini-btn logout" title="退出登录">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                            <span>退出</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="copyright-text sidebar-copyright"></div>
             </div>
@@ -275,7 +292,7 @@
                     <!-- 附件预览区域 -->
                     <div id="attachment-preview" class="attachment-preview hidden"></div>
                     <input type="file" id="file-input" class="hidden" accept="image/*,.pdf,.txt,.md,.csv">
-                    <textarea id="user-input" class="form-input" placeholder="输入消息... (Shift+Enter 换行)"></textarea>
+                    <textarea id="user-input" class="form-input" placeholder="输入消息..."></textarea>
                     <div class="input-actions">
                         <button id="upload-btn" class="btn-icon" title="上传附件">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -285,8 +302,8 @@
                             </svg>
                         </button>
                         <button id="stop-btn" class="btn-danger hidden" title="停止生成">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                <rect x="6" y="6" width="12" height="12" rx="2" />
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="5" y="5" width="14" height="14" rx="2" />
                             </svg>
                         </button>
                         <button id="send-btn" class="btn-primary" title="发送 (Enter)">
@@ -313,21 +330,20 @@
                             style="width: 32px; height: 32px; vertical-align: middle; margin-right: 10px; border-radius: 6px;">
                         智枢 · 系统设置
                     </div>
-                    <button onclick="switchTab('ops')" id="tab-ops" class="admin-tab admin-only hidden">运营概览</button>
-                    <button onclick="switchTab('models')" id="tab-models"
-                        class="admin-tab admin-only hidden">模型配置</button>
+                    <button onclick="switchTab('ops')" id="tab-ops" class="admin-tab">数据概览</button>
+                    <button onclick="switchTab('models')" id="tab-models" class="admin-tab">模型配置</button>
                     <button onclick="switchTab('prompts')" id="tab-prompts" class="admin-tab">指令中心</button>
                     <button onclick="switchTab('attachments')" id="tab-attachments" class="admin-tab">附件库</button>
-                    <!-- 暂时屏蔽 RAG 入口，保留代码待未来使用 -->
+                    <button onclick="switchTab('labs')" id="tab-labs" class="admin-tab admin-only hidden">实验室功能</button>
                     <button onclick="switchTab('knowledge')" id="tab-knowledge" class="admin-tab hidden">知识管理
                         (RAG)</button>
                     <button onclick="switchTab('users')" id="tab-users"
                         class="admin-tab admin-only hidden">用户管理</button>
                     <button onclick="switchTab('logs')" id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
                     <button onclick="switchTab('stats')" id="tab-stats"
-                        class="admin-tab admin-only hidden">用量统计</button>
+                        class="admin-tab">用量统计</button>
                     <button onclick="switchTab('details')" id="tab-details"
-                        class="admin-tab admin-only hidden">用量明细</button>
+                        class="admin-tab">用量明细</button>
                     <div style="flex: 1;"></div>
 
                 </nav>
@@ -337,13 +353,34 @@
                     <section id="tab-content-ops" class="admin-tab-content hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>运营概览</h3>
+                            <h3 id="ops-title">数据概览</h3>
                             <button class="btn-secondary" onclick="loadOpsSummary()">刷新</button>
                         </div>
                         <div id="ops-summary-grid" class="ops-grid"></div>
                         <div class="stat-card" style="margin-top: 20px;">
                             <h4>近 30 天 Token 趋势</h4>
                             <canvas id="usage-trend-chart" height="180"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- 实验室功能 -->
+                    <section id="tab-content-labs" class="admin-tab-content hidden">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>实验室功能</h3>
+                            <button class="btn-secondary" onclick="loadSettings()">刷新</button>
+                        </div>
+                        <div class="settings-list">
+                            <div class="settings-row">
+                                <div>
+                                    <h4>RAG 知识库检索</h4>
+                                    <p>开启后管理员和用户可以上传知识库文档，后端会开放 /api/rag 接口。</p>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="setting-rag-enabled" onchange="saveSettings()">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </section>
 
@@ -393,15 +430,17 @@
                             <button class="btn-primary" onclick="openModelModal()">+ 添加模型</button>
                         </div>
                         <div class="table-container">
-                            <table class="data-table">
+                            <table class="data-table compact-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 180px;">名称</th>
+                                        <th style="width: 160px;">名称</th>
                                         <th style="width: auto;">URL</th>
-                                        <th style="width: 100px;">每日额度</th>
-                                        <th style="width: 120px;">可见部门</th>
-                                        <th style="width: 120px;" class="text-center">状态</th>
-                                        <th style="width: 150px;" class="text-center">操作</th>
+                                        <th style="width: 70px;">每日额度</th>
+                                        <th style="width: 70px;">可见部门</th>
+                                        <th style="width: 70px;">添加用户</th>
+                                        <th style="width: 70px;">状态</th>
+                                        <th style="width: 155px;">添加时间</th>
+                                        <th style="width: 185px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="model-list-body"></tbody>
@@ -446,22 +485,25 @@
                                 <input type="file" id="user-import-input" class="hidden" accept=".csv"
                                     onchange="importUsers()">
                                 <button class="btn-primary" onclick="openUserModal()">添加用户</button>
+                                <button class="btn-secondary" onclick="downloadUserTemplate()">下载模板</button>
                                 <button class="btn-secondary"
                                     onclick="document.getElementById('user-import-input').click()">导入用户</button>
                                 <button class="btn-secondary" onclick="exportUsers()">导出用户</button>
                             </div>
                         </div>
                         <div class="table-container">
-                            <table class="data-table">
+                            <table class="data-table compact-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 70px;">ID</th>
-                                        <th style="width: 120px;">用户名</th>
+                                        <th style="width: 50px;">ID</th>
+                                        <th style="width: 110px;">用户名</th>
                                         <th style="width: 120px;">显示名</th>
-                                        <th style="width: 140px;">单位</th>
-                                        <th style="width: 90px;">角色</th>
-                                        <th style="width: 80px;">状态</th>
-                                        <th style="width: 210px;" class="text-center">操作</th>
+                                        <th style="width: auto;">单位</th>
+                                        <th style="width: 80px;">角色</th>
+                                        <th style="width: 70px;">状态</th>
+                                        <th style="width: 160px;">注册时间</th>
+                                        <th style="width: 160px;">最后登录</th>
+                                        <th style="width: 160px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="user-list-body"></tbody>
@@ -499,7 +541,7 @@
                     <div id="tab-content-stats" class="admin-tab-content hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>用量汇总统计</h3>
+                            <h3 id="stats-title">用量统计</h3>
                             <button class="btn-secondary" onclick="exportStats()">导出汇总</button>
                         </div>
                         <div class="table-container">
@@ -523,7 +565,7 @@
                     <div id="tab-content-details" class="admin-tab-content hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>用量明细流水</h3>
+                            <h3 id="details-title">用量明细流水</h3>
                             <button class="btn-secondary" onclick="exportDetails()">导出明细</button>
                         </div>
                         <div class="table-container">
@@ -557,12 +599,12 @@
     <!-- 页面逻辑 -->
 
     <!-- 模块化加载业务逻辑 -->
-    <script src="/chat/config.js?v=0.0.3"></script>
-    <script src="/chat/ui.js?v=0.0.3"></script>
-    <script src="/chat/auth.js?v=0.0.3"></script>
-    <script src="/chat/rag.js?v=0.0.3"></script>
-    <script src="/chat/admin.js?v=0.0.3"></script>
-    <script src="/chat/app.js?v=0.0.3"></script>
+    <script src="/chat/config.js?v=0.0.5"></script>
+    <script src="/chat/ui.js?v=0.0.5"></script>
+    <script src="/chat/auth.js?v=0.0.5"></script>
+    <script src="/chat/rag.js?v=0.0.5"></script>
+    <script src="/chat/admin.js?v=0.0.5"></script>
+    <script src="/chat/app.js?v=0.0.5"></script>
 
 </body>
 

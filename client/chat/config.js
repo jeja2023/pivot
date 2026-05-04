@@ -2,9 +2,10 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢 Pivot';
-const APP_VERSION = 'v0.0.3';
+const APP_VERSION = 'v0.0.4';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME}. 保留所有权利。`;
-let token = null;
+let token = localStorage.getItem('pivot_token');
+if (token === 'null') token = null;
 let currentUser = null;
 let currentSessionId = null;
 
@@ -23,7 +24,7 @@ async function checkLogin() {
             currentUser = data.user;
             showApp();
         } else {
-            localStorage.removeItem('lite_chat_token');
+            localStorage.removeItem('pivot_token');
             token = null;
             showAuth();
         }

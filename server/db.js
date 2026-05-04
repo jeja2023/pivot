@@ -33,6 +33,14 @@ db.exec(`
         updated_at DATETIME
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME,
+        updated_by INTEGER,
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -41,6 +49,7 @@ db.exec(`
         unit TEXT,
         role TEXT DEFAULT 'user',
         status TEXT DEFAULT 'active',
+        last_login_at DATETIME,
         created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
     );
 
@@ -76,6 +85,7 @@ db.exec(`
         is_default INTEGER DEFAULT 0,
         daily_token_limit INTEGER DEFAULT 0,
         allowed_units TEXT DEFAULT '',
+        created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
         FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
@@ -144,7 +154,9 @@ const ensureColumn = (table, column, definition) => {
 
 ensureColumn('users', 'nickname', 'TEXT');
 ensureColumn('users', 'unit', 'TEXT');
+ensureColumn('users', 'default_model_id', 'INTEGER');
 ensureColumn('users', 'status', "TEXT DEFAULT 'active'");
+ensureColumn('users', 'last_login_at', 'DATETIME');
 ensureColumn('audit_logs', 'ip_address', 'TEXT');
 ensureColumn('messages', 'model_id', 'INTEGER');
 ensureColumn('messages', 'cost_time', 'REAL');
@@ -152,6 +164,8 @@ ensureColumn('messages', 'tokens_per_sec', 'REAL');
 ensureColumn('attachments', 'access_token', 'TEXT');
 ensureColumn('models', 'daily_token_limit', 'INTEGER DEFAULT 0');
 ensureColumn('models', 'allowed_units', "TEXT DEFAULT ''");
+ensureColumn('models', 'created_at', "DATETIME");
+db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
 ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');
 ensureColumn('sessions', 'system_prompt', 'TEXT');
 ensureColumn('sessions', 'is_archived', 'INTEGER DEFAULT 0');
@@ -221,6 +235,16 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
 `);
+
+const ensureSetting = (key, value) => {
+    db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO NOTHING
+    `).run(key, String(value), getBeijingTimestamp());
+};
+
+ensureSetting('rag_enabled', process.env.ENABLE_RAG === 'true' ? 'true' : 'false');
 
 // --- 历史时间迁移：旧版本表默认 CURRENT_TIMESTAMP，实际存储 UTC，需要补正为东八区 ---
 const timeMigrationKey = 'utc_timestamp_migrated_to_beijing_v1';

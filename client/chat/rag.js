@@ -27,7 +27,7 @@ const escapeRagHtml = (str) => {
 window.loadKnowledgeDocs = async () => {
     try {
         const res = await fetch(`${API_BASE}/rag/docs`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: authHeaders()
         });
         const docs = await res.json();
         
@@ -62,7 +62,7 @@ window.uploadKnowledgeDoc = async () => {
     try {
         const res = await fetch(`${API_BASE}/rag/upload`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
+            headers: authHeaders(),
             body: formData
         });
         const data = await res.json();
@@ -81,7 +81,7 @@ window.deleteKnowledgeDoc = async (id) => {
     try {
         const res = await fetch(`${API_BASE}/rag/docs/${id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: authHeaders()
         });
         if (res.ok) {
             showToast('文档已移除');

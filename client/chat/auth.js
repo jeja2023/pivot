@@ -54,9 +54,9 @@ document.getElementById('auth-submit').onclick = async () => {
         if (data.error) throw new Error(data.error);
         
         if (isLogin) {
-            token = null;
+            token = data.token;
             currentUser = data.user;
-            localStorage.removeItem('lite_chat_token');
+            localStorage.setItem('pivot_token', token);
             showApp();
         } else {
             showToast('注册成功，请登录');
@@ -70,7 +70,7 @@ document.getElementById('logout-btn').onclick = () => {
         method: 'POST',
         headers: authHeaders()
     }).catch(() => {});
-    localStorage.removeItem('lite_chat_token');
+    localStorage.removeItem('pivot_token');
     token = null;
     location.reload();
 };

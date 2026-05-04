@@ -79,6 +79,9 @@ function login(username, password) {
         { expiresIn: '7d' }
     );
     
+    // 更新最后登录时间
+    db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(getBeijingTimestamp(), user.id);
+    
     return { token, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' } };
 }
 
@@ -94,7 +97,7 @@ function authMiddleware(req, res, next) {
     
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = db.prepare('SELECT id, username, nickname, unit, role, status FROM users WHERE id = ?').get(decoded.id);
+        const user = db.prepare('SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ?').get(decoded.id);
         if (!user || user.status === 'disabled') {
             return res.status(401).json({ error: '账号不存在或已被禁用' });
         }

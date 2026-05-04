@@ -1,11 +1,11 @@
 {
   "name": "pivot",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "智枢 (Pivot AI) - 企业级 AI 智能中枢管理系统",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "nodemon server/index.js",
+    "dev": "nodemon --ignore client server/index.js",
     "lint": "eslint . --ext .js",
     "check": "node scripts/check_syntax.js",
     "test": "npm run check",

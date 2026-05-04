@@ -6,9 +6,11 @@ let searchTimeout = null;
 
 // 全局 401 处理
 function handleUnauthorized() {
-    localStorage.removeItem('token');
+    localStorage.removeItem('pivot_token');
     localStorage.removeItem('user');
-    window.location.reload();
+    token = null;
+    currentUser = null;
+    showAuth();
 }
 
 // 搜索防抖处理
@@ -75,7 +77,7 @@ window.loadSessions = async function(append = false) {
     sidebarState.isLoading = true;
     try {
         const res = await fetch(`${API_BASE}/sessions?page=${sidebarState.page}&limit=${sidebarState.limit}&keyword=${encodeURIComponent(keyword)}&tag=${encodeURIComponent(tag)}&archived=${sidebarState.archived}`, { 
-            headers: { 'Authorization': `Bearer ${token}` } 
+            headers: authHeaders() 
         });
         
         if (res.status === 401) return handleUnauthorized();
@@ -87,14 +89,15 @@ window.loadSessions = async function(append = false) {
         const list = document.getElementById('session-list');
         if (!append) {
             list.innerHTML = '';
-            // 首次加载或重置时添加滚动监听 (仅一次)
-            if (!list.onscroll) {
-                list.onscroll = () => {
-                    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 50) {
-                        window.loadSessions(true);
-                    }
-                };
-            }
+        }
+        if (!list.dataset.boundLoadMore) {
+            list.dataset.boundLoadMore = '1';
+            list.addEventListener('scroll', () => {
+                if (sidebarState.isLoading || !sidebarState.hasMore) return;
+                if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) {
+                    window.loadSessions(true);
+                }
+            }, { passive: true });
         }
         
         sessions.forEach(s => {
@@ -102,18 +105,20 @@ window.loadSessions = async function(append = false) {
             const safeTitleStr = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const safeHTMLTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             const safeTags = String(s.tags || '').split(',').filter(Boolean).map(tag => `<em>${tag.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</em>`).join('');
+            const pinnedIcon = s.is_pinned ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 4.5V11l2 2v2h-5v6l-1 1-1-1v-6H6v-2l2-2V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5z"/></svg>' : '';
+            const safeTagsStr = String(s.tags || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const badgeText = s.is_archived ? '已归档' : (s.is_pinned ? '置顶' : '');
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
             div.innerHTML = `
                 <div class="session-main">
-                    <span class="session-title-text" title="${safeHTMLTitle}">
-                        ${s.is_pinned ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px; color: var(--primary);"><path d="M16 4.5V11l2 2v2h-5v6l-1 1-1-1v-6H6v-2l2-2V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5z"/></svg>' : ''}
-                        ${safeHTMLTitle}
-                    </span>
-                    ${safeTags ? `<div class="session-tags">${safeTags}</div>` : ''}
+                    <span class="session-title-text" title="${safeHTMLTitle}">${pinnedIcon}${safeTags ? `<span class="session-tags-inline">${safeTags}</span>` : ''}<span class="session-title-content">${safeHTMLTitle}</span></span>
+                    <div class="session-meta">
+                        ${badgeText ? `<span class="session-badge">${badgeText}</span>` : ''}
+                    </div>
                 </div>
                 <div class="session-more">
-                    <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0})">
+                    <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0}, '${safeTagsStr}')">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
                     </button>
                 </div>
@@ -131,7 +136,7 @@ window.loadSessions = async function(append = false) {
     }
 }
 
-window.toggleSessionMenu = (e, id, title, isPinned, isArchived) => {
+window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     e.stopPropagation();
     const old = document.querySelector('.session-dropdown');
     if (old) old.remove();
@@ -147,7 +152,7 @@ window.toggleSessionMenu = (e, id, title, isPinned, isArchived) => {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             重命名
         </div>
-        <div class="menu-item" onclick="editSessionTags('${id}')">
+        <div class="menu-item" onclick="editSessionTags('${id}', '${tags || ''}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
             编辑标签
         </div>
@@ -183,7 +188,7 @@ window.setArchiveFilter = (archived) => {
 window.toggleArchiveSession = async (id, currentArchived) => {
     const res = await fetch(`${API_BASE}/sessions/${id}/archive`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ isArchived: !currentArchived })
     });
     if (res.ok) {
@@ -197,25 +202,41 @@ window.toggleArchiveSession = async (id, currentArchived) => {
     }
 };
 
-window.editSessionTags = async (id) => {
-    const tags = prompt('请输入标签，多个标签用英文逗号分隔');
-    if (tags === null) return;
-    const res = await fetch(`${API_BASE}/sessions/${id}/tags`, {
+let editingTagsId = null;
+
+window.editSessionTags = (id, currentTags) => {
+    editingTagsId = id;
+    document.getElementById('session-tags-input').value = currentTags || '';
+    document.getElementById('tags-container').classList.remove('hidden');
+    document.getElementById('session-tags-input').focus();
+};
+
+window.closeTagsModal = () => {
+    document.getElementById('tags-container').classList.add('hidden');
+    editingTagsId = null;
+};
+
+window.saveSessionTags = async () => {
+    const tags = document.getElementById('session-tags-input').value;
+    if (editingTagsId === null) return;
+    
+    const res = await fetch(`${API_BASE}/sessions/${editingTagsId}/tags`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tags })
     });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '标签保存失败', 'error');
     showToast('标签已保存');
     await window.loadSessions();
+    closeTagsModal();
 };
 
 window.togglePinSession = async (id, currentPinned) => {
     try {
         const res = await fetch(`${API_BASE}/sessions/${id}/pin`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ isPinned: !currentPinned })
         });
         if (res.ok) {
@@ -245,7 +266,7 @@ window.saveSessionTitle = async () => {
     
     const res = await fetch(API_BASE + `/sessions/${renamingSessionId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title: newTitle })
     });
     
@@ -279,7 +300,7 @@ window.deleteSession = (id) => {
     showConfirm('删除会话', '确定要删除整个会话吗？此操作不可撤销。', async () => {
         const res = await fetch(API_BASE + `/sessions/${id}`, { 
             method: 'DELETE', 
-            headers: { 'Authorization': `Bearer ${token}` } 
+            headers: authHeaders() 
         });
         if (res.ok) {
             if (currentSessionId === id) {
@@ -301,7 +322,7 @@ document.getElementById('new-chat-btn').onclick = async () => {
 async function createSession(title) {
     const res = await fetch(API_BASE + '/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title })
     });
     const session = await res.json();
@@ -315,7 +336,7 @@ async function createSession(title) {
 async function selectSession(id, title) {
     currentSessionId = id;
     document.getElementById('current-title').innerText = title;
-    const res = await fetch(API_BASE + `/sessions/${id}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const res = await fetch(API_BASE + `/sessions/${id}`, { headers: authHeaders() });
     const messages = await res.json();
     document.getElementById('message-container').innerHTML = '';
     messages
@@ -461,7 +482,84 @@ function renderMarkdown(content) {
 
 function getThoughtOpenStates(root) {
     if (!root) return [];
-    return Array.from(root.querySelectorAll('.thought-block')).map(block => block.open);
+    return Array.from(root.querySelectorAll('.thought-block')).map(block => block.classList.contains('is-open'));
+}
+
+function getThoughtScrollStates(root) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('.thought-content-inner')).map(wrapper => ({
+        top: wrapper.scrollTop,
+        nearBottom: wrapper.scrollHeight - wrapper.scrollTop - wrapper.clientHeight < 24
+    }));
+}
+
+function restoreThoughtScrollStates(root, states = []) {
+    if (!root || !states.length) return;
+    const wrappers = Array.from(root.querySelectorAll('.thought-content-inner'));
+    wrappers.forEach((wrapper, index) => {
+        const state = states[index];
+        if (!state) return;
+        wrapper.scrollTop = state.nearBottom ? wrapper.scrollHeight : state.top;
+    });
+}
+
+function bindThoughtStateTracking(root) {
+    if (!root || root.dataset.thoughtTrackingBound === '1') return;
+    root.dataset.thoughtTrackingBound = '1';
+    root._thoughtOpenStates = [];
+    root._thoughtScrollStates = [];
+    
+    root.addEventListener('click', (event) => {
+        const summary = event.target.closest('.thought-summary');
+        if (!summary) return;
+        const block = summary.closest('.thought-block');
+        if (!block) return;
+        
+        const blocks = Array.from(root.querySelectorAll('.thought-block'));
+        const index = blocks.indexOf(block);
+        if (index >= 0) {
+            const willBeOpen = !block.classList.contains('is-open');
+            block.classList.toggle('is-open', willBeOpen);
+            root._thoughtOpenStates[index] = willBeOpen;
+            root._thoughtScrollStates = getThoughtScrollStates(root);
+        }
+    }, true);
+
+    root.addEventListener('scroll', (event) => {
+        if (!event.target.closest?.('.thought-content-inner')) return;
+        root._thoughtScrollStates = getThoughtScrollStates(root);
+    }, true);
+}
+
+function getRememberedThoughtOpenStates(root) {
+    const domStates = getThoughtOpenStates(root);
+    const rememberedStates = root?._thoughtOpenStates || [];
+    return domStates.map((state, index) => rememberedStates[index] ?? state);
+}
+
+function rememberThoughtStateBeforeRender(root) {
+    if (!root) return { openStates: [], scrollStates: [] };
+    const openStates = getRememberedThoughtOpenStates(root);
+    const scrollStates = getThoughtScrollStates(root);
+    root._thoughtOpenStates = openStates;
+    root._thoughtScrollStates = scrollStates;
+    return { openStates, scrollStates };
+}
+
+function restoreThoughtStateAfterRender(root, state) {
+    if (!root || !state) return;
+    root._thoughtOpenStates = state.openStates || [];
+    root._thoughtScrollStates = state.scrollStates || [];
+    restoreThoughtScrollStates(root, root._thoughtScrollStates);
+}
+
+function scrollMessageContainerIfNearBottom() {
+    const container = document.getElementById('message-container');
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 120) {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 function renderAiMessage(content, isStreaming = false, thoughtOpenStates = []) {
@@ -475,7 +573,7 @@ function renderAiMessage(content, isStreaming = false, thoughtOpenStates = []) {
         const id = `THOUGHT_BLOCK_PLACEHOLDER_${counter++}_`;
         blocks.push({
             id,
-            html: `<details class="thought-block"${thoughtOpenStates[counter - 1] ? ' open' : ''}><summary>模型思维过程 (点击展开)</summary><div class="thought-content">${renderMarkdown(p1)}</div></details>`
+            html: `<div class="thought-block${thoughtOpenStates[counter - 1] ? ' is-open' : ''}"><div class="thought-summary">模型思考内容</div><div class="thought-content-wrapper"><div class="thought-content-inner"><div class="thought-content">${renderMarkdown(p1)}</div></div></div></div>`
         });
         return `\n\n${id}\n\n`;
     });
@@ -486,7 +584,7 @@ function renderAiMessage(content, isStreaming = false, thoughtOpenStates = []) {
             const id = `THOUGHT_BLOCK_PLACEHOLDER_${counter++}_`;
             blocks.push({
                 id,
-                html: `<details class="thought-block"${thoughtOpenStates[counter - 1] ? ' open' : ''}><summary>模型正在思考中... (点击展开/收起)</summary><div class="thought-content">${renderMarkdown(p1)}</div></details>`
+                html: `<div class="thought-block thinking${thoughtOpenStates[counter - 1] ? ' is-open' : ''}"><div class="thought-summary">模型正在思考</div><div class="thought-content-wrapper"><div class="thought-content-inner"><div class="thought-content">${renderMarkdown(p1)}</div></div></div></div>`
             });
             return `\n\n${id}\n\n`;
         });
@@ -560,6 +658,12 @@ function appendMessage(role, content, id = null, stats = null) {
         </div>
     `;
     container.appendChild(div);
+    
+    if (role === 'assistant') {
+        const textBody = div.querySelector('.text-body');
+        if (textBody) bindThoughtStateTracking(textBody);
+    }
+    
     container.scrollTop = container.scrollHeight;
     return div.querySelector('.message-content');
 }
@@ -591,6 +695,7 @@ document.addEventListener('click', async (e) => {
         await navigator.clipboard.writeText(code.textContent);
         const label = btn.querySelector('span');
         const oldText = label ? label.innerText : btn.innerText;
+        btn.disabled = true;
         if (label) label.innerText = '已复制';
         else btn.innerText = '已复制';
         btn.classList.add('copied');
@@ -598,6 +703,7 @@ document.addEventListener('click', async (e) => {
             if (label) label.innerText = oldText;
             else btn.innerText = oldText;
             btn.classList.remove('copied');
+            btn.disabled = false;
         }, 1200);
     } catch (err) {
         showToast('复制失败', 'error');
@@ -608,7 +714,7 @@ window.deleteMsg = (id, btn) => {
     showConfirm('删除消息', '确定要删除这条消息吗？', async () => {
         const res = await fetch(`${API_BASE}/messages/${id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: authHeaders()
         });
         if (res.ok) {
             btn.closest('.message').remove();
@@ -618,6 +724,12 @@ window.deleteMsg = (id, btn) => {
 };
 
 const userInput = document.getElementById('user-input');
+function resizeUserInput() {
+    userInput.style.height = 'auto';
+    userInput.style.height = `${Math.min(userInput.scrollHeight, 180)}px`;
+}
+userInput.addEventListener('input', resizeUserInput);
+resizeUserInput();
 userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 document.getElementById('send-btn').onclick = sendMessage;
 
@@ -630,6 +742,34 @@ document.getElementById('stop-btn').onclick = () => {
 
 const fileInput = document.getElementById('file-input');
 document.getElementById('upload-btn').onclick = () => fileInput.click();
+
+window.saveMyDefaultModel = async (modelId = null) => {
+    const modelSelector = document.getElementById('model-selector');
+    const saveBtn = document.getElementById('save-default-model-btn');
+    const targetModelId = modelId || modelSelector?.value || null;
+    if (!targetModelId) return;
+
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/settings/default-model`, {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ default_model_id: targetModelId })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '保存默认模型失败');
+        if (modelSelector && [...modelSelector.options].some(opt => String(opt.value) === String(targetModelId))) {
+            modelSelector.value = targetModelId;
+        }
+        showToast('已设为默认模型');
+        return data;
+    } catch (e) {
+        showToast(e.message || '保存默认模型失败', 'error');
+        throw e;
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+    }
+};
 
 fileInput.onchange = async () => {
     if (!fileInput.files.length) return;
@@ -651,7 +791,7 @@ fileInput.onchange = async () => {
         showToast('正在上传...', 'info');
         const res = await fetch(`${API_BASE}/upload?sessionId=${currentSessionId || ''}`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
+            headers: authHeaders(),
             body: formData
         });
         const data = await res.json();
@@ -696,6 +836,7 @@ async function sendMessage() {
 
     // 清空输入和预览
     userInput.value = '';
+    resizeUserInput();
     pendingAttachments = [];
     renderAttachmentPreviews();
 
@@ -731,11 +872,10 @@ async function sendMessage() {
     try {
         const response = await fetch(API_BASE + '/chat', {
             method: 'POST',
-            headers: {
+            headers: authHeaders({
                 'Content-Type': 'application/json',
-                'Accept': 'text/event-stream',
-                'Authorization': `Bearer ${token}`
-            },
+                'Accept': 'text/event-stream'
+            }),
             body: JSON.stringify({ 
                 sessionId: currentSessionId, 
                 content,
@@ -752,6 +892,18 @@ async function sendMessage() {
             throw new Error(`服务器拒绝了请求 (${response.status}): ${errText.slice(0, 50)}`);
         }
 
+        const responseType = response.headers.get('content-type') || '';
+        if (responseType.includes('application/json')) {
+            const data = await response.json();
+            fullAiContent = data.content || data.error || '';
+            const textBody = aiMsgEl.querySelector('.text-body');
+            if (textBody) {
+                textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            }
+            await selectSession(currentSessionId, document.getElementById('current-title').innerText);
+            return;
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
@@ -759,6 +911,7 @@ async function sendMessage() {
 
         // 查找正文容器，用于后续流式更新
         const textBody = aiMsgEl.querySelector('.text-body');
+        bindThoughtStateTracking(textBody);
         textBody.innerHTML = ''; 
 
         const statsEl = document.createElement('div');
@@ -803,8 +956,27 @@ async function sendMessage() {
                             const otherChars = fullAiContent.length - chineseChars;
                             tokenCount = Math.ceil(chineseChars * 2 + otherChars * 0.5);
                             
-                            const thoughtOpenStates = getThoughtOpenStates(textBody);
-                            textBody.innerHTML = renderAiMessage(fullAiContent, true, thoughtOpenStates);
+                            // 流式思考阶段增量更新策略：
+                            // 当内容只有一个未闭合的思考块时，直接更新 .thought-content 避免全量重渲染
+                            const hasOpenThought = fullAiContent.includes('<thought>') && !fullAiContent.includes('</thought>');
+                            const hasClosedThought = fullAiContent.includes('</thought>');
+                            const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
+                            
+                            if (hasOpenThought && !hasClosedThought && existingThoughtContent) {
+                                // 纯思考阶段增量更新：只替换思考内容文本，不触碰外层 DOM
+                                const thoughtText = fullAiContent.replace(/^<thought>/, '');
+                                existingThoughtContent.innerHTML = renderMarkdown(thoughtText);
+                                // 如果思考块处于展开状态，自动滚动到底部
+                                const innerWrapper = existingThoughtContent.closest('.thought-content-inner');
+                                if (innerWrapper && innerWrapper.closest('.thought-block')?.classList.contains('is-open')) {
+                                    innerWrapper.scrollTop = innerWrapper.scrollHeight;
+                                }
+                            } else {
+                                // 结构变化（思考结束/正文开始/新思考块出现）：全量重渲染
+                                const thoughtState = rememberThoughtStateBeforeRender(textBody);
+                                textBody.innerHTML = renderAiMessage(fullAiContent, true, thoughtState.openStates);
+                                restoreThoughtStateAfterRender(textBody, thoughtState);
+                            }
                             
                             // 更新实时指标标签
                             const elapsed = (Date.now() - startTime) / 1000;
@@ -827,7 +999,7 @@ async function sendMessage() {
                     } catch (e) {}
                 }
             }
-            document.getElementById('message-container').scrollTop = document.getElementById('message-container').scrollHeight;
+            scrollMessageContainerIfNearBottom();
         }
 
         // 回答完成，发送最终统计数据给后端（用于持久化存入数据库）
@@ -836,7 +1008,7 @@ async function sendMessage() {
         
         await fetch(API_BASE + '/chat/stats', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ 
                 sessionId: currentSessionId,
                 costTime: finalElapsed,
@@ -850,7 +1022,8 @@ async function sendMessage() {
         if (e.name === 'AbortError') {
             fullAiContent += '\n\n[已由用户中断生成]';
             const textBody = aiMsgEl.querySelector('.text-body') || aiMsgEl;
-            textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            const finalStates = getRememberedThoughtOpenStates(textBody);
+            textBody.innerHTML = renderAiMessage(fullAiContent, false, finalStates);
         } else {
             aiMsgEl.innerHTML = `
                 <div class="error-wrapper">

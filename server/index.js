@@ -36,6 +36,8 @@ const { createPromptsRouter } = require('./routes/prompts');
 const { createSessionsRouter } = require('./routes/sessions');
 const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
+const { createSettingsRouter, isSettingEnabled } = require('./routes/settings');
+const { ragRouter, retrieveContext } = require('./rag');
 const {
     migrateModelSecrets
 } = require('./services/models');
@@ -128,9 +130,6 @@ app.get('/api/health', (req, res) => {
     }
 });
 
-// 知识库 RAG 模块路由（按需启用）
-// app.use('/api/rag', ragRouter);
-
 // --- 模型接口 ---
 app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }));
 
@@ -187,7 +186,7 @@ const adminMiddleware = (req, res, next) => {
     next();
 };
 
-app.use('/api', createAdminStatsRouter({
+app.use('/api/stats', createAdminStatsRouter({
     authMiddleware,
     adminMiddleware,
     logAction,
@@ -201,6 +200,19 @@ app.use('/api', createAdminUsersRouter({
     upload,
     logAction
 }));
+
+app.use('/api', createSettingsRouter({
+    authMiddleware,
+    adminMiddleware,
+    logAction
+}));
+
+app.use('/api/rag', (req, res, next) => {
+    if (!isSettingEnabled('rag_enabled')) {
+        return res.status(403).json({ error: 'RAG 知识库功能未开启' });
+    }
+    next();
+}, ragRouter);
 
 // --- 对话接口 ---
 app.use('/api', createSessionsRouter({
@@ -218,7 +230,9 @@ app.use('/api', createPromptsRouter({
 app.use('/api', createChatRouter({
     authMiddleware,
     chatLimiter: app.locals.chatLimiter,
-    logAction
+    logAction,
+    retrieveContext,
+    isRagEnabled: () => isSettingEnabled('rag_enabled')
 }));
 
 // --- 全局错误处理中间件 ---

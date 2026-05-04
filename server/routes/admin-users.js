@@ -23,7 +23,7 @@ function createAdminUsersRouter({
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
-        const users = db.prepare('SELECT id, username, nickname, unit, role, status, created_at FROM users ORDER BY id ASC LIMIT ? OFFSET ?').all(limit, offset);
+        const users = db.prepare('SELECT id, username, nickname, unit, role, status, created_at, last_login_at FROM users ORDER BY id ASC LIMIT ? OFFSET ?').all(limit, offset);
         const total = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
         res.json({ data: users, total });
     });
@@ -106,16 +106,31 @@ function createAdminUsersRouter({
             const cleanLine = line.trim();
             if (!cleanLine) return;
             const parts = parseCsvLine(cleanLine);
+            // 智能识别模板格式
+            // 格式 A: id, username, nickname, unit, role, status (导出格式)
+            // 格式 B: username, password, nickname, unit, role (导入模板格式)
+            let username, password, nickname, unit, role, status;
+            
             const hasIdColumn = /^\d+$/.test(parts[0] || '');
-            const username = hasIdColumn ? parts[1] : parts[0];
-            const nickname = hasIdColumn ? parts[2] : parts[1];
-            const unit = hasIdColumn ? parts[3] : parts[2];
-            const role = hasIdColumn ? parts[4] : parts[3];
-            const status = hasIdColumn ? parts[5] : parts[4];
-            if (username) {
+            if (hasIdColumn) {
+                username = parts[1];
+                nickname = parts[2];
+                unit = parts[3];
+                role = parts[4];
+                status = parts[5];
+            } else {
+                username = parts[0];
+                password = parts[1];
+                nickname = parts[2];
+                unit = parts[3];
+                role = parts[4];
+            }
+            
+            if (username && username !== 'username' && username !== '用户名') {
                 try {
+                    const userHash = password ? bcrypt.hashSync(String(password), 10) : hash;
                     db.prepare('INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                      .run(username, nickname || username, unit || '', role === 'admin' ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', hash, getBeijingTimestamp());
+                      .run(username, nickname || username, unit || '', role === 'admin' ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp());
                     count++;
                 } catch (e) {
                     skipped++;

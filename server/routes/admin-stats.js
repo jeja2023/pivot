@@ -13,8 +13,9 @@ function createAdminStatsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/admin/stats/usage', authMiddleware, adminMiddleware, (req, res) => {
-        const stats = db.prepare(`
+    router.get('/usage', authMiddleware, (req, res) => {
+        const isAdmin = req.user.role === 'admin';
+        const query = `
             SELECT u.username, u.nickname, m.name as model_name,
                    COUNT(msg.id) as msg_count,
                    SUM(msg.token_count) as total_tokens,
@@ -22,68 +23,94 @@ function createAdminStatsRouter({
             FROM messages msg
             JOIN users u ON msg.user_id = u.id
             LEFT JOIN models m ON msg.model_id = m.id
+            ${isAdmin ? '' : 'WHERE msg.user_id = ?'}
             GROUP BY u.id, msg.model_id
             ORDER BY last_active DESC
-        `).all();
+        `;
+        const stats = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(stats);
     });
 
-    router.get('/admin/stats/trend', authMiddleware, adminMiddleware, (req, res) => {
-        const trend = db.prepare(`
+    router.get('/trend', authMiddleware, (req, res) => {
+        const isAdmin = req.user.role === 'admin';
+        const query = `
             SELECT date(created_at) as day, SUM(token_count) as tokens
             FROM messages
             WHERE created_at >= date('now', '+8 hours', '-30 days')
+            ${isAdmin ? '' : 'AND user_id = ?'}
             GROUP BY day
             ORDER BY day
-        `).all();
+        `;
+        const trend = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(trend);
     });
 
-    router.get('/admin/ops/summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const uploadDir = path.resolve(__dirname, '../../uploads');
-        const dataDir = path.resolve(__dirname, '../../data');
-        const summary = {
-            users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
-            activeUsers: db.prepare("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled'").get().count,
-            sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
-            messages: db.prepare('SELECT COUNT(*) AS count FROM messages').get().count,
-            attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,
-            models: db.prepare('SELECT COUNT(*) AS count FROM models').get().count,
-            tokens: db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages').get().total,
-            uploadsSize: await getCachedDirSize(uploadDir),
-            dataSize: await getCachedDirSize(dataDir),
-            auditToday: db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')").get().count
-        };
-        res.json(summary);
+    router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
+        const isAdmin = req.user.role === 'admin';
+        if (isAdmin) {
+            const uploadDir = path.resolve(__dirname, '../../uploads');
+            const dataDir = path.resolve(__dirname, '../../data');
+            const summary = {
+                users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
+                activeUsers: db.prepare("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled'").get().count,
+                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
+                messages: db.prepare('SELECT COUNT(*) AS count FROM messages').get().count,
+                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,
+                models: db.prepare('SELECT COUNT(*) AS count FROM models').get().count,
+                tokens: db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages').get().total,
+                uploadsSize: await getCachedDirSize(uploadDir),
+                dataSize: await getCachedDirSize(dataDir),
+                auditToday: db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')").get().count,
+                isPersonal: false
+            };
+            res.json(summary);
+        } else {
+            const summary = {
+                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(req.user.id).count,
+                messages: db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ?').get(req.user.id).count,
+                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ?').get(req.user.id).count,
+                models: db.prepare("SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?").get(req.user.id).count,
+                tokens: db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages WHERE user_id = ?').get(req.user.id).total,
+                isPersonal: true
+            };
+            res.json(summary);
+        }
     }));
 
-    router.get('/admin/stats/details', authMiddleware, adminMiddleware, (req, res) => {
+    router.get('/details', authMiddleware, (req, res) => {
+        const isAdmin = req.user.role === 'admin';
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 20;
         const offset = (page - 1) * limit;
 
-        const details = db.prepare(`
+        const query = `
             SELECT m.id, m.created_at, u.username, u.nickname, md.name as model_name,
                    m.role, m.token_count
             FROM messages m
             JOIN users u ON m.user_id = u.id
             LEFT JOIN models md ON m.model_id = md.id
+            ${isAdmin ? '' : 'WHERE m.user_id = ?'}
             ORDER BY m.created_at DESC
             LIMIT ? OFFSET ?
-        `).all(limit, offset);
+        `;
+        const details = isAdmin ? db.prepare(query).all(limit, offset) : db.prepare(query).all(req.user.id, limit, offset);
 
-        const total = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;
+        const countQuery = `SELECT COUNT(*) as count FROM messages ${isAdmin ? '' : 'WHERE user_id = ?'}`;
+        const total = isAdmin ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
         res.json({ data: details, total });
     });
 
-    router.get('/admin/stats/details/export', authMiddleware, adminMiddleware, (req, res) => {
-        const details = db.prepare(`
+    router.get('/details/export', authMiddleware, (req, res) => {
+        const isAdmin = req.user.role === 'admin';
+        const query = `
             SELECT m.created_at, u.username, u.nickname, md.name as model_name, m.role, m.token_count
             FROM messages m
             JOIN users u ON m.user_id = u.id
             LEFT JOIN models md ON m.model_id = md.id
+            ${isAdmin ? '' : 'WHERE m.user_id = ?'}
             ORDER BY m.created_at DESC
-        `).all();
+        `;
+        const details = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,消耗Token\n';
         details.forEach(d => {
             csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', d.role === 'user' ? '提问' : '回答', d.token_count].map(escapeCsvCell).join(',') + '\n';
@@ -93,6 +120,7 @@ function createAdminStatsRouter({
         res.setHeader('Content-Disposition', 'attachment; filename=usage_details.csv');
         res.send(csv);
     });
+
 
     return router;
 }

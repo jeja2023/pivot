@@ -3,6 +3,10 @@ const axios = require('axios');
 const express = require('express');
 const { StringDecoder } = require('string_decoder');
 const db = require('../db');
+const {
+    detectUnsupportedCapability,
+    buildCapabilityFallbackMessage
+} = require('../capabilities');
 const { estimateTokens, getContext } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const {
@@ -45,7 +49,9 @@ async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
 function createChatRouter({
     authMiddleware,
     chatLimiter,
-    logAction
+    logAction,
+    retrieveContext,
+    isRagEnabled
 }) {
     const router = express.Router();
 
@@ -97,11 +103,36 @@ function createChatRouter({
 
         logAction(req, '发送消息', `发送消息到会话: ${sessionId}`);
 
+        const unsupportedCapability = detectUnsupportedCapability(modelContent);
+        if (unsupportedCapability) {
+            const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
+            const assistantTokens = estimateTokens(assistantContent);
+            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
+
+            const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId).count;
+            if (msgCount <= 2) {
+                generateTitle(sessionId, visibleContent, assistantContent, modelCfg);
+            }
+
+            logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
+            return res.json({
+                unsupportedCapability: unsupportedCapability.code,
+                content: assistantContent
+            });
+        }
+
         let history = await getContext(sessionId, userId, modelCfg);
         if (modelContent && modelContent !== visibleContent) {
             const lastUserIndex = history.map(msg => msg.role).lastIndexOf('user');
             if (lastUserIndex >= 0) {
                 history[lastUserIndex] = { ...history[lastUserIndex], content: modelContent };
+            }
+        }
+        if (typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
+            const ragContext = await retrieveContext(userId, modelContent);
+            if (ragContext) {
+                history.push({ role: 'system', content: ragContext });
             }
         }
 
