@@ -95,13 +95,15 @@ window.loadApiKeys = async function() {
         const data = await res.json();
         const body = document.getElementById('api-keys-body');
         if (data.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
             return;
         }
-        body.innerHTML = data.map(k => `
+        body.innerHTML = data.map((k, index) => `
             <tr>
+                <td class="text-center">${index + 1}</td>
                 <td>${escapeHtml(k.name)}</td>
-                <td style="font-family: monospace; font-size: 0.85rem;">${k.key}</td>
+                <td style="font-family: monospace; font-size: 0.85rem;">${k.key.length > 12 ? k.key.slice(0, 3) + '...' + k.key.slice(-4) : k.key}</td>
+                <td style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${(k.usage_tokens || 0).toLocaleString()} <small style="font-weight: 400; color: var(--text-muted);">Tokens</small></td>
                 <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
                 <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
                 <td class="text-center">

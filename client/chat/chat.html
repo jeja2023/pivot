@@ -6,8 +6,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pivot AI | 智枢</title>
-    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.6">
-    <link rel="stylesheet" href="/chat/chat.css?v=0.0.6">
+    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.8">
+    <link rel="stylesheet" href="/chat/chat.css?v=0.0.8">
     <link rel="stylesheet" href="/common/vendor/github-dark.min.css">
     <!-- 引用本地第三方脚本 -->
     <script src="/common/vendor/marked.min.js"></script>
@@ -135,6 +135,16 @@
                     <div class="form-item">
                         <label>Max Tokens (最大长度)</label>
                         <input type="number" id="m-max-tokens" class="form-input" min="1" step="1024" placeholder="留空使用默认">
+                    </div>
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>端点并发上限</label>
+                        <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1" placeholder="0 使用系统默认">
+                    </div>
+                    <div class="form-item">
+                        <label>远端健康检查 URL</label>
+                        <input type="text" id="m-monitor-url" class="form-input" placeholder="例如: http://10.0.0.8:8000/health">
                     </div>
                 </div>
                 <div class="form-item">
@@ -314,10 +324,10 @@
                 <div class="input-wrapper">
                     <!-- 附件预览区域 -->
                     <div id="attachment-preview" class="attachment-preview hidden"></div>
-                    <input type="file" id="file-input" class="hidden" accept="image/*,.pdf,.txt,.md,.csv">
+                    <input type="file" id="file-input" class="hidden" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx">
                     <textarea id="user-input" class="form-input" placeholder="输入消息..."></textarea>
                     <div class="input-actions">
-                        <button id="upload-btn" class="btn-icon" title="上传附件">
+                        <button id="upload-btn" class="btn-icon" title="上传附件（图片每次仅支持解析 1 张）">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path
@@ -384,6 +394,10 @@
                             <button id="ops-refresh-btn" class="btn-secondary">刷新</button>
                         </div>
                         <div id="ops-summary-grid" class="ops-grid"></div>
+                        <div class="stat-card">
+                            <h4>模型端点状态</h4>
+                            <div id="monitor-endpoint-list" class="monitor-list"></div>
+                        </div>
                         <div class="stat-card" style="margin-top: 20px;">
                             <h4>近 30 天 Token 趋势</h4>
                             <canvas id="usage-trend-chart" height="180"></canvas>
@@ -392,22 +406,35 @@
 
                     <!-- 实验室功能 -->
                     <section id="tab-content-labs" class="admin-tab-content hidden">
-                        <div
-                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>实验室功能</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <div>
+                                <h3 style="margin: 0;">实验室功能</h3>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">抢先体验研发中的实验性特性，功能可能不够稳定。</p>
+                            </div>
                             <button id="labs-refresh-btn" class="btn-secondary">刷新</button>
                         </div>
-                        <div class="settings-list">
-                            <div class="settings-row">
-                                <div>
-                                    <h4>RAG 知识库检索</h4>
-                                    <p>开启后管理员和用户可以上传知识库文档，后端会开放 /api/rag 接口。</p>
+                        <div class="lab-grid">
+                            <div class="lab-card">
+                                <span class="lab-tag">Experimental</span>
+                                <div class="lab-card-header">
+                                    <div class="lab-card-icon">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                        </svg>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="setting-rag-enabled">
+                                        <span class="switch-slider"></span>
+                                    </label>
                                 </div>
-                                <label class="switch">
-                                    <input type="checkbox" id="setting-rag-enabled">
-                                    <span class="switch-slider"></span>
-                                </label>
+                                <div class="lab-card-body">
+                                    <h4>RAG 知识库检索</h4>
+                                    <p>开启后管理员和用户可以上传知识库文档，后端会自动进行分片与向量化处理，实现基于私有文档的 AI 问答能力。</p>
+                                </div>
                             </div>
+                            
+                            <!-- 可以在此添加更多实验功能卡片 -->
                         </div>
                     </section>
 
@@ -435,12 +462,13 @@
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: auto;">文件名</th>
-                                        <th style="width: 170px;">会话</th>
-                                        <th style="width: 120px;">类型</th>
-                                        <th style="width: 90px;">大小</th>
-                                        <th style="width: 190px;">时间</th>
-                                        <th style="width: 120px;" class="text-center">操作</th>
+                                        <th style="width: 60px;" class="text-center">序号</th>
+                                        <th style="width: 320px;">文件名</th>
+                                        <th style="width: 170px;">关联会话</th>
+                                        <th style="width: 130px;">文件类型</th>
+                                        <th style="width: 110px;">大小</th>
+                                        <th style="width: 190px;">上传时间</th>
+                                        <th style="width: 115px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="attachment-list-body"></tbody>
@@ -460,14 +488,15 @@
                             <table class="data-table compact-table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 60px;" class="text-center">序号</th>
                                         <th style="width: 160px;">名称</th>
-                                        <th style="width: auto;">URL</th>
+                                        <th style="width: 250px;">后端 URL</th>
                                         <th style="width: 70px;">每日额度</th>
-                                        <th style="width: 70px;">可见部门</th>
-                                        <th style="width: 70px;">添加用户</th>
+                                        <th style="width: 80px;">可见部门</th>
+                                        <th style="width: 80px;">添加用户</th>
                                         <th style="width: 70px;">状态</th>
                                         <th style="width: 155px;">添加时间</th>
-                                        <th style="width: 185px;" class="text-center">操作</th>
+                                        <th style="width: 215px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="model-list-body"></tbody>
@@ -595,11 +624,13 @@
                                 <table class="data-table compact-table">
                                     <thead>
                                         <tr>
-                                            <th style="width: 90px;">方法</th>
-                                            <th>接口</th>
-                                            <th style="width: 90px;">状态</th>
-                                            <th style="width: 120px;">请求数</th>
-                                            <th style="width: 140px;">平均延迟</th>
+                                            <th style="width: 60px;" class="text-center">序号</th>
+                                            <th style="width: 130px;">接口名称</th>
+                                            <th style="width: 70px;">方法</th>
+                                            <th>路由地址</th>
+                                            <th style="width: 70px;">状态</th>
+                                            <th style="width: 100px;">请求数</th>
+                                            <th style="width: 120px;">平均延迟</th>
                                         </tr>
                                     </thead>
                                     <tbody id="monitor-routes-body"></tbody>
@@ -613,10 +644,10 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3>可视化审计报表</h3>
                             <div style="display: flex; gap: 10px;">
-                                <select id="report-unit" class="form-input" style="width: 150px; padding: 6px 12px; height: 36px;">
+                                <select id="report-unit" class="form-input" style="width: 180px; padding: 6px 12px; height: 36px;">
                                     <option value="">所有部门</option>
                                 </select>
-                                <input type="text" id="report-username" class="form-input" placeholder="搜索用户" style="width: 120px; padding: 6px 12px; height: 36px;">
+                                <input type="text" id="report-username" class="form-input" placeholder="搜索用户" style="width: 140px; padding: 6px 12px; height: 36px;">
                                 <select id="report-days" class="form-input" style="width: 120px; padding: 6px 12px; height: 36px;">
                                     <option value="7">近 7 天</option>
                                     <option value="30" selected>近 30 天</option>
@@ -653,11 +684,12 @@
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 150px;">用户</th>
-                                        <th style="width: 150px;">显示名</th>
-                                        <th style="width: 150px;">模型</th>
+                                        <th style="width: 60px;" class="text-center">序号</th>
+                                        <th style="width: 140px;">用户</th>
+                                        <th style="width: 140px;">显示名</th>
+                                        <th style="width: 160px;">模型</th>
                                         <th style="width: 80px;" class="text-center">消息数</th>
-                                        <th style="width: 120px;" class="text-center">总 Token</th>
+                                        <th style="width: 110px;" class="text-center">总 Token</th>
                                         <th style="width: auto;">最后活动</th>
                                     </tr>
                                 </thead>
@@ -690,12 +722,12 @@
                         </div>
                         <div id="pagination-details" class="pagination"></div>
                     </div>
+
                     <section id="tab-content-account" class="admin-tab-content hidden">
                         <div style="margin-bottom: 20px; text-align: left;">
                             <h3>账户安全</h3>
                         </div>
                         <div class="settings-list" style="display: flex; flex-direction: column; gap: 20px; align-items: center;">
-                            <!-- 修改密码卡片 -->
                             <div class="stat-card" style="width: 100%; max-width: 500px; padding: 25px;">
                                 <h4 style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -741,15 +773,17 @@
                                     <table class="data-table compact-table">
                                         <thead>
                                             <tr>
+                                                <th style="width: 60px;" class="text-center">序号</th>
                                                 <th>名称</th>
-                                                <th>密钥 (脱敏)</th>
+                                                <th style="width: 200px;">密钥 (脱敏)</th>
+                                                <th style="width: 130px;">已用额度</th>
                                                 <th style="width: 160px;">创建时间</th>
                                                 <th style="width: 160px;">最后使用</th>
                                                 <th style="width: 80px;" class="text-center">操作</th>
                                             </tr>
                                         </thead>
                                         <tbody id="api-keys-body">
-                                            <tr><td colspan="5" class="text-center" style="padding: 30px; color: var(--text-muted);">正在加载...</td></tr>
+                                            <tr><td colspan="6" class="text-center" style="padding: 30px; color: var(--text-muted);">正在加载...</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -803,21 +837,21 @@
     </div>
 
     <!-- 模块化加载业务逻辑 -->
-    <script src="/chat/config.js?v=0.0.6"></script>
-    <script src="/chat/ui.js?v=0.0.6"></script>
-    <script src="/chat/auth.js?v=0.0.6"></script>
-    <script src="/chat/rag.js?v=0.0.6"></script>
+    <script src="/chat/config.js?v=0.0.8"></script>
+    <script src="/chat/ui.js?v=0.0.8"></script>
+    <script src="/chat/auth.js?v=0.0.8"></script>
+    <script src="/chat/rag.js?v=0.0.8"></script>
     <!-- 管理员面板模块化脚本 -->
-    <script src="/chat/admin.js?v=0.0.6"></script>
-    <script src="/chat/users.js?v=0.0.6"></script>
-    <script src="/chat/models.js?v=0.0.6"></script>
-    <script src="/chat/stats.js?v=0.0.6"></script>
-    <script src="/chat/extra.js?v=0.0.6"></script>
+    <script src="/chat/admin.js?v=0.0.8"></script>
+    <script src="/chat/users.js?v=0.0.8"></script>
+    <script src="/chat/models.js?v=0.0.8"></script>
+    <script src="/chat/stats.js?v=0.0.8"></script>
+    <script src="/chat/extra.js?v=0.0.8"></script>
     <!-- 主程序模块化脚本 -->
-    <script src="/chat/render.js?v=0.0.6"></script>
-    <script src="/chat/engine.js?v=0.0.6"></script>
-    <script src="/chat/sidebar.js?v=0.0.6"></script>
-    <script src="/chat/app.js?v=0.0.6"></script>
+    <script src="/chat/render.js?v=0.0.8"></script>
+    <script src="/chat/engine.js?v=0.0.8"></script>
+    <script src="/chat/sidebar.js?v=0.0.8"></script>
+    <script src="/chat/app.js?v=0.0.8"></script>
 
 </body>
 

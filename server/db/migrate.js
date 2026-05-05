@@ -38,11 +38,24 @@ function runMigrations() {
     ensureColumn('messages', 'cost_time', 'REAL');
     ensureColumn('messages', 'tokens_per_sec', 'REAL');
     ensureColumn('attachments', 'access_token', 'TEXT');
+    const attachmentsMissingToken = db.prepare("SELECT id FROM attachments WHERE access_token IS NULL OR access_token = ''").all();
+    if (attachmentsMissingToken.length > 0) {
+        const updateAttachmentToken = db.prepare('UPDATE attachments SET access_token = ? WHERE id = ?');
+        const backfillAttachmentTokens = db.transaction(() => {
+            attachmentsMissingToken.forEach(row => {
+                updateAttachmentToken.run(crypto.randomBytes(24).toString('base64url'), row.id);
+            });
+        });
+        backfillAttachmentTokens();
+        logger.info({ count: attachmentsMissingToken.length }, '数据库升级：已为历史附件补充访问令牌');
+    }
     ensureColumn('models', 'daily_token_limit', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'allowed_units', "TEXT DEFAULT ''");
     ensureColumn('models', 'status', "TEXT DEFAULT 'active'");
     ensureColumn('models', 'temperature', 'REAL');
     ensureColumn('models', 'max_tokens', 'INTEGER');
+    ensureColumn('models', 'monitor_url', 'TEXT');
+    ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');
@@ -77,6 +90,7 @@ function runMigrations() {
     ensureColumn('api_keys', 'key_preview', 'TEXT');
     ensureColumn('api_keys', 'key', 'TEXT');
     ensureColumn('api_keys', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('api_keys', 'usage_tokens', "INTEGER DEFAULT 0");
     ensureColumn('api_keys', 'last_used_at', 'DATETIME');
     ensureColumn('api_keys', 'created_at', 'DATETIME');
 

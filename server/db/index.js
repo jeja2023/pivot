@@ -24,8 +24,8 @@ const stmts = {
     getMessages: db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC'),
     updateSessionTitle: db.prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     // 模型
-    getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, user_id, status, created_at FROM models ORDER BY id DESC'),
-    getAccessibleModels: db.prepare("SELECT id, name, url, model_name, daily_token_limit, allowed_units, user_id, status FROM models WHERE status = 'active' AND (user_id IS NULL OR user_id = ?) ORDER BY id DESC"),
+    getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, user_id, status, created_at FROM models ORDER BY id DESC'),
+    getAccessibleModels: db.prepare("SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, user_id, status FROM models WHERE status = 'active' AND (user_id IS NULL OR user_id = ?) ORDER BY id DESC"),
     getUserPasswordHash: db.prepare('SELECT password_hash FROM users WHERE id = ?'),
     // 刷新令牌
     insertRefreshToken: db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'),

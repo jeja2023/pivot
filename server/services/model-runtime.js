@@ -1,0 +1,235 @@
+const axios = require('axios');
+const { db } = require('../db');
+const { logger } = require('../logger');
+const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
+
+const parsePositiveInt = (value, fallback) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 2);
+const MAX_QUEUE_SIZE = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_SIZE, 20);
+const QUEUE_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_TIMEOUT_MS, 60000);
+const FAILURE_THRESHOLD = parsePositiveInt(process.env.MODEL_ENDPOINT_FAILURE_THRESHOLD, 3);
+const CIRCUIT_OPEN_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_CIRCUIT_OPEN_MS, 60000);
+const MONITOR_INTERVAL_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_INTERVAL_MS, 30000);
+const MONITOR_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_TIMEOUT_MS, 5000);
+
+const runtimes = new Map();
+let monitorStarted = false;
+
+function normalizeEndpointKey(modelCfg) {
+    try {
+        const parsed = new URL(String(modelCfg?.url || '').trim());
+        return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+    } catch (e) {
+        return `model:${modelCfg?.id || 'unknown'}`;
+    }
+}
+
+function normalizeMaxConcurrent(modelCfg) {
+    return parsePositiveInt(modelCfg?.max_concurrent, DEFAULT_MAX_CONCURRENT);
+}
+
+function ensureRuntime(modelCfg) {
+    const key = normalizeEndpointKey(modelCfg);
+    const maxConcurrent = normalizeMaxConcurrent(modelCfg);
+    let runtime = runtimes.get(key);
+    if (!runtime) {
+        runtime = {
+            key,
+            name: modelCfg?.name || key,
+            host: '',
+            models: new Map(),
+            semaphore: new ConcurrencySemaphore({
+                maxConcurrent,
+                maxQueueSize: MAX_QUEUE_SIZE,
+                queueTimeoutMs: QUEUE_TIMEOUT_MS
+            }),
+            configuredMaxConcurrent: maxConcurrent,
+            consecutiveFailures: 0,
+            circuitOpenUntil: 0,
+            lastError: '',
+            lastLatencyMs: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            requestCount: 0,
+            errorCount: 0,
+            monitor: {
+                configured: false,
+                url: '',
+                status: 'unknown',
+                updatedAt: null,
+                latencyMs: null,
+                error: '',
+                payload: null
+            }
+        };
+        try {
+            runtime.host = new URL(String(modelCfg?.url || '').trim()).host;
+        } catch (e) {
+            runtime.host = key;
+        }
+        runtimes.set(key, runtime);
+    }
+
+    runtime.name = modelCfg?.name || runtime.name;
+    runtime.configuredMaxConcurrent = maxConcurrent;
+    runtime.semaphore.updateMaxConcurrent(maxConcurrent);
+    runtime.models.set(String(modelCfg?.id || runtime.models.size), {
+        id: modelCfg?.id,
+        name: modelCfg?.name || '',
+        monitor_url: modelCfg?.monitor_url || '',
+        max_concurrent: modelCfg?.max_concurrent || 0
+    });
+    return runtime;
+}
+
+async function acquireModelSlot(modelCfg) {
+    const runtime = ensureRuntime(modelCfg);
+    const now = Date.now();
+    if (runtime.circuitOpenUntil > now) {
+        const retrySeconds = Math.ceil((runtime.circuitOpenUntil - now) / 1000);
+        throw new ConcurrencyLimitError(
+            `模型端点暂时熔断，约 ${retrySeconds} 秒后可重试。${runtime.lastError || ''}`.trim(),
+            'AI_ENDPOINT_CIRCUIT_OPEN'
+        );
+    }
+
+    await runtime.semaphore.acquire();
+    runtime.requestCount += 1;
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        runtime.semaphore.release();
+    };
+}
+
+function recordModelSuccess(modelCfg, latencyMs) {
+    const runtime = ensureRuntime(modelCfg);
+    runtime.consecutiveFailures = 0;
+    runtime.circuitOpenUntil = 0;
+    runtime.lastError = '';
+    runtime.lastLatencyMs = Number.isFinite(latencyMs) ? latencyMs : runtime.lastLatencyMs;
+    runtime.lastSuccessAt = new Date().toISOString();
+}
+
+function recordModelFailure(modelCfg, err) {
+    const runtime = ensureRuntime(modelCfg);
+    runtime.consecutiveFailures += 1;
+    runtime.errorCount += 1;
+    runtime.lastError = err?.response?.data?.error?.message || err?.message || String(err || 'unknown error');
+    runtime.lastFailureAt = new Date().toISOString();
+    if (runtime.consecutiveFailures >= FAILURE_THRESHOLD) {
+        runtime.circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+        runtime.semaphore.rejectQueuedRequests(
+            `模型端点连续失败，已熔断 ${Math.round(CIRCUIT_OPEN_MS / 1000)} 秒`,
+            'AI_ENDPOINT_CIRCUIT_OPEN'
+        );
+        logger.warn({
+            endpoint: runtime.key,
+            failures: runtime.consecutiveFailures,
+            error: runtime.lastError
+        }, '模型端点已触发熔断保护');
+    }
+}
+
+function compactPayload(data) {
+    if (!data || typeof data !== 'object') return null;
+    const payload = {};
+    ['status', 'state', 'healthy', 'message', 'gpu', 'gpus', 'memory', 'vram', 'queue', 'concurrency'].forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(data, key)) payload[key] = data[key];
+    });
+    return Object.keys(payload).length ? payload : null;
+}
+
+async function refreshEndpointMonitor(runtime) {
+    const model = Array.from(runtime.models.values()).find(item => item.monitor_url);
+    runtime.monitor.configured = Boolean(model?.monitor_url);
+    runtime.monitor.url = model?.monitor_url || '';
+    if (!runtime.monitor.url) return runtime.monitor;
+
+    const start = Date.now();
+    try {
+        const response = await axios.get(runtime.monitor.url, {
+            timeout: MONITOR_TIMEOUT_MS,
+            proxy: false,
+            validateStatus: status => status < 500
+        });
+        runtime.monitor.updatedAt = new Date().toISOString();
+        runtime.monitor.latencyMs = Date.now() - start;
+        runtime.monitor.error = '';
+        runtime.monitor.payload = compactPayload(response.data);
+        const rawStatus = response.data?.status || response.data?.state;
+        const healthy = response.data?.healthy;
+        runtime.monitor.status = response.status >= 400
+            ? 'degraded'
+            : (healthy === false ? 'degraded' : (rawStatus ? String(rawStatus) : 'ok'));
+    } catch (e) {
+        runtime.monitor.updatedAt = new Date().toISOString();
+        runtime.monitor.latencyMs = Date.now() - start;
+        runtime.monitor.status = 'unreachable';
+        runtime.monitor.error = e.message || 'monitor request failed';
+        runtime.monitor.payload = null;
+    }
+    return runtime.monitor;
+}
+
+async function refreshAllEndpointMonitors() {
+    const models = db.prepare(`
+        SELECT id, name, url, monitor_url, max_concurrent
+        FROM models
+        WHERE COALESCE(status, 'active') = 'active'
+    `).all();
+    models.forEach(ensureRuntime);
+    const jobs = Array.from(runtimes.values()).map(refreshEndpointMonitor);
+    await Promise.allSettled(jobs);
+}
+
+async function startModelEndpointMonitor() {
+    if (monitorStarted) return;
+    monitorStarted = true;
+    logger.info({ intervalMs: MONITOR_INTERVAL_MS }, '模型端点运行时监控已启动');
+    await refreshAllEndpointMonitors();
+    setInterval(() => {
+        refreshAllEndpointMonitors().catch(err => {
+            logger.warn({ err: err.message }, '模型端点监控刷新失败');
+        });
+    }, MONITOR_INTERVAL_MS).unref();
+}
+
+function getModelEndpointRuntimeStatus() {
+    return Array.from(runtimes.values()).map(runtime => {
+        const status = runtime.semaphore.getStatus();
+        const circuitOpenMs = Math.max(0, runtime.circuitOpenUntil - Date.now());
+        return {
+            key: runtime.key,
+            host: runtime.host,
+            name: runtime.name,
+            models: Array.from(runtime.models.values()),
+            concurrency: status,
+            configuredMaxConcurrent: runtime.configuredMaxConcurrent,
+            consecutiveFailures: runtime.consecutiveFailures,
+            circuitOpenMs,
+            lastError: runtime.lastError,
+            lastLatencyMs: runtime.lastLatencyMs,
+            lastSuccessAt: runtime.lastSuccessAt,
+            lastFailureAt: runtime.lastFailureAt,
+            requestCount: runtime.requestCount,
+            errorCount: runtime.errorCount,
+            monitor: { ...runtime.monitor }
+        };
+    });
+}
+
+module.exports = {
+    acquireModelSlot,
+    recordModelSuccess,
+    recordModelFailure,
+    refreshAllEndpointMonitors,
+    startModelEndpointMonitor,
+    getModelEndpointRuntimeStatus,
+    normalizeEndpointKey
+};

@@ -13,6 +13,29 @@ const normalizeTags = (value) => String(value || '')
     .slice(0, 8)
     .join(',');
 
+function appendAttachmentTokens(messages, userId, sessionId) {
+    const rows = db.prepare(`
+        SELECT file_path, access_token
+        FROM attachments
+        WHERE user_id = ? AND session_id = ? AND access_token IS NOT NULL AND access_token != ''
+    `).all(userId, sessionId);
+    if (rows.length === 0) return messages;
+
+    const tokenByUrl = new Map(rows.map(row => [
+        '/' + String(row.file_path || '').replace(/\\/g, '/'),
+        row.access_token
+    ]));
+
+    return messages.map(message => {
+        let content = String(message.content || '');
+        for (const [url, token] of tokenByUrl.entries()) {
+            const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            content = content.replace(new RegExp(`${escapedUrl}(?![\\w/?=&%.-])`, 'g'), `${url}?token=${token}`);
+        }
+        return { ...message, content };
+    });
+}
+
 function createSessionsRouter({
     authMiddleware,
     normalizePage,
@@ -84,7 +107,7 @@ function createSessionsRouter({
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const session = stmts.getSessionById.get(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+        const messages = appendAttachmentTokens(stmts.getMessages.all(req.params.id, req.user.id), req.user.id, req.params.id);
         res.json({ session, messages });
     }));
 

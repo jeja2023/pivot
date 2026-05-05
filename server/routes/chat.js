@@ -3,6 +3,8 @@ const axios = require('axios');
 const http = require('http');
 const https = require('https');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { asyncHandler } = require('../http');
 const { StringDecoder } = require('string_decoder');
 const { db } = require('../db');
@@ -18,15 +20,97 @@ const {
 } = require('../services/models');
 const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
+const {
+    acquireModelSlot,
+    recordModelSuccess,
+    recordModelFailure
+} = require('../services/model-runtime');
+const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('../image-safety');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
 
+function getRequestOrigin(req, publicUrl = '') {
+    if (publicUrl) return publicUrl;
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    return host ? `${proto}://${host}` : '';
+}
+
+function getImageDataUrl(uploadUrl) {
+    const cleanUrl = String(uploadUrl || '').split('?')[0];
+    const decodedUrl = decodeURIComponent(cleanUrl);
+    if (!decodedUrl.startsWith('/uploads/')) return null;
+
+    const uploadRoot = path.resolve(__dirname, '../../uploads');
+    const relativePath = decodedUrl.replace(/^\/uploads\//, '');
+    const target = path.resolve(uploadRoot, relativePath);
+    if (!target.startsWith(uploadRoot + path.sep) || !fs.existsSync(target)) return null;
+
+    return imageFileToDataUrl(target);
+}
+
+function buildVisionHistory(history, origin) {
+    if (!origin) return history;
+    const imageMarkdown = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
+    return history.map(message => {
+        if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.includes('/uploads/')) {
+            return message;
+        }
+
+        const imageParts = [];
+        const text = message.content.replace(imageMarkdown, (match, alt, url) => {
+            if (imageParts.length >= MAX_IMAGES_PER_MESSAGE) {
+                return alt ? `[图片已跳过: ${alt}]` : '[图片已跳过]';
+            }
+            const imageUrl = getImageDataUrl(url) || new URL(url, origin).toString();
+            imageParts.push({
+                type: 'image_url',
+                image_url: {
+                    url: imageUrl
+                }
+            });
+            return alt ? `[图片: ${alt}]` : '[图片]';
+        }).trim();
+
+        if (imageParts.length === 0) return message;
+        return {
+            ...message,
+            content: [
+                { type: 'text', text: text || '请分析这张图片。' },
+                ...imageParts
+            ]
+        };
+    });
+}
+
+function limitVisionImages(history) {
+    let usedImages = 0;
+    return history.map(message => {
+        if (!Array.isArray(message.content)) return message;
+        const content = [];
+        for (const part of message.content) {
+            if (part?.type === 'image_url') {
+                if (usedImages >= MAX_IMAGES_PER_MESSAGE) {
+                    content.push({ type: 'text', text: '[图片已跳过：当前模型一次只支持解析 1 张图片]' });
+                    continue;
+                }
+                usedImages += 1;
+            }
+            content.push(part);
+        }
+        return { ...message, content };
+    });
+}
+
 async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
     try {
         logger.info({ sessionId }, '正在生成会话标题');
-        const baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
-        const targetUrl = baseUrl + (baseUrl.includes('/v1') ? '' : '/v1') + '/chat/completions';
+        let baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+        if (!baseUrl.includes('/v1') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
+            baseUrl += '/v1';
+        }
+        const targetUrl = baseUrl + '/chat/completions';
 
         const response = await axios({
             method: 'post',
@@ -42,7 +126,7 @@ async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
                 ],
                 max_tokens: 20
             },
-            timeout: 30000,
+            timeout: 60000,
             proxy: false
         });
 
@@ -59,7 +143,8 @@ function createChatRouter({
     chatLimiter,
     logAction,
     retrieveContext,
-    isRagEnabled
+    isRagEnabled,
+    publicUrl = ''
 }) {
     const router = express.Router();
 
@@ -81,10 +166,14 @@ function createChatRouter({
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
-        const { sessionId, content, displayContent, modelId, regenerate } = req.body;
+        const { content, displayContent, regenerate } = req.body;
+        const sessionId = String(req.body.sessionId || '').trim();
+        const modelId = req.body.modelId ? parseInt(req.body.modelId) : null;
         const userId = req.user.id;
         const modelContent = String(content || '').trim();
         const visibleContent = String(displayContent || modelContent).trim();
+
+        req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
         const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
         if (!session) return res.status(403).json({ error: '无权访问或会话不存在' });
@@ -102,9 +191,15 @@ function createChatRouter({
         }
 
         if (!regenerate) {
-            const userTokens = estimateTokens(modelContent);
-            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(sessionId, userId, 'user', visibleContent, userTokens, modelCfg.id, getBeijingTimestamp());
+            try {
+                const userTokens = estimateTokens(modelContent);
+                const info = db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                  .run(sessionId, userId, 'user', modelContent, userTokens, modelCfg.id, getBeijingTimestamp());
+                req.log.info({ sessionId, changes: info.changes }, '已插入用户消息');
+            } catch (dbErr) {
+                req.log.error({ sessionId, err: dbErr.message }, '用户消息入库失败');
+                return res.status(500).json({ error: '消息保存失败，请稍后重试' });
+            }
         }
 
         db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(getBeijingTimestamp(), sessionId);
@@ -143,24 +238,57 @@ function createChatRouter({
             });
         }
         let semaphoreReleased = false;
+        let endpointRelease = null;
+        const requestStartedAt = Date.now();
+        try {
+            endpointRelease = await acquireModelSlot(modelCfg);
+        } catch (e) {
+            aiSemaphore.release();
+            const message = e.message || '模型端点当前繁忙，请稍后重试。';
+            logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
+            return res.status(e.statusCode || 503).json({
+                error: message,
+                code: e.code || 'AI_ENDPOINT_OVERLOADED',
+                retryable: true
+            });
+        }
         const releaseSemaphore = () => {
             if (!semaphoreReleased) {
+                if (endpointRelease) endpointRelease();
                 aiSemaphore.release();
                 semaphoreReleased = true;
             }
         };
 
         let history = await getContext(sessionId, userId, modelCfg);
-        if (modelContent && modelContent !== visibleContent) {
-            const lastUserIndex = history.map(msg => msg.role).lastIndexOf('user');
-            if (lastUserIndex >= 0) {
-                history[lastUserIndex] = { ...history[lastUserIndex], content: modelContent };
-            }
-        }
         if (typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
             const ragContext = await retrieveContext(userId, modelContent);
             if (ragContext) {
                 history.push({ role: 'system', content: ragContext });
+            }
+        }
+        let visionHistory = limitVisionImages(buildVisionHistory(history, getRequestOrigin(req, publicUrl)));
+        
+        if (visionHistory.length === 0) {
+            req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
+            // 如果历史为空，至少把当前消息塞进去（如果是刚发送的消息）
+            if (modelContent) {
+                req.log.info({ sessionId }, '执行补救措施：将丢失的用户消息存入数据库并加入当前上下文');
+                // 补救的消息需要存入数据库
+                const userTokens = estimateTokens(modelContent);
+                try {
+                    db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                      .run(sessionId, userId, 'user', modelContent, userTokens, modelId, getBeijingTimestamp());
+                } catch (dbErr) {
+                    req.log.error({ err: dbErr.message }, '补救消息入库失败');
+                }
+
+                // 补救的消息也需要经过 buildVisionHistory 处理以支持多模态
+                const rescuedHistory = limitVisionImages(buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl)));
+                visionHistory.push(...rescuedHistory);
+            } else {
+                releaseSemaphore();
+                return res.status(400).json({ error: '对话内容不能为空' });
             }
         }
 
@@ -218,9 +346,36 @@ function createChatRouter({
 
         try {
             let response;
-            const responsesHistory = history.map(msg => {
-                if (msg.role === 'system') return { role: 'user', content: `[系统设定]: ${msg.content}` };
-                return msg;
+
+            // 将 Chat Completions 格式转换为 Responses API 格式
+            const responsesHistory = visionHistory.map(msg => {
+                // system 角色在 Responses API 中需要转为 developer 或 user
+                let role = msg.role;
+                let content = msg.content;
+
+                if (role === 'system') {
+                    role = 'user';
+                    // 如果 content 是字符串，添加系统设定前缀
+                    if (typeof content === 'string') {
+                        content = `[系统设定]: ${content}`;
+                    }
+                }
+
+                // 如果 content 是数组（多模态），转换为 Responses API 格式
+                if (Array.isArray(content)) {
+                    content = content.map(part => {
+                        if (part.type === 'image_url' && part.image_url?.url) {
+                            // Responses API 使用 input_image 类型
+                            return {
+                                type: 'input_image',
+                                image_url: part.image_url.url
+                            };
+                        }
+                        return part;
+                    });
+                }
+
+                return { role, content };
             });
 
             const requestData = { 
@@ -237,6 +392,12 @@ function createChatRouter({
 
             if (isResponsesApi) {
                 req.log.info('正在建立连接 (Responses API, 流式)');
+                // 记录多模态内容的结构信息
+                const inputSummary = responsesHistory.map(m => ({
+                    role: m.role,
+                    contentType: Array.isArray(m.content) ? m.content.map(p => p.type).join('+') : 'text'
+                }));
+                req.log.info({ inputSummary }, '请求体结构');
                 try {
                     requestData.input = responsesHistory;
                     response = await axios({
@@ -253,7 +414,7 @@ function createChatRouter({
                         if (!targetUrl.endsWith('/chat/completions')) targetUrl += '/chat/completions';
                         
                         delete requestData.input;
-                        requestData.messages = history;
+                        requestData.messages = visionHistory;
                         
                         response = await axios({
                             method: 'post', url: targetUrl, headers,
@@ -268,7 +429,7 @@ function createChatRouter({
                 }
             } else {
                 req.log.info('正在建立连接 (Chat Completions API, 流式)');
-                requestData.messages = history;
+                requestData.messages = visionHistory;
                 response = await axios({
                     method: 'post', url: targetUrl, headers,
                     data: requestData,
@@ -375,6 +536,7 @@ function createChatRouter({
                     }
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
+                    recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     writeSse('[DONE]');
                     res.end();
                     releaseSemaphore(); // 正常结束释放
@@ -401,6 +563,7 @@ function createChatRouter({
                     writeSse(JSON.stringify({ error: '流传输中断', detail: err.message }));
                     res.end();
                 }
+                recordModelFailure(modelCfg, err);
                 releaseSemaphore(); // 传输错误释放
             });
 
@@ -411,6 +574,7 @@ function createChatRouter({
         } catch (e) {
             const errorData = e.response?.data;
             const statusCode = e.response?.status;
+            recordModelFailure(modelCfg, e);
 
             req.log.error({ statusCode, err: e.message }, '模型响应错误');
             if (errorData) {

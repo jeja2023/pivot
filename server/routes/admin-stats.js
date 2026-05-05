@@ -7,6 +7,70 @@ const { asyncHandler } = require('../http');
 const { getHttpMetricsSnapshot } = require('../metrics');
 const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
+const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
+
+function getLocalHostnames() {
+    const names = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', 'host.docker.internal']);
+    try {
+        names.add(os.hostname().toLowerCase());
+        const interfaces = os.networkInterfaces();
+        Object.values(interfaces).flat().filter(Boolean).forEach(item => {
+            if (item.address) names.add(String(item.address).toLowerCase());
+        });
+    } catch (e) {
+        // Keep the conservative defaults above.
+    }
+    return names;
+}
+
+function summarizeModelEndpoints() {
+    const rows = db.prepare(`
+        SELECT id, name, url, monitor_url, max_concurrent
+        FROM models
+        WHERE COALESCE(status, 'active') = 'active'
+        ORDER BY id ASC
+    `).all();
+    const localNames = getLocalHostnames();
+    const summary = {
+        total: rows.length,
+        localCount: 0,
+        remoteCount: 0,
+        unknownCount: 0,
+        remoteModels: [],
+        localModels: []
+    };
+
+    rows.forEach(row => {
+        try {
+            const parsed = new URL(String(row.url || '').trim());
+            const host = parsed.hostname.toLowerCase();
+            const item = {
+                id: row.id,
+                name: row.name,
+                host,
+                monitor_url: row.monitor_url || '',
+                max_concurrent: row.max_concurrent || 0
+            };
+            if (localNames.has(host)) {
+                summary.localCount += 1;
+                if (summary.localModels.length < 5) summary.localModels.push(item);
+            } else {
+                summary.remoteCount += 1;
+                if (summary.remoteModels.length < 5) summary.remoteModels.push(item);
+            }
+        } catch (e) {
+            summary.unknownCount += 1;
+        }
+    });
+
+    summary.hasRemoteModels = summary.remoteCount > 0;
+    summary.hasLocalModels = summary.localCount > 0;
+    summary.runtime = getModelEndpointRuntimeStatus();
+    summary.gpuScope = summary.hasRemoteModels
+        ? (summary.hasLocalModels ? 'mixed' : 'local_only_not_model_host')
+        : 'local';
+    return summary;
+}
 
 function createAdminStatsRouter({
     authMiddleware,
@@ -36,6 +100,7 @@ function createAdminStatsRouter({
 
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
+        const modelEndpoints = summarizeModelEndpoints();
 
         res.json({
             updatedAt: new Date().toISOString(),
@@ -65,7 +130,8 @@ function createAdminStatsRouter({
                 platform: os.platform()
             },
             concurrency,
-            gpu
+            gpu,
+            modelEndpoints
         });
     }));
 

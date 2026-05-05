@@ -41,6 +41,13 @@ function createAdminUsersRouter({
         const { nickname, unit, role, status } = req.body;
         const safeRole = role === 'admin' ? 'admin' : 'user';
         const safeStatus = status === 'disabled' ? 'disabled' : 'active';
+
+        const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(targetUserId);
+        if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+        
+        if (targetUser.username === 'admin' && (safeRole !== 'admin' || safeStatus === 'disabled')) {
+            return res.status(400).json({ error: '不能降低或禁用内置管理员权限' });
+        }
         if (targetUserId === req.user.id && (safeRole !== 'admin' || safeStatus === 'disabled')) {
             return res.status(400).json({ error: '不能降低或禁用自己的管理员权限' });
         }
@@ -152,9 +159,10 @@ function createAdminUsersRouter({
         if (targetUserId === req.user.id) return res.status(400).json({ error: '不能删除自己' });
         const targetUser = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+        if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员账号禁止删除' });
         if (targetUser.role === 'admin') {
             const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled'").get().count;
-            if (adminCount <= 1) return res.status(400).json({ error: '不能删除最后一个可用管理员' });
+            if (adminCount <= 1) return res.status(400).json({ error: '系统必须保留至少一个可用管理员' });
         }
         const deleteUserTx = db.transaction(() => {
             const attachments = db.prepare('SELECT file_path FROM attachments WHERE user_id = ?').all(targetUserId);

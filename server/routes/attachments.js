@@ -3,12 +3,13 @@ const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
-const pdf = require('pdf-parse');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { removeAttachmentFiles } = require('../security');
 const { getBeijingTimestamp } = require('../time');
+const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedText } = require('../document-text');
+const { isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
+const { logger } = require('../logger');
 
 function getSafeUploadPath(userId, sessionId, filename) {
     const uploadRoot = path.resolve(__dirname, '../../uploads');
@@ -32,7 +33,28 @@ function createAttachmentsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/uploads/:userId/:sessionId/:filename', authMiddleware, asyncHandler(async (req, res) => {
+    router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
+        // 先尝试通过 Cookie/Header 验证
+        authMiddleware(req, res, (err) => {
+            if (!err && req.user) return next();
+            
+            // 如果验证失败或未授权，尝试使用 URL 中的 token 参数
+            const token = req.query.token;
+            if (token) {
+                const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ?')
+                    .get(token, `%/${req.params.filename}`);
+                if (attachment) {
+                    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
+                    if (user && user.status !== 'disabled') {
+                        req.user = user; // 临时赋予权限
+                        return next();
+                    }
+                }
+            }
+            // 还是没过，就返回之前的错误或 401
+            res.status(401).json({ error: '未授权访问附件' });
+        });
+    }, asyncHandler(async (req, res) => {
         const requestedUserId = parseInt(req.params.userId, 10);
         const { sessionId, filename } = req.params;
 
@@ -61,46 +83,80 @@ function createAttachmentsRouter({
         const sessionId = req.query.sessionId || 'global';
         const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
         const mimeType = req.file.mimetype;
+        const password = String(req.body?.password || '').trim() || undefined;
         const targetDir = path.join('uploads', userId.toString(), sessionId);
         if (!fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }
 
         const safeOriginalName = path.basename(originalName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
-        const finalFileName = Date.now() + '-' + crypto.randomUUID() + '-' + safeOriginalName;
+        const imageOutput = isLikelyImageMime(mimeType);
+        const outputOriginalName = imageOutput
+            ? safeOriginalName.replace(/\.[^.]*$/, '') + '.jpg'
+            : safeOriginalName;
+        const finalFileName = Date.now() + '-' + crypto.randomUUID() + '-' + outputOriginalName;
         const finalPath = path.join(targetDir, finalFileName);
         const publicUrl = `/uploads/${userId}/${sessionId}/${finalFileName}`;
         const accessToken = crypto.randomBytes(24).toString('base64url');
         let extractedText = null;
+        const visionAttachments = [];
 
         try {
-            if (mimeType.startsWith('image/')) {
-                await sharp(req.file.path)
-                    .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
-                    .jpeg({ quality: 80 })
-                    .toFile(finalPath);
+            if (imageOutput) {
+                await normalizeUploadedImage(req.file.path, finalPath);
                 fs.unlinkSync(req.file.path);
             } else {
-                if (mimeType === 'application/pdf') {
-                    const dataBuffer = fs.readFileSync(req.file.path);
-                    const data = await pdf(dataBuffer);
-                    extractedText = data.text;
-                } else if (mimeType.startsWith('text/') || originalName.endsWith('.md')) {
-                    extractedText = fs.readFileSync(req.file.path, 'utf8');
-                }
-                if (extractedText && extractedText.length > 200000) {
-                    extractedText = extractedText.slice(0, 200000) + '\n\n[文档内容过长，已截断前 200000 字符]';
+                try {
+                    extractedText = truncateExtractedText(await extractDocumentText(req.file.path, mimeType, originalName, { password }));
+                } catch (readErr) {
+                    logger.error({ err: readErr.message, path: req.file.path, originalName }, 'Read attachment text failed');
+                    if (isPasswordError(readErr) || readErr.code === 'PASSWORD_UNSUPPORTED') {
+                        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+                        return res.status(422).json({
+                            error: password ? '文档密码不正确或当前格式不支持密码解密' : '该文档已加密，请输入密码后重试',
+                            code: 'DOCUMENT_PASSWORD_REQUIRED',
+                            passwordRequired: true
+                        });
+                    }
+                    if (path.extname(originalName).toLowerCase() === '.pdf') {
+                        throw new Error(`PDF text extraction failed: ${readErr.message}`);
+                    }
+                    extractedText = '';
                 }
                 fs.renameSync(req.file.path, finalPath);
+
+                if (path.extname(originalName).toLowerCase() === '.pdf' && !String(extractedText || '').trim()) {
+                    try {
+                        const pages = await renderPdfPages(finalPath, { password, maxPages: 1, desiredWidth: 1400 });
+                        for (const page of pages) {
+                            const pageToken = crypto.randomBytes(24).toString('base64url');
+                            const pageFileName = `${Date.now()}-${crypto.randomUUID()}-${path.basename(safeOriginalName, path.extname(safeOriginalName))}-page-${page.page}.png`;
+                            const pagePath = path.join(targetDir, pageFileName);
+                            fs.writeFileSync(pagePath, page.data);
+                            const pageUrl = `/uploads/${userId}/${sessionId}/${pageFileName}?token=${pageToken}`;
+                            db.prepare(`
+                                INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pagePath.replace(/\\/g, '/'), page.mimeType, page.data.length, pageToken, getBeijingTimestamp());
+                            visionAttachments.push({
+                                name: `${originalName} 第 ${page.page} 页`,
+                                url: pageUrl,
+                                markdown: `![${originalName} 第 ${page.page} 页](${pageUrl})`
+                            });
+                        }
+                    } catch (ocrErr) {
+                        logger.error({ err: ocrErr.message, originalName }, 'Render scanned PDF pages failed');
+                    }
+                }
             }
 
             db.prepare(`
                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(userId, sessionId, originalName, finalPath.replace(/\\/g, '/'), mimeType, req.file.size, accessToken, getBeijingTimestamp());
+            `).run(userId, sessionId, originalName, finalPath.replace(/\\/g, '/'), imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp());
 
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
-            res.json({ url: publicUrl, name: originalName, extractedText });
+            res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, extractedText, visionAttachments });
         } catch (e) {
             if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
@@ -128,7 +184,7 @@ function createAttachmentsRouter({
             LIMIT ? OFFSET ?
         `).all(...params, limit, offset).map(item => ({
             ...item,
-            url: '/' + String(item.file_path || '').replace(/\\/g, '/')
+            url: '/' + String(item.file_path || '').replace(/\\/g, '/') + (item.access_token ? '?token=' + item.access_token : '')
         }));
         const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
         res.json({ data, total, hasMore: offset + data.length < total });

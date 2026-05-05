@@ -57,15 +57,38 @@ window.deletePrompt = (id) => {
     });
 };
 
+const MIME_TYPE_MAP = {
+    'application/pdf': 'PDF 文档',
+    'application/msword': 'Word 文档',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word 文档',
+    'application/vnd.ms-excel': 'Excel 表格',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel 表格',
+    'application/vnd.ms-powerpoint': 'PPT 演示',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPT 演示',
+    'text/plain': '纯文本',
+    'text/markdown': 'Markdown',
+    'text/csv': 'CSV 表格',
+    'image/jpeg': 'JPEG 图片',
+    'image/png': 'PNG 图片',
+    'image/gif': 'GIF 图片',
+    'image/webp': 'WebP 图片',
+    'application/zip': '压缩包',
+    'application/x-zip-compressed': '压缩包',
+    'application/json': 'JSON 数据'
+};
+
 window.loadAttachments = async function(page = 1) {
     const keyword = document.getElementById('attachment-search-input')?.value || '';
     const res = await fetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
     const { data, total } = await res.json();
-    document.getElementById('attachment-list-body').innerHTML = data.map(item => `
+    document.getElementById('attachment-list-body').innerHTML = data.map((item, idx) => {
+        const typeDisplay = MIME_TYPE_MAP[item.file_type] || item.file_type || '未知类型';
+        return `
         <tr>
+            <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
             <td title="${escapeHtml(item.file_name)}">${escapeHtml(item.file_name)}</td>
-            <td>${escapeHtml(item.session_title || item.session_id || '-')}</td>
-            <td>${escapeHtml(item.file_type || '-')}</td>
+            <td title="${escapeHtml(item.session_title || item.session_id || '-')}">${escapeHtml(item.session_title || item.session_id || '-')}</td>
+            <td title="${escapeHtml(item.file_type)}">${escapeHtml(typeDisplay)}</td>
             <td>${formatFileSize(item.file_size)}</td>
             <td>${escapeHtml(formatDateToCN(item.created_at))}</td>
             <td class="text-center">
@@ -75,7 +98,7 @@ window.loadAttachments = async function(page = 1) {
                 </div>
             </td>
         </tr>
-    `).join('');
+    `}).join('');
     renderPagination('attachments', total, page);
 }
 

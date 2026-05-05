@@ -161,7 +161,7 @@ function renderMarkdown(content) {
                 'details', 'summary', 'thought', 
                 'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot', 'mspace', 'mtext', 'mstyle', 'merror'
             ], 
-            ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns'] 
+            ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel'] 
         });
     }
     return rawHtml;
@@ -209,8 +209,12 @@ function appendMessage(role, content, id = null, stats = null) {
 function renderAttachmentPreviews() {
     const previewArea = document.getElementById('attachment-preview');
     if (pendingAttachments.length === 0) { previewArea.classList.add('hidden'); previewArea.innerHTML = ''; return; }
+    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
+    if (pendingAttachments.length > maxAttachments) pendingAttachments.splice(maxAttachments);
     previewArea.classList.remove('hidden');
-    previewArea.innerHTML = pendingAttachments.map((file, index) => {
+    const hasImage = pendingAttachments.some(file => String(file.type || '').startsWith('image/'));
+    const notice = hasImage ? '<div class="attachment-limit-note">当前模型每次仅解析 1 张图片</div>' : '';
+    previewArea.innerHTML = notice + pendingAttachments.map((file, index) => {
         if (file.type.startsWith('image/')) {
             return `<div class="preview-card"><img src="${file.url}"><div class="remove-preview" onclick="removeAttachment(${index})">&times;</div></div>`;
         }

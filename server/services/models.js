@@ -2,7 +2,7 @@
 const { db, stmts } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_concurrent, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')

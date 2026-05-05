@@ -2,7 +2,7 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢 Pivot';
-const APP_VERSION = 'v0.0.6';
+const APP_VERSION = 'v0.0.8';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME}. 保留所有权利。`;
 let token = localStorage.getItem('pivot_token');
 let currentUser = null;
@@ -12,10 +12,39 @@ let currentSessionId = null;
 let isRefreshing = false;
 let refreshQueue = [];
 
+async function refreshAccessToken() {
+    if (!isRefreshing) {
+        isRefreshing = true;
+        try {
+            const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST' });
+            if (!refreshRes.ok) throw new Error('Refresh failed');
+            const refreshData = await refreshRes.json();
+            token = refreshData.accessToken;
+            localStorage.setItem('pivot_token', token);
+            isRefreshing = false;
+            refreshQueue.forEach(cb => cb(token));
+            refreshQueue = [];
+            return token;
+        } catch (e) {
+            isRefreshing = false;
+            refreshQueue = [];
+            throw e;
+        }
+    }
+
+    return new Promise((resolve) => {
+        refreshQueue.push(resolve);
+    });
+}
+
 function authHeaders(extra = {}) {
     const headers = { ...extra };
     if (token && token !== 'null') headers.Authorization = `Bearer ${token}`;
     return headers;
+}
+
+async function authFetch(url, options = {}) {
+    return apiFetch(url, options);
 }
 
 // 通用请求包装器 (支持自动刷新)
@@ -31,37 +60,12 @@ async function apiFetch(url, options = {}) {
     if (res.status === 401) {
         const data = await res.clone().json().catch(() => ({}));
         if (data.code === 'TOKEN_EXPIRED') {
-            if (!isRefreshing) {
-                isRefreshing = true;
-                try {
-                    const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST' });
-                    if (refreshRes.ok) {
-                        const refreshData = await refreshRes.json();
-                        token = refreshData.accessToken;
-                        localStorage.setItem('pivot_token', token);
-                        isRefreshing = false;
-                        // 执行队列中的请求
-                        refreshQueue.forEach(cb => cb(token));
-                        refreshQueue = [];
-                        // 重新发起原始请求
-                        return originalRequest();
-                    } else {
-                        throw new Error('Refresh failed');
-                    }
-                } catch (e) {
-                    isRefreshing = false;
-                    refreshQueue = [];
-                    handleUnauthorized();
-                    throw e;
-                }
-            } else {
-                // 等待正在进行的刷新
-                return new Promise((resolve) => {
-                    refreshQueue.push((newToken) => {
-                        token = newToken;
-                        resolve(originalRequest());
-                    });
-                });
+            try {
+                await refreshAccessToken();
+                return originalRequest();
+            } catch (e) {
+                handleUnauthorized();
+                throw e;
             }
         }
     }

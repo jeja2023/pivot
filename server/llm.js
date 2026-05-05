@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { db } = require('./db');
 const { getBeijingTimestamp } = require('./time');
+const { extractDocumentText, truncateExtractedText } = require('./document-text');
+const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('./image-safety');
 
 const THRESHOLD = parseInt(process.env.MEMORY_THRESHOLD) || 12000;
 
@@ -22,36 +24,104 @@ async function getContext(sessionId, userId, modelCfg) {
     const messages = db.prepare(`
         SELECT * FROM messages 
         WHERE session_id = ? AND user_id = ? 
-        ORDER BY created_at ASC
+        ORDER BY id ASC
     `).all(sessionId, userId);
 
+    const { logger } = require('./logger');
+    logger.info({ sessionId, messageCount: messages.length }, '检索会话历史');
+
     const totalTokens = messages.reduce((sum, m) => sum + m.token_count, 0);
+    let totalImageCount = 0;
 
     // 如果超过阈值且有足够消息，触发压缩
     if (totalTokens > THRESHOLD && messages.length > 8) {
         await compressMemory(sessionId, userId, messages, modelCfg);
-        return getContext(sessionId, userId, modelCfg); // 递归获取压缩后的结果
+        return await getContext(sessionId, userId, modelCfg); // 递归获取压缩后的结果
     }
 
-    let history = messages.map(m => {
+    let history = await Promise.all(messages.map(async m => {
         let content = m.content;
-        const imgRegex = /!\[.*?\]\((\/uploads\/.*?)\)/g;
+        // 匹配图片: ![]() 或 附件: []()
+        const imgRegex = /!\[.*?\]\((\/uploads\/[^)\s]+)\)/g;
+        const fileRegex = /\[附件:\s*([^\]]+)\]\((\/uploads\/[^)\s]+)\)/g;
+        
         let match;
         let finalContent = [];
         let lastIndex = 0;
 
+        // 处理图片
+        let imageCount = 0;
         while ((match = imgRegex.exec(content)) !== null) {
             if (match.index > lastIndex) {
                 finalContent.push({ type: "text", text: content.slice(lastIndex, match.index) });
             }
-            const localPath = path.join(__dirname, '..', match[1]);
+            if (imageCount >= MAX_IMAGES_PER_MESSAGE) {
+                finalContent.push({ type: "text", text: '[图片已跳过：数量超过限制]' });
+                lastIndex = imgRegex.lastIndex;
+                continue;
+            }
+            const cleanUrl = decodeURIComponent(match[1].split('?')[0]);
+            const relativePath = cleanUrl.startsWith('/') ? cleanUrl.slice(1) : cleanUrl;
+            const localPath = path.resolve(__dirname, '..', relativePath);
             if (fs.existsSync(localPath)) {
-                const base64 = fs.readFileSync(localPath, 'base64');
-                const ext = path.extname(localPath).slice(1) || 'jpeg';
-                // 使用行业标准的多模态 Payload 格式
-                finalContent.push({ type: "image_url", image_url: { url: `data:image/${ext};base64,${base64}` } });
+                const imageUrl = imageFileToDataUrl(localPath);
+                if (imageUrl && totalImageCount < MAX_IMAGES_PER_MESSAGE) {
+                    finalContent.push({ type: "image_url", image_url: { url: imageUrl } });
+                    imageCount += 1;
+                    totalImageCount += 1;
+                } else {
+                    finalContent.push({ type: "text", text: totalImageCount >= MAX_IMAGES_PER_MESSAGE ? '[图片已跳过：当前模型一次只支持解析 1 张图片]' : '[图片已跳过：文件过大或格式不支持]' });
+                }
+            } else {
+                finalContent.push({ type: "text", text: match[0] });
             }
             lastIndex = imgRegex.lastIndex;
+        }
+
+        // 处理非图片附件 (PDF, TXT, MD, CSV)
+        if (lastIndex === 0) { // 只有在没有处理图片的情况下才处理附件，或者可以合并逻辑
+             // 重新重置索引，因为我们可能需要多次扫描或合并正则
+             // 这里简单起见，我们重新遍历字符串处理附件
+             let fileContent = content;
+             let fileMatch;
+             let fileFinalContent = [];
+             let fileLastIndex = 0;
+
+             while ((fileMatch = fileRegex.exec(fileContent)) !== null) {
+                 if (fileMatch.index > fileLastIndex) {
+                     fileFinalContent.push({ type: "text", text: fileContent.slice(fileLastIndex, fileMatch.index) });
+                 }
+                 const fileName = fileMatch[1];
+                 const cleanUrl = decodeURIComponent(fileMatch[2].split('?')[0]);
+                 const relativePath = cleanUrl.startsWith('/') ? cleanUrl.slice(1) : cleanUrl;
+                 const localPath = path.resolve(__dirname, '..', relativePath);
+                 
+                 if (fs.existsSync(localPath)) {
+                     try {
+                         let text = truncateExtractedText(await extractDocumentText(localPath, '', fileName), 20000);
+
+                         if (text) {
+                             fileFinalContent.push({ type: "text", text: `\n\n--- 附件内容 (${fileName}) ---\n${text}\n--- 结束 ---\n\n` });
+                         } else {
+                             fileFinalContent.push({ type: "text", text: fileMatch[0] });
+                         }
+                     } catch (err) {
+                         logger.error({ err: err.message, localPath }, '读取附件内容失败');
+                         fileFinalContent.push({ type: "text", text: fileMatch[0] });
+                     }
+                 } else {
+                     fileFinalContent.push({ type: "text", text: fileMatch[0] });
+                 }
+                 fileLastIndex = fileRegex.lastIndex;
+             }
+             if (fileLastIndex < fileContent.length) {
+                 fileFinalContent.push({ type: "text", text: fileContent.slice(fileLastIndex) });
+             }
+             
+             if (fileFinalContent.length > 0) {
+                 finalContent = fileFinalContent;
+                 lastIndex = fileContent.length;
+             }
         }
 
         if (lastIndex < content.length) {
@@ -65,7 +135,7 @@ async function getContext(sessionId, userId, modelCfg) {
         }
 
         return { role: m.role, content: finalContent };
-    });
+    }));
 
     if (session && session.system_prompt) {
         history.unshift({ role: 'system', content: session.system_prompt });

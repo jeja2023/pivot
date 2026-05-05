@@ -16,8 +16,14 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET) || JWT_
 const AUTH_COOKIE_NAME = 'pivot_access_token';
 const REFRESH_COOKIE_NAME = 'pivot_refresh_token';
 
-const ACCESS_TOKEN_EXPIRES = '30m';
-const REFRESH_TOKEN_EXPIRES_DAYS = 7;
+const parsePositiveInt = (value, fallback) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const ACCESS_TOKEN_EXPIRES_MINUTES = parsePositiveInt(process.env.ACCESS_TOKEN_EXPIRES_MINUTES, 480);
+const REFRESH_TOKEN_EXPIRES_DAYS = parsePositiveInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS, 30);
+const ACCESS_TOKEN_EXPIRES = `${ACCESS_TOKEN_EXPIRES_MINUTES}m`;
 
 const COOKIE_OPTIONS = {
     httpOnly: true,
@@ -28,7 +34,7 @@ const COOKIE_OPTIONS = {
 
 const ACCESS_COOKIE_OPTIONS = {
     ...COOKIE_OPTIONS,
-    maxAge: 30 * 60 * 1000 // 30 分钟
+    maxAge: ACCESS_TOKEN_EXPIRES_MINUTES * 60 * 1000
 };
 
 const REFRESH_COOKIE_OPTIONS = {
@@ -43,7 +49,7 @@ function hashApiKey(key) {
 
 function previewApiKey(key) {
     const text = String(key || '');
-    return text ? `${text.slice(0, 8)}...${text.slice(-4)}` : '';
+    return text ? `${text.slice(0, 3)}...${text.slice(-4)}` : '';
 }
 
 function generateAccessToken(user) {
@@ -193,6 +199,7 @@ function authMiddleware(req, res, next) {
             db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
             req.user = user;
             req.isApiKey = true; // 标记是 API Key 调用
+            req.apiKeyId = apiKeyData.id;
             return next();
         }
     }

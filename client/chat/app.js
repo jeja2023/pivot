@@ -189,8 +189,14 @@ bind('pw-update-btn', () => window.changePassword());
 bind('image-viewer-modal', () => window.closeImageViewer());
 
 document.getElementById('file-input').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
+    if (pendingAttachments.length >= maxAttachments) {
+        showToast(`最多只能上传 ${maxAttachments} 个附件`, 'error');
+        e.target.value = '';
+        return;
+    }
     if (!currentSessionId) {
         const s = await createSession('新对话');
         if (!s) return;
@@ -198,17 +204,65 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
         document.getElementById('current-title').innerText = s.title;
         window.loadSessions();
     }
-    const fd = new FormData(); fd.append('file', file);
-    try {
-        showToast('正在上传...', 'info');
+    const uploadChatFile = async (file, password = '') => {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (password) fd.append('password', password);
         const res = await apiFetch(`${API_BASE}/upload?sessionId=${currentSessionId}`, { method: 'POST', body: fd });
         const data = await res.json();
-        if (data.url) {
-            pendingAttachments.push({ name: data.name, url: data.url, type: file.type, extractedText: data.extractedText, markdown: file.type.startsWith('image/') ? `![${data.name}](${data.url})` : `[附件: ${data.name}](${data.url})` });
-            renderAttachmentPreviews();
-            showToast('上传成功');
+        if (!res.ok) {
+            const err = new Error(data.error || 'Upload failed');
+            err.data = data;
+            throw err;
         }
-    } catch (e) { showToast('上传失败', 'error'); }
+        return data;
+    };
+    try {
+        let uploadedCount = 0;
+        let skippedCount = 0;
+        showToast(files.length > 1 ? `正在上传 ${files.length} 个文件...` : '正在上传...', 'info');
+        for (const file of files) {
+            if (pendingAttachments.length >= maxAttachments) {
+                skippedCount += 1;
+                continue;
+            }
+            const hasPendingImage = pendingAttachments.some(item => String(item.type || '').startsWith('image/'));
+            const selectedIsImage = String(file.type || '').startsWith('image/');
+            if (selectedIsImage && hasPendingImage) {
+                skippedCount += 1;
+                continue;
+            }
+
+            let data;
+            try {
+                data = await uploadChatFile(file);
+            } catch (uploadErr) {
+                if (uploadErr.data?.passwordRequired) {
+                    const password = window.prompt(`文档 ${file.name} 已加密，请输入文档密码`);
+                    if (!password) {
+                        skippedCount += 1;
+                        continue;
+                    }
+                    data = await uploadChatFile(file, password);
+                } else {
+                    throw uploadErr;
+                }
+            }
+
+            if (data.url) {
+                pendingAttachments.push({ name: data.name, url: data.url, type: file.type, extractedText: data.extractedText, markdown: file.type.startsWith('image/') ? `![${data.name}](${data.url})` : `[附件: ${data.name}](${data.url})` });
+                uploadedCount += 1;
+                (data.visionAttachments || []).forEach(item => {
+                    if (pendingAttachments.length >= maxAttachments) return;
+                    if (pendingAttachments.some(entry => String(entry.type || '').startsWith('image/'))) return;
+                    pendingAttachments.push({ name: item.name, url: item.url, type: 'image/png', extractedText: '', markdown: item.markdown || `![${item.name}](${item.url})` });
+                });
+                renderAttachmentPreviews();
+            }
+        }
+        if (uploadedCount > 0) showToast(skippedCount > 0 ? `已上传 ${uploadedCount} 个，跳过 ${skippedCount} 个` : '上传成功');
+        else if (skippedCount > 0) showToast('没有可上传的文件：最多 5 个附件，且图片每次仅 1 张', 'error');
+    } catch (e) { showToast(e.message || '上传失败', 'error'); }
     e.target.value = '';
 });
 

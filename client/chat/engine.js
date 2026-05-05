@@ -1,6 +1,8 @@
 // --- 数据引擎模块 Engine (完整功能版) ---
 let currentAbortController = null;
 let pendingAttachments = [];
+const MAX_PENDING_ATTACHMENTS = 5;
+window.MAX_PENDING_ATTACHMENTS = MAX_PENDING_ATTACHMENTS;
 
 window.createSession = async function(title) {
     const res = await apiFetch(API_BASE + '/sessions', {
@@ -43,6 +45,7 @@ window.selectSession = async function(id, title) {
 window.sendMessage = async function(isRegenerate = false) {
     const userVisibleContent = document.getElementById('user-input').value.trim();
     let content = userVisibleContent;
+    let displayContent = userVisibleContent;
     const modelId = document.getElementById('model-selector').value;
     
     if (!content && pendingAttachments.length === 0 && !isRegenerate) return;
@@ -50,6 +53,7 @@ window.sendMessage = async function(isRegenerate = false) {
     if (pendingAttachments.length > 0) {
         const attachmentLinks = pendingAttachments.map(a => a.markdown).join('\n');
         content = (content ? content + '\n\n' : '') + attachmentLinks;
+        displayContent = (displayContent ? displayContent + '\n\n' : '') + attachmentLinks;
         const docTexts = pendingAttachments.filter(a => a.extractedText).map(a => `\n\n---\n【参考文档: ${a.name}】\n${a.extractedText}\n---`).join('');
         if (docTexts) content += docTexts;
     }
@@ -69,7 +73,7 @@ window.sendMessage = async function(isRegenerate = false) {
     }
 
     if (!isRegenerate) {
-        appendMessage('user', userVisibleContent);
+        appendMessage('user', displayContent);
     }
     const aiMsgEl = appendMessage('assistant', '...');
     let fullAiContent = '';
@@ -85,7 +89,7 @@ window.sendMessage = async function(isRegenerate = false) {
         const response = await apiFetch(API_BASE + '/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-            body: JSON.stringify({ sessionId: currentSessionId, content, displayContent: userVisibleContent || stripInternalReferenceText(content), modelId, regenerate: isRegenerate }),
+            body: JSON.stringify({ sessionId: currentSessionId, content, displayContent: stripInternalReferenceText(displayContent || content), modelId, regenerate: isRegenerate }),
             signal: currentAbortController.signal
         });
 

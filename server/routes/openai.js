@@ -1,11 +1,17 @@
 const express = require('express');
 const http = require('http');
 const https = require('https');
+const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getAccessibleModel, getModelDailyUsage, getUserAccessibleModels } = require('../services/models');
 const { estimateTokens } = require('../llm');
 const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
+const {
+    acquireModelSlot,
+    recordModelSuccess,
+    recordModelFailure
+} = require('../services/model-runtime');
 const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
@@ -92,8 +98,23 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
             });
         }
         let semaphoreReleased = false;
+        let endpointRelease = null;
+        const requestStartedAt = Date.now();
+        try {
+            endpointRelease = await acquireModelSlot(modelCfg);
+        } catch (e) {
+            aiSemaphore.release();
+            return res.status(e.statusCode || 503).json({
+                error: {
+                    message: e.message || 'Model endpoint is busy. Please retry later.',
+                    type: 'server_overloaded',
+                    code: e.code || 'AI_ENDPOINT_OVERLOADED'
+                }
+            });
+        }
         const releaseSemaphore = () => {
             if (!semaphoreReleased) {
+                if (endpointRelease) endpointRelease();
                 aiSemaphore.release();
                 semaphoreReleased = true;
             }
@@ -152,12 +173,17 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
 
                 response.data.on('end', () => {
                     const tokens = estimateTokens(JSON.stringify(messages) + totalContent);
+                    if (req.isApiKey && req.apiKeyId && tokens > 0) {
+                        db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
+                    }
                     logAction(req, 'OpenAI 流式调用完成', `模型: ${modelCfg.name}, 估算Tokens: ${tokens}`);
+                    recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
                     releaseSemaphore();
                 });
                 response.data.on('error', err => {
                     logger.error({ err: err.message, model: modelCfg.name }, 'OpenAI 流式转发中断');
+                    recordModelFailure(modelCfg, err);
                     if (!res.writableEnded) res.end();
                     releaseSemaphore();
                 });
@@ -167,11 +193,17 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 });
             } else {
                 res.json(response.data);
+                const tokens = response.data?.usage?.total_tokens || 0;
+                if (req.isApiKey && req.apiKeyId && tokens > 0) {
+                    db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
+                }
+                recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 releaseSemaphore();
             }
         } catch (e) {
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
+            recordModelFailure(modelCfg, e);
             res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
             releaseSemaphore();
         }

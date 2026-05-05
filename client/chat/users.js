@@ -16,7 +16,7 @@ window.loadUsers = async function(page = 1) {
                 <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
                     <button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem;" onclick="prepareEditUser(JSON.parse(decodeURIComponent('${encodeActionArg(u)}')))">编辑</button>
                     <button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem;" onclick="resetUserPassword(${u.id})">重置密码</button>
-                    ${u.id !== currentUser.id ? `<button class="btn-danger" style="padding: 1px 5px; font-size: 0.68rem;" onclick="deleteUser(${u.id})">删除</button>` : ''}
+                    ${u.id !== currentUser.id && u.username !== 'admin' ? `<button class="btn-danger" style="padding: 1px 5px; font-size: 0.68rem;" onclick="deleteUser(${u.id})">删除</button>` : ''}
                 </div>
             </td>
         </tr>
@@ -57,7 +57,9 @@ window.resetUserForm = () => {
     document.getElementById('u-nickname').value = '';
     document.getElementById('u-unit').value = '';
     document.getElementById('u-role').value = 'user';
+    document.getElementById('u-role').disabled = false;
     document.getElementById('u-status').value = 'active';
+    document.getElementById('u-status').disabled = false;
 };
 
 window.prepareEditUser = (user) => {
@@ -66,8 +68,11 @@ window.prepareEditUser = (user) => {
     document.getElementById('u-username').disabled = true;
     document.getElementById('u-nickname').value = user.nickname || '';
     document.getElementById('u-unit').value = user.unit || '';
+    const isRootAdmin = user.username === 'admin';
     document.getElementById('u-role').value = user.role || 'user';
+    document.getElementById('u-role').disabled = isRootAdmin;
     document.getElementById('u-status').value = user.status || 'active';
+    document.getElementById('u-status').disabled = isRootAdmin;
     document.getElementById('u-password-wrap').classList.add('hidden');
     document.getElementById('user-modal-title').innerText = '编辑用户';
     document.getElementById('user-modal-container').classList.remove('hidden');

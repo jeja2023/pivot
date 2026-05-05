@@ -141,5 +141,6 @@ const aiSemaphore = new ConcurrencySemaphore({
 
 module.exports = {
     aiSemaphore,
+    ConcurrencySemaphore,
     ConcurrencyLimitError
 };

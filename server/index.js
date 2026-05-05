@@ -60,9 +60,11 @@ const {
     migrateModelSecrets
 } = require('./services/models');
 const { startGpuMonitor } = require('./services/gpu-monitor');
+const { startModelEndpointMonitor } = require('./services/model-runtime');
 
 // 启动 GPU 监控 (非阻塞)
 startGpuMonitor().catch(() => {});
+startModelEndpointMonitor().catch(() => {});
 
 const getClientIp = (req) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
@@ -128,6 +130,8 @@ const loginLimiter = rateLimit({
 app.use(helmet({
     contentSecurityPolicy: false, // 允许加载各种外部资源
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false, // 禁用 COOP，避免非 HTTPS 环境警告
+    originAgentCluster: false,      // 禁用 Origin-Agent-Cluster 冲突
     hsts: false // 禁用强制 HTTPS，适配局域网环境
 }));
 
@@ -273,7 +277,8 @@ app.use('/api', createChatRouter({
     chatLimiter: app.locals.chatLimiter,
     logAction,
     retrieveContext,
-    isRagEnabled: () => isSettingEnabled('rag_enabled')
+    isRagEnabled: () => isSettingEnabled('rag_enabled'),
+    publicUrl: appConfig.publicUrl
 }));
 
 app.use('/v1', createOpenAIRouter({

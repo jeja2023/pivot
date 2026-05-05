@@ -68,6 +68,8 @@ function initSchema() {
             status TEXT DEFAULT 'active',
             temperature REAL,
             max_tokens INTEGER,
+            monitor_url TEXT,
+            max_concurrent INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -147,6 +149,7 @@ function initSchema() {
             key_preview TEXT,
             key TEXT,
             status TEXT DEFAULT 'active',
+            usage_tokens INTEGER DEFAULT 0,
             last_used_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

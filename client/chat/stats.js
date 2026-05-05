@@ -1,4 +1,5 @@
-// --- 统计与日志模块 Stats & Logs (完整功能版) ---
+/* 统计与日志模块 Stats & Logs */
+
 window.loadDetails = async function(page = 1) {
     const isAdmin = currentUser.role === 'admin';
     const titleEl = document.getElementById('details-title');
@@ -10,8 +11,8 @@ window.loadDetails = async function(page = 1) {
             <tr>
                 <td class="text-center">${(page-1)*10 + i + 1}</td>
                 <td>${escapeHtml(formatDateToCN(d.created_at))}</td>
-                <td>${escapeHtml(d.nickname || d.username)}</td>
-                <td>${escapeHtml(d.model_name || '未知')}</td>
+                <td title="${escapeHtml(d.nickname || d.username)}">${escapeHtml(d.nickname || d.username)}</td>
+                <td title="${escapeHtml(d.model_name || '未知')}">${escapeHtml(d.model_name || '未知')}</td>
                 <td class="text-center">${d.role === 'user' ? '提问' : '回答'}</td>
                 <td>${d.token_count}</td>
             </tr>
@@ -27,11 +28,12 @@ window.loadStats = async function() {
     try {
         const res = await fetch(`${API_BASE}/stats/usage`, { headers: authHeaders() });
         const data = await res.json();
-        document.getElementById('stats-list-body').innerHTML = data.map(s => `
+        document.getElementById('stats-list-body').innerHTML = data.map((s, idx) => `
             <tr>
-                <td>${escapeHtml(s.username)}</td>
-                <td>${escapeHtml(s.nickname || s.username)}</td>
-                <td>${escapeHtml(s.model_name || '未知模型')}</td>
+                <td class="text-center">${idx + 1}</td>
+                <td title="${escapeHtml(s.username)}">${escapeHtml(s.username)}</td>
+                <td title="${escapeHtml(s.nickname || s.username)}">${escapeHtml(s.nickname || s.username)}</td>
+                <td title="${escapeHtml(s.model_name || '未知模型')}">${escapeHtml(s.model_name || '未知模型')}</td>
                 <td class="text-center">${s.msg_count}</td>
                 <td class="text-center">${s.total_tokens.toLocaleString()}</td>
                 <td style="color: var(--text-muted); font-size: 0.85rem;">${s.last_active || '-'}</td>
@@ -135,6 +137,47 @@ const formatDuration = (seconds) => {
     return `${minutes}分钟`;
 };
 
+const formatMsDuration = (milliseconds) => {
+    const value = Math.max(0, Number(milliseconds) || 0);
+    if (value >= 60000) return `${Math.ceil(value / 60000)} 分钟`;
+    if (value >= 1000) return `${Math.ceil(value / 1000)} 秒`;
+    return `${Math.ceil(value)} ms`;
+};
+
+const describeEndpointMonitor = (monitor = {}) => {
+    if (!monitor.configured) return '未配置健康探针';
+    const latency = monitor.latencyMs !== null && monitor.latencyMs !== undefined
+        ? ` · ${formatMetricNumber(monitor.latencyMs)} ms`
+        : '';
+    if (monitor.status === 'unreachable') return `探针不可达${latency}`;
+    if (monitor.status === 'degraded') return `探针异常${latency}`;
+    return `${monitor.status || 'ok'}${latency}`;
+};
+
+const ROUTE_NAME_MAP = {
+    '/api/auth/login': '用户登录',
+    '/api/auth/register': '用户注册',
+    '/api/auth/me': '获取当前用户',
+    '/api/auth/logout': '退出登录',
+    '/api/auth/keys': '密钥管理',
+    '/api/chat/completions': 'AI对话补全',
+    '/api/models': '获取模型列表',
+    '/api/stats/usage': '用量统计查询',
+    '/api/stats/details': '用量明细查询',
+    '/api/stats/trend': '用量趋势数据',
+    '/api/stats/report': '报表数据分析',
+    '/api/stats/monitor-summary': '获取监控数据',
+    '/api/admin/logs': '审计日志查询',
+    '/api/settings/rag': 'RAG功能配置',
+    '/api/settings/password': '修改用户密码',
+    '/api/upload': '附件上传',
+    '/api/models/test': '模型连接测试',
+    '/api/attachments': '获取附件列表',
+    '/api/auth/config': '获取认证配置',
+    '/api/stats/ops-summary': '获取运营概览',
+    '/': '静态资源访问'
+};
+
 window.loadMonitorSummary = async function() {
     if (currentUser?.role !== 'admin') return;
     try {
@@ -145,10 +188,14 @@ window.loadMonitorSummary = async function() {
         const errorRate = (data.http.errorRate || 0) * 100;
         const concurrency = data.concurrency || {};
         const gpu = data.gpu || {};
+        const endpoints = data.modelEndpoints || {};
         const gpuMaxRate = Number(gpu.maxRatio || 0) * 100;
+        const gpuScopeHint = endpoints.hasRemoteModels
+            ? `检测到 ${formatMetricNumber(endpoints.remoteCount)} 个远端模型，本机 GPU 不代表远端负载`
+            : '仅当模型部署在当前服务器时代表模型负载';
         const cards = [
             ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrency.max)}`, `排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`],
-            ['GPU 显存', gpu.available ? `${gpuMaxRate.toFixed(1)}%` : '未检测到', gpu.overloaded ? '保护中，拒绝新请求' : '运行正常'],
+            ['GPU 显存', gpu.available ? `${gpuMaxRate.toFixed(1)}%` : '未检测到', gpu.overloaded ? '保护中，拒绝新请求' : gpuScopeHint],
             ['今日 Token', formatMetricNumber(data.tokens.today), '累计 ' + formatMetricNumber(data.tokens.total)],
             ['今日消息', formatMetricNumber(data.tokens.todayMessages), '用户与模型消息总量'],
             ['请求总数', formatMetricNumber(data.http.requests), `错误率 ${errorRate.toFixed(2)}%`],
@@ -159,8 +206,8 @@ window.loadMonitorSummary = async function() {
         document.getElementById('monitor-summary-grid').innerHTML = cards.map(([label, value, hint]) => `
             <div class="monitor-card${label === 'GPU 显存' && gpu.overloaded ? ' is-warning' : ''}">
                 <span>${escapeHtml(label)}</span>
-                <strong>${escapeHtml(value)}</strong>
-                <small>${escapeHtml(hint)}</small>
+                <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
+                <small title="${escapeHtml(hint)}">${escapeHtml(hint)}</small>
             </div>
         `).join('');
 
@@ -181,7 +228,11 @@ window.loadMonitorSummary = async function() {
                 </div>`;
             }).join('')
             : `<div class="monitor-empty">${escapeHtml(gpu.error ? `未获取到 GPU 指标：${gpu.error}` : '未检测到 NVIDIA GPU 指标')}</div>`;
+        const endpointNotice = endpoints.hasRemoteModels
+            ? `<div class="monitor-empty is-warning">检测到远端模型：${escapeHtml((endpoints.remoteModels || []).map(item => `${item.name}@${item.host}`).join('，') || '未列出')}。本机 GPU 指标仅代表 Pivot 所在服务器；并发保护只限制本系统发出的请求数。</div>`
+            : '<div class="monitor-empty">本机 GPU 监控仅当模型服务部署在当前服务器时才代表模型负载。</div>';
         document.getElementById('monitor-gpu-list').innerHTML = [
+            endpointNotice,
             `<div class="monitor-row"><span>保护状态</span><strong>${escapeHtml(gpu.overloaded ? '保护中' : '正常')}</strong></div>`,
             `<div class="monitor-row"><span>拒绝阈值</span><strong>${escapeHtml(`${((gpu.thresholds?.reject || 0) * 100).toFixed(0)}%`)}</strong></div>`,
             gpuRows
@@ -192,18 +243,44 @@ window.loadMonitorSummary = async function() {
             ? models.map(item => `<div class="monitor-row"><span>${escapeHtml(item.model_name)}</span><strong>${formatMetricNumber(item.tokens)}</strong></div>`).join('')
             : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
 
+        const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
+        const endpointListEl = document.getElementById('monitor-endpoint-list');
+        if (endpointListEl) {
+            endpointListEl.innerHTML = runtimeEndpoints.length
+                ? runtimeEndpoints.map(item => {
+                    const concurrencyStatus = item.concurrency || {};
+                    const circuit = Number(item.circuitOpenMs || 0) > 0 ? ` · 熔断 ${formatMsDuration(item.circuitOpenMs)}` : '';
+                    const failures = Number(item.consecutiveFailures || 0) > 0 ? ` · 失败 ${formatMetricNumber(item.consecutiveFailures)}` : '';
+                    const modelNames = (item.models || []).map(model => model.name).filter(Boolean).slice(0, 3).join('、') || item.name || item.host;
+                    const detail = `${describeEndpointMonitor(item.monitor)} · 并发 ${formatMetricNumber(concurrencyStatus.active)}/${formatMetricNumber(concurrencyStatus.max)} · 排队 ${formatMetricNumber(concurrencyStatus.queued)}${failures}${circuit}`;
+                    const warningClass = item.monitor?.status === 'unreachable' || Number(item.circuitOpenMs || 0) > 0 ? ' is-warning' : '';
+                    return `<div class="monitor-endpoint${warningClass}">
+                        <div class="monitor-row">
+                            <span title="${escapeHtml(item.host || item.key)}">${escapeHtml(modelNames)}</span>
+                            <strong>${escapeHtml(item.host || item.key)}</strong>
+                        </div>
+                        <div class="monitor-empty">${escapeHtml(detail)}</div>
+                    </div>`;
+                }).join('')
+                : '<div class="monitor-empty">暂无模型端点运行数据</div>';
+        }
+
         const routes = data.http.routes || [];
         document.getElementById('monitor-routes-body').innerHTML = routes.length
-            ? routes.map(route => `
+            ? routes.map((route, idx) => {
+                const name = ROUTE_NAME_MAP[route.route] || '未知接口';
+                return `
                 <tr>
+                    <td class="text-center">${idx + 1}</td>
+                    <td title="${escapeHtml(name)}">${escapeHtml(name)}</td>
                     <td>${escapeHtml(route.method)}</td>
                     <td title="${escapeHtml(route.route)}">${escapeHtml(route.route)}</td>
-                    <td>${escapeHtml(route.status)}</td>
+                    <td class="text-center">${escapeHtml(route.status)}</td>
                     <td>${formatMetricNumber(route.requests)}</td>
                     <td>${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
                 </tr>
-            `).join('')
-            : '<tr><td colspan="5" class="text-center">暂无请求数据</td></tr>';
+            `}).join('')
+            : '<tr><td colspan="8" class="text-center">暂无请求数据</td></tr>';
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();
@@ -222,29 +299,36 @@ function scheduleMonitorRefresh() {
 }
 
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
+
 window.exportStats = () => {
     const rows = Array.from(document.querySelectorAll('#stats-list-body tr'));
-    let csv = '\uFEFF用户,显示名,模型,消息数,总Token\n';
-    rows.forEach(row => { csv += Array.from(row.querySelectorAll('td')).map(td => escapeCsvValue(td.innerText)).join(',') + '\n'; });
+    let csv = '\uFEFF用户,显示名,模型,消息数,总Token,最后活动\n';
+    rows.forEach(row => { 
+        const tds = Array.from(row.querySelectorAll('td')).slice(1); // 跳过序号列
+        csv += tds.map(td => escapeCsvValue(td.innerText)).join(',') + '\n'; 
+    });
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'usage_stats.csv'; a.click();
 };
 
 window.loadLogs = async function(page = 1) {
-    const res = await fetch(`${API_BASE}/admin/logs?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
-    const { data, total } = await res.json();
-    document.getElementById('log-list-body').innerHTML = data.map((l, i) => `
-        <tr>
-            <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
-            <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
-            <td>${escapeHtml(l.username || '系统')}</td>
-            <td>${escapeHtml(l.ip_address || '-')}</td>
-            <td><strong>${escapeHtml(l.action)}</strong></td>
-            <td>${escapeHtml(l.details)}</td>
-        </tr>
-    `).join('');
-    renderPagination('logs', total, page);
+    try {
+        const res = await fetch(`${API_BASE}/admin/logs?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
+        const { data, total } = await res.json();
+        document.getElementById('log-list-body').innerHTML = data.map((l, i) => `
+            <tr>
+                <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
+                <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
+                <td title="${escapeHtml(l.username || '系统')}">${escapeHtml(l.username || '系统')}</td>
+                <td>${escapeHtml(l.ip_address || '-')}</td>
+                <td><strong>${escapeHtml(l.action)}</strong></td>
+                <td>${escapeHtml(l.details)}</td>
+            </tr>
+        `).join('');
+        renderPagination('logs', total, page);
+    } catch (e) { showToast('加载日志失败', 'error'); }
 }
+
 window.exportLogs = () => downloadFileByFetch(`${API_BASE}/admin/logs/export`, 'audit_logs.csv');
 
 window.loadReport = async function() {
@@ -291,7 +375,7 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
     const values = data.map(d => Number(d.tokens) || 0);
     const labels = data.map(d => String(d[labelField] || d[fallbackField] || '未知'));
     const max = Math.max(...values, 1);
-    const padX = 80; const padY = 20; const chartW = width - padX - 60; const chartH = height - padY * 2;
+    const padX = 120; const padY = 20; const chartW = width - padX - 60; const chartH = height - padY * 2;
 
     if (values.length === 0) {
         ctx.fillStyle = '#6b7280'; ctx.font = '13px sans-serif';
@@ -310,7 +394,7 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         // 标签绘制
         ctx.fillStyle = '#4b5563';
         let labelText = labels[i];
-        if (labelText.length > 8) labelText = labelText.slice(0, 7) + '...';
+        if (labelText.length > 12) labelText = labelText.slice(0, 11) + '...';
         ctx.textAlign = 'right';
         ctx.fillText(labelText, padX - 10, y);
 

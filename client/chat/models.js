@@ -20,7 +20,7 @@ window.loadModels = async function(page = 1) {
     
     if (page === 1) refreshModelSelector();
 
-    document.getElementById('model-list-body').innerHTML = data.map(m => {
+    document.getElementById('model-list-body').innerHTML = data.map((m, idx) => {
         const isGlobalModel = !m.user_id;
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
@@ -56,6 +56,7 @@ window.loadModels = async function(page = 1) {
 
         return `
         <tr id="model-row-${m.id}">
+            <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
             <td title="${escapeHtml(m.name)}">
                 <div class="model-name-cell">
                     <span>${escapeHtml(m.name)}${m.user_id ? ' <small>(私有)</small>' : ' <small>(全局)</small>'}</span>
@@ -137,6 +138,10 @@ window.prepareEditModel = (model) => {
     if (tempEl) tempEl.value = model.temperature !== null && model.temperature !== undefined ? model.temperature : '';
     const maxTokensEl = document.getElementById('m-max-tokens');
     if (maxTokensEl) maxTokensEl.value = model.max_tokens || '';
+    const maxConcurrentEl = document.getElementById('m-max-concurrent');
+    if (maxConcurrentEl) maxConcurrentEl.value = model.max_concurrent || '';
+    const monitorUrlEl = document.getElementById('m-monitor-url');
+    if (monitorUrlEl) monitorUrlEl.value = model.monitor_url || '';
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
@@ -214,7 +219,7 @@ window.refreshModelSelector = async function() {
 }
 
 window.resetModelForm = () => {
-    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-tokens'].forEach(id => {
+    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
@@ -278,7 +283,9 @@ window.addModel = async () => {
         daily_token_limit: Number(document.getElementById('m-daily-limit').value || 0),
         allowed_units: document.getElementById('m-units').value,
         temperature: document.getElementById('m-temp') ? document.getElementById('m-temp').value : undefined,
-        max_tokens: document.getElementById('m-max-tokens') ? document.getElementById('m-max-tokens').value : undefined
+        max_tokens: document.getElementById('m-max-tokens') ? document.getElementById('m-max-tokens').value : undefined,
+        max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
+        monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : ''
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
     const btn = document.getElementById('m-submit-btn');
