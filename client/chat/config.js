@@ -1,9 +1,9 @@
 /* 对话页面逻辑 Chat Page Logic */
 
 const API_BASE = '/api';
-const APP_NAME = '智枢 Pivot';
-const APP_VERSION = 'v0.0.8';
-const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME}. 保留所有权利。`;
+const APP_NAME = '智枢';
+const APP_VERSION = 'v0.0.9';
+const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION}. 保留所有权利。`;
 let token = localStorage.getItem('pivot_token');
 let currentUser = null;
 let currentSessionId = null;
