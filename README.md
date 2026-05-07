@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.13-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.14-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款专为私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为用户提供一个安全、稳定且美观的 AI 交互门户。
@@ -156,4 +156,4 @@ RAG_SCORE_THRESHOLD=0.4
 - 附件访问 token 绑定完整文件路径，文档 ZIP 解析增加解压上限，前端动态 HTML 输出补充转义。
 - README 与 CHANGELOG 已同步记录本轮安全、RAG、可观测性和中文检索增强。
 
-**当前版本**: v0.0.11 (RAG Retrieval, Security Hardening, Quota Statistics & Observability)
+**当前版本**: v0.0.14 (Changelog-driven Versioning, PWA Cache Refresh & UI Alignment)

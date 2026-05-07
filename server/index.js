@@ -69,7 +69,6 @@ const {
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
-
 // 启动后台维护任务
 startMaintenanceTasks();
 
@@ -249,7 +248,13 @@ app.use(createAttachmentsRouter({
 // 根路径跳转至对话页面
 app.get('/', (req, res) => {
     noCacheHeaders(res);
-    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
+    const htmlPath = path.join(__dirname, '../client/chat/chat.html');
+    try {
+        const content = fs.readFileSync(htmlPath, 'utf8');
+        res.send(applyAppVersionTemplate(content, getAppVersion()));
+    } catch (e) {
+        res.sendFile(htmlPath);
+    }
 });
 
 app.use('/api', createAuthRouter({
@@ -363,7 +368,7 @@ app.use((err, req, res, _next) => {
 });
 
 const server = app.listen(PORT, () => {
-    logger.info({ port: PORT, url: `http://localhost:${PORT}` }, 'Pivot AI (智枢) 服务已启动');
+    logger.info({ port: PORT, url: `http://localhost:${PORT}`, version: appVersion }, 'Pivot AI (智枢) 服务已启动');
 });
 
 const gracefulShutdown = (signal) => {

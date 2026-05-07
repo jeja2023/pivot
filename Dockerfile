@@ -1,5 +1,5 @@
-# 使用国内华为云加速的 Node.js 20 镜像 (Debian 基础)
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:20
+# 使用国内华为云加速的 Node.js 22 镜像 (Debian 基础)
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22
 
 # 设置工作目录
 WORKDIR /app
