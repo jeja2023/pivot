@@ -28,6 +28,12 @@ const {
     recordModelTokenUsage
 } = require('../server/services/models');
 const {
+    getLocalHostnames,
+    isDockerInternalServiceHost,
+    isLocalModelHost,
+    normalizeHostAlias
+} = require('../server/routes/admin-stats');
+const {
     readZipEntries,
     MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES
 } = require('../server/document-text');
@@ -162,6 +168,53 @@ test('model usage events count toward daily model quota usage', () => {
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('local model host detection includes request and configured host aliases', () => {
+    assert.equal(normalizeHostAlias('http://50.64.150.40:8080/v1'), '50.64.150.40');
+    assert.equal(normalizeHostAlias('ai.example.com:3000'), 'ai.example.com');
+
+    const previousAliases = process.env.PIVOT_LOCAL_MODEL_HOSTS;
+    process.env.PIVOT_LOCAL_MODEL_HOSTS = '203.0.113.10,llama-server:8080';
+    try {
+        const names = getLocalHostnames({
+            publicUrl: 'https://50.64.150.40/app',
+            requestHosts: ['ai.example.com:3000', 'models.internal:8080, proxy.example']
+        });
+        assert.equal(names.has('50.64.150.40'), true);
+        assert.equal(names.has('ai.example.com'), true);
+        assert.equal(names.has('models.internal'), true);
+        assert.equal(names.has('203.0.113.10'), true);
+        assert.equal(names.has('llama-server'), true);
+    } finally {
+        if (previousAliases === undefined) {
+            delete process.env.PIVOT_LOCAL_MODEL_HOSTS;
+        } else {
+            process.env.PIVOT_LOCAL_MODEL_HOSTS = previousAliases;
+        }
+    }
+});
+
+test('docker internal service names are local only when container trust is enabled', () => {
+    const previousTrust = process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
+    try {
+        process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'true';
+        assert.equal(isDockerInternalServiceHost('llama-server'), true);
+        assert.equal(isDockerInternalServiceHost('llama-server:8080'), true);
+        assert.equal(isDockerInternalServiceHost('api.internal'), false);
+        assert.equal(isDockerInternalServiceHost('10.0.0.8'), false);
+        assert.equal(isLocalModelHost('llama-server', new Set()), true);
+
+        process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'false';
+        assert.equal(isDockerInternalServiceHost('llama-server'), false);
+        assert.equal(isLocalModelHost('llama-server', new Set()), false);
+    } finally {
+        if (previousTrust === undefined) {
+            delete process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
+        } else {
+            process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = previousTrust;
+        }
     }
 });
 

@@ -2,7 +2,7 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢';
-const APP_VERSION = 'v0.0.11';
+const APP_VERSION = 'v0.0.12';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION} 保留所有权利`;
 localStorage.removeItem('pivot_token');
 let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';

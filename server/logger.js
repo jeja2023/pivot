@@ -63,7 +63,8 @@ const httpLogger = pinoHttp({
                    url === '/api/health' || 
                    url === '/favicon.ico' ||
                    url === '/favicon.png' ||
-                   url === '/common/logo.png';
+                   url === '/common/logo.png' ||
+                   url.includes('com.chrome.devtools.json');
         }
     },
     // 自定义日志级别：成功的 GET 请求和已手动记录的测试请求设为 trace (默认不显示)

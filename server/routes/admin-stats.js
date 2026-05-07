@@ -2,6 +2,8 @@
 const express = require('express');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const net = require('net');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getHttpMetricsSnapshot } = require('../metrics');
@@ -9,7 +11,71 @@ const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 
-function getLocalHostnames() {
+function normalizeHostAlias(value) {
+    let host = String(value || '').trim();
+    if (!host) return '';
+    if (host.includes(',')) host = host.split(',')[0].trim();
+    if (!host) return '';
+
+    try {
+        host = new URL(host.includes('://') ? host : `http://${host}`).hostname;
+    } catch (e) {
+        host = host.replace(/\/.*$/, '');
+        if (host.startsWith('[')) {
+            const bracketEnd = host.indexOf(']');
+            host = bracketEnd >= 0 ? host.slice(1, bracketEnd) : host.slice(1);
+        } else if ((host.match(/:/g) || []).length === 1) {
+            host = host.split(':')[0];
+        }
+    }
+
+    host = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (host.includes('%')) host = host.split('%')[0];
+    return host;
+}
+
+function addHostAlias(names, value) {
+    String(value || '')
+        .split(',')
+        .map(normalizeHostAlias)
+        .filter(Boolean)
+        .forEach(host => names.add(host));
+}
+
+function getRequestHostAliases(req) {
+    if (!req) return [];
+    return [
+        req.hostname,
+        req.headers?.host,
+        req.headers?.['x-forwarded-host'],
+        req.headers?.['x-forwarded-server']
+    ].filter(Boolean);
+}
+
+function isLikelyContainerRuntime() {
+    if (process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS === 'true') return true;
+    if (process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS === 'false') return false;
+    if (process.env.KUBERNETES_SERVICE_HOST) return true;
+    try {
+        return fs.existsSync('/.dockerenv');
+    } catch (e) {
+        return false;
+    }
+}
+
+function isDockerInternalServiceHost(host) {
+    const normalized = normalizeHostAlias(host);
+    if (!normalized || normalized.includes('.') || net.isIP(normalized)) return false;
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(normalized)) return false;
+    return isLikelyContainerRuntime();
+}
+
+function isLocalModelHost(host, localNames) {
+    const normalized = normalizeHostAlias(host);
+    return localNames.has(normalized) || isDockerInternalServiceHost(normalized);
+}
+
+function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_URL || '' } = {}) {
     const names = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0', 'host.docker.internal', 'loopback']);
     try {
         const hostname = os.hostname().toLowerCase();
@@ -31,17 +97,20 @@ function getLocalHostnames() {
     } catch (e) {
         // Keep the conservative defaults above.
     }
+    addHostAlias(names, publicUrl);
+    addHostAlias(names, process.env.PIVOT_LOCAL_MODEL_HOSTS || process.env.MODEL_LOCAL_HOSTS || '');
+    requestHosts.forEach(host => addHostAlias(names, host));
     return names;
 }
 
-function summarizeModelEndpoints() {
+function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
     const rows = db.prepare(`
         SELECT id, name, url, monitor_url, max_concurrent
         FROM models
         WHERE COALESCE(status, 'active') = 'active'
         ORDER BY id ASC
     `).all();
-    const localNames = getLocalHostnames();
+    const localNames = getLocalHostnames({ requestHosts, publicUrl });
     const summary = {
         total: rows.length,
         localCount: 0,
@@ -55,7 +124,7 @@ function summarizeModelEndpoints() {
         try {
             const parsed = new URL(String(row.url || '').trim());
             const host = parsed.hostname.toLowerCase();
-            const isLocal = localNames.has(host);
+            const isLocal = isLocalModelHost(host, localNames);
             const item = {
                 id: row.id,
                 name: row.name,
@@ -100,7 +169,8 @@ function createAdminStatsRouter({
     adminMiddleware,
     logAction,
     escapeCsvCell,
-    getCachedDirSize
+    getCachedDirSize,
+    publicUrl = ''
 }) {
     const router = express.Router();
 
@@ -130,14 +200,15 @@ function createAdminStatsRouter({
 
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
-        const modelEndpoints = summarizeModelEndpoints();
-        const localNames = getLocalHostnames();
+        const requestHosts = getRequestHostAliases(req);
+        const modelEndpoints = summarizeModelEndpoints({ requestHosts, publicUrl });
+        const localNames = getLocalHostnames({ requestHosts, publicUrl });
         
         // 标记运行时的模型端点是否为本地
         if (Array.isArray(modelEndpoints.runtime)) {
             modelEndpoints.runtime.forEach(item => {
-                const host = String(item.host || '').split(':')[0].toLowerCase();
-                item.isLocal = localNames.has(host);
+                const host = normalizeHostAlias(item.host || item.key || '');
+                item.isLocal = isLocalModelHost(host, localNames);
             });
         }
 
@@ -337,4 +408,11 @@ function createAdminStatsRouter({
     return router;
 }
 
-module.exports = { createAdminStatsRouter };
+module.exports = {
+    createAdminStatsRouter,
+    getLocalHostnames,
+    isDockerInternalServiceHost,
+    isLocalModelHost,
+    normalizeHostAlias,
+    summarizeModelEndpoints
+};

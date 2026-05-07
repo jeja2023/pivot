@@ -256,7 +256,8 @@ app.use('/api/stats', createAdminStatsRouter({
     adminMiddleware,
     logAction,
     escapeCsvCell,
-    getCachedDirSize
+    getCachedDirSize,
+    publicUrl: appConfig.publicUrl
 }));
 
 app.use('/api', createAdminUsersRouter({

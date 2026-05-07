@@ -1009,7 +1009,7 @@ input::-webkit-contacts-auto-fill-button {
 /* 管理面板布局样式 */
 .admin-panel { 
     position: relative; 
-    width: 1550px; max-width: 96vw; height: 90vh; padding: 0; 
+    width: 1550px; max-width: 96vw; height: 94vh; padding: 0; 
     overflow: hidden; display: flex; flex-direction: column; 
 }
 .admin-layout { display: flex; height: 100%; }
@@ -1170,6 +1170,19 @@ input::-webkit-contacts-auto-fill-button {
     padding: 24px; box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04); backdrop-filter: blur(10px);
 }
 .stat-card h4 { margin: 0 0 20px 0; font-size: 1.05rem; color: var(--text-main); font-weight: 800; letter-spacing: -0.01em; }
+.trend-card canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
+.report-chart-grid { align-items: start; }
+.report-bar-card { text-align: left; }
+.report-bar-card h4 { text-align: center; }
+.report-bar-card canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
 .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 16px; }
 .ops-card {
     background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
@@ -1186,7 +1199,9 @@ input::-webkit-contacts-auto-fill-button {
 .monitor-card {
     background: #ffffff; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 10px;
     padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    transition: all 0.2s ease;
 }
+.monitor-card:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
 .monitor-card span { color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
 .monitor-card strong {
     color: var(--text-main); font-size: 0.92rem; line-height: 1.1;
@@ -1203,21 +1218,26 @@ input::-webkit-contacts-auto-fill-button {
 }
 .monitor-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .monitor-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    display: flex; align-items: center; justify-content: flex-start; gap: 12px;
     padding: 5px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);
 }
 .monitor-row:last-child { border-bottom: 0; }
 .monitor-row span { 
     color: var(--text-muted); font-size: 0.78rem; 
-    flex: 1; min-width: 0; 
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+}
+#monitor-gpu-list .monitor-row span,
+#monitor-resource-list .monitor-row span,
+#monitor-model-list .monitor-row span {
+    width: 72px; flex-shrink: 0;
 }
 .monitor-row strong { 
     color: var(--text-main); font-size: 0.82rem; 
     white-space: nowrap; flex-shrink: 0; 
-    text-align: right; margin-left: 10px;
+    text-align: left;
 }
 .monitor-empty { color: var(--text-muted); font-size: 0.82rem; padding: 10px 0; text-align: left; line-height: 1.4; }
 .monitor-empty.is-warning { color: #b91c1c; background: #fff7f7; border: 1px solid rgba(239, 68, 68, 0.24); border-radius: 8px; padding: 8px; text-align: left; }
@@ -1246,8 +1266,7 @@ input::-webkit-contacts-auto-fill-button {
 /* 监控页面专属紧凑化配置 (Deeply Compact) */
 #tab-content-monitor .stat-card { padding: 12px 14px; margin-bottom: 0; }
 #tab-content-monitor .stat-card h4 { margin-bottom: 8px; font-size: 0.9rem; }
-#tab-content-monitor h3 { margin-bottom: 8px; font-size: 1.15rem; }
-#tab-content-monitor .table-container { max-height: 240px; }
+#tab-content-monitor .table-container { max-height: 480px; }
 #tab-content-monitor .ops-grid { gap: 8px; }
 .ops-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06); border-color: var(--primary); }
 .ops-card span { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }

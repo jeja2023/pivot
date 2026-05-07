@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pivot-v0.0.11';
+const CACHE_NAME = 'pivot-v0.0.12';
 const ASSETS_TO_CACHE = [
   '/',
   '/chat/chat.html',

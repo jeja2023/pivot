@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pivot AI | 智枢</title>
     <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.11">
-    <link rel="stylesheet" href="/chat/chat.css?v=0.0.11">
+    <link rel="stylesheet" href="/chat/chat.css?v=0.0.12">
     <link rel="stylesheet" href="/common/vendor/github-dark.min.css">
     <!-- 引用本地第三方脚本 -->
     <script src="/common/vendor/marked.min.js"></script>
@@ -427,9 +427,9 @@
                             <h4>模型端点状态</h4>
                             <div id="monitor-endpoint-list" class="monitor-list"></div>
                         </div>
-                        <div class="stat-card" style="margin-top: 20px;">
+                        <div class="stat-card trend-card" style="margin-top: 20px;">
                             <h4>近 30 天 Token 趋势</h4>
-                            <canvas id="usage-trend-chart" height="180"></canvas>
+                            <canvas id="usage-trend-chart" height="220"></canvas>
                         </div>
                     </section>
 
@@ -671,13 +671,11 @@
 
                     <section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
                         <div
-                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                            <div style="text-align: left;">
-                                <h3 style="margin: 0;">系统监控</h3>
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>系统监控</h3>
+                            <div style="display: flex; gap: 16px; align-items: center;">
                                 <p id="monitor-updated-at"
-                                    style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.82rem;">等待刷新</p>
-                            </div>
-                            <div style="display: flex; gap: 10px; align-items: center;">
+                                    style="margin: 0; color: var(--text-muted); font-size: 0.82rem;">等待刷新</p>
                                 <label
                                     style="display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.85rem;">
                                     <input type="checkbox" id="monitor-auto-refresh" checked>
@@ -703,7 +701,7 @@
                         </div>
                         <div class="stat-card" style="margin-top: 20px;">
                             <h4>热点接口</h4>
-                            <div class="table-container" style="max-height: 320px;">
+                            <div class="table-container" style="max-height: 480px;">
                                 <table class="data-table compact-table">
                                     <thead>
                                         <tr>
@@ -726,7 +724,7 @@
                     <div id="tab-content-report" class="admin-tab-content admin-only hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>可视化审计报表</h3>
+                            <h3>审计报表</h3>
                             <div style="display: flex; gap: 10px;">
                                 <select id="report-unit" class="form-input"
                                     style="width: 180px; padding: 6px 12px; height: 36px;">
@@ -744,16 +742,16 @@
                                 <button id="report-query-btn" class="btn-primary" style="height: 36px;">生成报表</button>
                             </div>
                         </div>
-                        <div class="stat-card" style="margin-bottom: 20px;">
+                        <div class="stat-card trend-card" style="margin-bottom: 20px;">
                             <h4>Token 使用趋势</h4>
-                            <canvas id="report-trend-chart" height="180"></canvas>
+                            <canvas id="report-trend-chart" height="240"></canvas>
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                            <div class="stat-card">
+                        <div class="report-chart-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="stat-card report-bar-card">
                                 <h4>用户消耗排行 (Top 10)</h4>
                                 <canvas id="report-user-chart" height="250"></canvas>
                             </div>
-                            <div class="stat-card">
+                            <div class="stat-card report-bar-card">
                                 <h4>部门消耗对比</h4>
                                 <canvas id="report-unit-chart" height="250"></canvas>
                             </div>
@@ -950,16 +948,16 @@
     </div>
 
     <!-- 模块化加载业务逻辑 -->
-    <script src="/chat/config.js?v=0.0.11"></script>
-    <script src="/chat/ui.js?v=0.0.11"></script>
-    <script src="/chat/auth.js?v=0.0.11"></script>
+    <script src="/chat/config.js?v=0.0.12"></script>
+    <script src="/chat/ui.js?v=0.0.12"></script>
+    <script src="/chat/auth.js?v=0.0.12"></script>
     <!-- 管理员面板模块化脚本 -->
-    <script src="/chat/admin.js?v=0.0.11"></script>
+    <script src="/chat/admin.js?v=0.0.12"></script>
     <!-- 主程序模块化脚本 -->
-    <script src="/chat/render.js?v=0.0.11"></script>
-    <script src="/chat/engine.js?v=0.0.11"></script>
-    <script src="/chat/sidebar.js?v=0.0.11"></script>
-    <script src="/chat/app.js?v=0.0.11"></script>
+    <script src="/chat/render.js?v=0.0.12"></script>
+    <script src="/chat/engine.js?v=0.0.12"></script>
+    <script src="/chat/sidebar.js?v=0.0.12"></script>
+    <script src="/chat/app.js?v=0.0.12"></script>
 
     <!-- PWA 注册脚本 -->
     <script>
