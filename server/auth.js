@@ -15,6 +15,7 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET) || JWT_
 
 const AUTH_COOKIE_NAME = 'pivot_access_token';
 const REFRESH_COOKIE_NAME = 'pivot_refresh_token';
+const CSRF_COOKIE_NAME = 'pivot_csrf_token';
 
 const parsePositiveInt = (value, fallback) => {
     const parsed = parseInt(value, 10);
@@ -50,6 +51,10 @@ function hashApiKey(key) {
 function previewApiKey(key) {
     const text = String(key || '');
     return text ? `${text.slice(0, 3)}...${text.slice(-4)}` : '';
+}
+
+function generateCsrfToken() {
+    return crypto.randomBytes(24).toString('base64url');
 }
 
 function generateAccessToken(user) {
@@ -207,6 +212,18 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Token 无效或已过期', code: 'TOKEN_INVALID' });
 }
 
+function csrfMiddleware(req, res, next) {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) return next();
+    if (['/auth/login', '/auth/register', '/auth/refresh'].includes(req.path)) return next();
+    const cookieToken = getCookie(req, CSRF_COOKIE_NAME);
+    const headerToken = req.headers['x-csrf-token'];
+    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+        return res.status(403).json({ error: 'CSRF 校验失败' });
+    }
+    next();
+}
+
 module.exports = { 
     register, 
     login, 
@@ -216,8 +233,11 @@ module.exports = {
     getCookie,
     AUTH_COOKIE_NAME, 
     REFRESH_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
+    generateCsrfToken,
+    csrfMiddleware,
     hashApiKey,
     previewApiKey
 };

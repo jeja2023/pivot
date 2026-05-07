@@ -37,6 +37,9 @@ function runMigrations() {
     ensureColumn('messages', 'model_id', 'INTEGER');
     ensureColumn('messages', 'cost_time', 'REAL');
     ensureColumn('messages', 'tokens_per_sec', 'REAL');
+    ensureColumn('messages', 'context_archived', 'INTEGER DEFAULT 0');
+    ensureColumn('messages', 'compressed_at', 'DATETIME');
+    db.prepare('UPDATE messages SET context_archived = 0 WHERE context_archived IS NULL').run();
     ensureColumn('attachments', 'access_token', 'TEXT');
     ensureColumn('attachments', 'expires_at', 'DATETIME');
     const attachmentsToUpdate = db.prepare("SELECT id, created_at FROM attachments WHERE access_token IS NULL OR access_token = '' OR expires_at IS NULL").all();

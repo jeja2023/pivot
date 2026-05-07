@@ -1,6 +1,5 @@
 // 该脚本专用于 Docker 构建阶段，用于提前下载 RAG 向量模型并打包进镜像
 const path = require('path');
-const fs = require('fs');
 
 async function downloadModel() {
     console.log('🔄 正在为 Docker 镜像离线打包下载向量模型...');
@@ -16,7 +15,7 @@ async function downloadModel() {
     
     try {
         console.log('⏳ 开始下载 Xenova/paraphrase-multilingual-MiniLM-L12-v2...');
-        const extractor = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
+        await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
             quantized: true,
             progress_callback: (info) => {
                 if (info.status === 'progress') {

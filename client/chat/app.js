@@ -149,7 +149,7 @@ bind('pw-update-btn', () => window.updatePassword());
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
-bind('admin-panel-btn', () => window.switchTab('ops'));
+bind('admin-panel-btn', () => window.openAdminPanel());
 bind('logout-btn', () => window.logout());
 
 // 管理操作
@@ -183,7 +183,6 @@ bind('user-export-btn', () => window.exportUsers());
 bind('logs-export-btn', () => window.exportLogs());
 bind('stats-export-btn', () => window.exportStats());
 bind('details-export-btn', () => window.exportDetails());
-bind('pw-update-btn', () => window.changePassword());
 
 // 其他
 bind('image-viewer-modal', () => window.closeImageViewer());

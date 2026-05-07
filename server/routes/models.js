@@ -6,11 +6,21 @@ const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { encryptSecret, validateModelUrl } = require('../security');
 const {
-    modelListFields,
     normalizeTags,
     getAccessibleModel
 } = require('../services/models');
 const { getBeijingTimestamp } = require('../time');
+
+function buildModelsListUrl(url) {
+    let modelsUrl = String(url || '').trim();
+    if (!modelsUrl.includes('/v1') && !modelsUrl.includes('localhost') && !modelsUrl.includes('127.0.0.1')) {
+        modelsUrl = modelsUrl.replace(/\/+$/, '') + '/v1';
+    }
+    if (!modelsUrl.endsWith('/models')) {
+        modelsUrl = modelsUrl.replace(/\/+$/, '') + '/models';
+    }
+    return modelsUrl;
+}
 
 function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }) {
     const router = express.Router();
@@ -19,30 +29,35 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let { url, api_key, id } = req.body;
         if (!url) return res.status(400).json({ error: '请填写接口地址' });
 
-        // 处理掩码情况：如果提供了 ID 且 Key 为掩码，则从数据库加载真实 Key
-        if (id && api_key === '********') {
-            const existing = db.prepare('SELECT api_key FROM models WHERE id = ?').get(id);
-            if (existing && existing.api_key) {
-                const { decryptSecret } = require('../security');
-                try {
-                    api_key = decryptSecret(existing.api_key);
-                } catch (e) {
-                    return res.status(500).json({ error: '解密密钥失败，请手动重新输入' });
-                }
-            }
+        url = String(url || '').trim();
+        if (api_key) api_key = String(api_key).trim();
+
+        try {
+            validateModelUrl(url, req.user);
+        } catch (e) {
+            logAction(req, '模型列表拉取拦截', e.message);
+            return res.json({ success: false, error: e.message });
         }
 
-        url = url.trim();
-        if (api_key) api_key = api_key.trim();
+        // 处理掩码情况：只能复用当前用户可访问模型且 URL 未被替换时的真实 Key
+        if (id && api_key === '********') {
+            const storedModel = getAccessibleModel(id, req.user);
+            if (!storedModel || String(storedModel.id) !== String(id)) {
+                logAction(req, '模型列表拉取拦截', `无权复用模型密钥，模型ID: ${id}`);
+                return res.status(403).json({ success: false, error: '无权访问该模型或模型不存在' });
+            }
+            if (storedModel.secret_error) {
+                return res.json({ success: false, error: `${storedModel.secret_error}，请重新保存该模型的 API Key` });
+            }
+            if (new URL(buildModelsListUrl(url)).href !== new URL(buildModelsListUrl(storedModel.url)).href) {
+                logAction(req, '模型列表拉取拦截', `拒绝将模型密钥用于不同 URL，模型ID: ${id}`);
+                return res.status(400).json({ success: false, error: '接口地址已变更，请重新输入 API Key 后再获取模型列表' });
+            }
+            api_key = storedModel.api_key;
+        }
 
         // 尝试自动补全 /v1
-        let modelsUrl = url;
-        if (!modelsUrl.includes('/v1') && !modelsUrl.includes('localhost') && !modelsUrl.includes('127.0.0.1')) {
-            modelsUrl = modelsUrl.replace(/\/+$/, '') + '/v1';
-        }
-        if (!modelsUrl.endsWith('/models')) {
-            modelsUrl = modelsUrl.replace(/\/+$/, '') + '/models';
-        }
+        let modelsUrl = buildModelsListUrl(url);
 
         try {
             const response = await axios.get(modelsUrl, {
@@ -113,7 +128,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         try {
             const testUrl = chatUrl.replace('/chat/completions', '/models');
             req.log.debug({ testId, testUrl }, '探测模型路径');
-            const response = await axios.get(testUrl, {
+            await axios.get(testUrl, {
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
                     'x-api-key': api_key || undefined,

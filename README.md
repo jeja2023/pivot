@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.9-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.10-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款专为私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为用户提供一个安全、稳定且美观的 AI 交互门户。
@@ -110,6 +110,14 @@ GPU_VRAM_REJECT_THRESHOLD=0.97
 
 `.env` 与 `.env.example` 应保持一致；生产部署修改 `.env` 后需要重启服务，新的登录有效期需要重新登录后才会体现在 Cookie 中。
 
+## 最近更新
+
+- 增加 CSRF token 机制，强化登录、刷新与会话状态安全。
+- 统一聊天与 OpenAI 兼容接口的 SSE 流式解析，减少重复实现。
+- 优化 RAG 检索缓存与候选预过滤，降低高频查询开销。
+- 新增 ESLint 配置与安全测试，完善 lint / test / check 基础链路。
+- 补充审计日志、RAG 缓存等环境变量说明，并同步示例配置。
+
 ## 目录结构
 - `server/`: 后端核心程序 (Express + SQLite)
 - `client/`: 前端静态资源 (完全本地化)
@@ -117,4 +125,12 @@ GPU_VRAM_REJECT_THRESHOLD=0.97
 - `uploads/`: 用户附件隔离存储
 
 ---
-**当前版本**: v0.0.9 (Performance, FTS5 Search, PWA & Full-stack Security Optimization)
+## 本次更新（0.0.10）
+- 聊天页右上角新增上下文用量提示，切换会话时会同步显示当前活跃 token 的占用比例。
+- 会话压缩改为“软归档 + 摘要”模式，历史消息不再物理删除，保留可追踪的归档标记和摘要消息。
+- 管理员面板相关脚本改为按需加载，降低 `chat.html` 初始脚本体积。
+- 认证页事件绑定增加空节点保护，避免旧缓存或局部加载导致登录页报错。
+- 聊天页资源版本统一提升到 `0.0.10`，Service Worker 缓存名也同步更新，减少旧资源命中。
+- 顶栏模型选择器与上下文提示做了对齐修正，视觉上更紧凑。
+
+**当前版本**: v0.0.10 (Authentication Hardening, Context Archiving, Lazy Loading & UI Polish)

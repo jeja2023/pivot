@@ -1,8 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// 配置路径
-const DB_PATH = path.join(__dirname, '../data/chat.db');
 const BACKUP_DIR = path.join(__dirname, '../data/backups');
 
 // 确保备份目录存在

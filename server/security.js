@@ -7,6 +7,7 @@ const logger = require('./logger');
 
 const encryptedPrefix = 'enc:v1:';
 const uploadRoot = path.resolve(__dirname, '../uploads');
+const projectRoot = path.resolve(__dirname, '..');
 
 function getEncryptionKey() {
     const source = process.env.DATA_ENCRYPTION_KEY || process.env.JWT_SECRET;
@@ -140,11 +141,43 @@ function removeAttachmentFiles(attachments) {
     }
 }
 
+function isPathInsideUploadRoot(targetPath) {
+    const target = path.resolve(targetPath);
+    return target === uploadRoot || target.startsWith(uploadRoot + path.sep);
+}
+
+function resolveUploadUrlPath(uploadUrl) {
+    const cleanUrl = String(uploadUrl || '').split(/[?#]/)[0];
+    let decodedUrl;
+    try {
+        decodedUrl = decodeURIComponent(cleanUrl);
+    } catch (e) {
+        return null;
+    }
+    if (!decodedUrl.startsWith('/uploads/') || decodedUrl.includes('\0')) return null;
+
+    const relativePath = decodedUrl.slice('/uploads/'.length);
+    if (!relativePath || relativePath.split(/[\\/]/).some(part => part === '..')) return null;
+
+    const target = path.resolve(uploadRoot, relativePath);
+    if (!isPathInsideUploadRoot(target)) return null;
+    return target;
+}
+
+function toProjectRelativePath(targetPath) {
+    const target = path.resolve(targetPath);
+    if (!isPathInsideUploadRoot(target)) return '';
+    return path.relative(projectRoot, target).replace(/\\/g, '/');
+}
+
 module.exports = {
     encryptSecret,
     decryptSecret,
     validateModelUrl,
     escapeCsvCell,
     parseCsvLine,
-    removeAttachmentFiles
+    removeAttachmentFiles,
+    resolveUploadUrlPath,
+    toProjectRelativePath,
+    isPathInsideUploadRoot
 };

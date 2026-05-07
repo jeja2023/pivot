@@ -3,10 +3,7 @@ const axios = require('axios');
 const http = require('http');
 const https = require('https');
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const { asyncHandler } = require('../http');
-const { StringDecoder } = require('string_decoder');
 const { db } = require('../db');
 const {
     detectUnsupportedCapability,
@@ -26,6 +23,8 @@ const {
     recordModelFailure
 } = require('../services/model-runtime');
 const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('../image-safety');
+const { resolveUploadUrlPath, toProjectRelativePath } = require('../security');
+const { createSseEventParser, extractStreamPayload } = require('../streaming');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -37,20 +36,19 @@ function getRequestOrigin(req, publicUrl = '') {
     return host ? `${proto}://${host}` : '';
 }
 
-function getImageDataUrl(uploadUrl) {
-    const cleanUrl = String(uploadUrl || '').split('?')[0];
-    const decodedUrl = decodeURIComponent(cleanUrl);
-    if (!decodedUrl.startsWith('/uploads/')) return null;
-
-    const uploadRoot = path.resolve(__dirname, '../../uploads');
-    const relativePath = decodedUrl.replace(/^\/uploads\//, '');
-    const target = path.resolve(uploadRoot, relativePath);
-    if (!target.startsWith(uploadRoot + path.sep) || !fs.existsSync(target)) return null;
-
+function getImageDataUrl(uploadUrl, userId, sessionId) {
+    const target = resolveUploadUrlPath(uploadUrl);
+    const filePath = target ? toProjectRelativePath(target) : '';
+    if (!filePath) return null;
+    const attachment = db.prepare(`
+        SELECT id FROM attachments
+        WHERE user_id = ? AND session_id = ? AND file_path = ?
+    `).get(userId, sessionId, filePath);
+    if (!attachment) return null;
     return imageFileToDataUrl(target);
 }
 
-function buildVisionHistory(history, origin) {
+function buildVisionHistory(history, origin, userId, sessionId) {
     if (!origin) return history;
     const imageMarkdown = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
     return history.map(message => {
@@ -63,7 +61,10 @@ function buildVisionHistory(history, origin) {
             if (imageParts.length >= MAX_IMAGES_PER_MESSAGE) {
                 return alt ? `[图片已跳过: ${alt}]` : '[图片已跳过]';
             }
-            const imageUrl = getImageDataUrl(url) || new URL(url, origin).toString();
+            const imageUrl = getImageDataUrl(url, userId, sessionId);
+            if (!imageUrl) {
+                return alt ? `[图片不可用: ${alt}]` : '[图片不可用]';
+            }
             imageParts.push({
                 type: 'image_url',
                 image_url: {
@@ -267,7 +268,7 @@ function createChatRouter({
                 history.push({ role: 'system', content: ragContext });
             }
         }
-        let visionHistory = limitVisionImages(buildVisionHistory(history, getRequestOrigin(req, publicUrl)));
+        let visionHistory = limitVisionImages(buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
         
         if (visionHistory.length === 0) {
             req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
@@ -284,7 +285,7 @@ function createChatRouter({
                 }
 
                 // 补救的消息也需要经过 buildVisionHistory 处理以支持多模态
-                const rescuedHistory = limitVisionImages(buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl)));
+                const rescuedHistory = limitVisionImages(buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl), userId, sessionId));
                 visionHistory.push(...rescuedHistory);
             } else {
                 releaseSemaphore();
@@ -439,84 +440,48 @@ function createChatRouter({
                 req.log.info('连接成功');
             }
 
-            const decoder = new StringDecoder('utf8');
-            let buffer = '';
             let assistantContent = '';
             let lastWasThought = false;
             let apiUsage = null;
-
-            response.data.on('data', chunk => {
-                buffer += decoder.write(chunk);
-                let lines = buffer.split('\n');
-                buffer = lines.pop();
-
-                for (let line of lines) {
-                    line = line.trim();
-                    if (!line || !line.startsWith('data:')) continue;
-
-                    const dataStr = line.replace(/^data:\s*/, '');
-                    if (dataStr === '[DONE]') continue;
-
+            const parser = createSseEventParser({
+                onData(payload) {
                     try {
-                        const json = JSON.parse(dataStr);
+                        const json = JSON.parse(payload);
                         if (json.usage) apiUsage = json.usage;
-                        
-                        let delta = '';
-                        let isThought = false;
+                        const { delta, isThought } = extractStreamPayload(json);
+                        if (!delta) return;
 
-                        if (json.type === 'response.output_text.delta' || json.type === 'response.text_delta') {
-                            delta = json.delta || json.text || '';
-                        } else if (json.type === 'response.reasoning_text.delta' || json.type === 'response.reasoning_delta') {
-                            delta = json.delta || json.text || '';
-                            isThought = true;
-                        } else if (json.type === 'response.content_part.delta') {
-                            delta = json.delta?.text || '';
-                        } else if (json.choices && json.choices[0].delta) {
-                            const d = json.choices[0].delta;
-                            if (d.reasoning_content !== undefined && d.reasoning_content !== null) {
-                                delta = d.reasoning_content;
-                                isThought = true;
-                            } else if (d.content !== undefined && d.content !== null) {
-                                delta = d.content;
-                                isThought = false;
+                        let sendContent = '';
+                        if (isThought) {
+                            if (!lastWasThought) {
+                                sendContent += '<thought>';
+                                lastWasThought = true;
                             }
-                        } else if (json.type === 'response.completed' && !assistantContent && json.response?.output) {
-                            const out = json.response.output.find(o => o.type === 'message');
-                            if (out) {
-                                const content = out.content.find(c => c.type === 'output_text' || c.type === 'text');
-                                delta = content?.text || '';
+                            sendContent += delta;
+                        } else {
+                            if (lastWasThought) {
+                                sendContent += '</thought>';
+                                lastWasThought = false;
                             }
+                            sendContent += delta;
                         }
 
-                        if (delta) {
-                            let sendContent = '';
-                            if (isThought) {
-                                if (!lastWasThought) {
-                                    sendContent += '<thought>';
-                                    lastWasThought = true;
-                                }
-                                sendContent += delta;
-                            } else {
-                                if (lastWasThought) {
-                                    sendContent += '</thought>';
-                                    lastWasThought = false;
-                                }
-                                sendContent += delta;
-                            }
-
-                            if (sendContent) {
-                                assistantContent += sendContent;
-                                writeSse(JSON.stringify({ content: sendContent }));
-                            }
+                        if (sendContent) {
+                            assistantContent += sendContent;
+                            writeSse(JSON.stringify({ content: sendContent }));
                         }
                     } catch (e) {
                         // 忽略无效行
                     }
-                }
+                },
+                onDone() {}
             });
+
+            response.data.on('data', chunk => parser.write(chunk));
 
             response.data.on('end', async () => {
                 try {
+                    parser.end();
                     if (lastWasThought) {
                         const closeTag = '</thought>';
                         assistantContent += closeTag;

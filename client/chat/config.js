@@ -2,9 +2,10 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢';
-const APP_VERSION = 'v0.0.9';
+const APP_VERSION = 'v0.0.10';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION} 保留所有权利`;
-let token = localStorage.getItem('pivot_token');
+localStorage.removeItem('pivot_token');
+let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';
 let currentUser = null;
 let currentSessionId = null;
 
@@ -18,13 +19,14 @@ async function refreshAccessToken() {
         try {
             const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST' });
             if (!refreshRes.ok) throw new Error('Refresh failed');
-            const refreshData = await refreshRes.json();
-            token = refreshData.accessToken;
-            localStorage.setItem('pivot_token', token);
+            const refreshData = await refreshRes.json().catch(() => ({}));
+            if (refreshData.csrfToken) {
+                setCsrfToken(refreshData.csrfToken);
+            }
             isRefreshing = false;
-            refreshQueue.forEach(cb => cb(token));
+            refreshQueue.forEach(cb => cb(true));
             refreshQueue = [];
-            return token;
+            return true;
         } catch (e) {
             isRefreshing = false;
             refreshQueue = [];
@@ -39,7 +41,7 @@ async function refreshAccessToken() {
 
 function authHeaders(extra = {}) {
     const headers = { ...extra };
-    if (token && token !== 'null') headers.Authorization = `Bearer ${token}`;
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
     return headers;
 }
 
@@ -79,6 +81,7 @@ async function checkLogin() {
         const res = await apiFetch(`${API_BASE}/auth/me`);
         if (res.ok) {
             const data = await res.json();
+            if (data.csrfToken) setCsrfToken(data.csrfToken);
             currentUser = data.user;
             if (window.showApp) window.showApp();
         } else {
@@ -92,6 +95,15 @@ async function checkLogin() {
 
 function handleUnauthorized() {
     localStorage.removeItem('pivot_token');
-    token = null;
+    setCsrfToken('');
     if (window.showAuth) window.showAuth();
+}
+
+function setCsrfToken(value) {
+    csrfToken = value || '';
+    if (csrfToken) {
+        sessionStorage.setItem('pivot_csrf_token', csrfToken);
+    } else {
+        sessionStorage.removeItem('pivot_csrf_token');
+    }
 }

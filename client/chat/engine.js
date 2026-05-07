@@ -28,6 +28,7 @@ window.selectSession = async function(id, title) {
     
     const session = data.session;
     const messages = data.messages;
+    if (window.updateContextUsage) window.updateContextUsage(data.contextMeta || null);
     
     if (session && session.title) document.getElementById('current-title').innerText = session.title;
     

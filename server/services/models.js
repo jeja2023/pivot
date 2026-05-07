@@ -1,5 +1,5 @@
 /* 模型业务逻辑层 Model Service Layer */
-const { db, stmts } = require('../db');
+const { db } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 
 const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_concurrent, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";

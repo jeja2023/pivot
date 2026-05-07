@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "server/index.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "dev": "chcp 65001 >nul && nodemon --ignore client server/index.js",
     "lint": "eslint . --ext .js",
     "check": "node scripts/check_syntax.js",
-    "test": "npm run check",
+    "test": "npm run check && node tests/security.test.js",
     "backup": "node scripts/backup_db.js"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "eslint": "^10.3.0",
     "nodemon": "^3.1.0"
   }
 }

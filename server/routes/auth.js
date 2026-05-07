@@ -7,8 +7,10 @@ const {
     getCookie,
     AUTH_COOKIE_NAME,
     REFRESH_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
-    REFRESH_COOKIE_OPTIONS
+    REFRESH_COOKIE_OPTIONS,
+    generateCsrfToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
 const { db, stmts } = require('../db');
@@ -51,10 +53,17 @@ function createAuthRouter({
             // 设置两个 Cookie
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
+            const csrfToken = generateCsrfToken();
+            res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+                sameSite: 'lax',
+                path: '/',
+                secure: process.env.COOKIE_SECURE === 'true',
+                maxAge: ACCESS_COOKIE_OPTIONS.maxAge
+            });
             
             res.json({ 
                 user: data.user,
-                accessToken: data.accessToken // 也返回给前端，方便前端决定存储方式
+                csrfToken
             });
         } catch (e) {
             logAction(req, '登录失败', `账号: ${req.body?.username || '-'}，原因: ${e.message}`);
@@ -72,7 +81,14 @@ function createAuthRouter({
             const data = refreshTokens(refreshToken);
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
-            res.json({ accessToken: data.accessToken });
+            const csrfToken = generateCsrfToken();
+            res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+                sameSite: 'lax',
+                path: '/',
+                secure: process.env.COOKIE_SECURE === 'true',
+                maxAge: ACCESS_COOKIE_OPTIONS.maxAge
+            });
+            res.json({ success: true, csrfToken });
         } catch (e) {
             res.clearCookie(AUTH_COOKIE_NAME, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, REFRESH_COOKIE_OPTIONS);
@@ -81,7 +97,14 @@ function createAuthRouter({
     }));
 
     router.get('/auth/me', authMiddleware, (req, res) => {
-        res.json({ user: req.user });
+        const csrfToken = generateCsrfToken();
+        res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+            sameSite: 'lax',
+            path: '/',
+            secure: process.env.COOKIE_SECURE === 'true',
+            maxAge: ACCESS_COOKIE_OPTIONS.maxAge
+        });
+        res.json({ user: req.user, csrfToken });
     });
 
     router.post('/auth/logout', authMiddleware, (req, res) => {
@@ -95,6 +118,7 @@ function createAuthRouter({
 
         res.clearCookie(AUTH_COOKIE_NAME, { ...ACCESS_COOKIE_OPTIONS, maxAge: 0 });
         res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+        res.clearCookie(CSRF_COOKIE_NAME, { sameSite: 'lax', path: '/', secure: process.env.COOKIE_SECURE === 'true', maxAge: 0 });
         res.json({ success: true });
     });
 

@@ -9,15 +9,15 @@ async function loadAuthConfig() {
         allowPublicRegistration = data.allowPublicRegistration === true;
         window.publicUrl = data.publicUrl || '';
         if (!allowPublicRegistration) {
-            document.getElementById('auth-toggle').classList.add('hidden');
+            document.getElementById('auth-toggle')?.classList.add('hidden');
         }
     } catch (e) {
         allowPublicRegistration = false;
-        document.getElementById('auth-toggle').classList.add('hidden');
+        document.getElementById('auth-toggle')?.classList.add('hidden');
     }
 }
 
-document.getElementById('auth-toggle').addEventListener('click', () => {
+document.getElementById('auth-toggle')?.addEventListener('click', () => {
     if (!allowPublicRegistration) return showToast('当前已关闭公开注册，请联系管理员创建账号', 'error');
     isLogin = !isLogin;
     document.getElementById('auth-title').innerText = isLogin ? '智枢' : '智枢 - 注册账号';
@@ -26,12 +26,21 @@ document.getElementById('auth-toggle').addEventListener('click', () => {
     document.querySelectorAll('.reg-only').forEach(el => el.classList.toggle('hidden', isLogin));
 });
 
-document.getElementById('auth-submit').addEventListener('click', async () => {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const nickname = document.getElementById('nickname').value;
-    const unit = document.getElementById('unit').value;
-    const confirmPw = document.getElementById('confirm-password').value;
+document.getElementById('auth-submit')?.addEventListener('click', async () => {
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const nicknameInput = document.getElementById('nickname');
+    const unitInput = document.getElementById('unit');
+    const confirmPwInput = document.getElementById('confirm-password');
+    if (!usernameInput || !passwordInput || !nicknameInput || !unitInput || !confirmPwInput) {
+        return showToast('登录表单未加载完成，请刷新页面', 'error');
+    }
+
+    const username = usernameInput.value;
+    const password = passwordInput.value;
+    const nickname = nicknameInput.value;
+    const unit = unitInput.value;
+    const confirmPw = confirmPwInput.value;
 
     if (!username || !password) return showToast('请输入账号密码');
     
@@ -55,9 +64,9 @@ document.getElementById('auth-submit').addEventListener('click', async () => {
         if (data.error) throw new Error(data.error);
         
         if (isLogin) {
-            token = data.accessToken;
+            setCsrfToken(data.csrfToken || '');
             currentUser = data.user;
-            localStorage.setItem('pivot_token', token);
+            localStorage.removeItem('pivot_token');
             showApp();
         } else {
             showToast('注册成功，请登录');
@@ -71,17 +80,23 @@ window.logout = () => {
         method: 'POST'
     }).catch(() => {});
     localStorage.removeItem('pivot_token');
-    token = null;
+    setCsrfToken('');
     location.reload();
 };
 
 // --- 表单交互体验优化：支持回车键 (Enter) 提交 ---
-document.getElementById('auth-container').addEventListener('keydown', (e) => {
-    // 监听任意输入框的回车键事件
-    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
-        e.preventDefault(); // 阻止默认的回车行为
-        document.getElementById('auth-submit').click(); // 触发按钮点击
-    }
+document.getElementById('auth-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    document.getElementById('auth-submit')?.click();
+});
+
+document.querySelectorAll('#auth-form input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('auth-submit')?.click();
+        }
+    });
 });
 
 loadAuthConfig();

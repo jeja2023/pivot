@@ -22,6 +22,7 @@ const stmts = {
     getSessions: db.prepare('SELECT * FROM sessions WHERE user_id = ? AND is_archived = ? ORDER BY is_pinned DESC, updated_at DESC'),
     getSessionById: db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?'),
     getMessages: db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC'),
+    getMessagesForContext: db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC'),
     updateSessionTitle: db.prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     // 模型
     getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, user_id, status, created_at FROM models ORDER BY id DESC'),

@@ -5,6 +5,8 @@ const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { removeAttachmentFiles } = require('../security');
 const { getBeijingTimestamp } = require('../time');
+const { buildFtsQuery } = require('../search');
+const { buildContextMeta } = require('../llm');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -107,6 +109,8 @@ function createSessionsRouter({
     router.get('/sessions/search/content', authMiddleware, asyncHandler(async (req, res) => {
         const keyword = String(req.query.keyword || '').trim();
         if (!keyword) return res.json({ data: [] });
+        const ftsQuery = buildFtsQuery(keyword);
+        if (!ftsQuery) return res.json({ data: [] });
 
         const sessions = db.prepare(`
             SELECT DISTINCT s.*, 
@@ -118,7 +122,7 @@ function createSessionsRouter({
             WHERE s.user_id = ? AND messages_fts MATCH ?
             ORDER BY s.updated_at DESC
             LIMIT 50
-        `).all(req.user.id, keyword);
+        `).all(req.user.id, ftsQuery);
 
         res.json({ data: sessions });
     }));
@@ -126,8 +130,9 @@ function createSessionsRouter({
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const session = stmts.getSessionById.get(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const messages = appendAttachmentTokens(stmts.getMessages.all(req.params.id, req.user.id), req.user.id, req.params.id);
-        res.json({ session, messages });
+        const rawMessages = stmts.getMessages.all(req.params.id, req.user.id);
+        const messages = appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
+        res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
     }));
 
     router.get('/sessions/:id/export', authMiddleware, asyncHandler(async (req, res) => {

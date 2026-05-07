@@ -49,6 +49,8 @@ function initSchema() {
             content TEXT NOT NULL,
             token_count INTEGER DEFAULT 0,
             is_summary INTEGER DEFAULT 0,
+            context_archived INTEGER DEFAULT 0,
+            compressed_at DATETIME,
             model_id INTEGER,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (session_id) REFERENCES sessions(id),

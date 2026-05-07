@@ -20,7 +20,11 @@ const {
     metricsAuthMiddleware,
     renderPrometheusMetrics
 } = require('./metrics');
-const { v4: uuidv4 } = require('uuid');
+const { 
+    getClientIp, 
+    normalizePage, 
+    normalizeLimit
+} = require('./http');
 const { validateConfig } = require('./config');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
@@ -35,11 +39,11 @@ const fatalExit = (reason, err) => {
 process.on('uncaughtException', (err) => {
     fatalExit('未捕获的异常 (Uncaught Exception)', err);
 });
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
     fatalExit('未处理的 Promise 拒绝 (Unhandled Rejection)', reason);
 });
 const { db, stmts } = require('./db');
-const { authMiddleware } = require('./auth');
+const { authMiddleware, csrfMiddleware } = require('./auth');
 const {
     escapeCsvCell
 } = require('./security');
@@ -61,15 +65,16 @@ const {
 } = require('./services/models');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
+const { startMaintenanceTasks } = require('./services/maintenance');
+
+// 启动后台维护任务
+startMaintenanceTasks();
 
 // 启动 GPU 监控 (非阻塞)
 startGpuMonitor().catch(() => {});
 startModelEndpointMonitor().catch(() => {});
 
-const getClientIp = (req) => {
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-    return ip.replace(/^.*:ffff:/, '');
-};
+// 移除冗余的 getClientIp 定义，已由 http.js 提供
 
 const logAction = (req, action, details) => {
     const userId = req.user ? req.user.id : null;
@@ -77,8 +82,7 @@ const logAction = (req, action, details) => {
     stmts.insertLog.run(userId, action, details, ip, getBeijingTimestamp());
 };
 
-const normalizePage = (value, fallback = 1) => Math.max(parseInt(value, 10) || fallback, 1);
-const normalizeLimit = (value, fallback = 10, max = 100) => Math.min(Math.max(parseInt(value, 10) || fallback, 1), max);
+// 移除冗余的分页格式化函数，已由 http.js 提供
 const isPublicRegistrationEnabled = () => process.env.ALLOW_PUBLIC_REGISTRATION === 'true';
 async function getDirSizeAsync(dir) {
     if (!fs.existsSync(dir)) return 0;
@@ -123,6 +127,7 @@ migrateModelSecrets();
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
+    keyGenerator: (req) => getClientIp(req), // 统一使用 getClientIp
     message: { error: '登录请求过于频繁，请15分钟后再试' }
 });
 
@@ -131,11 +136,11 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "blob:"],
+            "script-src": ["'self'", "'unsafe-inline'", "blob:"],
             "script-src-attr": ["'unsafe-inline'"], // 允许 HTML 标签中的 onclick 等内联事件
-            "img-src": ["'self'", "data:", "blob:", "*"],
+            "img-src": ["'self'", "data:", "blob:"],
             "style-src": ["'self'", "'unsafe-inline'"],
-            "connect-src": ["'self'", "*"],
+            "connect-src": ["'self'"],
             "upgrade-insecure-requests": null
         }
     },
@@ -148,6 +153,10 @@ app.use(helmet({
 const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
+    keyGenerator: (req) => {
+        // 优先使用用户 ID 进行限流，防止多设备/代理下的误伤，同时也防止单一用户刷接口
+        return req.user ? `user_${req.user.id}` : getClientIp(req);
+    },
     message: { error: '您的提问速度过快，请稍作休息' }
 });
 
@@ -160,6 +169,9 @@ if (corsOrigins.length > 0) {
 }
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+app.use('/api', csrfMiddleware);
+app.use('/v1', csrfMiddleware);
 
 app.get('/api/health', (req, res) => {
     try {
@@ -295,7 +307,7 @@ app.use('/v1', createOpenAIRouter({
 }));
 
 // --- 全局错误处理中间件 ---
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
     const status = err.status || 500;
     const isClientError = status >= 400 && status < 500;
 

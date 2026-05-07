@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
-const includeDirs = ['server', 'client', 'scripts'];
+const includeDirs = ['server', 'client', 'scripts', 'tests'];
 const ignoredDirs = new Set(['node_modules', 'data', 'uploads']);
 
 function collectJsFiles(dir, files = []) {

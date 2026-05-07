@@ -17,6 +17,7 @@ const {
     buildCapabilityFallbackMessage
 } = require('../capabilities');
 const axios = require('axios');
+const { createSseEventParser, extractStreamPayload } = require('../streaming');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -158,20 +159,24 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 res.setHeader('Connection', 'keep-alive');
                 
                 let totalContent = '';
+                const parser = createSseEventParser({
+                    onData(payload) {
+                        try {
+                            const json = JSON.parse(payload);
+                            const { delta } = extractStreamPayload(json);
+                            if (delta) totalContent += delta;
+                        } catch (e) {
+                            // 转发兼容接口时忽略无法解析的非标准事件
+                        }
+                    }
+                });
                 response.data.on('data', chunk => {
                     res.write(chunk);
-                    // 尝试从流中提取内容进行 Token 统计 (粗略统计)
-                    const str = chunk.toString();
-                    const matches = str.match(/"content":"(.*?)"/g);
-                    if (matches) {
-                        matches.forEach(m => {
-                            const content = m.match(/"content":"(.*?)"/)[1];
-                            totalContent += content;
-                        });
-                    }
+                    parser.write(chunk);
                 });
 
                 response.data.on('end', () => {
+                    parser.end();
                     const tokens = estimateTokens(JSON.stringify(messages) + totalContent);
                     if (req.isApiKey && req.apiKeyId && tokens > 0) {
                         db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);

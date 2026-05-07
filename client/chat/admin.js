@@ -53,7 +53,47 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, limit: 10 };
 
-document.getElementById('admin-panel-btn').onclick = () => {
+const adminFeatureScripts = [
+    `/chat/models.js?v=${APP_VERSION}`,
+    `/chat/rag.js?v=${APP_VERSION}`,
+    `/chat/users.js?v=${APP_VERSION}`,
+    `/chat/stats.js?v=${APP_VERSION}`,
+    `/chat/extra.js?v=${APP_VERSION}`
+];
+
+let adminFeatureLoadPromise = null;
+
+const loadScriptOnce = (src) => new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+        resolve();
+        return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+});
+
+window.ensureAdminFeatureScripts = async () => {
+    if (adminFeatureLoadPromise) return adminFeatureLoadPromise;
+    adminFeatureLoadPromise = (async () => {
+        for (const src of adminFeatureScripts) {
+            await loadScriptOnce(src);
+        }
+    })();
+    try {
+        await adminFeatureLoadPromise;
+    } catch (e) {
+        adminFeatureLoadPromise = null;
+        throw e;
+    }
+};
+
+window.openAdminPanel = async () => {
+    await window.ensureAdminFeatureScripts();
     const adminContainer = document.getElementById('admin-container');
     adminContainer.classList.remove('hidden');
     
@@ -62,13 +102,14 @@ document.getElementById('admin-panel-btn').onclick = () => {
     } else {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     }
-    loadSettings();
-    switchTab('ops');
+    await loadSettings();
+    await window.switchTab('ops');
 };
 
 window.closeModal = () => document.getElementById('admin-container').classList.add('hidden');
 
 window.switchTab = async (tab) => {
+    await window.ensureAdminFeatureScripts();
     const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));

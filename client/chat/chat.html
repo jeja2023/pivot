@@ -6,8 +6,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pivot AI | 智枢</title>
-    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.9">
-    <link rel="stylesheet" href="/chat/chat.css?v=0.0.9">
+    <link rel="stylesheet" href="/common/styles/theme.css?v=0.0.10">
+    <link rel="stylesheet" href="/chat/chat.css?v=0.0.10">
     <link rel="stylesheet" href="/common/vendor/github-dark.min.css">
     <!-- 引用本地第三方脚本 -->
     <script src="/common/vendor/marked.min.js"></script>
@@ -29,7 +29,7 @@
         <div class="modal">
             <img src="/common/logo.png" alt="Zhi-Shu Logo" class="auth-logo">
             <h2 id="auth-title">智枢</h2>
-            <div class="form-group">
+            <form class="form-group" id="auth-form" autocomplete="on">
                 <input type="text" id="username" class="form-input" placeholder="用户名">
                 <div class="reg-only hidden">
                     <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
@@ -37,7 +37,7 @@
                 </div>
                 <input type="password" id="password" class="form-input" placeholder="密码">
                 <input type="password" id="confirm-password" class="form-input reg-only hidden" placeholder="确认密码">
-            </div>
+            </form>
             <button id="auth-submit" class="btn-primary" style="width: 100%;">进入系统</button>
             <p style="margin-top: 15px; font-size: 0.85rem;">
                 <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
@@ -345,6 +345,7 @@
                     <h3 id="current-title">请选择或新建对话</h3>
                 </div>
                 <div class="header-right">
+                    <span id="context-usage-pill" class="context-pill" title="当前会话上下文用量">上下文 -</span>
                     <span style="font-size: 0.85rem; color: var(--text-muted); margin-right: 8px;">当前模型:</span>
                     <select id="model-selector" class="form-input" style="width: auto;"></select>
                 </div>
@@ -949,21 +950,16 @@
     </div>
 
     <!-- 模块化加载业务逻辑 -->
-    <script src="/chat/config.js?v=0.0.9"></script>
-    <script src="/chat/ui.js?v=0.0.9"></script>
-    <script src="/chat/auth.js?v=0.0.9"></script>
-    <script src="/chat/rag.js?v=0.0.9"></script>
+    <script src="/chat/config.js?v=0.0.10"></script>
+    <script src="/chat/ui.js?v=0.0.10"></script>
+    <script src="/chat/auth.js?v=0.0.10"></script>
     <!-- 管理员面板模块化脚本 -->
-    <script src="/chat/admin.js?v=0.0.9"></script>
-    <script src="/chat/users.js?v=0.0.9"></script>
-    <script src="/chat/models.js?v=0.0.9"></script>
-    <script src="/chat/stats.js?v=0.0.9"></script>
-    <script src="/chat/extra.js?v=0.0.9"></script>
+    <script src="/chat/admin.js?v=0.0.10"></script>
     <!-- 主程序模块化脚本 -->
-    <script src="/chat/render.js?v=0.0.9"></script>
-    <script src="/chat/engine.js?v=0.0.9"></script>
-    <script src="/chat/sidebar.js?v=0.0.9"></script>
-    <script src="/chat/app.js?v=0.0.9"></script>
+    <script src="/chat/render.js?v=0.0.10"></script>
+    <script src="/chat/engine.js?v=0.0.10"></script>
+    <script src="/chat/sidebar.js?v=0.0.10"></script>
+    <script src="/chat/app.js?v=0.0.10"></script>
 
     <!-- PWA 注册脚本 -->
     <script>

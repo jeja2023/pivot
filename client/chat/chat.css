@@ -330,6 +330,23 @@ input::-webkit-contacts-auto-fill-button {
 
 .chat-container { flex: 1; display: flex; flex-direction: column; position: relative; background: var(--bg-main); }
 .chat-header { padding: 0.5rem 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.chat-header .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.context-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary);
+    background: rgba(16, 163, 127, 0.08);
+    border: 1px solid rgba(16, 163, 127, 0.16);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+.context-pill.is-warn { color: #b45309; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.22); }
+.context-pill.is-critical { color: #b91c1c; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.22); }
 .icon-btn {
     background: none; border: none; color: var(--text-muted); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
@@ -344,9 +361,11 @@ input::-webkit-contacts-auto-fill-button {
     cursor: pointer;
     font-size: 0.82rem;
     height: 32px;
+    margin-bottom: 0;
     padding-right: 32px;
     white-space: nowrap;
     text-overflow: ellipsis;
+    align-self: center;
 }
 #save-default-model-btn {
     height: 32px;
