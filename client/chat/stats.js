@@ -110,7 +110,7 @@ window.loadOpsSummary = async function() {
         const cards = summary.isPersonal ? [['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', Number(summary.tokens || 0).toLocaleString()]] : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', Number(summary.tokens || 0).toLocaleString()], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
         const gridEl = document.getElementById('ops-summary-grid');
         gridEl.style.gridTemplateColumns = `repeat(${cards.length}, 1fr)`;
-        gridEl.innerHTML = cards.map(([l, v]) => `<div class="ops-card"><span>${l}</span><strong>${v}</strong></div>`).join('');
+        gridEl.innerHTML = cards.map(([l, v]) => `<div class="ops-card"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
         renderTrendChart('usage-trend-chart', trend);
     } catch (e) { showToast('加载概览失败', 'error'); }
 }

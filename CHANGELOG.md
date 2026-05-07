@@ -1,5 +1,35 @@
 # 更新日志 (CHANGELOG)
 
+## [0.0.11] - 2026-05-07
+### RAG 检索、安全加固、额度统计与可观测性升级
+
+本轮更新围绕 RAG 存储检索、安全边界、OpenAI 兼容接口额度统计和运维可观测性做了一次集中优化，保持 SQLite 部署形态不变，同时为后续向量库或更成熟 embedding 索引层预留了更清晰的演进路径。
+
+#### 1. RAG 存储、检索与中文召回增强
+- **RAG 模块拆分**：将原本较大的 RAG 逻辑拆为 `server/rag.js` 路由门面、`server/services/rag-index.js` 检索/索引服务和 `server/services/rag-cache.js` 缓存服务，降低后续维护成本。
+- **SQLite FTS5 候选召回**：为知识库分片增加 FTS5 索引、触发器和历史数据回填逻辑，RAG 检索先走 FTS 候选预过滤，再进行 embedding 相似度排序。
+- **中文 ngram 检索预处理**：新增 `server/services/rag-tokenizer.js`，在应用层生成中文 1-3 gram 检索 token；知识库分片新增 `search_content` 字段，FTS 索引使用“原文 + 中文 ngram token”，改善中文短词、单字和词组召回。
+- **旧数据平滑迁移**：启动迁移会自动为历史 `knowledge_chunks` 回填 `search_content`，并重建 RAG FTS 索引，无需手动重新上传知识库文档。
+- **RAG 缓存与阈值配置**：补充 RAG 检索 TTL 缓存、候选数量和相似度阈值配置；实际运行以 `.env` 为准，`.env.example` 仅作为模板。
+
+#### 2. OpenAI 兼容接口额度与统计修正
+- **修复 `/v1` 绕过每日模型额度问题**：新增 `model_usage_events` 表记录 API Key / Cookie 方式调用 OpenAI 兼容接口产生的 token 用量。
+- **统一额度口径**：`getModelDailyUsage()` 现在合并统计网页聊天消息和 `/v1/chat/completions` 调用，模型 `daily_token_limit` 对第三方接入同样生效。
+- **统一管理统计口径**：后台 usage、trend、report、details/export、ops-summary 与 Prometheus token 指标均合并 `messages` 和 `model_usage_events`，避免“限额已计入但看板漏算”的割裂。
+
+#### 3. 安全边界与输入防护
+- **附件 token 绑定完整资源**：附件访问 token 校验改为同时绑定 `user_id`、`session_id`、`file_path` 和过期时间，防止同一用户任意有效附件 token 被用于访问其他可猜路径附件。
+- **文档 ZIP 解压上限**：DOCX/XLSX 内部 ZIP 解析增加 entry 数量、单 entry 解压大小、总解压大小和 `maxOutputLength` 限制，降低压缩炸弹导致的 CPU / 内存风险。
+- **前端动态 HTML 转义补强**：管理端模型选项、附件预览、附件链接和统计卡片等动态内容增加 HTML / 属性转义，减少异常数据进入 UI 后的注入风险。
+
+#### 4. 可观测性与测试
+- **RAG 指标补齐**：新增 RAG 检索次数、缓存命中、候选数量、命中数量、Top Score、检索耗时和入库耗时等 Prometheus 指标。
+- **测试覆盖扩展**：新增模型用量事件计入每日额度、ZIP 解压上限、RAG 中文 ngram FTS 命中等安全/检索测试。
+
+#### 验证
+- 已通过 `npm test`
+- 已通过 `npm run lint`
+
 ## [0.0.10] - 2026-05-07
 ### 认证安全、流式解析与检索性能补齐
 

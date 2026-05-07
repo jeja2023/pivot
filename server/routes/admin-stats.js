@@ -85,6 +85,16 @@ function summarizeModelEndpoints() {
     return summary;
 }
 
+function tokenUsageSubquery() {
+    return `
+        SELECT id, user_id, model_id, role, token_count, created_at, 'message' AS usage_source
+        FROM messages
+        UNION ALL
+        SELECT id, user_id, model_id, COALESCE(source, 'api') AS role, token_count, created_at, 'api' AS usage_source
+        FROM model_usage_events
+    `;
+}
+
 function createAdminStatsRouter({
     authMiddleware,
     adminMiddleware,
@@ -98,14 +108,21 @@ function createAdminStatsRouter({
         const httpMetrics = getHttpMetricsSnapshot();
         const memory = process.memoryUsage();
         const cpu = process.cpuUsage();
-        const todayTokens = db.prepare("SELECT COALESCE(SUM(token_count), 0) AS total FROM messages WHERE date(created_at) = date('now', '+8 hours')").get().total || 0;
-        const totalTokens = db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages').get().total || 0;
+        const todayTokens = db.prepare(`
+            SELECT COALESCE(SUM(token_count), 0) AS total
+            FROM (${tokenUsageSubquery()}) usage
+            WHERE date(created_at) = date('now', '+8 hours')
+        `).get().total || 0;
+        const totalTokens = db.prepare(`
+            SELECT COALESCE(SUM(token_count), 0) AS total
+            FROM (${tokenUsageSubquery()}) usage
+        `).get().total || 0;
         const todayMessages = db.prepare("SELECT COUNT(*) AS count FROM messages WHERE date(created_at) = date('now', '+8 hours')").get().count || 0;
         const tokenByModel = db.prepare(`
-            SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(m.token_count), 0) AS tokens
-            FROM messages m
-            LEFT JOIN models md ON md.id = m.model_id
-            WHERE date(m.created_at) = date('now', '+8 hours')
+            SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
+            FROM (${tokenUsageSubquery()}) usage
+            LEFT JOIN models md ON md.id = usage.model_id
+            WHERE date(usage.created_at) = date('now', '+8 hours')
             GROUP BY COALESCE(md.name, '未知模型')
             ORDER BY tokens DESC
             LIMIT 8
@@ -161,14 +178,14 @@ function createAdminStatsRouter({
         const isAdmin = req.user.role === 'admin';
         const query = `
             SELECT u.username, u.nickname, m.name as model_name,
-                   COUNT(msg.id) as msg_count,
-                   SUM(msg.token_count) as total_tokens,
-                   MAX(msg.created_at) as last_active
-            FROM messages msg
-            JOIN users u ON msg.user_id = u.id
-            LEFT JOIN models m ON msg.model_id = m.id
-            ${isAdmin ? '' : 'WHERE msg.user_id = ?'}
-            GROUP BY u.id, msg.model_id
+                   COUNT(usage.id) as msg_count,
+                   SUM(usage.token_count) as total_tokens,
+                   MAX(usage.created_at) as last_active
+            FROM (${tokenUsageSubquery()}) usage
+            JOIN users u ON usage.user_id = u.id
+            LEFT JOIN models m ON usage.model_id = m.id
+            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            GROUP BY u.id, usage.model_id
             ORDER BY last_active DESC
         `;
         const stats = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
@@ -179,7 +196,7 @@ function createAdminStatsRouter({
         const isAdmin = req.user.role === 'admin';
         const query = `
             SELECT date(created_at) as day, SUM(token_count) as tokens
-            FROM messages
+            FROM (${tokenUsageSubquery()}) usage
             WHERE created_at >= date('now', '+8 hours', '-30 days')
             ${isAdmin ? '' : 'AND user_id = ?'}
             GROUP BY day
@@ -191,7 +208,7 @@ function createAdminStatsRouter({
 
     router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const { unit, username, days = 30 } = req.query;
-        let conditions = ["m.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
+        let conditions = ["usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
         let params = [parseInt(days, 10) || 30];
 
         if (unit) {
@@ -206,22 +223,22 @@ function createAdminStatsRouter({
         const whereClause = 'WHERE ' + conditions.join(' AND ');
 
         const trend = db.prepare(`
-            SELECT date(m.created_at) as day, SUM(m.token_count) as tokens
-            FROM messages m JOIN users u ON m.user_id = u.id
+            SELECT date(usage.created_at) as day, SUM(usage.token_count) as tokens
+            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
             ${whereClause}
             GROUP BY day ORDER BY day
         `).all(...params);
 
         const byUser = db.prepare(`
-            SELECT u.username, u.nickname, SUM(m.token_count) as tokens
-            FROM messages m JOIN users u ON m.user_id = u.id
+            SELECT u.username, u.nickname, SUM(usage.token_count) as tokens
+            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
             ${whereClause}
             GROUP BY u.id ORDER BY tokens DESC LIMIT 10
         `).all(...params);
 
         const byUnit = db.prepare(`
-            SELECT COALESCE(u.unit, '未分配') as unit, SUM(m.token_count) as tokens
-            FROM messages m JOIN users u ON m.user_id = u.id
+            SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
+            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
             ${whereClause}
             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC
         `).all(...params);
@@ -244,7 +261,10 @@ function createAdminStatsRouter({
                 messages: db.prepare('SELECT COUNT(*) AS count FROM messages').get().count,
                 attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,
                 models: db.prepare('SELECT COUNT(*) AS count FROM models').get().count,
-                tokens: db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages').get().total,
+                tokens: db.prepare(`
+                    SELECT COALESCE(SUM(token_count), 0) AS total
+                    FROM (${tokenUsageSubquery()}) usage
+                `).get().total,
                 uploadsSize: await getCachedDirSize(uploadDir),
                 dataSize: await getCachedDirSize(dataDir),
                 auditToday: db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')").get().count,
@@ -257,7 +277,11 @@ function createAdminStatsRouter({
                 messages: db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ?').get(req.user.id).count,
                 attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ?').get(req.user.id).count,
                 models: db.prepare("SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?").get(req.user.id).count,
-                tokens: db.prepare('SELECT COALESCE(SUM(token_count), 0) AS total FROM messages WHERE user_id = ?').get(req.user.id).total,
+                tokens: db.prepare(`
+                    SELECT COALESCE(SUM(token_count), 0) AS total
+                    FROM (${tokenUsageSubquery()}) usage
+                    WHERE user_id = ?
+                `).get(req.user.id).total,
                 isPersonal: true
             };
             res.json(summary);
@@ -271,18 +295,18 @@ function createAdminStatsRouter({
         const offset = (page - 1) * limit;
 
         const query = `
-            SELECT m.id, m.created_at, u.username, u.nickname, md.name as model_name,
-                   m.role, m.token_count
-            FROM messages m
-            JOIN users u ON m.user_id = u.id
-            LEFT JOIN models md ON m.model_id = md.id
-            ${isAdmin ? '' : 'WHERE m.user_id = ?'}
-            ORDER BY m.created_at DESC
+            SELECT usage.id, usage.created_at, u.username, u.nickname, md.name as model_name,
+                   usage.role, usage.token_count, usage.usage_source
+            FROM (${tokenUsageSubquery()}) usage
+            JOIN users u ON usage.user_id = u.id
+            LEFT JOIN models md ON usage.model_id = md.id
+            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            ORDER BY usage.created_at DESC
             LIMIT ? OFFSET ?
         `;
         const details = isAdmin ? db.prepare(query).all(limit, offset) : db.prepare(query).all(req.user.id, limit, offset);
 
-        const countQuery = `SELECT COUNT(*) as count FROM messages ${isAdmin ? '' : 'WHERE user_id = ?'}`;
+        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery()}) usage ${isAdmin ? '' : 'WHERE user_id = ?'}`;
         const total = isAdmin ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
         res.json({ data: details, total });
     }));
@@ -290,17 +314,18 @@ function createAdminStatsRouter({
     router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         const query = `
-            SELECT m.created_at, u.username, u.nickname, md.name as model_name, m.role, m.token_count
-            FROM messages m
-            JOIN users u ON m.user_id = u.id
-            LEFT JOIN models md ON m.model_id = md.id
-            ${isAdmin ? '' : 'WHERE m.user_id = ?'}
-            ORDER BY m.created_at DESC LIMIT 10000
+            SELECT usage.created_at, u.username, u.nickname, md.name as model_name, usage.role, usage.token_count, usage.usage_source
+            FROM (${tokenUsageSubquery()}) usage
+            JOIN users u ON usage.user_id = u.id
+            LEFT JOIN models md ON usage.model_id = md.id
+            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            ORDER BY usage.created_at DESC LIMIT 10000
         `;
         const details = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,消耗Token\n';
         details.forEach(d => {
-            csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', d.role === 'user' ? '提问' : '回答', d.token_count].map(escapeCsvCell).join(',') + '\n';
+            const roleLabel = d.usage_source === 'api' ? d.role : (d.role === 'user' ? '提问' : '回答');
+            csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', roleLabel, d.token_count].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出用量明细', `导出 ${details.length} 条明细`);
         res.setHeader('Content-Type', 'text/csv');

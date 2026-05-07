@@ -37,8 +37,16 @@ function createAttachmentsRouter({
         const token = req.query.token;
         if (token) {
             // 尝试通过 URL 中的 token 参数验证 (且校验过期时间)
-            const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ? AND (expires_at IS NULL OR expires_at > ?)')
-                .get(token, `%/${req.params.filename}`, getBeijingTimestamp());
+            const requestedUserId = parseInt(req.params.userId, 10);
+            const expectedPath = `uploads/${requestedUserId}/${req.params.sessionId}/${req.params.filename}`;
+            const attachment = db.prepare(`
+                SELECT user_id FROM attachments
+                WHERE access_token = ?
+                  AND user_id = ?
+                  AND session_id = ?
+                  AND file_path = ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+            `).get(token, requestedUserId, req.params.sessionId, expectedPath, getBeijingTimestamp());
             if (attachment) {
                 const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
                 if (user && user.status !== 'disabled') {

@@ -6,6 +6,22 @@ const { getGpuMonitorStatus } = require('./services/gpu-monitor');
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const routeStats = new Map();
 const startedAt = Date.now();
+const ragStats = {
+    retrievals: 0,
+    retrievalErrors: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    emptyResults: 0,
+    totalRetrievalMs: 0,
+    totalCandidates: 0,
+    totalMatches: 0,
+    topScoreSum: 0,
+    topScoreCount: 0,
+    ingests: 0,
+    ingestErrors: 0,
+    totalIngestMs: 0,
+    chunksIndexed: 0
+};
 
 function normalizeRoute(req) {
     const routePath = req.route?.path;
@@ -38,6 +54,42 @@ function recordHttpRequest(method, route, status, durationSeconds) {
     buckets.forEach((bucket, index) => {
         if (durationSeconds <= bucket) stat.buckets[index] += 1;
     });
+}
+
+function recordRagRetrieval({
+    status = 'unknown',
+    durationMs = 0,
+    candidates = 0,
+    matches = 0,
+    topScore = null,
+    cacheHit = false
+} = {}) {
+    ragStats.retrievals += 1;
+    ragStats.totalRetrievalMs += Math.max(Number(durationMs) || 0, 0);
+    ragStats.totalCandidates += Math.max(Number(candidates) || 0, 0);
+    ragStats.totalMatches += Math.max(Number(matches) || 0, 0);
+    if (cacheHit || status === 'cache_hit') {
+        ragStats.cacheHits += 1;
+    } else {
+        ragStats.cacheMisses += 1;
+    }
+    if (status === 'error') ragStats.retrievalErrors += 1;
+    if (status === 'empty' || status === 'no_match') ragStats.emptyResults += 1;
+    if (Number.isFinite(topScore)) {
+        ragStats.topScoreSum += topScore;
+        ragStats.topScoreCount += 1;
+    }
+}
+
+function recordRagIngest({
+    status = 'unknown',
+    chunks = 0,
+    durationMs = 0
+} = {}) {
+    ragStats.ingests += 1;
+    ragStats.totalIngestMs += Math.max(Number(durationMs) || 0, 0);
+    ragStats.chunksIndexed += Math.max(Number(chunks) || 0, 0);
+    if (status === 'error') ragStats.ingestErrors += 1;
 }
 
 function getHttpMetricsSnapshot() {
@@ -82,6 +134,25 @@ function getHttpMetricsSnapshot() {
     };
 }
 
+function getRagMetricsSnapshot() {
+    return {
+        retrievals: ragStats.retrievals,
+        retrievalErrors: ragStats.retrievalErrors,
+        cacheHits: ragStats.cacheHits,
+        cacheMisses: ragStats.cacheMisses,
+        cacheHitRate: ragStats.retrievals > 0 ? ragStats.cacheHits / ragStats.retrievals : 0,
+        emptyResults: ragStats.emptyResults,
+        avgRetrievalMs: ragStats.retrievals > 0 ? ragStats.totalRetrievalMs / ragStats.retrievals : 0,
+        avgCandidates: ragStats.retrievals > 0 ? ragStats.totalCandidates / ragStats.retrievals : 0,
+        avgMatches: ragStats.retrievals > 0 ? ragStats.totalMatches / ragStats.retrievals : 0,
+        avgTopScore: ragStats.topScoreCount > 0 ? ragStats.topScoreSum / ragStats.topScoreCount : 0,
+        ingests: ragStats.ingests,
+        ingestErrors: ragStats.ingestErrors,
+        chunksIndexed: ragStats.chunksIndexed,
+        avgIngestMs: ragStats.ingests > 0 ? ragStats.totalIngestMs / ragStats.ingests : 0
+    };
+}
+
 function metricsMiddleware(req, res, next) {
     if ((req.originalUrl || req.url || '').startsWith('/api/metrics')) return next();
     const start = process.hrtime.bigint();
@@ -102,28 +173,55 @@ const line = (name, labels, value) => {
 
 function getTokenRows() {
     return db.prepare(`
-        SELECT
-            COALESCE(m.model_id, 0) AS model_id,
-            COALESCE(md.name, 'unknown') AS model_name,
-            COALESCE(m.role, 'unknown') AS role,
-            COALESCE(SUM(m.token_count), 0) AS tokens
-        FROM messages m
-        LEFT JOIN models md ON md.id = m.model_id
-        GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
+        SELECT model_id, model_name, role, SUM(tokens) AS tokens
+        FROM (
+            SELECT
+                COALESCE(m.model_id, 0) AS model_id,
+                COALESCE(md.name, 'unknown') AS model_name,
+                COALESCE(m.role, 'unknown') AS role,
+                COALESCE(SUM(m.token_count), 0) AS tokens
+            FROM messages m
+            LEFT JOIN models md ON md.id = m.model_id
+            GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
+            UNION ALL
+            SELECT
+                COALESCE(e.model_id, 0) AS model_id,
+                COALESCE(md.name, 'unknown') AS model_name,
+                COALESCE(e.source, 'api') AS role,
+                COALESCE(SUM(e.token_count), 0) AS tokens
+            FROM model_usage_events e
+            LEFT JOIN models md ON md.id = e.model_id
+            GROUP BY COALESCE(e.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(e.source, 'api')
+        )
+        GROUP BY model_id, model_name, role
     `).all();
 }
 
 function getTodayTokenRows() {
     return db.prepare(`
-        SELECT
-            COALESCE(m.model_id, 0) AS model_id,
-            COALESCE(md.name, 'unknown') AS model_name,
-            COALESCE(m.role, 'unknown') AS role,
-            COALESCE(SUM(m.token_count), 0) AS tokens
-        FROM messages m
-        LEFT JOIN models md ON md.id = m.model_id
-        WHERE date(m.created_at) = date('now', '+8 hours')
-        GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
+        SELECT model_id, model_name, role, SUM(tokens) AS tokens
+        FROM (
+            SELECT
+                COALESCE(m.model_id, 0) AS model_id,
+                COALESCE(md.name, 'unknown') AS model_name,
+                COALESCE(m.role, 'unknown') AS role,
+                COALESCE(SUM(m.token_count), 0) AS tokens
+            FROM messages m
+            LEFT JOIN models md ON md.id = m.model_id
+            WHERE date(m.created_at) = date('now', '+8 hours')
+            GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
+            UNION ALL
+            SELECT
+                COALESCE(e.model_id, 0) AS model_id,
+                COALESCE(md.name, 'unknown') AS model_name,
+                COALESCE(e.source, 'api') AS role,
+                COALESCE(SUM(e.token_count), 0) AS tokens
+            FROM model_usage_events e
+            LEFT JOIN models md ON md.id = e.model_id
+            WHERE date(e.created_at) = date('now', '+8 hours')
+            GROUP BY COALESCE(e.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(e.source, 'api')
+        )
+        GROUP BY model_id, model_name, role
     `).all();
 }
 
@@ -179,6 +277,47 @@ function renderPrometheusMetrics() {
             role: row.role
         }, row.tokens));
     });
+
+    const rag = getRagMetricsSnapshot();
+    lines.push('# HELP pivot_rag_retrievals_total Total RAG retrieval attempts.');
+    lines.push('# TYPE pivot_rag_retrievals_total counter');
+    lines.push(line('pivot_rag_retrievals_total', {}, rag.retrievals));
+    lines.push('# HELP pivot_rag_retrieval_errors_total Total failed RAG retrieval attempts.');
+    lines.push('# TYPE pivot_rag_retrieval_errors_total counter');
+    lines.push(line('pivot_rag_retrieval_errors_total', {}, rag.retrievalErrors));
+    lines.push('# HELP pivot_rag_cache_hits_total Total RAG retrieval cache hits.');
+    lines.push('# TYPE pivot_rag_cache_hits_total counter');
+    lines.push(line('pivot_rag_cache_hits_total', {}, rag.cacheHits));
+    lines.push('# HELP pivot_rag_cache_hit_ratio RAG retrieval cache hit ratio.');
+    lines.push('# TYPE pivot_rag_cache_hit_ratio gauge');
+    lines.push(line('pivot_rag_cache_hit_ratio', {}, rag.cacheHitRate.toFixed(6)));
+    lines.push('# HELP pivot_rag_empty_results_total Total RAG retrievals without usable matches.');
+    lines.push('# TYPE pivot_rag_empty_results_total counter');
+    lines.push(line('pivot_rag_empty_results_total', {}, rag.emptyResults));
+    lines.push('# HELP pivot_rag_retrieval_latency_ms Average RAG retrieval latency in milliseconds.');
+    lines.push('# TYPE pivot_rag_retrieval_latency_ms gauge');
+    lines.push(line('pivot_rag_retrieval_latency_ms', { stat: 'avg' }, rag.avgRetrievalMs.toFixed(3)));
+    lines.push('# HELP pivot_rag_candidates Average candidate chunks considered per RAG retrieval.');
+    lines.push('# TYPE pivot_rag_candidates gauge');
+    lines.push(line('pivot_rag_candidates', { stat: 'avg' }, rag.avgCandidates.toFixed(3)));
+    lines.push('# HELP pivot_rag_matches Average selected RAG chunks per retrieval.');
+    lines.push('# TYPE pivot_rag_matches gauge');
+    lines.push(line('pivot_rag_matches', { stat: 'avg' }, rag.avgMatches.toFixed(3)));
+    lines.push('# HELP pivot_rag_top_score Average top RAG similarity score.');
+    lines.push('# TYPE pivot_rag_top_score gauge');
+    lines.push(line('pivot_rag_top_score', { stat: 'avg' }, rag.avgTopScore.toFixed(6)));
+    lines.push('# HELP pivot_rag_ingests_total Total RAG document indexing attempts.');
+    lines.push('# TYPE pivot_rag_ingests_total counter');
+    lines.push(line('pivot_rag_ingests_total', {}, rag.ingests));
+    lines.push('# HELP pivot_rag_ingest_errors_total Total failed RAG document indexing attempts.');
+    lines.push('# TYPE pivot_rag_ingest_errors_total counter');
+    lines.push(line('pivot_rag_ingest_errors_total', {}, rag.ingestErrors));
+    lines.push('# HELP pivot_rag_chunks_indexed_total Total RAG chunks indexed during this process lifetime.');
+    lines.push('# TYPE pivot_rag_chunks_indexed_total counter');
+    lines.push(line('pivot_rag_chunks_indexed_total', {}, rag.chunksIndexed));
+    lines.push('# HELP pivot_rag_ingest_latency_ms Average RAG document indexing latency in milliseconds.');
+    lines.push('# TYPE pivot_rag_ingest_latency_ms gauge');
+    lines.push(line('pivot_rag_ingest_latency_ms', { stat: 'avg' }, rag.avgIngestMs.toFixed(3)));
 
     const memory = process.memoryUsage();
     const cpuUsage = process.cpuUsage();
@@ -253,5 +392,8 @@ module.exports = {
     metricsAuthMiddleware,
     renderPrometheusMetrics,
     recordHttpRequest,
-    getHttpMetricsSnapshot
+    getHttpMetricsSnapshot,
+    recordRagRetrieval,
+    recordRagIngest,
+    getRagMetricsSnapshot
 };

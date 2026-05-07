@@ -93,7 +93,7 @@ window.loadAttachments = async function(page = 1) {
             <td>${escapeHtml(formatDateToCN(item.created_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 5px; justify-content: center;">
-                    <a class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; text-decoration: none;" href="${item.url}" target="_blank">打开</a>
+                    <a class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; text-decoration: none;" href="${escapeHtml(item.url)}" target="_blank">打开</a>
                     <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" onclick="deleteAttachment(${item.id})">删除</button>
                 </div>
             </td>

@@ -29,7 +29,10 @@ const escapeCsvValue = (value) => {
     return `"${text.replace(/"/g, '""')}"`;
 };
 
-const encodeActionArg = (value) => encodeURIComponent(JSON.stringify(value));
+const encodeActionArg = (value) => encodeURIComponent(JSON.stringify(value))
+    .replace(/'/g, '%27')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
 
 const downloadFileByFetch = async (url, filename) => {
     showToast('正在准备导出文件...', 'info');
@@ -168,7 +171,7 @@ window.fetchRemoteModels = async function() {
 
         // 填充下拉框
         selectEl.innerHTML = '<option value="">-- 请选择获取到的模型 --</option>' + 
-            data.models.map(m => `<option value="${m}">${m}</option>`).join('');
+            data.models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
         
         selectContainer.classList.remove('hidden');
         showToast(`成功获取 ${data.models.length} 个模型`);

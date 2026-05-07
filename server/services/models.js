@@ -42,11 +42,26 @@ function getAccessibleModel(modelId, user) {
 }
 
 function getModelDailyUsage(userId, modelId) {
-    return db.prepare(`
+    const messageTokens = db.prepare(`
         SELECT COALESCE(SUM(token_count), 0) AS tokens
         FROM messages
         WHERE user_id = ? AND model_id = ? AND date(created_at) = date('now', '+8 hours')
     `).get(userId, modelId).tokens || 0;
+    const eventTokens = db.prepare(`
+        SELECT COALESCE(SUM(token_count), 0) AS tokens
+        FROM model_usage_events
+        WHERE user_id = ? AND model_id = ? AND date(created_at) = date('now', '+8 hours')
+    `).get(userId, modelId).tokens || 0;
+    return messageTokens + eventTokens;
+}
+
+function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api') {
+    const safeTokens = Math.max(parseInt(tokenCount, 10) || 0, 0);
+    if (!userId || !modelId || safeTokens <= 0) return;
+    db.prepare(`
+        INSERT INTO model_usage_events (user_id, model_id, source, token_count, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userId, modelId, String(source || 'api').slice(0, 40), safeTokens);
 }
 
 function migrateModelSecrets() {
@@ -86,6 +101,7 @@ module.exports = {
     normalizeTags,
     getAccessibleModel,
     getModelDailyUsage,
+    recordModelTokenUsage,
     getUserAccessibleModels,
     migrateModelSecrets
 };

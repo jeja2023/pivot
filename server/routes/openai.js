@@ -3,7 +3,12 @@ const http = require('http');
 const https = require('https');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { getAccessibleModel, getModelDailyUsage, getUserAccessibleModels } = require('../services/models');
+const {
+    getAccessibleModel,
+    getModelDailyUsage,
+    getUserAccessibleModels,
+    recordModelTokenUsage
+} = require('../services/models');
 const { estimateTokens } = require('../llm');
 const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
@@ -181,6 +186,7 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                     if (req.isApiKey && req.apiKeyId && tokens > 0) {
                         db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
                     }
+                    recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
                     logAction(req, 'OpenAI 流式调用完成', `模型: ${modelCfg.name}, 估算Tokens: ${tokens}`);
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
@@ -202,6 +208,7 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 if (req.isApiKey && req.apiKeyId && tokens > 0) {
                     db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
                 }
+                recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 releaseSemaphore();
             }

@@ -15,6 +15,9 @@ const CFB_FREE = 0xffffffff;
 const CFB_END = 0xfffffffe;
 const CFB_FAT = 0xfffffffd;
 const CFB_DIFAT = 0xfffffffc;
+const MAX_ZIP_ENTRIES = 2000;
+const MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
+const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 60 * 1024 * 1024;
 
 function isOleFile(buffer) {
     return buffer.length >= 8
@@ -76,10 +79,15 @@ function readZipEntries(buffer) {
     if (eocdOffset < 0) throw new Error('Invalid ZIP file: central directory not found');
 
     const entryCount = buffer.readUInt16LE(eocdOffset + 10);
+    if (entryCount > MAX_ZIP_ENTRIES) throw new Error('ZIP file has too many entries');
     let offset = buffer.readUInt32LE(eocdOffset + 16);
     const entries = new Map();
+    let totalUncompressedSize = 0;
 
     for (let i = 0; i < entryCount; i += 1) {
+        if (offset < 0 || offset + 46 > buffer.length) {
+            throw new Error('Invalid ZIP file: central directory entry is out of bounds');
+        }
         if (buffer.readUInt32LE(offset) !== 0x02014b50) {
             throw new Error('Invalid ZIP file: central directory entry is corrupt');
         }
@@ -87,11 +95,23 @@ function readZipEntries(buffer) {
         const flags = buffer.readUInt16LE(offset + 8);
         const method = buffer.readUInt16LE(offset + 10);
         const compressedSize = buffer.readUInt32LE(offset + 20);
+        const uncompressedSize = buffer.readUInt32LE(offset + 24);
         const fileNameLength = buffer.readUInt16LE(offset + 28);
         const extraLength = buffer.readUInt16LE(offset + 30);
         const commentLength = buffer.readUInt16LE(offset + 32);
         const localHeaderOffset = buffer.readUInt32LE(offset + 42);
         const nameStart = offset + 46;
+        const entryEnd = nameStart + fileNameLength + extraLength + commentLength;
+        if (entryEnd > buffer.length || localHeaderOffset + 30 > buffer.length) {
+            throw new Error('Invalid ZIP file: entry metadata is out of bounds');
+        }
+        if (compressedSize > buffer.length || uncompressedSize > MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES) {
+            throw new Error('ZIP entry is too large');
+        }
+        totalUncompressedSize += uncompressedSize;
+        if (totalUncompressedSize > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES) {
+            throw new Error('ZIP file expands to too much data');
+        }
         const encoding = flags & 0x0800 ? 'utf8' : 'latin1';
         const fileName = buffer.toString(encoding, nameStart, nameStart + fileNameLength).replace(/\\/g, '/');
 
@@ -102,19 +122,27 @@ function readZipEntries(buffer) {
         const localNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
         const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
         const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
+        if (dataStart > buffer.length || dataStart + compressedSize > buffer.length) {
+            throw new Error(`Invalid ZIP file: compressed data is out of bounds for ${fileName}`);
+        }
         const compressedData = buffer.subarray(dataStart, dataStart + compressedSize);
 
         let data;
         if (method === 0) {
             data = compressedData;
         } else if (method === 8) {
-            data = zlib.inflateRawSync(compressedData);
+            data = zlib.inflateRawSync(compressedData, {
+                maxOutputLength: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES
+            });
         } else {
             data = Buffer.alloc(0);
         }
+        if (data.length > MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES) {
+            throw new Error(`ZIP entry inflated beyond limit for ${fileName}`);
+        }
 
         entries.set(fileName, data);
-        offset = nameStart + fileNameLength + extraLength + commentLength;
+        offset = entryEnd;
     }
 
     return entries;
@@ -642,5 +670,8 @@ module.exports = {
     isPasswordError,
     renderPdfPages,
     extractDocumentText,
-    truncateExtractedText
+    truncateExtractedText,
+    readZipEntries,
+    MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES,
+    MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES
 };

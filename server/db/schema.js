@@ -99,6 +99,7 @@ function initSchema() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             doc_id INTEGER,
             content TEXT NOT NULL,
+            search_content TEXT,
             embedding TEXT,
             FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
         );
@@ -152,6 +153,17 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS model_usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            model_id INTEGER NOT NULL,
+            source TEXT DEFAULT 'api',
+            token_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -160,6 +172,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
         CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+        CREATE INDEX IF NOT EXISTS idx_model_usage_user_model_created ON model_usage_events(user_id, model_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);
@@ -169,6 +182,22 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+            content,
+            tokenize='unicode61'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_insert AFTER INSERT ON knowledge_chunks BEGIN
+            INSERT INTO knowledge_chunks_fts(rowid, content) VALUES (new.id, COALESCE(new.search_content, new.content));
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_delete AFTER DELETE ON knowledge_chunks BEGIN
+            DELETE FROM knowledge_chunks_fts WHERE rowid = old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_update AFTER UPDATE ON knowledge_chunks
+        WHEN old.content != new.content OR COALESCE(old.search_content, '') != COALESCE(new.search_content, '') BEGIN
+            UPDATE knowledge_chunks_fts SET content = COALESCE(new.search_content, new.content) WHERE rowid = new.id;
+        END;
 
         -- 全文搜索支持 (FTS5)
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

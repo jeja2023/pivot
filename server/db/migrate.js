@@ -2,6 +2,7 @@ const { db } = require('./connection');
 const logger = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const crypto = require('crypto');
+const { buildRagSearchContent } = require('../services/rag-tokenizer');
 
 const ensureColumn = (table, column, definition) => {
     try {
@@ -72,6 +73,7 @@ function runMigrations() {
     db.prepare('UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL').run();
     ensureColumn('app_settings', 'updated_at', 'DATETIME');
     ensureColumn('app_settings', 'updated_by', 'INTEGER');
+    ensureColumn('knowledge_chunks', 'search_content', 'TEXT');
 
     ensureColumn('prompts', 'user_id', 'INTEGER');
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");
@@ -99,6 +101,20 @@ function runMigrations() {
     ensureColumn('api_keys', 'usage_tokens', "INTEGER DEFAULT 0");
     ensureColumn('api_keys', 'last_used_at', 'DATETIME');
     ensureColumn('api_keys', 'created_at', 'DATETIME');
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS model_usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            model_id INTEGER NOT NULL,
+            source TEXT DEFAULT 'api',
+            token_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_model_usage_user_model_created ON model_usage_events(user_id, model_id, created_at);
+    `);
 
     // 确保字段存在后再创建索引
     try {
@@ -139,6 +155,53 @@ function runMigrations() {
 
     // --- 全文搜索索引初始化 ---
     try {
+        db.exec(`
+            DROP TRIGGER IF EXISTS trg_knowledge_chunks_insert;
+            DROP TRIGGER IF EXISTS trg_knowledge_chunks_delete;
+            DROP TRIGGER IF EXISTS trg_knowledge_chunks_update;
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+                content,
+                tokenize='unicode61'
+            );
+            CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_insert AFTER INSERT ON knowledge_chunks BEGIN
+                INSERT INTO knowledge_chunks_fts(rowid, content) VALUES (new.id, COALESCE(new.search_content, new.content));
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_delete AFTER DELETE ON knowledge_chunks BEGIN
+                DELETE FROM knowledge_chunks_fts WHERE rowid = old.id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_update AFTER UPDATE ON knowledge_chunks
+            WHEN old.content != new.content OR COALESCE(old.search_content, '') != COALESCE(new.search_content, '') BEGIN
+                UPDATE knowledge_chunks_fts SET content = COALESCE(new.search_content, new.content) WHERE rowid = new.id;
+            END;
+        `);
+        const ragTokenizerMigrationKey = 'rag_cjk_search_content_v1';
+        const ragTokenizerMigration = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(ragTokenizerMigrationKey);
+        const chunksMissingSearchContent = db.prepare(`
+            SELECT id, content FROM knowledge_chunks
+            WHERE search_content IS NULL OR search_content = ''
+        `).all();
+        if (chunksMissingSearchContent.length > 0) {
+            const updateSearchContent = db.prepare('UPDATE knowledge_chunks SET search_content = ? WHERE id = ?');
+            const backfillSearchContent = db.transaction(() => {
+                chunksMissingSearchContent.forEach(row => {
+                    updateSearchContent.run(buildRagSearchContent(row.content), row.id);
+                });
+            });
+            backfillSearchContent();
+            logger.info({ count: chunksMissingSearchContent.length }, 'RAG search content backfilled with CJK ngrams.');
+        }
+
+        const ragFtsCount = db.prepare('SELECT COUNT(*) as count FROM knowledge_chunks_fts').get().count;
+        const chunkCount = db.prepare('SELECT COUNT(*) as count FROM knowledge_chunks').get().count;
+        if (!ragTokenizerMigration || ragFtsCount === 0) {
+            db.exec('DELETE FROM knowledge_chunks_fts');
+            if (chunkCount > 0) {
+                db.exec('INSERT INTO knowledge_chunks_fts(rowid, content) SELECT id, COALESCE(search_content, content) FROM knowledge_chunks');
+                logger.info({ count: chunkCount }, 'RAG FTS index rebuilt with CJK ngrams.');
+            }
+            recordMigration(ragTokenizerMigrationKey);
+        }
+
         const ftsCount = db.prepare('SELECT COUNT(*) as count FROM messages_fts').get().count;
         if (ftsCount === 0) {
             const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;

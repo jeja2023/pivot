@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-security-suite-please-do-not-use';
 
@@ -15,6 +16,22 @@ const {
     csrfMiddleware,
     CSRF_COOKIE_NAME
 } = require('../server/auth');
+const {
+    buildFtsOrQuery,
+    buildKeywordCandidates,
+    buildRagSearchContent,
+    chunkText,
+    cosineSimilarity
+} = require('../server/services/rag-index');
+const {
+    getModelDailyUsage,
+    recordModelTokenUsage
+} = require('../server/services/models');
+const {
+    readZipEntries,
+    MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES
+} = require('../server/document-text');
+const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
 
@@ -84,4 +101,125 @@ test('csrfMiddleware requires matching cookie and header for cookie writes', () 
         passed = true;
     });
     assert.equal(passed, true);
+});
+
+test('RAG helpers build safe FTS queries and deterministic chunks', () => {
+    assert.equal(buildFtsOrQuery(['hello', 'a"b']), '"hello" OR "a""b"');
+    assert.ok(buildKeywordCandidates('权限配置流程').includes('权限'));
+    assert.ok(buildRagSearchContent('权限配置流程').includes('权限'));
+    assert.ok(buildRagSearchContent('权限配置流程').includes('配置'));
+    assert.deepEqual(chunkText('abcdef', 4, 2), ['abcd', 'cdef', 'ef']);
+    assert.equal(cosineSimilarity([1, 0], [1, 0]), 1);
+    assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
+});
+
+test('RAG FTS indexes generated Chinese ngram tokens', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_fts_${suffix}`, 'hash', 'RAG FTS Test', 'QA', 'user', 'active');
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, created_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userInfo.lastInsertRowid, `rag_fts_${suffix}.txt`, 'ready');
+    const content = '这是一段关于权限配置流程的说明';
+    const chunkInfo = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docInfo.lastInsertRowid, content, buildRagSearchContent(content), JSON.stringify([1, 0]));
+
+    try {
+        const row = db.prepare(`
+            SELECT c.id
+            FROM knowledge_chunks_fts
+            JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.rowid
+            WHERE knowledge_chunks_fts MATCH ? AND c.id = ?
+        `).get(buildFtsOrQuery(['权限']), chunkInfo.lastInsertRowid);
+        assert.equal(row.id, chunkInfo.lastInsertRowid);
+    } finally {
+        db.prepare('DELETE FROM knowledge_chunks WHERE id = ?').run(chunkInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('model usage events count toward daily model quota usage', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`quota_test_${suffix}`, 'hash', 'Quota Test', 'QA', 'user', 'active');
+    const modelInfo = db.prepare(`
+        INSERT INTO models (name, url, model_name, created_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`Quota Model ${suffix}`, 'http://127.0.0.1:1/v1', 'test-model');
+
+    try {
+        recordModelTokenUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid, 123, 'openai_api_key');
+        assert.equal(getModelDailyUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid), 123);
+    } finally {
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userInfo.lastInsertRowid);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+function buildSingleEntryZip({ name, data, declaredUncompressedSize = data.length }) {
+    const compressed = zlib.deflateRawSync(data);
+    const nameBuffer = Buffer.from(name);
+    const local = Buffer.alloc(30 + nameBuffer.length + compressed.length);
+    let offset = 0;
+    local.writeUInt32LE(0x04034b50, offset); offset += 4;
+    local.writeUInt16LE(20, offset); offset += 2;
+    local.writeUInt16LE(0, offset); offset += 2;
+    local.writeUInt16LE(8, offset); offset += 2;
+    local.writeUInt16LE(0, offset); offset += 2;
+    local.writeUInt16LE(0, offset); offset += 2;
+    local.writeUInt32LE(0, offset); offset += 4;
+    local.writeUInt32LE(compressed.length, offset); offset += 4;
+    local.writeUInt32LE(declaredUncompressedSize, offset); offset += 4;
+    local.writeUInt16LE(nameBuffer.length, offset); offset += 2;
+    local.writeUInt16LE(0, offset); offset += 2;
+    nameBuffer.copy(local, offset); offset += nameBuffer.length;
+    compressed.copy(local, offset);
+
+    const central = Buffer.alloc(46 + nameBuffer.length);
+    offset = 0;
+    central.writeUInt32LE(0x02014b50, offset); offset += 4;
+    central.writeUInt16LE(20, offset); offset += 2;
+    central.writeUInt16LE(20, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt16LE(8, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt32LE(0, offset); offset += 4;
+    central.writeUInt32LE(compressed.length, offset); offset += 4;
+    central.writeUInt32LE(declaredUncompressedSize, offset); offset += 4;
+    central.writeUInt16LE(nameBuffer.length, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt16LE(0, offset); offset += 2;
+    central.writeUInt32LE(0, offset); offset += 4;
+    central.writeUInt32LE(0, offset); offset += 4;
+    nameBuffer.copy(central, offset);
+
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(central.length, 12);
+    eocd.writeUInt32LE(local.length, 16);
+
+    return Buffer.concat([local, central, eocd]);
+}
+
+test('readZipEntries rejects entries with excessive declared expansion', () => {
+    const zip = buildSingleEntryZip({
+        name: 'word/document.xml',
+        data: Buffer.from('<w:t>small</w:t>'),
+        declaredUncompressedSize: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1
+    });
+    assert.throws(() => readZipEntries(zip), /too large|too much data/);
 });
