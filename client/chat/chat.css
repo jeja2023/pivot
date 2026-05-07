@@ -1229,10 +1229,32 @@ input::-webkit-contacts-auto-fill-button {
     text-overflow: ellipsis;
     min-width: 0;
 }
-#monitor-gpu-list .monitor-row span,
-#monitor-resource-list .monitor-row span,
-#monitor-model-list .monitor-row span {
+#monitor-resource-list .monitor-row span {
     width: 72px; flex-shrink: 0;
+}
+#monitor-gpu-list .monitor-row span {
+    width: auto; max-width: 160px; flex: 1;
+}
+#monitor-model-list .monitor-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    align-items: start;
+}
+#monitor-model-list .monitor-row span {
+    width: auto;
+    flex: none;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+    padding-top: 1px;
+    text-align: left;
+}
+#monitor-model-list .monitor-row strong {
+    justify-self: end;
+    text-align: right;
 }
 .monitor-row strong { 
     color: var(--text-main); font-size: 0.82rem; 

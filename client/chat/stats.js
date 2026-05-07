@@ -340,12 +340,12 @@ window.loadMonitorSummary = async function() {
         ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span><strong>${v}</strong></div>`).join('');
 
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
-            ? gpu.gpus.map(item => {
+            ? gpu.gpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
                 const utilRate = Number(item.utilization || 0) * 100;
                 const gpuName = item.name || 'GPU';
                 return `<div class="monitor-row">
-                    <span title="${escapeHtml(gpuName)}">${escapeHtml(gpuName)}</span>
+                    <span title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
                     <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(1)}%，负载 ${utilRate.toFixed(0)}%)`)}</strong>
                 </div>`;
             }).join('')
@@ -378,7 +378,13 @@ window.loadMonitorSummary = async function() {
 
         const models = data.tokens.byModel || [];
         document.getElementById('monitor-model-list').innerHTML = models.length
-            ? models.map(item => `<div class="monitor-row"><span>${escapeHtml(item.model_name)}</span><strong>${formatMetricNumber(item.tokens)}</strong></div>`).join('')
+            ? models.map(item => {
+                const modelName = item.model_name || '未知模型';
+                return `<div class="monitor-row">
+                    <span title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>
+                    <strong>${formatMetricNumber(item.tokens)}</strong>
+                </div>`;
+            }).join('')
             : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
 
         const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
@@ -559,7 +565,16 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
     const values = data.map(d => Number(d.tokens) || 0);
     const labels = data.map(d => String(d[labelField] || d[fallbackField] || '未知'));
     const max = Math.max(...values, 1);
-    const padX = 80; const padY = 20; const chartW = width - padX - 60; const chartH = height - padY * 2;
+    ctx.font = '12px sans-serif';
+    const longestLabelWidth = labels.reduce((longest, label) => Math.max(longest, ctx.measureText(label).width), 0);
+    const labelColumnWidth = Math.min(
+        Math.max(Math.ceil(longestLabelWidth + 20), 140),
+        Math.max(180, Math.floor(width * 0.45))
+    );
+    const padX = labelColumnWidth;
+    const padY = 20;
+    const chartW = width - padX - 60;
+    const chartH = height - padY * 2;
 
     if (values.length === 0) {
         ctx.fillStyle = '#6b7280'; ctx.font = '13px sans-serif';
@@ -569,7 +584,6 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
     const spacing = chartH / Math.max(values.length, 5);
     const barHeight = spacing * 0.6;
 
-    ctx.font = '12px sans-serif';
     ctx.textBaseline = 'middle';
 
     values.forEach((v, i) => {
@@ -577,10 +591,9 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         
         // 标签绘制
         ctx.fillStyle = '#4b5563';
-        let labelText = labels[i];
-        if (labelText.length > 12) labelText = labelText.slice(0, 11) + '...';
-        ctx.textAlign = 'left';
-        ctx.fillText(labelText, 10, y);
+        const labelText = labels[i];
+        ctx.textAlign = 'right';
+        ctx.fillText(labelText, padX - 10, y, padX - 16);
 
         // 条块绘制
         const barWidth = (v / max) * chartW;
