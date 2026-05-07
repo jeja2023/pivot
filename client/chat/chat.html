@@ -571,6 +571,36 @@
                             <h3>审计日志</h3>
                             <button id="logs-export-btn" class="btn-secondary">导出日志</button>
                         </div>
+                        <div class="filter-bar" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; background: rgba(148, 163, 184, 0.05); padding: 10px 15px; border-radius: 8px;">
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">用户</label>
+                                <input type="text" id="log-filter-user" class="form-input" placeholder="用户名" style="width: 110px; height: 32px; margin: 0; font-size: 0.85rem;">
+                            </div>
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">操作类型</label>
+                                <input type="text" id="log-filter-action" class="form-input" placeholder="例如: 登录" style="width: 110px; height: 32px; margin: 0; font-size: 0.85rem;">
+                            </div>
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">详情关键字</label>
+                                <input type="text" id="log-filter-details" class="form-input" placeholder="搜索详情..." style="width: 140px; height: 32px; margin: 0; font-size: 0.85rem;">
+                            </div>
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">IP 地址</label>
+                                <input type="text" id="log-filter-ip" class="form-input" placeholder="IP" style="width: 110px; height: 32px; margin: 0; font-size: 0.85rem;">
+                            </div>
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">开始日期</label>
+                                <input type="date" id="log-filter-start" class="form-input" style="width: 130px; height: 32px; margin: 0; padding: 4px 8px; font-size: 0.82rem;">
+                            </div>
+                            <div class="filter-item">
+                                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; text-align: left;">结束日期</label>
+                                <input type="date" id="log-filter-end" class="form-input" style="width: 130px; height: 32px; margin: 0; padding: 4px 8px; font-size: 0.82rem;">
+                            </div>
+                            <div class="filter-item" style="display: flex; align-items: flex-end; gap: 8px;">
+                                <button onclick="window.loadLogs(1)" class="btn-primary" style="height: 32px; padding: 0 15px; font-size: 0.85rem;">查询</button>
+                                <button onclick="window.resetLogFilters()" class="btn-secondary" style="height: 32px; padding: 0 15px; font-size: 0.85rem;">重置</button>
+                            </div>
+                        </div>
                         <div class="table-container">
                             <table class="data-table log-table">
                                 <thead>

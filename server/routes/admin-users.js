@@ -70,12 +70,31 @@ function createAdminUsersRouter({
     }));
 
     router.get('/admin/logs/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const logs = db.prepare('SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ORDER BY al.timestamp DESC LIMIT 10000').all();
+        const { username, action, details, ip, start, end } = req.query;
+        let conditions = [];
+        let params = [];
+        if (username) { conditions.push("u.username LIKE ?"); params.push(`%${username}%`); }
+        if (action) { conditions.push("al.action = ?"); params.push(action); }
+        if (details) { conditions.push("al.details LIKE ?"); params.push(`%${details}%`); }
+        if (ip) { conditions.push("al.ip_address LIKE ?"); params.push(`%${ip}%`); }
+        if (start) { conditions.push("al.timestamp >= ?"); params.push(start + ' 00:00:00'); }
+        if (end) { conditions.push("al.timestamp <= ?"); params.push(end + ' 23:59:59'); }
+        
+        const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+        const logs = db.prepare(`
+            SELECT al.*, u.username 
+            FROM audit_logs al 
+            LEFT JOIN users u ON al.user_id = u.id 
+            ${whereClause}
+            ORDER BY al.timestamp DESC 
+            LIMIT 10000
+        `).all(...params);
+        
         let csv = '\uFEFF序号,时间,用户,IP,操作,详情\n';
         logs.forEach((l, i) => {
             csv += [i + 1, l.timestamp, l.username || '系统', l.ip_address || '-', l.action, l.details || ''].map(escapeCsvCell).join(',') + '\n';
         });
-        logAction(req, '导出审计日志', `导出 ${logs.length} 条日志`);
+        logAction(req, '导出审计日志', `导出 ${logs.length} 条日志${whereClause ? ' (已筛选)' : ''}`);
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=audit_logs.csv');
         res.send(csv);
@@ -143,14 +162,54 @@ function createAdminUsersRouter({
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
+        
+        const { username, action, details, ip, start, end } = req.query;
+        let conditions = [];
+        let params = [];
+        
+        if (username) {
+            conditions.push("u.username LIKE ?");
+            params.push(`%${username}%`);
+        }
+        if (action) {
+            conditions.push("l.action = ?");
+            params.push(action);
+        }
+        if (details) {
+            conditions.push("l.details LIKE ?");
+            params.push(`%${details}%`);
+        }
+        if (ip) {
+            conditions.push("l.ip_address LIKE ?");
+            params.push(`%${ip}%`);
+        }
+        if (start) {
+            conditions.push("l.timestamp >= ?");
+            params.push(start + ' 00:00:00');
+        }
+        if (end) {
+            conditions.push("l.timestamp <= ?");
+            params.push(end + ' 23:59:59');
+        }
+        
+        const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+        
         const logs = db.prepare(`
             SELECT l.*, u.username
             FROM audit_logs l
             LEFT JOIN users u ON l.user_id = u.id
+            ${whereClause}
             ORDER BY l.timestamp DESC
             LIMIT ? OFFSET ?
-        `).all(limit, offset);
-        const total = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get().count;
+        `).all(...params, limit, offset);
+        
+        const total = db.prepare(`
+            SELECT COUNT(*) as count 
+            FROM audit_logs l 
+            LEFT JOIN users u ON l.user_id = u.id
+            ${whereClause}
+        `).get(...params).count;
+        
         res.json({ data: logs, total });
     }));
 

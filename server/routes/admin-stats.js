@@ -10,12 +10,23 @@ const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 
 function getLocalHostnames() {
-    const names = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', 'host.docker.internal']);
+    const names = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0', 'host.docker.internal', 'loopback']);
     try {
-        names.add(os.hostname().toLowerCase());
+        const hostname = os.hostname().toLowerCase();
+        names.add(hostname);
+        if (hostname.includes('.')) {
+            names.add(hostname.split('.')[0]);
+        }
+        
         const interfaces = os.networkInterfaces();
         Object.values(interfaces).flat().filter(Boolean).forEach(item => {
-            if (item.address) names.add(String(item.address).toLowerCase());
+            if (item.address) {
+                names.add(String(item.address).toLowerCase());
+                // Handle IPv6 with zone index if any
+                if (item.address.includes('%')) {
+                    names.add(item.address.split('%')[0].toLowerCase());
+                }
+            }
         });
     } catch (e) {
         // Keep the conservative defaults above.
@@ -44,19 +55,21 @@ function summarizeModelEndpoints() {
         try {
             const parsed = new URL(String(row.url || '').trim());
             const host = parsed.hostname.toLowerCase();
+            const isLocal = localNames.has(host);
             const item = {
                 id: row.id,
                 name: row.name,
                 host,
+                isLocal,
                 monitor_url: row.monitor_url || '',
                 max_concurrent: row.max_concurrent || 0
             };
-            if (localNames.has(host)) {
+            if (isLocal) {
                 summary.localCount += 1;
-                if (summary.localModels.length < 5) summary.localModels.push(item);
+                summary.localModels.push(item);
             } else {
                 summary.remoteCount += 1;
-                if (summary.remoteModels.length < 5) summary.remoteModels.push(item);
+                summary.remoteModels.push(item);
             }
         } catch (e) {
             summary.unknownCount += 1;
@@ -101,6 +114,15 @@ function createAdminStatsRouter({
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
         const modelEndpoints = summarizeModelEndpoints();
+        const localNames = getLocalHostnames();
+        
+        // 标记运行时的模型端点是否为本地
+        if (Array.isArray(modelEndpoints.runtime)) {
+            modelEndpoints.runtime.forEach(item => {
+                const host = String(item.host || '').split(':')[0].toLowerCase();
+                item.isLocal = localNames.has(host);
+            });
+        }
 
         res.json({
             updatedAt: new Date().toISOString(),

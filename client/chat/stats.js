@@ -155,27 +155,68 @@ const describeEndpointMonitor = (monitor = {}) => {
 };
 
 const ROUTE_NAME_MAP = {
-    '/api/auth/login': '用户登录',
-    '/api/auth/register': '用户注册',
-    '/api/auth/me': '获取当前用户',
-    '/api/auth/logout': '退出登录',
-    '/api/auth/keys': '密钥管理',
-    '/api/chat/completions': 'AI对话补全',
-    '/api/models': '获取模型列表',
-    '/api/stats/usage': '用量统计查询',
-    '/api/stats/details': '用量明细查询',
-    '/api/stats/trend': '用量趋势数据',
-    '/api/stats/report': '报表数据分析',
-    '/api/stats/monitor-summary': '获取监控数据',
-    '/api/admin/logs': '审计日志查询',
-    '/api/settings/rag': 'RAG功能配置',
-    '/api/settings/password': '修改用户密码',
-    '/api/upload': '附件上传',
-    '/api/models/test': '模型连接测试',
-    '/api/attachments': '获取附件列表',
+    // 认证与授权
+    '/api/auth/login': '用户登录验证',
+    '/api/auth/register': '新用户注册',
+    '/api/auth/me': '获取个人账户信息',
+    '/api/auth/logout': '安全退出登录',
+    '/api/auth/keys': 'API 密钥管理',
     '/api/auth/config': '获取认证配置',
-    '/api/stats/ops-summary': '获取运营概览',
-    '/': '静态资源访问'
+    '/api/auth/refresh': '刷新身份令牌',
+    
+    // 对话核心
+    '/api/chat/completions': 'AI 对话流式补全',
+    '/api/chat/sessions': '获取个人会话列表',
+    '/api/chat/messages': '加载历史消息记录',
+    '/api/chat/title': '生成会话标题',
+    '/api/chat/clear': '清空对话历史',
+    
+    // 用量与报表
+    '/api/stats/usage': '个人用量统计',
+    '/api/stats/details': '个人用量明细',
+    '/api/stats/trend': '个人用量趋势',
+    '/api/stats/report': '报表分析数据',
+    '/api/stats/monitor-summary': '系统实时监控数据',
+    '/api/stats/ops-summary': '运营后台汇总数据',
+    
+    // 管理员专享
+    '/api/admin/users': '全站用户账号管理',
+    '/api/admin/logs': '全量审计日志检索',
+    '/api/admin/logs/export': '导出全量审计 CSV',
+    '/api/stats/admin/usage': '全局多维度用量汇总',
+    '/api/stats/admin/details': '全站消息流监控',
+    '/api/stats/admin/trend': '全站每日流量趋势',
+    
+    // 模型管理
+    '/api/models': '模型列表获取与增删',
+    '/api/models/test': '端点连接稳定性测试',
+    '/api/models/fetch-remote': '远程模型列表探测',
+    '/api/models/:id': '更新/删除指定模型',
+    '/api/models/:id/key': '解密查看模型密钥',
+    
+    // 附件与文件
+    '/api/upload': '附件文件上传',
+    '/api/attachments': '获取附件资源列表',
+    '/api/attachments/:id': '附件资源读取/下载',
+    
+    // 系统配置与健康
+    '/api/health': '服务健康状态检测',
+    '/api/metrics': '监控指标导出 (Prometheus)',
+    '/api/settings': '系统与个人基础设置',
+    '/api/admin/settings': '修改系统全局策略',
+    '/api/settings/password': '用户自主修改密码',
+    '/api/settings/default-model': '设置个人默认模型',
+    '/api/settings/rag': 'RAG 检索增强参数配置',
+    
+    // 核心静态资源
+    '/': '系统主入口',
+    '/chat.html': '对话主界面',
+    '/admin.js': '管理后台脚本',
+    '/stats.js': '统计分析脚本',
+    '/chat.css': '界面主样式表',
+    '/common/styles/theme.css': '全局主题 CSS',
+    '/common/styles/layout.css': '通用布局 CSS',
+    '/chat/chat.css': '对话模块 CSS'
 };
 
 window.loadMonitorSummary = async function() {
@@ -222,15 +263,24 @@ window.loadMonitorSummary = async function() {
             ? gpu.gpus.map(item => {
                 const usedRate = Number(item.ratio || 0) * 100;
                 const utilRate = Number(item.utilization || 0) * 100;
+                const gpuName = item.name || 'GPU';
                 return `<div class="monitor-row">
-                    <span>${escapeHtml(`#${item.index} ${item.name || 'GPU'}`)}</span>
+                    <span title="${escapeHtml(gpuName)}">${escapeHtml(gpuName)}</span>
                     <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(1)}%，负载 ${utilRate.toFixed(0)}%)`)}</strong>
                 </div>`;
             }).join('')
             : `<div class="monitor-empty">${escapeHtml(gpu.error ? `未获取到 GPU 指标：${gpu.error}` : '未检测到 NVIDIA GPU 指标')}</div>`;
-        const endpointNotice = endpoints.hasRemoteModels
-            ? `<div class="monitor-empty is-warning">检测到远端模型：${escapeHtml((endpoints.remoteModels || []).map(item => `${item.name}@${item.host}`).join('，') || '未列出')}。本机 GPU 指标仅代表 Pivot 所在服务器；并发保护只限制本系统发出的请求数。</div>`
-            : '<div class="monitor-empty">本机 GPU 监控仅当模型服务部署在当前服务器时才代表模型负载。</div>';
+        
+        let endpointNotice = '';
+        if (endpoints.hasRemoteModels) {
+            const remoteList = (endpoints.remoteModels || []).map(item => `${item.name}@${item.host}`).join('，');
+            endpointNotice = `<div class="monitor-empty is-warning">检测到远端模型：${escapeHtml(remoteList || '未列出')}。本机 GPU 指标仅代表 Pivot 所在服务器；并发保护只限制本系统发出的请求数。</div>`;
+        } else if (endpoints.hasLocalModels) {
+            endpointNotice = '<div class="monitor-empty is-success" style="color: #059669; background: #f0fdf4; border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 8px; padding: 8px;">已确认模型服务部署在本地，GPU 与并发监控数据代表端点真实负载。</div>';
+        } else {
+            endpointNotice = '<div class="monitor-empty">未检测到活跃的模型端点。</div>';
+        }
+
         document.getElementById('monitor-gpu-list').innerHTML = [
             endpointNotice,
             `<div class="monitor-row"><span>保护状态</span><strong>${escapeHtml(gpu.overloaded ? '保护中' : '正常')}</strong></div>`,
@@ -254,9 +304,12 @@ window.loadMonitorSummary = async function() {
                     const modelNames = (item.models || []).map(model => model.name).filter(Boolean).slice(0, 3).join('、') || item.name || item.host;
                     const detail = `${describeEndpointMonitor(item.monitor)} · 并发 ${formatMetricNumber(concurrencyStatus.active)}/${formatMetricNumber(concurrencyStatus.max)} · 排队 ${formatMetricNumber(concurrencyStatus.queued)}${failures}${circuit}`;
                     const warningClass = item.monitor?.status === 'unreachable' || Number(item.circuitOpenMs || 0) > 0 ? ' is-warning' : '';
+                    const locBadge = item.isLocal 
+                        ? '<span style="font-size: 0.65rem; background: #f0fdf4; color: #059669; padding: 1px 5px; border-radius: 4px; margin-right: 6px; font-weight: 700; border: 1px solid rgba(5, 150, 105, 0.1);">本地</span>'
+                        : '<span style="font-size: 0.65rem; background: #fef2f2; color: #dc2626; padding: 1px 5px; border-radius: 4px; margin-right: 6px; font-weight: 700; border: 1px solid rgba(220, 38, 38, 0.1);">远端</span>';
                     return `<div class="monitor-endpoint${warningClass}">
                         <div class="monitor-row">
-                            <span title="${escapeHtml(item.host || item.key)}">${escapeHtml(modelNames)}</span>
+                            <span title="${escapeHtml(item.host || item.key)}">${locBadge}${escapeHtml(modelNames)}</span>
                             <strong>${escapeHtml(item.host || item.key)}</strong>
                         </div>
                         <div class="monitor-empty">${escapeHtml(detail)}</div>
@@ -268,7 +321,12 @@ window.loadMonitorSummary = async function() {
         const routes = data.http.routes || [];
         document.getElementById('monitor-routes-body').innerHTML = routes.length
             ? routes.map((route, idx) => {
-                const name = ROUTE_NAME_MAP[route.route] || '未知接口';
+                let name = ROUTE_NAME_MAP[route.route];
+                if (!name) {
+                    if (route.route.startsWith('/common/vendor/')) name = '第三方组件库资源';
+                    else if (route.route.startsWith('/uploads/')) name = '用户上传附件流';
+                    else name = route.route;
+                }
                 return `
                 <tr>
                     <td class="text-center">${idx + 1}</td>
@@ -313,7 +371,25 @@ window.exportStats = () => {
 
 window.loadLogs = async function(page = 1) {
     try {
-        const res = await fetch(`${API_BASE}/admin/logs?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
+        const username = document.getElementById('log-filter-user')?.value || '';
+        const action = document.getElementById('log-filter-action')?.value || '';
+        const details = document.getElementById('log-filter-details')?.value || '';
+        const ip = document.getElementById('log-filter-ip')?.value || '';
+        const start = document.getElementById('log-filter-start')?.value || '';
+        const end = document.getElementById('log-filter-end')?.value || '';
+        
+        const params = new URLSearchParams({
+            page,
+            limit: pageState.limit,
+            username,
+            action,
+            details,
+            ip,
+            start,
+            end
+        });
+
+        const res = await fetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
         const { data, total } = await res.json();
         document.getElementById('log-list-body').innerHTML = data.map((l, i) => `
             <tr>
@@ -329,7 +405,25 @@ window.loadLogs = async function(page = 1) {
     } catch (e) { showToast('加载日志失败', 'error'); }
 }
 
-window.exportLogs = () => downloadFileByFetch(`${API_BASE}/admin/logs/export`, 'audit_logs.csv');
+window.resetLogFilters = () => {
+    ['user', 'action', 'details', 'ip', 'start', 'end'].forEach(f => {
+        const el = document.getElementById(`log-filter-${f}`);
+        if (el) el.value = '';
+    });
+    window.loadLogs(1);
+};
+
+window.exportLogs = () => {
+    const username = document.getElementById('log-filter-user')?.value || '';
+    const action = document.getElementById('log-filter-action')?.value || '';
+    const details = document.getElementById('log-filter-details')?.value || '';
+    const ip = document.getElementById('log-filter-ip')?.value || '';
+    const start = document.getElementById('log-filter-start')?.value || '';
+    const end = document.getElementById('log-filter-end')?.value || '';
+    
+    const params = new URLSearchParams({ username, action, details, ip, start, end });
+    downloadFileByFetch(`${API_BASE}/admin/logs/export?${params.toString()}`, 'audit_logs.csv');
+};
 
 window.loadReport = async function() {
     const unit = document.getElementById('report-unit').value || '';

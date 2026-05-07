@@ -1,6 +1,6 @@
 # Pivot (智枢) —— 企业级 AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.8-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.9-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E4%BC%81%E4%B8%9A%E7%BA%A7-blue)
 
 **Pivot (智枢)** 是一款专为企业私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为企业提供一个安全、稳定且美观的 AI 交互门户。
@@ -31,7 +31,7 @@
 - **UI/UX 深度优化**：1450px 宽屏管理面板，全系统自定义弹窗，10+ 子系统的前端彻底模块化重构。
 
 ### 4. 安全、存储与审计报表
-- **全链路审计日志**：完整记录敏感操作、登录轨迹及 IP 地址，满足合规审计需求。
+- **全链路审计日志**：完整记录敏感操作、登录轨迹及 IP 地址，支持多维度条件筛选，满足合规审计需求。
 - **第三方 API 接入 (OpenAI 兼容)**：实现标准的 `/v1` 接口，支持用户自主管理 API Key，并上线了 **API Key 用量统计** 体系。
 - **智能模型探测**：支持一键获取上游服务模型列表，极大简化了配置流程。
 - **可视化审计报表**：支持按部门、用户动态生成 Token 消耗报告。
@@ -114,4 +114,4 @@ GPU_VRAM_REJECT_THRESHOLD=0.97
 - `uploads/`: 用户附件隔离存储
 
 ---
-**当前版本**: v0.0.8 (Multimodal Attachments, Remote Model Protection & Auth Session Update)
+**当前版本**: v0.0.9 (Audit Log Filters, Monitoring Precision & Admin UI Optimization)

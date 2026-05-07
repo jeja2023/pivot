@@ -34,26 +34,22 @@ function createAttachmentsRouter({
     const router = express.Router();
 
     router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
-        // 先尝试通过 Cookie/Header 验证
-        authMiddleware(req, res, (err) => {
-            if (!err && req.user) return next();
-            
-            // 如果验证失败或未授权，尝试使用 URL 中的 token 参数
-            const token = req.query.token;
-            if (token) {
-                const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ?')
-                    .get(token, `%/${req.params.filename}`);
-                if (attachment) {
-                    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
-                    if (user && user.status !== 'disabled') {
-                        req.user = user; // 临时赋予权限
-                        return next();
-                    }
+        const token = req.query.token;
+        if (token) {
+            // 尝试通过 URL 中的 token 参数验证
+            const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ?')
+                .get(token, `%/${req.params.filename}`);
+            if (attachment) {
+                const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
+                if (user && user.status !== 'disabled') {
+                    req.user = user; // 临时赋予权限
+                    return next();
                 }
             }
-            // 还是没过，就返回之前的错误或 401
-            res.status(401).json({ error: '未授权访问附件' });
-        });
+        }
+
+        // 如果没有 token 或 token 验证失败，尝试通过 Cookie/Header 验证 (例如管理员访问)
+        authMiddleware(req, res, next);
     }, asyncHandler(async (req, res) => {
         const requestedUserId = parseInt(req.params.userId, 10);
         const { sessionId, filename } = req.params;
