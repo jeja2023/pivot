@@ -18,7 +18,7 @@ async function loadAuthConfig() {
 }
 
 document.getElementById('auth-toggle').addEventListener('click', () => {
-    if (!allowPublicRegistration) return showToast('企业模式已关闭公开注册，请联系管理员创建账号', 'error');
+    if (!allowPublicRegistration) return showToast('当前已关闭公开注册，请联系管理员创建账号', 'error');
     isLogin = !isLogin;
     document.getElementById('auth-title').innerText = isLogin ? '智枢' : '智枢 - 注册账号';
     document.getElementById('auth-toggle').innerText = isLogin ? '没有账号？点击注册' : '已有账号？点击登录';

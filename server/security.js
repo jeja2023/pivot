@@ -81,7 +81,7 @@ function validateModelUrl(rawUrl, user) {
         throw new Error('模型接口地址中不允许包含用户名或密码');
     }
     if (!hostAllowedByList(parsed.hostname)) {
-        throw new Error('模型接口域名不在企业白名单内');
+        throw new Error('模型接口域名不在安全白名单内');
     }
 
     const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && user?.role === 'admin';

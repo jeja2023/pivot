@@ -27,7 +27,7 @@ function createAuthRouter({
     router.post('/auth/register', asyncHandler(async (req, res) => {
         if (!isPublicRegistrationEnabled()) {
             logAction(req, '注册拦截', `尝试注册账号: ${req.body?.username || '-'}`);
-            return res.status(403).json({ error: '企业模式已关闭公开注册，请联系管理员创建账号' });
+            return res.status(403).json({ error: '当前已关闭公开注册，请联系管理员创建账号' });
         }
         const { username, password, nickname, unit } = req.body;
         const user = register(username, password, nickname, unit);

@@ -33,10 +33,11 @@ async function getContext(sessionId, userId, modelCfg) {
     const totalTokens = messages.reduce((sum, m) => sum + m.token_count, 0);
     let totalImageCount = 0;
 
-    // 如果超过阈值且有足够消息，触发压缩
+    // 如果超过阈值且有足够消息，触发压缩 (异步执行，不阻塞当前对话)
     if (totalTokens > THRESHOLD && messages.length > 8) {
-        await compressMemory(sessionId, userId, messages, modelCfg);
-        return await getContext(sessionId, userId, modelCfg); // 递归获取压缩后的结果
+        compressMemory(sessionId, userId, messages, modelCfg).catch(err => {
+            logger.error({ sessionId, err: err.message }, '异步记忆压缩失败');
+        });
     }
 
     let history = await Promise.all(messages.map(async m => {

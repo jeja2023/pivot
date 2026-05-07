@@ -358,7 +358,12 @@ input::-webkit-contacts-auto-fill-button {
 
 .message-container { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; padding-bottom: 180px; }
 
-.message { display: flex; width: 100%; position: relative; gap: 10px; align-items: flex-start; margin-bottom: 0; }
+.message { 
+    display: flex; width: 100%; position: relative; gap: 10px; align-items: flex-start; margin-bottom: 0; 
+    content-visibility: auto; /* 仅在进入视图时渲染，大幅提升长列表性能 */
+    contain-intrinsic-size: 1px 100px; /* 占位预估大小，防止滚动条抖动 */
+    transform: translateZ(0); /* 触发 GPU 加速 */
+}
 .message.user { flex-direction: row-reverse; }
 .message.assistant { flex-direction: row; }
 

@@ -1,32 +1,56 @@
 const pino = require('pino');
 const pinoHttp = require('pino-http');
+const path = require('path');
+const fs = require('fs');
 
 const isProduction = process.env.NODE_ENV === 'production';
+const logDir = path.resolve(__dirname, '../logs');
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
-// 基础日志配置
-const logger = pino({
-    level: process.env.LOG_LEVEL || 'info',
-    // 只要在控制台运行，就强制使用美化输出
-    transport: {
-        target: 'pino-pretty',
-        options: {
+// 敏感字段脱敏配置
+const redactFields = [
+    'password', 'password_hash', 'api_key', 'key', 'key_hash', 
+    '*.password', '*.api_key', 'headers.authorization', 'headers.cookie'
+];
+
+// 构建输出流
+const streams = [];
+if (isProduction) {
+    // 生产环境：控制台输出原始 JSON (高性能)
+    streams.push({ stream: process.stdout });
+    // 同时写入文件
+    streams.push({ 
+        level: 'info',
+        stream: pino.destination({
+            dest: path.join(logDir, 'pivot.log'),
+            sync: false, // 异步写入，提升性能
+            mkdir: true
+        })
+    });
+} else {
+    // 开发环境：使用 pino-pretty 美化输出
+    streams.push({
+        stream: require('pino-pretty')({
             colorize: true,
             translateTime: 'HH:mm:ss',
-            // 隐藏所有对人眼无用的元数据字段
             ignore: 'pid,hostname,version,req,res,responseTime,reqId',
-            // 将级别简化为单个字母或精简模式
             singleLine: true,
-            // 重点突出消息内容
             messageFormat: '{msg}'
-        }
+        })
+    });
+}
+
+const logger = pino({
+    level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
+    redact: {
+        paths: redactFields,
+        censor: '[REDACTED]'
     },
     timestamp: pino.stdTimeFunctions.isoTime,
     formatters: {
-        level: (label) => {
-            return { level: label.toUpperCase() };
-        }
+        level: (label) => ({ level: label.toUpperCase() })
     }
-});
+}, pino.multistream(streams));
 
 // HTTP 请求日志中间件
 const httpLogger = pinoHttp({

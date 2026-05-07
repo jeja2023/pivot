@@ -38,16 +38,19 @@ function runMigrations() {
     ensureColumn('messages', 'cost_time', 'REAL');
     ensureColumn('messages', 'tokens_per_sec', 'REAL');
     ensureColumn('attachments', 'access_token', 'TEXT');
-    const attachmentsMissingToken = db.prepare("SELECT id FROM attachments WHERE access_token IS NULL OR access_token = ''").all();
-    if (attachmentsMissingToken.length > 0) {
-        const updateAttachmentToken = db.prepare('UPDATE attachments SET access_token = ? WHERE id = ?');
-        const backfillAttachmentTokens = db.transaction(() => {
-            attachmentsMissingToken.forEach(row => {
-                updateAttachmentToken.run(crypto.randomBytes(24).toString('base64url'), row.id);
+    ensureColumn('attachments', 'expires_at', 'DATETIME');
+    const attachmentsToUpdate = db.prepare("SELECT id, created_at FROM attachments WHERE access_token IS NULL OR access_token = '' OR expires_at IS NULL").all();
+    if (attachmentsToUpdate.length > 0) {
+        const updateAttachmentToken = db.prepare("UPDATE attachments SET access_token = ?, expires_at = datetime(?, '+30 days') WHERE id = ?");
+        const backfill = db.transaction(() => {
+            attachmentsToUpdate.forEach(row => {
+                const token = crypto.randomBytes(24).toString('base64url');
+                const baseTime = row.created_at || getBeijingTimestamp();
+                updateAttachmentToken.run(token, baseTime, row.id);
             });
         });
-        backfillAttachmentTokens();
-        logger.info({ count: attachmentsMissingToken.length }, '数据库升级：已为历史附件补充访问令牌');
+        backfill();
+        logger.info({ count: attachmentsToUpdate.length }, '数据库升级：已为历史附件补充访问令牌及过期时间 (30天)');
     }
     ensureColumn('models', 'daily_token_limit', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'allowed_units', "TEXT DEFAULT ''");
@@ -129,6 +132,20 @@ function runMigrations() {
         });
         migrateTime();
         logger.info('数据库升级：已将历史 UTC 时间补正为东八区时间');
+    }
+
+    // --- 全文搜索索引初始化 ---
+    try {
+        const ftsCount = db.prepare('SELECT COUNT(*) as count FROM messages_fts').get().count;
+        if (ftsCount === 0) {
+            const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;
+            if (msgCount > 0) {
+                db.exec('INSERT INTO messages_fts(rowid, content) SELECT id, content FROM messages');
+                logger.info({ count: msgCount }, '数据库升级：全文搜索索引初始化完成');
+            }
+        }
+    } catch (e) {
+        logger.error({ err: e.message }, '全文搜索索引初始化失败');
     }
 }
 

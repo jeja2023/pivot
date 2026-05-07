@@ -126,13 +126,23 @@ const loginLimiter = rateLimit({
     message: { error: '登录请求过于频繁，请15分钟后再试' }
 });
 
-// 开启 Helmet 安全防护 (内网兼容模式)
+// 开启 Helmet 安全防护 (精细化安全配置)
 app.use(helmet({
-    contentSecurityPolicy: false, // 允许加载各种外部资源
+    contentSecurityPolicy: {
+        directives: {
+            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "blob:"],
+            "script-src-attr": ["'unsafe-inline'"], // 允许 HTML 标签中的 onclick 等内联事件
+            "img-src": ["'self'", "data:", "blob:", "*"],
+            "style-src": ["'self'", "'unsafe-inline'"],
+            "connect-src": ["'self'", "*"],
+            "upgrade-insecure-requests": null
+        }
+    },
     crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: false, // 禁用 COOP，避免非 HTTPS 环境警告
-    originAgentCluster: false,      // 禁用 Origin-Agent-Cluster 冲突
-    hsts: false // 禁用强制 HTTPS，适配局域网环境
+    crossOriginOpenerPolicy: false,
+    originAgentCluster: false,
+    hsts: false
 }));
 
 const chatLimiter = rateLimit({
@@ -150,8 +160,6 @@ if (corsOrigins.length > 0) {
 }
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
-
-// 请求 ID 与结构化日志中间件由 httpLogger 处理，此处移除旧的逻辑
 
 app.get('/api/health', (req, res) => {
     try {

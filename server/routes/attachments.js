@@ -36,9 +36,9 @@ function createAttachmentsRouter({
     router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
         const token = req.query.token;
         if (token) {
-            // 尝试通过 URL 中的 token 参数验证
-            const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ?')
-                .get(token, `%/${req.params.filename}`);
+            // 尝试通过 URL 中的 token 参数验证 (且校验过期时间)
+            const attachment = db.prepare('SELECT user_id FROM attachments WHERE access_token = ? AND file_path LIKE ? AND (expires_at IS NULL OR expires_at > ?)')
+                .get(token, `%/${req.params.filename}`, getBeijingTimestamp());
             if (attachment) {
                 const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
                 if (user && user.status !== 'disabled') {
@@ -131,9 +131,9 @@ function createAttachmentsRouter({
                             fs.writeFileSync(pagePath, page.data);
                             const pageUrl = `/uploads/${userId}/${sessionId}/${pageFileName}?token=${pageToken}`;
                             db.prepare(`
-                                INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pagePath.replace(/\\/g, '/'), page.mimeType, page.data.length, pageToken, getBeijingTimestamp());
+                                INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
+                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pagePath.replace(/\\/g, '/'), page.mimeType, page.data.length, pageToken, getBeijingTimestamp(), getBeijingTimestamp());
                             visionAttachments.push({
                                 name: `${originalName} 第 ${page.page} 页`,
                                 url: pageUrl,
@@ -147,9 +147,9 @@ function createAttachmentsRouter({
             }
 
             db.prepare(`
-                INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(userId, sessionId, originalName, finalPath.replace(/\\/g, '/'), imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp());
+                INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
+            `).run(userId, sessionId, originalName, finalPath.replace(/\\/g, '/'), imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp(), getBeijingTimestamp());
 
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
             res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, extractedText, visionAttachments });

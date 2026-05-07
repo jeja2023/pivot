@@ -104,6 +104,25 @@ function createSessionsRouter({
         res.json(tags);
     }));
 
+    router.get('/sessions/search/content', authMiddleware, asyncHandler(async (req, res) => {
+        const keyword = String(req.query.keyword || '').trim();
+        if (!keyword) return res.json({ data: [] });
+
+        const sessions = db.prepare(`
+            SELECT DISTINCT s.*, 
+            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) as msg_count,
+            snippet(messages_fts, 0, '<b>', '</b>', '...', 20) as snippet
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            JOIN messages_fts f ON f.rowid = m.id
+            WHERE s.user_id = ? AND messages_fts MATCH ?
+            ORDER BY s.updated_at DESC
+            LIMIT 50
+        `).all(req.user.id, keyword);
+
+        res.json({ data: sessions });
+    }));
+
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const session = stmts.getSessionById.get(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
