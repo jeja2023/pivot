@@ -1,4 +1,5 @@
-const CACHE_NAME = 'pivot-v0.0.13';
+const SW_VERSION = new URL(self.location.href).searchParams.get('v') || 'v0.0.0';
+const CACHE_NAME = `pivot-${SW_VERSION}`;
 const ASSETS_TO_CACHE = [
   '/',
   '/chat/chat.html',

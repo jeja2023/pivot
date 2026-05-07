@@ -26,8 +26,11 @@ const {
     normalizeLimit
 } = require('./http');
 const { validateConfig } = require('./config');
+const { applyAppVersionTemplate, getAppVersion } = require('./version');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
+const appVersion = getAppVersion();
+const chatHtmlTemplate = fs.readFileSync(path.join(__dirname, '../client/chat/chat.html'), 'utf8');
 
 let shuttingDown = false;
 const fatalExit = (reason, err) => {
@@ -118,6 +121,7 @@ async function getCachedDirSize(dir) {
 }
 
 const app = express();
+app.locals.appVersion = appVersion;
 app.use(httpLogger); // 注入请求日志和请求 ID
 app.use(metricsMiddleware);
 const rateLimit = require('express-rate-limit');
@@ -216,6 +220,19 @@ app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/
     maxAge: appConfig.vendorMaxAge,
     immutable: true
 }));
+const noCacheHeaders = (res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+};
+app.get('/chat/chat.html', (req, res) => {
+    noCacheHeaders(res);
+    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
+});
+app.get('/sw.js', (req, res) => {
+    noCacheHeaders(res);
+    res.sendFile(path.join(__dirname, '../client/sw.js'));
+});
 app.use(express.static('client', { maxAge: appConfig.staticMaxAge }));
 const upload = createUploadMiddleware();
 const secureUpload = {
@@ -231,7 +248,8 @@ app.use(createAttachmentsRouter({
 
 // 根路径跳转至对话页面
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/chat/chat.html'));
+    noCacheHeaders(res);
+    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
 });
 
 app.use('/api', createAuthRouter({

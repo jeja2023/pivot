@@ -19,6 +19,7 @@
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#3b82f6">
+
 </head>
 
 <body class="light-mode">
@@ -963,7 +964,8 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
+                const swVersion = typeof APP_VERSION !== 'undefined' ? APP_VERSION : `v${Date.now()}`;
+                navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(swVersion)}`)
                     .then(reg => console.log('PWA Service Worker 注册成功:', reg.scope))
                     .catch(err => console.warn('PWA Service Worker 注册失败:', err));
             });
