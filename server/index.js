@@ -361,7 +361,7 @@ app.use((err, req, res, _next) => {
     }
 
     res.status(status).json({
-        error: (process.env.NODE_ENV === 'production' && status >= 500) 
+        error: (process.env.NODE_ENV === 'production' && status >= 500 && status !== 503) 
             ? '服务器内部错误，请联系管理员' 
             : err.message
     });

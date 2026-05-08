@@ -274,35 +274,81 @@ function createChatRouter({
 
         req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
+        // --- 立即建立 SSE 连接 ---
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.setHeader('Content-Encoding', 'identity');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.socket?.setNoDelay?.(true);
+        res.socket?.setKeepAlive?.(true);
+        res.flushHeaders?.();
+
+        const writeSse = (payload) => {
+            if (res.writableEnded) return;
+            res.write(`data: ${payload}\n\n`);
+            res.flush?.();
+        };
+
+        const writeQueueNotice = (scope, info = {}) => {
+            const queueAhead = Math.max(0, Number(info.queueAhead || 0));
+            const label = scope === 'endpoint' ? '模型端点' : '模型服务';
+            const message = info.status === 'ready'
+                ? `${label}排队结束，正在连接模型。`
+                : `正在排队，前方还有 ${queueAhead} 个请求，当前正在处理 ${info.active}/${info.max} 个。`;
+            writeSse(JSON.stringify({
+                type: 'queue',
+                scope,
+                status: info.status || 'waiting',
+                message,
+                ...info
+            }));
+        };
+
+        res.write(': stream-ready\n\n');
+        res.flush?.();
+
+        // --- 业务逻辑检查 ---
         const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
-        if (!session) return res.status(403).json({ error: '无权访问或会话不存在' });
+        if (!session) {
+            writeSse(JSON.stringify({ error: '无权访问或会话不存在', code: 'FORBIDDEN' }));
+            return res.end();
+        }
 
         const modelCfg = getAccessibleModel(modelId, req.user);
+        if (!modelCfg) {
+            writeSse(JSON.stringify({ error: '未找到可用的模型配置', code: 'MODEL_NOT_FOUND' }));
+            return res.end();
+        }
 
-        if (!modelCfg) return res.status(400).json({ error: '未找到可用的模型配置' });
-        if (modelCfg.secret_error) return res.status(400).json({ error: `${modelCfg.secret_error}，请重新保存该模型的 API Key` });
+        if (modelCfg.secret_error) {
+            writeSse(JSON.stringify({ error: `${modelCfg.secret_error}，请重新保存该模型的 API Key`, code: 'API_KEY_ERROR' }));
+            return res.end();
+        }
+
         if (modelCfg.daily_token_limit && modelCfg.daily_token_limit > 0) {
             const usedToday = getModelDailyUsage(userId, modelCfg.id);
             if (usedToday >= modelCfg.daily_token_limit) {
                 logAction(req, '模型额度拦截', `模型: ${modelCfg.name}，今日已用: ${usedToday}/${modelCfg.daily_token_limit}`);
-                return res.status(429).json({ error: `该模型今日额度已用完（${usedToday}/${modelCfg.daily_token_limit} Tokens）` });
+                writeSse(JSON.stringify({ error: `该模型今日额度已用完（${usedToday}/${modelCfg.daily_token_limit} Tokens）`, code: 'QUOTA_EXCEEDED' }));
+                return res.end();
             }
         }
 
         if (!regenerate) {
             try {
                 const userTokens = estimateTokens(modelContent);
-                const info = db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
                   .run(sessionId, userId, 'user', modelContent, userTokens, modelCfg.id, getBeijingTimestamp());
-                req.log.info({ sessionId, changes: info.changes }, '已插入用户消息');
             } catch (dbErr) {
                 req.log.error({ sessionId, err: dbErr.message }, '用户消息入库失败');
-                return res.status(500).json({ error: '消息保存失败，请稍后重试' });
+                writeSse(JSON.stringify({ error: '消息保存失败，请稍后重试', code: 'DB_ERROR' }));
+                return res.end();
             }
         }
 
         db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(getBeijingTimestamp(), sessionId);
-        
         logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
 
         const unsupportedCapability = detectUnsupportedCapability(modelContent);
@@ -313,48 +359,75 @@ function createChatRouter({
               .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
-
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
-            return res.json({
+            
+            writeSse(JSON.stringify({
                 unsupportedCapability: unsupportedCapability.code,
                 content: assistantContent
-            });
+            }));
+            writeSse('[DONE]');
+            return res.end();
         }
 
-        // --- 进入并发控制 ---
-        try {
-            await aiSemaphore.acquire();
-        } catch (e) {
-            const message = e.message || '模型服务当前繁忙，请稍后重试。';
-            logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
-            return res.status(e.statusCode || 503).json({
-                error: message,
-                code: e.code || 'AI_OVERLOADED',
-                retryable: true
-            });
-        }
+
         let semaphoreReleased = false;
         let endpointRelease = null;
+        let globalSlotAcquired = false;
         const requestStartedAt = Date.now();
-        try {
-            endpointRelease = await acquireModelSlot(modelCfg);
-        } catch (e) {
-            aiSemaphore.release();
-            const message = e.message || '模型端点当前繁忙，请稍后重试。';
-            logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
-            return res.status(e.statusCode || 503).json({
-                error: message,
-                code: e.code || 'AI_ENDPOINT_OVERLOADED',
-                retryable: true
-            });
-        }
         const releaseSemaphore = () => {
             if (!semaphoreReleased) {
                 if (endpointRelease) endpointRelease();
-                aiSemaphore.release();
+                if (globalSlotAcquired) aiSemaphore.release();
                 semaphoreReleased = true;
             }
         };
+
+
+        // --- 进入并发控制 ---
+        let queuedAtGlobalGate = false;
+        try {
+            await aiSemaphore.acquire({
+                onQueued(info) {
+                    queuedAtGlobalGate = true;
+                    writeQueueNotice('global', info);
+                }
+            });
+            globalSlotAcquired = true;
+            if (queuedAtGlobalGate) writeQueueNotice('global', { status: 'ready', active: aiSemaphore.getStatus().active, max: aiSemaphore.getStatus().max });
+        } catch (e) {
+            const message = e.message || '模型服务当前繁忙，请稍后重试。';
+            logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
+            writeSse(JSON.stringify({
+                error: message,
+                code: e.code || 'AI_OVERLOADED',
+                retryable: true
+            }));
+            return res.end();
+        }
+
+        let queuedAtEndpointGate = false;
+        try {
+            endpointRelease = await acquireModelSlot(modelCfg, {
+                onQueued(info) {
+                    queuedAtEndpointGate = true;
+                    writeQueueNotice('endpoint', info);
+                }
+            });
+            if (queuedAtEndpointGate) {
+                const status = aiSemaphore.getStatus();
+                writeQueueNotice('endpoint', { status: 'ready', active: status.active, max: status.max });
+            }
+        } catch (e) {
+            releaseSemaphore();
+            const message = e.message || '模型端点当前繁忙，请稍后重试。';
+            logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
+            writeSse(JSON.stringify({
+                error: message,
+                code: e.code || 'AI_ENDPOINT_OVERLOADED',
+                retryable: true
+            }));
+            return res.end();
+        }
 
         let history = await getContext(sessionId, userId, modelCfg);
         if (typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
@@ -384,27 +457,10 @@ function createChatRouter({
                 visionHistory.push(...rescuedHistory);
             } else {
                 releaseSemaphore();
-                return res.status(400).json({ error: '对话内容不能为空' });
+                writeSse(JSON.stringify({ error: '对话内容不能为空', code: 'EMPTY_MESSAGE' }));
+                return res.end();
             }
         }
-
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        res.setHeader('Content-Encoding', 'identity');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.socket?.setNoDelay?.(true);
-        res.socket?.setKeepAlive?.(true);
-        res.flushHeaders?.();
-
-        const writeSse = (payload) => {
-            if (res.writableEnded) return;
-            res.write(`data: ${payload}\n\n`);
-            res.flush?.();
-        };
-        res.write(': stream-ready\n\n');
-        res.flush?.();
 
         let baseUrl = modelCfg.url.trim().replace(/\/+$/, '');
         if (!baseUrl.includes('/v1') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {

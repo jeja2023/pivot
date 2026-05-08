@@ -18,13 +18,13 @@ const escapeSelectorText = (str) => {
 };
 
 const describeSelectorModel = (model, simple = false) => {
-    if (simple) return model.name + (model.user_id ? ' (private)' : '');
+    if (simple) return model.name + (model.user_id ? ' (个人)' : '');
     const parts = [model.name];
-    if (model.user_id) parts.push('private');
+    if (model.user_id) parts.push('个人');
     if (model.model_name && model.model_name !== model.name) parts.push(model.model_name);
     const limit = Number(model.daily_token_limit || 0);
-    if (limit > 0) parts.push(`limit: ${limit.toLocaleString()} / day`);
-    if (!model.user_id && model.allowed_units) parts.push(`scope: ${model.allowed_units}`);
+    if (limit > 0) parts.push(`每日额度: ${limit.toLocaleString()}`);
+    if (!model.user_id && model.allowed_units) parts.push(`可见范围: ${model.allowed_units}`);
     return parts.join(' | ');
 };
 
@@ -64,20 +64,36 @@ window.refreshModelSelector = async function() {
         const { data = [] } = await modelRes.json();
         const settings = settingsRes.ok ? await settingsRes.json() : {};
         const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
-        const models = currentUser?.role === 'admin'
+        
+        // 只有当 currentUser 存在时才进行过滤
+        const models = (window.currentUser && window.currentUser.role === 'admin')
             ? data.filter(model => !model.user_id || model.owner_role === 'admin')
             : data;
 
-        selector.innerHTML = models.length
-            ? models.map(model => `<option value="${model.id}" title="${escapeSelectorText(describeSelectorModel(model, false))}">${escapeSelectorText(describeSelectorModel(model, true))}</option>`).join('')
-            : '<option value="">No available models</option>';
-        selector.disabled = models.length === 0;
+        if (models.length === 0) {
+            selector.innerHTML = '<option value="">暂无可用模型</option>';
+            selector.disabled = true;
+            return;
+        }
 
-        if (selected && models.some(model => String(model.id) === String(selected))) selector.value = selected;
-        else if (defaultModelId && models.some(model => String(model.id) === String(defaultModelId))) selector.value = defaultModelId;
-        else if (models.length > 0) selector.value = models[0].id;
+        selector.innerHTML = models.map(model => {
+            const isSelected = (selected && String(model.id) === String(selected)) || 
+                             (!selected && defaultModelId && String(model.id) === String(defaultModelId));
+            return `<option value="${model.id}" ${isSelected ? 'selected' : ''} title="${escapeSelectorText(describeSelectorModel(model, false))}">${escapeSelectorText(describeSelectorModel(model, true))}</option>`;
+        }).join('');
+        selector.disabled = false;
+
+        // 如果之前没有选中值，或者选中的值已不在列表中，尝试恢复默认或第一个
+        if (!selector.value && models.length > 0) {
+            if (defaultModelId && models.some(m => String(m.id) === String(defaultModelId))) {
+                selector.value = defaultModelId;
+            } else {
+                selector.value = models[0].id;
+            }
+        }
     } catch (e) {
-        selector.innerHTML = '<option value="">Model list failed</option>';
+        console.error('刷新模型列表失败:', e);
+        selector.innerHTML = '<option value="">模型列表加载失败</option>';
         selector.disabled = true;
     }
 };
@@ -85,41 +101,13 @@ window.refreshModelSelector = async function() {
 // --- 初始化 ---
 document.addEventListener('DOMContentLoaded', () => {
     renderCopyright();
-    showAuth();
+    if (window.showAuth) window.showAuth();
 });
 
 function renderCopyright() {
     document.querySelectorAll('.copyright-text').forEach(el => {
         el.innerText = APP_COPYRIGHT;
     });
-}
-
-function showAuth() {
-    document.getElementById('auth-container').classList.remove('hidden');
-    document.getElementById('app').classList.add('hidden');
-    window.updateContextUsage(null);
-}
-
-function showApp() {
-    if (!currentUser) return;
-    document.getElementById('auth-container').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    
-    // 更新用户信息显示
-    const userDisplay = document.getElementById('user-info') || document.getElementById('current-username');
-    if (userDisplay) userDisplay.innerText = currentUser.nickname || currentUser.username;
-    
-    if (currentUser.role === 'admin') {
-        const tag = document.getElementById('admin-tag');
-        if (tag) tag.classList.remove('hidden');
-        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
-        const btn = document.getElementById('admin-panel-btn');
-        if (btn) btn.classList.remove('hidden');
-    }
-    
-    // 立即加载会话与模型列表
-    loadSessions();
-    window.refreshModelSelector();
 }
 
 // --- 全局图片预览 (支持聊天记录中点击放大) ---

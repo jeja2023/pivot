@@ -175,48 +175,7 @@ async function testConnection(url, api_key, model_name, id = null) {
     } catch (e) { showToast('网络错误', 'error'); }
 }
 
-window.refreshModelSelector = async function() {
-    const selector = document.getElementById('model-selector');
-    if (!selector) return;
-    const selected = selector.value;
-    const describeModelOption = (m, simple = false) => {
-        if (simple) return m.name + (m.user_id ? ' (私有)' : '');
-        const parts = [m.name];
-        if (m.user_id) parts.push('私有');
-        if (m.model_name && m.model_name !== m.name) parts.push(m.model_name);
-        const limit = Number(m.daily_token_limit || 0);
-        if (limit > 0) parts.push(`限额: ${limit.toLocaleString()} /日`);
-        if (!m.user_id && m.allowed_units) parts.push(`范围: ${m.allowed_units}`);
-        return parts.join(' · ');
-    };
-    try {
-        const [modelRes, settingsRes] = await Promise.all([
-            fetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/settings`, { headers: authHeaders() })
-        ]);
-        if (!modelRes.ok) throw new Error('模型列表加载失败');
-        const { data } = await modelRes.json();
-        const settings = settingsRes.ok ? await settingsRes.json() : {};
-        const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
-
-        // 管理员过滤：不显示普通用户的私有模型
-        const filteredData = currentUser.role === 'admin'
-            ? data.filter(m => !m.user_id || m.owner_role === 'admin')
-            : data;
-
-        selector.innerHTML = filteredData.length
-            ? filteredData.map(m => `<option value="${m.id}" title="${escapeHtml(describeModelOption(m, false))}">${escapeHtml(describeModelOption(m, true))}</option>`).join('')
-            : '<option value="">暂无可用模型</option>';
-        selector.disabled = filteredData.length === 0;
-
-        if (selected && filteredData.some(m => String(m.id) === String(selected))) selector.value = selected;
-        else if (defaultModelId && filteredData.some(m => String(m.id) === String(defaultModelId))) selector.value = defaultModelId;
-        else if (filteredData.length > 0) selector.value = filteredData[0].id;
-    } catch (e) {
-        selector.innerHTML = '<option value="">模型加载失败</option>';
-        selector.disabled = true;
-    }
-}
+// refreshModelSelector 已在 ui.js 中定义
 
 window.resetModelForm = () => {
     ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {

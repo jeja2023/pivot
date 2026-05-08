@@ -4,6 +4,28 @@ let pendingAttachments = [];
 const MAX_PENDING_ATTACHMENTS = 5;
 window.MAX_PENDING_ATTACHMENTS = MAX_PENDING_ATTACHMENTS;
 
+const escapeChatStatusHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+async function readChatErrorMessage(response) {
+    const fallback = `服务器拒绝 (${response.status})`;
+    const responseType = response.headers.get('content-type') || '';
+    try {
+        if (responseType.includes('application/json')) {
+            const data = await response.json();
+            const message = data.error?.message || data.error || data.message;
+            return message ? String(message) : fallback;
+        }
+        const text = await response.text();
+        return text ? text.slice(0, 300) : fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
 window.createSession = async function(title) {
     const res = await apiFetch(API_BASE + '/sessions', {
         method: 'POST',
@@ -78,10 +100,17 @@ window.sendMessage = async function(isRegenerate = false) {
         appendMessage('user', displayContent, null, { createdAt: new Date() });
     }
     const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date() });
+    const textBody = aiMsgEl.querySelector('.text-body');
+    const updateAssistantStatus = (message, type = 'queue') => {
+        if (!textBody) return;
+        const cls = type === 'error' ? 'error-detail' : 'queue-detail';
+        textBody.innerHTML = `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`;
+    };
     let fullAiContent = '';
     let tokenCount = 0;
     let startTime = Date.now();
     let firstTokenTime = null;
+    let hasShownQueueToast = false;
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -95,13 +124,12 @@ window.sendMessage = async function(isRegenerate = false) {
             signal: currentAbortController.signal
         });
 
-        if (!response.ok) throw new Error(`服务器拒绝 (${response.status})`);
+        if (!response.ok) throw new Error(await readChatErrorMessage(response));
 
         const responseType = response.headers.get('content-type') || '';
         if (responseType.includes('application/json')) {
             const data = await response.json();
             fullAiContent = data.content || data.error || '';
-            const textBody = aiMsgEl.querySelector('.text-body');
             if (textBody) textBody.innerHTML = renderAiMessage(fullAiContent, false);
             if (window.loadSessions) window.loadSessions();
             return;
@@ -110,7 +138,6 @@ window.sendMessage = async function(isRegenerate = false) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
-        const textBody = aiMsgEl.querySelector('.text-body');
         const statsEl = aiMsgEl.querySelector('.message-stats') || document.createElement('div');
         statsEl.className = 'message-stats';
         if (!aiMsgEl.querySelector('.message-stats')) {
@@ -134,39 +161,50 @@ window.sendMessage = async function(isRegenerate = false) {
                 const cleanLine = line.trim();
                 if (cleanLine.startsWith('data: ')) {
                     if (cleanLine === 'data: [DONE]') break;
+                    let data = null;
                     try {
-                        const data = JSON.parse(cleanLine.replace(/^data:\s*/, ''));
-                        if (data.error) throw new Error(data.detail || data.error);
-                        if (data.content) {
-                            if (!firstTokenTime) firstTokenTime = Date.now();
-                            fullAiContent += data.content;
-                            const chineseChars = (fullAiContent.match(/[\u4e00-\u9fa5]/g) || []).length;
-                            tokenCount = Math.ceil(chineseChars * 2 + (fullAiContent.length - chineseChars) * 0.5);
-                            
-                            const hasOpenThought = fullAiContent.includes('<thought>') && !fullAiContent.includes('</thought>');
-                            const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
-                            
-                            if (hasOpenThought && existingThoughtContent) {
-                                existingThoughtContent.innerHTML = renderMarkdown(fullAiContent.replace(/^<thought>/, ''));
-                                if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
-                                    const inner = existingThoughtContent.closest('.thought-content-inner');
-                                    inner.scrollTop = inner.scrollHeight;
-                                }
-                            } else {
-                                const thoughtState = rememberThoughtStateBeforeRender(textBody);
-                                textBody.innerHTML = renderAiMessage(fullAiContent, true, thoughtState.openStates);
-                                restoreThoughtStateAfterRender(textBody, thoughtState);
-                            }
-                            
-                            const elapsed = (Date.now() - startTime) / 1000;
-                            const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
-                            statsEl.innerHTML = `
-                                <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
-                                <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
-                                <span class="stat-item">${ICONS.speed}${tps} t/s</span>
-                            `;
+                        data = JSON.parse(cleanLine.replace(/^data:\s*/, ''));
+                    } catch (e) {
+                        continue;
+                    }
+                    if (data.type === 'queue') {
+                        updateAssistantStatus(data.message || '正在排队，请稍候。');
+                        if (!hasShownQueueToast && data.status !== 'ready') {
+                            showToast(data.message || '请求已进入排队', 'info');
+                            hasShownQueueToast = true;
                         }
-                    } catch (e) {}
+                        continue;
+                    }
+                    if (data.error) throw new Error(data.detail || data.error);
+                    if (data.content) {
+                        if (!firstTokenTime) firstTokenTime = Date.now();
+                        fullAiContent += data.content;
+                        const chineseChars = (fullAiContent.match(/[\u4e00-\u9fa5]/g) || []).length;
+                        tokenCount = Math.ceil(chineseChars * 2 + (fullAiContent.length - chineseChars) * 0.5);
+                        
+                        const hasOpenThought = fullAiContent.includes('<thought>') && !fullAiContent.includes('</thought>');
+                        const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
+                        
+                        if (hasOpenThought && existingThoughtContent) {
+                            existingThoughtContent.innerHTML = renderMarkdown(fullAiContent.replace(/^<thought>/, ''));
+                            if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
+                                const inner = existingThoughtContent.closest('.thought-content-inner');
+                                inner.scrollTop = inner.scrollHeight;
+                            }
+                        } else {
+                            const thoughtState = rememberThoughtStateBeforeRender(textBody);
+                            textBody.innerHTML = renderAiMessage(fullAiContent, true, thoughtState.openStates);
+                            restoreThoughtStateAfterRender(textBody, thoughtState);
+                        }
+                        
+                        const elapsed = (Date.now() - startTime) / 1000;
+                        const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
+                        statsEl.innerHTML = `
+                            <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
+                            <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
+                            <span class="stat-item">${ICONS.speed}${tps} t/s</span>
+                        `;
+                    }
                 }
             }
             const container = document.getElementById('message-container');
@@ -191,7 +229,8 @@ window.sendMessage = async function(isRegenerate = false) {
             fullAiContent += '\n\n[已由用户中断生成]';
             textBody.innerHTML = renderAiMessage(fullAiContent);
         } else {
-            textBody.innerHTML = `<div class="error-detail">${e.message}</div>`;
+            updateAssistantStatus(e.message, 'error');
+            showToast(e.message, 'error');
         }
     } finally {
         document.getElementById('stop-btn').classList.add('hidden');

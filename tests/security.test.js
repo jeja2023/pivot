@@ -40,6 +40,7 @@ const {
 const {
     _titleHelpers
 } = require('../server/routes/chat');
+const { ConcurrencySemaphore } = require('../server/services/concurrency');
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
@@ -75,6 +76,32 @@ test('createSseEventParser parses chunked SSE payloads', () => {
     assert.equal(payloads.length, 1);
     const extracted = extractStreamPayload(JSON.parse(payloads[0]));
     assert.deepEqual(extracted, { delta: 'hello', isThought: false, usage: null });
+});
+
+test('ConcurrencySemaphore reports queue position for waiting requests', async () => {
+    const semaphore = new ConcurrencySemaphore({
+        maxConcurrent: 1,
+        maxQueueSize: 2,
+        queueTimeoutMs: 5000
+    });
+    await semaphore.acquire();
+
+    let notice = null;
+    const waiting = semaphore.acquire({
+        onQueued: info => {
+            notice = info;
+        }
+    });
+
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notice.position, 1);
+    assert.equal(notice.queueAhead, 0);
+    assert.equal(notice.queueLength, 1);
+    assert.equal(notice.maxQueue, 2);
+
+    semaphore.release();
+    await waiting;
+    semaphore.release();
 });
 
 test('csrfMiddleware requires matching cookie and header for cookie writes', () => {

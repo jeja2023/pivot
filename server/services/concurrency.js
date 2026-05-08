@@ -37,7 +37,9 @@ class ConcurrencySemaphore {
         }, nextEnabled ? 'AI 请求保护已开启' : 'AI 请求保护已恢复');
     }
 
-    async acquire() {
+    async acquire(options = {}) {
+        const onQueued = typeof options.onQueued === 'function' ? options.onQueued : null;
+
         if (this.rejectingNewRequests) {
             throw new ConcurrencyLimitError(
                 this.rejectReason || '模型服务当前负载过高，请稍后重试。',
@@ -75,10 +77,24 @@ class ConcurrencySemaphore {
             }, this.queueTimeoutMs);
 
             this.queue.push(item);
-            logger.info({
+            const queueInfo = {
+                position: this.queue.length,
+                queueAhead: Math.max(0, this.queue.length - 1),
                 queueLength: this.queue.length,
                 active: this.currentConcurrent,
-                max: this.maxConcurrent
+                max: this.maxConcurrent,
+                maxQueue: this.maxQueueSize,
+                queueTimeoutMs: this.queueTimeoutMs
+            };
+            if (onQueued) {
+                try {
+                    onQueued(queueInfo);
+                } catch (e) {
+                    logger.warn({ err: e.message }, 'AI 排队提醒回调执行失败');
+                }
+            }
+            logger.info({
+                ...queueInfo
             }, 'AI 并发已满，请求进入排队');
         });
     }
@@ -134,7 +150,7 @@ class ConcurrencySemaphore {
 }
 
 const aiSemaphore = new ConcurrencySemaphore({
-    maxConcurrent: parsePositiveInt(process.env.MAX_CONCURRENT_AI_REQUESTS, 5),
+    maxConcurrent: parsePositiveInt(process.env.MAX_CONCURRENT_AI_REQUESTS, 1),
     maxQueueSize: parsePositiveInt(process.env.MAX_AI_QUEUE_SIZE, 20),
     queueTimeoutMs: parsePositiveInt(process.env.AI_QUEUE_TIMEOUT_MS, 60000)
 });

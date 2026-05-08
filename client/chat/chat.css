@@ -508,6 +508,27 @@ input::-webkit-contacts-auto-fill-button {
     min-width: 0;
     overflow: hidden;
 }
+.queue-detail,
+.error-detail {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 6px 10px;
+    border-radius: 8px;
+    line-height: 1.5;
+    font-size: 0.86rem;
+    overflow-wrap: anywhere;
+}
+.queue-detail {
+    color: #0f766e;
+    background: #f0fdfa;
+    border: 1px solid rgba(13, 148, 136, 0.24);
+}
+.error-detail {
+    color: #b42318;
+    background: #fff1f2;
+    border: 1px solid rgba(225, 29, 72, 0.2);
+}
 .message-footer {
     display: flex;
     align-items: center;

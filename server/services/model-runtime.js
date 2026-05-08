@@ -8,7 +8,7 @@ const parsePositiveInt = (value, fallback) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 2);
+const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 1);
 const MAX_QUEUE_SIZE = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_SIZE, 20);
 const QUEUE_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_TIMEOUT_MS, 60000);
 const FAILURE_THRESHOLD = parsePositiveInt(process.env.MODEL_ENDPOINT_FAILURE_THRESHOLD, 3);
@@ -86,7 +86,7 @@ function ensureRuntime(modelCfg) {
     return runtime;
 }
 
-async function acquireModelSlot(modelCfg) {
+async function acquireModelSlot(modelCfg, options = {}) {
     const runtime = ensureRuntime(modelCfg);
     const now = Date.now();
     if (runtime.circuitOpenUntil > now) {
@@ -97,7 +97,7 @@ async function acquireModelSlot(modelCfg) {
         );
     }
 
-    await runtime.semaphore.acquire();
+    await runtime.semaphore.acquire(options);
     runtime.requestCount += 1;
     let released = false;
     return () => {

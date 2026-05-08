@@ -34,14 +34,30 @@ async function loadAuthConfig() {
 window.showAuth = () => {
     document.getElementById('auth-container').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+    if (window.updateContextUsage) window.updateContextUsage(null);
 };
 
 window.showApp = () => {
+    if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+
+    // 更新用户信息显示
+    const userDisplay = document.getElementById('user-info') || document.getElementById('current-username');
+    if (userDisplay) userDisplay.innerText = currentUser.nickname || currentUser.username;
+    
+    if (currentUser.role === 'admin') {
+        const tag = document.getElementById('admin-tag');
+        if (tag) tag.classList.remove('hidden');
+        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+        const btn = document.getElementById('admin-panel-btn');
+        if (btn) btn.classList.remove('hidden');
+    }
+
     // 登录成功后加载必要数据
     if (window.loadSessions) window.loadSessions();
     if (window.loadSettings) window.loadSettings();
+    if (window.refreshModelSelector) window.refreshModelSelector();
 };
 
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
