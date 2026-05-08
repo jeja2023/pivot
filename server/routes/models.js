@@ -25,6 +25,25 @@ function buildModelsListUrl(url) {
 function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }) {
     const router = express.Router();
 
+    router.get('/models/available', authMiddleware, asyncHandler(async (req, res) => {
+        let where = "WHERE m.user_id IS NULL";
+        let params = [];
+        
+        if (req.user.role !== 'admin') {
+            where += " AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)";
+            params.push(`,${(req.user.unit || '').trim()},`);
+        }
+
+        const sql = `
+            SELECT id, name, model_name
+            FROM models m
+            ${where}
+            ORDER BY m.is_default DESC, m.id ASC
+        `;
+        const models = db.prepare(sql).all(...params);
+        res.json(models);
+    }));
+
     router.post('/models/fetch-remote', authMiddleware, asyncHandler(async (req, res) => {
         let { url, api_key, id } = req.body;
         if (!url) return res.status(400).json({ error: '请填写接口地址' });

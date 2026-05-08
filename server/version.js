@@ -10,22 +10,30 @@ function extractAppVersionFromChangelog(text) {
 }
 
 function getAppVersion() {
+    // 优先从 CHANGELOG.md 获取，以实现版本号单一来源管理
     try {
-        // 优先从 package.json 获取
-        const pkgPath = path.resolve(__dirname, '..', 'package.json');
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        if (pkg.version) return pkg.version.startsWith('v') ? pkg.version : `v${pkg.version}`;
+        const changelogPath = path.resolve(__dirname, '..', 'CHANGELOG.md');
+        if (fs.existsSync(changelogPath)) {
+            const text = fs.readFileSync(changelogPath, 'utf8');
+            const version = extractAppVersionFromChangelog(text);
+            if (version && version !== 'v0.0.0') return version;
+        }
     } catch (e) {
-        // 忽略错误，尝试从 CHANGELOG 获取
+        // 忽略错误，继续尝试 package.json
     }
 
     try {
-        const changelogPath = path.resolve(__dirname, '..', 'CHANGELOG.md');
-        const text = fs.readFileSync(changelogPath, 'utf8');
-        return extractAppVersionFromChangelog(text);
+        // 回退方案：从 package.json 获取
+        const pkgPath = path.resolve(__dirname, '..', 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.version) return pkg.version.startsWith('v') ? pkg.version : `v${pkg.version}`;
+        }
     } catch (e) {
-        return 'v0.0.0';
+        // 忽略错误
     }
+
+    return 'v0.0.0';
 }
 
 function applyAppVersionTemplate(text, appVersion = getAppVersion()) {

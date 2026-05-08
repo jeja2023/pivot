@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.14-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.15-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款专为私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为用户提供一个安全、稳定且美观的 AI 交互门户。
@@ -138,11 +138,6 @@ RAG_SCORE_THRESHOLD=0.4
 ## 最近更新
 
 - RAG 检索升级为 SQLite FTS5 候选召回 + embedding 排序，并拆分为索引、缓存和路由门面模块。
-- 新增中文 1-3 gram 检索预处理，知识库分片通过 `search_content` 提升中文短词、单字和词组召回。
-- `/v1/chat/completions` 调用已统一计入模型每日额度、后台统计和 Prometheus 指标。
-- 强化附件 token 绑定、DOCX/XLSX ZIP 解压上限和前端动态内容转义。
-- 补充 RAG 指标、模型用量事件、ZIP 解压防护与中文 FTS 命中的测试覆盖。
-
 ## 目录结构
 - `server/`: 后端核心程序 (Express + SQLite)
 - `client/`: 前端静态资源 (完全本地化)
@@ -150,10 +145,9 @@ RAG_SCORE_THRESHOLD=0.4
 - `uploads/`: 用户附件隔离存储
 
 ---
-## 本轮未发布更新
-- RAG 存储检索继续基于 SQLite，新增 FTS5 候选召回、中文 ngram 预处理、结果缓存和 Prometheus 指标。
-- `/v1` OpenAI 兼容接口的 token 用量会写入 `model_usage_events`，并统一纳入每日额度、后台统计和监控指标。
-- 附件访问 token 绑定完整文件路径，文档 ZIP 解析增加解压上限，前端动态 HTML 输出补充转义。
-- README 与 CHANGELOG 已同步记录本轮安全、RAG、可观测性和中文检索增强。
+## 最近更新
+- **模型标识标准化**：优化兼容接口标识符，支持更直观的第三方客户端接入。
+- **消息时间戳与会话分组**：新增消息发送时间显示，并支持侧边栏会话按日期智能分组。
+- **UI 细节优化**：登录页增加密码显隐切换，优化 API Key 管理与生成弹窗交互。
 
-**当前版本**: v0.0.14 (Changelog-driven Versioning, PWA Cache Refresh & UI Alignment)
+**当前版本**: v0.0.15 (API Integration Optimization, UI Polish & Security Enhancement)

@@ -104,7 +104,74 @@ function limitVisionImages(history) {
     });
 }
 
-async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
+function normalizeTitleText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function stripTitleSourceText(value) {
+    return String(value || '')
+        .replace(/<thought>[\s\S]*?<\/thought>/gi, ' ')
+        .replace(/\n{0,2}---\n【参考文档[^\n]*】\n[\s\S]*?\n---/g, ' ')
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1 图片')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/[`*_#>|~]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function truncateTitle(value, maxLength = 24) {
+    const chars = Array.from(normalizeTitleText(value));
+    return chars.length > maxLength ? chars.slice(0, maxLength).join('') : chars.join('');
+}
+
+function buildFallbackTitle(userMsg, aiMsg = '') {
+    const userText = stripTitleSourceText(userMsg);
+    if (userText) return truncateTitle(userText);
+
+    const aiText = stripTitleSourceText(aiMsg);
+    if (aiText) return truncateTitle(aiText);
+
+    return '新对话';
+}
+
+function sanitizeGeneratedTitle(value, fallbackTitle) {
+    let title = normalizeTitleText(value)
+        .replace(/^#+\s*/, '')
+        .replace(/^(会话)?标题\s*[:：]\s*/i, '')
+        .replace(/^["'“”‘’《》【】「」\[\]\s]+|["'“”‘’《》【】「」\[\]\s]+$/g, '')
+        .replace(/[。.!！?？,，;；:：]+$/g, '')
+        .replace(/^["'“”‘’《》【】「」\[\]\s]+|["'“”‘’《》【】「」\[\]\s]+$/g, '');
+
+    title = title.split(/\n/)[0] || '';
+    title = truncateTitle(title);
+
+    if (!title || /^新对话$/i.test(title) || /^untitled$/i.test(title)) {
+        return fallbackTitle;
+    }
+    return title;
+}
+
+function buildInitialAutoTitles(userMsg) {
+    const raw = String(userMsg || '').trim();
+    const cleaned = stripTitleSourceText(userMsg);
+    return new Set([
+        '新对话',
+        raw ? raw.slice(0, 15) + '...' : '',
+        cleaned ? cleaned.slice(0, 15) + '...' : ''
+    ].filter(Boolean).map(normalizeTitleText));
+}
+
+function shouldReplaceAutoTitle(currentTitle, userMsg) {
+    const normalized = normalizeTitleText(currentTitle);
+    if (!normalized) return true;
+    return buildInitialAutoTitles(userMsg).has(normalized);
+}
+
+async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg) {
+    const fallbackTitle = buildFallbackTitle(userMsg, aiMsg);
+    let newTitle = fallbackTitle;
+
     try {
         logger.info({ sessionId }, '正在生成会话标题');
         let baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
@@ -123,19 +190,50 @@ async function generateTitle(sessionId, userMsg, aiMsg, modelCfg) {
             data: {
                 model: modelCfg.model_name,
                 messages: [
-                    { role: 'user', content: `请根据以下对话内容，生成一个非常简短的标题（5-10个字），直接输出标题内容，不要带引号或任何解释。\n\n用户: ${userMsg}\n助手: ${aiMsg.slice(0, 100)}` }
+                    {
+                        role: 'user',
+                        content: [
+                            '请根据以下对话内容，生成一个简短、具体、自然的中文标题。',
+                            '要求：5-12 个字；不要引号；不要解释；不要使用“新对话”“聊天记录”等泛泛标题。',
+                            '',
+                            `用户：${stripTitleSourceText(userMsg).slice(0, 600)}`,
+                            `助手：${stripTitleSourceText(aiMsg).slice(0, 600)}`
+                        ].join('\n')
+                    }
                 ],
-                max_tokens: 20
+                max_tokens: 32,
+                temperature: 0.2
             },
             timeout: 60000,
             proxy: false
         });
 
-        const newTitle = response.data.choices[0]?.message?.content?.trim() || '新对话';
-        db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(newTitle, sessionId);
-        logger.info({ sessionId, newTitle }, '会话标题已更新');
+        newTitle = sanitizeGeneratedTitle(response.data.choices[0]?.message?.content, fallbackTitle);
     } catch (e) {
-        logger.error({ sessionId, err: e.message }, '会话标题生成失败');
+        logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');
+    }
+
+    const session = db.prepare('SELECT title FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
+    if (!session) return;
+
+    if (!shouldReplaceAutoTitle(session.title, userMsg)) {
+        logger.info({ sessionId, currentTitle: session.title }, '跳过标题更新：当前标题疑似已被用户修改');
+        return;
+    }
+
+    db.prepare('UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?').run(newTitle, sessionId, userId);
+    logger.info({ sessionId, newTitle }, '会话标题已更新');
+}
+
+function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg) {
+    const msgCount = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM messages
+        WHERE session_id = ? AND user_id = ? AND role IN ('user', 'assistant')
+    `).get(sessionId, userId).count;
+
+    if (msgCount <= 2) {
+        generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg);
     }
 }
 
@@ -214,10 +312,7 @@ function createChatRouter({
             db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
               .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
 
-            const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId).count;
-            if (msgCount <= 2) {
-                generateTitle(sessionId, visibleContent, assistantContent, modelCfg);
-            }
+            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
 
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
             return res.json({
@@ -495,10 +590,7 @@ function createChatRouter({
                     db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
                       .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
 
-                    const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId).count;
-                    if (msgCount <= 2) {
-                        generateTitle(sessionId, visibleContent, assistantContent, modelCfg);
-                    }
+                    maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
@@ -580,4 +672,13 @@ function createChatRouter({
     return router;
 }
 
-module.exports = { createChatRouter };
+module.exports = {
+    createChatRouter,
+    _titleHelpers: {
+        buildFallbackTitle,
+        sanitizeGeneratedTitle,
+        shouldReplaceAutoTitle,
+        stripTitleSourceText,
+        truncateTitle
+    }
+};

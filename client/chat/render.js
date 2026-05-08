@@ -12,6 +12,163 @@ const ICONS = {
 const escapeCodeHtml = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeAttrValue = (value) => escapeCodeHtml(value).replace(/"/g, '&quot;');
 
+function parseChatDateTime(value) {
+    if (!value) return '';
+    if (value instanceof Date) return value;
+
+    const text = String(value).trim();
+    if (!text) return '';
+
+    let normalized = text.replace(' ', 'T');
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(normalized)) {
+        normalized += '+08:00';
+    }
+
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? '' : date;
+}
+
+function formatChatDateTime(value) {
+    const parsed = parseChatDateTime(value);
+    if (!parsed) return value ? String(value).trim() : '';
+
+    return parsed.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+}
+
+function formatChatCompactDateTime(value) {
+    const parsed = parseChatDateTime(value);
+    if (!parsed) return value ? String(value).trim() : '';
+
+    const now = new Date();
+    const dayKey = (date) => new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+    const timeText = parsed.toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+
+    if (dayKey(parsed) === dayKey(now)) return `今天 ${timeText}`;
+
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    if (dayKey(parsed) === dayKey(yesterday)) return `昨天 ${timeText}`;
+
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+    }).formatToParts(parsed).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+    }, {});
+    const currentYear = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric'
+    }).format(now);
+
+    return parts.year === currentYear
+        ? `${parts.month}月${parts.day}日 ${timeText}`
+        : `${parts.year}年${parts.month}月${parts.day}日 ${timeText}`;
+}
+
+function formatSessionListTime(value) {
+    const parsed = parseChatDateTime(value);
+    if (!parsed) return value ? String(value).trim() : '';
+
+    const now = new Date();
+    const dayKey = (date) => new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+
+    if (dayKey(parsed) === dayKey(now)) {
+        return parsed.toLocaleTimeString('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+    }
+
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    if (dayKey(parsed) === dayKey(yesterday)) return '昨天';
+
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+    }).formatToParts(parsed).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+    }, {});
+    const currentYear = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric'
+    }).format(now);
+
+    return parts.year === currentYear
+        ? `${parts.month}月${parts.day}日`
+        : `${parts.year}年`;
+}
+
+function formatSessionGroupDate(value) {
+    const parsed = parseChatDateTime(value);
+    if (!parsed) return '更早';
+
+    const now = new Date();
+    const dayKey = (date) => new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+
+    if (dayKey(parsed) === dayKey(now)) return '今天';
+
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    if (dayKey(parsed) === dayKey(yesterday)) return '昨天';
+
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+    }).formatToParts(parsed).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+    }, {});
+    const currentYear = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric'
+    }).format(now);
+
+    return parts.year === currentYear
+        ? `${parts.month}月${parts.day}日`
+        : `${parts.year}年${parts.month}月${parts.day}日`;
+}
+
+window.formatChatDateTime = formatChatDateTime;
+window.formatChatCompactDateTime = formatChatCompactDateTime;
+window.formatSessionListTime = formatSessionListTime;
+window.formatSessionGroupDate = formatSessionGroupDate;
+
 const customRenderer = new marked.Renderer();
 customRenderer.code = (code, infostring, escaped) => {
     if (typeof code === 'object' && code !== null) {
@@ -181,19 +338,35 @@ function appendMessage(role, content, id = null, stats = null) {
     div.className = `message ${role}`;
     const displayContent = getDisplayContent(role, content);
     const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : renderMarkdown(displayContent);
+    const createdAt = stats?.createdAt || stats?.created_at || stats?.created_at_text;
+    const messageTime = formatChatDateTime(createdAt);
+    const messageTimeTitle = formatChatDateTime(createdAt);
+    const messageTimeHtml = messageTime ? `<span class="message-meta" title="${escapeAttrValue(messageTimeTitle)}">${escapeCodeHtml(messageTime)}</span>` : '';
+    const statsHtml = (role === 'assistant' && stats && stats.costTime !== undefined) ? `
+        <div class="message-stats">
+            <span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>
+            <span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>
+            <span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>
+        </div>
+    ` : '';
+    const footerClass = [
+        'message-footer',
+        (!messageTimeHtml && !statsHtml) ? 'hidden' : '',
+        (messageTimeHtml && !statsHtml) ? 'hover-time-only' : ''
+    ].filter(Boolean).join(' ');
     
     div.innerHTML = `
         <div class="avatar">${role === 'user' ? ICONS.user : ICONS.ai}</div>
         <div class="message-content">
             <div class="text-body">${displayHtml}</div>
-            ${(role === 'assistant' && stats && stats.costTime !== undefined) ? `
-                <div class="message-stats">
-                    <span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>
-                    <span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>
-                    <span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>
-                </div>
+            ${role === 'assistant' ? `
+            <div class="${footerClass}">
+                ${statsHtml}
+                ${messageTimeHtml}
+            </div>
             ` : ''}
             <div class="message-actions">
+                ${role === 'user' ? messageTimeHtml : ''}
                 <button class="action-btn" onclick="copyMsg(this)" title="复制">${ICONS.copy}</button>
                 ${role === 'assistant' && id ? `<button class="action-btn" onclick="regenerateMsg(${id})" title="重新回答"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>` : ''}
                 ${id ? `<button class="action-btn" onclick="deleteMsg(${id}, this)" title="删除">${ICONS.delete}</button>` : ''}

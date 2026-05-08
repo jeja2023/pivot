@@ -1,8 +1,8 @@
 /* 智枢前端主程序 Main Entry */
 function handleUnauthorized() {
-    localStorage.clear();
+    localStorage.removeItem('pivot_token');
+    if (typeof setCsrfToken === 'function') setCsrfToken('');
     if (window.showAuth) window.showAuth();
-    else window.location.reload();
 }
 
 // --- 输入框自适应 ---

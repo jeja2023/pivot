@@ -10,7 +10,8 @@ const {
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
-    generateCsrfToken
+    generateCsrfToken,
+    resolveAuthenticatedUser
 } = require('../auth');
 const { asyncHandler } = require('../http');
 const { db, stmts } = require('../db');
@@ -96,7 +97,12 @@ function createAuthRouter({
         }
     }));
 
-    router.get('/auth/me', authMiddleware, (req, res) => {
+    router.get('/auth/me', (req, res) => {
+        const auth = resolveAuthenticatedUser(req);
+        if (!auth.user) {
+            return res.json({ authenticated: false, code: auth.code });
+        }
+
         const csrfToken = generateCsrfToken();
         res.cookie(CSRF_COOKIE_NAME, csrfToken, {
             sameSite: 'lax',
@@ -104,7 +110,7 @@ function createAuthRouter({
             secure: process.env.COOKIE_SECURE === 'true',
             maxAge: ACCESS_COOKIE_OPTIONS.maxAge
         });
-        res.json({ user: req.user, csrfToken });
+        res.json({ authenticated: true, user: auth.user, csrfToken });
     });
 
     router.post('/auth/logout', authMiddleware, (req, res) => {

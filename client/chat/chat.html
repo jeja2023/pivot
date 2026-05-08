@@ -36,8 +36,24 @@
                     <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
                     <input type="text" id="unit" class="form-input" placeholder="工作单位">
                 </div>
-                <input type="password" id="password" class="form-input" placeholder="密码">
-                <input type="password" id="confirm-password" class="form-input reg-only hidden" placeholder="确认密码">
+                <div style="position: relative; margin-bottom: 15px;">
+                    <input type="password" id="password" class="form-input" placeholder="密码" style="margin-bottom: 0; padding-right: 45px;">
+                    <button type="button" class="btn-toggle-pw" onclick="toggleAuthPassword('password', 'eye-icon-auth')" title="显示/隐藏明文">
+                        <svg id="eye-icon-auth" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="reg-only hidden" style="position: relative; margin-bottom: 15px;">
+                    <input type="password" id="confirm-password" class="form-input" placeholder="确认密码" style="margin-bottom: 0; padding-right: 45px;">
+                    <button type="button" class="btn-toggle-pw" onclick="toggleAuthPassword('confirm-password', 'eye-icon-auth-conf')" title="显示/隐藏明文">
+                        <svg id="eye-icon-auth-conf" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
+                </div>
             </form>
             <button id="auth-submit" class="btn-primary" style="width: 100%;">进入系统</button>
             <p style="margin-top: 15px; font-size: 0.85rem;">
@@ -447,7 +463,7 @@
                         </div>
                         <div class="lab-grid">
                             <div class="lab-card">
-                                <span class="lab-tag">Experimental</span>
+                                <span class="lab-tag">实验性</span>
                                 <div class="lab-card-header">
                                     <div class="lab-card-icon">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
@@ -896,6 +912,14 @@
                                         接口协议: OpenAI Chat Completions v1
                                     </code>
                                 </div>
+                                <div
+                                    style="margin-top: 15px; padding: 15px; background: rgba(59, 130, 246, 0.03); border-radius: 8px; border-left: 4px solid #6366f1;">
+                                    <h5 style="margin: 0 0 10px 0; color: #6366f1;">可用模型 (外部调用填写)</h5>
+                                    <div id="available-models-list" style="font-size: 0.82rem; color: var(--text-main); line-height: 1.8;">
+                                        <span style="color: var(--text-muted);">正在加载可用模型...</span>
+                                    </div>
+                                </div>
+                            </div>
                             </div>
                         </div>
                     </section>
@@ -914,7 +938,7 @@
 
     <!-- API Key 创建/显示弹窗 -->
     <div id="key-modal" class="modal-overlay hidden" style="z-index: 5000;">
-        <div class="modal" style="max-width: 450px; padding: 30px; position: relative;">
+        <div class="modal" style="width: 550px; padding: 30px; position: relative;">
             <button class="modal-close-btn" onclick="window.closeKeyModal()">&times;</button>
             <div id="key-input-view">
                 <h3 style="margin-bottom: 20px;">新建 API Key</h3>
@@ -930,12 +954,12 @@
                 <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">
                     请立即复制并妥善保存此密钥。出于安全考虑，它将<strong>不会再次完整显示</strong>：</p>
                 <div
-                    style="background: rgba(15, 23, 42, 0.04); padding: 16px; border-radius: 10px; font-family: 'Fira Code', monospace; word-break: break-all; border: 1px dashed var(--primary); position: relative; font-size: 0.9rem; color: var(--text-main); margin-bottom: 25px;">
-                    <span id="generated-key-text"></span>
+                    style="background: rgba(15, 23, 42, 0.04); padding: 16px 50px 16px 16px; border-radius: 10px; font-family: 'Fira Code', 'JetBrains Mono', monospace; border: 1px dashed var(--primary); position: relative; font-size: 0.9rem; color: var(--text-main); margin-bottom: 25px; overflow: hidden;">
+                    <span id="generated-key-text" style="display: block; white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"></span>
                     <button onclick="window.copyGeneratedKey()"
-                        style="position: absolute; right: 10px; top: 10px; background: white; border: 1px solid var(--border); border-radius: 6px; padding: 4px; color: var(--primary); cursor: pointer; display: flex; align-items: center; justify-content: center;"
+                        style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: white; border: 1px solid var(--border); border-radius: 6px; padding: 6px; color: var(--primary); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"
                         title="复制到剪贴板">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>

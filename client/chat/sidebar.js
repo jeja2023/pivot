@@ -37,6 +37,7 @@ window.loadSessions = async function(append = false) {
             }, { passive: true });
         }
         
+        let lastGroupLabel = append ? list.dataset.lastGroupLabel || '' : '';
         sessions.forEach(s => {
             const title = s.title || '新对话';
             const safeTitleStr = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -44,16 +45,31 @@ window.loadSessions = async function(append = false) {
             const tagsHtml = String(s.tags || '').split(',').filter(Boolean).map(t => `<em>${escapeHtml(t)}</em>`).join('');
             const archiveBadge = s.is_archived ? '<span class="session-badge">已归档</span>' : '';
             const pinnedBadge = s.is_pinned ? '<span class="session-badge pinned-badge">置顶</span>' : '';
+            const sessionRawTime = s.updated_at || s.created_at;
+            const groupLabel = window.formatSessionGroupDate ? window.formatSessionGroupDate(sessionRawTime) : '更早';
+            const sessionTimeTitle = window.formatChatDateTime ? window.formatChatDateTime(sessionRawTime) : String(sessionRawTime || '');
+            const msgCount = Number(s.msg_count || 0);
+            const sessionInfoTitle = escapeAttrValue([safeHTMLTitle, sessionTimeTitle, msgCount ? `${msgCount} 条消息` : ''].filter(Boolean).join(' · '));
+
+            if (groupLabel !== lastGroupLabel) {
+                const groupEl = document.createElement('div');
+                groupEl.className = 'session-date-group';
+                groupEl.textContent = groupLabel;
+                list.appendChild(groupEl);
+                lastGroupLabel = groupLabel;
+                list.dataset.lastGroupLabel = groupLabel;
+            }
             
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
             div.innerHTML = `
-                <div class="session-main">
-                    <span class="session-title-text" title="${safeHTMLTitle}">
-                        ${pinnedBadge}${archiveBadge}${tagsHtml ? `<span class="session-tags-inline">${tagsHtml}</span>` : ''}
-                        <span class="session-title-content">${safeHTMLTitle}</span>
-                    </span>
-                    <div class="session-meta"></div>
+                <div class="session-main" title="${sessionInfoTitle}">
+                    <div class="session-title-row">
+                        <span class="session-title-text">
+                            ${pinnedBadge}${archiveBadge}${tagsHtml ? `<span class="session-tags-inline">${tagsHtml}</span>` : ''}
+                            <span class="session-title-content">${safeHTMLTitle}</span>
+                        </span>
+                    </div>
                 </div>
                 <div class="session-more">
                     <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0}, '${String(s.tags || '').replace(/'/g, "\\'")}')">

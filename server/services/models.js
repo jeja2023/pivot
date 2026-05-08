@@ -14,10 +14,21 @@ const normalizeTags = (value) => String(value || '')
 function getAccessibleModel(modelId, user) {
     let model;
     if (modelId) {
+        const isNumeric = /^\d+$/.test(String(modelId));
         if (user.role === 'admin') {
-            model = db.prepare('SELECT * FROM models WHERE id = ?').get(modelId); // Admin query remains flexible
+            // 管理员可以按 ID 或 model_name 查找
+            const sql = isNumeric ? 
+                'SELECT * FROM models WHERE id = ? OR model_name = ?' : 
+                'SELECT * FROM models WHERE model_name = ?';
+            const params = isNumeric ? [modelId, modelId] : [modelId];
+            model = db.prepare(sql).get(...params);
         } else {
-            model = db.prepare('SELECT * FROM models WHERE id = ? AND (user_id IS NULL OR user_id = ?)').get(modelId, user.id);
+            // 普通用户只能查找自己有权访问的模型 (按 ID 或 model_name)
+            const sql = isNumeric ? 
+                'SELECT * FROM models WHERE (id = ? OR model_name = ?) AND (user_id IS NULL OR user_id = ?)' : 
+                'SELECT * FROM models WHERE model_name = ? AND (user_id IS NULL OR user_id = ?)';
+            const params = isNumeric ? [modelId, modelId, user.id] : [modelId, user.id];
+            model = db.prepare(sql).get(...params);
         }
     } else {
         model = db.prepare('SELECT * FROM models WHERE is_default = 1 AND user_id IS NULL').get();

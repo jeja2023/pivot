@@ -2,7 +2,7 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢';
-const APP_VERSION = (window.APP_VERSION_TAG && window.APP_VERSION_TAG !== '__APP_VERSION__') ? window.APP_VERSION_TAG : 'v0.0.13';
+const APP_VERSION = (window.APP_VERSION_TAG && window.APP_VERSION_TAG !== '__APP_VERSION__') ? window.APP_VERSION_TAG : 'v0.0.14';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION} 保留所有权利`;
 localStorage.removeItem('pivot_token');
 let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';
@@ -81,6 +81,19 @@ async function checkLogin() {
         const res = await apiFetch(`${API_BASE}/auth/me`);
         if (res.ok) {
             const data = await res.json();
+            if (data.authenticated === false) {
+                if (data.code === 'TOKEN_EXPIRED') {
+                    try {
+                        await refreshAccessToken();
+                        return checkLogin();
+                    } catch (e) {
+                        handleUnauthorized();
+                        return;
+                    }
+                }
+                handleUnauthorized();
+                return;
+            }
             if (data.csrfToken) setCsrfToken(data.csrfToken);
             currentUser = data.user;
             if (window.showApp) window.showApp();

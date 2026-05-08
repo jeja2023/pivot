@@ -71,7 +71,11 @@ function createSessionsRouter({
             params.push(`%,${tag},%`);
         }
 
-        query += ' ORDER BY s.is_pinned DESC, s.created_at DESC LIMIT ? OFFSET ? ';
+        query += ` ORDER BY
+            date(COALESCE(s.updated_at, s.created_at)) DESC,
+            s.is_pinned DESC,
+            COALESCE(s.updated_at, s.created_at) DESC
+            LIMIT ? OFFSET ? `;
         params.push(limit, offset);
 
         const sessions = db.prepare(query).all(...params);

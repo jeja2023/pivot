@@ -37,6 +37,9 @@ const {
     readZipEntries,
     MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES
 } = require('../server/document-text');
+const {
+    _titleHelpers
+} = require('../server/routes/chat');
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
@@ -275,4 +278,27 @@ test('readZipEntries rejects entries with excessive declared expansion', () => {
         declaredUncompressedSize: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1
     });
     assert.throws(() => readZipEntries(zip), /too large|too much data/);
+});
+
+test('chat title helpers sanitize generated titles and protect custom titles', () => {
+    assert.equal(
+        _titleHelpers.sanitizeGeneratedTitle('标题：「用户权限配置流程。」', '权限配置'),
+        '用户权限配置流程'
+    );
+    assert.equal(
+        _titleHelpers.sanitizeGeneratedTitle('新对话', '文档内容分析'),
+        '文档内容分析'
+    );
+    assert.equal(
+        _titleHelpers.buildFallbackTitle('请帮我分析这份季度销售表格，并总结风险点'),
+        '请帮我分析这份季度销售表格，并总结风险点'
+    );
+    assert.equal(
+        _titleHelpers.shouldReplaceAutoTitle('新对话', '用户与助手打招呼'),
+        true
+    );
+    assert.equal(
+        _titleHelpers.shouldReplaceAutoTitle('用户手动命名', '用户与助手打招呼'),
+        false
+    );
 });

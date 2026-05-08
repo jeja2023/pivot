@@ -36,7 +36,7 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
         res.json({
             object: 'list',
             data: models.map(m => ({
-                id: m.id.toString(), // 使用数字 ID 或标识符，推荐使用 ID 保证唯一
+                id: m.model_name || m.id.toString(), // 外部调用核心标识：优先使用语义化的 model_name
                 object: 'model',
                 created: Math.floor(new Date(m.created_at).getTime() / 1000) || 0,
                 owned_by: m.user_id ? 'user' : 'system',

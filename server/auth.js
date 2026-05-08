@@ -97,6 +97,39 @@ function getCookie(req, name) {
     return cookies[name];
 }
 
+function resolveAuthenticatedUser(req) {
+    const authHeader = req.headers.authorization;
+    const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
+    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : cookieToken;
+
+    if (!token) {
+        return { user: null, token: null, code: 'AUTH_MISSING' };
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = stmts.getUserById.get(decoded.id);
+        if (user && user.status !== 'disabled') {
+            return { user, token, code: 'AUTH_OK' };
+        }
+    } catch (e) {
+        if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
+            return { user: null, token, code: 'TOKEN_EXPIRED' };
+        }
+    }
+
+    const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(hashApiKey(token));
+    if (apiKeyData) {
+        const user = stmts.getUserById.get(apiKeyData.user_id);
+        if (user && user.status !== 'disabled') {
+            db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
+            return { user, token, apiKeyData, code: 'AUTH_OK' };
+        }
+    }
+
+    return { user: null, token, code: 'TOKEN_INVALID' };
+}
+
 // 注册用户
 function register(username, password, nickname, unit, role = 'user') {
     const cleanUsername = String(username || '').trim();
@@ -172,41 +205,23 @@ function refreshTokens(token) {
 
 // 鉴权中间件
 function authMiddleware(req, res, next) {
-    const authHeader = req.headers.authorization;
-    const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
-    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : cookieToken;
-    
-    if (!token) {
+    const auth = resolveAuthenticatedUser(req);
+
+    if (!auth.token) {
         return res.status(401).json({ error: '未授权访问' });
     }
-    
-    // 1. 尝试 JWT 验证 (主要用于前端网页登录)
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = stmts.getUserById.get(decoded.id);
-        if (user && user.status !== 'disabled') {
-            req.user = user;
-            return next();
-        }
-    } catch (e) {
-        if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
-            return res.status(401).json({ error: 'Token 已过期', code: 'TOKEN_EXPIRED' });
-        }
-        // 如果 JWT 验证失败（如过期），继续尝试 API Key 验证
+
+    if (auth.code === 'TOKEN_EXPIRED') {
+        return res.status(401).json({ error: 'Token 已过期', code: 'TOKEN_EXPIRED' });
     }
 
-    // 2. 尝试 API Key 验证 (主要用于第三方客户端)
-    const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(hashApiKey(token));
-    if (apiKeyData) {
-        const user = stmts.getUserById.get(apiKeyData.user_id);
-        if (user && user.status !== 'disabled') {
-            // 异步更新最后使用时间 (不阻塞请求)
-            db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
-            req.user = user;
-            req.isApiKey = true; // 标记是 API Key 调用
-            req.apiKeyId = apiKeyData.id;
-            return next();
+    if (auth.user) {
+        req.user = auth.user;
+        if (auth.apiKeyData) {
+            req.isApiKey = true;
+            req.apiKeyId = auth.apiKeyData.id;
         }
+        return next();
     }
 
     return res.status(401).json({ error: 'Token 无效或已过期', code: 'TOKEN_INVALID' });
@@ -231,6 +246,7 @@ module.exports = {
     authMiddleware, 
     validatePassword, 
     getCookie,
+    resolveAuthenticatedUser,
     AUTH_COOKIE_NAME, 
     REFRESH_COOKIE_NAME,
     CSRF_COOKIE_NAME,

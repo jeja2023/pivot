@@ -36,6 +36,7 @@ window.selectSession = async function(id, title) {
     messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .forEach(m => appendMessage(m.role, m.content, m.id, {
+            createdAt: m.created_at,
             costTime: m.cost_time,
             tps: m.tokens_per_sec,
             tokenCount: m.token_count
@@ -74,9 +75,9 @@ window.sendMessage = async function(isRegenerate = false) {
     }
 
     if (!isRegenerate) {
-        appendMessage('user', displayContent);
+        appendMessage('user', displayContent, null, { createdAt: new Date() });
     }
-    const aiMsgEl = appendMessage('assistant', '...');
+    const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date() });
     let fullAiContent = '';
     let tokenCount = 0;
     let startTime = Date.now();
@@ -112,7 +113,16 @@ window.sendMessage = async function(isRegenerate = false) {
         const textBody = aiMsgEl.querySelector('.text-body');
         const statsEl = aiMsgEl.querySelector('.message-stats') || document.createElement('div');
         statsEl.className = 'message-stats';
-        if (!aiMsgEl.querySelector('.message-stats')) aiMsgEl.appendChild(statsEl);
+        if (!aiMsgEl.querySelector('.message-stats')) {
+            const footerEl = aiMsgEl.querySelector('.message-footer');
+            if (footerEl) {
+                footerEl.classList.remove('hidden');
+                footerEl.classList.remove('hover-time-only');
+                footerEl.insertBefore(statsEl, footerEl.querySelector('.message-meta'));
+            } else {
+                aiMsgEl.insertBefore(statsEl, aiMsgEl.querySelector('.message-actions'));
+            }
+        }
 
         while (true) {
             const { done, value } = await reader.read();
