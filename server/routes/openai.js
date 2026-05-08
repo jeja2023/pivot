@@ -70,6 +70,11 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
             const fallback = buildCapabilityFallbackMessage(unsupportedCapability);
             const promptTokens = estimateTokens(JSON.stringify(messages));
             const completionTokens = estimateTokens(fallback);
+            const totalTokens = promptTokens + completionTokens;
+            if (req.isApiKey && req.apiKeyId && totalTokens > 0) {
+                db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(totalTokens, req.apiKeyId);
+            }
+            recordModelTokenUsage(userId, modelCfg.id, totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
             logAction(req, 'OpenAI 能力不支持提示', `能力: ${unsupportedCapability.code}, 模型: ${model}`);
             return res.json({
                 id: `chatcmpl-${Date.now().toString(36)}`,
@@ -77,7 +82,7 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 created: Math.floor(Date.now() / 1000),
                 model: String(model || modelCfg.id),
                 choices: [{ index: 0, message: { role: 'assistant', content: fallback }, finish_reason: 'stop' }],
-                usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
+                usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens }
             });
         }
         

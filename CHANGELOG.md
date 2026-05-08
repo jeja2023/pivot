@@ -1,5 +1,18 @@
 # 更新日志 (CHANGELOG)
 
+## [0.0.16] - 2026-05-08
+
+### 认证时效、检查链路与部署文档修复
+- **Refresh Token 过期时间统一**：刷新令牌的 `expires_at` 改为使用 `getBeijingTimestamp(expiresAt)` 写入，和过期校验使用同一时区格式，避免实际有效期比配置提前约 8 小时结束。
+- **Lint 配置补齐**：在 `eslint.config.js` 的 Node 全局变量声明中加入 `setImmediate`，修复测试文件通过但 `npm run lint` 被 `no-undef` 阻断的问题。
+- **OpenAI 兼容接口用量统计补齐**：`/v1/chat/completions` 命中“不支持能力”兜底响应时，现在同样会记录 `model_usage_events`，并在 API Key 调用场景累加 `usage_tokens`，保证配额和统计口径一致。
+- **容器部署说明补充**：README 离线部署步骤加入 `docker network create ai-bridge`，避免外部网络未预创建时 `docker-compose up -d` 启动失败。
+
+#### 验证
+- 已通过 `npm run lint`
+- 已通过 `npm test`
+- 已通过 `npm audit --audit-level=moderate`
+
 ## [0.0.15] - 2026-05-08
 
 ### API 接入优化与 UI 细节打磨

@@ -10,6 +10,7 @@ const nodeGlobals = {
     module: 'readonly',
     process: 'readonly',
     require: 'readonly',
+    setImmediate: 'readonly',
     setInterval: 'readonly',
     setTimeout: 'readonly'
 };

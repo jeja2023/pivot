@@ -99,6 +99,7 @@ docker save -o pivot.tar pivot:latest
 将 `pivot.tar` 和 `docker-compose.yml` 拷贝至目标服务器：
 ```bash
 docker load -i pivot.tar
+docker network create ai-bridge
 docker-compose up -d
 ```
 

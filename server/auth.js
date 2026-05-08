@@ -69,7 +69,7 @@ function generateRefreshToken(userId) {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
-    const expiresAtStr = expiresAt.toISOString().replace('T', ' ').substring(0, 19);
+    const expiresAtStr = getBeijingTimestamp(expiresAt);
     
     stmts.insertRefreshToken.run(userId, token, expiresAtStr);
     return token;
