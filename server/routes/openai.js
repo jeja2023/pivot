@@ -7,7 +7,9 @@ const {
     getAccessibleModel,
     getModelDailyUsage,
     getUserAccessibleModels,
-    recordModelTokenUsage
+    recordModelTokenUsage,
+    modelSupportsVision,
+    messagesContainVisionInput
 } = require('../services/models');
 const { estimateTokens } = require('../llm');
 const { logger } = require('../logger');
@@ -59,6 +61,16 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
         if (!modelCfg) return res.status(404).json({ error: { message: `Model '${model}' not found or no access.`, type: 'invalid_request_error' } });
         if (modelCfg.secret_error) {
             return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+        }
+
+        if (messagesContainVisionInput(messages) && !modelSupportsVision(modelCfg)) {
+            return res.status(400).json({
+                error: {
+                    message: `Model '${model}' is not configured for visual input. Enable vision support for images/scanned documents or choose a vision-capable model.`,
+                    type: 'invalid_request_error',
+                    code: 'vision_not_supported'
+                }
+            });
         }
 
         const lastUserContent = [...messages].reverse().find(m => m?.role === 'user')?.content;

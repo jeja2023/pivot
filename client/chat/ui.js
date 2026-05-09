@@ -21,6 +21,7 @@ const describeSelectorModel = (model, simple = false) => {
     if (simple) return model.name + (model.user_id ? ' (个人)' : '');
     const parts = [model.name];
     if (model.user_id) parts.push('个人');
+    if (Number(model.supports_vision || 0) === 1) parts.push('视觉输入');
     if (model.model_name && model.model_name !== model.name) parts.push(model.model_name);
     const limit = Number(model.daily_token_limit || 0);
     if (limit > 0) parts.push(`每日额度: ${limit.toLocaleString()}`);
@@ -79,7 +80,8 @@ window.refreshModelSelector = async function() {
         selector.innerHTML = models.map(model => {
             const isSelected = (selected && String(model.id) === String(selected)) || 
                              (!selected && defaultModelId && String(model.id) === String(defaultModelId));
-            return `<option value="${model.id}" ${isSelected ? 'selected' : ''} title="${escapeSelectorText(describeSelectorModel(model, false))}">${escapeSelectorText(describeSelectorModel(model, true))}</option>`;
+            const capabilitySuffix = Number(model.supports_vision || 0) === 1 ? ' · 视觉' : '';
+            return `<option value="${model.id}" ${isSelected ? 'selected' : ''} title="${escapeSelectorText(describeSelectorModel(model, false))}">${escapeSelectorText(describeSelectorModel(model, true) + capabilitySuffix)}</option>`;
         }).join('');
         selector.disabled = false;
 

@@ -10,7 +10,7 @@ const parsePositiveInt = (value, fallback) => {
 
 const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 1);
 const MAX_QUEUE_SIZE = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_SIZE, 20);
-const QUEUE_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_TIMEOUT_MS, 60000);
+const QUEUE_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_TIMEOUT_MS, 300000);
 const FAILURE_THRESHOLD = parsePositiveInt(process.env.MODEL_ENDPOINT_FAILURE_THRESHOLD, 3);
 const CIRCUIT_OPEN_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_CIRCUIT_OPEN_MS, 60000);
 const MONITOR_INTERVAL_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_INTERVAL_MS, 30000);
@@ -81,7 +81,8 @@ function ensureRuntime(modelCfg) {
         id: modelCfg?.id,
         name: modelCfg?.name || '',
         monitor_url: modelCfg?.monitor_url || '',
-        max_concurrent: modelCfg?.max_concurrent || 0
+        max_concurrent: modelCfg?.max_concurrent || 0,
+        supports_vision: modelCfg?.supports_vision || 0
     });
     return runtime;
 }
@@ -179,7 +180,7 @@ async function refreshEndpointMonitor(runtime) {
 
 async function refreshAllEndpointMonitors() {
     const models = db.prepare(`
-        SELECT id, name, url, monitor_url, max_concurrent
+        SELECT id, name, url, monitor_url, max_concurrent, supports_vision
         FROM models
         WHERE COALESCE(status, 'active') = 'active'
     `).all();

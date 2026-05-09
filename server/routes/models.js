@@ -7,6 +7,7 @@ const { asyncHandler } = require('../http');
 const { encryptSecret, validateModelUrl } = require('../security');
 const {
     normalizeTags,
+    normalizeBooleanFlag,
     getAccessibleModel
 } = require('../services/models');
 const { getBeijingTimestamp } = require('../time');
@@ -35,7 +36,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         const sql = `
-            SELECT id, name, model_name
+            SELECT id, name, model_name, supports_vision
             FROM models m
             ${where}
             ORDER BY m.is_default DESC, m.id ASC
@@ -195,7 +196,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 END) as url,
                 m.model_name, m.is_default, 
                 m.daily_token_limit, m.allowed_units, m.created_at,
-                m.temperature, m.max_tokens, m.monitor_url, m.max_concurrent,
+                m.temperature, m.max_tokens, m.monitor_url, m.max_concurrent, m.supports_vision,
                 (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
                 u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
             FROM models m
@@ -228,9 +229,10 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
         const maxTokens = max_tokens !== undefined && max_tokens !== '' ? parseInt(max_tokens, 10) : null;
         const maxConcurrent = Math.max(parseInt(req.body.max_concurrent, 10) || 0, 0);
+        const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
 
-        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_tokens, monitor_url, max_concurrent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxTokens, monitor_url || '', maxConcurrent);
+        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_tokens, monitor_url, max_concurrent, supports_vision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxTokens, monitor_url || '', maxConcurrent, supportsVision);
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
         res.json({ success: true });
@@ -261,14 +263,15 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
         const maxTokens = max_tokens !== undefined && max_tokens !== '' ? parseInt(max_tokens, 10) : null;
         const maxConcurrent = Math.max(parseInt(req.body.max_concurrent, 10) || 0, 0);
+        const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
 
         let info;
         if (req.user.role === 'admin') {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ? WHERE id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxTokens, monitor_url || '', maxConcurrent, req.params.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ? WHERE id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxTokens, monitor_url || '', maxConcurrent, supportsVision, req.params.id);
         } else {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ? WHERE id = ? AND user_id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxTokens, monitor_url || '', maxConcurrent, req.params.id, req.user.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ? WHERE id = ? AND user_id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxTokens, monitor_url || '', maxConcurrent, supportsVision, req.params.id, req.user.id);
         }
 
         if (info.changes > 0) {

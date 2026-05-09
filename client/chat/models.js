@@ -54,6 +54,10 @@ window.loadModels = async function(page = 1) {
             if (!isOwnModel) displayUrl = '********';
         }
 
+        const capabilityBadge = Number(m.supports_vision || 0) === 1
+            ? '<span class="model-capability-badge">视觉</span>'
+            : '<span class="model-capability-badge text-only">文本</span>';
+
         return `
         <tr id="model-row-${m.id}">
             <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
@@ -64,6 +68,7 @@ window.loadModels = async function(page = 1) {
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
             <td>${Number(m.daily_token_limit || 0) > 0 ? Number(m.daily_token_limit).toLocaleString() : '不限'}</td>
+            <td class="text-center">${capabilityBadge}</td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
@@ -142,6 +147,8 @@ window.prepareEditModel = (model) => {
     if (maxConcurrentEl) maxConcurrentEl.value = model.max_concurrent || '';
     const monitorUrlEl = document.getElementById('m-monitor-url');
     if (monitorUrlEl) monitorUrlEl.value = model.monitor_url || '';
+    const supportsVisionEl = document.getElementById('m-supports-vision');
+    if (supportsVisionEl) supportsVisionEl.checked = Number(model.supports_vision || 0) === 1;
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
@@ -182,6 +189,8 @@ window.resetModelForm = () => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
+    const supportsVisionEl = document.getElementById('m-supports-vision');
+    if (supportsVisionEl) supportsVisionEl.checked = false;
     const keyInput = document.getElementById('m-key');
     if (keyInput) keyInput.type = 'password';
 };
@@ -244,7 +253,8 @@ window.addModel = async () => {
         temperature: document.getElementById('m-temp') ? document.getElementById('m-temp').value : undefined,
         max_tokens: document.getElementById('m-max-tokens') ? document.getElementById('m-max-tokens').value : undefined,
         max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
-        monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : ''
+        monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
+        supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
     const btn = document.getElementById('m-submit-btn');

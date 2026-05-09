@@ -106,7 +106,7 @@
 
     <!-- 模型配置弹窗 (Add/Edit Model Modal) -->
     <div id="model-modal-container" class="modal-overlay hidden" style="z-index: 200;">
-        <div class="modal model-modal">
+        <div class="modal model-modal model-config-modal">
             <div class="model-modal-header">
                 <h3 id="model-modal-title">添加新模型</h3>
                 <p class="model-modal-desc">配置 OpenAI 兼容格式的大模型接口</p>
@@ -121,7 +121,7 @@
                     <label>接口地址 (Endpoint)</label>
                     <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
                 </div>
-                <div class="form-item">
+                <div class="form-item model-id-item">
                     <label>模型标识 (Model ID)</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
@@ -175,6 +175,16 @@
                         <input type="text" id="m-monitor-url" class="form-input"
                             placeholder="例如: http://10.0.0.8:8000/health">
                     </div>
+                </div>
+                <div class="form-item model-capability-row">
+                    <div>
+                        <label>视觉输入（图片/扫描件）</label>
+                        <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                    </div>
+                    <label class="switch" title="视觉输入（图片/扫描件）">
+                        <input type="checkbox" id="m-supports-vision">
+                        <span class="switch-slider"></span>
+                    </label>
                 </div>
                 <div class="form-item">
                     <label>API Key (可选)</label>
@@ -543,6 +553,7 @@
                                         <th style="width: 160px;">名称</th>
                                         <th style="width: 250px;">后端 URL</th>
                                         <th style="width: 70px;">每日额度</th>
+                                        <th style="width: 70px;">能力</th>
                                         <th style="width: 80px;">可见部门</th>
                                         <th style="width: 80px;">添加用户</th>
                                         <th style="width: 70px;">状态</th>

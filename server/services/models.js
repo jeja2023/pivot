@@ -2,7 +2,7 @@
 const { db } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_concurrent, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -10,6 +10,30 @@ const normalizeTags = (value) => String(value || '')
     .filter(Boolean)
     .slice(0, 8)
     .join(',');
+
+function normalizeBooleanFlag(value) {
+    return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
+}
+
+function modelSupportsVision(model) {
+    return normalizeBooleanFlag(model?.supports_vision) === 1;
+}
+
+function contentContainsVisionInput(content) {
+    if (Array.isArray(content)) {
+        return content.some(part => {
+            if (!part || typeof part !== 'object') return false;
+            if (part.type === 'image_url' || part.type === 'input_image') return true;
+            if (part.image_url) return true;
+            return contentContainsVisionInput(part.content);
+        });
+    }
+    return /!\[[^\]]*]\((?:\/uploads\/|data:image\/|https?:\/\/[^)\s]+\.(?:png|jpe?g|gif|webp|bmp)(?:[?#][^)\s]*)?)[^)\s]*\)/i.test(String(content || ''));
+}
+
+function messagesContainVisionInput(messages) {
+    return Array.isArray(messages) && messages.some(message => contentContainsVisionInput(message?.content));
+}
 
 function getAccessibleModel(modelId, user) {
     let model;
@@ -110,6 +134,10 @@ function getUserAccessibleModels(user) {
 module.exports = {
     modelListFields,
     normalizeTags,
+    normalizeBooleanFlag,
+    modelSupportsVision,
+    contentContainsVisionInput,
+    messagesContainVisionInput,
     getAccessibleModel,
     getModelDailyUsage,
     recordModelTokenUsage,

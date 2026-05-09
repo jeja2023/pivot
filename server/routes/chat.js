@@ -13,7 +13,9 @@ const { estimateTokens, getContext } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const {
     getAccessibleModel,
-    getModelDailyUsage
+    getModelDailyUsage,
+    modelSupportsVision,
+    contentContainsVisionInput
 } = require('../services/models');
 const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
@@ -102,6 +104,11 @@ function limitVisionImages(history) {
         }
         return { ...message, content };
     });
+}
+
+function buildVisionUnsupportedMessage(modelCfg) {
+    const name = modelCfg?.name || modelCfg?.model_name || '当前模型';
+    return `${name} 未配置视觉输入能力，不能处理图片或扫描件内容。请切换到已开启“视觉输入（图片/扫描件）”的模型，或联系管理员在模型配置中启用该能力。普通文档会先抽取文本，不受此限制。`;
 }
 
 function normalizeTitleText(value) {
@@ -294,9 +301,13 @@ function createChatRouter({
         const writeQueueNotice = (scope, info = {}) => {
             const queueAhead = Math.max(0, Number(info.queueAhead || 0));
             const label = scope === 'endpoint' ? '模型端点' : '模型服务';
+            const activeText = Number.isFinite(Number(info.active)) && Number.isFinite(Number(info.max))
+                ? `已有 ${info.active}/${info.max} 个请求正在生成`
+                : '正在等待可用生成通道';
+            const timeoutSeconds = info.queueTimeoutMs ? `，最长等待约 ${Math.round(info.queueTimeoutMs / 1000)} 秒` : '';
             const message = info.status === 'ready'
                 ? `${label}排队结束，正在连接模型。`
-                : `正在排队，前方还有 ${queueAhead} 个请求，当前正在处理 ${info.active}/${info.max} 个。`;
+                : `正在排队，前面${queueAhead === 0 ? '没有等待请求' : `还有 ${queueAhead} 个等待请求`}，${activeText}${timeoutSeconds}。`;
             writeSse(JSON.stringify({
                 type: 'queue',
                 scope,
@@ -350,6 +361,23 @@ function createChatRouter({
 
         db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(getBeijingTimestamp(), sessionId);
         logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
+
+        if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
+            const assistantContent = buildVisionUnsupportedMessage(modelCfg);
+            const assistantTokens = estimateTokens(assistantContent);
+            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
+
+            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
+            logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
+
+            writeSse(JSON.stringify({
+                unsupportedCapability: 'vision_input',
+                content: assistantContent
+            }));
+            writeSse('[DONE]');
+            return res.end();
+        }
 
         const unsupportedCapability = detectUnsupportedCapability(modelContent);
         if (unsupportedCapability) {
@@ -731,6 +759,7 @@ function createChatRouter({
 module.exports = {
     createChatRouter,
     _titleHelpers: {
+        buildVisionUnsupportedMessage,
         buildFallbackTitle,
         sanitizeGeneratedTitle,
         shouldReplaceAutoTitle,

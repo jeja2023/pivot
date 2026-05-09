@@ -19,7 +19,7 @@ class ConcurrencySemaphore {
     constructor(options = {}) {
         this.maxConcurrent = Math.max(1, options.maxConcurrent || 10);
         this.maxQueueSize = Math.max(0, options.maxQueueSize ?? 20);
-        this.queueTimeoutMs = Math.max(1000, options.queueTimeoutMs || 60000);
+        this.queueTimeoutMs = Math.max(1000, options.queueTimeoutMs || 300000);
         this.currentConcurrent = 0;
         this.queue = [];
         this.rejectingNewRequests = false;
@@ -152,7 +152,7 @@ class ConcurrencySemaphore {
 const aiSemaphore = new ConcurrencySemaphore({
     maxConcurrent: parsePositiveInt(process.env.MAX_CONCURRENT_AI_REQUESTS, 1),
     maxQueueSize: parsePositiveInt(process.env.MAX_AI_QUEUE_SIZE, 20),
-    queueTimeoutMs: parsePositiveInt(process.env.AI_QUEUE_TIMEOUT_MS, 60000)
+    queueTimeoutMs: parsePositiveInt(process.env.AI_QUEUE_TIMEOUT_MS, 300000)
 });
 
 module.exports = {

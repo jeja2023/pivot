@@ -63,6 +63,7 @@ function runMigrations() {
     ensureColumn('models', 'max_tokens', 'INTEGER');
     ensureColumn('models', 'monitor_url', 'TEXT');
     ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
+    ensureColumn('models', 'supports_vision', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');

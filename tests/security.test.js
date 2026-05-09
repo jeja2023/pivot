@@ -25,7 +25,10 @@ const {
 } = require('../server/services/rag-index');
 const {
     getModelDailyUsage,
-    recordModelTokenUsage
+    recordModelTokenUsage,
+    contentContainsVisionInput,
+    messagesContainVisionInput,
+    modelSupportsVision
 } = require('../server/services/models');
 const {
     getLocalHostnames,
@@ -102,6 +105,16 @@ test('ConcurrencySemaphore reports queue position for waiting requests', async (
     semaphore.release();
     await waiting;
     semaphore.release();
+});
+
+test('model vision capability helpers detect visual inputs and flags', () => {
+    assert.equal(modelSupportsVision({ supports_vision: 1 }), true);
+    assert.equal(modelSupportsVision({ supports_vision: 0 }), false);
+    assert.equal(contentContainsVisionInput('![截图](/uploads/1/session/a.png)'), true);
+    assert.equal(contentContainsVisionInput('普通文本，没有图片'), false);
+    assert.equal(messagesContainVisionInput([
+        { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }] }
+    ]), true);
 });
 
 test('csrfMiddleware requires matching cookie and header for cookie writes', () => {
