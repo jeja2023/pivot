@@ -164,7 +164,6 @@ bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
 bind('labs-refresh-btn', () => window.loadSettings());
 bind('setting-rag-enabled', () => window.saveSettings(), 'change');
-bind('rag-config-save-btn', () => window.saveSettings());
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());
 bind('modal-prompt-cancel', () => window.closePromptModal());

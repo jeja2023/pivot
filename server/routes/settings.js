@@ -9,6 +9,7 @@ const { validateModelUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
+    getEmbeddingConfig,
     getRagConfig,
     toRagSettingValue
 } = require('../services/rag-config');
@@ -138,6 +139,12 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         apiUrl = String(apiUrl || '').trim();
         apiKey = String(apiKey || '').trim();
+        
+        // 如果用户没填密钥（输入框为空），尝试使用已保存的密钥
+        if (!apiKey) {
+            const savedConfig = getEmbeddingConfig(req.user.id).http;
+            apiKey = savedConfig.apiKey || '';
+        }
         try {
             validateModelUrl(apiUrl, req.user);
         } catch (e) {

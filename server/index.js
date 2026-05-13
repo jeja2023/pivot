@@ -440,6 +440,11 @@ app.use('/v1', createOpenAIRouter({
     logAction
 }));
 
+// --- API 404 处理器 (确保 API 请求永远返回 JSON) ---
+app.use(['/api', '/v1'], (req, res) => {
+    res.status(404).json({ error: `接口不存在: ${req.method} ${req.originalUrl}` });
+});
+
 // --- 全局错误处理中间件 ---
 app.use((err, req, res, _next) => {
     const status = err.status || 500;

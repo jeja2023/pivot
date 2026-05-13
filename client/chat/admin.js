@@ -163,7 +163,11 @@ window.switchTab = async (tab) => {
     
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
-    loadTabData(tab); if (tab === 'knowledge') bindEmbeddingModalEvents();
+    loadTabData(tab);
+    if (tab === 'knowledge') {
+        bindEmbeddingModalEvents();
+        bindRagDebugModalEvents();
+    }
 };
 
 async function loadTabData(tab, page = 1) {
@@ -286,13 +290,21 @@ window.fetchEmbeddingModels = async () => {
     if (!selectContainer || !selectEl) return;
 
     if (fetchBtn) fetchBtn.disabled = true;
+    showToast('正在获取向量模型列表...', 'info');
+
     try {
-        showToast('正在获取向量模型列表...', 'info');
         const res = await apiFetch(`${API_BASE}/settings/embedding-models`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ apiUrl, apiKey })
         });
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await res.text();
+            throw new Error(`服务器返回了非 JSON 内容（可能是 404/500 页面）：${text.slice(0, 100)}...`);
+        }
+
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || '获取向量模型列表失败');
         if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
@@ -311,6 +323,7 @@ window.fetchEmbeddingModels = async () => {
         showToast(`成功获取 ${data.models.length} 个向量模型`, 'success');
     } catch (e) {
         showToast(e.message || '获取向量模型列表失败', 'error');
+        console.error('Fetch error:', e);
     } finally {
         if (fetchBtn) fetchBtn.disabled = false;
     }
@@ -327,7 +340,10 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
     if (embeddingModeInput) embeddingModeInput.value = 'http';
     if (embeddingUrlInput) embeddingUrlInput.value = embeddingConfig?.apiUrl || '';
     if (embeddingModelInput) embeddingModelInput.value = embeddingConfig?.model || 'nomic-embed-text';
-    if (embeddingKeyInput) embeddingKeyInput.value = '';
+    if (embeddingKeyInput) {
+        embeddingKeyInput.value = '';
+        embeddingKeyInput.placeholder = embeddingConfig?.hasApiKey ? '•••••••• (已配置，输入新密钥可覆盖)' : '输入 API Key (留空则保留原配置)';
+    }
     if (embeddingModelSelect) embeddingModelSelect.innerHTML = '';
     if (embeddingModelSelectContainer) embeddingModelSelectContainer.classList.add('hidden');
     if (embeddingStatusEl) {
@@ -383,11 +399,20 @@ window.saveEmbeddingSettings = async () => {
     if (!embeddingUrlInput || !embeddingModelInput) return;
     if (saveBtn) saveBtn.disabled = true;
     try {
+        const scoreInput = document.getElementById('setting-rag-score-threshold');
+        const topKInput = document.getElementById('setting-rag-top-k');
+        const candidateInput = document.getElementById('setting-rag-candidate-limit');
+
         const payload = {
             rag_embedding_mode: 'http',
             rag_embedding_api_url: embeddingUrlInput.value.trim(),
             rag_embedding_model: getEmbeddingModelValue()
         };
+        
+        if (scoreInput) payload.rag_score_threshold = scoreInput.value;
+        if (topKInput) payload.rag_top_k = topKInput.value;
+        if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
+
         if (embeddingModeInput) embeddingModeInput.value = 'http';
         if (embeddingKeyInput && embeddingKeyInput.value.trim()) {
             payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
@@ -398,12 +423,12 @@ window.saveEmbeddingSettings = async () => {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '向量模型配置保存失败');
+        if (!res.ok) throw new Error(data.error || 'RAG 配置保存失败');
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        showToast('向量模型配置已保存');
+        showToast('RAG 配置已保存');
         if (modal) modal.classList.add('hidden');
     } catch (e) {
-        showToast(e.message || '向量模型配置保存失败', 'error');
+        showToast(e.message || 'RAG 配置保存失败', 'error');
     } finally {
         if (saveBtn) saveBtn.disabled = false;
     }
@@ -432,6 +457,13 @@ window.testEmbeddingConnection = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await res.text();
+            throw new Error(`连接测试请求失败（返回了 HTML）：${text.slice(0, 100)}...`);
+        }
+
         const data = await res.json();
         if (data.success) {
             showToast(`连接测试成功！向量维度：${data.dimension}，耗时：${data.durationMs}ms`, 'success');
@@ -440,6 +472,7 @@ window.testEmbeddingConnection = async () => {
         }
     } catch (e) {
         showToast(e.message, 'error');
+        console.error('Test connection error:', e);
     } finally {
         if (testBtn) testBtn.disabled = false;
     }
@@ -466,13 +499,16 @@ function bindEmbeddingModalEvents() {
         modal.classList.remove('hidden');
     };
     newCancelBtn.onclick = () => modal.classList.add('hidden');
-    modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
     
     if (testBtn) {
         testBtn.onclick = () => window.testEmbeddingConnection();
     }
     if (fetchModelsBtn) {
         fetchModelsBtn.onclick = () => window.fetchEmbeddingModels();
+    }
+    const saveBtn = document.getElementById('rag-embedding-save-btn');
+    if (saveBtn) {
+        saveBtn.onclick = () => window.saveEmbeddingSettings();
     }
     if (embeddingModelSelect) {
         embeddingModelSelect.onchange = (e) => {
@@ -483,6 +519,36 @@ function bindEmbeddingModalEvents() {
     }
     if (modeSelect) {
     }
+    const keyToggle = document.getElementById('rag-embedding-key-toggle');
+    const keyInput = document.getElementById('setting-rag-embedding-key');
+    if (keyToggle && keyInput) {
+        keyToggle.onclick = () => {
+            const isPassword = keyInput.type === 'password';
+            keyInput.type = isPassword ? 'text' : 'password';
+            keyToggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)';
+        };
+    }
+}
+
+function bindRagDebugModalEvents() {
+    const openBtn = document.getElementById('rag-debug-modal-open-btn');
+    const closeBtn = document.getElementById('rag-debug-modal-close');
+    const modal = document.getElementById('rag-debug-modal');
+    if (!openBtn || !modal) return;
+
+    openBtn.onclick = () => {
+        modal.classList.remove('hidden');
+        // 如果是空的，自动填充默认参数
+        if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
+    };
+    
+    if (closeBtn) {
+        closeBtn.onclick = () => modal.classList.add('hidden');
+    }
+    
+    modal.onclick = (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    };
 }
 
 function renderPagination(tab, total, currentPage) {

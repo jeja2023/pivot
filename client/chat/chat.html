@@ -557,12 +557,6 @@
                                 <div class="lab-card-body">
                                     <h4>RAG 知识库检索</h4>
                                     <p>开启后管理员和用户可以上传知识库文档，后端会自动进行分片与向量化处理，实现基于私有文档的 AI 问答能力。</p>
-                                    <div class="rag-config-grid">
-                                        <label>相似度阈值<input type="number" id="setting-rag-score-threshold" class="form-input" min="0" max="1" step="0.05"></label>
-                                        <label>命中数量<input type="number" id="setting-rag-top-k" class="form-input" min="1" max="10" step="1"></label>
-                                        <label>候选数量<input type="number" id="setting-rag-candidate-limit" class="form-input" min="20" max="1000" step="10"></label>
-                                    </div>
-                                    <button id="rag-config-save-btn" class="btn-secondary" style="margin-top: 10px; width: 100%;">保存 RAG 参数</button>
                                 </div>
                             </div>
 
@@ -646,7 +640,8 @@
                             <h3>知识库文档管理</h3>
                             <div class="footer-actions" style="margin-bottom: 0;">
                                 <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf">
-                                <button id="rag-embedding-modal-open-btn" class="btn-secondary">向量配置</button>
+                                <button id="rag-embedding-modal-open-btn" class="btn-secondary">RAG 配置</button>
+                                <button id="rag-debug-modal-open-btn" class="btn-secondary">召回测试</button>
                                 <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
                                 <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                                 <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
@@ -656,14 +651,6 @@
                             </div>
                         </div>
                         <div id="rag-summary" class="rag-summary"></div>
-                        <div class="rag-debug-panel">
-                            <input id="rag-debug-query" class="form-input" placeholder="输入问题测试知识库召回">
-                            <input id="rag-debug-score-threshold" class="form-input rag-debug-param" type="number" min="0" max="1" step="0.05" title="临时相似度阈值">
-                            <input id="rag-debug-top-k" class="form-input rag-debug-param" type="number" min="1" max="10" step="1" title="临时命中数量">
-                            <input id="rag-debug-candidate-limit" class="form-input rag-debug-param" type="number" min="20" max="1000" step="10" title="临时候选数量">
-                            <button id="rag-debug-btn" class="btn-secondary">测试召回</button>
-                        </div>
-                        <div id="rag-debug-results" class="rag-debug-results hidden"></div>
                         <div class="table-container">
                             <table class="data-table">
                                 <thead>
@@ -1153,10 +1140,25 @@
     <div id="rag-embedding-modal" class="modal-overlay hidden" style="z-index: 5500;">
         <div class="modal model-modal">
             <div class="model-modal-header">
-                <h3>向量模型配置</h3>
-                <p class="model-modal-desc">用于当前账号的知识库文档索引和召回测试，未配置时使用系统默认 Embedding 服务。</p>
+                <h3>知识库 (RAG) 配置</h3>
+                <p class="model-modal-desc">设置系统全局的检索参数与向量模型（Embedding）服务，影响文档分片与召回效果。</p>
             </div>
             <div class="model-form">
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>相似度阈值</label>
+                        <input type="number" id="setting-rag-score-threshold" class="form-input" min="0" max="1" step="0.05" placeholder="推荐 0.4">
+                    </div>
+                    <div class="form-item">
+                        <label>命中数量 (Top K)</label>
+                        <input type="number" id="setting-rag-top-k" class="form-input" min="1" max="10" step="1" placeholder="推荐 3">
+                    </div>
+                </div>
+                <div class="form-item">
+                    <label>候选数量 (Candidate Limit)</label>
+                    <input type="number" id="setting-rag-candidate-limit" class="form-input" min="20" max="1000" step="10" placeholder="推荐 300">
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--border); margin: 5px 0;">
                 <input type="hidden" id="setting-rag-embedding-mode" value="http">
                 <div class="form-item">
                     <label>Embedding Base URL</label>
@@ -1164,7 +1166,15 @@
                 </div>
                 <div class="form-item">
                     <label>API Key</label>
-                    <input type="password" id="setting-rag-embedding-key" class="form-input" placeholder="留空则保留已配置密钥">
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="setting-rag-embedding-key" class="form-input" placeholder="输入 API Key (留空则保留原配置)" style="padding-right: 40px;">
+                        <button type="button" id="rag-embedding-key-toggle" class="btn-icon" style="position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: var(--text-muted); display: flex; align-items: center;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-icon">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="form-item">
                     <label>Embedding 模型</label>
@@ -1184,7 +1194,7 @@
                 <div class="model-modal-actions">
                     <button id="rag-embedding-modal-cancel" class="btn-secondary">取消</button>
                     <button id="rag-embedding-test-btn" class="btn-secondary">测试连接</button>
-                    <button id="rag-embedding-save-btn" class="btn-primary">保存向量配置</button>
+                    <button id="rag-embedding-save-btn" class="btn-primary">保存 RAG 配置</button>
                 </div>
             </div>
         </div>
@@ -1217,6 +1227,61 @@
                 </table>
             </div>
             <p style="margin-top: 15px; font-size: 0.8rem; color: var(--text-muted);">数据每 10 秒随监控面板同步刷新。此列表仅显示请求频率较高的接口路径。</p>
+        </div>
+    </div>
+    <style>
+        #rag-debug-btn:active { transform: scale(0.96); box-shadow: none; opacity: 0.8; }
+        .btn-red-outline { background: transparent; border: 1px solid #ef4444 !important; color: #ef4444 !important; }
+        .btn-red-outline:hover { background: #fef2f2; }
+    </style>
+    <!-- 召回测试弹窗 (RAG Debug) -->
+    <div id="rag-debug-modal" class="modal-overlay hidden">
+        <div class="modal" style="width: min(1040px, calc(100vw - 36px)); min-height: 520px; max-height: min(850px, calc(100vh - 36px)); display: flex; flex-direction: column; padding: 24px;">
+            <div class="modal-header" style="margin-bottom: 20px; border-bottom: none; padding-bottom: 0;">
+                <h3 style="font-size: 1.15rem; color: var(--text-main);">知识库召回测试 (RAG Debug)</h3>
+                <p class="model-modal-desc" style="margin-top: 4px;">测试知识库检索准确度，查看匹配详情。</p>
+            </div>
+            
+            <div class="modal-form" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+                <!-- 配置面板 - 彻底的行列分离布局 -->
+                <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;">
+                    <!-- 第一行：标签 -->
+                    <div style="display: flex; gap: 12px; margin-bottom: 6px;">
+                        <div style="flex: 1;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); padding-left: 2px;">测试问题</label></div>
+                        <div style="width: 75px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">阈值</label></div>
+                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">命中</label></div>
+                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">候选</label></div>
+                        <div style="width: 95px;"></div> <!-- 按钮占位空位 -->
+                    </div>
+                    <!-- 第二行：输入框与按钮 -->
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div style="flex: 1; display: flex;">
+                            <input id="rag-debug-query" class="form-input" placeholder="输入测试问题..." style="height: 34px; border-radius: 6px; font-size: 0.85rem; width: 100%; margin: 0;">
+                        </div>
+                        <div style="width: 75px; display: flex;">
+                            <input id="rag-debug-score-threshold" class="form-input" type="number" min="0" max="1" step="0.05" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                        </div>
+                        <div style="width: 65px; display: flex;">
+                            <input id="rag-debug-top-k" class="form-input" type="number" min="1" max="10" step="1" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                        </div>
+                        <div style="width: 65px; display: flex;">
+                            <input id="rag-debug-candidate-limit" class="form-input" type="number" min="20" max="1000" step="10" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                        </div>
+                        <button id="rag-debug-btn" class="btn-primary" style="height: 34px; width: 95px; font-size: 0.85rem; font-weight: 600; border-radius: 6px; flex-shrink: 0; transition: transform 0.1s ease; margin: 0;">开始测试</button>
+                    </div>
+                </div>
+
+                <!-- 结果展示区域 -->
+                <div id="rag-debug-results" class="rag-debug-results" style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: white; padding: 4px;">
+                    <div class="rag-debug-empty" style="height: 180px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.85rem;">
+                        请输入测试问题并点击“开始测试”
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer" style="margin-top: 20px; padding-top: 0; border-top: none;">
+                <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" style="height: 34px; padding: 0 20px; font-size: 0.85rem;">关闭</button>
+            </div>
         </div>
     </div>
 </body>

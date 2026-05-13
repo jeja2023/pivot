@@ -171,9 +171,13 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
 
 ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (req, res) => {
     const savedConfig = getEmbeddingConfig(req.user.id).http;
-    const config = req.body?.apiUrl || req.body?.model || req.body?.apiKey
-        ? req.body
-        : { mode: 'http', apiUrl: savedConfig.url, model: savedConfig.model, apiKey: savedConfig.apiKey };
+    const config = {
+        mode: req.body?.mode || 'http',
+        apiUrl: req.body?.apiUrl || savedConfig.url,
+        model: req.body?.model || savedConfig.model,
+        apiKey: (req.body?.apiKey && req.body.apiKey.trim()) ? req.body.apiKey.trim() : savedConfig.apiKey
+    };
+    
     const result = await testEmbeddingConnection(config);
     auditRagAction(req, 'RAG_EMBEDDING_TEST', { 
         mode: config.mode, 
