@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { removeAttachmentFiles } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedText } = require('../document-text');
 const { isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
@@ -32,6 +31,7 @@ function createAttachmentsRouter({
     logAction
 }) {
     const router = express.Router();
+    const isSuperAdmin = (user) => user?.username === 'admin';
 
     router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
         const token = req.query.token;
@@ -45,6 +45,7 @@ function createAttachmentsRouter({
                   AND user_id = ?
                   AND session_id = ?
                   AND file_path = ?
+                  AND deleted_at IS NULL
                   AND (expires_at IS NULL OR expires_at > ?)
             `).get(token, requestedUserId, req.params.sessionId, expectedPath, getBeijingTimestamp());
             if (attachment) {
@@ -62,14 +63,14 @@ function createAttachmentsRouter({
         const requestedUserId = parseInt(req.params.userId, 10);
         const { sessionId, filename } = req.params;
 
-        if (req.user.role !== 'admin' && requestedUserId !== req.user.id) {
+        if (!isSuperAdmin(req.user) && requestedUserId !== req.user.id) {
             return res.status(403).json({ error: '无权访问该附件' });
         }
 
         const expectedPath = `uploads/${requestedUserId}/${sessionId}/${filename}`;
-        const attachment = db.prepare('SELECT id FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?')
+        const attachment = db.prepare('SELECT id, deleted_at FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?')
             .get(requestedUserId, sessionId, expectedPath);
-        if (!attachment && req.user.role !== 'admin') {
+        if (!attachment || (attachment.deleted_at && !isSuperAdmin(req.user))) {
             return res.status(403).json({ error: '附件归属校验失败' });
         }
 
@@ -173,16 +174,31 @@ function createAttachmentsRouter({
         const limit = normalizeLimit(req.query.limit || 20);
         const keyword = String(req.query.keyword || '').trim();
         const offset = (page - 1) * limit;
-        let where = 'WHERE a.user_id = ?';
-        const params = [req.user.id];
+        const ownerId = parseInt(req.query.userId, 10);
+        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
+        let where = '';
+        const params = [];
+        if (isSuperAdmin(req.user) && ownerId) {
+            where = 'WHERE a.user_id = ?';
+            params.push(ownerId);
+        } else if (!isSuperAdmin(req.user)) {
+            where = 'WHERE a.user_id = ?';
+            params.push(req.user.id);
+        } else {
+            where = 'WHERE 1 = 1';
+        }
+        if (!includeDeleted) {
+            where += ' AND a.deleted_at IS NULL';
+        }
         if (keyword) {
             where += ' AND a.file_name LIKE ?';
             params.push(`%${keyword}%`);
         }
         const data = db.prepare(`
-            SELECT a.*, s.title AS session_title
+            SELECT a.*, s.title AS session_title, u.username, u.nickname
             FROM attachments a
             LEFT JOIN sessions s ON s.id = a.session_id
+            LEFT JOIN users u ON u.id = a.user_id
             ${where}
             ORDER BY a.created_at DESC
             LIMIT ? OFFSET ?
@@ -191,14 +207,13 @@ function createAttachmentsRouter({
             url: '/' + String(item.file_path || '').replace(/\\/g, '/') + (item.access_token ? '?token=' + item.access_token : '')
         }));
         const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
-        res.json({ data, total, hasMore: offset + data.length < total });
+        res.json({ data, total, hasMore: offset + data.length < total, isSuperAdmin: isSuperAdmin(req.user) });
     }));
 
     router.delete('/api/attachments/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const attachment = db.prepare('SELECT * FROM attachments WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+        const attachment = db.prepare('SELECT * FROM attachments WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(req.params.id, req.user.id);
         if (!attachment) return res.status(404).json({ error: '附件不存在' });
-        db.prepare('DELETE FROM attachments WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-        removeAttachmentFiles([attachment]);
+        db.prepare('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ?').run(getBeijingTimestamp(), req.params.id, req.user.id);
         logAction(req, '删除附件', `附件: ${attachment.file_name}`);
         res.json({ success: true });
     }));

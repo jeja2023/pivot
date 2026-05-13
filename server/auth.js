@@ -153,7 +153,7 @@ function register(username, password, nickname, unit, role = 'user') {
 
 // 登录验证
 function login(username, password) {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(username);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
         throw new Error('用户名或密码错误');
     }

@@ -106,28 +106,21 @@ function formatSessionListTime(value) {
         });
     }
 
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    if (dayKey(parsed) === dayKey(yesterday)) return '昨天';
+    const todayStart = new Date(dayKey(now) + 'T00:00:00+08:00');
+    const parsedStart = new Date(dayKey(parsed) + 'T00:00:00+08:00');
+    const dayDiff = Math.max(1, Math.round((todayStart - parsedStart) / (24 * 60 * 60 * 1000)));
+    if (dayDiff <= 99) return dayDiff + ' 天';
 
     const parts = new Intl.DateTimeFormat('zh-CN', {
         timeZone: 'Asia/Shanghai',
-        year: 'numeric',
         month: 'numeric',
         day: 'numeric'
     }).formatToParts(parsed).reduce((acc, part) => {
         acc[part.type] = part.value;
         return acc;
     }, {});
-    const currentYear = new Intl.DateTimeFormat('zh-CN', {
-        timeZone: 'Asia/Shanghai',
-        year: 'numeric'
-    }).format(now);
-
-    return parts.year === currentYear
-        ? `${parts.month}月${parts.day}日`
-        : `${parts.year}年`;
+    return parts.month + '/' + parts.day;
 }
-
 function formatSessionGroupDate(value) {
     const parsed = parseChatDateTime(value);
     if (!parsed) return '更早';

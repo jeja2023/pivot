@@ -2,7 +2,7 @@
 const { db } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -17,6 +17,10 @@ function normalizeBooleanFlag(value) {
 
 function modelSupportsVision(model) {
     return normalizeBooleanFlag(model?.supports_vision) === 1;
+}
+
+function modelSupportsReasoning(model) {
+    return normalizeBooleanFlag(model?.supports_reasoning) === 1;
 }
 
 function contentContainsVisionInput(content) {
@@ -80,7 +84,7 @@ function getModelDailyUsage(userId, modelId) {
     const messageTokens = db.prepare(`
         SELECT COALESCE(SUM(token_count), 0) AS tokens
         FROM messages
-        WHERE user_id = ? AND model_id = ? AND date(created_at) = date('now', '+8 hours')
+        WHERE user_id = ? AND model_id = ? AND deleted_at IS NULL AND date(created_at) = date('now', '+8 hours')
     `).get(userId, modelId).tokens || 0;
     const eventTokens = db.prepare(`
         SELECT COALESCE(SUM(token_count), 0) AS tokens
@@ -90,13 +94,15 @@ function getModelDailyUsage(userId, modelId) {
     return messageTokens + eventTokens;
 }
 
-function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api') {
+function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inputTokens = 0, outputTokens = 0) {
     const safeTokens = Math.max(parseInt(tokenCount, 10) || 0, 0);
+    const safeInputTokens = Math.max(parseInt(inputTokens, 10) || 0, 0);
+    const safeOutputTokens = Math.max(parseInt(outputTokens, 10) || 0, 0);
     if (!userId || !modelId || safeTokens <= 0) return;
     db.prepare(`
-        INSERT INTO model_usage_events (user_id, model_id, source, token_count, created_at)
-        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(userId, modelId, String(source || 'api').slice(0, 40), safeTokens);
+        INSERT INTO model_usage_events (user_id, model_id, source, token_count, input_tokens, output_tokens, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userId, modelId, String(source || 'api').slice(0, 40), safeTokens, safeInputTokens, safeOutputTokens);
 }
 
 function migrateModelSecrets() {
@@ -136,6 +142,7 @@ module.exports = {
     normalizeTags,
     normalizeBooleanFlag,
     modelSupportsVision,
+    modelSupportsReasoning,
     contentContainsVisionInput,
     messagesContainVisionInput,
     getAccessibleModel,

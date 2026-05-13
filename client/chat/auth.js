@@ -148,19 +148,24 @@ loadAuthConfig();
 
 window.loadApiKeys = async function() {
     try {
+        document.querySelectorAll('.super-admin-only').forEach(el => {
+            el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        });
         const res = await apiFetch(`${API_BASE}/auth/keys`);
         if (!res.ok) throw new Error('加载 API Key 失败');
         const data = await res.json();
         const body = document.getElementById('api-keys-body');
         if (data.length === 0) {
-            body.innerHTML = '<tr><td colspan="6" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
         } else {
             body.innerHTML = data.map((k, index) => `
                 <tr>
                     <td class="text-center">${index + 1}</td>
                     <td>${escapeHtml(k.name)}</td>
                     <td style="font-family: monospace; font-size: 0.85rem;">${k.key.length > 12 ? k.key.slice(0, 3) + '...' + k.key.slice(-4) : k.key}</td>
-                    <td style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${(k.usage_tokens || 0).toLocaleString()} <small style="font-weight: 400; color: var(--text-muted);">Tokens</small></td>
+                    <td class="text-center" title="${Number(k.input_tokens || 0).toLocaleString()} Tokens" style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${formatTokenCount(k.input_tokens)}</td>
+                    <td class="text-center" title="${Number(k.output_tokens || 0).toLocaleString()} Tokens" style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${formatTokenCount(k.output_tokens)}</td>
+                    <td class="text-center" title="${Number(k.usage_tokens || 0).toLocaleString()} Tokens" style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${formatTokenCount(k.usage_tokens)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
                     <td class="text-center">
@@ -178,6 +183,59 @@ window.loadApiKeys = async function() {
     }
 }
 
+window.openApiCallLogsModal = function() {
+    if (currentUser?.username !== 'admin') return;
+    document.getElementById('api-call-logs-modal')?.classList.remove('hidden');
+    window.loadApiCallLogs?.(1);
+}
+
+window.closeApiCallLogsModal = function() {
+    document.getElementById('api-call-logs-modal')?.classList.add('hidden');
+}
+
+window.loadApiCallLogs = async function(page = 1) {
+    if (currentUser?.username !== 'admin') return;
+    pageState.apiCallLogs = page;
+    const body = document.getElementById('api-call-logs-body');
+    if (!body) return;
+    const keyword = document.getElementById('api-call-log-search')?.value || '';
+    try {
+        const limit = pageState.limit || 15;
+        const params = new URLSearchParams({ page, limit, keyword });
+        const res = await apiFetch(`${API_BASE}/stats/api-call-logs?${params.toString()}`);
+        if (!res.ok) throw new Error('加载第三方 API 调用记录失败');
+        const { data, total } = await res.json();
+        if (!data.length) {
+            body.innerHTML = '<tr><td colspan="10" class="text-center" style="padding: 28px; color: var(--text-muted);">暂无第三方 API 调用记录</td></tr>';
+            renderPagination('apiCallLogs', total, page);
+            return;
+        }
+        body.innerHTML = data.map((row, idx) => {
+            const requestText = row.request_messages || '';
+            const responseText = row.response_text || row.error_message || '';
+            const statusText = row.status === 'error' ? '失败' : '成功';
+            const statusColor = row.status === 'error' ? 'var(--danger)' : 'var(--primary)';
+            return `
+                <tr>
+                    <td class="text-center">${(page - 1) * limit + idx + 1}</td>
+                    <td title="${escapeHtml(formatDateToCN(row.created_at))}">${escapeHtml(formatDateToCN(row.created_at))}</td>
+                    <td title="${escapeHtml(row.nickname || row.username)}">${escapeHtml(row.nickname || row.username)}</td>
+                    <td title="${escapeHtml(row.api_key_name || row.key_preview || '-')}">${escapeHtml(row.api_key_name || row.key_preview || '-')}</td>
+                    <td title="${escapeHtml(row.model_name || '-')}">${escapeHtml(row.model_name || '-')}</td>
+                    <td class="text-center" title="${Number(row.input_tokens || 0).toLocaleString()}">${formatTokenCount(row.input_tokens)}</td>
+                    <td class="text-center" title="${Number(row.output_tokens || 0).toLocaleString()}">${formatTokenCount(row.output_tokens)}</td>
+                    <td title="${escapeHtml(requestText)}">${escapeHtml(requestText)}</td>
+                    <td title="${escapeHtml(responseText)}">${escapeHtml(responseText)}</td>
+                    <td class="text-center" style="color:${statusColor};font-weight:600;" title="${escapeHtml(row.error_message || statusText)}">${statusText}</td>
+                </tr>
+            `;
+        }).join('');
+        renderPagination('apiCallLogs', total, page);
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="10" class="text-center" style="padding: 28px; color: var(--danger);">${escapeHtml(e.message)}</td></tr>`;
+    }
+}
+
 window.loadAvailableModels = async function() {
     const listEl = document.getElementById('available-models-list');
     if (!listEl) return;
@@ -191,9 +249,9 @@ window.loadAvailableModels = async function() {
         }
         // 简化展示：只显示模型标识 (model 参数值)，使用标签形式排列
         listEl.innerHTML = `
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; justify-content: center; text-align: center;">
                 ${models.map(m => `
-                    <code style="background: rgba(99, 102, 241, 0.06); padding: 4px 12px; border-radius: 6px; color: #6366f1; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid rgba(99, 102, 241, 0.15);" title="友好名称: ${escapeHtml(m.name)}">${escapeHtml(m.model_name || m.id)}</code>
+                    <code style="background: rgba(99, 102, 241, 0.06); padding: 4px 12px; border-radius: 6px; color: #6366f1; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid rgba(99, 102, 241, 0.15); text-align: center;" title="友好名称: ${escapeHtml(m.name)}">${escapeHtml(m.model_name || m.id)}</code>
                 `).join('')}
             </div>
             <p style="margin-top: 12px; font-size: 0.75rem; color: var(--text-muted);">* 以上为外部调用时 model 参数需填写的具体值</p>

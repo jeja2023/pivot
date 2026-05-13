@@ -14,6 +14,7 @@ const formatDateToCN = (dateStr) => {
 };
 
 const escapeHtml = (str) => {
+    if (str === 0) return '0';
     if (!str) return '';
     return String(str)
         .replace(/&/g, '&amp;')
@@ -23,11 +24,49 @@ const escapeHtml = (str) => {
         .replace(/'/g, '&#039;');
 };
 
+
 const escapeCsvValue = (value) => {
     let text = value === undefined || value === null ? '' : String(value);
     if (/^[=+\-@]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
 };
+
+function formatTokenAmount(value, options = {}) {
+    const { emptyText = '不限', suffix = '' } = options;
+    const n = Number(value) || 0;
+    if (n <= 0) return emptyText;
+    if (n >= 1000000000) return `${(n / 1000000000).toFixed(n >= 10000000000 ? 0 : 1)}B${suffix}`;
+    if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1)}M${suffix}`;
+    if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K${suffix}`;
+    return `${n.toLocaleString()}${suffix}`;
+}
+
+const formatTokenCount = (value, emptyText = '0') => formatTokenAmount(value, { emptyText });
+
+function formatTokenInputValue(value) {
+    const n = Number(value) || 0;
+    if (n <= 0) return '';
+    if (n >= 1000000000) return `${(n / 1000000000).toFixed(n >= 10000000000 ? 0 : 1)}B`;
+    if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1)}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`;
+    return String(n);
+}
+
+function parseTokenAmount(value) {
+    const text = String(value || '').trim();
+    if (!text) return 0;
+    const match = text.replace(/,/g, '').match(/^(\d+(?:\.\d+)?)\s*([kKmMbB万亿]?)\s*(?:tokens?)?$/);
+    if (!match) return Number(text.replace(/[^\d.]/g, '')) || 0;
+    const num = Number(match[1]) || 0;
+    const unit = match[2].toLowerCase();
+    const multiplier = unit === 'k' ? 1000
+        : unit === '万' ? 10000
+        : unit === 'm' ? 1000000
+        : unit === '亿' ? 100000000
+        : unit === 'b' ? 1000000000
+        : 1;
+    return Math.round(num * multiplier);
+}
 
 const encodeActionArg = (value) => encodeURIComponent(JSON.stringify(value))
     .replace(/'/g, '%27')
@@ -54,29 +93,34 @@ const downloadFileByFetch = async (url, filename) => {
     }
 };
 
-let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, limit: 10 };
+let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
 const adminFeatureScripts = [
-    `/chat/models.js?v=${APP_VERSION}`,
-    `/chat/rag.js?v=${APP_VERSION}`,
-    `/chat/users.js?v=${APP_VERSION}`,
-    `/chat/stats.js?v=${APP_VERSION}`,
-    `/chat/extra.js?v=${APP_VERSION}`
+    '/chat/models.js',
+    '/chat/rag.js',
+    '/chat/users.js',
+    '/chat/stats.js',
+    '/chat/extra.js'
 ];
 
 let adminFeatureLoadPromise = null;
 
 const loadScriptOnce = (src) => new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
+    const versionTag = window.APP_VERSION_TAG ? `?v=${encodeURIComponent(window.APP_VERSION_TAG)}` : '';
+    const versionedSrc = `${src}${versionTag}`;
+    const existing = Array.from(document.scripts).find(script => {
+        const current = script.getAttribute('src') || '';
+        return current === src || current === versionedSrc || current.startsWith(`${src}?`);
+    });
     if (existing) {
         resolve();
         return;
     }
     const script = document.createElement('script');
-    script.src = src;
+    script.src = versionedSrc;
     script.async = false;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    script.onerror = () => reject(new Error(`加载脚本失败: ${src}`));
     document.head.appendChild(script);
 });
 
@@ -119,13 +163,16 @@ window.switchTab = async (tab) => {
     
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
-    loadTabData(tab);
+    loadTabData(tab); if (tab === 'knowledge') bindEmbeddingModalEvents();
 };
 
 async function loadTabData(tab, page = 1) {
     pageState[tab] = page;
     if (tab === 'models' && window.loadModels) loadModels(page);
-    if (tab === 'users' && window.loadUsers) loadUsers(page);
+    if (tab === 'users' && window.loadUsers) {
+        loadUsers(page);
+        setTimeout(() => window.ensureUserRecordButtons?.(), 0);
+    }
     if (tab === 'logs' && window.loadLogs) loadLogs(page);
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
     if (tab === 'stats' && window.loadStats) loadStats();
@@ -134,8 +181,13 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
     if (tab === 'ops' && window.loadOpsSummary) loadOpsSummary();
     if (tab === 'details' && window.loadDetails) loadDetails(page);
+    if (tab === 'apiCallLogs' && window.loadApiCallLogs) loadApiCallLogs(page);
+    if (tab === 'userRecords' && window.loadUserRecordMessages) loadUserRecordMessages(page);
     if (tab === 'labs') loadSettings();
-    if (tab === 'knowledge' && window.loadKnowledgeDocs) window.loadKnowledgeDocs();
+    if (tab === 'knowledge') {
+        if (window.loadSettings) window.loadSettings();
+        if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
+    }
     if (tab === 'keys' && window.loadApiKeys) {
         loadApiKeys();
         const displayEl = document.getElementById('api-base-url-display');
@@ -146,6 +198,7 @@ async function loadTabData(tab, page = 1) {
         }
     }
 }
+window.loadTabData = loadTabData;
 
 // 智能获取远程模型列表
 window.fetchRemoteModels = async function() {
@@ -200,9 +253,89 @@ async function loadSettings() {
         if (!res.ok) throw new Error('系统设置加载失败');
         const data = await res.json();
         ragCheckbox.checked = data.ragEnabled === true;
+        const scoreInput = document.getElementById('setting-rag-score-threshold');
+        const topKInput = document.getElementById('setting-rag-top-k');
+        const candidateInput = document.getElementById('setting-rag-candidate-limit');
+        if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? 0.4;
+        if (topKInput) topKInput.value = data.ragConfig?.topK ?? 3;
+        if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? 300;
+        updateEmbeddingSettingsForm(data.embeddingConfig);
         document.getElementById('tab-knowledge')?.classList.toggle('hidden', !ragCheckbox.checked);
     } catch (e) {
         showToast(e.message || '系统设置加载失败', 'error');
+    }
+}
+
+function getEmbeddingModelValue() {
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
+    return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
+}
+
+window.fetchEmbeddingModels = async () => {
+    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
+    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const selectContainer = document.getElementById('setting-rag-embedding-model-select-container');
+    const selectEl = document.getElementById('setting-rag-embedding-model-select');
+    const fetchBtn = document.getElementById('rag-embedding-fetch-models-btn');
+
+    const apiUrl = embeddingUrlInput?.value.trim() || '';
+    const apiKey = embeddingKeyInput?.value.trim() || '';
+    if (!apiUrl) return showToast('请先填写 Embedding Base URL', 'error');
+    if (!selectContainer || !selectEl) return;
+
+    if (fetchBtn) fetchBtn.disabled = true;
+    try {
+        showToast('正在获取向量模型列表...', 'info');
+        const res = await apiFetch(`${API_BASE}/settings/embedding-models`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiUrl, apiKey })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '获取向量模型列表失败');
+        if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
+
+        const currentModel = embeddingModelInput?.value.trim() || '';
+        selectEl.innerHTML = '<option value="">-- 请选择获取到的向量模型 --</option>' +
+            data.models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+        if (currentModel && data.models.includes(currentModel)) {
+            selectEl.value = currentModel;
+        }
+        selectContainer.classList.remove('hidden');
+        if (data.models.length === 1 && embeddingModelInput) {
+            selectEl.value = data.models[0];
+            embeddingModelInput.value = data.models[0];
+        }
+        showToast(`成功获取 ${data.models.length} 个向量模型`, 'success');
+    } catch (e) {
+        showToast(e.message || '获取向量模型列表失败', 'error');
+    } finally {
+        if (fetchBtn) fetchBtn.disabled = false;
+    }
+};
+
+function updateEmbeddingSettingsForm(embeddingConfig = {}) {
+    const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
+    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
+    const embeddingStatusEl = document.getElementById('setting-rag-embedding-status');
+    const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
+    const embeddingModelSelectContainer = document.getElementById('setting-rag-embedding-model-select-container');
+    if (embeddingModeInput) embeddingModeInput.value = 'http';
+    if (embeddingUrlInput) embeddingUrlInput.value = embeddingConfig?.apiUrl || '';
+    if (embeddingModelInput) embeddingModelInput.value = embeddingConfig?.model || 'nomic-embed-text';
+    if (embeddingKeyInput) embeddingKeyInput.value = '';
+    if (embeddingModelSelect) embeddingModelSelect.innerHTML = '';
+    if (embeddingModelSelectContainer) embeddingModelSelectContainer.classList.add('hidden');
+    if (embeddingStatusEl) {
+        const keyStatus = embeddingConfig?.hasApiKey ? '已配置 API Key' : '未配置 API Key';
+        const source = embeddingConfig?.isPersonal ? '个人配置'
+            : embeddingConfig?.source?.url === 'settings' ? '系统默认'
+            : '环境变量/默认值';
+        embeddingStatusEl.innerText = `HTTP 服务 · ${keyStatus} · 来源：${source}`;
     }
 }
 
@@ -210,15 +343,27 @@ window.saveSettings = async () => {
     const ragCheckbox = document.getElementById('setting-rag-enabled');
     if (!ragCheckbox) return;
     ragCheckbox.disabled = true;
+    const scoreInput = document.getElementById('setting-rag-score-threshold');
+    const topKInput = document.getElementById('setting-rag-top-k');
+    const candidateInput = document.getElementById('setting-rag-candidate-limit');
     try {
-        const res = await apiFetch(`${API_BASE}/admin/settings`, {
+        const payload = { rag_enabled: ragCheckbox.checked };
+        if (scoreInput) payload.rag_score_threshold = scoreInput.value;
+        if (topKInput) payload.rag_top_k = topKInput.value;
+        if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
+        const endpoint = currentUser?.role === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+        const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rag_enabled: ragCheckbox.checked })
+            body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '系统设置保存失败');
         ragCheckbox.checked = data.ragEnabled === true;
+        if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? scoreInput.value;
+        if (topKInput) topKInput.value = data.ragConfig?.topK ?? topKInput.value;
+        if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? candidateInput.value;
+        updateEmbeddingSettingsForm(data.embeddingConfig);
         document.getElementById('tab-knowledge')?.classList.toggle('hidden', !data.ragEnabled);
         showToast('系统设置已保存');
     } catch (e) {
@@ -228,19 +373,154 @@ window.saveSettings = async () => {
     }
 };
 
+window.saveEmbeddingSettings = async () => {
+    const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
+    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
+    const saveBtn = document.getElementById('rag-embedding-save-btn');
+    const modal = document.getElementById('rag-embedding-modal');
+    if (!embeddingUrlInput || !embeddingModelInput) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+        const payload = {
+            rag_embedding_mode: 'http',
+            rag_embedding_api_url: embeddingUrlInput.value.trim(),
+            rag_embedding_model: getEmbeddingModelValue()
+        };
+        if (embeddingModeInput) embeddingModeInput.value = 'http';
+        if (embeddingKeyInput && embeddingKeyInput.value.trim()) {
+            payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
+        }
+        const res = await apiFetch(`${API_BASE}/admin/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '向量模型配置保存失败');
+        updateEmbeddingSettingsForm(data.embeddingConfig);
+        showToast('向量模型配置已保存');
+        if (modal) modal.classList.add('hidden');
+    } catch (e) {
+        showToast(e.message || '向量模型配置保存失败', 'error');
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+    }
+};
+window.testEmbeddingConnection = async () => {
+    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
+    const testBtn = document.getElementById('rag-embedding-test-btn');
+    
+    if (!embeddingUrlInput || !embeddingModelInput) return;
+    
+    const payload = {
+        mode: 'http',
+        apiUrl: embeddingUrlInput.value.trim(),
+        model: getEmbeddingModelValue(),
+        apiKey: embeddingKeyInput?.value.trim() || ''
+    };
+
+    if (testBtn) testBtn.disabled = true;
+    showToast('正在测试向量连接，请稍候...', 'info');
+    
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/settings/test-embedding`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`连接测试成功！向量维度：${data.dimension}，耗时：${data.durationMs}ms`, 'success');
+        } else {
+            throw new Error(data.error || '连接测试失败');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        if (testBtn) testBtn.disabled = false;
+    }
+};
+
+function bindEmbeddingModalEvents() {
+    const openBtn = document.getElementById('rag-embedding-modal-open-btn');
+    const cancelBtn = document.getElementById('rag-embedding-modal-cancel');
+    const testBtn = document.getElementById('rag-embedding-test-btn');
+    const fetchModelsBtn = document.getElementById('rag-embedding-fetch-models-btn');
+    const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
+    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+    const modal = document.getElementById('rag-embedding-modal');
+    const modeSelect = document.getElementById('setting-rag-embedding-mode');
+    if (!openBtn || !modal) return;
+    
+    // 移除旧监听防止重复
+    const newOpenBtn = openBtn.cloneNode(true);
+    openBtn.parentNode.replaceChild(newOpenBtn, openBtn);
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+    newOpenBtn.onclick = () => {
+        modal.classList.remove('hidden');
+    };
+    newCancelBtn.onclick = () => modal.classList.add('hidden');
+    modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };
+    
+    if (testBtn) {
+        testBtn.onclick = () => window.testEmbeddingConnection();
+    }
+    if (fetchModelsBtn) {
+        fetchModelsBtn.onclick = () => window.fetchEmbeddingModels();
+    }
+    if (embeddingModelSelect) {
+        embeddingModelSelect.onchange = (e) => {
+            if (embeddingModelInput && e.target.value) {
+                embeddingModelInput.value = e.target.value;
+            }
+        };
+    }
+    if (modeSelect) {
+    }
+}
+
 function renderPagination(tab, total, currentPage) {
     const totalPages = Math.ceil(total / pageState.limit);
     const container = document.getElementById(`pagination-${tab}`);
     if (!container) return;
-    if (totalPages <= 1) {
-        container.innerHTML = '';
-        return;
-    }
-    container.innerHTML = `
-        <button class="btn-secondary" ${currentPage === 1 ? 'disabled' : ''} onclick="loadTabData('${tab}', 1)">首页</button>
-        <button class="btn-secondary" ${currentPage === 1 ? 'disabled' : ''} onclick="loadTabData('${tab}', ${currentPage - 1})">上一页</button>
-        <span style="margin: 0 15px; font-weight: 500;">第 ${currentPage} / ${totalPages} 页 (共 ${total} 条)</span>
-        <button class="btn-secondary" ${currentPage === totalPages ? 'disabled' : ''} onclick="loadTabData('${tab}', ${currentPage + 1})">下一页</button>
-        <button class="btn-secondary" ${currentPage === totalPages ? 'disabled' : ''} onclick="loadTabData('${tab}', ${totalPages})">末页</button>
-    `;
+    container.replaceChildren();
+    if (totalPages <= 1) return;
+
+    const createButton = (label, targetPage, disabled) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary';
+        button.disabled = disabled;
+        button.dataset.paginationTab = tab;
+        button.dataset.paginationPage = String(targetPage);
+        button.textContent = label;
+        return button;
+    };
+
+    const summary = document.createElement('span');
+    summary.style.margin = '0 15px';
+    summary.style.fontWeight = '500';
+    summary.textContent = `第 ${currentPage} / ${totalPages} 页 (共 ${total} 条)`;
+
+    container.append(
+        createButton('首页', 1, currentPage === 1),
+        createButton('上一页', currentPage - 1, currentPage === 1),
+        summary,
+        createButton('下一页', currentPage + 1, currentPage === totalPages),
+        createButton('末页', totalPages, currentPage === totalPages)
+    );
 }
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-pagination-tab][data-pagination-page]');
+    if (!button || button.disabled) return;
+    const page = parseInt(button.dataset.paginationPage, 10);
+    if (!Number.isFinite(page) || page < 1) return;
+    loadTabData(button.dataset.paginationTab, page);
+});

@@ -54,9 +54,15 @@ window.loadModels = async function(page = 1) {
             if (!isOwnModel) displayUrl = '********';
         }
 
-        const capabilityBadge = Number(m.supports_vision || 0) === 1
-            ? '<span class="model-capability-badge">视觉</span>'
-            : '<span class="model-capability-badge text-only">文本</span>';
+        const capabilityIcons = [
+            Number(m.supports_vision || 0) === 1
+                ? '<span class="model-capability-icon vision" title="支持视觉输入" aria-label="支持视觉输入"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>'
+                : '',
+            Number(m.supports_reasoning || 0) === 1
+                ? '<span class="model-capability-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>'
+                : ''
+        ].filter(Boolean).join('');
+        const capabilityBadge = capabilityIcons || '<span class="model-capability-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>';
 
         return `
         <tr id="model-row-${m.id}">
@@ -67,8 +73,8 @@ window.loadModels = async function(page = 1) {
                 </div>
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
-            <td>${Number(m.daily_token_limit || 0) > 0 ? Number(m.daily_token_limit).toLocaleString() : '不限'}</td>
-            <td class="text-center">${capabilityBadge}</td>
+            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens">${formatTokenAmount(m.daily_token_limit)}</td>
+            <td class="text-center"><div class="model-capability-icons">${capabilityBadge}</div></td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
@@ -137,18 +143,22 @@ window.prepareEditModel = (model) => {
     document.getElementById('m-url').value = model.url;
     document.getElementById('m-model').value = model.model_name;
     document.getElementById('m-key').value = model.api_key || '';
-    document.getElementById('m-daily-limit').value = model.daily_token_limit || '';
+    document.getElementById('m-daily-limit').value = formatTokenInputValue(model.daily_token_limit);
     document.getElementById('m-units').value = model.allowed_units || '';
     const tempEl = document.getElementById('m-temp');
     if (tempEl) tempEl.value = model.temperature !== null && model.temperature !== undefined ? model.temperature : '';
     const maxTokensEl = document.getElementById('m-max-tokens');
-    if (maxTokensEl) maxTokensEl.value = model.max_tokens || '';
+    if (maxTokensEl) maxTokensEl.value = formatTokenInputValue(model.max_tokens);
+    const maxInputTokensEl = document.getElementById('m-max-input-tokens');
+    if (maxInputTokensEl) maxInputTokensEl.value = formatTokenInputValue(model.max_input_tokens);
     const maxConcurrentEl = document.getElementById('m-max-concurrent');
     if (maxConcurrentEl) maxConcurrentEl.value = model.max_concurrent || '';
     const monitorUrlEl = document.getElementById('m-monitor-url');
     if (monitorUrlEl) monitorUrlEl.value = model.monitor_url || '';
     const supportsVisionEl = document.getElementById('m-supports-vision');
     if (supportsVisionEl) supportsVisionEl.checked = Number(model.supports_vision || 0) === 1;
+    const supportsReasoningEl = document.getElementById('m-supports-reasoning');
+    if (supportsReasoningEl) supportsReasoningEl.checked = Number(model.supports_reasoning || 0) === 1;
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
@@ -185,12 +195,14 @@ async function testConnection(url, api_key, model_name, id = null) {
 // refreshModelSelector 已在 ui.js 中定义
 
 window.resetModelForm = () => {
-    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {
+    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
     const supportsVisionEl = document.getElementById('m-supports-vision');
     if (supportsVisionEl) supportsVisionEl.checked = false;
+    const supportsReasoningEl = document.getElementById('m-supports-reasoning');
+    if (supportsReasoningEl) supportsReasoningEl.checked = false;
     const keyInput = document.getElementById('m-key');
     if (keyInput) keyInput.type = 'password';
 };
@@ -248,13 +260,15 @@ window.addModel = async () => {
         url: document.getElementById('m-url').value,
         model_name: document.getElementById('m-model').value,
         api_key: document.getElementById('m-key').value,
-        daily_token_limit: Number(document.getElementById('m-daily-limit').value || 0),
+        daily_token_limit: parseTokenAmount(document.getElementById('m-daily-limit').value),
         allowed_units: document.getElementById('m-units').value,
         temperature: document.getElementById('m-temp') ? document.getElementById('m-temp').value : undefined,
-        max_tokens: document.getElementById('m-max-tokens') ? document.getElementById('m-max-tokens').value : undefined,
+        max_input_tokens: document.getElementById('m-max-input-tokens') ? parseTokenAmount(document.getElementById('m-max-input-tokens').value) || undefined : undefined,
+        max_tokens: document.getElementById('m-max-tokens') ? parseTokenAmount(document.getElementById('m-max-tokens').value) || undefined : undefined,
         max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
-        supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0
+        supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
+        supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
     const btn = document.getElementById('m-submit-btn');

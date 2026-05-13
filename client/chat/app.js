@@ -141,6 +141,12 @@ bind('modal-rename-save', () => window.saveSessionTitle());
 bind('modal-tags-cancel', () => window.closeTagsModal());
 bind('modal-tags-save', () => window.saveSessionTags());
 bind('report-query-btn', () => window.loadReport());
+bind('report-days', () => window.syncReportDateFilters?.(), 'change');
+bind('api-call-log-search', () => {
+    clearTimeout(window.apiCallLogSearchTimer);
+    window.apiCallLogSearchTimer = setTimeout(() => window.loadApiCallLogs?.(1), 300);
+}, 'input');
+bind('api-call-logs-open-btn', () => window.openApiCallLogsModal?.());
 bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
@@ -158,6 +164,8 @@ bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
 bind('labs-refresh-btn', () => window.loadSettings());
 bind('setting-rag-enabled', () => window.saveSettings(), 'change');
+bind('rag-config-save-btn', () => window.saveSettings());
+bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());
 bind('modal-prompt-cancel', () => window.closePromptModal());
 bind('modal-prompt-save', () => window.savePrompt());

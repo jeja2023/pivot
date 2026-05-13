@@ -24,10 +24,50 @@ const {
     buildCapabilityFallbackMessage
 } = require('../capabilities');
 const axios = require('axios');
-const { createSseEventParser, extractStreamPayload } = require('../streaming');
+const { createSseEventParser, createStreamAccumulator } = require('../streaming');
+const { getBeijingTimestamp } = require('../time');
+const {
+    buildChatCompletionsUrl,
+    buildModelHeaders
+} = require('../services/model-adapter');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
+
+function stringifyForAudit(value) {
+    try {
+        const text = JSON.stringify(value);
+        return text && text.length > 200000 ? `${text.slice(0, 200000)}...[truncated]` : text;
+    } catch (e) {
+        return '[unserializable]';
+    }
+}
+
+function recordApiCallLog(req, modelCfg, messages, data = {}) {
+    if (!req.isApiKey || !req.apiKeyId) return;
+    db.prepare(`
+        INSERT INTO api_call_logs (
+            user_id, api_key_id, model_id, model_name, request_messages, response_text,
+            status, error_message, input_tokens, output_tokens, total_tokens, stream,
+            ip_address, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        req.user.id,
+        req.apiKeyId,
+        modelCfg?.id || null,
+        modelCfg?.name || modelCfg?.model_name || null,
+        stringifyForAudit(messages),
+        data.responseText ? String(data.responseText).slice(0, 200000) : '',
+        data.status || 'success',
+        data.errorMessage ? String(data.errorMessage).slice(0, 4000) : '',
+        Number(data.inputTokens) || 0,
+        Number(data.outputTokens) || 0,
+        Number(data.totalTokens) || 0,
+        data.stream ? 1 : 0,
+        req.ip,
+        getBeijingTimestamp()
+    );
+}
 
 function createOpenAIRouter({ authMiddleware, logAction }) {
     const router = express.Router();
@@ -84,9 +124,17 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
             const completionTokens = estimateTokens(fallback);
             const totalTokens = promptTokens + completionTokens;
             if (req.isApiKey && req.apiKeyId && totalTokens > 0) {
-                db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(totalTokens, req.apiKeyId);
+                db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
+                  .run(totalTokens, promptTokens, completionTokens, req.apiKeyId);
             }
-            recordModelTokenUsage(userId, modelCfg.id, totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
+            recordModelTokenUsage(userId, modelCfg.id, totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+            recordApiCallLog(req, modelCfg, messages, {
+                responseText: fallback,
+                inputTokens: promptTokens,
+                outputTokens: completionTokens,
+                totalTokens,
+                stream: !!stream
+            });
             logAction(req, 'OpenAI 能力不支持提示', `能力: ${unsupportedCapability.code}, 模型: ${model}`);
             return res.json({
                 id: `chatcmpl-${Date.now().toString(36)}`,
@@ -144,8 +192,7 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
         };
 
         // 3. 构建下游请求
-        const baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
-        const targetUrl = baseUrl + (baseUrl.includes('/v1') ? '' : '/v1') + '/chat/completions';
+        const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
 
         const payload = {
             model: modelCfg.model_name,
@@ -154,13 +201,11 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
             temperature: temperature ?? modelCfg.temperature ?? 0.7,
             max_tokens: max_tokens ?? modelCfg.max_tokens ?? 2000
         };
+        if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
+            payload.max_input_tokens = modelCfg.max_input_tokens;
+        }
 
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined,
-            'x-api-key': modelCfg.api_key || undefined,
-            'User-Agent': 'Pivot-AI-Client/1.0'
-        };
+        const headers = buildModelHeaders(modelCfg);
 
         try {
             const response = await axios({
@@ -180,16 +225,10 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 res.setHeader('Cache-Control', 'no-cache');
                 res.setHeader('Connection', 'keep-alive');
                 
-                let totalContent = '';
+                const accumulator = createStreamAccumulator();
                 const parser = createSseEventParser({
                     onData(payload) {
-                        try {
-                            const json = JSON.parse(payload);
-                            const { delta } = extractStreamPayload(json);
-                            if (delta) totalContent += delta;
-                        } catch (e) {
-                            // 转发兼容接口时忽略无法解析的非标准事件
-                        }
+                        accumulator.pushPayload(payload);
                     }
                 });
                 response.data.on('data', chunk => {
@@ -199,11 +238,24 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
 
                 response.data.on('end', () => {
                     parser.end();
-                    const tokens = estimateTokens(JSON.stringify(messages) + totalContent);
+                    accumulator.finish();
+                    const totalContent = accumulator.getContent();
+                    const apiUsage = accumulator.getUsage();
+                    const promptTokens = apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(messages));
+                    const completionTokens = apiUsage?.completion_tokens || estimateTokens(totalContent);
+                    const tokens = apiUsage?.total_tokens || (promptTokens + completionTokens);
                     if (req.isApiKey && req.apiKeyId && tokens > 0) {
-                        db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
+                        db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
+                          .run(tokens, promptTokens, completionTokens, req.apiKeyId);
                     }
-                    recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
+                    recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+                    recordApiCallLog(req, modelCfg, messages, {
+                        responseText: totalContent,
+                        inputTokens: promptTokens,
+                        outputTokens: completionTokens,
+                        totalTokens: tokens,
+                        stream: true
+                    });
                     logAction(req, 'OpenAI 流式调用完成', `模型: ${modelCfg.name}, 估算Tokens: ${tokens}`);
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
@@ -221,11 +273,21 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
                 });
             } else {
                 res.json(response.data);
-                const tokens = response.data?.usage?.total_tokens || 0;
+                const promptTokens = response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(messages));
+                const completionTokens = response.data?.usage?.completion_tokens || estimateTokens(JSON.stringify(response.data?.choices || []));
+                const tokens = response.data?.usage?.total_tokens || (promptTokens + completionTokens);
                 if (req.isApiKey && req.apiKeyId && tokens > 0) {
-                    db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ? WHERE id = ?').run(tokens, req.apiKeyId);
+                    db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
+                      .run(tokens, promptTokens, completionTokens, req.apiKeyId);
                 }
-                recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie');
+                recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+                recordApiCallLog(req, modelCfg, messages, {
+                    responseText: JSON.stringify(response.data?.choices || []),
+                    inputTokens: promptTokens,
+                    outputTokens: completionTokens,
+                    totalTokens: tokens,
+                    stream: false
+                });
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 releaseSemaphore();
             }
@@ -233,6 +295,11 @@ function createOpenAIRouter({ authMiddleware, logAction }) {
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
             recordModelFailure(modelCfg, e);
+            recordApiCallLog(req, modelCfg, messages, {
+                status: 'error',
+                errorMessage: errorMsg,
+                stream: !!stream
+            });
             res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
             releaseSemaphore();
         }

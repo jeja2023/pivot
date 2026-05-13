@@ -1,10 +1,64 @@
 /* 系统设置路由 System Settings Routes */
 const express = require('express');
-const { db } = require('../db');
+const axios = require('axios');
+const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
+const { clearAllRagCache } = require('../services/rag-cache');
+const { validateModelUrl } = require('../security');
+const {
+    RAG_CONFIG_KEYS,
+    getPublicEmbeddingConfig,
+    getRagConfig,
+    toRagSettingValue
+} = require('../services/rag-config');
 
-const allowedSettings = new Set(['rag_enabled', 'default_model_id']);
+const allowedSettings = new Set([
+    'rag_enabled',
+    'default_model_id',
+    RAG_CONFIG_KEYS.scoreThreshold,
+    RAG_CONFIG_KEYS.topK,
+    RAG_CONFIG_KEYS.candidateLimit,
+    RAG_CONFIG_KEYS.embeddingMode,
+    RAG_CONFIG_KEYS.embeddingApiUrl,
+    RAG_CONFIG_KEYS.embeddingApiKey,
+    RAG_CONFIG_KEYS.embeddingModel
+]);
+
+const userEmbeddingSettings = new Set([
+    RAG_CONFIG_KEYS.embeddingMode,
+    RAG_CONFIG_KEYS.embeddingApiUrl,
+    RAG_CONFIG_KEYS.embeddingApiKey,
+    RAG_CONFIG_KEYS.embeddingModel
+]);
+
+function buildEmbeddingModelListUrls(url) {
+    const rawUrl = String(url || '').trim().replace(/\/+$/, '');
+    const lowerUrl = rawUrl.toLowerCase();
+    if (!rawUrl) return [];
+    if (lowerUrl.endsWith('/api/embed') || lowerUrl.endsWith('/api/embeddings')) {
+        return [`${rawUrl.replace(/\/api\/(?:embed|embeddings)$/i, '')}/api/tags`];
+    }
+    if (lowerUrl.endsWith('/api/tags')) {
+        return [rawUrl];
+    }
+    if (lowerUrl.endsWith('/models')) {
+        return [rawUrl];
+    }
+    if (lowerUrl.endsWith('/v1')) {
+        return [`${rawUrl}/models`];
+    }
+    return [`${rawUrl}/v1/models`, `${rawUrl}/models`, `${rawUrl}/api/tags`];
+}
+
+function extractEmbeddingModelIds(data) {
+    const rawModels = Array.isArray(data?.data) ? data.data
+        : Array.isArray(data?.models) ? data.models
+        : [];
+    return rawModels
+        .map(model => typeof model === 'string' ? model : (model?.id || model?.name || model?.model))
+        .filter(Boolean);
+}
 
 const toSettingValue = (key, value) => {
     if (value === null || value === undefined || value === '') {
@@ -12,6 +66,9 @@ const toSettingValue = (key, value) => {
     }
     if (key === 'rag_enabled') {
         return value === true || value === 'true' || value === 1 || value === '1' ? 'true' : 'false';
+    }
+    if (Object.values(RAG_CONFIG_KEYS).includes(key)) {
+        return toRagSettingValue(key, value);
     }
     return String(value);
 };
@@ -30,6 +87,36 @@ function getSettings() {
     return settings;
 }
 
+function saveUserEmbeddingSettings(req, updates) {
+    const stmt = db.prepare(`
+        INSERT INTO user_settings (user_id, key, value, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at
+    `);
+    const removeStmt = db.prepare('DELETE FROM user_settings WHERE user_id = ? AND key = ?');
+    const changed = [];
+
+    Object.keys(updates || {}).forEach(key => {
+        if (!userEmbeddingSettings.has(key)) return;
+        const value = toSettingValue(key, updates[key]);
+        if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {
+            validateModelUrl(value, req.user);
+        }
+        if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) return;
+        if (key !== RAG_CONFIG_KEYS.embeddingApiKey && !value) {
+            removeStmt.run(req.user.id, key);
+            changed.push(`${key}=<fallback>`);
+            return;
+        }
+        stmt.run(req.user.id, key, value, getBeijingTimestamp());
+        changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
+    });
+
+    return changed;
+}
+
 function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
 
@@ -37,11 +124,66 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         const settings = getSettings();
         res.json({
             ragEnabled: settings.rag_enabled?.value === 'true',
+            ragConfig: getRagConfig(),
+            embeddingConfig: getPublicEmbeddingConfig(req.user?.role === 'admin' ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings
         });
     });
+
+    router.post('/settings/embedding-models', authMiddleware, asyncHandler(async (req, res) => {
+        let { apiUrl, apiKey } = req.body || {};
+        if (!apiUrl) return res.status(400).json({ success: false, error: '请先填写 Embedding Base URL' });
+
+        apiUrl = String(apiUrl || '').trim();
+        apiKey = String(apiKey || '').trim();
+        try {
+            validateModelUrl(apiUrl, req.user);
+        } catch (e) {
+            logAction(req, '向量模型列表拉取拦截', e.message);
+            return res.json({ success: false, error: e.message });
+        }
+
+        const candidates = buildEmbeddingModelListUrls(apiUrl);
+        let lastError = null;
+        for (const modelsUrl of candidates) {
+            try {
+                const response = await axios.get(modelsUrl, {
+                    headers: {
+                        Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+                        'x-api-key': apiKey || undefined,
+                        'User-Agent': 'Pivot-AI-Client/1.0'
+                    },
+                    timeout: 10000,
+                    proxy: false
+                });
+                const models = extractEmbeddingModelIds(response.data);
+                if (models.length === 0) {
+                    lastError = new Error('未获取到可用模型');
+                    continue;
+                }
+                return res.json({ success: true, models: [...new Set(models)] });
+            } catch (e) {
+                lastError = e;
+            }
+        }
+
+        const errMsg = lastError?.response?.data?.error?.message || lastError?.message || '获取模型列表失败';
+        res.json({ success: false, error: errMsg });
+    }));
+
+    router.put('/settings/embedding', authMiddleware, asyncHandler(async (req, res) => {
+        const changed = saveUserEmbeddingSettings(req, req.body || {});
+        if (changed.length > 0) {
+            clearAllRagCache();
+            logAction(req, '修改个人向量模型配置', changed.join('；'));
+        }
+        res.json({
+            success: true,
+            embeddingConfig: getPublicEmbeddingConfig(req.user?.id)
+        });
+    }));
 
     router.put('/settings/default-model', authMiddleware, asyncHandler(async (req, res) => {
         const rawModelId = req.body?.default_model_id;
@@ -92,18 +234,27 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
                     throw new Error('系统默认模型只能选择全局模型，不能选择用户私有模型');
                 }
             }
+            if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {
+                validateModelUrl(value, req.user);
+            }
+            if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) return;
             stmt.run(key, value, getBeijingTimestamp(), req.user.id);
-            changed.push(`${key}=${value}`);
+            changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
         });
 
         if (changed.length > 0) {
             logAction(req, '修改系统设置', changed.join('，'));
+            if (changed.some(item => item.startsWith('rag_'))) {
+                clearAllRagCache();
+            }
         }
 
         const settings = getSettings();
         res.json({
             success: true,
             ragEnabled: settings.rag_enabled?.value === 'true',
+            ragConfig: getRagConfig(),
+            embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings
@@ -130,7 +281,10 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
 
         const newHash = bcrypt.hashSync(newPassword, 10);
-        db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+        const revokeInfo = db.transaction(() => {
+            db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+            return stmts.deleteUserRefreshTokens.run(req.user.id);
+        })();
 
         logAction(req, '修改密码', '用户自主修改了登录密码');
         res.json({ success: true, message: '密码修改成功' });
@@ -146,5 +300,7 @@ function isSettingEnabled(key) {
 
 module.exports = {
     createSettingsRouter,
-    isSettingEnabled
+    isSettingEnabled,
+    buildEmbeddingModelListUrls,
+    extractEmbeddingModelIds
 };

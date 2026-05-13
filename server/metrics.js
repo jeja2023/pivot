@@ -2,6 +2,8 @@ const os = require('os');
 const { db } = require('./db');
 const { aiSemaphore } = require('./services/concurrency');
 const { getGpuMonitorStatus } = require('./services/gpu-monitor');
+const { getMaintenanceStatus } = require('./services/maintenance');
+const { getSystemHealthSnapshot } = require('./services/system-health');
 
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const routeStats = new Map();
@@ -373,6 +375,33 @@ function renderPrometheusMetrics() {
     lines.push('# HELP pivot_gpu_overloaded Whether GPU monitor reports overload protection.');
     lines.push('# TYPE pivot_gpu_overloaded gauge');
     lines.push(line('pivot_gpu_overloaded', {}, gpu.overloaded ? 1 : 0));
+
+    const health = getSystemHealthSnapshot();
+    lines.push('# HELP pivot_system_health_status System health status by component (1 ok, 0 degraded/error).');
+    lines.push('# TYPE pivot_system_health_status gauge');
+    health.checks.forEach(item => {
+        lines.push(line('pivot_system_health_status', {
+            component: item.name,
+            status: item.status
+        }, item.status === 'ok' ? 1 : 0));
+    });
+
+    const maintenance = getMaintenanceStatus();
+    lines.push('# HELP pivot_maintenance_last_success_timestamp_seconds Last successful maintenance task timestamp.');
+    lines.push('# TYPE pivot_maintenance_last_success_timestamp_seconds gauge');
+    [
+        ['audit_cleanup', maintenance.auditCleanup?.lastSuccessAt],
+        ['api_call_log_cleanup', maintenance.apiCallLogCleanup?.lastSuccessAt],
+        ['refresh_token_cleanup', maintenance.refreshTokenCleanup?.lastSuccessAt],
+        ['sqlite_optimize', maintenance.optimize?.lastSuccessAt]
+    ].forEach(([task, timestamp]) => {
+        lines.push(line('pivot_maintenance_last_success_timestamp_seconds', { task }, timestamp ? Math.floor(new Date(timestamp).getTime() / 1000) : 0));
+    });
+    lines.push('# HELP pivot_maintenance_deleted_rows_total Rows deleted by maintenance cleanup tasks.');
+    lines.push('# TYPE pivot_maintenance_deleted_rows_total counter');
+    lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'audit_cleanup' }, maintenance.auditCleanup?.totalChanges || 0));
+    lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'api_call_log_cleanup' }, maintenance.apiCallLogCleanup?.totalChanges || 0));
+    lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'refresh_token_cleanup' }, maintenance.refreshTokenCleanup?.totalChanges || 0));
 
     return `${lines.join('\n')}\n`;
 }

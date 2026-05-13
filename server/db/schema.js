@@ -16,6 +16,15 @@ function initSchema() {
             FOREIGN KEY (updated_by) REFERENCES users(id)
         );
 
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at DATETIME,
+            PRIMARY KEY (user_id, key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
@@ -24,6 +33,8 @@ function initSchema() {
             unit TEXT,
             role TEXT DEFAULT 'user',
             status TEXT DEFAULT 'active',
+            deleted_at DATETIME,
+            deleted_by_admin INTEGER DEFAULT 0,
             last_login_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
         );
@@ -36,6 +47,8 @@ function initSchema() {
             is_archived INTEGER DEFAULT 0,
             tags TEXT DEFAULT '',
             system_prompt TEXT,
+            deleted_at DATETIME,
+            deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
@@ -52,6 +65,8 @@ function initSchema() {
             context_archived INTEGER DEFAULT 0,
             compressed_at DATETIME,
             model_id INTEGER,
+            deleted_at DATETIME,
+            deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (session_id) REFERENCES sessions(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
@@ -69,10 +84,12 @@ function initSchema() {
             allowed_units TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
             temperature REAL,
+            max_input_tokens INTEGER,
             max_tokens INTEGER,
             monitor_url TEXT,
             max_concurrent INTEGER DEFAULT 0,
             supports_vision INTEGER DEFAULT 0,
+            supports_reasoning INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -92,6 +109,17 @@ function initSchema() {
             user_id INTEGER,
             name TEXT NOT NULL,
             status TEXT DEFAULT 'processing',
+            is_enabled INTEGER DEFAULT 1,
+            chunk_count INTEGER DEFAULT 0,
+            indexed_chunks INTEGER DEFAULT 0,
+            progress INTEGER DEFAULT 0,
+            error_message TEXT,
+            processed_at DATETIME,
+            updated_at DATETIME,
+            source_path TEXT,
+            source_size INTEGER DEFAULT 0,
+            deleted_at DATETIME,
+            deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -105,6 +133,20 @@ function initSchema() {
             FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS rag_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            chunk_id INTEGER,
+            doc_name TEXT,
+            score REAL,
+            helpful INTEGER NOT NULL,
+            note TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -115,6 +157,8 @@ function initSchema() {
             file_size INTEGER,
             access_token TEXT,
             expires_at DATETIME,
+            deleted_at DATETIME,
+            deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (session_id) REFERENCES sessions(id)
@@ -149,6 +193,8 @@ function initSchema() {
             key TEXT,
             status TEXT DEFAULT 'active',
             usage_tokens INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
             last_used_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -160,9 +206,32 @@ function initSchema() {
             model_id INTEGER NOT NULL,
             source TEXT DEFAULT 'api',
             token_count INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS api_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            api_key_id INTEGER,
+            model_id INTEGER,
+            model_name TEXT,
+            request_messages TEXT,
+            response_text TEXT,
+            status TEXT DEFAULT 'success',
+            error_message TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            stream INTEGER DEFAULT 0,
+            ip_address TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (api_key_id) REFERENCES api_keys(id),
+            FOREIGN KEY (model_id) REFERENCES models(id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
@@ -174,6 +243,9 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
         CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
         CREATE INDEX IF NOT EXISTS idx_model_usage_user_model_created ON model_usage_events(user_id, model_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_created ON api_call_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_user ON api_call_logs(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_key ON api_call_logs(api_key_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);
@@ -182,7 +254,14 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_attachments_token ON attachments(access_token);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+        CREATE INDEX IF NOT EXISTS idx_model_usage_created ON model_usage_events(created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_created_at ON api_call_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_docs_created ON knowledge_docs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
+        CREATE INDEX IF NOT EXISTS idx_prompts_created ON prompts(created_at);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
             content,

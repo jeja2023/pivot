@@ -1,5 +1,19 @@
 // --- 侧边栏模块 Sidebar (完整功能版) ---
-let sidebarState = { page: 1, limit: 20, hasMore: true, isLoading: false, archived: false };
+let sidebarState = { page: 1, limit: 20, cursor: '', hasMore: true, isLoading: false, archived: false };
+
+function updateSessionListStatus(text = '') {
+    const list = document.getElementById('session-list');
+    if (!list) return;
+    let status = document.getElementById('session-list-status');
+    if (!status) {
+        status = document.createElement('div');
+        status.id = 'session-list-status';
+        status.className = 'session-list-status';
+    }
+    list.appendChild(status);
+    status.textContent = text;
+    status.classList.toggle('hidden', !text);
+}
 
 window.loadSessions = async function(append = false) {
     if (sidebarState.isLoading) return;
@@ -11,13 +25,23 @@ window.loadSessions = async function(append = false) {
     
     if (!append) {
         sidebarState.page = 1;
+        sidebarState.cursor = '';
         sidebarState.hasMore = true;
     }
     if (!sidebarState.hasMore) return;
     
     sidebarState.isLoading = true;
+    updateSessionListStatus(append ? '加载中...' : '');
     try {
-        const res = await apiFetch(`${API_BASE}/sessions?page=${sidebarState.page}&limit=${sidebarState.limit}&keyword=${encodeURIComponent(keyword)}&tag=${encodeURIComponent(tag)}&archived=${sidebarState.archived}`);
+        const params = new URLSearchParams({
+            limit: sidebarState.limit,
+            keyword,
+            tag,
+            archived: String(sidebarState.archived)
+        });
+        if (append && sidebarState.cursor) params.set('cursor', sidebarState.cursor);
+        else params.set('page', sidebarState.page);
+        const res = await apiFetch(`${API_BASE}/sessions?${params.toString()}`);
         
         const result = await res.json();
         const sessions = result.data || [];
@@ -37,7 +61,6 @@ window.loadSessions = async function(append = false) {
             }, { passive: true });
         }
         
-        let lastGroupLabel = append ? list.dataset.lastGroupLabel || '' : '';
         sessions.forEach(s => {
             const title = s.title || '新对话';
             const safeTitleStr = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -46,19 +69,10 @@ window.loadSessions = async function(append = false) {
             const archiveBadge = s.is_archived ? '<span class="session-badge">已归档</span>' : '';
             const pinnedBadge = s.is_pinned ? '<span class="session-badge pinned-badge">置顶</span>' : '';
             const sessionRawTime = s.updated_at || s.created_at;
-            const groupLabel = window.formatSessionGroupDate ? window.formatSessionGroupDate(sessionRawTime) : '更早';
+            const sessionListTime = window.formatSessionListTime ? window.formatSessionListTime(sessionRawTime) : '';
             const sessionTimeTitle = window.formatChatDateTime ? window.formatChatDateTime(sessionRawTime) : String(sessionRawTime || '');
             const msgCount = Number(s.msg_count || 0);
             const sessionInfoTitle = escapeAttrValue([safeHTMLTitle, sessionTimeTitle, msgCount ? `${msgCount} 条消息` : ''].filter(Boolean).join(' · '));
-
-            if (groupLabel !== lastGroupLabel) {
-                const groupEl = document.createElement('div');
-                groupEl.className = 'session-date-group';
-                groupEl.textContent = groupLabel;
-                list.appendChild(groupEl);
-                lastGroupLabel = groupLabel;
-                list.dataset.lastGroupLabel = groupLabel;
-            }
             
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
@@ -71,10 +85,13 @@ window.loadSessions = async function(append = false) {
                         </span>
                     </div>
                 </div>
-                <div class="session-more">
+                <div class="session-side">
+                    <span class="session-list-time" title="${escapeAttrValue(sessionTimeTitle)}">${escapeHtml(sessionListTime)}</span>
+                    <div class="session-more">
                     <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0}, '${String(s.tags || '').replace(/'/g, "\\'")}')">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
                     </button>
+                    </div>
                 </div>
             `;
             div.onclick = () => selectSession(s.id, title);
@@ -82,7 +99,9 @@ window.loadSessions = async function(append = false) {
         });
         
         sidebarState.hasMore = hasMore;
+        sidebarState.cursor = result.nextCursor || '';
         sidebarState.page++;
+        updateSessionListStatus(hasMore ? '' : (sessions.length ? '已加载全部' : '暂无会话'));
     } catch (e) { console.error('加载会话失败:', e); }
     finally { sidebarState.isLoading = false; }
 };

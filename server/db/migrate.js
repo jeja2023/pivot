@@ -33,6 +33,8 @@ function runMigrations() {
     ensureColumn('users', 'unit', 'TEXT');
     ensureColumn('users', 'default_model_id', 'INTEGER');
     ensureColumn('users', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('users', 'deleted_at', 'DATETIME');
+    ensureColumn('users', 'deleted_by_admin', 'INTEGER DEFAULT 0');
     ensureColumn('users', 'last_login_at', 'DATETIME');
     ensureColumn('audit_logs', 'ip_address', 'TEXT');
     ensureColumn('messages', 'model_id', 'INTEGER');
@@ -40,9 +42,13 @@ function runMigrations() {
     ensureColumn('messages', 'tokens_per_sec', 'REAL');
     ensureColumn('messages', 'context_archived', 'INTEGER DEFAULT 0');
     ensureColumn('messages', 'compressed_at', 'DATETIME');
+    ensureColumn('messages', 'deleted_at', 'DATETIME');
+    ensureColumn('messages', 'deleted_by_user', 'INTEGER DEFAULT 0');
     db.prepare('UPDATE messages SET context_archived = 0 WHERE context_archived IS NULL').run();
     ensureColumn('attachments', 'access_token', 'TEXT');
     ensureColumn('attachments', 'expires_at', 'DATETIME');
+    ensureColumn('attachments', 'deleted_at', 'DATETIME');
+    ensureColumn('attachments', 'deleted_by_user', 'INTEGER DEFAULT 0');
     const attachmentsToUpdate = db.prepare("SELECT id, created_at FROM attachments WHERE access_token IS NULL OR access_token = '' OR expires_at IS NULL").all();
     if (attachmentsToUpdate.length > 0) {
         const updateAttachmentToken = db.prepare("UPDATE attachments SET access_token = ?, expires_at = datetime(?, '+30 days') WHERE id = ?");
@@ -60,10 +66,12 @@ function runMigrations() {
     ensureColumn('models', 'allowed_units', "TEXT DEFAULT ''");
     ensureColumn('models', 'status', "TEXT DEFAULT 'active'");
     ensureColumn('models', 'temperature', 'REAL');
+    ensureColumn('models', 'max_input_tokens', 'INTEGER');
     ensureColumn('models', 'max_tokens', 'INTEGER');
     ensureColumn('models', 'monitor_url', 'TEXT');
     ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_vision', 'INTEGER DEFAULT 0');
+    ensureColumn('models', 'supports_reasoning', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');
@@ -71,10 +79,63 @@ function runMigrations() {
     ensureColumn('sessions', 'is_archived', 'INTEGER DEFAULT 0');
     ensureColumn('sessions', 'tags', "TEXT DEFAULT ''");
     ensureColumn('sessions', 'updated_at', 'DATETIME');
+    ensureColumn('sessions', 'deleted_at', 'DATETIME');
+    ensureColumn('sessions', 'deleted_by_user', 'INTEGER DEFAULT 0');
     db.prepare('UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL').run();
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_users_deleted ON users(deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_deleted ON sessions(user_id, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_session_deleted ON messages(session_id, user_id, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_attachments_user_deleted ON attachments(user_id, deleted_at);
+    `);
     ensureColumn('app_settings', 'updated_at', 'DATETIME');
     ensureColumn('app_settings', 'updated_by', 'INTEGER');
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at DATETIME,
+            PRIMARY KEY (user_id, key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_settings_user_key ON user_settings(user_id, key);
+    `);
+    db.prepare("UPDATE app_settings SET value = 'http' WHERE key = 'rag_embedding_mode' AND value != 'http'").run();
+    db.prepare("DELETE FROM app_settings WHERE key = 'rag_embedding_model_path'").run();
+    ensureColumn('knowledge_docs', 'chunk_count', 'INTEGER DEFAULT 0');
+    ensureColumn('knowledge_docs', 'indexed_chunks', 'INTEGER DEFAULT 0');
+    ensureColumn('knowledge_docs', 'progress', 'INTEGER DEFAULT 0');
+    ensureColumn('knowledge_docs', 'error_message', 'TEXT');
+    ensureColumn('knowledge_docs', 'processed_at', 'DATETIME');
+    ensureColumn('knowledge_docs', 'updated_at', 'DATETIME');
+    ensureColumn('knowledge_docs', 'source_path', 'TEXT');
+    ensureColumn('knowledge_docs', 'source_size', 'INTEGER DEFAULT 0');
+    ensureColumn('knowledge_docs', 'is_enabled', 'INTEGER DEFAULT 1');
+    ensureColumn('knowledge_docs', 'deleted_at', 'DATETIME');
+    ensureColumn('knowledge_docs', 'deleted_by_user', 'INTEGER DEFAULT 0');
+    db.prepare('UPDATE knowledge_docs SET updated_at = created_at WHERE updated_at IS NULL').run();
+    db.prepare("UPDATE knowledge_docs SET progress = CASE WHEN status = 'ready' THEN 100 WHEN status = 'error' THEN 0 ELSE COALESCE(progress, 0) END WHERE progress IS NULL OR progress = 0").run();
+    db.prepare('UPDATE knowledge_docs SET indexed_chunks = chunk_count WHERE indexed_chunks IS NULL OR indexed_chunks = 0').run();
     ensureColumn('knowledge_chunks', 'search_content', 'TEXT');
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS rag_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            chunk_id INTEGER,
+            doc_name TEXT,
+            score REAL,
+            helpful INTEGER NOT NULL,
+            note TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_enabled ON knowledge_docs(user_id, is_enabled, status);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_docs_deleted ON knowledge_docs(deleted_at);
+    `);
 
     ensureColumn('prompts', 'user_id', 'INTEGER');
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");
@@ -100,6 +161,8 @@ function runMigrations() {
     ensureColumn('api_keys', 'key', 'TEXT');
     ensureColumn('api_keys', 'status', "TEXT DEFAULT 'active'");
     ensureColumn('api_keys', 'usage_tokens', "INTEGER DEFAULT 0");
+    ensureColumn('api_keys', 'input_tokens', "INTEGER DEFAULT 0");
+    ensureColumn('api_keys', 'output_tokens', "INTEGER DEFAULT 0");
     ensureColumn('api_keys', 'last_used_at', 'DATETIME');
     ensureColumn('api_keys', 'created_at', 'DATETIME');
 
@@ -110,14 +173,44 @@ function runMigrations() {
             model_id INTEGER NOT NULL,
             source TEXT DEFAULT 'api',
             token_count INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_model_usage_user_model_created ON model_usage_events(user_id, model_id, created_at);
     `);
+    ensureColumn('model_usage_events', 'input_tokens', "INTEGER DEFAULT 0");
+    ensureColumn('model_usage_events', 'output_tokens', "INTEGER DEFAULT 0");
 
     // 确保字段存在后再创建索引
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS api_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            api_key_id INTEGER,
+            model_id INTEGER,
+            model_name TEXT,
+            request_messages TEXT,
+            response_text TEXT,
+            status TEXT DEFAULT 'success',
+            error_message TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            stream INTEGER DEFAULT 0,
+            ip_address TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (api_key_id) REFERENCES api_keys(id),
+            FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_created ON api_call_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_user ON api_call_logs(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_api_call_logs_key ON api_call_logs(api_key_id, created_at);
+    `);
+
     try {
         db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)");
         db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)");

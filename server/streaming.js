@@ -88,4 +88,65 @@ function createSseEventParser({ onData, onDone } = {}) {
     };
 }
 
-module.exports = { createSseEventParser, extractStreamPayload };
+function createStreamAccumulator({ includeThoughtTags = false, onContent } = {}) {
+    let content = '';
+    let usage = null;
+    let lastWasThought = false;
+
+    const pushJson = (json) => {
+        if (json.usage) usage = json.usage;
+        const { delta, isThought, usage: extractedUsage } = extractStreamPayload(json);
+        if (extractedUsage) usage = extractedUsage;
+        if (!delta) return '';
+
+        let sendContent = '';
+        if (includeThoughtTags && isThought) {
+            if (!lastWasThought) {
+                sendContent += '<thought>';
+                lastWasThought = true;
+            }
+            sendContent += delta;
+        } else {
+            if (includeThoughtTags && lastWasThought) {
+                sendContent += '</thought>';
+                lastWasThought = false;
+            }
+            sendContent += delta;
+        }
+
+        if (sendContent) {
+            content += sendContent;
+            if (typeof onContent === 'function') onContent(sendContent);
+        }
+        return sendContent;
+    };
+
+    const pushPayload = (payload) => {
+        try {
+            return pushJson(JSON.parse(payload));
+        } catch (e) {
+            return '';
+        }
+    };
+
+    const finish = () => {
+        if (includeThoughtTags && lastWasThought) {
+            const closeTag = '</thought>';
+            content += closeTag;
+            lastWasThought = false;
+            if (typeof onContent === 'function') onContent(closeTag);
+            return closeTag;
+        }
+        return '';
+    };
+
+    return {
+        pushJson,
+        pushPayload,
+        finish,
+        getContent: () => content,
+        getUsage: () => usage
+    };
+}
+
+module.exports = { createSseEventParser, createStreamAccumulator, extractStreamPayload };

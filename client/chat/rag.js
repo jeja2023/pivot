@@ -24,27 +24,444 @@ const escapeRagHtml = (str) => {
         .replace(/'/g, '&#039;');
 };
 
+const formatRagSize = (bytes) => {
+    const value = Number(bytes || 0);
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+};
+
+const getRagStatusLabel = (status) => {
+    if (status === 'ready') return '就绪';
+    if (status === 'processing') return '处理中';
+    if (status === 'error') return '失败';
+    return status || '-';
+};
+
+const renderRagActions = (doc) => {
+    const buttons = [];
+    buttons.push(`<button class="btn-secondary rag-detail-btn" data-rag-id="${doc.id}">详情</button>`);
+    if (doc.status === 'error' && doc.source_path) {
+        buttons.push(`<button class="btn-secondary rag-reindex-btn" data-rag-id="${doc.id}">重试</button>`);
+    }
+    buttons.push(`<button class="btn-danger rag-delete-btn" data-rag-id="${doc.id}">删除</button>`);
+    return buttons.join('');
+};
+
+let ragStatusRefreshTimer = null;
+
+const shouldAutoRefreshRagDocs = () => {
+    const panel = document.getElementById('tab-content-knowledge');
+    return Boolean(panel && !panel.classList.contains('hidden'));
+};
+
+const scheduleRagStatusRefresh = (docs) => {
+    if (ragStatusRefreshTimer) {
+        clearTimeout(ragStatusRefreshTimer);
+        ragStatusRefreshTimer = null;
+    }
+    if (!Array.isArray(docs) || !docs.some(doc => doc.status === 'processing')) return;
+    if (!shouldAutoRefreshRagDocs()) return;
+    ragStatusRefreshTimer = setTimeout(() => {
+        if (shouldAutoRefreshRagDocs()) window.loadKnowledgeDocs();
+    }, 3000);
+};
+
+const ragConfirm = (title, message) => new Promise((resolve) => {
+    if (typeof window.showConfirm === 'function') {
+        window.showConfirm(title, message, () => resolve(true));
+        const cancelBtn = document.getElementById('modal-confirm-cancel');
+        const container = document.getElementById('confirm-container');
+        const cancelHandler = () => {
+            cancelBtn?.removeEventListener('click', cancelHandler);
+            container?.removeEventListener('click', overlayHandler);
+            resolve(false);
+        };
+        const overlayHandler = (event) => {
+            if (event.target === container) cancelHandler();
+        };
+        cancelBtn?.addEventListener('click', cancelHandler, { once: true });
+        container?.addEventListener('click', overlayHandler, { once: true });
+        return;
+    }
+    resolve(false);
+});
+
+const ensureRagDetailModal = () => {
+    let modal = document.getElementById('rag-detail-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'rag-detail-modal';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.innerHTML = `
+        <div class="modal rag-detail-modal">
+            <div class="rag-detail-header">
+                <div>
+                    <h3 id="rag-detail-title">知识库文档详情</h3>
+                    <p id="rag-detail-subtitle" class="model-modal-desc"></p>
+                </div>
+                <button type="button" id="rag-detail-close-btn" class="btn-danger-outline">关闭</button>
+            </div>
+            <div id="rag-detail-meta" class="rag-detail-meta"></div>
+            <div id="rag-detail-chunks" class="rag-detail-chunks"></div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal || event.target.closest('#rag-detail-close-btn')) {
+            modal.classList.add('hidden');
+        }
+    });
+    return modal;
+};
+
+const ensureRagAuditModal = () => {
+    let modal = document.getElementById('rag-audit-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'rag-audit-modal';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.innerHTML = `
+        <div class="modal rag-detail-modal">
+            <div class="rag-detail-header">
+                <div>
+                    <h3>知识库删除审计</h3>
+                    <p class="model-modal-desc">仅 admin 超级管理员可见，保留用户删除后的文档元数据、源文件路径与索引状态。</p>
+                </div>
+                <button type="button" id="rag-audit-close-btn" class="btn-danger-outline">关闭</button>
+            </div>
+            <div class="table-container rag-audit-table-wrap">
+                <table class="data-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>文档</th>
+                            <th>用户</th>
+                            <th>状态</th>
+                            <th>分块</th>
+                            <th>源文件</th>
+                            <th>删除时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rag-audit-body"></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal || event.target.closest('#rag-audit-close-btn')) {
+            modal.classList.add('hidden');
+        }
+    });
+    return modal;
+};
+
+const renderRagAuditRows = (items = []) => {
+    if (!items.length) {
+        return '<tr><td colspan="6" class="text-center muted-text">暂无已删除知识库文档</td></tr>';
+    }
+    return items.map(item => `
+        <tr>
+            <td title="${escapeRagHtml(item.name)}">${escapeRagHtml(item.name)}</td>
+            <td>${escapeRagHtml(item.nickname || item.username || `用户 ${item.user_id || '-'}`)}</td>
+            <td>${escapeRagHtml(getRagStatusLabel(item.status))}</td>
+            <td>${Number(item.indexed_chunks || item.chunk_count || 0)} / ${Number(item.chunk_count || 0)}</td>
+            <td title="${escapeRagHtml(item.source_path || '')}">${escapeRagHtml(item.source_path || '-')}</td>
+            <td>${formatRagDateToCN(item.deleted_at)}</td>
+        </tr>
+    `).join('');
+};
+
+const showRagDetailModal = (data) => {
+    const modal = ensureRagDetailModal();
+    const doc = data.doc || {};
+    const chunks = Array.isArray(data.chunks) ? data.chunks : [];
+    const title = document.getElementById('rag-detail-title');
+    const subtitle = document.getElementById('rag-detail-subtitle');
+    const meta = document.getElementById('rag-detail-meta');
+    const chunkList = document.getElementById('rag-detail-chunks');
+
+    if (title) title.textContent = doc.name || '知识库文档详情';
+    if (subtitle) subtitle.textContent = `共 ${Number(data.totalChunks || 0)} 个分块，当前展示 ${chunks.length} 个`;
+    if (meta) {
+        const enabled = Number(doc.is_enabled ?? 1) === 1 ? '已启用' : '已停用';
+        meta.innerHTML = [
+            ['状态', getRagStatusLabel(doc.status)],
+            ['启用状态', enabled],
+            ['索引进度', `${Number(doc.progress || 0)}%`],
+            ['分块总数', Number(data.totalChunks || 0)],
+            ['创建时间', formatRagDateToCN(doc.created_at)],
+            ['更新时间', formatRagDateToCN(doc.updated_at || doc.processed_at)]
+        ].map(([label, value]) => `
+            <span><b>${escapeRagHtml(label)}</b>${escapeRagHtml(value)}</span>
+        `).join('');
+    }
+    if (chunkList) {
+        chunkList.innerHTML = chunks.length
+            ? chunks.map((chunk, index) => `
+                <article class="rag-detail-chunk">
+                    <header>
+                        <strong>#${index + 1}</strong>
+                        <span>${Number(chunk.length || String(chunk.content || '').length)} 字</span>
+                    </header>
+                    <p>${escapeRagHtml(chunk.content || '')}</p>
+                </article>
+            `).join('')
+            : '<div class="rag-debug-empty">暂无可预览分块</div>';
+    }
+    modal.classList.remove('hidden');
+};
+
+window.showKnowledgeDocAudit = async () => {
+    if (currentUser?.username !== 'admin') {
+        showToast('仅 admin 超级管理员可查看知识库删除审计', 'error');
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/rag/admin/docs/audit?limit=100`, { headers: authHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '删除审计加载失败');
+        const modal = ensureRagAuditModal();
+        const body = modal.querySelector('#rag-audit-body');
+        if (body) body.innerHTML = renderRagAuditRows(data.data || []);
+        modal.classList.remove('hidden');
+    } catch (e) {
+        showToast(e.message || '删除审计加载失败', 'error');
+    }
+};
+
+const renderRagSummary = (summary) => {
+    const el = document.getElementById('rag-summary');
+    if (!el || !summary) return;
+    const items = [
+        ['文档', summary.total || 0],
+        ['就绪', summary.ready || 0],
+        ['处理中', summary.processing || 0],
+        ['失败', summary.error || 0],
+        ['分块', summary.chunks || 0],
+        ['源文件', formatRagSize(summary.sourceSize || 0)],
+        ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`]
+    ];
+    const lastError = summary.lastError?.error_message
+        ? `<span class="rag-summary-error" title="${escapeRagHtml(summary.lastError.error_message)}">最近错误：${escapeRagHtml(summary.lastError.name || '文档')}</span>`
+        : '';
+    el.innerHTML = `
+        <div class="rag-summary-items">
+            ${items.map(([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`).join('')}
+        </div>
+        ${lastError}
+    `;
+
+    const retryBtn = document.getElementById('rag-retry-failed-btn');
+    if (retryBtn) retryBtn.disabled = !(summary.retryableErrors > 0);
+    const scoreInput = document.getElementById('rag-debug-score-threshold');
+    const topKInput = document.getElementById('rag-debug-top-k');
+    const candidateInput = document.getElementById('rag-debug-candidate-limit');
+    if (scoreInput && !scoreInput.value) scoreInput.value = summary.config?.scoreThreshold ?? 0.4;
+    if (topKInput && !topKInput.value) topKInput.value = summary.config?.topK ?? 3;
+    if (candidateInput && !candidateInput.value) candidateInput.value = summary.config?.candidateLimit ?? 300;
+};
+
+const renderRagDebugResults = (data) => {
+    const el = document.getElementById('rag-debug-results');
+    if (!el) return;
+    const matches = Array.isArray(data.matches) ? data.matches : [];
+    el.classList.remove('hidden');
+    el.innerHTML = `
+        <div class="rag-debug-meta">
+            <span>关键词：${escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
+            <span>候选：${Number(data.candidateCount || 0)}</span>
+            <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
+        </div>
+        <div class="rag-debug-list">
+            ${matches.map((m, index) => `
+                <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
+                    <div class="rag-debug-item-head">
+                        <strong>#${index + 1} ${escapeRagHtml(m.source || '-')}</strong>
+                        <span>${Number(m.score || 0).toFixed(3)}${m.matched ? ' 命中' : ''}</span>
+                    </div>
+                    <p>${escapeRagHtml(m.text || '')}</p>
+                    <div class="rag-feedback-actions">
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${Number(m.score || 0)}">有用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${Number(m.score || 0)}">无用</button>
+                    </div>
+                </div>
+            `).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
+        </div>
+    `;
+};
+
 window.loadKnowledgeDocs = async () => {
     try {
-        const res = await fetch(`${API_BASE}/rag/docs`, {
-            headers: authHeaders()
-        });
+        const [res, summaryRes] = await Promise.all([
+            fetch(`${API_BASE}/rag/docs`, { headers: authHeaders() }),
+            fetch(`${API_BASE}/rag/summary`, { headers: authHeaders() })
+        ]);
         const docs = await res.json();
+        const summary = await summaryRes.json().catch(() => null);
+        renderRagSummary(summary);
         
-        document.getElementById('rag-docs-body').innerHTML = docs.map((d, i) => `
+        const body = document.getElementById('rag-docs-body');
+        body.innerHTML = docs.map((d) => `
             <tr>
+                <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
                 <td title="${escapeRagHtml(d.name)}">${escapeRagHtml(d.name)}</td>
                 <td class="text-center">
-                    <span class="status-badge ${d.status}">${d.status === 'ready' ? '就绪' : d.status === 'processing' ? '处理中' : '失败'}</span>
+                    <span class="status-badge ${escapeRagHtml(d.status)}" title="${escapeRagHtml(d.error_message || '')}">${getRagStatusLabel(d.status)}</span>
                 </td>
-                <td>${escapeRagHtml(formatRagDateToCN(d.created_at))}</td>
                 <td class="text-center">
-                    <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" onclick="deleteKnowledgeDoc(${d.id})">删除</button>
+                    <input type="checkbox" class="rag-enable-toggle" data-rag-id="${d.id}" ${Number(d.is_enabled ?? 1) === 1 ? 'checked' : ''}>
+                </td>
+                <td class="text-center">${Number(d.chunk_count || 0)}</td>
+                <td class="text-center">${Number(d.progress || (d.status === 'ready' ? 100 : 0))}%</td>
+                <td>${escapeRagHtml(formatRagDateToCN(d.created_at))}</td>
+                <td>${escapeRagHtml(formatRagDateToCN(d.updated_at || d.processed_at))}</td>
+                <td class="text-center">
+                    <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('');
+        `).join('') || '<tr><td colspan="9" class="text-center">暂无知识库文档</td></tr>';
+        scheduleRagStatusRefresh(docs);
     } catch (e) {
         console.error('加载知识库失败', e);
+    }
+};
+
+const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-doc-check:checked'))
+    .map(input => Number(input.value))
+    .filter(Boolean);
+
+window.batchReindexKnowledgeDocs = async () => {
+    const docIds = getSelectedRagDocIds();
+    if (docIds.length === 0) return showToast('请选择文档', 'error');
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/batch-reindex`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docIds })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '批量重建失败');
+        showToast(`已加入 ${data.scheduled || 0} 个重建任务`);
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '批量重建失败', 'error');
+    }
+};
+
+window.batchDeleteKnowledgeDocs = async () => {
+    const docIds = getSelectedRagDocIds();
+    if (docIds.length === 0) return showToast('请选择文档', 'error');
+    const confirmed = await ragConfirm('批量删除知识库文档', `确定删除选中的 ${docIds.length} 个知识库文档吗？大模型将不再参考这些文档。`);
+    if (!confirmed) return;
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/batch-delete`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docIds })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '批量删除失败');
+        showToast(`已删除 ${data.deleted || 0} 个文档`);
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '批量删除失败', 'error');
+    }
+};
+
+window.toggleKnowledgeDocEnabled = async (id, enabled) => {
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/${id}/enabled`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '启停失败');
+        showToast(enabled ? '文档已启用' : '文档已停用');
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '启停失败', 'error');
+    }
+};
+
+window.showKnowledgeDocDetail = async (id) => {
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/${id}?limit=50`, { headers: authHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '详情加载失败');
+        showRagDetailModal(data);
+    } catch (e) {
+        showToast(e.message || '详情加载失败', 'error');
+    }
+};
+
+window.sendRagFeedback = async (button) => {
+    try {
+        const res = await fetch(`${API_BASE}/rag/feedback`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: button.dataset.query,
+                chunkId: button.dataset.chunkId,
+                docName: button.dataset.docName,
+                score: button.dataset.score,
+                helpful: button.dataset.helpful === 'true'
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '反馈失败');
+        showToast('反馈已记录');
+    } catch (e) {
+        showToast(e.message || '反馈失败', 'error');
+    }
+};
+
+window.debugRagQuery = async () => {
+    const input = document.getElementById('rag-debug-query');
+    const query = input?.value?.trim();
+    if (!query) {
+        showToast('请输入要测试的问题', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/rag/debug-query`, {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                query,
+                scoreThreshold: document.getElementById('rag-debug-score-threshold')?.value,
+                topK: document.getElementById('rag-debug-top-k')?.value,
+                candidateLimit: document.getElementById('rag-debug-candidate-limit')?.value
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '检索测试失败');
+        renderRagDebugResults(data);
+    } catch (e) {
+        showToast(e.message || '检索测试失败', 'error');
+    }
+};
+
+window.retryFailedKnowledgeDocs = async () => {
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/retry-failed`, {
+            method: 'POST',
+            headers: authHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '批量重试失败');
+        showToast(`已加入 ${data.scheduled || 0} 个重新索引任务`);
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '批量重试失败', 'error');
     }
 };
 
@@ -68,15 +485,103 @@ window.uploadKnowledgeDoc = async () => {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         
-        showToast('文档上传成功并已加入知识库');
+        showToast(data.message || '文档已加入后台索引队列');
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档上传失败', 'error');
     }
 };
 
+window.reindexKnowledgeDoc = async (id) => {
+    try {
+        const res = await fetch(`${API_BASE}/rag/docs/${id}/reindex`, {
+            method: 'POST',
+            headers: authHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '重新索引失败');
+        showToast(data.message || '已加入重新索引队列');
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '重新索引失败', 'error');
+    }
+};
+
+document.addEventListener('click', (event) => {
+    const reindexBtn = event.target.closest('.rag-reindex-btn');
+    if (reindexBtn) {
+        window.reindexKnowledgeDoc(reindexBtn.dataset.ragId);
+        return;
+    }
+
+    const detailBtn = event.target.closest('.rag-detail-btn');
+    if (detailBtn) {
+        window.showKnowledgeDocDetail(detailBtn.dataset.ragId);
+        return;
+    }
+
+    const feedbackBtn = event.target.closest('.rag-feedback-btn');
+    if (feedbackBtn) {
+        window.sendRagFeedback(feedbackBtn);
+        return;
+    }
+
+    const deleteBtn = event.target.closest('.rag-delete-btn');
+    if (deleteBtn) {
+        window.deleteKnowledgeDoc(deleteBtn.dataset.ragId);
+        return;
+    }
+
+    if (event.target.closest('#rag-refresh-btn')) {
+        window.loadKnowledgeDocs();
+        return;
+    }
+
+    if (event.target.closest('#rag-audit-btn')) {
+        window.showKnowledgeDocAudit();
+        return;
+    }
+
+    if (event.target.closest('#rag-batch-reindex-btn')) {
+        window.batchReindexKnowledgeDocs();
+        return;
+    }
+
+    if (event.target.closest('#rag-batch-delete-btn')) {
+        window.batchDeleteKnowledgeDocs();
+        return;
+    }
+
+    if (event.target.closest('#rag-retry-failed-btn')) {
+        window.retryFailedKnowledgeDocs();
+        return;
+    }
+
+    if (event.target.closest('#rag-debug-btn')) {
+        window.debugRagQuery();
+    }
+});
+
+document.addEventListener('change', (event) => {
+    if (event.target?.id === 'rag-select-all') {
+        document.querySelectorAll('.rag-doc-check').forEach(input => { input.checked = event.target.checked; });
+        return;
+    }
+    const enableToggle = event.target.closest?.('.rag-enable-toggle');
+    if (enableToggle) {
+        window.toggleKnowledgeDocEnabled(enableToggle.dataset.ragId, enableToggle.checked);
+    }
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target?.id === 'rag-debug-query') {
+        window.debugRagQuery();
+    }
+});
+
 window.deleteKnowledgeDoc = async (id) => {
-    if (!confirm('确定要从知识库中移除该文档吗？大模型将不再参考此文档。')) return;
+    const confirmed = await ragConfirm('删除知识库文档', '确定要从知识库中移除该文档吗？大模型将不再参考此文档。');
+    if (!confirmed) return;
     
     try {
         const res = await fetch(`${API_BASE}/rag/docs/${id}`, {
@@ -99,5 +604,116 @@ style.textContent = `
     .status-badge.ready { background: rgba(16, 185, 129, 0.1); color: #10b981; }
     .status-badge.processing { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
     .status-badge.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+    .rag-actions { display: inline-flex; gap: 6px; align-items: center; justify-content: center; }
+    .rag-actions button { padding: 2px 8px; font-size: 0.75rem; }
+    .rag-summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -6px 0 14px; color: var(--text-muted); font-size: 0.82rem; }
+    .rag-summary-items { display: flex; flex-wrap: wrap; gap: 8px; }
+    .rag-summary-items span { display: inline-flex; gap: 5px; align-items: baseline; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(148, 163, 184, 0.05); }
+    .rag-summary-items b { color: var(--text-main); font-weight: 700; }
+    .rag-summary-error { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ef4444; }
+    #rag-retry-failed-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rag-debug-panel { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; }
+    .rag-debug-panel .form-input { margin: 0; height: 36px; flex: 1; }
+    .rag-debug-panel .rag-debug-param { flex: 0 0 88px; }
+    .rag-debug-panel button { height: 36px; white-space: nowrap; }
+    .rag-debug-results { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(148, 163, 184, 0.04); overflow: hidden; }
+    .rag-debug-meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; color: var(--text-muted); font-size: 0.78rem; border-bottom: 1px solid var(--border); }
+    .rag-debug-list { display: grid; gap: 8px; padding: 10px; max-height: 320px; overflow: auto; }
+    .rag-debug-item { border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; background: var(--bg-secondary); }
+    .rag-debug-item.matched { border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.06); }
+    .rag-debug-item-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 0.82rem; }
+    .rag-debug-item p { margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; }
+    .rag-feedback-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .rag-feedback-actions button { padding: 2px 8px; font-size: 0.75rem; }
+    .rag-debug-empty { padding: 12px; color: var(--text-muted); text-align: center; }
+    .rag-detail-modal-overlay { z-index: 5400; }
+    .rag-detail-modal {
+        width: min(980px, calc(100vw - 36px));
+        max-height: min(760px, calc(100vh - 36px));
+        padding: 22px;
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+    .rag-detail-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+    }
+    .rag-detail-header h3 {
+        margin: 0;
+        font-size: 1.05rem;
+        max-width: 680px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rag-detail-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 8px;
+    }
+    .rag-detail-meta span {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(148, 163, 184, 0.05);
+        min-width: 0;
+    }
+    .rag-detail-meta b {
+        color: var(--text-muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+    }
+    .rag-detail-chunks {
+        display: grid;
+        gap: 10px;
+        overflow: auto;
+        padding-right: 4px;
+    }
+    .rag-detail-chunk {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        padding: 12px;
+    }
+    .rag-detail-chunk header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        color: var(--text-muted);
+        font-size: 0.8rem;
+    }
+    .rag-detail-chunk p {
+        margin: 0;
+        color: var(--text-main);
+        line-height: 1.65;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 0.88rem;
+    }
+    .rag-audit-table-wrap {
+        max-height: 560px;
+        overflow: auto;
+    }
+    .rag-audit-table-wrap td {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    @media (max-width: 720px) {
+        .rag-detail-modal { width: calc(100vw - 20px); max-height: calc(100vh - 20px); padding: 16px; }
+        .rag-detail-header { align-items: stretch; flex-direction: column; }
+        .rag-detail-header h3 { max-width: 100%; white-space: normal; }
+    }
 `;
 document.head.appendChild(style);

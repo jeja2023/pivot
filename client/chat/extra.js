@@ -80,17 +80,32 @@ const MIME_TYPE_MAP = {
 window.loadAttachments = async function(page = 1) {
     const keyword = document.getElementById('attachment-search-input')?.value || '';
     const res = await fetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
-    const { data, total } = await res.json();
+    const { data, total, isSuperAdmin } = await res.json();
+    const showOwner = isSuperAdmin === true;
+    let ownerHeader = document.getElementById('attachment-user-header');
+    if (!ownerHeader && showOwner) {
+        const firstHeader = document.querySelector('#tab-content-attachments thead tr th:first-child');
+        if (firstHeader) {
+            ownerHeader = document.createElement('th');
+            ownerHeader.id = 'attachment-user-header';
+            ownerHeader.style.width = '120px';
+            ownerHeader.textContent = '用户';
+            firstHeader.insertAdjacentElement('afterend', ownerHeader);
+        }
+    }
+    ownerHeader?.classList.toggle('hidden', !showOwner);
     document.getElementById('attachment-list-body').innerHTML = data.map((item, idx) => {
         const typeDisplay = MIME_TYPE_MAP[item.file_type] || item.file_type || '未知类型';
+        const ownerName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
         return `
         <tr>
             <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
+            ${showOwner ? `<td title="${escapeHtml(ownerName)}">${escapeHtml(ownerName)}</td>` : ''}
             <td title="${escapeHtml(item.file_name)}">${escapeHtml(item.file_name)}</td>
             <td title="${escapeHtml(item.session_title || item.session_id || '-')}">${escapeHtml(item.session_title || item.session_id || '-')}</td>
             <td title="${escapeHtml(item.file_type)}">${escapeHtml(typeDisplay)}</td>
-            <td>${formatFileSize(item.file_size)}</td>
-            <td>${escapeHtml(formatDateToCN(item.created_at))}</td>
+            <td title="${formatFileSize(item.file_size)}">${formatFileSize(item.file_size)}</td>
+            <td title="${escapeHtml(formatDateToCN(item.created_at))}">${escapeHtml(formatDateToCN(item.created_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 5px; justify-content: center;">
                     <a class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; text-decoration: none;" href="${escapeHtml(item.url)}" target="_blank">打开</a>

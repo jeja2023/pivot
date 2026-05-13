@@ -25,6 +25,7 @@ function resolveOwnedAttachmentPath(uploadUrl, userId, sessionId) {
     const attachment = db.prepare(`
         SELECT id FROM attachments
         WHERE user_id = ? AND session_id = ? AND file_path = ?
+          AND deleted_at IS NULL
     `).get(userId, sessionId, filePath);
     if (!attachment || !fs.existsSync(targetPath)) return null;
     return targetPath;
@@ -142,10 +143,11 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
 }
 
 async function getContext(sessionId, userId, modelCfg) {
-    const session = db.prepare('SELECT system_prompt FROM sessions WHERE id = ?').get(sessionId);
+    const session = db.prepare('SELECT system_prompt FROM sessions WHERE id = ? AND deleted_at IS NULL').get(sessionId);
     const messages = db.prepare(`
         SELECT * FROM messages
         WHERE session_id = ? AND user_id = ?
+          AND deleted_at IS NULL
         ORDER BY id ASC
     `).all(sessionId, userId);
 

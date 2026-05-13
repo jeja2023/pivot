@@ -63,18 +63,23 @@ const { createAdminStatsRouter } = require('./routes/admin-stats');
 const { createSettingsRouter, isSettingEnabled } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
 const { ragRouter, retrieveContext } = require('./rag');
+const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const {
     migrateModelSecrets
 } = require('./services/models');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
+const { getSystemHealthSnapshot } = require('./services/system-health');
 // 启动后台维护任务
 startMaintenanceTasks();
 
 // 启动 GPU 监控 (非阻塞)
 startGpuMonitor().catch(() => {});
 startModelEndpointMonitor().catch(() => {});
+setImmediate(() => {
+    recoverStaleKnowledgeDocumentIndexes();
+});
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
 
@@ -177,6 +182,12 @@ app.use('/api', csrfMiddleware);
 app.use('/v1', csrfMiddleware);
 
 app.get('/api/health', (req, res) => {
+    const health = getSystemHealthSnapshot();
+    return res.status(health.status === 'error' ? 503 : 200).json({
+        service: 'pivot-ai',
+        timestamp: getBeijingTimestamp(),
+        ...health
+    });
     try {
         db.prepare('SELECT 1').get();
         res.json({
@@ -214,25 +225,124 @@ if (appConfig.compressionEnabled) {
     }
 }
 
-// 开启静态文件缓存
-app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/vendor'), {
-    maxAge: appConfig.vendorMaxAge,
-    immutable: true
-}));
+// 禁止缓存的响应头
 const noCacheHeaders = (res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 };
+
+// 需要禁止缓存的路径前缀（业务代码，频繁更新）
+const noCachePrefixes = ['/chat/', '/common/styles/'];
+const noCacheExact = new Set(['/manifest.json', '/sw.js', '/version.json', '/pwa-manager.js']);
+const pwaResetHtml = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pivot PWA 缓存清理</title>
+    <style>
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; }
+        main { width: min(520px, calc(100vw - 32px)); padding: 28px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12); }
+        h1 { margin: 0 0 12px; font-size: 22px; }
+        p { margin: 8px 0; color: #64748b; line-height: 1.6; }
+        button, a { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #dbe3ef; background: #fff; color: #334155; text-decoration: none; cursor: pointer; font-size: 14px; }
+        button.primary { border-color: #10a37f; background: #10a37f; color: #fff; }
+        .actions { display: flex; gap: 10px; margin-top: 18px; }
+        #status { margin-top: 14px; font-size: 13px; color: #0f766e; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Pivot PWA 缓存清理</h1>
+        <p>该页面会注销当前站点的 Service Worker，并删除 Pivot 相关缓存。</p>
+        <p>清理完成后请返回系统页面。</p>
+        <div class="actions">
+            <button id="reset-btn" class="primary">立即清理</button>
+            <a href="/chat/chat.html">返回系统</a>
+        </div>
+        <div id="status">等待操作</div>
+    </main>
+    <script>
+        async function clearPivotPwa() {
+            var status = document.getElementById('status');
+            try {
+                status.textContent = '正在注销 Service Worker...';
+                if ('serviceWorker' in navigator) {
+                    var regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map(function (reg) { return reg.unregister(); }));
+                }
+                status.textContent = '正在删除 CacheStorage...';
+                if (window.caches) {
+                    var keys = await caches.keys();
+                    await Promise.all(keys.filter(function (key) { return key.startsWith('pivot-'); }).map(function (key) { return caches.delete(key); }));
+                }
+                localStorage.removeItem('pivot-current-build');
+                status.textContent = '清理完成，正在返回系统...';
+                setTimeout(function () { location.href = '/chat/chat.html'; }, 800);
+            } catch (err) {
+                status.textContent = '清理失败：' + (err && err.message ? err.message : err);
+            }
+        }
+        document.getElementById('reset-btn').addEventListener('click', clearPivotPwa);
+        window.addEventListener('load', clearPivotPwa);
+    </script>
+</body>
+</html>`;
+
+// 第三方库 vendor 目录长期缓存（内容几乎不变）
+app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/vendor'), {
+    maxAge: appConfig.vendorMaxAge,
+    immutable: true
+}));
+
+// chat.html 由服务端注入版本号，必须单独处理
 app.get('/chat/chat.html', (req, res) => {
     noCacheHeaders(res);
     res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
 });
+
+// sw.js 必须禁止缓存，否则浏览器无法检测到新版本
 app.get('/sw.js', (req, res) => {
     noCacheHeaders(res);
+    res.type('application/javascript');
     res.sendFile(path.join(__dirname, '../client/sw.js'));
 });
-app.use(express.static('client', { maxAge: appConfig.staticMaxAge }));
+
+// manifest.json 禁止缓存
+app.get('/manifest.json', (req, res) => {
+    noCacheHeaders(res);
+    res.sendFile(path.join(__dirname, '../client/manifest.json'));
+});
+
+app.get('/version.json', (req, res) => {
+    noCacheHeaders(res);
+    res.json({
+        version: appVersion,
+        build: `${appVersion}-vendor-only`,
+        swPolicy: 'vendor-only',
+        generatedAt: getBeijingTimestamp()
+    });
+});
+
+app.get('/pwa-reset', (req, res) => {
+    noCacheHeaders(res);
+    res.type('html').send(pwaResetHtml);
+});
+
+// 静态文件服务：通过 setHeaders 动态控制缓存策略
+// 注意：express.static 会在发送文件时覆盖已设置的 Cache-Control 头，
+// 因此必须在 setHeaders 回调中设置，而不是在前置中间件中设置
+app.use(express.static('client', {
+    maxAge: appConfig.staticMaxAge,
+    setHeaders: (res, filePath) => {
+        const urlPath = '/' + path.relative(path.join(__dirname, '../client'), filePath).replace(/\\/g, '/');
+        // 业务代码文件（JS/CSS/HTML）禁止缓存
+        if (noCacheExact.has(urlPath) || noCachePrefixes.some(p => urlPath.startsWith(p)) || /\/common\/styles\//.test(urlPath)) {
+            noCacheHeaders(res);
+        }
+    }
+}));
 const upload = createUploadMiddleware();
 const secureUpload = {
     single: (field) => [upload.single(field), uploadSecurityMiddleware]

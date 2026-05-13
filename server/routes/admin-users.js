@@ -7,8 +7,7 @@ const { asyncHandler } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
     escapeCsvCell,
-    parseCsvLine,
-    removeAttachmentFiles
+    parseCsvLine
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 
@@ -19,14 +18,27 @@ function createAdminUsersRouter({
     logAction
 }) {
     const router = express.Router();
+    const isSuperAdmin = (user) => user?.username === 'admin';
+    const requireSuperAdmin = (req, res) => {
+        if (isSuperAdmin(req.user)) return true;
+        res.status(403).json({ error: '仅超级管理员 admin 可执行该操作' });
+        return false;
+    };
 
     router.get('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
-        const users = db.prepare('SELECT id, username, nickname, unit, role, status, created_at, last_login_at FROM users ORDER BY id ASC LIMIT ? OFFSET ?').all(limit, offset);
-        const total = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-        res.json({ data: users, total });
+        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
+        const where = includeDeleted ? '' : 'WHERE deleted_at IS NULL';
+        const users = db.prepare(`
+            SELECT id, username, nickname, unit, role, status, deleted_at, created_at, last_login_at
+            FROM users
+            ${where}
+            ORDER BY id ASC LIMIT ? OFFSET ?
+        `).all(limit, offset);
+        const total = db.prepare(`SELECT COUNT(*) as count FROM users ${where}`).get().count;
+        res.json({ data: users, total, isSuperAdmin: isSuperAdmin(req.user) });
     }));
 
     router.post('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -42,8 +54,9 @@ function createAdminUsersRouter({
         const safeRole = role === 'admin' ? 'admin' : 'user';
         const safeStatus = status === 'disabled' ? 'disabled' : 'active';
 
-        const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(targetUserId);
+        const targetUser = db.prepare('SELECT username, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+        if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能修改' });
         
         if (targetUser.username === 'admin' && (safeRole !== 'admin' || safeStatus === 'disabled')) {
             return res.status(400).json({ error: '不能降低或禁用内置管理员权限' });
@@ -61,6 +74,10 @@ function createAdminUsersRouter({
     router.post('/admin/users/:id/password', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         const { password } = req.body;
+        const targetUser = db.prepare('SELECT username, deleted_at FROM users WHERE id = ?').get(targetUserId);
+        if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+        if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能重置密码' });
+        if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员密码不可由其他用户重置' });
         validatePassword(password);
         const hash = bcrypt.hashSync(password, 10);
         const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
@@ -101,15 +118,109 @@ function createAdminUsersRouter({
     }));
 
     router.get('/admin/users/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const users = db.prepare('SELECT * FROM users LIMIT 10000').all();
-        let csv = '\uFEFFID,用户名,显示名,单位,角色,状态,创建时间\n';
+        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
+        const users = db.prepare(`SELECT * FROM users ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'} LIMIT 10000`).all();
+        let csv = '\uFEFFID,用户名,显示名,单位,角色,状态,删除时间,创建时间\n';
         users.forEach(u => {
-            csv += [u.id, u.username, u.nickname || '', u.unit || '', u.role, u.status || 'active', u.created_at].map(escapeCsvCell).join(',') + '\n';
+            csv += [u.id, u.username, u.nickname || '', u.unit || '', u.role, u.status || 'active', u.deleted_at || '', u.created_at].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出用户', `导出 ${users.length} 名用户`);
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=users.csv');
         res.send(csv);
+    }));
+
+    router.get('/admin/users/:id/sessions', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!requireSuperAdmin(req, res)) return;
+        const targetUserId = parseInt(req.params.id, 10);
+        const includeDeleted = req.query.includeDeleted === 'true';
+        const deletedFilter = includeDeleted ? '' : 'AND s.deleted_at IS NULL';
+        const sessions = db.prepare(`
+            SELECT s.*,
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS msg_count,
+                   (SELECT COUNT(*) FROM attachments a WHERE a.session_id = s.id) AS attachment_count
+            FROM sessions s
+            WHERE s.user_id = ? ${deletedFilter}
+            ORDER BY COALESCE(s.updated_at, s.created_at) DESC
+            LIMIT 1000
+        `).all(targetUserId);
+        res.json({ data: sessions });
+    }));
+
+    router.get('/admin/users/:id/messages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!requireSuperAdmin(req, res)) return;
+        const targetUserId = parseInt(req.params.id, 10);
+        const sessionId = String(req.query.sessionId || '').trim();
+        const includeDeleted = req.query.includeDeleted === 'true';
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+        const offset = (page - 1) * limit;
+        let where = "WHERE m.user_id = ? AND m.role = 'user'";
+        const params = [targetUserId];
+        if (sessionId) {
+            where += ' AND m.session_id = ?';
+            params.push(sessionId);
+        }
+        if (!includeDeleted) where += ' AND m.deleted_at IS NULL';
+
+        const total = db.prepare(`SELECT COUNT(*) AS count FROM messages m ${where}`).get(...params).count;
+        const userMessages = db.prepare(`
+            SELECT m.*, s.title AS session_title, md.name AS model_name
+            FROM messages m
+            LEFT JOIN sessions s ON s.id = m.session_id
+            LEFT JOIN models md ON md.id = m.model_id
+            ${where}
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT ? OFFSET ?
+        `).all(...params, limit, offset);
+
+        const assistantStmt = db.prepare(`
+            SELECT m.content, m.token_count, m.deleted_at, md.name AS model_name
+            FROM messages m
+            LEFT JOIN models md ON md.id = m.model_id
+            WHERE m.user_id = ?
+              AND m.session_id = ?
+              AND m.role = 'assistant'
+              AND m.id > ?
+              ${includeDeleted ? '' : 'AND m.deleted_at IS NULL'}
+            ORDER BY m.id ASC
+            LIMIT 1
+        `);
+
+        const records = userMessages.map(message => {
+            const assistant = assistantStmt.get(targetUserId, message.session_id, message.id);
+            return {
+                id: message.id,
+                session_id: message.session_id,
+                session_title: message.session_title,
+                model_name: message.model_name || assistant?.model_name || '',
+                created_at: message.created_at,
+                deleted_at: message.deleted_at || assistant?.deleted_at || '',
+                user_content: message.content,
+                assistant_content: assistant?.content || '',
+                input_tokens: message.token_count || 0,
+                output_tokens: assistant?.token_count || 0
+            };
+        });
+
+        res.json({ data: records, total, page, limit });
+    }));
+
+    router.get('/admin/users/:id/attachments', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!requireSuperAdmin(req, res)) return;
+        const targetUserId = parseInt(req.params.id, 10);
+        const includeDeleted = req.query.includeDeleted === 'true';
+        const deletedFilter = includeDeleted ? '' : 'AND a.deleted_at IS NULL';
+        const attachments = db.prepare(`
+            SELECT a.*, s.title AS session_title,
+                   '/' || replace(a.file_path, '\\', '/') || CASE WHEN a.access_token IS NOT NULL AND a.access_token != '' THEN '?token=' || a.access_token ELSE '' END AS url
+            FROM attachments a
+            LEFT JOIN sessions s ON s.id = a.session_id
+            WHERE a.user_id = ? ${deletedFilter}
+            ORDER BY a.created_at DESC
+            LIMIT 1000
+        `).all(targetUserId);
+        res.json({ data: attachments });
     }));
 
     router.post('/admin/users/import', authMiddleware, adminMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
@@ -216,25 +327,20 @@ function createAdminUsersRouter({
     router.delete('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         if (targetUserId === req.user.id) return res.status(400).json({ error: '不能删除自己' });
-        const targetUser = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetUserId);
+        const targetUser = db.prepare('SELECT id, username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+        if (targetUser.deleted_at) return res.json({ success: true });
         if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员账号禁止删除' });
         if (targetUser.role === 'admin') {
-            const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled'").get().count;
+            const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled' AND deleted_at IS NULL").get().count;
             if (adminCount <= 1) return res.status(400).json({ error: '系统必须保留至少一个可用管理员' });
         }
         const deleteUserTx = db.transaction(() => {
-            const attachments = db.prepare('SELECT file_path FROM attachments WHERE user_id = ?').all(targetUserId);
-            const docs = db.prepare('SELECT id FROM knowledge_docs WHERE user_id = ?').all(targetUserId);
-            docs.forEach(doc => db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(doc.id));
-            db.prepare('DELETE FROM knowledge_docs WHERE user_id = ?').run(targetUserId);
-            db.prepare('DELETE FROM attachments WHERE user_id = ?').run(targetUserId);
-            db.prepare('DELETE FROM messages WHERE user_id = ?').run(targetUserId);
-            db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetUserId);
-            db.prepare('DELETE FROM models WHERE user_id = ?').run(targetUserId);
-            db.prepare('DELETE FROM audit_logs WHERE user_id = ?').run(targetUserId);
-            const info = db.prepare('DELETE FROM users WHERE id = ?').run(targetUserId);
-            removeAttachmentFiles(attachments);
+            const now = getBeijingTimestamp();
+            db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(targetUserId);
+            db.prepare("UPDATE api_keys SET status = 'disabled' WHERE user_id = ?").run(targetUserId);
+            const info = db.prepare("UPDATE users SET status = 'disabled', deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL")
+                .run(now, req.user.id, targetUserId);
             return info;
         });
         deleteUserTx();

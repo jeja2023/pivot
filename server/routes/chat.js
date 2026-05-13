@@ -17,7 +17,6 @@ const {
     modelSupportsVision,
     contentContainsVisionInput
 } = require('../services/models');
-const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
 const {
     acquireModelSlot,
@@ -26,7 +25,21 @@ const {
 } = require('../services/model-runtime');
 const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('../image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('../security');
-const { createSseEventParser, extractStreamPayload } = require('../streaming');
+const { createSseEventParser, createStreamAccumulator } = require('../streaming');
+const {
+    buildModelHeaders,
+    buildResponsesUrl,
+    convertChatMessagesToResponsesInput,
+    normalizeModelBaseUrl,
+    shouldUseResponsesApi
+} = require('../services/model-adapter');
+const {
+    saveAssistantMessage,
+    saveUserMessage,
+    touchSession,
+    updateLastAssistantStats
+} = require('../services/chat-messages');
+const { maybeGenerateTitle } = require('../services/chat-title');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -45,6 +58,7 @@ function getImageDataUrl(uploadUrl, userId, sessionId) {
     const attachment = db.prepare(`
         SELECT id FROM attachments
         WHERE user_id = ? AND session_id = ? AND file_path = ?
+          AND deleted_at IS NULL
     `).get(userId, sessionId, filePath);
     if (!attachment) return null;
     return imageFileToDataUrl(target);
@@ -111,139 +125,6 @@ function buildVisionUnsupportedMessage(modelCfg) {
     return `${name} 未配置视觉输入能力，不能处理图片或扫描件内容。请切换到已开启“视觉输入（图片/扫描件）”的模型，或联系管理员在模型配置中启用该能力。普通文档会先抽取文本，不受此限制。`;
 }
 
-function normalizeTitleText(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function stripTitleSourceText(value) {
-    return String(value || '')
-        .replace(/<thought>[\s\S]*?<\/thought>/gi, ' ')
-        .replace(/\n{0,2}---\n【参考文档[^\n]*】\n[\s\S]*?\n---/g, ' ')
-        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1 图片')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .replace(/https?:\/\/\S+/g, ' ')
-        .replace(/[`*_#>|~]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function truncateTitle(value, maxLength = 24) {
-    const chars = Array.from(normalizeTitleText(value));
-    return chars.length > maxLength ? chars.slice(0, maxLength).join('') : chars.join('');
-}
-
-function buildFallbackTitle(userMsg, aiMsg = '') {
-    const userText = stripTitleSourceText(userMsg);
-    if (userText) return truncateTitle(userText);
-
-    const aiText = stripTitleSourceText(aiMsg);
-    if (aiText) return truncateTitle(aiText);
-
-    return '新对话';
-}
-
-function sanitizeGeneratedTitle(value, fallbackTitle) {
-    let title = normalizeTitleText(value)
-        .replace(/^#+\s*/, '')
-        .replace(/^(会话)?标题\s*[:：]\s*/i, '')
-        .replace(/^["'“”‘’《》【】「」\[\]\s]+|["'“”‘’《》【】「」\[\]\s]+$/g, '')
-        .replace(/[。.!！?？,，;；:：]+$/g, '')
-        .replace(/^["'“”‘’《》【】「」\[\]\s]+|["'“”‘’《》【】「」\[\]\s]+$/g, '');
-
-    title = title.split(/\n/)[0] || '';
-    title = truncateTitle(title);
-
-    if (!title || /^新对话$/i.test(title) || /^untitled$/i.test(title)) {
-        return fallbackTitle;
-    }
-    return title;
-}
-
-function buildInitialAutoTitles(userMsg) {
-    const raw = String(userMsg || '').trim();
-    const cleaned = stripTitleSourceText(userMsg);
-    return new Set([
-        '新对话',
-        raw ? raw.slice(0, 15) + '...' : '',
-        cleaned ? cleaned.slice(0, 15) + '...' : ''
-    ].filter(Boolean).map(normalizeTitleText));
-}
-
-function shouldReplaceAutoTitle(currentTitle, userMsg) {
-    const normalized = normalizeTitleText(currentTitle);
-    if (!normalized) return true;
-    return buildInitialAutoTitles(userMsg).has(normalized);
-}
-
-async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg) {
-    const fallbackTitle = buildFallbackTitle(userMsg, aiMsg);
-    let newTitle = fallbackTitle;
-
-    try {
-        logger.info({ sessionId }, '正在生成会话标题');
-        let baseUrl = modelCfg.url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
-        if (!baseUrl.includes('/v1') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
-            baseUrl += '/v1';
-        }
-        const targetUrl = baseUrl + '/chat/completions';
-
-        const response = await axios({
-            method: 'post',
-            url: targetUrl,
-            headers: {
-                'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined,
-                'Content-Type': 'application/json'
-            },
-            data: {
-                model: modelCfg.model_name,
-                messages: [
-                    {
-                        role: 'user',
-                        content: [
-                            '请根据以下对话内容，生成一个简短、具体、自然的中文标题。',
-                            '要求：5-12 个字；不要引号；不要解释；不要使用“新对话”“聊天记录”等泛泛标题。',
-                            '',
-                            `用户：${stripTitleSourceText(userMsg).slice(0, 600)}`,
-                            `助手：${stripTitleSourceText(aiMsg).slice(0, 600)}`
-                        ].join('\n')
-                    }
-                ],
-                max_tokens: 32,
-                temperature: 0.2
-            },
-            timeout: 60000,
-            proxy: false
-        });
-
-        newTitle = sanitizeGeneratedTitle(response.data.choices[0]?.message?.content, fallbackTitle);
-    } catch (e) {
-        logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');
-    }
-
-    const session = db.prepare('SELECT title FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
-    if (!session) return;
-
-    if (!shouldReplaceAutoTitle(session.title, userMsg)) {
-        logger.info({ sessionId, currentTitle: session.title }, '跳过标题更新：当前标题疑似已被用户修改');
-        return;
-    }
-
-    db.prepare('UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?').run(newTitle, sessionId, userId);
-    logger.info({ sessionId, newTitle }, '会话标题已更新');
-}
-
-function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg) {
-    const msgCount = db.prepare(`
-        SELECT COUNT(*) as count
-        FROM messages
-        WHERE session_id = ? AND user_id = ? AND role IN ('user', 'assistant')
-    `).get(sessionId, userId).count;
-
-    if (msgCount <= 2) {
-        generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg);
-    }
-}
-
 function createChatRouter({
     authMiddleware,
     chatLimiter,
@@ -256,18 +137,7 @@ function createChatRouter({
 
     router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
         const { sessionId, costTime, tps } = req.body;
-        const userId = req.user.id;
-
-        const lastMsg = db.prepare(`
-            SELECT id FROM messages
-            WHERE session_id = ? AND user_id = ? AND role = 'assistant'
-            ORDER BY id DESC LIMIT 1
-        `).get(sessionId, userId);
-
-        if (lastMsg) {
-            db.prepare('UPDATE messages SET cost_time = ?, tokens_per_sec = ? WHERE id = ?')
-              .run(costTime, tps, lastMsg.id);
-        }
+        updateLastAssistantStats({ sessionId, userId: req.user.id, costTime, tps });
         res.json({ success: true });
     }));
 
@@ -321,7 +191,7 @@ function createChatRouter({
         res.flush?.();
 
         // --- 业务逻辑检查 ---
-        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
+        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
         if (!session) {
             writeSse(JSON.stringify({ error: '无权访问或会话不存在', code: 'FORBIDDEN' }));
             return res.end();
@@ -349,9 +219,7 @@ function createChatRouter({
 
         if (!regenerate) {
             try {
-                const userTokens = estimateTokens(modelContent);
-                db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                  .run(sessionId, userId, 'user', modelContent, userTokens, modelCfg.id, getBeijingTimestamp());
+                saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
             } catch (dbErr) {
                 req.log.error({ sessionId, err: dbErr.message }, '用户消息入库失败');
                 writeSse(JSON.stringify({ error: '消息保存失败，请稍后重试', code: 'DB_ERROR' }));
@@ -359,14 +227,13 @@ function createChatRouter({
             }
         }
 
-        db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(getBeijingTimestamp(), sessionId);
+        touchSession(sessionId);
         logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
 
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
+            saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
             logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
@@ -383,8 +250,7 @@ function createChatRouter({
         if (unsupportedCapability) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
-            db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
+            saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
@@ -471,11 +337,8 @@ function createChatRouter({
             // 如果历史为空，至少把当前消息塞进去（如果是刚发送的消息）
             if (modelContent) {
                 req.log.info({ sessionId }, '执行补救措施：将丢失的用户消息存入数据库并加入当前上下文');
-                // 补救的消息需要存入数据库
-                const userTokens = estimateTokens(modelContent);
                 try {
-                    db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                      .run(sessionId, userId, 'user', modelContent, userTokens, modelId, getBeijingTimestamp());
+                    saveUserMessage({ sessionId, userId, content: modelContent, modelId });
                 } catch (dbErr) {
                     req.log.error({ err: dbErr.message }, '补救消息入库失败');
                 }
@@ -490,23 +353,14 @@ function createChatRouter({
             }
         }
 
-        let baseUrl = modelCfg.url.trim().replace(/\/+$/, '');
-        if (!baseUrl.includes('/v1') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
-            baseUrl = baseUrl + '/v1';
-        }
+        let baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
 
         const modelName = modelCfg.model_name || 'default';
-        const isResponsesApi = modelName.includes('gpt-5') || modelName.includes('o1') || modelName.includes('o3') || modelName.includes('o4');
+        const isResponsesApi = shouldUseResponsesApi(modelName);
 
-        let targetUrl;
-        if (isResponsesApi) {
-            targetUrl = baseUrl.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/responses';
-        } else {
-            targetUrl = baseUrl.replace(/\/+$/, '');
-            if (!targetUrl.endsWith('/chat/completions')) {
-                targetUrl += '/chat/completions';
-            }
-        }
+        let targetUrl = isResponsesApi
+            ? buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false })
+            : buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
 
         req.log.info({
             userId,
@@ -516,47 +370,13 @@ function createChatRouter({
             mode: isResponsesApi ? 'Responses API' : 'Chat Completions API'
         }, '发起对话请求');
 
-        const headers = {
-            'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined,
-            'x-api-key': modelCfg.api_key || undefined,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Pivot-AI-Client/1.0',
-            'Accept': 'application/json'
-        };
+        const headers = buildModelHeaders(modelCfg, { acceptJson: true });
 
         try {
             let response;
 
             // 将 Chat Completions 格式转换为 Responses API 格式
-            const responsesHistory = visionHistory.map(msg => {
-                // system 角色在 Responses API 中需要转为 developer 或 user
-                let role = msg.role;
-                let content = msg.content;
-
-                if (role === 'system') {
-                    role = 'user';
-                    // 如果 content 是字符串，添加系统设定前缀
-                    if (typeof content === 'string') {
-                        content = `[系统设定]: ${content}`;
-                    }
-                }
-
-                // 如果 content 是数组（多模态），转换为 Responses API 格式
-                if (Array.isArray(content)) {
-                    content = content.map(part => {
-                        if (part.type === 'image_url' && part.image_url?.url) {
-                            // Responses API 使用 input_image 类型
-                            return {
-                                type: 'input_image',
-                                image_url: part.image_url.url
-                            };
-                        }
-                        return part;
-                    });
-                }
-
-                return { role, content };
-            });
+            const responsesHistory = convertChatMessagesToResponsesInput(visionHistory);
 
             const requestData = { 
                 model: modelName, 
@@ -568,6 +388,9 @@ function createChatRouter({
             if (modelCfg.max_tokens !== null && modelCfg.max_tokens !== undefined) {
                 requestData.max_completion_tokens = modelCfg.max_tokens;
                 requestData.max_tokens = modelCfg.max_tokens; // Some APIs use this instead
+            }
+            if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
+                requestData.max_input_tokens = modelCfg.max_input_tokens;
             }
 
             if (isResponsesApi) {
@@ -590,8 +413,7 @@ function createChatRouter({
                     const status = err.response?.status;
                     if ([404, 405, 502, 503].includes(status)) {
                         req.log.warn({ status }, 'Responses API 暂不可用，正在自动回退到常规接口');
-                        targetUrl = baseUrl.replace(/\/+$/, '');
-                        if (!targetUrl.endsWith('/chat/completions')) targetUrl += '/chat/completions';
+                        targetUrl = buildChatCompletionsUrl(baseUrl, { appendV1ForLocal: false });
                         
                         delete requestData.input;
                         requestData.messages = visionHistory;
@@ -619,39 +441,15 @@ function createChatRouter({
                 req.log.info('连接成功');
             }
 
-            let assistantContent = '';
-            let lastWasThought = false;
-            let apiUsage = null;
+            const accumulator = createStreamAccumulator({
+                includeThoughtTags: true,
+                onContent(sendContent) {
+                    writeSse(JSON.stringify({ content: sendContent }));
+                }
+            });
             const parser = createSseEventParser({
                 onData(payload) {
-                    try {
-                        const json = JSON.parse(payload);
-                        if (json.usage) apiUsage = json.usage;
-                        const { delta, isThought } = extractStreamPayload(json);
-                        if (!delta) return;
-
-                        let sendContent = '';
-                        if (isThought) {
-                            if (!lastWasThought) {
-                                sendContent += '<thought>';
-                                lastWasThought = true;
-                            }
-                            sendContent += delta;
-                        } else {
-                            if (lastWasThought) {
-                                sendContent += '</thought>';
-                                lastWasThought = false;
-                            }
-                            sendContent += delta;
-                        }
-
-                        if (sendContent) {
-                            assistantContent += sendContent;
-                            writeSse(JSON.stringify({ content: sendContent }));
-                        }
-                    } catch (e) {
-                        // 忽略无效行
-                    }
+                    accumulator.pushPayload(payload);
                 },
                 onDone() {}
             });
@@ -661,18 +459,14 @@ function createChatRouter({
             response.data.on('end', async () => {
                 try {
                     parser.end();
-                    if (lastWasThought) {
-                        const closeTag = '</thought>';
-                        assistantContent += closeTag;
-                        writeSse(JSON.stringify({ content: closeTag }));
-                        lastWasThought = false;
-                    }
+                    accumulator.finish();
 
+                    const assistantContent = accumulator.getContent();
+                    const apiUsage = accumulator.getUsage();
                     const assistantTokens = (apiUsage && apiUsage.completion_tokens) 
                         ? apiUsage.completion_tokens 
                         : estimateTokens(assistantContent);
-                    db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                      .run(sessionId, userId, 'assistant', assistantContent, assistantTokens, modelCfg.id, getBeijingTimestamp());
+                    saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
                     maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
 
@@ -757,13 +551,5 @@ function createChatRouter({
 }
 
 module.exports = {
-    createChatRouter,
-    _titleHelpers: {
-        buildVisionUnsupportedMessage,
-        buildFallbackTitle,
-        sanitizeGeneratedTitle,
-        shouldReplaceAutoTitle,
-        stripTitleSourceText,
-        truncateTitle
-    }
+    createChatRouter
 };

@@ -14,60 +14,77 @@ const {
     buildRagSearchContent,
     buildRagSearchTerms
 } = require('./rag-tokenizer');
+const { EMBEDDING_MODES, getEmbeddingConfig, getRagConfig, normalizeEmbeddingMode } = require('./rag-config');
 
-const RAG_CANDIDATE_LIMIT = Math.max(parseInt(process.env.RAG_CANDIDATE_LIMIT || '300', 10) || 300, 20);
-const RAG_SCORE_THRESHOLD = Number.isFinite(parseFloat(process.env.RAG_SCORE_THRESHOLD))
-    ? parseFloat(process.env.RAG_SCORE_THRESHOLD)
-    : 0.4;
+const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 
-async function initLocalExtractor() {
-    logger.warn('RAG 本地向量引擎当前未启用');
-    throw new Error('RAG 本地向量引擎当前未启用');
-}
-
-function getEmbeddingConfig() {
-    const mode = process.env.EMBEDDING_MODE || (process.env.EMBEDDING_API_URL ? 'cloud' : 'local');
-    return {
-        mode,
-        cloud: {
-            url: process.env.EMBEDDING_API_URL,
-            apiKey: process.env.EMBEDDING_API_KEY || '',
-            model: process.env.EMBEDDING_MODEL || 'nomic-embed-text'
-        }
-    };
-}
-
-async function generateEmbedding(text, mode = null, cloudConfig = null) {
-    const config = getEmbeddingConfig();
-    const targetMode = mode || config.mode;
-    const targetCloudConfig = cloudConfig || config.cloud;
-
-    if (targetMode === 'cloud') {
-        const { url, apiKey, model } = targetCloudConfig;
-        if (!url) throw new Error('未配置 EMBEDDING_API_URL');
-        const res = await axios.post(url, {
-            input: text,
-            model: model || 'nomic-embed-text'
-        }, {
-            headers: {
-                Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
-                'Content-Type': 'application/json'
-            },
-            timeout: 30000,
-            proxy: false
-        });
-        return res.data.data[0].embedding;
+function normalizeEmbeddingVector(data) {
+    const vector = data?.data?.[0]?.embedding
+        || data?.embedding
+        || data?.embeddings?.[0]
+        || data?.response?.embedding;
+    if (!Array.isArray(vector) || vector.length === 0) {
+        throw new Error('Embedding 服务响应中未找到有效向量');
     }
+    return vector.map(Number);
+}
 
-    if (targetMode === 'local') {
-        const getExtractor = await initLocalExtractor();
-        const output = await getExtractor(text, { pooling: 'mean', normalize: true });
-        return Array.from(output.data);
+function resolveEmbeddingUrl(url) {
+    const rawUrl = String(url || '').trim();
+    const lowerUrl = rawUrl.toLowerCase();
+    if (!rawUrl) return '';
+    if (
+        lowerUrl.endsWith('/embeddings') ||
+        lowerUrl.endsWith('/api/embed') ||
+        lowerUrl.endsWith('/api/embeddings')
+    ) {
+        return rawUrl;
+    }
+    if (lowerUrl.endsWith('/v1')) {
+        return `${rawUrl.replace(/\/+$/, '')}/embeddings`;
+    }
+    return `${rawUrl.replace(/\/+$/, '')}/v1/embeddings`;
+}
+
+function buildEmbeddingPayload(text, model, mode, url) {
+    const endpoint = String(url || '').toLowerCase();
+    if (endpoint.includes('/api/embeddings')) {
+        return { model, prompt: text };
+    }
+    if (endpoint.includes('/api/embed')) {
+        return { model, input: text };
+    }
+    return { input: text, model };
+}
+
+async function requestEmbedding(text, httpConfig) {
+    const { url, apiKey, model } = httpConfig;
+    if (!url) {
+        throw new Error('未配置 Embedding HTTP 服务地址');
+    }
+    const targetUrl = resolveEmbeddingUrl(url);
+    const res = await axios.post(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        headers: {
+            Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+            'Content-Type': 'application/json'
+        },
+        timeout: 30000,
+        proxy: false
+    });
+    return normalizeEmbeddingVector(res.data);
+}
+
+async function generateEmbedding(text, mode = null, embeddingConfig = null, userId = null) {
+    const config = getEmbeddingConfig(userId);
+    const targetMode = normalizeEmbeddingMode(mode || config.mode);
+
+    if (targetMode === EMBEDDING_MODES.http) {
+        const targetHttpConfig = embeddingConfig || config.http || config.cloud;
+        return requestEmbedding(text, targetHttpConfig);
     }
 
     throw new Error(`不支持的 Embedding 模式: ${targetMode}`);
 }
-
 function cosineSimilarity(vecA, vecB) {
     if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length !== vecB.length) return 0;
     let dotProduct = 0;
@@ -120,6 +137,8 @@ function selectFtsCandidates(userId, keywords, limit) {
             WHERE knowledge_chunks_fts MATCH ?
               AND d.user_id = ?
               AND d.status = 'ready'
+              AND d.deleted_at IS NULL
+              AND COALESCE(d.is_enabled, 1) = 1
             ORDER BY bm25(knowledge_chunks_fts)
             LIMIT ?
         `).all(ftsQuery, userId, limit);
@@ -136,7 +155,7 @@ function selectLikeCandidates(userId, keywords, limit) {
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready' AND (${keywordWhere})
+        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1 AND (${keywordWhere})
         ORDER BY c.id DESC
         LIMIT ?
     `).all(userId, ...keywords.map(k => `%${k}%`), limit);
@@ -147,20 +166,20 @@ function selectRecentCandidates(userId, limit) {
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready'
+        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1
         ORDER BY c.id DESC
         LIMIT ?
     `).all(userId, limit);
 }
 
-function selectRetrievalCandidates(userId, query, topK) {
+function selectRetrievalCandidates(userId, query, topK, candidateLimit) {
     const keywords = buildKeywordCandidates(query);
-    let chunks = selectFtsCandidates(userId, keywords, RAG_CANDIDATE_LIMIT);
+    let chunks = selectFtsCandidates(userId, keywords, candidateLimit);
     if (chunks.length < topK) {
-        chunks = selectLikeCandidates(userId, keywords, RAG_CANDIDATE_LIMIT);
+        chunks = selectLikeCandidates(userId, keywords, candidateLimit);
     }
     if (chunks.length < topK) {
-        chunks = selectRecentCandidates(userId, RAG_CANDIDATE_LIMIT);
+        chunks = selectRecentCandidates(userId, candidateLimit);
     }
     return chunks;
 }
@@ -192,33 +211,99 @@ function formatInjectedContext(topChunks) {
     return injectedContext;
 }
 
-async function retrieveContext(userId, query, topK = 3) {
+function normalizeRetrievalDebugMatch(match, scoreThreshold) {
+    return {
+        chunkId: match.chunkId,
+        source: match.source,
+        score: Number(match.score.toFixed(6)),
+        matched: match.score > scoreThreshold,
+        text: String(match.text || '').slice(0, 800)
+    };
+}
+
+async function debugRetrieveContext(userId, query, {
+    topK = null,
+    candidateLimit = null,
+    scoreThreshold = null,
+    queryVector = null
+} = {}) {
+    const config = getRagConfig({ topK, candidateLimit, scoreThreshold });
+    const normalizedQuery = normalizeCacheQuery(query);
+    if (!normalizedQuery) {
+        return {
+            query: '',
+            keywords: [],
+            threshold: config.scoreThreshold,
+            topK: config.topK,
+            candidateCount: 0,
+            matches: []
+        };
+    }
+
+    const safeTopK = config.topK;
+    const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
+    const keywords = buildKeywordCandidates(normalizedQuery);
+    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId);
+    const candidates = selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit).slice(0, safeCandidateLimit);
+    const scoredChunks = candidates.map(chunk => {
+        try {
+            if (!chunk.embedding) return null;
+            const docVec = JSON.parse(chunk.embedding);
+            if (!Array.isArray(docVec) || docVec.length !== vector.length) return null;
+            return {
+                chunkId: chunk.id,
+                text: chunk.content,
+                source: chunk.name,
+                score: cosineSimilarity(vector, docVec)
+            };
+        } catch (e) {
+            logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 调试向量解析失败，已跳过分片');
+            return null;
+        }
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    const matches = scoredChunks.map(match => normalizeRetrievalDebugMatch(match, config.scoreThreshold));
+
+    return {
+        query: normalizedQuery,
+        keywords,
+        threshold: config.scoreThreshold,
+        topK: safeTopK,
+        candidateCount: candidates.length,
+        matches,
+        injectedContext: formatInjectedContext(
+            scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, safeTopK)
+        )
+    };
+}
+
+async function retrieveContext(userId, query, topK = null) {
     const startedAt = Date.now();
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
+    const config = getRagConfig({ topK });
 
-    const cachedResult = getFromCache(userId, normalizedQuery, topK);
+    const cachedResult = getFromCache(userId, normalizedQuery, config.topK);
     if (cachedResult !== null) {
         recordRagRetrieval({ status: 'cache_hit', durationMs: Date.now() - startedAt, cacheHit: true });
         return cachedResult;
     }
 
     try {
-        const queryVector = await generateEmbedding(normalizedQuery);
-        const chunks = selectRetrievalCandidates(userId, normalizedQuery, topK);
+        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId);
+        const chunks = selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit);
 
         if (chunks.length === 0) {
-            setToCache(userId, normalizedQuery, topK, '');
+            setToCache(userId, normalizedQuery, config.topK, '');
             recordRagRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
         }
 
         const scoredChunks = scoreChunks(chunks, queryVector).sort((a, b) => b.score - a.score);
-        const topChunks = scoredChunks.filter(chunk => chunk.score > RAG_SCORE_THRESHOLD).slice(0, topK);
+        const topChunks = scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, config.topK);
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
 
         if (topChunks.length === 0) {
-            setToCache(userId, normalizedQuery, topK, '');
+            setToCache(userId, normalizedQuery, config.topK, '');
             recordRagRetrieval({
                 status: 'no_match',
                 durationMs: Date.now() - startedAt,
@@ -230,7 +315,7 @@ async function retrieveContext(userId, query, topK = 3) {
         }
 
         const injectedContext = formatInjectedContext(topChunks);
-        setToCache(userId, normalizedQuery, topK, injectedContext);
+        setToCache(userId, normalizedQuery, config.topK, injectedContext);
         recordRagRetrieval({
             status: 'hit',
             durationMs: Date.now() - startedAt,
@@ -246,14 +331,31 @@ async function retrieveContext(userId, query, topK = 3) {
     }
 }
 
-async function indexDocumentChunks(docId, text) {
+async function indexDocumentChunks(docId, text, { onProgress, userId = null } = {}) {
     const startedAt = Date.now();
     const chunks = chunkText(text);
+    const batchSize = 5; // 限制并发数，防止 OOM 或 API 限流
     try {
-        for (const chunk of chunks) {
-            const vector = await generateEmbedding(chunk);
-            db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)')
-                .run(docId, chunk, buildRagSearchContent(chunk), JSON.stringify(vector));
+        for (let i = 0; i < chunks.length; i += batchSize) {
+            const batch = chunks.slice(i, i + batchSize);
+            const results = await Promise.all(batch.map(async (chunk) => {
+                const vector = await generateEmbedding(chunk, null, null, userId);
+                return { chunk, vector };
+            }));
+            
+            const insert = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)');
+            const transaction = db.transaction((items) => {
+                for (const item of items) {
+                    insert.run(docId, item.chunk, buildRagSearchContent(item.chunk), JSON.stringify(item.vector));
+                }
+            });
+            transaction(results);
+            if (typeof onProgress === 'function') {
+                onProgress({
+                    indexed: Math.min(i + batch.length, chunks.length),
+                    total: chunks.length
+                });
+            }
         }
         recordRagIngest({ status: 'ready', chunks: chunks.length, durationMs: Date.now() - startedAt });
         return chunks.length;
@@ -263,15 +365,48 @@ async function indexDocumentChunks(docId, text) {
     }
 }
 
+async function testEmbeddingConnection(config = {}) {
+    const startedAt = Date.now();
+    try {
+        const httpConfig = {
+            url: config.apiUrl || '',
+            model: config.model || '',
+            apiKey: config.apiKey || ''
+        };
+        const vector = await requestEmbedding('测试向量生成 (智枢 Test Connection)', httpConfig);
+
+        if (!Array.isArray(vector) || vector.length === 0) {
+            throw new Error('生成的向量数据无效');
+        }
+
+        return {
+            success: true,
+            dimension: vector.length,
+            durationMs: Date.now() - startedAt
+        };
+    } catch (e) {
+        logger.error({ err: e.message, config: { ...config, apiKey: config.apiKey ? '***' : '' } }, '向量模型连接测试失败');
+        return {
+            success: false,
+            error: e.message,
+            durationMs: Date.now() - startedAt
+        };
+    }
+}
 module.exports = {
     getEmbeddingConfig,
     generateEmbedding,
+    testEmbeddingConnection,
+    normalizeEmbeddingVector,
+    resolveEmbeddingUrl,
+    buildEmbeddingPayload,
     cosineSimilarity,
     chunkText,
     buildKeywordCandidates,
     buildFtsOrQuery,
     buildRagSearchContent,
     buildRagSearchTerms,
+    debugRetrieveContext,
     retrieveContext,
     indexDocumentChunks
 };

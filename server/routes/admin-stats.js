@@ -6,10 +6,12 @@ const fs = require('fs');
 const net = require('net');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { getHttpMetricsSnapshot } = require('../metrics');
+const { getHttpMetricsSnapshot, getRagMetricsSnapshot } = require('../metrics');
 const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
+const { getMaintenanceStatus } = require('../services/maintenance');
+const { getSystemHealthSnapshot } = require('../services/system-health');
 
 function normalizeHostAlias(value) {
     let host = String(value || '').trim();
@@ -156,13 +158,21 @@ function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
 
 function tokenUsageSubquery() {
     return `
-        SELECT id, user_id, model_id, role, token_count, created_at, 'message' AS usage_source
+        SELECT id, user_id, model_id, role, token_count,
+               CASE WHEN role = 'user' THEN token_count ELSE 0 END AS input_tokens,
+               CASE WHEN role != 'user' THEN token_count ELSE 0 END AS output_tokens,
+               created_at, 'message' AS usage_source
         FROM messages
         UNION ALL
-        SELECT id, user_id, model_id, COALESCE(source, 'api') AS role, token_count, created_at, 'api' AS usage_source
+        SELECT id, user_id, model_id, COALESCE(source, 'api') AS role, token_count,
+               COALESCE(input_tokens, 0) AS input_tokens,
+               COALESCE(output_tokens, 0) AS output_tokens,
+               created_at, 'api' AS usage_source
         FROM model_usage_events
     `;
 }
+
+const isSuperAdmin = (user) => user?.username === 'admin';
 
 function createAdminStatsRouter({
     authMiddleware,
@@ -176,8 +186,47 @@ function createAdminStatsRouter({
 
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const httpMetrics = getHttpMetricsSnapshot();
+        const ragMetrics = getRagMetricsSnapshot();
         const memory = process.memoryUsage();
         const cpu = process.cpuUsage();
+        
+        // 统计 15 分钟内活跃用户
+        const activeUsersCount = db.prepare(`
+            SELECT COUNT(DISTINCT user_id) AS count 
+            FROM audit_logs 
+            WHERE timestamp >= datetime('now', '+8 hours', '-15 minutes')
+        `).get().count || 0;
+
+        // 获取存储统计
+        const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '../../data');
+        const dbFile = path.join(dataDir, 'chat.db');
+        let dbSize = 0;
+        try {
+            if (fs.existsSync(dbFile)) {
+                dbSize += fs.statSync(dbFile).size;
+                const walFile = dbFile + '-wal';
+                if (fs.existsSync(walFile)) dbSize += fs.statSync(walFile).size;
+            }
+        } catch(e) {}
+        
+        const uploadsDir = path.resolve(__dirname, '../../uploads');
+        let uploadsSize = 0;
+        try {
+            if (fs.existsSync(uploadsDir)) {
+                const getDirSizeSync = (dir) => {
+                    let total = 0;
+                    const items = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const item of items) {
+                        const p = path.join(dir, item.name);
+                        if (item.isDirectory()) total += getDirSizeSync(p);
+                        else total += fs.statSync(p).size;
+                    }
+                    return total;
+                };
+                uploadsSize = getDirSizeSync(uploadsDir);
+            }
+        } catch(e) {}
+
         const todayTokens = db.prepare(`
             SELECT COALESCE(SUM(token_count), 0) AS total
             FROM (${tokenUsageSubquery()}) usage
@@ -203,6 +252,9 @@ function createAdminStatsRouter({
         const requestHosts = getRequestHostAliases(req);
         const modelEndpoints = summarizeModelEndpoints({ requestHosts, publicUrl });
         const localNames = getLocalHostnames({ requestHosts, publicUrl });
+        const health = getSystemHealthSnapshot();
+        const maintenance = getMaintenanceStatus();
+        const diskHealth = (health.checks || []).find(item => item.name === 'disk') || {};
         
         // 标记运行时的模型端点是否为本地
         if (Array.isArray(modelEndpoints.runtime)) {
@@ -227,7 +279,9 @@ function createAdminStatsRouter({
                 cpuSeconds: {
                     user: cpu.user / 1e6,
                     system: cpu.system / 1e6
-                }
+                },
+                version: process.version,
+                arch: process.arch
             },
             system: {
                 loadAverage: os.loadavg(),
@@ -236,51 +290,90 @@ function createAdminStatsRouter({
                     free: os.freemem(),
                     used: os.totalmem() - os.freemem()
                 },
+                disk: {
+                    path: diskHealth.path || dataDir,
+                    total: diskHealth.total || 0,
+                    free: diskHealth.free || 0,
+                    used: Math.max(0, Number(diskHealth.total || 0) - Number(diskHealth.free || 0)),
+                    usedRatio: diskHealth.usedRatio || 0,
+                    status: diskHealth.status || 'unknown'
+                },
                 cpuCount: os.cpus().length,
-                platform: os.platform()
+                cpuModel: os.cpus()[0]?.model || '未知',
+                platform: os.platform(),
+                type: os.type(),
+                release: os.release(),
+                arch: os.arch(),
+                hostname: os.hostname(),
+                uptime: os.uptime()
             },
             concurrency,
             gpu,
-            modelEndpoints
+            modelEndpoints,
+            rag: ragMetrics,
+            health,
+            maintenance,
+            storage: {
+                db: dbSize,
+                uploads: uploadsSize,
+                total: dbSize + uploadsSize
+            },
+            activeUsers: activeUsersCount
         });
     }));
-
+    
     router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = req.user.role === 'admin';
+        const canViewAll = isSuperAdmin(req.user);
         const query = `
             SELECT u.username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
-                   SUM(usage.token_count) as total_tokens,
+                   COALESCE(SUM(usage.input_tokens), 0) as input_tokens,
+                   COALESCE(SUM(usage.output_tokens), 0) as output_tokens,
+                   COALESCE(SUM(usage.token_count), 0) as total_tokens,
                    MAX(usage.created_at) as last_active
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models m ON usage.model_id = m.id
-            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
             GROUP BY u.id, usage.model_id
             ORDER BY last_active DESC
         `;
-        const stats = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
+        const stats = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(stats);
     }));
 
     router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = req.user.role === 'admin';
+        const canViewAll = isSuperAdmin(req.user);
         const query = `
             SELECT date(created_at) as day, SUM(token_count) as tokens
             FROM (${tokenUsageSubquery()}) usage
             WHERE created_at >= date('now', '+8 hours', '-30 days')
-            ${isAdmin ? '' : 'AND user_id = ?'}
+            ${canViewAll ? '' : 'AND user_id = ?'}
             GROUP BY day
             ORDER BY day
         `;
-        const trend = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
+        const trend = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         res.json(trend);
     }));
 
     router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const { unit, username, days = 30 } = req.query;
-        let conditions = ["usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
-        let params = [parseInt(days, 10) || 30];
+        const { unit, username, days = 30, start, end } = req.query;
+        let conditions = [];
+        let params = [];
+        if (start || end) {
+            if (start) {
+                conditions.push("date(usage.created_at) >= date(?)");
+                params.push(String(start));
+            }
+            if (end) {
+                conditions.push("date(usage.created_at) <= date(?)");
+                params.push(String(end));
+            }
+        } else {
+            const safeDays = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
+            conditions.push("usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')");
+            params.push(safeDays);
+        }
 
         if (unit) {
             conditions.push("u.unit = ?");
@@ -321,13 +414,13 @@ function createAdminStatsRouter({
     }));
 
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = req.user.role === 'admin';
-        if (isAdmin) {
+        const canViewAll = isSuperAdmin(req.user);
+        if (canViewAll) {
             const uploadDir = path.resolve(__dirname, '../../uploads');
             const dataDir = path.resolve(__dirname, '../../data');
             const summary = {
                 users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
-                activeUsers: db.prepare("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled'").get().count,
+                activeUsers: db.prepare("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled' AND deleted_at IS NULL").get().count,
                 sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
                 messages: db.prepare('SELECT COUNT(*) AS count FROM messages').get().count,
                 attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,
@@ -344,9 +437,9 @@ function createAdminStatsRouter({
             res.json(summary);
         } else {
             const summary = {
-                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(req.user.id).count,
-                messages: db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ?').get(req.user.id).count,
-                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ?').get(req.user.id).count,
+                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
+                messages: db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
+                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
                 models: db.prepare("SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?").get(req.user.id).count,
                 tokens: db.prepare(`
                     SELECT COALESCE(SUM(token_count), 0) AS total
@@ -360,48 +453,85 @@ function createAdminStatsRouter({
     }));
 
     router.get('/details', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = req.user.role === 'admin';
+        const canViewAll = isSuperAdmin(req.user);
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 20;
         const offset = (page - 1) * limit;
 
         const query = `
             SELECT usage.id, usage.created_at, u.username, u.nickname, md.name as model_name,
-                   usage.role, usage.token_count, usage.usage_source
+                   usage.role, usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
-            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
             ORDER BY usage.created_at DESC
             LIMIT ? OFFSET ?
         `;
-        const details = isAdmin ? db.prepare(query).all(limit, offset) : db.prepare(query).all(req.user.id, limit, offset);
+        const details = canViewAll ? db.prepare(query).all(limit, offset) : db.prepare(query).all(req.user.id, limit, offset);
 
-        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery()}) usage ${isAdmin ? '' : 'WHERE user_id = ?'}`;
-        const total = isAdmin ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
+        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery()}) usage ${canViewAll ? '' : 'WHERE user_id = ?'}`;
+        const total = canViewAll ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
         res.json({ data: details, total });
     }));
 
     router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = req.user.role === 'admin';
+        const canViewAll = isSuperAdmin(req.user);
         const query = `
-            SELECT usage.created_at, u.username, u.nickname, md.name as model_name, usage.role, usage.token_count, usage.usage_source
+            SELECT usage.created_at, u.username, u.nickname, md.name as model_name, usage.role,
+                   usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
-            ${isAdmin ? '' : 'WHERE usage.user_id = ?'}
+            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
             ORDER BY usage.created_at DESC LIMIT 10000
         `;
-        const details = isAdmin ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
-        let csv = '\uFEFF时间,用户名,显示名,模型,角色,消耗Token\n';
+        const details = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
+        let csv = '\uFEFF时间,用户名,显示名,模型,角色,输入Token,输出Token,总Token\n';
         details.forEach(d => {
-            const roleLabel = d.usage_source === 'api' ? d.role : (d.role === 'user' ? '提问' : '回答');
-            csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', roleLabel, d.token_count].map(escapeCsvCell).join(',') + '\n';
+            const roleLabel = d.role === 'deleted_session' ? '已删会话' : (d.usage_source === 'api' ? d.role : (d.role === 'user' ? '提问' : '回答'));
+            csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', roleLabel, d.input_tokens || 0, d.output_tokens || 0, d.token_count].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出用量明细', `导出 ${details.length} 条明细`);
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=usage_details.csv');
         res.send(csv);
+    }));
+
+    router.get('/api-call-logs', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '仅 admin 超级管理员可查看第三方 API 调用内容' });
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = Math.min(parseInt(req.query.limit, 10) || 15, 100);
+        const offset = (page - 1) * limit;
+        const keyword = String(req.query.keyword || '').trim();
+        const conditions = [];
+        const params = [];
+        if (keyword) {
+            conditions.push('(u.username LIKE ? OR u.nickname LIKE ? OR l.model_name LIKE ? OR l.request_messages LIKE ? OR l.response_text LIKE ?)');
+            const like = `%${keyword}%`;
+            params.push(like, like, like, like, like);
+        }
+        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const rows = db.prepare(`
+            SELECT l.id, l.created_at, l.model_name, l.status, l.error_message,
+                   l.input_tokens, l.output_tokens, l.total_tokens, l.stream, l.ip_address,
+                   l.request_messages, l.response_text,
+                   u.username, u.nickname, k.name AS api_key_name, k.key_preview
+            FROM api_call_logs l
+            JOIN users u ON u.id = l.user_id
+            LEFT JOIN api_keys k ON k.id = l.api_key_id
+            ${where}
+            ORDER BY l.created_at DESC
+            LIMIT ? OFFSET ?
+        `).all(...params, limit, offset);
+        const total = db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM api_call_logs l
+            JOIN users u ON u.id = l.user_id
+            LEFT JOIN api_keys k ON k.id = l.api_key_id
+            ${where}
+        `).get(...params).count;
+        res.json({ data: rows, total });
     }));
 
 

@@ -37,6 +37,10 @@ function clearRagCacheForUser(userId) {
     }
 }
 
+function clearAllRagCache() {
+    ragCache.clear();
+}
+
 function getRagCacheSnapshot() {
     return {
         enabled: RAG_CACHE_TTL > 0,
@@ -51,5 +55,6 @@ module.exports = {
     getFromCache,
     setToCache,
     clearRagCacheForUser,
+    clearAllRagCache,
     getRagCacheSnapshot
 };

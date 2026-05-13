@@ -5,18 +5,27 @@ window.loadDetails = async function(page = 1) {
     const titleEl = document.getElementById('details-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
-        const res = await fetch(`${API_BASE}/stats/details?page=${page}&limit=10`, { headers: authHeaders() });
+        const res = await fetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
         const { data, total } = await res.json();
-        document.getElementById('details-list-body').innerHTML = data.map((d, i) => `
-            <tr>
-                <td class="text-center">${(page-1)*10 + i + 1}</td>
-                <td>${escapeHtml(formatDateToCN(d.created_at))}</td>
-                <td title="${escapeHtml(d.nickname || d.username)}">${escapeHtml(d.nickname || d.username)}</td>
-                <td title="${escapeHtml(d.model_name || '未知')}">${escapeHtml(d.model_name || '未知')}</td>
-                <td class="text-center">${d.role === 'user' ? '提问' : '回答'}</td>
-                <td>${d.token_count}</td>
-            </tr>
-        `).join('');
+        document.getElementById('details-list-body').innerHTML = data.map((d, i) => {
+            const roleLabel = d.role === 'deleted_session'
+                ? '已删会话'
+                : d.usage_source === 'api'
+                    ? d.role
+                    : (d.role === 'user' ? '提问' : '回答');
+            return `
+                <tr>
+                    <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
+                    <td title="${escapeHtml(formatDateToCN(d.created_at))}">${escapeHtml(formatDateToCN(d.created_at))}</td>
+                    <td title="${escapeHtml(d.nickname || d.username)}">${escapeHtml(d.nickname || d.username)}</td>
+                    <td title="${escapeHtml(d.model_name || '未知')}">${escapeHtml(d.model_name || '未知')}</td>
+                    <td class="text-center" title="${escapeHtml(roleLabel)}">${escapeHtml(roleLabel)}</td>
+                    <td class="text-center" title="${Number(d.input_tokens || 0).toLocaleString()}">${formatTokenCount(d.input_tokens)}</td>
+                    <td class="text-center" title="${Number(d.output_tokens || 0).toLocaleString()}">${formatTokenCount(d.output_tokens)}</td>
+                    <td class="text-center" title="${Number(d.token_count || 0).toLocaleString()}">${formatTokenCount(d.token_count)}</td>
+                </tr>
+            `;
+        }).join('');
         renderPagination('details', total, page);
     } catch (e) { showToast('加载明细失败', 'error'); }
 }
@@ -35,7 +44,9 @@ window.loadStats = async function() {
                 <td title="${escapeHtml(s.nickname || s.username)}">${escapeHtml(s.nickname || s.username)}</td>
                 <td title="${escapeHtml(s.model_name || '未知模型')}">${escapeHtml(s.model_name || '未知模型')}</td>
                 <td class="text-center">${s.msg_count}</td>
-                <td class="text-center">${s.total_tokens.toLocaleString()}</td>
+                <td class="text-center" title="${Number(s.input_tokens || 0).toLocaleString()}">${formatTokenCount(s.input_tokens)}</td>
+                <td class="text-center" title="${Number(s.output_tokens || 0).toLocaleString()}">${formatTokenCount(s.output_tokens)}</td>
+                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)}</td>
                 <td style="color: var(--text-muted); font-size: 0.85rem;">${s.last_active || '-'}</td>
             </tr>
         `).join('');
@@ -82,7 +93,8 @@ function renderTrendChart(canvasId, data) {
     const points = values.map((v, i) => ({
         x: padLeft + (values.length === 1 ? chartW : chartW * i / (values.length - 1)),
         y: padTop + chartH - (v / max) * chartH,
-        label: labels[i]
+        label: labels[i],
+        value: v
     }));
 
     ctx.beginPath();
@@ -96,6 +108,18 @@ function renderTrendChart(canvasId, data) {
 
     ctx.fillStyle = '#10a37f';
     points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    points.forEach(p => {
+        const text = formatTokenCount(p.value);
+        const y = Math.max(14, p.y - 7);
+        const textWidth = ctx.measureText(text).width;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+        ctx.fillRect(p.x - textWidth / 2 - 4, y - 12, textWidth + 8, 14);
+        ctx.fillStyle = '#047857';
+        ctx.fillText(text, p.x, y);
+    });
     const labelCount = Math.min(values.length, Math.max(4, Math.floor(width / 140)));
     const labelIndexes = new Set([0, values.length - 1]);
     if (labelCount > 2) {
@@ -114,7 +138,7 @@ function renderTrendChart(canvasId, data) {
     });
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(String(max), padLeft, 14);
+    ctx.fillText(formatTokenCount(max), padLeft, 14);
 }
 
 window.loadOpsSummary = async function() {
@@ -131,7 +155,9 @@ window.loadOpsSummary = async function() {
             if (v > 1024**2) return `${(v / 1024**2).toFixed(1)} MB`;
             return `${(v / 1024).toFixed(1)} KB`;
         };
-        const cards = summary.isPersonal ? [['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', Number(summary.tokens || 0).toLocaleString()]] : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', Number(summary.tokens || 0).toLocaleString()], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
+        const cards = summary.isPersonal
+            ? [['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)]]
+            : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
         const gridEl = document.getElementById('ops-summary-grid');
         gridEl.style.gridTemplateColumns = `repeat(${cards.length}, 1fr)`;
         gridEl.innerHTML = cards.map(([l, v]) => `<div class="ops-card"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
@@ -167,6 +193,15 @@ const formatMsDuration = (milliseconds) => {
     if (value >= 1000) return `${Math.ceil(value / 1000)} 秒`;
     return `${Math.ceil(value)} ms`;
 };
+
+const formatHealthStatus = (status) => {
+    if (status === 'ok') return '正常';
+    if (status === 'degraded') return '需关注';
+    if (status === 'error') return '异常';
+    return '未知';
+};
+
+const formatMaintenanceTime = (value) => value ? formatDateToCN(value) : '尚未成功';
 
 const describeEndpointMonitor = (monitor = {}) => {
     if (!monitor.configured) return '未配置健康探针';
@@ -284,37 +319,37 @@ window.loadMonitorSummary = async function() {
         if (!res.ok) throw new Error('系统监控加载失败');
         const data = await res.json();
         const memoryUsedRate = data.system.memory.total > 0 ? data.system.memory.used / data.system.memory.total : 0;
+        const disk = data.system.disk || {};
+        const diskUsedRate = Number(disk.usedRatio ?? (disk.total > 0 ? disk.used / disk.total : 0)) || 0;
         const errorRate = (data.http.errorRate || 0) * 100;
         const concurrency = data.concurrency || {};
         const gpu = data.gpu || {};
         const endpoints = data.modelEndpoints || {};
-        const gpuMaxRate = Number(gpu.maxRatio || 0) * 100;
-        const gpuScopeHint = endpoints.hasRemoteModels
-            ? `检测到 ${formatMetricNumber(endpoints.remoteCount)} 个远端模型，本机 GPU 不代表远端负载`
-            : '仅当模型部署在当前服务器时代表模型负载';
+        const health = data.health || {};
+        const maintenance = data.maintenance || {};
         const cards = [
             ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrency.max)}`, `排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`],
-            ['GPU 显存', gpu.available ? `${gpuMaxRate.toFixed(1)}%` : '未检测到', gpu.overloaded ? '保护中，拒绝新请求' : gpuScopeHint],
-            ['今日 Token', formatMetricNumber(data.tokens.today), '累计 ' + formatMetricNumber(data.tokens.total)],
-            ['今日消息', formatMetricNumber(data.tokens.todayMessages), '用户与模型消息总量'],
+            ['今日 Token', formatTokenCount(data.tokens.today), '累计 ' + formatTokenCount(data.tokens.total)],
+            ['今日消息', formatMetricNumber(data.tokens.todayMessages), `15min 活跃用户: ${data.activeUsers}`],
             ['请求总数', formatMetricNumber(data.http.requests), `错误率 ${errorRate.toFixed(2)}%`],
             ['平均延迟', `${formatMetricNumber(data.http.avgLatencyMs, 1)} ms`, `P95 ${formatMetricNumber(data.http.p95LatencyMs, 1)} ms`],
             ['进程内存', formatBytes(data.process.memory.rss), `堆 ${formatBytes(data.process.memory.heapUsed)}`],
-            ['系统负载', data.system.loadAverage.map(v => Number(v).toFixed(2)).join(' / '), `${data.system.cpuCount} 核 CPU`]
+            ['系统负载', data.system.loadAverage.map(v => Number(v).toFixed(2)).join(' / '), `${data.system.cpuCount} 核 CPU`],
+            ['维护任务', maintenance.running ? '运行中' : '未启动', `审计保留 ${maintenance.retentionDays || '-'} 天`]
         ];
         const cardIcons = {
             'AI 并发': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-            'GPU 显存': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>',
             '今日 Token': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
             '今日消息': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
             '请求总数': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
             '平均延迟': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
             '进程内存': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
-            '系统负载': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'
+            '系统负载': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+            '维护任务': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.9 7.9l-6.8 6.8a2.1 2.1 0 0 1-3-3l6.8-6.8a6 6 0 0 1 7.9-7.9l-3.1 3.1z"/></svg>'
         };
 
         document.getElementById('monitor-summary-grid').innerHTML = cards.map(([label, value, hint]) => `
-            <div class="monitor-card${label === 'GPU 显存' && gpu.overloaded ? ' is-warning' : ''}">
+            <div class="monitor-card">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                     <span>${escapeHtml(label)}</span>
                     <span style="opacity: 0.5;">${cardIcons[label] || ''}</span>
@@ -326,40 +361,92 @@ window.loadMonitorSummary = async function() {
 
         const memBarWidth = Math.min(100, Math.round(memoryUsedRate * 100));
         const memBarColor = memBarWidth > 90 ? '#ef4444' : (memBarWidth > 75 ? '#f59e0b' : '#10b981');
+        const diskBarWidth = Math.min(100, Math.round(diskUsedRate * 100));
+        const diskBarColor = diskBarWidth > 90 ? '#ef4444' : (diskBarWidth > 75 ? '#f59e0b' : '#10b981');
 
+        // 恢复详细资源展示 (9行)
         document.getElementById('monitor-resource-list').innerHTML = [
-            ['运行时长', formatDuration(data.process.uptimeSeconds)],
-            ['系统内存', `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                <span>${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${memBarWidth}%)</span>
-                <div style="width: 100px; height: 4px; background: rgba(148, 163, 184, 0.1); border-radius: 2px; overflow: hidden;">
+            ['运行主机', `<strong>${escapeHtml(data.system.hostname)}</strong>`],
+            ['操作系统', `<strong>${escapeHtml(`${data.system.type} ${data.system.release}`)}</strong>`],
+            ['Node 版本', `<strong>${escapeHtml(`${data.process.version} (${data.process.arch})`)}</strong>`],
+            ['CPU 型号', `<strong>${escapeHtml(data.system.cpuModel)}</strong>`],
+            ['系统时长', `<strong>${formatDuration(data.system.uptime)}</strong>`],
+            ['进程时长', `<strong>${formatDuration(data.process.uptimeSeconds)}</strong>`],
+            ['系统内存', `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 1; min-width: 0;">
+                <strong style="font-size: 0.8rem; white-space: nowrap;">${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${memBarWidth}%)</strong>
+                <div style="width: 100%; max-width: 120px; height: 4px; background: rgba(148, 163, 184, 0.1); border-radius: 2px; overflow: hidden;">
                     <div style="width: ${memBarWidth}%; height: 100%; background: ${memBarColor}; transition: width 0.5s ease;"></div>
                 </div>
             </div>`],
-            ['进程 CPU', `${data.process.cpuSeconds.user.toFixed(2)}s 用户 / ${data.process.cpuSeconds.system.toFixed(2)}s 系统`],
-            ['运行平台', data.system.platform]
-        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span><strong>${v}</strong></div>`).join('');
+            ['硬盘空间', `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 1; min-width: 0;" title="${escapeHtml(disk.path || '')}">
+                <strong style="font-size: 0.8rem; white-space: nowrap;">${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)</strong>
+                <div style="width: 100%; max-width: 120px; height: 4px; background: rgba(148, 163, 184, 0.1); border-radius: 2px; overflow: hidden;">
+                    <div style="width: ${diskBarWidth}%; height: 100%; background: ${diskBarColor}; transition: width 0.5s ease;"></div>
+                </div>
+            </div>`],
+            ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free)}</strong>`],
+            ['进程 CPU', `<strong>${data.process.cpuSeconds.user.toFixed(1)}s U / ${data.process.cpuSeconds.system.toFixed(1)}s S</strong>`],
+            ['运行平台', `<strong>${escapeHtml(data.system.platform)}</strong>`]
+        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join('');
+
+        const healthEl = document.getElementById('monitor-health-maintenance-list');
+        if (healthEl) {
+            const HEALTH_NAME_MAP = {
+                'database': '数据库连接',
+                'dataDir': '数据目录',
+                'uploadsDir': '附件目录',
+                'memory': '系统内存',
+                'disk': '磁盘空间',
+                'api': '接口可用性',
+                'cache': '缓存服务'
+            };
+            const healthRows = (health.checks || []).map(item => {
+                const cls = item.status === 'ok' ? '' : ' is-warning';
+                const displayName = HEALTH_NAME_MAP[item.name] || item.name;
+                return `<div class="monitor-row${cls}">
+                    <span title="${escapeHtml(item.message || '')}">${escapeHtml(displayName)}</span>
+                    <strong>${escapeHtml(formatHealthStatus(item.status))}</strong>
+                </div>`;
+            });
+            const maintenanceRows = [
+                ['审计清理', `${formatMaintenanceTime(maintenance.auditCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.auditCleanup?.lastChanges || 0)} 条`],
+                ['API 日志清理', `${formatMaintenanceTime(maintenance.apiCallLogCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`],
+                ['令牌清理', `${formatMaintenanceTime(maintenance.refreshTokenCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`],
+                ['SQLite 优化', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
+            ].map(([label, value]) => `<div class="monitor-row">
+                <span>${escapeHtml(label)}</span>
+                <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
+            </div>`);
+            healthEl.innerHTML = [...healthRows, ...maintenanceRows].join('');
+        }
+
+        let endpointNotice = '';
+        if (endpoints.hasRemoteModels) {
+            const remoteNames = (endpoints.remoteModels || []).map(m => m.name).join('、');
+            const localNames = (endpoints.localModels || []).map(m => m.name).join('、');
+            let msg = `<strong>集群模式：</strong>检测到远端模型（${escapeHtml(remoteNames)}）`;
+            if (localNames) {
+                msg += `，本机运行模型（${escapeHtml(localNames)}），本机指标仅供本机模型参考。`;
+            } else {
+                msg += `，本机指标仅供参考。`;
+            }
+            endpointNotice = `<div class="monitor-empty is-info" style="padding: 6px 12px; font-size: 0.78rem;">${msg}</div>`;
+        } else if (endpoints.hasLocalModels) {
+            endpointNotice = '<div class="monitor-empty" style="color: #059669; background: #f0fdf4; border: 1px solid rgba(5, 150, 105, 0.1); border-radius: 8px; padding: 6px 12px; font-size: 0.78rem;"><strong>本地模式：</strong>模型部署在本地，数据真实。</div>';
+        } else {
+            endpointNotice = '<div class="monitor-empty" style="padding: 6px 0;">未检测到活跃端点。</div>';
+        }
 
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
             ? gpu.gpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
-                const utilRate = Number(item.utilization || 0) * 100;
                 const gpuName = item.name || 'GPU';
                 return `<div class="monitor-row">
                     <span title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
-                    <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(1)}%，负载 ${utilRate.toFixed(0)}%)`)}</strong>
+                    <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${usedRate.toFixed(0)}%`)}</strong>
                 </div>`;
             }).join('')
-            : `<div class="monitor-empty is-warning" style="margin-top: 8px;">${escapeHtml(gpu.error ? `未获取到 GPU 指标：${gpu.error}` : '未检测到 NVIDIA GPU 指标')}</div>`;
-        
-        let endpointNotice = '';
-        if (endpoints.hasRemoteModels) {
-            const remoteList = (endpoints.remoteModels || []).map(item => `${item.name}@${item.host}`).join('，');
-            endpointNotice = `<div class="monitor-empty is-warning">检测到远端模型：${escapeHtml(remoteList || '未列出')}。本机 GPU 指标仅代表 Pivot 所在服务器；并发保护只限制本系统发出的请求数。</div>`;
-        } else if (endpoints.hasLocalModels) {
-            endpointNotice = '<div class="monitor-empty is-success" style="color: #059669; background: #f0fdf4; border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 8px; padding: 8px;">已确认模型服务部署在本地，GPU 与并发监控数据代表端点真实负载。</div>';
-        } else {
-            endpointNotice = '<div class="monitor-empty">未检测到活跃的模型端点。</div>';
-        }
+            : `<div class="monitor-empty is-warning" style="margin-top: 6px; padding: 6px 12px; font-size: 0.78rem;"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
 
         document.getElementById('monitor-gpu-list').innerHTML = [
             endpointNotice,
@@ -382,10 +469,23 @@ window.loadMonitorSummary = async function() {
                 const modelName = item.model_name || '未知模型';
                 return `<div class="monitor-row">
                     <span title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>
-                    <strong>${formatMetricNumber(item.tokens)}</strong>
+                    <strong title="${Number(item.tokens || 0).toLocaleString()} Tokens">${formatTokenCount(item.tokens)}</strong>
                 </div>`;
             }).join('')
             : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
+
+        // 4. 数据与知识库渲染
+        const ragStorageEl = document.getElementById('monitor-rag-storage-list');
+        if (ragStorageEl) {
+            ragStorageEl.innerHTML = [
+                ['检索总数', `<strong>${formatMetricNumber(data.rag.retrievals)} 次</strong>`],
+                ['命中率', `<strong>${(data.rag.cacheHitRate * 100).toFixed(1)}%</strong>`],
+                ['平均耗时', `<strong>${data.rag.avgRetrievalMs.toFixed(1)} ms</strong>`],
+                ['索引分片', `<strong>${formatMetricNumber(data.rag.chunksIndexed)}</strong>`],
+                ['数据库大小', `<strong>${formatBytes(data.storage.db)}</strong>`],
+                ['附件总存储', `<strong>${formatBytes(data.storage.uploads)}</strong>`]
+            ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join('');
+        }
 
         const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
         const endpointListEl = document.getElementById('monitor-endpoint-list');
@@ -413,7 +513,7 @@ window.loadMonitorSummary = async function() {
         }
 
         const routes = data.http.routes || [];
-        document.getElementById('monitor-routes-body').innerHTML = routes.length
+        const routesHtml = routes.length
             ? routes.map((route, idx) => {
                 const purePath = (route.route || '').split('?')[0].trim().toLowerCase();
                 let name = ROUTE_NAME_MAP[purePath] || ROUTE_NAME_MAP[route.route.trim().toLowerCase()];
@@ -426,14 +526,17 @@ window.loadMonitorSummary = async function() {
                 <tr>
                     <td class="text-center">${idx + 1}</td>
                     <td title="${escapeHtml(name)}">${escapeHtml(name)}</td>
-                    <td>${escapeHtml(route.method)}</td>
+                    <td class="text-center">${escapeHtml(route.method)}</td>
                     <td title="${escapeHtml(route.route)}">${escapeHtml(route.route)}</td>
                     <td class="text-center">${escapeHtml(route.status)}</td>
-                    <td>${formatMetricNumber(route.requests)}</td>
-                    <td>${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
+                    <td class="text-center">${formatMetricNumber(route.requests)}</td>
+                    <td class="text-center">${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
                 </tr>
             `}).join('')
-            : '<tr><td colspan="8" class="text-center">暂无请求数据</td></tr>';
+            : '<tr><td colspan="7" class="text-center">暂无请求数据</td></tr>';
+
+        const modalBody = document.getElementById('monitor-routes-modal-body');
+        if (modalBody) modalBody.innerHTML = routesHtml;
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();
@@ -453,9 +556,17 @@ function scheduleMonitorRefresh() {
 
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
 
+window.openMonitorRoutesModal = () => {
+    document.getElementById('monitor-routes-modal')?.classList.remove('hidden');
+};
+
+window.closeMonitorRoutesModal = () => {
+    document.getElementById('monitor-routes-modal')?.classList.add('hidden');
+};
+
 window.exportStats = () => {
     const rows = Array.from(document.querySelectorAll('#stats-list-body tr'));
-    let csv = '\uFEFF用户,显示名,模型,消息数,总Token,最后活动\n';
+    let csv = '\uFEFF用户,显示名,模型,消息数,输入Token,输出Token,总Token,最后活动\n';
     rows.forEach(row => { 
         const tds = Array.from(row.querySelectorAll('td')).slice(1); // 跳过序号列
         csv += tds.map(td => escapeCsvValue(td.innerText)).join(',') + '\n'; 
@@ -492,8 +603,8 @@ window.loadLogs = async function(page = 1) {
                 <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
                 <td title="${escapeHtml(l.username || '系统')}">${escapeHtml(l.username || '系统')}</td>
                 <td>${escapeHtml(l.ip_address || '-')}</td>
-                <td><strong>${escapeHtml(l.action)}</strong></td>
-                <td>${escapeHtml(l.details)}</td>
+                <td title="${escapeHtml(l.action)}"><strong>${escapeHtml(l.action)}</strong></td>
+                <td title="${escapeHtml(l.details || '')}">${escapeHtml(l.details || '')}</td>
             </tr>
         `).join('');
         renderPagination('logs', total, page);
@@ -521,12 +632,25 @@ window.exportLogs = () => {
 };
 
 window.loadReport = async function() {
+    window.bindReportDateFilters?.();
+    window.syncReportDateFilters?.();
     const unit = document.getElementById('report-unit').value || '';
     const username = document.getElementById('report-username').value || '';
-    const days = document.getElementById('report-days').value || 30;
+    const period = document.getElementById('report-days').value || '30';
+    const start = document.getElementById('report-start')?.value || '';
+    const end = document.getElementById('report-end')?.value || '';
+    const params = new URLSearchParams({ unit, username });
+    if (period === 'custom') {
+        if (!start || !end) return showToast('请选择自定义开始和结束日期', 'error');
+        if (start > end) return showToast('开始日期不能晚于结束日期', 'error');
+        params.set('start', start);
+        params.set('end', end);
+    } else {
+        params.set('days', period);
+    }
 
     try {
-        const res = await fetch(`${API_BASE}/stats/report?unit=${encodeURIComponent(unit)}&username=${encodeURIComponent(username)}&days=${days}`, { headers: authHeaders() });
+        const res = await fetch(`${API_BASE}/stats/report?${params.toString()}`, { headers: authHeaders() });
         const data = await res.json();
         
         // 动态填充部门下拉框
@@ -546,6 +670,40 @@ window.loadReport = async function() {
     } catch (e) {
         showToast('加载报表失败', 'error');
     }
+}
+
+window.syncReportDateFilters = function() {
+    const period = document.getElementById('report-days')?.value || '30';
+    document.getElementById('report-custom-range')?.classList.toggle('hidden', period !== 'custom');
+}
+
+window.bindReportDateFilters = function() {
+    const periodSelect = document.getElementById('report-days');
+    if (periodSelect && periodSelect.dataset.boundReportRange !== '1') {
+        periodSelect.dataset.boundReportRange = '1';
+        periodSelect.addEventListener('change', () => window.syncReportDateFilters());
+    }
+    const resetBtn = document.getElementById('report-reset-btn');
+    if (resetBtn && resetBtn.dataset.boundReportReset !== '1') {
+        resetBtn.dataset.boundReportReset = '1';
+        resetBtn.addEventListener('click', window.resetReportFilters);
+    }
+    window.syncReportDateFilters();
+}
+
+window.resetReportFilters = function() {
+    const unit = document.getElementById('report-unit');
+    const username = document.getElementById('report-username');
+    const period = document.getElementById('report-days');
+    const start = document.getElementById('report-start');
+    const end = document.getElementById('report-end');
+    if (unit) unit.value = '';
+    if (username) username.value = '';
+    if (period) period.value = '30';
+    if (start) start.value = '';
+    if (end) end.value = '';
+    window.syncReportDateFilters?.();
+    window.loadReport?.();
 }
 
 function renderBarChart(canvasId, data, labelField, fallbackField) {
@@ -616,6 +774,6 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         // 数值绘制
         ctx.textAlign = 'left';
         ctx.fillStyle = '#6b7280';
-        ctx.fillText(v.toLocaleString(), padX + barWidth + 8, y);
+        ctx.fillText(formatTokenCount(v), padX + barWidth + 8, y);
     });
 }

@@ -17,9 +17,11 @@
     <link rel="stylesheet" href="/common/vendor/katex.min.css">
     <script src="/common/vendor/katex.min.js"></script>
     <link rel="icon" type="image/png" href="/favicon.png">
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/manifest.json?v=__APP_VERSION__">
     <meta name="theme-color" content="#3b82f6">
-    <script>window.APP_VERSION_TAG = "__APP_VERSION__";</script>
+    <script>
+        window.APP_VERSION_TAG = "__APP_VERSION__";
+    </script>
 </head>
 
 <body class="light-mode">
@@ -114,14 +116,28 @@
             <div class="model-form">
                 <input type="hidden" id="m-id">
                 <div class="form-item">
+                    <label>接口地址 (Endpoint)</label>
+                    <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
+                </div>
+                <div class="form-item">
+                    <label>API Key (可选)</label>
+                    <div style="position: relative;">
+                        <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
+                            style="padding-right: 45px;">
+                        <button type="button" class="btn-toggle-pw" onclick="toggleKeyVisibility()" title="显示/隐藏明文">
+                            <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-item">
                     <label>模型展示名称</label>
                     <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
                 </div>
                 <div class="form-item">
-                    <label>接口地址 (Endpoint)</label>
-                    <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
-                </div>
-                <div class="form-item model-id-item">
                     <label>模型标识 (Model ID)</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
@@ -141,63 +157,66 @@
                             style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
                     </div>
                 </div>
+                <div class="form-item model-full-row">
+                    <label>可见部门</label>
+                    <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                </div>
                 <div class="model-form-row">
                     <div class="form-item">
                         <label>每日额度 (Token)</label>
-                        <input type="number" id="m-daily-limit" class="form-input" min="0" step="1000"
-                            placeholder="0 表示不限">
+                        <input type="text" id="m-daily-limit" class="form-input"
+                            placeholder="0 表示不限，可填 8K / 1M">
                     </div>
-                    <div class="form-item">
-                        <label>可见部门</label>
-                        <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
-                    </div>
-                </div>
-                <div class="model-form-row">
                     <div class="form-item">
                         <label>Temperature (温度)</label>
                         <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
                             placeholder="留空使用默认">
                     </div>
-                    <div class="form-item">
-                        <label>Max Tokens (最大长度)</label>
-                        <input type="number" id="m-max-tokens" class="form-input" min="1" step="1024"
-                            placeholder="留空使用默认">
-                    </div>
                 </div>
                 <div class="model-form-row">
                     <div class="form-item">
-                        <label>端点并发上限</label>
-                        <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
-                            placeholder="0 使用系统默认">
+                        <label>输入 Token 上限</label>
+                        <input type="text" id="m-max-input-tokens" class="form-input"
+                            placeholder="留空使用默认，可填 128K">
                     </div>
+                    <div class="form-item">
+                        <label>输出 Token 上限</label>
+                        <input type="text" id="m-max-tokens" class="form-input"
+                            placeholder="留空使用默认，可填 8K">
+                    </div>
+                </div>
+                <div class="model-form-row">
                     <div class="form-item">
                         <label>远端健康检查 URL</label>
                         <input type="text" id="m-monitor-url" class="form-input"
                             placeholder="例如: http://10.0.0.8:8000/health">
                     </div>
-                </div>
-                <div class="form-item model-capability-row">
-                    <div>
-                        <label>视觉输入（图片/扫描件）</label>
-                        <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                    <div class="form-item">
+                        <label>端点并发上限</label>
+                        <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
+                            placeholder="0 使用系统默认">
                     </div>
-                    <label class="switch" title="视觉输入（图片/扫描件）">
-                        <input type="checkbox" id="m-supports-vision">
-                        <span class="switch-slider"></span>
-                    </label>
                 </div>
-                <div class="form-item">
-                    <label>API Key (可选)</label>
-                    <div style="position: relative;">
-                        <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
-                            style="padding-right: 45px;">
-                        <button type="button" class="btn-toggle-pw" onclick="toggleKeyVisibility()" title="显示/隐藏明文">
-                            <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                <circle cx="12" cy="12" r="3" />
-                            </svg>
-                        </button>
+                <div class="model-form-row">
+                    <div class="form-item model-capability-row">
+                        <div>
+                            <label>思考模型</label>
+                            <small>开启后，该模型会在列表与选择器中标记为支持推理/思考输出。</small>
+                        </div>
+                        <label class="switch" title="思考模型">
+                            <input type="checkbox" id="m-supports-reasoning">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="form-item model-capability-row">
+                        <div>
+                            <label>视觉输入（图片/扫描件）</label>
+                            <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                        </div>
+                        <label class="switch" title="视觉输入（图片/扫描件）">
+                            <input type="checkbox" id="m-supports-vision">
+                            <span class="switch-slider"></span>
+                        </label>
                     </div>
                 </div>
                 <div class="model-modal-actions">
@@ -253,6 +272,53 @@
                     <button id="modal-user-cancel" class="btn-secondary">取消</button>
                     <button id="modal-user-save" class="btn-primary">保存用户</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 超级管理员用户输入输出记录 -->
+    <div id="user-records-modal" class="modal-overlay hidden" style="z-index: 5300;">
+        <div class="modal user-records-modal">
+            <div class="user-records-panel">
+                <div class="user-records-header">
+                    <div>
+                        <h3>用户输入输出记录</h3>
+                        <p id="user-records-title" class="model-modal-desc"></p>
+                    </div>
+                    <div class="user-records-toolbar">
+                        <select id="user-record-session-select" class="form-input">
+                            <option value="">全部会话</option>
+                        </select>
+                        <label class="user-records-check">
+                            <input type="checkbox" id="user-record-include-deleted" checked>
+                            <span>包含已删除</span>
+                        </label>
+                        <button id="user-record-refresh-btn" class="btn-secondary">刷新</button>
+                        <button type="button" class="btn-danger-outline user-records-header-close"
+                            onclick="window.closeUserRecordsModal()" title="关闭弹窗">关闭</button>
+                    </div>
+                </div>
+                <div class="table-container user-records-table-wrap">
+                    <table class="data-table compact-table user-records-table">
+                        <thead>
+                            <tr>
+                                <th class="col-time">时间</th>
+                                <th class="col-session">会话</th>
+                                <th class="col-model">模型</th>
+                                <th class="col-token">输入 Token</th>
+                                <th class="col-token">输出 Token</th>
+                                <th class="col-content">用户输入</th>
+                                <th class="col-content">模型输出</th>
+                            </tr>
+                        </thead>
+                        <tbody id="user-records-body">
+                            <tr>
+                                <td colspan="7" class="text-center">请选择用户查看记录</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="pagination-userRecords" class="pagination"></div>
             </div>
         </div>
     </div>
@@ -414,7 +480,6 @@
     <!-- 管理与配置面板 (符合第39条复用规范) -->
     <div id="admin-container" class="modal-overlay hidden">
         <div class="modal admin-panel">
-            <button id="admin-modal-close" class="modal-close-btn">&times;</button>
             <div class="admin-layout">
                 <nav class="admin-sidebar">
                     <div class="sidebar-brand">
@@ -427,8 +492,7 @@
                     <button id="tab-prompts" class="admin-tab">指令中心</button>
                     <button id="tab-attachments" class="admin-tab">附件库</button>
                     <button id="tab-labs" class="admin-tab admin-only hidden">实验室功能</button>
-                    <button id="tab-knowledge" class="admin-tab hidden">知识管理
-                        (RAG)</button>
+                    <button id="tab-knowledge" class="admin-tab hidden">知识库</button>
                     <button id="tab-users" class="admin-tab admin-only hidden">用户管理</button>
                     <button id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
                     <button id="tab-monitor" class="admin-tab admin-only hidden">系统监控</button>
@@ -438,6 +502,7 @@
                     <button id="tab-keys" class="admin-tab">API 接入</button>
                     <button id="tab-account" class="admin-tab">账户安全</button>
                     <div style="flex: 1;"></div>
+                    <button id="admin-modal-close" class="btn-secondary settings-panel-close">关闭设置</button>
 
                 </nav>
 
@@ -492,6 +557,12 @@
                                 <div class="lab-card-body">
                                     <h4>RAG 知识库检索</h4>
                                     <p>开启后管理员和用户可以上传知识库文档，后端会自动进行分片与向量化处理，实现基于私有文档的 AI 问答能力。</p>
+                                    <div class="rag-config-grid">
+                                        <label>相似度阈值<input type="number" id="setting-rag-score-threshold" class="form-input" min="0" max="1" step="0.05"></label>
+                                        <label>命中数量<input type="number" id="setting-rag-top-k" class="form-input" min="1" max="10" step="1"></label>
+                                        <label>候选数量<input type="number" id="setting-rag-candidate-limit" class="form-input" min="20" max="1000" step="10"></label>
+                                    </div>
+                                    <button id="rag-config-save-btn" class="btn-secondary" style="margin-top: 10px; width: 100%;">保存 RAG 参数</button>
                                 </div>
                             </div>
 
@@ -512,7 +583,7 @@
                     </section>
 
                     <!-- 附件库 -->
-                    <section id="tab-content-attachments" class="admin-tab-content hidden">
+                    <section id="tab-content-attachments" class="admin-tab-content attachments-tab hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3>附件库</h3>
@@ -524,6 +595,7 @@
                                 <thead>
                                     <tr>
                                         <th style="width: 60px;" class="text-center">序号</th>
+                                        <th id="attachment-user-header" style="width: 120px;" class="hidden">用户</th>
                                         <th style="width: 320px;">文件名</th>
                                         <th style="width: 170px;">关联会话</th>
                                         <th style="width: 130px;">文件类型</th>
@@ -574,17 +646,37 @@
                             <h3>知识库文档管理</h3>
                             <div class="footer-actions" style="margin-bottom: 0;">
                                 <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf">
+                                <button id="rag-embedding-modal-open-btn" class="btn-secondary">向量配置</button>
+                                <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
+                                <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                                <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
+                                <button id="rag-batch-delete-btn" class="btn-secondary">批量删除</button>
+                                <button id="rag-retry-failed-btn" class="btn-secondary">重试失败</button>
                                 <button id="rag-upload-btn" class="btn-primary">上传文档</button>
                             </div>
                         </div>
+                        <div id="rag-summary" class="rag-summary"></div>
+                        <div class="rag-debug-panel">
+                            <input id="rag-debug-query" class="form-input" placeholder="输入问题测试知识库召回">
+                            <input id="rag-debug-score-threshold" class="form-input rag-debug-param" type="number" min="0" max="1" step="0.05" title="临时相似度阈值">
+                            <input id="rag-debug-top-k" class="form-input rag-debug-param" type="number" min="1" max="10" step="1" title="临时命中数量">
+                            <input id="rag-debug-candidate-limit" class="form-input rag-debug-param" type="number" min="20" max="1000" step="10" title="临时候选数量">
+                            <button id="rag-debug-btn" class="btn-secondary">测试召回</button>
+                        </div>
+                        <div id="rag-debug-results" class="rag-debug-results hidden"></div>
                         <div class="table-container">
                             <table class="data-table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all"></th>
                                         <th style="width: auto;">文档名称</th>
                                         <th style="width: 120px;">状态</th>
+                                        <th style="width: 90px;" class="text-center">启用</th>
+                                        <th style="width: 90px;" class="text-center">分块</th>
+                                        <th style="width: 90px;" class="text-center">进度</th>
                                         <th style="width: 150px;">上传时间</th>
-                                        <th style="width: 100px;">操作</th>
+                                        <th style="width: 150px;">更新时间</th>
+                                        <th style="width: 210px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="rag-docs-body"></tbody>
@@ -617,7 +709,7 @@
                                         <th style="width: 70px;">状态</th>
                                         <th style="width: 160px;">注册时间</th>
                                         <th style="width: 160px;">最后登录</th>
-                                        <th style="width: 160px;" class="text-center">操作</th>
+                                        <th style="width: 220px;" class="text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="user-list-body"></tbody>
@@ -627,7 +719,7 @@
                     </div>
 
                     <!-- 审计日志 -->
-                    <div id="tab-content-logs" class="admin-tab-content hidden">
+                    <div id="tab-content-logs" class="admin-tab-content audit-log-tab hidden">
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3>审计日志</h3>
@@ -701,15 +793,17 @@
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3>系统监控</h3>
-                            <div style="display: flex; gap: 16px; align-items: center;">
+                            <div style="display: flex; gap: 12px; align-items: center;">
                                 <p id="monitor-updated-at"
                                     style="margin: 0; color: var(--text-muted); font-size: 0.82rem;">等待刷新</p>
                                 <label
-                                    style="display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.85rem;">
+                                    style="display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.85rem; margin-right: 4px;">
                                     <input type="checkbox" id="monitor-auto-refresh" checked>
                                     自动刷新
                                 </label>
-                                <button id="monitor-refresh-btn" class="btn-secondary">刷新</button>
+                                <button class="btn-primary" onclick="window.openMonitorRoutesModal()"
+                                    style="height: 32px; font-size: 0.82rem; padding: 0 14px;">接口详情</button>
+                                <button id="monitor-refresh-btn" class="btn-secondary" style="height: 32px;">刷新</button>
                             </div>
                         </div>
                         <div id="monitor-summary-grid" class="monitor-grid"></div>
@@ -723,27 +817,16 @@
                                 <div id="monitor-resource-list" class="monitor-list"></div>
                             </div>
                             <div class="stat-card">
+                                <h4>健康与维护</h4>
+                                <div id="monitor-health-maintenance-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card">
                                 <h4>今日模型 Token</h4>
                                 <div id="monitor-model-list" class="monitor-list"></div>
                             </div>
-                        </div>
-                        <div class="stat-card" style="margin-top: 20px;">
-                            <h4>热点接口</h4>
-                            <div class="table-container" style="max-height: 480px;">
-                                <table class="data-table compact-table">
-                                    <thead>
-                                        <tr>
-                                            <th style="width: 60px;" class="text-center">序号</th>
-                                            <th style="width: 130px;">接口名称</th>
-                                            <th style="width: 70px;">方法</th>
-                                            <th>路由地址</th>
-                                            <th style="width: 70px;">状态</th>
-                                            <th style="width: 100px;">请求数</th>
-                                            <th style="width: 120px;">平均延迟</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="monitor-routes-body"></tbody>
-                                </table>
+                            <div class="stat-card">
+                                <h4>知识库与存储</h4>
+                                <div id="monitor-rag-storage-list" class="monitor-list"></div>
                             </div>
                         </div>
                     </section>
@@ -753,7 +836,7 @@
                         <div
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3>审计报表</h3>
-                            <div style="display: flex; gap: 10px;">
+                            <div class="report-filter-bar">
                                 <select id="report-unit" class="form-input"
                                     style="width: 180px; padding: 6px 12px; height: 36px;">
                                     <option value="">所有部门</option>
@@ -761,12 +844,27 @@
                                 <input type="text" id="report-username" class="form-input" placeholder="搜索用户"
                                     style="width: 140px; padding: 6px 12px; height: 36px;">
                                 <select id="report-days" class="form-input"
-                                    style="width: 120px; padding: 6px 12px; height: 36px;">
+                                    style="width: 128px; padding: 6px 12px; height: 36px;">
+                                    <option value="1">今天</option>
+                                    <option value="3">近 3 天</option>
                                     <option value="7">近 7 天</option>
+                                    <option value="14">近 14 天</option>
                                     <option value="30" selected>近 30 天</option>
                                     <option value="90">近 90 天</option>
+                                    <option value="180">近半年</option>
                                     <option value="365">近 1 年</option>
+                                    <option value="730">近 2 年</option>
+                                    <option value="custom">自定义</option>
                                 </select>
+                                <div id="report-custom-range" class="report-custom-range hidden">
+                                    <input type="date" id="report-start" class="form-input"
+                                        style="width: 132px; padding: 6px 10px; height: 36px;">
+                                    <span>至</span>
+                                    <input type="date" id="report-end" class="form-input"
+                                        style="width: 132px; padding: 6px 10px; height: 36px;">
+                                </div>
+                                <button id="report-reset-btn" class="btn-secondary" style="height: 36px;"
+                                    onclick="window.resetReportFilters?.()">重置</button>
                                 <button id="report-query-btn" class="btn-primary" style="height: 36px;">生成报表</button>
                             </div>
                         </div>
@@ -802,6 +900,8 @@
                                         <th style="width: 140px;">显示名</th>
                                         <th style="width: 160px;">模型</th>
                                         <th style="width: 80px;" class="text-center">消息数</th>
+                                        <th style="width: 110px;" class="text-center">输入 Token</th>
+                                        <th style="width: 110px;" class="text-center">输出 Token</th>
                                         <th style="width: 110px;" class="text-center">总 Token</th>
                                         <th style="width: auto;">最后活动</th>
                                     </tr>
@@ -827,7 +927,9 @@
                                         <th style="width: 130px;">用户</th>
                                         <th style="width: 160px;">模型</th>
                                         <th style="width: 100px;" class="text-center">角色</th>
-                                        <th style="width: auto;">消耗 Token</th>
+                                        <th style="width: 120px;" class="text-center">输入 Token</th>
+                                        <th style="width: 120px;" class="text-center">输出 Token</th>
+                                        <th style="width: auto;" class="text-center">总 Token</th>
                                     </tr>
                                 </thead>
                                 <tbody id="details-list-body"></tbody>
@@ -836,13 +938,12 @@
                         <div id="pagination-details" class="pagination"></div>
                     </div>
 
-                    <section id="tab-content-account" class="admin-tab-content hidden">
+                    <section id="tab-content-account" class="admin-tab-content account-security-tab hidden">
                         <div style="margin-bottom: 20px; text-align: left;">
                             <h3>账户安全</h3>
                         </div>
-                        <div class="settings-list"
-                            style="display: flex; flex-direction: column; gap: 20px; align-items: center;">
-                            <div class="stat-card" style="width: 100%; max-width: 500px; padding: 25px;">
+                        <div class="settings-list account-security-wrap">
+                            <div class="stat-card account-security-card">
                                 <h4 style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                         stroke-width="2">
@@ -887,11 +988,16 @@
                                         </svg>
                                         我的 API Key
                                     </h4>
-                                    <button id="create-key-btn" class="btn-primary"
-                                        style="padding: 4px 12px; font-size: 0.8rem; height: 32px;">新建密钥</button>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <button id="api-call-logs-open-btn" class="btn-secondary super-admin-only hidden"
+                                            style="padding: 4px 12px; font-size: 0.8rem; height: 32px;"
+                                            title="查看第三方 API 调用的输入、输出与 Token 明细">API 调用记录</button>
+                                        <button id="create-key-btn" class="btn-primary"
+                                            style="padding: 4px 12px; font-size: 0.8rem; height: 32px;">新建密钥</button>
+                                    </div>
                                 </div>
                                 <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">你可以生成 API
-                                    Key 用于在第三方应用（如沉浸式翻译、NextChat 等）中调用本系统的模型能力。支持 OpenAI 标准格式调用。</p>
+                                    Key 用于在第三方应用中调用本系统的模型能力。支持 OpenAI 标准格式调用。</p>
                                 <div class="table-container"
                                     style="border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px;">
                                     <table class="data-table compact-table">
@@ -900,7 +1006,9 @@
                                                 <th style="width: 60px;" class="text-center">序号</th>
                                                 <th>名称</th>
                                                 <th style="width: 200px;">密钥 (脱敏)</th>
-                                                <th style="width: 130px;">已用额度</th>
+                                                <th style="width: 120px;">输入 Token</th>
+                                                <th style="width: 120px;">输出 Token</th>
+                                                <th style="width: 120px;">总 Token</th>
                                                 <th style="width: 160px;">创建时间</th>
                                                 <th style="width: 160px;">最后使用</th>
                                                 <th style="width: 80px;" class="text-center">操作</th>
@@ -908,7 +1016,7 @@
                                         </thead>
                                         <tbody id="api-keys-body">
                                             <tr>
-                                                <td colspan="6" class="text-center"
+                                                <td colspan="9" class="text-center"
                                                     style="padding: 30px; color: var(--text-muted);">正在加载...</td>
                                             </tr>
                                         </tbody>
@@ -931,7 +1039,6 @@
                                     </div>
                                 </div>
                             </div>
-                            </div>
                         </div>
                     </section>
                 </main>
@@ -948,9 +1055,54 @@
     <!-- 页面逻辑 -->
 
     <!-- API Key 创建/显示弹窗 -->
+
+    <div id="api-call-logs-modal" class="modal-overlay hidden" style="z-index: 5200;">
+        <div class="modal api-call-logs-modal">
+            <div id="api-call-logs-card" class="api-call-logs-panel" style="padding: 22px;">
+                <div
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                    <h4 style="margin: 0;">第三方 API 调用记录</h4>
+                    <div class="api-call-logs-toolbar">
+                        <input id="api-call-log-search" class="form-input" placeholder="搜索用户 / 模型 / 内容"
+                            style="width: 220px; height: 34px; margin: 0; padding: 5px 10px; font-size: 0.86rem;">
+                        <button type="button" class="btn-secondary api-call-logs-header-close"
+                            onclick="window.closeApiCallLogsModal()" title="关闭弹窗">关闭</button>
+                    </div>
+                </div>
+                <div class="table-container api-call-logs-table-wrap"
+                    style="border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px;">
+                    <table class="data-table compact-table api-call-logs-table">
+                        <thead>
+                            <tr>
+                                <th class="text-center col-index">序号</th>
+                                <th class="col-time">时间</th>
+                                <th class="col-user">用户</th>
+                                <th class="col-key">API Key</th>
+                                <th class="col-model">模型</th>
+                                <th class="text-center col-token">输入</th>
+                                <th class="text-center col-token">输出</th>
+                                <th class="col-content">请求内容</th>
+                                <th class="col-content">响应内容</th>
+                                <th class="text-center col-status">状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="api-call-logs-body">
+                            <tr>
+                                <td colspan="10" class="text-center"
+                                    style="padding: 28px; color: var(--text-muted);">正在加载...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="pagination-apiCallLogs" class="pagination"></div>
+
+            </div>
+        </div>
+    </div>
     <div id="key-modal" class="modal-overlay hidden" style="z-index: 5000;">
         <div class="modal" style="width: 550px; padding: 30px; position: relative;">
-            <button class="modal-close-btn" onclick="window.closeKeyModal()">&times;</button>
+            <button type="button" class="btn-secondary settings-dialog-close"
+                onclick="window.closeKeyModal()">关闭</button>
             <div id="key-input-view">
                 <h3 style="margin-bottom: 20px;">新建 API Key</h3>
                 <div class="form-item" style="margin-bottom: 20px;">
@@ -994,18 +1146,78 @@
     <script src="/chat/engine.js?v=__APP_VERSION__"></script>
     <script src="/chat/sidebar.js?v=__APP_VERSION__"></script>
     <script src="/chat/app.js?v=__APP_VERSION__"></script>
+    <script src="/pwa-manager.js?v=__APP_VERSION__"></script>
 
-    <!-- PWA 注册脚本 -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                const swVersion = typeof APP_VERSION !== 'undefined' ? APP_VERSION : `v${Date.now()}`;
-                navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(swVersion)}`)
-                    .then(reg => console.log('PWA Service Worker 注册成功:', reg.scope))
-                    .catch(err => console.warn('PWA Service Worker 注册失败:', err));
-            });
-        }
-    </script>
+
+    <!-- 向量模型配置弹窗 -->
+    <div id="rag-embedding-modal" class="modal-overlay hidden" style="z-index: 5500;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3>向量模型配置</h3>
+                <p class="model-modal-desc">用于当前账号的知识库文档索引和召回测试，未配置时使用系统默认 Embedding 服务。</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="setting-rag-embedding-mode" value="http">
+                <div class="form-item">
+                    <label>Embedding Base URL</label>
+                    <input type="text" id="setting-rag-embedding-url" class="form-input" placeholder="例如：https://api.deepseek.com/v1 或 http://127.0.0.1:11434/api/embed">
+                </div>
+                <div class="form-item">
+                    <label>API Key</label>
+                    <input type="password" id="setting-rag-embedding-key" class="form-input" placeholder="留空则保留已配置密钥">
+                </div>
+                <div class="form-item">
+                    <label>Embedding 模型</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="setting-rag-embedding-model" class="form-input" placeholder="例如：bge-m3" style="flex: 1;">
+                        <button type="button" id="rag-embedding-fetch-models-btn" class="btn-secondary" title="从 API 获取模型列表" style="padding: 0 12px; height: 38px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="setting-rag-embedding-model-select-container" class="hidden" style="margin-top: 8px;">
+                        <select id="setting-rag-embedding-model-select" class="form-input" style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
+                    </div>
+                </div>
+                <p id="setting-rag-embedding-status" class="model-modal-desc" style="margin: 0;"></p>
+                <div class="model-modal-actions">
+                    <button id="rag-embedding-modal-cancel" class="btn-secondary">取消</button>
+                    <button id="rag-embedding-test-btn" class="btn-secondary">测试连接</button>
+                    <button id="rag-embedding-save-btn" class="btn-primary">保存向量配置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="monitor-routes-modal" class="modal-overlay hidden" style="z-index: 5200;">
+        <div class="modal" style="width: 1000px; padding: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                <h3 style="margin: 0;">热点接口详情 (最近 10 分钟)</h3>
+                <button type="button" class="btn-danger-outline" onclick="window.closeMonitorRoutesModal()">关闭</button>
+            </div>
+            <div class="table-container" style="max-height: 600px; border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px;">
+                <table class="data-table compact-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;" class="text-center">序号</th>
+                            <th style="width: 150px;">接口名称</th>
+                            <th style="width: 80px;">方法</th>
+                            <th>路由地址</th>
+                            <th style="width: 80px;" class="text-center">状态</th>
+                            <th style="width: 100px;">请求数</th>
+                            <th style="width: 120px;">平均延迟</th>
+                        </tr>
+                    </thead>
+                    <tbody id="monitor-routes-modal-body">
+                        <tr>
+                            <td colspan="7" class="text-center" style="padding: 30px; color: var(--text-muted);">正在加载数据...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p style="margin-top: 15px; font-size: 0.8rem; color: var(--text-muted);">数据每 10 秒随监控面板同步刷新。此列表仅显示请求频率较高的接口路径。</p>
+        </div>
+    </div>
 </body>
-
 </html>

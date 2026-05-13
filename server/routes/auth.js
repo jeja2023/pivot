@@ -130,7 +130,7 @@ function createAuthRouter({
 
     // --- API Key 管理 ---
     router.get('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
-        const keys = db.prepare('SELECT id, name, key_preview, created_at, last_used_at, status, usage_tokens FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+        const keys = db.prepare('SELECT id, name, key_preview, created_at, last_used_at, status, usage_tokens, input_tokens, output_tokens FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
         res.json(keys.map(k => ({ ...k, key: k.key_preview || 'sk-****' })));
     }));
 
