@@ -762,6 +762,7 @@ input::-webkit-contacts-auto-fill-button {
     text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 .message-content p { margin-bottom: 6px; }
+.message-content p:last-child { margin-bottom: 0; }
 
 /* Markdown 标题样式 (Headings) */
 .message-content h1, .message-content h2, .message-content h3,
@@ -1355,8 +1356,8 @@ input::-webkit-contacts-auto-fill-button {
 
 .admin-sidebar { width: 240px; background: var(--bg-side); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 25px; gap: 6px; }
 .modal h2 { margin-bottom: 8px; color: var(--text-main); font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
-.auth-logo { width: 90px; height: 90px; margin: 10px auto 25px; display: block; border-radius: 20px; box-shadow: 0 8px 24px rgba(16, 185, 129, 0.15); transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-.auth-logo:hover { transform: translateY(-5px) rotate(3deg); box-shadow: 0 12px 30px rgba(16, 185, 129, 0.25); }
+.auth-logo { width: 90px; height: 90px; margin: 10px auto 25px; display: block; mix-blend-mode: multiply; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.auth-logo:hover { transform: translateY(-5px) scale(1.05); }
 .modal .tagline { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 8px; font-weight: 500; }
 .modal .subtitle { color: var(--accent); margin-bottom: 35px; font-size: 0.85rem; opacity: 0.8; font-weight: 600; letter-spacing: 0.05em; }
 .sidebar-brand { font-weight: bold; color: var(--text-muted); margin-bottom: 25px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; }

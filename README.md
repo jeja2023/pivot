@@ -248,4 +248,4 @@ RAG_SCORE_THRESHOLD=0.4
 - **消息时间戳与会话分组**：新增消息发送时间显示，并支持侧边栏会话按日期智能分组。
 - **UI 细节优化**：登录页增加密码显隐切换，优化 API Key 管理与生成弹窗交互。
 
-**当前版本**: v0.0.24 (Security, Maintenance, Backup & Frontend Hardening)
+**当前版本**: v0.0.25 (UI Polish & Visual Experience Updates)
