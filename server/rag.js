@@ -6,6 +6,7 @@ const { db } = require('./db');
 const { authMiddleware } = require('./auth');
 const { asyncHandler, getClientIp } = require('./http');
 const { getBeijingTimestamp } = require('./time');
+const { normalizeUploadedOriginalName } = require('./upload');
 const { clearRagCacheForUser } = require('./services/rag-cache');
 const {
     batchDeleteKnowledgeDocuments,
@@ -43,6 +44,7 @@ const upload = multer({
     dest: 'uploads/docs/',
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
+        file.originalname = normalizeUploadedOriginalName(file.originalname);
         if (/\.(txt|md|pdf)$/i.test(file.originalname || '')) return cb(null, true);
         cb(new Error('仅支持 txt、md、pdf 文档'));
     }
@@ -124,6 +126,8 @@ ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, r
 
 ragRouter.post('/upload', authMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请上传文件' });
+
+    req.file.originalname = normalizeUploadedOriginalName(req.file.originalname);
 
     const { docId } = createKnowledgeDocumentFromUpload({ userId: req.user.id, file: req.file });
     scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id });

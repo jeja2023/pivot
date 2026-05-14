@@ -5,17 +5,18 @@
 
 **Pivot (智枢)** 是一款专为私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为用户提供一个安全、稳定且美观的 AI 交互门户。
 
-## 最新版本：0.0.24
+## 最新版本：0.0.25
 
 - 内置应用级 SQLite 热备份：维护服务默认每 24 小时调用 `db.backup()` 生成东八区毫秒级时间戳备份到 `data/backups/`，并按 7 天、最多 7 个版本滚动清理；同一秒连续备份会自动避让重名文件。
 - 自动维护闭环增强：软删除附件、知识库源文件、知识库分块、FTS 索引和历史消息会在保留期后被物理清理，并配套执行 `PRAGMA optimize` 与增量 vacuum；物理文件删除失败时会保留数据库引用，等待后续维护重试。
 - 安全防护继续收紧：管理员重置密码会吊销目标用户全部 refresh token；模型探测接口、上传接口和 RAG/外部模型出站探测均补齐限流与 SSRF 防护。
 - 第三方 API 网关补齐向量转发：持有 Pivot API Key 的客户端现在可通过 OpenAI-compatible `/v1/embeddings` 调用当前用户可用的 RAG 向量模型，`/v1/models` 与 API 接入管理页都会暴露已配置的 embedding 模型。
+- 知识库中文文件名修复：上传入口统一规范化文件名，保留正常中文并修复 latin1 mojibake，避免知识库列表中文档名称显示乱码。
 - 前端 CSP 治理推进：`client/chat` 已清除全部 `onclick=` 内联事件，模型、提示词、附件、API Key 和会话菜单均改为 `data-*` 事件委托；管理员重置密码、模型密钥查看校验和加密文档密码输入已迁移到应用内 `showInputPrompt()`，不再依赖原生 `prompt()`。
 - 表格渲染安全组件化起步：表格空态、加载态和错误态新增 DOM API 渲染工具，减少裸 `innerHTML` 提示行。
 - 流式输出与上传体验增强：SSE 解析按标准事件边界处理，长思考输出节流渲染，大文件上传增加进度反馈，模型选择器补齐键盘导航。
 - RAG 配置开放 Chunk Size 与 Overlap，可按业务文档调优分块策略；保存后自动清空相关缓存。
-- 当前验证命令为 `npm run verify`，覆盖语法检查、ESLint 和安全测试，测试通过 `47/47`。
+- 当前验证命令为 `npm run verify`，覆盖语法检查、ESLint 和安全测试，测试通过 `49/49`。
 
 - Sidebar session infinite scroll now uses cursor-based pagination (`nextCursor`) instead of `page + OFFSET`, reducing duplicate or skipped sessions when conversations are created, updated, or pinned while scrolling. The list footer also shows loading, empty, completed, and error states.
 - PWA 更新机制继续收紧：Service Worker 不再拦截页面导航请求，仅缓存稳定 vendor 资源，业务页面、脚本、API 与版本清单交回服务端和浏览器处理。
@@ -248,4 +249,4 @@ RAG_SCORE_THRESHOLD=0.4
 - **消息时间戳与会话分组**：新增消息发送时间显示，并支持侧边栏会话按日期智能分组。
 - **UI 细节优化**：登录页增加密码显隐切换，优化 API Key 管理与生成弹窗交互。
 
-**当前版本**: v0.0.25 (UI Polish & Visual Experience Updates)
+**当前版本**: v0.0.26 (RAG UX Refinement & Management Enhancement)

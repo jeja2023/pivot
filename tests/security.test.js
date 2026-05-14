@@ -18,6 +18,7 @@ const {
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
+const { normalizeUploadedOriginalName } = require('../server/upload');
 const { buildFtsQuery } = require('../server/search');
 const { createSseEventParser, createStreamAccumulator, extractStreamPayload } = require('../server/streaming');
 const {
@@ -72,6 +73,7 @@ const {
 } = require('../server/services/chat-messages');
 const {
     getKnowledgeSourcePath,
+    createKnowledgeDocumentFromUpload,
     deleteKnowledgeDocument,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentSummaryForUser,
@@ -140,6 +142,15 @@ test('resolveUploadUrlPath rejects traversal and non-upload URLs', () => {
     assert.equal(resolveUploadUrlPath('/uploads/%2e%2e/data/chat.db'), null);
     assert.equal(resolveUploadUrlPath('/uploads/1/../../server/index.js'), null);
     assert.equal(isPathInsideUploadRoot(path.resolve(__dirname, '..', 'server', 'index.js')), false);
+});
+
+test('normalizeUploadedOriginalName preserves Chinese names and repairs latin1 mojibake', () => {
+    const name = '测试文档.pdf';
+    const mojibake = Buffer.from(name, 'utf8').toString('latin1');
+
+    assert.equal(normalizeUploadedOriginalName(name), name);
+    assert.equal(normalizeUploadedOriginalName(mojibake), name);
+    assert.equal(normalizeUploadedOriginalName('../测试文档.pdf'), name);
 });
 
 test('getCookie ignores malformed percent-encoded cookie pairs', () => {
@@ -845,6 +856,44 @@ test('RAG document source path is constrained to knowledge_docs uploads', () => 
     assert.equal(getKnowledgeSourcePath('uploads/docs/legacy.txt'), null);
     assert.equal(getKnowledgeSourcePath('uploads/knowledge_docs/../secret.txt'), null);
     assert.equal(getKnowledgeSourcePath('uploads/knowledge_docs/%2e%2e/secret.txt'), null);
+});
+
+test('RAG document upload stores repaired Chinese filename', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_name_${suffix}`, 'hash', 'RAG Name Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'rag-name-test');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const tempPath = path.join(tempDir, `${suffix}.txt`);
+    fs.writeFileSync(tempPath, '中文文件名测试');
+    const originalName = Buffer.from('测试文档.txt', 'utf8').toString('latin1');
+    let docId = null;
+
+    try {
+        const result = createKnowledgeDocumentFromUpload({
+            userId,
+            file: {
+                path: tempPath,
+                originalname: normalizeUploadedOriginalName(originalName)
+            }
+        });
+        docId = result.docId;
+        const row = db.prepare('SELECT name FROM knowledge_docs WHERE id = ?').get(docId);
+        assert.equal(row.name, '测试文档.txt');
+    } finally {
+        if (docId) {
+            const doc = db.prepare('SELECT source_path FROM knowledge_docs WHERE id = ?').get(docId);
+            const sourcePath = doc?.source_path ? path.resolve(__dirname, '..', doc.source_path) : null;
+            if (sourcePath) fs.rmSync(sourcePath, { force: true });
+            db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
+            db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
 });
 
 test('RAG document deletion is soft and remains auditable', () => {

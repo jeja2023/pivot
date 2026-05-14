@@ -14,6 +14,14 @@ const formatRagDateToCN = (dateStr) => {
     }).replace(/\//g, '-');
 };
 
+const RAG_ICONS = {
+    status: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>',
+    enable: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>',
+    progress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
+    chunks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>',
+    time: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>'
+};
+
 const escapeRagHtml = (str) => {
     if (!str) return '';
     return String(str)
@@ -187,16 +195,20 @@ const showRagDetailModal = (data) => {
     if (title) title.textContent = doc.name || '知识库文档详情';
     if (subtitle) subtitle.textContent = `共 ${Number(data.totalChunks || 0)} 个分块，当前展示 ${chunks.length} 个`;
     if (meta) {
-        const enabled = Number(doc.is_enabled ?? 1) === 1 ? '已启用' : '已停用';
-        meta.innerHTML = [
-            ['状态', getRagStatusLabel(doc.status)],
-            ['启用状态', enabled],
-            ['索引进度', `${Number(doc.progress || 0)}%`],
-            ['分块总数', Number(data.totalChunks || 0)],
-            ['创建时间', formatRagDateToCN(doc.created_at)],
-            ['更新时间', formatRagDateToCN(doc.updated_at || doc.processed_at)]
-        ].map(([label, value]) => `
-            <span><b>${escapeRagHtml(label)}</b>${escapeRagHtml(value)}</span>
+        const enabledText = Number(doc.is_enabled ?? 1) === 1 ? '已启用' : '已停用';
+        const items = [
+            { icon: RAG_ICONS.status, label: '解析状态', value: getRagStatusLabel(doc.status), class: `status-${doc.status}` },
+            { icon: RAG_ICONS.enable, label: '生效状态', value: enabledText, class: enabledText === '已启用' ? 'status-ready' : 'status-error' },
+            { icon: RAG_ICONS.progress, label: '索引进度', value: `${Number(doc.progress || 0)}%` },
+            { icon: RAG_ICONS.chunks, label: '分块总数', value: Number(data.totalChunks || 0) },
+            { icon: RAG_ICONS.time, label: '创建时间', value: formatRagDateToCN(doc.created_at) },
+            { icon: RAG_ICONS.time, label: '更新时间', value: formatRagDateToCN(doc.updated_at || doc.processed_at) }
+        ];
+        meta.innerHTML = items.map(item => `
+            <div class="rag-meta-card ${item.class || ''}">
+                <div class="rag-meta-label">${item.icon}<span>${escapeRagHtml(item.label)}</span></div>
+                <div class="rag-meta-value" title="${escapeAttrValue(item.value)}">${escapeRagHtml(item.value)}</div>
+            </div>
         `).join('');
     }
     if (chunkList) {
@@ -654,24 +666,56 @@ style.textContent = `
     }
     .rag-detail-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 8px;
+        margin-bottom: 6px;
     }
-    .rag-detail-meta span {
+    .rag-meta-card {
         display: flex;
         flex-direction: column;
         gap: 3px;
-        padding: 8px 10px;
+        padding: 6px 10px;
         border: 1px solid var(--border);
         border-radius: 8px;
-        background: rgba(148, 163, 184, 0.05);
+        background: var(--bg-secondary);
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
         min-width: 0;
     }
-    .rag-detail-meta b {
-        color: var(--text-muted);
-        font-size: 0.74rem;
-        font-weight: 600;
+    .rag-meta-card:hover {
+        border-color: var(--primary-color);
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
+        transform: translateY(-1px);
     }
+    .rag-meta-label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--text-muted);
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.01em;
+    }
+    .rag-meta-label svg {
+        opacity: 0.6;
+        width: 12px !important;
+        height: 12px !important;
+    }
+    .rag-meta-value {
+        color: var(--text-main);
+        font-size: 0.78rem;
+        font-weight: 700;
+        line-height: 1.2;
+        word-break: break-all;
+        white-space: nowrap;
+    }
+    @media (max-width: 900px) {
+        .rag-meta-value { white-space: normal; }
+    }
+    .rag-meta-card.status-ready .rag-meta-value { color: #10b981; }
+    .rag-meta-card.status-processing .rag-meta-value { color: #f59e0b; }
+    .rag-meta-card.status-error .rag-meta-value { color: #ef4444; }
     .rag-detail-chunks {
         display: grid;
         gap: 10px;
@@ -682,23 +726,23 @@ style.textContent = `
         border: 1px solid var(--border);
         border-radius: 8px;
         background: var(--bg-secondary);
-        padding: 12px;
+        padding: 8px 12px;
     }
     .rag-detail-chunk header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
         color: var(--text-muted);
-        font-size: 0.8rem;
+        font-size: 0.75rem;
     }
     .rag-detail-chunk p {
         margin: 0;
         color: var(--text-main);
-        line-height: 1.65;
+        line-height: 1.5;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        font-size: 0.88rem;
+        font-size: 0.82rem;
     }
     .rag-audit-table-wrap {
         max-height: 560px;

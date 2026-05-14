@@ -9,6 +9,7 @@ const { getBeijingTimestamp } = require('../time');
 const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedText } = require('../document-text');
 const { isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
 const { logger } = require('../logger');
+const { normalizeUploadedOriginalName } = require('../upload');
 
 function getSafeUploadPath(userId, sessionId, filename) {
     const uploadRoot = path.resolve(__dirname, '../../uploads');
@@ -87,7 +88,7 @@ function createAttachmentsRouter({
 
         const userId = req.user.id;
         const sessionId = req.query.sessionId || 'global';
-        const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+        const originalName = normalizeUploadedOriginalName(req.file.originalname);
         const mimeType = req.file.mimetype;
         const password = String(req.body?.password || '').trim() || undefined;
         const targetDir = path.join('uploads', userId.toString(), sessionId);

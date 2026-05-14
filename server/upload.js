@@ -7,6 +7,38 @@ const multer = require('multer');
 const uploadRoot = path.resolve(__dirname, '../uploads');
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.doc', '.docx', '.xls', '.xlsx']);
 
+function scoreFilenameEncoding(value) {
+    const text = String(value || '');
+    let score = 0;
+    for (const char of text) {
+        if (/[\u4e00-\u9fff\u3400-\u4dbf]/u.test(char)) score += 3;
+        if (/[\u3040-\u30ff\uac00-\ud7af]/u.test(char)) score += 2;
+        if (char === '\uFFFD') score -= 12;
+        if (/[\u0080-\u009f]/u.test(char)) score -= 8;
+    }
+    if (/[ÃÂ][\u0080-\u00bf]/u.test(text)) score -= 5;
+    if (/[\u00e4-\u00e9][\u0080-\u00bf]/u.test(text)) score -= 5;
+    return score;
+}
+
+function shouldPreferLatin1DecodedName(original, decoded) {
+    if (!decoded || decoded === original || decoded.includes('\uFFFD')) return false;
+    const originalScore = scoreFilenameEncoding(original);
+    const decodedScore = scoreFilenameEncoding(decoded);
+    const hasMojibakeSignal = /[\u0080-\u009f]/u.test(original)
+        || /[ÃÂ][\u0080-\u00bf]/u.test(original)
+        || /[\u00e4-\u00e9][\u0080-\u00bf]/u.test(original);
+    return hasMojibakeSignal && decodedScore > originalScore;
+}
+
+function normalizeUploadedOriginalName(value) {
+    const fallback = 'upload';
+    const raw = String(value || '').replace(/\0/g, '').replace(/\\/g, '/');
+    const original = path.basename(raw).normalize('NFC') || fallback;
+    const decoded = path.basename(Buffer.from(original, 'latin1').toString('utf8').replace(/\\/g, '/')).normalize('NFC');
+    return shouldPreferLatin1DecodedName(original, decoded) ? decoded : original;
+}
+
 function removeUploadedFile(file) {
     if (!file?.path) return;
     const target = path.resolve(file.path);
@@ -64,13 +96,14 @@ function uploadSecurityMiddleware(req, res, next) {
 function createUploadMiddleware() {
     const storage = multer.diskStorage({
         destination: (req, file, cb) => cb(null, 'uploads/'),
-        filename: (req, file, cb) => cb(null, Date.now() + '-' + crypto.randomUUID() + path.extname(file.originalname || ''))
+        filename: (req, file, cb) => cb(null, Date.now() + '-' + crypto.randomUUID() + path.extname(normalizeUploadedOriginalName(file.originalname)))
     });
 
     return multer({
         storage,
         limits: { fileSize: 20 * 1024 * 1024 },
         fileFilter: (req, file, cb) => {
+            file.originalname = normalizeUploadedOriginalName(file.originalname);
             const ext = path.extname(file.originalname || '').toLowerCase();
             if (!allowedExtensions.has(ext)) {
                 return cb(new Error(`不支持该文件类型 (${file.originalname}, 扩展名: ${ext})`));
@@ -81,4 +114,4 @@ function createUploadMiddleware() {
     });
 }
 
-module.exports = { createUploadMiddleware, uploadSecurityMiddleware };
+module.exports = { createUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware };
