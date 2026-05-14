@@ -124,7 +124,13 @@ window.saveUser = async () => {
 };
 
 window.resetUserPassword = async (id) => {
-    const password = prompt('请输入新密码（至少 8 位，包含字母和数字）');
+    const password = await window.showInputPrompt({
+        title: '重置密码',
+        message: '请输入新密码，至少 8 位，并包含字母和数字。',
+        type: 'password',
+        placeholder: '新密码',
+        autocomplete: 'new-password'
+    });
     if (!password) return;
     const res = await fetch(`${API_BASE}/admin/users/${id}/password`, {
         method: 'POST',
@@ -191,7 +197,7 @@ window.loadUserRecordSessions = async () => {
         const title = escapeHtml(s.title || '未命名会话');
         const deleted = s.deleted_at ? '（已删除）' : '';
         const msgCount = Number(s.msg_count || 0);
-        return `<option value="${escapeHtml(s.id)}">${title}${deleted} · ${msgCount} 条</option>`;
+        return `<option value="${escapeHtml(s.id)}">${title}${deleted} - ${msgCount} 条</option>`;
     }).join('');
     if (previous && data.some(s => String(s.id) === previous)) select.value = previous;
 };
@@ -203,19 +209,19 @@ window.loadUserRecordMessages = async (page = 1) => {
     const sessionId = document.getElementById('user-record-session-select')?.value || '';
     const includeDeleted = document.getElementById('user-record-include-deleted')?.checked === true;
     if (!body) return;
-    body.innerHTML = '<tr><td colspan="7" class="text-center">正在加载记录...</td></tr>';
+    renderTableMessage(body, 7, '正在加载记录...');
     const limit = pageState.limit || 15;
     const params = new URLSearchParams({ includeDeleted: String(includeDeleted), page, limit });
     if (sessionId) params.set('sessionId', sessionId);
     const res = await fetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/messages?${params.toString()}`, { headers: authHeaders() });
     const { data = [], total = 0 } = await res.json();
     if (!res.ok) {
-        body.innerHTML = '<tr><td colspan="7" class="text-center">记录加载失败</td></tr>';
+        renderTableMessage(body, 7, '记录加载失败');
         renderPagination('userRecords', 0, 1);
         return;
     }
     if (!data.length) {
-        body.innerHTML = '<tr><td colspan="7" class="text-center">暂无输入输出记录</td></tr>';
+        renderTableMessage(body, 7, '暂无输入输出记录');
         renderPagination('userRecords', total, page);
         return;
     }

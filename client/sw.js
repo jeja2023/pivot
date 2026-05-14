@@ -3,7 +3,7 @@
  * Policy: cache stable vendor assets only. App HTML/CSS/JS and API traffic always use network.
  */
 const SW_POLICY = 'vendor-only';
-const SW_VERSION = 'pivot-sw-vendor-only-v1';
+const SW_VERSION = 'pivot-sw-vendor-only-v2';
 const CACHE_PREFIX = 'pivot-';
 const VENDOR_CACHE = `${CACHE_PREFIX}vendor-${SW_VERSION}`;
 

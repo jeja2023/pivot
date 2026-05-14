@@ -1,4 +1,4 @@
-const { db } = require('./connection');
+const { db, dataDir, dbPath } = require('./connection');
 const { initSchema } = require('./schema');
 const { runMigrations } = require('./migrate');
 const { runSeeds } = require('./seed');
@@ -47,8 +47,10 @@ ensureSetting('rag_enabled', process.env.ENABLE_RAG === 'true' ? 'true' : 'false
 ensureSetting('rag_score_threshold', process.env.RAG_SCORE_THRESHOLD || '0.4');
 ensureSetting('rag_top_k', process.env.RAG_TOP_K || '3');
 ensureSetting('rag_candidate_limit', process.env.RAG_CANDIDATE_LIMIT || '300');
+ensureSetting('rag_chunk_size', process.env.RAG_CHUNK_SIZE || '500');
+ensureSetting('rag_chunk_overlap', process.env.RAG_CHUNK_OVERLAP || '100');
 ensureSetting('rag_embedding_mode', 'http');
 ensureSetting('rag_embedding_api_url', process.env.EMBEDDING_API_URL || '');
 ensureSetting('rag_embedding_model', process.env.EMBEDDING_MODEL || 'nomic-embed-text');
 
-module.exports = { db, stmts };
+module.exports = { db, dataDir, dbPath, stmts };

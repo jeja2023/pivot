@@ -89,10 +89,14 @@ function getCookie(req, name) {
     const cookies = Object.fromEntries(cookieHeader.split(';').map(part => {
         const index = part.indexOf('=');
         if (index === -1) return ['', ''];
-        return [
-            decodeURIComponent(part.slice(0, index).trim()),
-            decodeURIComponent(part.slice(index + 1).trim())
-        ];
+        try {
+            return [
+                decodeURIComponent(part.slice(0, index).trim()),
+                decodeURIComponent(part.slice(index + 1).trim())
+            ];
+        } catch (e) {
+            return ['', ''];
+        }
     }).filter(([key]) => key));
     return cookies[name];
 }

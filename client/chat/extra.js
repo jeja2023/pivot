@@ -10,12 +10,22 @@ window.loadPrompts = async function() {
             </div>
             <p>${escapeHtml(p.content)}</p>
             <div class="prompt-actions">
-                <button class="btn-secondary" onclick="applyPrompt(JSON.parse(decodeURIComponent('${encodeActionArg(p)}')).content)">应用</button>
-                ${(p.scope !== 'global' || currentUser.role === 'admin') ? `<button class="btn-secondary" onclick="prepareEditPrompt(JSON.parse(decodeURIComponent('${encodeActionArg(p)}')))">编辑</button><button class="btn-danger" onclick="deletePrompt(${p.id})">删除</button>` : ''}
+                <button class="btn-secondary" data-prompt-action="apply" data-prompt="${encodeActionArg(p)}">应用</button>
+                ${(p.scope !== 'global' || currentUser.role === 'admin') ? `<button class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
             </div>
         </div>
     `).join('');
 }
+
+document.getElementById('prompt-grid')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-prompt-action]');
+    if (!button) return;
+    const action = button.dataset.promptAction;
+    const prompt = button.dataset.prompt ? JSON.parse(decodeURIComponent(button.dataset.prompt)) : null;
+    if (action === 'apply' && prompt) return window.applyPrompt(prompt.content);
+    if (action === 'edit' && prompt) return window.prepareEditPrompt(prompt);
+    if (action === 'delete' && button.dataset.promptId) return window.deletePrompt(button.dataset.promptId);
+});
 
 window.applyPrompt = async (content) => {
     if (!currentSessionId) return showToast('请先选择一个对话', 'error');
@@ -109,13 +119,19 @@ window.loadAttachments = async function(page = 1) {
             <td class="text-center">
                 <div style="display: flex; gap: 5px; justify-content: center;">
                     <a class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; text-decoration: none;" href="${escapeHtml(item.url)}" target="_blank">打开</a>
-                    <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" onclick="deleteAttachment(${item.id})">删除</button>
+                    <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-action="delete" data-attachment-id="${item.id}">删除</button>
                 </div>
             </td>
         </tr>
     `}).join('');
     renderPagination('attachments', total, page);
 }
+
+document.getElementById('attachment-list-body')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-attachment-action="delete"]');
+    if (!button) return;
+    window.deleteAttachment(button.dataset.attachmentId);
+});
 
 function formatFileSize(size) {
     const v = Number(size) || 0;

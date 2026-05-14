@@ -1,5 +1,6 @@
-/* 安全工具模块 Security Utilities */
+/* Security Utilities */
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
@@ -35,7 +36,7 @@ function decryptSecret(value) {
             decipher.final()
         ]).toString('utf8');
     } catch (e) {
-        throw new Error('密钥解密失败，请检查 DATA_ENCRYPTION_KEY 或 JWT_SECRET 是否一致');
+        throw new Error('Secret decryption failed. Check DATA_ENCRYPTION_KEY or JWT_SECRET consistency.');
     }
 }
 
@@ -60,6 +61,46 @@ function isPrivateHost(hostname) {
     return false;
 }
 
+function isSensitiveOutboundHost(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (['localhost', 'metadata.google.internal'].includes(host)) return true;
+
+    const ipType = net.isIP(host);
+    if (ipType === 4) {
+        const parts = host.split('.').map(Number);
+        return parts[0] === 0 ||
+            parts[0] === 127 ||
+            (parts[0] === 169 && parts[1] === 254);
+    }
+    if (ipType === 6) {
+        return host === '::1' || host.startsWith('fe80');
+    }
+    return false;
+}
+
+async function assertSafeOutboundUrl(rawUrl, user) {
+    const parsed = validateModelUrl(rawUrl, user);
+    if (process.env.ALLOW_SENSITIVE_OUTBOUND_URLS === 'true') return parsed;
+
+    if (isSensitiveOutboundHost(parsed.hostname)) {
+        throw new Error('Outbound URL points to a sensitive local, link-local, or metadata target.');
+    }
+
+    if (net.isIP(parsed.hostname)) return parsed;
+
+    let records = [];
+    try {
+        records = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+    } catch (e) {
+        return parsed;
+    }
+
+    if (records.some(record => isSensitiveOutboundHost(record.address))) {
+        throw new Error('Outbound URL resolves to a sensitive local, link-local, or metadata target.');
+    }
+    return parsed;
+}
+
 function hostAllowedByList(hostname) {
     const allowList = (process.env.MODEL_URL_ALLOWLIST || '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
     if (allowList.length === 0) return true;
@@ -72,22 +113,22 @@ function validateModelUrl(rawUrl, user) {
     try {
         parsed = new URL(String(rawUrl || '').trim());
     } catch (e) {
-        throw new Error('模型接口地址格式无效');
+        throw new Error('Model endpoint URL is invalid.');
     }
 
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-        throw new Error('模型接口仅允许使用 HTTP 或 HTTPS');
+        throw new Error('Model endpoint URL must use HTTP or HTTPS.');
     }
     if (parsed.username || parsed.password) {
-        throw new Error('模型接口地址中不允许包含用户名或密码');
+        throw new Error('Model endpoint URL must not include username or password.');
     }
     if (!hostAllowedByList(parsed.hostname)) {
-        throw new Error('模型接口域名不在安全白名单内');
+        throw new Error('Model endpoint host is not in the allowlist.');
     }
 
     const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && user?.role === 'admin';
     if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
-        throw new Error('普通用户不允许配置内网或本机模型地址');
+        throw new Error('Non-admin users cannot configure private or local model endpoints.');
     }
 
     return parsed;
@@ -123,22 +164,43 @@ function parseCsvLine(line) {
 }
 
 function removeAttachmentFiles(attachments) {
+    const results = [];
     for (const attachment of attachments) {
         const filePath = attachment.file_path;
+        const result = {
+            id: attachment.id,
+            filePath,
+            ok: true,
+            removed: false,
+            skipped: false,
+            error: ''
+        };
+        results.push(result);
+
         if (!filePath) continue;
         const target = path.resolve(__dirname, '..', filePath);
-        if (!target.startsWith(uploadRoot + path.sep)) continue;
+        if (target === uploadRoot || !isPathInsideUploadRoot(target)) {
+            result.skipped = true;
+            logger.warn({ filePath }, 'Attachment cleanup skipped unsafe path');
+            continue;
+        }
         try {
-            if (fs.existsSync(target)) fs.unlinkSync(target);
+            if (fs.existsSync(target)) {
+                fs.unlinkSync(target);
+                result.removed = true;
+            }
             let dir = path.dirname(target);
             while (dir.startsWith(uploadRoot + path.sep) && dir !== uploadRoot) {
                 if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
                 dir = path.dirname(dir);
             }
         } catch (e) {
-            logger.warn({ filePath, err: e.message }, '附件清理：删除失败');
+            result.ok = false;
+            result.error = e.message;
+            logger.warn({ filePath, err: e.message }, 'Attachment cleanup failed to remove file');
         }
     }
+    return results;
 }
 
 function isPathInsideUploadRoot(targetPath) {
@@ -174,6 +236,8 @@ module.exports = {
     encryptSecret,
     decryptSecret,
     validateModelUrl,
+    assertSafeOutboundUrl,
+    isSensitiveOutboundHost,
     escapeCsvCell,
     parseCsvLine,
     removeAttachmentFiles,
@@ -181,3 +245,4 @@ module.exports = {
     toProjectRelativePath,
     isPathInsideUploadRoot
 };
+

@@ -1,5 +1,6 @@
 // --- 侧边栏模块 Sidebar (完整功能版) ---
 let sidebarState = { page: 1, limit: 20, cursor: '', hasMore: true, isLoading: false, archived: false };
+const sessionMenuData = new Map();
 
 function updateSessionListStatus(text = '') {
     const list = document.getElementById('session-list');
@@ -63,7 +64,6 @@ window.loadSessions = async function(append = false) {
         
         sessions.forEach(s => {
             const title = s.title || '新对话';
-            const safeTitleStr = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const safeHTMLTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             const tagsHtml = String(s.tags || '').split(',').filter(Boolean).map(t => `<em>${escapeHtml(t)}</em>`).join('');
             const archiveBadge = s.is_archived ? '<span class="session-badge">已归档</span>' : '';
@@ -76,6 +76,13 @@ window.loadSessions = async function(append = false) {
             
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
+            sessionMenuData.set(String(s.id), {
+                id: String(s.id),
+                title,
+                isPinned: Number(s.is_pinned || 0),
+                isArchived: Number(s.is_archived || 0),
+                tags: String(s.tags || '')
+            });
             div.innerHTML = `
                 <div class="session-main" title="${sessionInfoTitle}">
                     <div class="session-title-row">
@@ -88,7 +95,7 @@ window.loadSessions = async function(append = false) {
                 <div class="session-side">
                     <span class="session-list-time" title="${escapeAttrValue(sessionTimeTitle)}">${escapeHtml(sessionListTime)}</span>
                     <div class="session-more">
-                    <button class="more-btn" onclick="toggleSessionMenu(event, '${s.id}', '${safeTitleStr}', ${s.is_pinned}, ${s.is_archived || 0}, '${String(s.tags || '').replace(/'/g, "\\'")}')">
+                    <button class="more-btn" data-session-menu-id="${escapeAttrValue(String(s.id))}">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
                     </button>
                     </div>
@@ -106,19 +113,36 @@ window.loadSessions = async function(append = false) {
     finally { sidebarState.isLoading = false; }
 };
 
+document.getElementById('session-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-session-menu-id]');
+    if (!button) return;
+    const session = sessionMenuData.get(String(button.dataset.sessionMenuId));
+    if (!session) return;
+    window.toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
+});
+
 window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     e.stopPropagation();
     document.querySelector('.session-dropdown')?.remove();
     const menu = document.createElement('div');
     menu.className = 'session-dropdown';
-    menu.innerHTML = `
-        <div class="menu-item" onclick="togglePinSession('${id}', ${isPinned})">${isPinned ? '取消置顶' : '置顶对话'}</div>
-        <div class="menu-item" onclick="renameSession('${id}', '${title}')">重命名</div>
-        <div class="menu-item" onclick="editSessionTags('${id}', '${tags}')">编辑标签</div>
-        <div class="menu-item" onclick="toggleArchiveSession('${id}', ${isArchived})">${isArchived ? '恢复对话' : '归档对话'}</div>
-        <div class="menu-item" onclick="exportSession('${id}')">导出为 Markdown</div>
-        <div class="menu-item danger" onclick="deleteSession('${id}')">删除</div>
-    `;
+    const makeItem = (label, className, handler) => {
+        const item = document.createElement('div');
+        item.className = className ? `menu-item ${className}` : 'menu-item';
+        item.textContent = label;
+        item.addEventListener('click', (event) => {
+            event.stopPropagation();
+            menu.remove();
+            handler();
+        });
+        menu.appendChild(item);
+    };
+    makeItem(isPinned ? '取消置顶' : '置顶对话', '', () => togglePinSession(id, isPinned));
+    makeItem('重命名', '', () => renameSession(id, title));
+    makeItem('编辑标签', '', () => editSessionTags(id, tags));
+    makeItem(isArchived ? '恢复对话' : '归档对话', '', () => toggleArchiveSession(id, isArchived));
+    makeItem('导出为 Markdown', '', () => exportSession(id));
+    makeItem('删除', 'danger', () => deleteSession(id));
     document.body.appendChild(menu);
     const rect = e.currentTarget.getBoundingClientRect();
     menu.style.top = `${rect.bottom + 5}px`; menu.style.left = `${rect.right - 120}px`;

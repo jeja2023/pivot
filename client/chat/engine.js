@@ -1,4 +1,4 @@
-// --- 数据引擎模块 Engine (完整功能版) ---
+// --- 数据引擎模块 Engine ---
 let currentAbortController = null;
 let pendingAttachments = [];
 const MAX_PENDING_ATTACHMENTS = 5;
@@ -9,6 +9,107 @@ const escapeChatStatusHtml = (value) => String(value ?? '')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+
+const STREAM_RENDER_INTERVAL_MS = 80;
+
+function createBrowserSseParser({ onData, onDone } = {}) {
+    let buffer = '';
+    let done = false;
+
+    const flushEvent = (rawEvent) => {
+        const dataLines = rawEvent
+            .split(/\r?\n/)
+            .map(line => line.trimEnd())
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.replace(/^data:\s?/, ''));
+        if (dataLines.length === 0) return;
+
+        const payload = dataLines.join('\n');
+        if (payload === '[DONE]') {
+            done = true;
+            if (typeof onDone === 'function') onDone();
+            return;
+        }
+        if (typeof onData === 'function') onData(payload);
+    };
+
+    const write = (text) => {
+        if (done) return;
+        buffer += String(text || '').replace(/\r\n/g, '\n');
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            flushEvent(rawEvent);
+            if (done) return;
+            boundary = buffer.indexOf('\n\n');
+        }
+    };
+
+    const end = () => {
+        if (!done && buffer.trim()) {
+            flushEvent(buffer);
+        }
+        buffer = '';
+    };
+
+    return { write, end, isDone: () => done };
+}
+
+function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount, startTime, firstTokenTime) {
+    if (!textBody) return;
+    const hasOpenThought = content.includes('<thought>') && !content.includes('</thought>');
+    const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
+
+    if (hasOpenThought && existingThoughtContent) {
+        existingThoughtContent.innerHTML = renderMarkdown(content.replace(/^<thought>/, ''));
+        if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
+            const inner = existingThoughtContent.closest('.thought-content-inner');
+            inner.scrollTop = inner.scrollHeight;
+        }
+    } else {
+        const thoughtState = rememberThoughtStateBeforeRender(textBody);
+        textBody.innerHTML = renderAiMessage(content, true, thoughtState.openStates);
+        restoreThoughtStateAfterRender(textBody, thoughtState);
+    }
+
+    const elapsed = (Date.now() - startTime) / 1000;
+    const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
+    statsEl.innerHTML = `
+        <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
+        <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
+        <span class="stat-item">${ICONS.speed}${tps} t/s</span>
+    `;
+}
+
+function createUploadProgress(label) {
+    const area = document.getElementById('attachment-preview');
+    if (!area) return { update() {}, close() {} };
+    area.classList.remove('hidden');
+
+    const card = document.createElement('div');
+    card.className = 'upload-progress-card';
+    card.innerHTML = `
+        <div class="upload-progress-ring" style="--progress:0">
+            <span>0%</span>
+        </div>
+        <div class="upload-progress-name">${escapeChatStatusHtml(label)}</div>
+    `;
+    area.prepend(card);
+
+    return {
+        update(percent) {
+            const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            card.querySelector('.upload-progress-ring')?.style.setProperty('--progress', clamped);
+            const text = card.querySelector('.upload-progress-ring span');
+            if (text) text.textContent = `${clamped}%`;
+        },
+        close() {
+            card.remove();
+            if (pendingAttachments.length === 0) renderAttachmentPreviews();
+        }
+    };
+}
 
 async function readChatErrorMessage(response) {
     const fallback = `服务器拒绝 (${response.status})`;
@@ -71,6 +172,14 @@ window.sendMessage = async function(isRegenerate = false) {
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
     const modelId = document.getElementById('model-selector').value;
+    const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
+    
+    if (pendingAttachments.length > 0) {
+        if (!model || Number(model.supports_vision || 0) !== 1) {
+            showToast('当前模型不支持附件处理能力（图片、文档等）', 'error');
+            return;
+        }
+    }
     
     if (!content && pendingAttachments.length === 0 && !isRegenerate) return;
 
@@ -78,7 +187,10 @@ window.sendMessage = async function(isRegenerate = false) {
         const attachmentLinks = pendingAttachments.map(a => a.markdown).join('\n');
         content = (content ? content + '\n\n' : '') + attachmentLinks;
         displayContent = (displayContent ? displayContent + '\n\n' : '') + attachmentLinks;
-        const docTexts = pendingAttachments.filter(a => a.extractedText).map(a => `\n\n---\n【参考文档: ${a.name}】\n${a.extractedText}\n---`).join('');
+        const docTexts = pendingAttachments
+            .filter(a => a.extractedText)
+            .map(a => '\n\n---\n【参考文档: ' + a.name + '】\n' + a.extractedText + '\n---')
+            .join('');
         if (docTexts) content += docTexts;
     }
 
@@ -137,7 +249,6 @@ window.sendMessage = async function(isRegenerate = false) {
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let sseBuffer = '';
         const statsEl = aiMsgEl.querySelector('.message-stats') || document.createElement('div');
         statsEl.className = 'message-stats';
         if (!aiMsgEl.querySelector('.message-stats')) {
@@ -150,66 +261,63 @@ window.sendMessage = async function(isRegenerate = false) {
                 aiMsgEl.insertBefore(statsEl, aiMsgEl.querySelector('.message-actions'));
             }
         }
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            sseBuffer += decoder.decode(value, { stream: true });
-            const lines = sseBuffer.split('\n');
-            sseBuffer = lines.pop() || '';
-            for (const line of lines) {
-                const cleanLine = line.trim();
-                if (cleanLine.startsWith('data: ')) {
-                    if (cleanLine === 'data: [DONE]') break;
-                    let data = null;
-                    try {
-                        data = JSON.parse(cleanLine.replace(/^data:\s*/, ''));
-                    } catch (e) {
-                        continue;
+        let renderTimer = null;
+        let renderPending = false;
+        const scheduleStreamRender = () => {
+            if (renderPending) return;
+            renderPending = true;
+            renderTimer = setTimeout(() => {
+                renderPending = false;
+                renderTimer = null;
+                renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+            }, STREAM_RENDER_INTERVAL_MS);
+        };
+        const flushStreamRender = () => {
+            if (renderTimer) clearTimeout(renderTimer);
+            renderPending = false;
+            renderTimer = null;
+            renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+        };
+        const sseParser = createBrowserSseParser({
+            onData(payload) {
+                let data = null;
+                try {
+                    data = JSON.parse(payload);
+                } catch (e) {
+                    console.warn('忽略格式异常的 SSE 事件', e);
+                    return;
+                }
+                if (data.type === 'queue') {
+                    updateAssistantStatus(data.message || '正在排队，请稍候');
+                    if (!hasShownQueueToast && data.status !== 'ready') {
+                        showToast(data.message || '请求已进入排队', 'info');
+                        hasShownQueueToast = true;
                     }
-                    if (data.type === 'queue') {
-                        updateAssistantStatus(data.message || '正在排队，请稍候。');
-                        if (!hasShownQueueToast && data.status !== 'ready') {
-                            showToast(data.message || '请求已进入排队', 'info');
-                            hasShownQueueToast = true;
-                        }
-                        continue;
-                    }
-                    if (data.error) throw new Error(data.detail || data.error);
-                    if (data.content) {
-                        if (!firstTokenTime) firstTokenTime = Date.now();
-                        fullAiContent += data.content;
-                        const chineseChars = (fullAiContent.match(/[\u4e00-\u9fa5]/g) || []).length;
-                        tokenCount = Math.ceil(chineseChars * 2 + (fullAiContent.length - chineseChars) * 0.5);
-                        
-                        const hasOpenThought = fullAiContent.includes('<thought>') && !fullAiContent.includes('</thought>');
-                        const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
-                        
-                        if (hasOpenThought && existingThoughtContent) {
-                            existingThoughtContent.innerHTML = renderMarkdown(fullAiContent.replace(/^<thought>/, ''));
-                            if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
-                                const inner = existingThoughtContent.closest('.thought-content-inner');
-                                inner.scrollTop = inner.scrollHeight;
-                            }
-                        } else {
-                            const thoughtState = rememberThoughtStateBeforeRender(textBody);
-                            textBody.innerHTML = renderAiMessage(fullAiContent, true, thoughtState.openStates);
-                            restoreThoughtStateAfterRender(textBody, thoughtState);
-                        }
-                        
-                        const elapsed = (Date.now() - startTime) / 1000;
-                        const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
-                        statsEl.innerHTML = `
-                            <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
-                            <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
-                            <span class="stat-item">${ICONS.speed}${tps} t/s</span>
-                        `;
-                    }
+                    return;
+                }
+                if (data.error) throw new Error(data.detail || data.error);
+                if (data.content) {
+                    if (!firstTokenTime) firstTokenTime = Date.now();
+                    fullAiContent += data.content;
+                    const chineseChars = (fullAiContent.match(/[\u4e00-\u9fa5]/g) || []).length;
+                    tokenCount = Math.ceil(chineseChars * 2 + (fullAiContent.length - chineseChars) * 0.5);
+                    scheduleStreamRender();
                 }
             }
+        });
+
+        while (!sseParser.isDone()) {
+            const { done, value } = await reader.read();
+            if (done) {
+                sseParser.write(decoder.decode());
+                sseParser.end();
+                break;
+            }
+            sseParser.write(decoder.decode(value, { stream: true }));
             const container = document.getElementById('message-container');
             if (container.scrollHeight - container.scrollTop - container.clientHeight < 120) container.scrollTop = container.scrollHeight;
         }
+        flushStreamRender();
 
         const finalElapsed = (Date.now() - startTime) / 1000;
         const finalTps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
@@ -239,6 +347,124 @@ window.sendMessage = async function(isRegenerate = false) {
     }
 }
 
+document.getElementById('file-input').addEventListener('change', async (e) => {
+    const modelId = document.getElementById('model-selector').value;
+    const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
+    if (!model || Number(model.supports_vision || 0) !== 1) {
+        showToast('当前选中的模型不具备视觉或文档分析能力，无法上传附件', 'error');
+        e.target.value = '';
+        return;
+    }
+
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
+    if (pendingAttachments.length >= maxAttachments) {
+        showToast(`最多只能上传 ${maxAttachments} 个附件`, 'error');
+        e.target.value = '';
+        return;
+    }
+    if (!currentSessionId) {
+        const s = await createSession('新对话');
+        if (!s) return;
+        currentSessionId = s.id;
+        document.getElementById('current-title').innerText = s.title;
+        window.loadSessions();
+    }
+    const uploadChatFile = async (file, password = '', onProgress = null) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (password) fd.append('password', password);
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(currentSessionId)}`);
+            Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable && typeof onProgress === 'function') {
+                    onProgress((event.loaded / event.total) * 100);
+                }
+            };
+            xhr.onload = () => {
+                let data = {};
+                try {
+                    data = JSON.parse(xhr.responseText || '{}');
+                } catch (e) {
+                    data = { error: xhr.responseText || 'Upload failed' };
+                }
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(data);
+                    return;
+                }
+                const err = new Error(data.error || `Upload failed (${xhr.status})`);
+                err.data = data;
+                reject(err);
+            };
+            xhr.onerror = () => reject(new Error('上传连接失败'));
+            xhr.send(fd);
+        });
+    };
+    try {
+        let uploadedCount = 0;
+        let skippedCount = 0;
+        showToast(files.length > 1 ? `正在上传 ${files.length} 个文件...` : '正在上传...', 'info');
+        for (const file of files) {
+            if (pendingAttachments.length >= maxAttachments) {
+                skippedCount += 1;
+                continue;
+            }
+            const hasPendingImage = pendingAttachments.some(item => String(item.type || '').startsWith('image/'));
+            const selectedIsImage = String(file.type || '').startsWith('image/');
+            if (selectedIsImage && hasPendingImage) {
+                skippedCount += 1;
+                continue;
+            }
+
+            let data;
+            const progress = createUploadProgress(file.name);
+            try {
+                data = await uploadChatFile(file, '', percent => progress.update(percent));
+            } catch (uploadErr) {
+                if (uploadErr.data?.passwordRequired) {
+                    progress.close();
+                    const password = await window.showInputPrompt({
+                        title: '文档密码',
+                        message: `文档 ${file.name} 已加密，请输入文档密码。`,
+                        type: 'password',
+                        placeholder: '文档密码',
+                        autocomplete: 'off',
+                        trim: false
+                    });
+                    if (!password) {
+                        skippedCount += 1;
+                        continue;
+                    }
+                    const retryProgress = createUploadProgress(file.name);
+                    data = await uploadChatFile(file, password, percent => retryProgress.update(percent));
+                    retryProgress.close();
+                } else {
+                    progress.close();
+                    throw uploadErr;
+                }
+            }
+            progress.close();
+
+            if (data.url) {
+                pendingAttachments.push({ name: data.name, url: data.url, type: file.type, extractedText: data.extractedText, markdown: file.type.startsWith('image/') ? `![${data.name}](${data.url})` : `[附件: ${data.name}](${data.url})` });
+                uploadedCount += 1;
+                (data.visionAttachments || []).forEach(item => {
+                    if (pendingAttachments.length >= maxAttachments) return;
+                    if (pendingAttachments.some(entry => String(entry.type || '').startsWith('image/'))) return;
+                    pendingAttachments.push({ name: item.name, url: item.url, type: 'image/png', extractedText: '', markdown: item.markdown || `![${item.name}](${item.url})` });
+                });
+                renderAttachmentPreviews();
+            }
+        }
+        if (uploadedCount > 0) showToast(skippedCount > 0 ? `已上传 ${uploadedCount} 个，跳过 ${skippedCount} 个` : '上传成功');
+        else if (skippedCount > 0) showToast('没有可上传的文件：最多 5 个附件，且图片每次仅 1 张', 'error');
+    } catch (e) { showToast(e.message || '上传失败', 'error'); }
+    e.target.value = '';
+});
+
 window.removeAttachment = (index) => { pendingAttachments.splice(index, 1); renderAttachmentPreviews(); };
 
 window.saveMyDefaultModel = async (modelId = undefined, btn = null) => {
@@ -256,5 +482,5 @@ window.saveMyDefaultModel = async (modelId = undefined, btn = null) => {
             const selector = document.getElementById('model-selector');
             if (selector) selector.value = targetModelId;
         }
-    } catch (e) { showToast('保存失败', 'error'); }
+    } catch (e) { showToast('设置失败', 'error'); }
 };

@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { db } = require('../db');
 const { logger } = require('../logger');
+const { getBeijingTimestamp } = require('../time');
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
 
 const parsePositiveInt = (value, fallback) => {
@@ -114,7 +115,7 @@ function recordModelSuccess(modelCfg, latencyMs) {
     runtime.circuitOpenUntil = 0;
     runtime.lastError = '';
     runtime.lastLatencyMs = Number.isFinite(latencyMs) ? latencyMs : runtime.lastLatencyMs;
-    runtime.lastSuccessAt = new Date().toISOString();
+    runtime.lastSuccessAt = getBeijingTimestamp();
 }
 
 function recordModelFailure(modelCfg, err) {
@@ -122,7 +123,7 @@ function recordModelFailure(modelCfg, err) {
     runtime.consecutiveFailures += 1;
     runtime.errorCount += 1;
     runtime.lastError = err?.response?.data?.error?.message || err?.message || String(err || 'unknown error');
-    runtime.lastFailureAt = new Date().toISOString();
+    runtime.lastFailureAt = getBeijingTimestamp();
     if (runtime.consecutiveFailures >= FAILURE_THRESHOLD) {
         runtime.circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
         runtime.semaphore.rejectQueuedRequests(
@@ -159,7 +160,7 @@ async function refreshEndpointMonitor(runtime) {
             proxy: false,
             validateStatus: status => status < 500
         });
-        runtime.monitor.updatedAt = new Date().toISOString();
+        runtime.monitor.updatedAt = getBeijingTimestamp();
         runtime.monitor.latencyMs = Date.now() - start;
         runtime.monitor.error = '';
         runtime.monitor.payload = compactPayload(response.data);
@@ -169,7 +170,7 @@ async function refreshEndpointMonitor(runtime) {
             ? 'degraded'
             : (healthy === false ? 'degraded' : (rawStatus ? String(rawStatus) : 'ok'));
     } catch (e) {
-        runtime.monitor.updatedAt = new Date().toISOString();
+        runtime.monitor.updatedAt = getBeijingTimestamp();
         runtime.monitor.latencyMs = Date.now() - start;
         runtime.monitor.status = 'unreachable';
         runtime.monitor.error = e.message || 'monitor request failed';

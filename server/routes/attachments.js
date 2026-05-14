@@ -25,6 +25,7 @@ function getSafeUploadPath(userId, sessionId, filename) {
 
 function createAttachmentsRouter({
     authMiddleware,
+    uploadLimiter,
     upload,
     normalizePage,
     normalizeLimit,
@@ -81,7 +82,7 @@ function createAttachmentsRouter({
         res.sendFile(target);
     }));
 
-    router.post('/api/upload', authMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
+    router.post('/api/upload', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
         if (!req.file) return res.status(400).json({ error: '未选择文件' });
 
         const userId = req.user.id;
@@ -204,7 +205,9 @@ function createAttachmentsRouter({
             LIMIT ? OFFSET ?
         `).all(...params, limit, offset).map(item => ({
             ...item,
-            url: '/' + String(item.file_path || '').replace(/\\/g, '/') + (item.access_token ? '?token=' + item.access_token : '')
+            url: item.file_path
+                ? '/' + String(item.file_path).replace(/\\/g, '/') + (item.access_token ? '?token=' + item.access_token : '')
+                : ''
         }));
         const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
         res.json({ data, total, hasMore: offset + data.length < total, isSuperAdmin: isSuperAdmin(req.user) });

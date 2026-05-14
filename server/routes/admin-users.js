@@ -80,7 +80,12 @@ function createAdminUsersRouter({
         if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员密码不可由其他用户重置' });
         validatePassword(password);
         const hash = bcrypt.hashSync(password, 10);
-        const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
+        const resetPasswordTx = db.transaction(() => {
+            const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
+            db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(targetUserId);
+            return info;
+        });
+        const info = resetPasswordTx();
         if (info.changes === 0) return res.status(404).json({ error: '用户不存在' });
         logAction(req, '重置密码', `用户ID: ${targetUserId}`);
         res.json({ success: true });
@@ -339,6 +344,11 @@ function createAdminUsersRouter({
             const now = getBeijingTimestamp();
             db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(targetUserId);
             db.prepare("UPDATE api_keys SET status = 'disabled' WHERE user_id = ?").run(targetUserId);
+            db.prepare('UPDATE sessions SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL').run(now, targetUserId);
+            db.prepare('UPDATE messages SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL').run(now, targetUserId);
+            db.prepare('UPDATE attachments SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL').run(now, targetUserId);
+            db.prepare('UPDATE knowledge_docs SET deleted_at = ?, deleted_by_user = 0, is_enabled = 0, updated_at = ? WHERE user_id = ? AND deleted_at IS NULL')
+                .run(now, now, targetUserId);
             const info = db.prepare("UPDATE users SET status = 'disabled', deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL")
                 .run(now, req.user.id, targetUserId);
             return info;

@@ -28,6 +28,76 @@ document.getElementById('confirm-ok-btn')?.addEventListener('click', () => { if 
 document.getElementById('modal-confirm-cancel')?.addEventListener('click', window.closeConfirmModal);
 
 // --- 消息操作 ---
+let inputPromptResolve = null;
+let inputPromptOptions = {};
+
+function resetInputPromptError() {
+    const errorEl = document.getElementById('input-prompt-error');
+    if (!errorEl) return;
+    errorEl.innerText = '';
+    errorEl.classList.add('hidden');
+}
+
+function closeInputPrompt(value = null) {
+    document.getElementById('input-prompt-container')?.classList.add('hidden');
+    const resolve = inputPromptResolve;
+    inputPromptResolve = null;
+    inputPromptOptions = {};
+    if (resolve) resolve(value);
+}
+
+window.showInputPrompt = function(options = {}) {
+    const container = document.getElementById('input-prompt-container');
+    const titleEl = document.getElementById('input-prompt-title');
+    const messageEl = document.getElementById('input-prompt-message');
+    const field = document.getElementById('input-prompt-field');
+    if (!container || !titleEl || !messageEl || !field) return Promise.resolve(null);
+
+    if (inputPromptResolve) closeInputPrompt(null);
+    inputPromptOptions = options;
+    titleEl.innerText = options.title || '输入';
+    messageEl.innerText = options.message || '';
+    field.type = options.type || 'text';
+    field.value = options.value || '';
+    field.placeholder = options.placeholder || '';
+    field.autocomplete = options.autocomplete || 'off';
+    resetInputPromptError();
+    container.classList.remove('hidden');
+    setTimeout(() => field.focus(), 0);
+
+    return new Promise(resolve => {
+        inputPromptResolve = resolve;
+    });
+};
+
+function submitInputPrompt() {
+    const field = document.getElementById('input-prompt-field');
+    const errorEl = document.getElementById('input-prompt-error');
+    if (!field || !errorEl) return closeInputPrompt(null);
+    const value = field.value;
+    const trimmed = value.trim();
+    if (inputPromptOptions.required !== false && !trimmed) {
+        errorEl.innerText = inputPromptOptions.requiredMessage || '请输入内容';
+        errorEl.classList.remove('hidden');
+        field.focus();
+        return;
+    }
+    closeInputPrompt(inputPromptOptions.trim === false ? value : trimmed);
+}
+
+document.getElementById('modal-input-prompt-ok')?.addEventListener('click', submitInputPrompt);
+document.getElementById('modal-input-prompt-cancel')?.addEventListener('click', () => closeInputPrompt(null));
+document.getElementById('input-prompt-field')?.addEventListener('input', resetInputPromptError);
+document.getElementById('input-prompt-field')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        submitInputPrompt();
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeInputPrompt(null);
+    }
+});
+
 window.copyMsg = (btn) => {
     const body = btn.closest('.message-content').querySelector('.text-body');
     const temp = body.cloneNode(true);
@@ -130,7 +200,14 @@ bind('new-chat-btn', async () => {
 });
 bind('send-btn', sendMessage);
 bind('stop-btn', () => { currentAbortController?.abort(); });
-bind('upload-btn', () => document.getElementById('file-input').click());
+bind('upload-btn', () => {
+    const modelId = document.getElementById('model-selector').value;
+    const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
+    if (!model || Number(model.supports_vision || 0) !== 1) {
+        return showToast('当前选中的模型不具备视觉或文档分析能力', 'error');
+    }
+    document.getElementById('file-input').click();
+});
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
 bind('session-active-filter', () => window.setArchiveFilter(false));
 bind('session-archive-filter', () => window.setArchiveFilter(true));
@@ -157,6 +234,33 @@ bind('pw-update-btn', () => window.updatePassword());
 bind('admin-modal-close', () => window.closeModal());
 bind('admin-panel-btn', () => window.openAdminPanel());
 bind('logout-btn', () => window.logout());
+
+document.addEventListener('click', async (event) => {
+    const authToggle = event.target.closest('[data-auth-password-toggle]');
+    if (authToggle) {
+        window.toggleAuthPassword?.(authToggle.dataset.inputId, authToggle.dataset.iconId);
+        return;
+    }
+
+    const actionButton = event.target.closest('[data-static-action]');
+    if (!actionButton) return;
+
+    const actions = {
+        'toggle-model-key': () => window.toggleKeyVisibility?.(),
+        'fetch-remote-models': () => window.fetchRemoteModels?.(),
+        'close-user-records': () => window.closeUserRecordsModal?.(),
+        'query-logs': () => window.loadLogs?.(1),
+        'reset-logs': () => window.resetLogFilters?.(),
+        'open-monitor-routes': () => window.openMonitorRoutesModal?.(),
+        'reset-report': () => window.resetReportFilters?.(),
+        'close-api-call-logs': () => window.closeApiCallLogsModal?.(),
+        'close-key-modal': () => window.closeKeyModal?.(),
+        'confirm-create-key': () => window.confirmCreateKey?.(),
+        'copy-generated-key': () => window.copyGeneratedKey?.(),
+        'close-monitor-routes': () => window.closeMonitorRoutesModal?.()
+    };
+    await actions[actionButton.dataset.staticAction]?.();
+});
 
 // 管理操作
 bind('ops-refresh-btn', () => window.loadOpsSummary());
@@ -193,84 +297,6 @@ bind('details-export-btn', () => window.exportDetails());
 
 // 其他
 bind('image-viewer-modal', () => window.closeImageViewer());
-
-document.getElementById('file-input').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
-    if (pendingAttachments.length >= maxAttachments) {
-        showToast(`最多只能上传 ${maxAttachments} 个附件`, 'error');
-        e.target.value = '';
-        return;
-    }
-    if (!currentSessionId) {
-        const s = await createSession('新对话');
-        if (!s) return;
-        currentSessionId = s.id;
-        document.getElementById('current-title').innerText = s.title;
-        window.loadSessions();
-    }
-    const uploadChatFile = async (file, password = '') => {
-        const fd = new FormData();
-        fd.append('file', file);
-        if (password) fd.append('password', password);
-        const res = await apiFetch(`${API_BASE}/upload?sessionId=${currentSessionId}`, { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) {
-            const err = new Error(data.error || 'Upload failed');
-            err.data = data;
-            throw err;
-        }
-        return data;
-    };
-    try {
-        let uploadedCount = 0;
-        let skippedCount = 0;
-        showToast(files.length > 1 ? `正在上传 ${files.length} 个文件...` : '正在上传...', 'info');
-        for (const file of files) {
-            if (pendingAttachments.length >= maxAttachments) {
-                skippedCount += 1;
-                continue;
-            }
-            const hasPendingImage = pendingAttachments.some(item => String(item.type || '').startsWith('image/'));
-            const selectedIsImage = String(file.type || '').startsWith('image/');
-            if (selectedIsImage && hasPendingImage) {
-                skippedCount += 1;
-                continue;
-            }
-
-            let data;
-            try {
-                data = await uploadChatFile(file);
-            } catch (uploadErr) {
-                if (uploadErr.data?.passwordRequired) {
-                    const password = window.prompt(`文档 ${file.name} 已加密，请输入文档密码`);
-                    if (!password) {
-                        skippedCount += 1;
-                        continue;
-                    }
-                    data = await uploadChatFile(file, password);
-                } else {
-                    throw uploadErr;
-                }
-            }
-
-            if (data.url) {
-                pendingAttachments.push({ name: data.name, url: data.url, type: file.type, extractedText: data.extractedText, markdown: file.type.startsWith('image/') ? `![${data.name}](${data.url})` : `[附件: ${data.name}](${data.url})` });
-                uploadedCount += 1;
-                (data.visionAttachments || []).forEach(item => {
-                    if (pendingAttachments.length >= maxAttachments) return;
-                    if (pendingAttachments.some(entry => String(entry.type || '').startsWith('image/'))) return;
-                    pendingAttachments.push({ name: item.name, url: item.url, type: 'image/png', extractedText: '', markdown: item.markdown || `![${item.name}](${item.url})` });
-                });
-                renderAttachmentPreviews();
-            }
-        }
-        if (uploadedCount > 0) showToast(skippedCount > 0 ? `已上传 ${uploadedCount} 个，跳过 ${skippedCount} 个` : '上传成功');
-        else if (skippedCount > 0) showToast('没有可上传的文件：最多 5 个附件，且图片每次仅 1 张', 'error');
-    } catch (e) { showToast(e.message || '上传失败', 'error'); }
-    e.target.value = '';
-});
 
 // --- 搜索防抖 ---
 let searchTimer = null;

@@ -12,7 +12,7 @@ if (!fs.existsSync(BACKUP_DIR)) {
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 const backupPath = path.join(BACKUP_DIR, `chat_backup_${timestamp}.db`);
 
-const db = require('../server/db'); // 借用现有的数据库连接
+const { db } = require('../server/db'); // 借用现有的数据库连接
 
 async function runBackup() {
     try {

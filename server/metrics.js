@@ -393,6 +393,7 @@ function renderPrometheusMetrics() {
         ['audit_cleanup', maintenance.auditCleanup?.lastSuccessAt],
         ['api_call_log_cleanup', maintenance.apiCallLogCleanup?.lastSuccessAt],
         ['refresh_token_cleanup', maintenance.refreshTokenCleanup?.lastSuccessAt],
+        ['sqlite_backup', maintenance.backup?.lastSuccessAt],
         ['sqlite_optimize', maintenance.optimize?.lastSuccessAt]
     ].forEach(([task, timestamp]) => {
         lines.push(line('pivot_maintenance_last_success_timestamp_seconds', { task }, timestamp ? Math.floor(new Date(timestamp).getTime() / 1000) : 0));
@@ -402,6 +403,12 @@ function renderPrometheusMetrics() {
     lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'audit_cleanup' }, maintenance.auditCleanup?.totalChanges || 0));
     lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'api_call_log_cleanup' }, maintenance.apiCallLogCleanup?.totalChanges || 0));
     lines.push(line('pivot_maintenance_deleted_rows_total', { task: 'refresh_token_cleanup' }, maintenance.refreshTokenCleanup?.totalChanges || 0));
+    lines.push('# HELP pivot_maintenance_backup_size_bytes Last successful SQLite backup file size in bytes.');
+    lines.push('# TYPE pivot_maintenance_backup_size_bytes gauge');
+    lines.push(line('pivot_maintenance_backup_size_bytes', {}, maintenance.backup?.lastSizeBytes || 0));
+    lines.push('# HELP pivot_maintenance_backup_deleted_files_total Backup files deleted by rolling cleanup.');
+    lines.push('# TYPE pivot_maintenance_backup_deleted_files_total counter');
+    lines.push(line('pivot_maintenance_backup_deleted_files_total', {}, maintenance.backup?.totalDeletedFiles || 0));
 
     return `${lines.join('\n')}\n`;
 }

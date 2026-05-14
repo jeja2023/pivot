@@ -18,7 +18,12 @@ const escapeSelectorText = (str) => {
 };
 
 const describeSelectorModel = (model, simple = false) => {
-    if (simple) return model.name + (model.user_id ? ' (个人)' : '');
+    if (simple) {
+        let suffix = '';
+        if (Number(model.supports_vision || 0) === 1) suffix += ' 👁️';
+        if (Number(model.supports_reasoning || 0) === 1) suffix += ' 🧠';
+        return model.name + (model.user_id ? ' (个人)' : '') + suffix;
+    }
     const parts = [model.name];
     if (model.user_id) parts.push('个人');
     if (Number(model.supports_vision || 0) === 1) parts.push('视觉输入');
@@ -52,9 +57,10 @@ window.updateContextUsage = (meta = null) => {
 };
 
 window.refreshModelSelector = async function() {
-    const selector = document.getElementById('model-selector');
-    if (!selector) return;
-    const selected = selector.value;
+    const hiddenInput = document.getElementById('model-selector');
+    const triggerBtn = document.getElementById('model-selector-btn');
+    const dropdownList = document.getElementById('model-dropdown-list');
+    if (!hiddenInput || !triggerBtn || !dropdownList) return;
 
     try {
         const [modelRes, settingsRes] = await Promise.all([
@@ -64,47 +70,189 @@ window.refreshModelSelector = async function() {
         if (!modelRes.ok) throw new Error('Model list failed to load');
 
         const { data = [] } = await modelRes.json();
+        window._cachedModels = data;
         const settings = settingsRes.ok ? await settingsRes.json() : {};
         const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
         
-        // 只有当 currentUser 存在时才进行过滤
         const models = (window.currentUser && window.currentUser.role === 'admin')
             ? data.filter(model => !model.user_id || model.owner_role === 'admin')
             : data;
 
         if (models.length === 0) {
-            selector.innerHTML = '<option value="">暂无可用模型</option>';
-            selector.disabled = true;
+            triggerBtn.innerHTML = '<span>暂无可用模型</span>';
+            triggerBtn.disabled = true;
             return;
         }
 
-        selector.innerHTML = models.map(model => {
-            const isSelected = (selected && String(model.id) === String(selected)) || 
-                             (!selected && defaultModelId && String(model.id) === String(defaultModelId));
-            const capabilitySuffix = '';
-            return `<option value="${model.id}" ${isSelected ? 'selected' : ''} title="${escapeSelectorText(describeSelectorModel(model, false))}">${escapeSelectorText(describeSelectorModel(model, true) + capabilitySuffix)}</option>`;
+        dropdownList.innerHTML = models.map(model => {
+            const hasVision = Number(model.supports_vision || 0) === 1;
+            const hasReasoning = Number(model.supports_reasoning || 0) === 1;
+            const meta = describeSelectorModel(model, false).split(' | ').slice(1).join(' | ');
+            
+            const visionIcon = hasVision ? `
+                <div class="cap-icon vision" title="支持视觉输入">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                </div>` : '';
+            const reasoningIcon = hasReasoning ? `
+                <div class="cap-icon reasoning" title="支持推理/思考">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg>
+                </div>` : '';
+            
+            return `
+                <div class="model-item" data-id="${model.id}">
+                    <div class="model-item-header">
+                        <span class="model-item-name">${escapeSelectorText(model.name)}${model.user_id ? ' (个人)' : ''}</span>
+                        <div class="model-item-caps">
+                            ${visionIcon}${reasoningIcon}
+                        </div>
+                    </div>
+                    <div class="model-item-meta">${escapeSelectorText(meta)}</div>
+                </div>
+            `;
         }).join('');
-        selector.disabled = false;
+        dropdownList.querySelectorAll('.model-item').forEach(item => {
+            item.addEventListener('click', () => window.selectDropdownModel(item.dataset.id));
+        });
 
-        // 如果之前没有选中值，或者选中的值已不在列表中，尝试恢复默认或第一个
-        if (!selector.value && models.length > 0) {
-            if (defaultModelId && models.some(m => String(m.id) === String(defaultModelId))) {
-                selector.value = defaultModelId;
-            } else {
-                selector.value = models[0].id;
-            }
+        let initialId = hiddenInput.value;
+        if (!initialId || !models.some(m => String(m.id) === String(initialId))) {
+            initialId = (defaultModelId && models.some(m => String(m.id) === String(defaultModelId))) ? defaultModelId : models[0].id;
         }
+        window.selectDropdownModel(initialId, false);
+        
     } catch (e) {
         console.error('刷新模型列表失败:', e);
-        selector.innerHTML = '<option value="">模型列表加载失败</option>';
-        selector.disabled = true;
+        triggerBtn.innerHTML = '<span>列表加载失败</span>';
     }
+};
+
+function setModelDropdownOpen(open) {
+    const container = document.getElementById('model-selector-container');
+    const trigger = document.getElementById('model-selector-btn');
+    const dropdown = document.getElementById('model-dropdown-list');
+    if (!container || !trigger || !dropdown) return;
+    container.classList.toggle('is-open', open);
+    dropdown.classList.toggle('hidden', !open);
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        const active = dropdown.querySelector('.model-item.active') || dropdown.querySelector('.model-item');
+        active?.classList.add('is-keyboard-active');
+        active?.scrollIntoView({ block: 'nearest' });
+    } else {
+        dropdown.querySelectorAll('.model-item.is-keyboard-active').forEach(item => item.classList.remove('is-keyboard-active'));
+    }
+}
+
+function moveModelDropdownActive(delta) {
+    const dropdown = document.getElementById('model-dropdown-list');
+    const items = Array.from(dropdown?.querySelectorAll('.model-item') || []);
+    if (items.length === 0) return;
+    let index = items.findIndex(item => item.classList.contains('is-keyboard-active'));
+    if (index < 0) index = items.findIndex(item => item.classList.contains('active'));
+    const nextIndex = (Math.max(index, 0) + delta + items.length) % items.length;
+    items.forEach(item => item.classList.remove('is-keyboard-active'));
+    items[nextIndex].classList.add('is-keyboard-active');
+    items[nextIndex].scrollIntoView({ block: 'nearest' });
+}
+
+window.selectDropdownModel = function(id, shouldClose = true) {
+    const hiddenInput = document.getElementById('model-selector');
+    const models = window._cachedModels || [];
+    const model = models.find(m => String(m.id) === String(id));
+    if (!model) return;
+
+    hiddenInput.value = id;
+    document.getElementById('selected-model-name').innerText = model.name + (model.user_id ? ' (个人)' : '');
+    
+    const hasVision = Number(model.supports_vision || 0) === 1;
+    const hasReasoning = Number(model.supports_reasoning || 0) === 1;
+    
+    const visionIcon = hasVision ? `
+        <div class="cap-icon vision" title="支持视觉">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>` : '';
+    const reasoningIcon = hasReasoning ? `
+        <div class="cap-icon reasoning" title="支持思考">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg>
+        </div>` : '';
+    
+    document.getElementById('selected-model-caps').innerHTML = visionIcon + reasoningIcon;
+
+    document.querySelectorAll('.model-item').forEach(el => {
+        el.classList.toggle('active', String(el.dataset.id) === String(id));
+        el.classList.toggle('is-keyboard-active', String(el.dataset.id) === String(id));
+    });
+
+    // 更新上传按钮状态
+    const uploadBtn = document.getElementById('upload-btn');
+    if (uploadBtn) {
+        if (hasVision) {
+            uploadBtn.style.opacity = '1';
+            uploadBtn.style.cursor = 'pointer';
+            uploadBtn.title = '上传附件 (图片、文档)';
+        } else {
+            uploadBtn.style.opacity = '0.4';
+            uploadBtn.style.cursor = 'not-allowed';
+            uploadBtn.title = '当前模型不支持附件 (请切换至视觉模型)';
+        }
+    }
+
+    if (window.pendingAttachments && window.pendingAttachments.length > 0 && !hasVision) {
+        showToast('警告：当前模型不支持已添加的附件，发送将受限', 'warning');
+    }
+
+    if (shouldClose) {
+        setModelDropdownOpen(false);
+    }
+    hiddenInput.dispatchEvent(new Event('change'));
 };
 
 // --- 初始化 ---
 document.addEventListener('DOMContentLoaded', () => {
     renderCopyright();
     if (window.showAuth) window.showAuth();
+    
+    const container = document.getElementById('model-selector-container');
+    const trigger = document.getElementById('model-selector-btn');
+    const dropdown = document.getElementById('model-dropdown-list');
+    
+    if (trigger && dropdown) {
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setModelDropdownOpen(!container.classList.contains('is-open'));
+        });
+        trigger.addEventListener('keydown', (e) => {
+            const isOpen = container.classList.contains('is-open');
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setModelDropdownOpen(true);
+                moveModelDropdownActive(e.key === 'ArrowDown' ? 1 : -1);
+                return;
+            }
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (!isOpen) {
+                    setModelDropdownOpen(true);
+                    return;
+                }
+                const active = dropdown.querySelector('.model-item.is-keyboard-active') || dropdown.querySelector('.model-item.active');
+                if (active) window.selectDropdownModel(active.dataset.id);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setModelDropdownOpen(false);
+            }
+        });
+        
+        document.addEventListener('click', (e) => {
+            if (!container.contains(e.target)) {
+                setModelDropdownOpen(false);
+            }
+        });
+    }
 });
 
 function renderCopyright() {

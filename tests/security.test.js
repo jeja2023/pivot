@@ -1,12 +1,20 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const zlib = require('node:zlib');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-security-suite-please-do-not-use';
+const generatedTestDataDir = !process.env.DATA_DIR;
+if (generatedTestDataDir) {
+    process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-security-test-'));
+}
 
 const {
+    assertSafeOutboundUrl,
     resolveUploadUrlPath,
+    isSensitiveOutboundHost,
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
@@ -14,7 +22,8 @@ const { buildFtsQuery } = require('../server/search');
 const { createSseEventParser, createStreamAccumulator, extractStreamPayload } = require('../server/streaming');
 const {
     csrfMiddleware,
-    CSRF_COOKIE_NAME
+    CSRF_COOKIE_NAME,
+    getCookie
 } = require('../server/auth');
 const {
     buildFtsOrQuery,
@@ -89,9 +98,20 @@ const {
     cleanupApiCallLogs,
     cleanupExpiredRefreshTokens,
     cleanupOldLogs,
+    backupDatabase,
+    cleanupOldBackups,
     getMaintenanceStatus,
     optimizeDatabase
 } = require('../server/services/maintenance');
+const { cleanupSoftDeletedStorage } = require('../server/services/storage-gc');
+const { createAdminUsersRouter } = require('../server/routes/admin-users');
+const { createModelsRouter } = require('../server/routes/models');
+const {
+    buildEmbeddingModelItem,
+    buildEmbeddingResponse,
+    createOpenAIRouter,
+    normalizeEmbeddingInputs
+} = require('../server/routes/openai');
 const {
     getSystemHealthSnapshot,
     overallStatus
@@ -99,6 +119,14 @@ const {
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
+
+test.after(async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    if (generatedTestDataDir && process.env.DATA_DIR) {
+        db.close();
+        fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+    }
+});
 
 test('resolveUploadUrlPath accepts normal upload URLs', () => {
     const target = resolveUploadUrlPath('/uploads/1/session/file.png?token=abc');
@@ -112,6 +140,32 @@ test('resolveUploadUrlPath rejects traversal and non-upload URLs', () => {
     assert.equal(resolveUploadUrlPath('/uploads/%2e%2e/data/chat.db'), null);
     assert.equal(resolveUploadUrlPath('/uploads/1/../../server/index.js'), null);
     assert.equal(isPathInsideUploadRoot(path.resolve(__dirname, '..', 'server', 'index.js')), false);
+});
+
+test('getCookie ignores malformed percent-encoded cookie pairs', () => {
+    const req = {
+        headers: {
+            cookie: 'bad=%E0%A4%A; pivot_csrf_token=valid-token'
+        }
+    };
+    assert.equal(getCookie(req, 'pivot_csrf_token'), 'valid-token');
+    assert.equal(getCookie(req, 'bad'), undefined);
+});
+
+test('outbound URL guard blocks sensitive SSRF targets', async () => {
+    assert.equal(isSensitiveOutboundHost('127.0.0.1'), true);
+    assert.equal(isSensitiveOutboundHost('169.254.169.254'), true);
+    assert.equal(isSensitiveOutboundHost('metadata.google.internal'), true);
+    assert.equal(isSensitiveOutboundHost('192.168.1.10'), false);
+
+    await assert.rejects(
+        assertSafeOutboundUrl('http://169.254.169.254/latest/meta-data', { role: 'admin' }),
+        /sensitive local|metadata target/
+    );
+    await assert.rejects(
+        assertSafeOutboundUrl('http://localhost:11434/v1', { role: 'admin' }),
+        /sensitive local|metadata target/
+    );
 });
 
 test('buildFtsQuery escapes user input into phrase terms', () => {
@@ -139,12 +193,12 @@ test('createStreamAccumulator wraps reasoning deltas and captures usage', () => 
         includeThoughtTags: true,
         onContent: chunk => emitted.push(chunk)
     });
-    accumulator.pushJson({ choices: [{ delta: { reasoning_content: '思考' } }] });
-    accumulator.pushJson({ choices: [{ delta: { content: '答案' } }], usage: { completion_tokens: 2 } });
+    accumulator.pushJson({ choices: [{ delta: { reasoning_content: 'reasoning' } }] });
+    accumulator.pushJson({ choices: [{ delta: { content: 'answer' } }], usage: { completion_tokens: 2 } });
     accumulator.finish();
 
-    assert.equal(accumulator.getContent(), '<thought>思考</thought>答案');
-    assert.deepEqual(emitted, ['<thought>思考', '</thought>答案']);
+    assert.equal(accumulator.getContent(), '<thought>reasoning</thought>answer');
+    assert.deepEqual(emitted, ['<thought>reasoning', '</thought>answer']);
     assert.deepEqual(accumulator.getUsage(), { completion_tokens: 2 });
 });
 
@@ -184,17 +238,17 @@ test('model adapter normalizes compatible endpoint URLs without changing local c
 
 test('model adapter converts chat messages to Responses API input', () => {
     const converted = convertChatMessagesToResponsesInput([
-        { role: 'system', content: '安全策略' },
+        { role: 'system', content: 'security policy' },
         {
             role: 'user',
             content: [
-                { type: 'text', text: '看图' },
+                { type: 'text', text: 'look at image' },
                 { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }
             ]
         }
     ]);
     assert.equal(converted[0].role, 'user');
-    assert.match(converted[0].content, /安全策略/);
+    assert.match(converted[0].content, /security policy/);
     assert.deepEqual(converted[1].content[1], {
         type: 'input_image',
         image_url: 'data:image/png;base64,abc'
@@ -257,6 +311,88 @@ test('chat message service saves messages and updates session stats', () => {
     }
 });
 
+test('session detail only appends valid attachment tokens', async () => {
+    const { createSessionsRouter } = require('../server/routes/sessions');
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`session_attach_${suffix}`, 'hash', 'Session Attachment Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const sessionId = `session-attach-${suffix}`;
+    const activePath = `uploads/${userId}/${sessionId}/active.png`;
+    const deletedPath = `uploads/${userId}/${sessionId}/deleted.png`;
+    const expiredPath = `uploads/${userId}/${sessionId}/expired.png`;
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionId, userId, 'Session Attachment Test');
+    db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(
+        sessionId,
+        userId,
+        'user',
+        `![a](/${activePath}) ![d](/${deletedPath}) ![e](/${expiredPath})`
+    );
+    db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'))
+    `).run(userId, sessionId, 'active.png', activePath, 'image/png', 1, 'active-token');
+    db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, deleted_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, sessionId, 'deleted.png', deletedPath, 'image/png', 1, 'deleted-token');
+    db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '-1 day'), datetime('now', '+8 hours'))
+    `).run(userId, sessionId, 'expired.png', expiredPath, 'image/png', 1, 'expired-token');
+
+    const router = createSessionsRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = { id: userId, username: `session_attach_${suffix}`, role: 'user', status: 'active' };
+            next();
+        },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/sessions/:id' && layer.route.methods.get);
+    const req = { params: { id: sessionId }, query: {}, headers: {} };
+    let payload = null;
+    const res = {
+        status() { return this; },
+        json(data) {
+            payload = data;
+            return this;
+        }
+    };
+    const handlers = route.route.stack.map(item => item.handle);
+
+    try {
+        await handlers[0](req, res, err => { if (err) throw err; });
+        await new Promise((resolve, reject) => {
+            const originalJson = res.json.bind(res);
+            res.json = (data) => {
+                originalJson(data);
+                resolve();
+                return res;
+            };
+            handlers[1](req, res, reject);
+        });
+        const content = payload.messages[0].content;
+        assert.match(content, /active\.png\?token=active-token/);
+        assert.doesNotMatch(content, /deleted\.png\?token=deleted-token/);
+        assert.doesNotMatch(content, /expired\.png\?token=expired-token/);
+    } finally {
+        db.prepare('DELETE FROM attachments WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('ConcurrencySemaphore reports queue position for waiting requests', async () => {
     const semaphore = new ConcurrencySemaphore({
         maxConcurrent: 1,
@@ -286,10 +422,10 @@ test('ConcurrencySemaphore reports queue position for waiting requests', async (
 test('model vision capability helpers detect visual inputs and flags', () => {
     assert.equal(modelSupportsVision({ supports_vision: 1 }), true);
     assert.equal(modelSupportsVision({ supports_vision: 0 }), false);
-    assert.equal(contentContainsVisionInput('![截图](/uploads/1/session/a.png)'), true);
-    assert.equal(contentContainsVisionInput('普通文本，没有图片'), false);
+    assert.equal(contentContainsVisionInput('![screenshot](/uploads/1/session/a.png)'), true);
+    assert.equal(contentContainsVisionInput('plain text without image'), false);
     assert.equal(messagesContainVisionInput([
-        { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }] }
+        { role: 'user', content: [{ type: 'text', text: 'look at image' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }] }
     ]), true);
 });
 
@@ -343,16 +479,22 @@ test('RAG config clamps unsafe retrieval parameters', () => {
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.scoreThreshold, -1), '0');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.topK, 99), '10');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.candidateLimit, 1), '20');
+    assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.chunkSize, 99), '200');
+    assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.chunkOverlap, -1), '0');
 
     const config = getRagConfig({
         scoreThreshold: '0.7',
         topK: '5',
-        candidateLimit: '3'
+        candidateLimit: '3',
+        chunkSize: '240',
+        chunkOverlap: '999'
     });
     assert.deepEqual(config, {
         scoreThreshold: 0.7,
         topK: 5,
-        candidateLimit: 20
+        candidateLimit: 20,
+        chunkSize: 240,
+        chunkOverlap: 120
     });
 });
 
@@ -510,12 +652,12 @@ test('RAG embedding helpers support HTTP services', () => {
     assert.equal(resolveEmbeddingUrl('https://example.com'), 'https://example.com/v1/embeddings');
 
     assert.deepEqual(
-        buildEmbeddingPayload('你好', 'bge-m3', 'http', 'http://127.0.0.1:11434/api/embed'),
-        { model: 'bge-m3', input: '你好' }
+        buildEmbeddingPayload('hello', 'bge-m3', 'http', 'http://127.0.0.1:11434/api/embed'),
+        { model: 'bge-m3', input: 'hello' }
     );
     assert.deepEqual(
-        buildEmbeddingPayload('你好', 'nomic-embed-text', 'http', 'http://127.0.0.1:11434/api/embeddings'),
-        { model: 'nomic-embed-text', prompt: '你好' }
+        buildEmbeddingPayload('hello', 'nomic-embed-text', 'http', 'http://127.0.0.1:11434/api/embeddings'),
+        { model: 'nomic-embed-text', prompt: 'hello' }
     );
     assert.deepEqual(
         buildEmbeddingPayload('hello', 'text-embedding-3-small', 'http', 'http://127.0.0.1:8000/v1/embeddings'),
@@ -526,6 +668,32 @@ test('RAG embedding helpers support HTTP services', () => {
     assert.deepEqual(normalizeEmbeddingVector({ embedding: ['1', 2] }), [1, 2]);
     assert.deepEqual(normalizeEmbeddingVector({ embeddings: [[0.1, 0.2]] }), [0.1, 0.2]);
     assert.throws(() => normalizeEmbeddingVector({ ok: true }), /有效向量/);
+});
+
+test('OpenAI embedding helpers normalize requests and responses', () => {
+    assert.deepEqual(normalizeEmbeddingInputs('hello'), ['hello']);
+    assert.deepEqual(normalizeEmbeddingInputs(['hello', 'world']), ['hello', 'world']);
+    assert.deepEqual(normalizeEmbeddingInputs([[1, 2, 3]]), ['1 2 3']);
+    assert.throws(() => normalizeEmbeddingInputs(''), /empty string/);
+    assert.throws(() => normalizeEmbeddingInputs([{}]), /input must/);
+
+    const response = buildEmbeddingResponse({
+        vectors: [[0.1, 0.2], [0.3, 0.4]],
+        model: 'bge-m3',
+        promptTokens: 6
+    });
+    assert.equal(response.object, 'list');
+    assert.equal(response.model, 'bge-m3');
+    assert.equal(response.data[1].object, 'embedding');
+    assert.deepEqual(response.data[1].embedding, [0.3, 0.4]);
+    assert.deepEqual(response.usage, { prompt_tokens: 6, total_tokens: 6 });
+
+    const modelItem = buildEmbeddingModelItem({
+        http: { url: 'https://embedding.example/v1', model: 'bge-m3' },
+        source: { url: 'settings', model: 'settings' }
+    });
+    assert.equal(modelItem.id, 'bge-m3');
+    assert.deepEqual(modelItem.capabilities, ['embeddings']);
 });
 
 test('RAG embedding model discovery supports OpenAI and Ollama-style endpoints', () => {
@@ -566,7 +734,7 @@ test('RAG FTS indexes generated Chinese ngram tokens', () => {
         INSERT INTO knowledge_docs (user_id, name, status, created_at)
         VALUES (?, ?, ?, datetime('now', '+8 hours'))
     `).run(userInfo.lastInsertRowid, `rag_fts_${suffix}.txt`, 'ready');
-    const content = '这是一段关于权限配置流程的说明';
+    const content = '权限配置流程说明';
     const chunkInfo = db.prepare(`
         INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
         VALUES (?, ?, ?, ?)
@@ -723,6 +891,132 @@ test('RAG document deletion is soft and remains auditable', () => {
         db.prepare('DELETE FROM knowledge_chunks WHERE id = ?').run(chunkInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('soft-deleted storage cleanup purges expired files and RAG chunks', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`storage_gc_${suffix}`, 'hash', 'Storage GC Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const gcDir = path.join(uploadRoot, 'gc-test', String(userId));
+    fs.mkdirSync(gcDir, { recursive: true });
+
+    const attachmentPath = path.join(gcDir, 'old-attachment.txt');
+    const knowledgePath = path.join(uploadRoot, 'knowledge_docs', String(userId), `old-doc-${suffix}.txt`);
+    fs.mkdirSync(path.dirname(knowledgePath), { recursive: true });
+    fs.writeFileSync(attachmentPath, 'old attachment');
+    fs.writeFileSync(knowledgePath, 'old knowledge');
+
+    const attachmentRel = toProjectRelativePath(attachmentPath);
+    const knowledgeRel = toProjectRelativePath(knowledgePath);
+    const attachmentInfo = db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, deleted_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '-40 days'), datetime('now', '+8 hours', '-45 days'))
+    `).run(userId, null, 'old-attachment.txt', attachmentRel, 'text/plain', 14, 'old-token');
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, indexed_chunks, source_path, source_size, deleted_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '-40 days'), datetime('now', '+8 hours', '-45 days'), datetime('now', '+8 hours', '-40 days'))
+    `).run(userId, `old-doc-${suffix}.txt`, 'ready', 0, 1, 1, knowledgeRel, 13);
+    const chunkInfo = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docInfo.lastInsertRowid, 'expired storage gc chunk', 'expired storage gc chunk', JSON.stringify([1, 0]));
+
+    try {
+        assert.equal(fs.existsSync(attachmentPath), true);
+        assert.equal(fs.existsSync(knowledgePath), true);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts WHERE rowid = ?').get(chunkInfo.lastInsertRowid).count, 1);
+
+        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        assert.equal(result.attachmentRows, 1);
+        assert.equal(result.knowledgeDocRows, 1);
+        assert.equal(fs.existsSync(attachmentPath), false);
+        assert.equal(fs.existsSync(knowledgePath), false);
+
+        const attachment = db.prepare('SELECT file_path, file_size, access_token, expires_at FROM attachments WHERE id = ?')
+            .get(attachmentInfo.lastInsertRowid);
+        assert.equal(attachment.file_path, '');
+        assert.equal(attachment.file_size, 0);
+        assert.equal(attachment.access_token, null);
+        assert.equal(attachment.expires_at, null);
+
+        const doc = db.prepare('SELECT status, source_path, source_size, chunk_count, indexed_chunks FROM knowledge_docs WHERE id = ?')
+            .get(docInfo.lastInsertRowid);
+        assert.equal(doc.status, 'purged');
+        assert.equal(doc.source_path, '');
+        assert.equal(doc.source_size, 0);
+        assert.equal(doc.chunk_count, 0);
+        assert.equal(doc.indexed_chunks, 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?').get(docInfo.lastInsertRowid).count, 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts WHERE rowid = ?').get(chunkInfo.lastInsertRowid).count, 0);
+    } finally {
+        db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        fs.rmSync(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true, force: true });
+        fs.rmSync(path.join(uploadRoot, 'knowledge_docs', String(userId)), { recursive: true, force: true });
+    }
+});
+
+test('soft-deleted storage cleanup purges expired messages and message FTS rows', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`message_gc_${suffix}`, 'hash', 'Message GC Test', 'QA', 'user', 'active');
+    const sessionId = `message-gc-${suffix}`;
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, deleted_at, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours', '-40 days'), datetime('now', '+8 hours', '-45 days'), datetime('now', '+8 hours', '-40 days'))
+    `).run(sessionId, userInfo.lastInsertRowid, 'Message GC');
+    const messageInfo = db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, deleted_at, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours', '-40 days'), datetime('now', '+8 hours', '-45 days'))
+    `).run(sessionId, userInfo.lastInsertRowid, 'user', `expired message gc ${suffix}`);
+
+    try {
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 1);
+        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        assert.equal(result.messageRows, 1);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages WHERE id = ?').get(messageInfo.lastInsertRowid).count, 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 0);
+    } finally {
+        db.prepare('DELETE FROM messages WHERE id = ?').run(messageInfo.lastInsertRowid);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('soft-deleted storage cleanup keeps files within retention window', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`storage_gc_keep_${suffix}`, 'hash', 'Storage GC Keep Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const gcDir = path.join(uploadRoot, 'gc-test', String(userId));
+    fs.mkdirSync(gcDir, { recursive: true });
+    const attachmentPath = path.join(gcDir, 'recent-attachment.txt');
+    fs.writeFileSync(attachmentPath, 'recent attachment');
+    const attachmentInfo = db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, deleted_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '-2 days'), datetime('now', '+8 hours', '-3 days'))
+    `).run(userId, null, 'recent-attachment.txt', toProjectRelativePath(attachmentPath), 'text/plain', 17);
+
+    try {
+        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        assert.equal(result.attachmentRows, 0);
+        assert.equal(fs.existsSync(attachmentPath), true);
+        const attachment = db.prepare('SELECT file_path FROM attachments WHERE id = ?').get(attachmentInfo.lastInsertRowid);
+        assert.ok(attachment.file_path);
+    } finally {
+        db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        fs.rmSync(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true, force: true });
     }
 });
 
@@ -997,12 +1291,216 @@ test('maintenance tasks record cleanup and optimize status', async () => {
         assert.ok(status.apiCallLogCleanup.lastSuccessAt);
         assert.ok(status.refreshTokenCleanup.lastSuccessAt);
         assert.ok(status.optimize.lastSuccessAt);
+        assert.equal(status.optimize.vacuumPages, 200);
     } finally {
         db.prepare('DELETE FROM audit_logs WHERE action = ?').run(`MAINT_AUDIT_${suffix}`);
         db.prepare('DELETE FROM api_call_logs WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM api_keys WHERE id = ?').run(keyInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('database backup task creates hot backup and prunes old versions', async () => {
+    const backupDir = path.join(process.env.DATA_DIR, `backup-test-${Date.now().toString(36)}`);
+    fs.mkdirSync(backupDir, { recursive: true });
+    try {
+        for (let i = 0; i < 3; i += 1) {
+            const oldPath = path.join(backupDir, `chat_backup_old_${i}.db`);
+            fs.writeFileSync(oldPath, `old-${i}`);
+            const oldTime = Date.now() - (10 + i) * 24 * 60 * 60 * 1000;
+            fs.utimesSync(oldPath, oldTime / 1000, oldTime / 1000);
+        }
+
+        const result = await backupDatabase({ backupDir, retentionDays: 7, maxVersions: 2 });
+        assert.ok(result?.backupPath);
+        assert.ok(fs.existsSync(result.backupPath));
+        assert.ok(result.sizeBytes > 0);
+        assert.equal(result.cleanup.deletedFiles, 3);
+
+        const firstBackup = result.backupPath;
+        const firstTime = Date.now() - 1000;
+        fs.utimesSync(firstBackup, firstTime / 1000, firstTime / 1000);
+        const second = await backupDatabase({ backupDir, retentionDays: 7, maxVersions: 1 });
+        assert.ok(second?.backupPath);
+        assert.equal(fs.existsSync(second.backupPath), true);
+        assert.equal(fs.existsSync(firstBackup), false);
+
+        const cleanup = cleanupOldBackups({ backupDir, retentionDays: 7, maxVersions: 1 });
+        assert.ok(cleanup.remainingFiles <= 1);
+
+        const status = getMaintenanceStatus();
+        assert.ok(status.backup.lastSuccessAt);
+        assert.equal(status.backup.backupDir, backupDir);
+        assert.equal(status.backup.retentionDays, 7);
+        assert.equal(status.backup.maxVersions, 1);
+    } finally {
+        fs.rmSync(backupDir, { recursive: true, force: true });
+    }
+});
+
+test('admin password reset revokes target refresh tokens', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`admin_reset_${suffix}`, 'old-hash', 'Admin Reset Test', 'QA', 'user', 'active');
+    db.prepare(`
+        INSERT INTO refresh_tokens (user_id, token, expires_at, created_at)
+        VALUES (?, ?, datetime('now', '+8 hours', '+7 days'), datetime('now', '+8 hours'))
+    `).run(userInfo.lastInsertRowid, `admin-reset-refresh-${suffix}`);
+
+    const router = createAdminUsersRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = { id: 1, username: 'admin', role: 'admin' };
+            next();
+        },
+        adminMiddleware: (req, res, next) => next(),
+        upload: { single: () => (req, res, next) => next() },
+        logAction: () => {}
+    });
+    const passwordRoute = router.stack.find(layer => layer.route?.path === '/admin/users/:id/password');
+    assert.ok(passwordRoute);
+    const req = {
+        params: { id: String(userInfo.lastInsertRowid) },
+        body: { password: 'NewPassword123' }
+    };
+    let statusCode = 200;
+    let payload = null;
+    const res = {
+        status(code) {
+            statusCode = code;
+            return this;
+        },
+        json(data) {
+            payload = data;
+            return this;
+        }
+    };
+    const handlers = passwordRoute.route.stack.map(item => item.handle);
+
+    try {
+        await handlers[0](req, res, err => { if (err) throw err; });
+        await handlers[1](req, res, err => { if (err) throw err; });
+        await new Promise((resolve, reject) => {
+            const originalJson = res.json.bind(res);
+            res.json = (data) => {
+                originalJson(data);
+                resolve();
+                return res;
+            };
+            handlers[2](req, res, reject);
+        });
+        assert.equal(statusCode, 200);
+        assert.equal(payload.success, true);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM refresh_tokens WHERE user_id = ?').get(userInfo.lastInsertRowid).count, 0);
+        assert.notEqual(db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userInfo.lastInsertRowid).password_hash, 'old-hash');
+    } finally {
+        db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(userInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('model probe routes authenticate before rate limiting', () => {
+    const router = createModelsRouter({
+        authMiddleware: (req, res, next) => next(),
+        probeLimiter: (req, res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    for (const pathName of ['/models/fetch-remote', '/models/test']) {
+        const route = router.stack.find(layer => layer.route?.path === pathName);
+        assert.ok(route, `${pathName} route should exist`);
+        const handlers = route.route.stack.map(item => item.handle);
+        assert.equal(handlers[0].name, 'authMiddleware');
+        assert.equal(handlers[1].name, 'probeLimiter');
+    }
+});
+
+test('OpenAI embedding route authenticates before rate limiting', () => {
+    const router = createOpenAIRouter({
+        authMiddleware: (req, res, next) => next(),
+        embeddingLimiter: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/embeddings');
+    assert.ok(route);
+    const handlers = route.route.stack.map(item => item.handle);
+    assert.equal(handlers[0].name, 'authMiddleware');
+    assert.equal(handlers[1].name, 'embeddingLimiter');
+});
+
+test('available models route includes configured embedding model', async () => {
+    const router = createModelsRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = { id: 1, username: 'admin', role: 'admin' };
+            next();
+        },
+        probeLimiter: (req, res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/models/available');
+    assert.ok(route);
+
+    const keys = [
+        RAG_CONFIG_KEYS.embeddingMode,
+        RAG_CONFIG_KEYS.embeddingApiUrl,
+        RAG_CONFIG_KEYS.embeddingModel
+    ];
+    const previousRows = keys.map(key => db.prepare('SELECT * FROM app_settings WHERE key = ?').get(key));
+    const upsert = db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, datetime('now', '+8 hours'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+    upsert.run(RAG_CONFIG_KEYS.embeddingMode, 'http');
+    upsert.run(RAG_CONFIG_KEYS.embeddingApiUrl, 'https://embedding.example/v1');
+    upsert.run(RAG_CONFIG_KEYS.embeddingModel, 'bge-m3');
+
+    try {
+        const handlers = route.route.stack.map(item => item.handle);
+        const req = {};
+        let payload = null;
+        const res = {
+            json(data) {
+                payload = data;
+                return this;
+            }
+        };
+        await handlers[0](req, res, err => { if (err) throw err; });
+        await new Promise((resolve, reject) => {
+            const originalJson = res.json.bind(res);
+            res.json = (data) => {
+                originalJson(data);
+                resolve();
+                return res;
+            };
+            handlers[1](req, res, reject);
+        });
+        assert.ok(Array.isArray(payload));
+        const embedding = payload.find(model => model.type === 'embedding' && model.model_name === 'bge-m3');
+        assert.ok(embedding);
+        assert.equal(embedding.endpoint, '/v1/embeddings');
+        assert.deepEqual(embedding.capabilities, ['embeddings']);
+    } finally {
+        keys.forEach((key, index) => {
+            const row = previousRows[index];
+            if (row) {
+                db.prepare(`
+                    INSERT INTO app_settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by
+                `).run(row.key, row.value, row.updated_at, row.updated_by);
+            } else {
+                db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+            }
+        });
     }
 });
 
@@ -1067,23 +1565,23 @@ test('readZipEntries rejects entries with excessive declared expansion', () => {
 
 test('chat title helpers sanitize generated titles and protect custom titles', () => {
     assert.equal(
-        titleHelpers.sanitizeGeneratedTitle('标题：「用户权限配置流程。」', '权限配置'),
-        '用户权限配置流程'
+        titleHelpers.sanitizeGeneratedTitle('User permission setup flow', 'Permission setup'),
+        'User permission setup fl'
     );
     assert.equal(
-        titleHelpers.sanitizeGeneratedTitle('新对话', '文档内容分析'),
-        '文档内容分析'
+        titleHelpers.sanitizeGeneratedTitle('untitled', 'Document content analysis'),
+        'Document content analysis'
     );
     assert.equal(
-        titleHelpers.buildFallbackTitle('请帮我分析这份季度销售表格，并总结风险点'),
-        '请帮我分析这份季度销售表格，并总结风险点'
+        titleHelpers.buildFallbackTitle('Please analyze this quarterly sales spreadsheet and summarize risks.'),
+        'Please analyze this quar'
     );
     assert.equal(
-        titleHelpers.shouldReplaceAutoTitle('新对话', '用户与助手打招呼'),
+        titleHelpers.shouldReplaceAutoTitle('User greets ass...', 'User greets assistant'),
         true
     );
     assert.equal(
-        titleHelpers.shouldReplaceAutoTitle('用户手动命名', '用户与助手打招呼'),
+        titleHelpers.shouldReplaceAutoTitle('Manually named chat', 'User greets assistant'),
         false
     );
 });

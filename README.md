@@ -1,20 +1,21 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.22-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.24-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款专为私有化、离线化环境设计的全栈 AI 对话管理平台。它集成了多模型对接、全链路安全加固、资产归属追踪及高性能持久化存储，致力于为用户提供一个安全、稳定且美观的 AI 交互门户。
 
-## 最新版本：0.0.22
+## 最新版本：0.0.24
 
-- RAG 知识库管理完成一轮运维化升级：支持文档启停、批量删除、批量重建、失败重试、索引进度追踪、错误信息展示、详情查看和分块预览。
-- RAG 调试链路支持临时调整相似度阈值、topK 与候选数量，并可对命中结果提交“有用/无用”反馈，形成后续质量分析闭环。
-- RAG 管理端已替换原生浏览器 `alert/confirm` 弹窗，删除确认、批量确认和文档详情都改为系统内自定义弹窗，交互风格与后台管理界面保持一致。
-- 知识库页的向量模型配置支持从 Embedding 服务自动获取模型 ID，API Key 输入框已调整到 Base URL 下方，并兼容 OpenAI-compatible 与 Ollama 风格的模型列表接口。
-- 普通用户可在知识库页保存自己的 Embedding HTTP 服务配置；个人配置优先用于自己的文档索引、调试召回和聊天召回，未配置时自动回退系统默认配置。普通用户配置地址仍受安全限制，默认不能指向内网/本机地址。
-- 系统健康检查扩展到数据库、数据目录、上传目录、内存和磁盘状态，`/api/health`、管理端监控面板和 Prometheus 指标同步暴露健康与维护状态。
-- 自动维护任务新增第三方 API 调用日志清理、过期刷新令牌清理和维护结果追踪；用户修改密码后会清理该用户全部刷新令牌，降低旧令牌续期风险。
-- 本轮验证已覆盖 JS 语法检查、系统健康、维护任务、过期刷新令牌清理、RAG 中文检索和安全边界测试。
+- 内置应用级 SQLite 热备份：维护服务默认每 24 小时调用 `db.backup()` 生成东八区毫秒级时间戳备份到 `data/backups/`，并按 7 天、最多 7 个版本滚动清理；同一秒连续备份会自动避让重名文件。
+- 自动维护闭环增强：软删除附件、知识库源文件、知识库分块、FTS 索引和历史消息会在保留期后被物理清理，并配套执行 `PRAGMA optimize` 与增量 vacuum；物理文件删除失败时会保留数据库引用，等待后续维护重试。
+- 安全防护继续收紧：管理员重置密码会吊销目标用户全部 refresh token；模型探测接口、上传接口和 RAG/外部模型出站探测均补齐限流与 SSRF 防护。
+- 第三方 API 网关补齐向量转发：持有 Pivot API Key 的客户端现在可通过 OpenAI-compatible `/v1/embeddings` 调用当前用户可用的 RAG 向量模型，`/v1/models` 与 API 接入管理页都会暴露已配置的 embedding 模型。
+- 前端 CSP 治理推进：`client/chat` 已清除全部 `onclick=` 内联事件，模型、提示词、附件、API Key 和会话菜单均改为 `data-*` 事件委托；管理员重置密码、模型密钥查看校验和加密文档密码输入已迁移到应用内 `showInputPrompt()`，不再依赖原生 `prompt()`。
+- 表格渲染安全组件化起步：表格空态、加载态和错误态新增 DOM API 渲染工具，减少裸 `innerHTML` 提示行。
+- 流式输出与上传体验增强：SSE 解析按标准事件边界处理，长思考输出节流渲染，大文件上传增加进度反馈，模型选择器补齐键盘导航。
+- RAG 配置开放 Chunk Size 与 Overlap，可按业务文档调优分块策略；保存后自动清空相关缓存。
+- 当前验证命令为 `npm run verify`，覆盖语法检查、ESLint 和安全测试，测试通过 `47/47`。
 
 - Sidebar session infinite scroll now uses cursor-based pagination (`nextCursor`) instead of `page + OFFSET`, reducing duplicate or skipped sessions when conversations are created, updated, or pinned while scrolling. The list footer also shows loading, empty, completed, and error states.
 - PWA 更新机制继续收紧：Service Worker 不再拦截页面导航请求，仅缓存稳定 vendor 资源，业务页面、脚本、API 与版本清单交回服务端和浏览器处理。
@@ -74,7 +75,7 @@
 - **附件令牌绑定与过期机制**：附件访问链接引入自动过期，并在校验时绑定完整用户、会话和文件路径，确保同一 token 只能访问对应附件。
 - **全链路审计日志**：完整记录敏感操作与 IP 地址，支持多维度条件筛选与同步导出。
 - **生产级日志管理**：自动切换高性能 JSON 模式，具备 API Key、密码等敏感数据全局脱敏能力。
-- **第三方 API 接入 (OpenAI 兼容)**：实现标准 `/v1` 接口，支持用户自主管理 API Key 与消费统计。
+- **第三方 API 接入 (OpenAI 兼容)**：实现标准 `/v1` 接口，支持用户自主管理 API Key、聊天补全、向量生成与消费统计。
 - **文档解析安全上限**：DOCX/XLSX ZIP 解析内置 entry 数量、单文件解压大小和总解压大小限制，降低压缩炸弹风险。
 - **智能模型探测**：支持一键获取上游服务模型列表，极大简化了配置流程。
 - **资产确权隔离**：上传文件按“用户/会话”路径物理隔离存储，支持图片压缩与文档预处理。
@@ -188,6 +189,12 @@ REFRESH_TOKEN_EXPIRES_DAYS=30
 # 自动维护
 AUDIT_LOG_RETENTION_DAYS=180
 API_CALL_LOG_RETENTION_DAYS=30
+STORAGE_GC_RETENTION_DAYS=30
+STORAGE_GC_BATCH_SIZE=100
+SQLITE_INCREMENTAL_VACUUM_PAGES=200
+DB_BACKUP_DIR=
+DB_BACKUP_RETENTION_DAYS=7
+DB_BACKUP_MAX_VERSIONS=7
 
 # 全局 AI 并发与排队
 MAX_CONCURRENT_AI_REQUESTS=1
@@ -241,4 +248,4 @@ RAG_SCORE_THRESHOLD=0.4
 - **消息时间戳与会话分组**：新增消息发送时间显示，并支持侧边栏会话按日期智能分组。
 - **UI 细节优化**：登录页增加密码显隐切换，优化 API Key 管理与生成弹窗交互。
 
-**当前版本**: v0.0.22 (RAG Operations, Health Checks & Maintenance Upgrades)
+**当前版本**: v0.0.24 (Security, Maintenance, Backup & Frontend Hardening)

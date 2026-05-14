@@ -49,7 +49,9 @@ function appendAttachmentTokens(messages, userId, sessionId) {
         SELECT file_path, access_token
         FROM attachments
         WHERE user_id = ? AND session_id = ? AND access_token IS NOT NULL AND access_token != ''
-    `).all(userId, sessionId);
+          AND deleted_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)
+    `).all(userId, sessionId, getBeijingTimestamp());
     if (rows.length === 0) return messages;
 
     const tokenByUrl = new Map(rows.map(row => [

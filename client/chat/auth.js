@@ -156,7 +156,7 @@ window.loadApiKeys = async function() {
         const data = await res.json();
         const body = document.getElementById('api-keys-body');
         if (data.length === 0) {
-            body.innerHTML = '<tr><td colspan="9" class="text-center" style="padding: 30px; color: var(--text-muted);">暂无 API Key，点击右上角新建</td></tr>';
+            renderTableMessage(body, 9, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
         } else {
             body.innerHTML = data.map((k, index) => `
                 <tr>
@@ -169,7 +169,7 @@ window.loadApiKeys = async function() {
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
                     <td class="text-center">
-                        <button onclick="window.deleteApiKey(${k.id})" class="btn-icon" style="color: var(--danger);" title="删除">
+                        <button class="btn-icon" style="color: var(--danger);" title="删除" data-api-key-action="delete" data-api-key-id="${k.id}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
                         </button>
                     </td>
@@ -182,6 +182,12 @@ window.loadApiKeys = async function() {
         showToast(e.message, 'error');
     }
 }
+
+document.getElementById('api-keys-body')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-api-key-action="delete"]');
+    if (!button) return;
+    window.deleteApiKey(button.dataset.apiKeyId);
+});
 
 window.openApiCallLogsModal = function() {
     if (currentUser?.username !== 'admin') return;
@@ -206,7 +212,7 @@ window.loadApiCallLogs = async function(page = 1) {
         if (!res.ok) throw new Error('加载第三方 API 调用记录失败');
         const { data, total } = await res.json();
         if (!data.length) {
-            body.innerHTML = '<tr><td colspan="10" class="text-center" style="padding: 28px; color: var(--text-muted);">暂无第三方 API 调用记录</td></tr>';
+            renderTableMessage(body, 10, '暂无第三方 API 调用记录', { color: 'var(--text-muted)' });
             renderPagination('apiCallLogs', total, page);
             return;
         }
@@ -232,7 +238,7 @@ window.loadApiCallLogs = async function(page = 1) {
         }).join('');
         renderPagination('apiCallLogs', total, page);
     } catch (e) {
-        body.innerHTML = `<tr><td colspan="10" class="text-center" style="padding: 28px; color: var(--danger);">${escapeHtml(e.message)}</td></tr>`;
+        renderTableMessage(body, 10, e.message, { color: 'var(--danger)' });
     }
 }
 
@@ -247,14 +253,35 @@ window.loadAvailableModels = async function() {
             listEl.innerHTML = '<span style="color: var(--text-muted);">暂无可用全局模型</span>';
             return;
         }
+        const renderCapabilityText = (model) => {
+            if (model.type === 'embedding') {
+                return model.source === 'personal' ? '向量 · 个人配置' : '向量 · 系统配置';
+            }
+            const labels = ['聊天'];
+            if (Number(model.supports_vision || 0) === 1 || model.capabilities?.includes('vision')) labels.push('视觉');
+            if (Number(model.supports_reasoning || 0) === 1 || model.capabilities?.includes('reasoning')) labels.push('推理');
+            return labels.join(' · ');
+        };
+        const renderModelChip = (model) => {
+            const isEmbedding = model.type === 'embedding';
+            const color = isEmbedding ? '#059669' : '#6366f1';
+            const bg = isEmbedding ? 'rgba(5, 150, 105, 0.06)' : 'rgba(99, 102, 241, 0.06)';
+            const border = isEmbedding ? 'rgba(5, 150, 105, 0.18)' : 'rgba(99, 102, 241, 0.15)';
+            const endpoint = model.endpoint || (isEmbedding ? '/v1/embeddings' : '/v1/chat/completions');
+            const modelName = model.model_name || model.id;
+            return `
+                <code style="display: inline-flex; flex-direction: column; gap: 2px; background: ${bg}; padding: 6px 12px; border-radius: 6px; color: ${color}; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid ${border}; text-align: center;" title="友好名称: ${escapeHtml(model.name || modelName)}&#10;接口: ${escapeHtml(endpoint)}">
+                    <span>${escapeHtml(modelName)}</span>
+                    <small style="font-family: inherit; color: var(--text-muted); font-size: 0.68rem;">${escapeHtml(renderCapabilityText(model))}</small>
+                </code>
+            `;
+        };
         // 简化展示：只显示模型标识 (model 参数值)，使用标签形式排列
         listEl.innerHTML = `
             <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; justify-content: center; text-align: center;">
-                ${models.map(m => `
-                    <code style="background: rgba(99, 102, 241, 0.06); padding: 4px 12px; border-radius: 6px; color: #6366f1; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid rgba(99, 102, 241, 0.15); text-align: center;" title="友好名称: ${escapeHtml(m.name)}">${escapeHtml(m.model_name || m.id)}</code>
-                `).join('')}
+                ${models.map(renderModelChip).join('')}
             </div>
-            <p style="margin-top: 12px; font-size: 0.75rem; color: var(--text-muted);">* 以上为外部调用时 model 参数需填写的具体值</p>
+            <p style="margin-top: 12px; font-size: 0.75rem; color: var(--text-muted);">* 以上为外部调用时 model 参数需填写的具体值；聊天模型用于 /v1/chat/completions，向量模型用于 /v1/embeddings。</p>
         `;
     } catch (e) {
         listEl.innerHTML = `<span style="color: var(--danger);">加载失败: ${escapeHtml(e.message)}</span>`;
@@ -332,16 +359,17 @@ function fallbackCopyTextToClipboard(text) {
 }
 
 window.deleteApiKey = async function(id) {
-    if (!confirm('确定要删除此 API Key 吗？相关服务将无法再通过此密钥访问。')) return;
-    try {
-        const res = await apiFetch(`${API_BASE}/auth/keys/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-            showToast('密钥已注销');
-            loadApiKeys();
+    showConfirm('删除 API Key', '确定要删除此 API Key 吗？相关服务将无法再通过此密钥访问。', async () => {
+        try {
+            const res = await apiFetch(`${API_BASE}/auth/keys/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('密钥已注销');
+                loadApiKeys();
+            }
+        } catch (e) {
+            showToast('操作失败', 'error');
         }
-    } catch (e) {
-        showToast('操作失败', 'error');
-    }
+    });
 }
 
 window.updatePassword = async function() {

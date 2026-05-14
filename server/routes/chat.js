@@ -10,7 +10,6 @@ const {
     buildCapabilityFallbackMessage
 } = require('../capabilities');
 const { estimateTokens, getContext } = require('../llm');
-const { getBeijingTimestamp } = require('../time');
 const {
     getAccessibleModel,
     getModelDailyUsage,
@@ -29,6 +28,7 @@ const { createSseEventParser, createStreamAccumulator } = require('../streaming'
 const {
     buildModelHeaders,
     buildResponsesUrl,
+    buildChatCompletionsUrl,
     convertChatMessagesToResponsesInput,
     normalizeModelBaseUrl,
     shouldUseResponsesApi

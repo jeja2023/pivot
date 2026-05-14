@@ -1,7 +1,13 @@
 /* Automated maintenance service */
-const { db } = require('../db');
+const fs = require('fs');
+const path = require('path');
+
+const { db, dataDir } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
+const { cleanupSoftDeletedStorage } = require('./storage-gc');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const maintenanceState = {
     startedAt: null,
@@ -28,10 +34,36 @@ const maintenanceState = {
         lastChanges: 0,
         totalChanges: 0
     },
+    storageGc: {
+        lastRunAt: null,
+        lastSuccessAt: null,
+        lastError: '',
+        lastAttachmentRows: 0,
+        lastKnowledgeDocRows: 0,
+        lastMessageRows: 0,
+        totalAttachmentRows: 0,
+        totalKnowledgeDocRows: 0,
+        totalMessageRows: 0,
+        retentionDays: 30
+    },
     optimize: {
         lastRunAt: null,
         lastSuccessAt: null,
-        lastError: ''
+        lastError: '',
+        vacuumPages: 200
+    },
+    backup: {
+        lastRunAt: null,
+        lastSuccessAt: null,
+        lastError: '',
+        lastPath: '',
+        lastSizeBytes: 0,
+        lastDeletedFiles: 0,
+        totalDeletedFiles: 0,
+        retentionDays: 7,
+        maxVersions: 7,
+        backupDir: '',
+        running: false
     }
 };
 
@@ -43,6 +75,102 @@ function getAuditLogRetentionDays() {
 function getApiCallLogRetentionDays() {
     const days = parseInt(process.env.API_CALL_LOG_RETENTION_DAYS || '30', 10);
     return Number.isFinite(days) && days > 0 ? days : 30;
+}
+
+function getStorageGcRetentionDays() {
+    const days = parseInt(process.env.STORAGE_GC_RETENTION_DAYS || '30', 10);
+    return Number.isFinite(days) && days > 0 ? days : 30;
+}
+
+function getIncrementalVacuumPages() {
+    const pages = parseInt(process.env.SQLITE_INCREMENTAL_VACUUM_PAGES || '200', 10);
+    return Number.isFinite(pages) && pages >= 0 ? pages : 200;
+}
+
+function parsePositiveInt(value, fallback) {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getBackupRetentionDays() {
+    return parsePositiveInt(process.env.DB_BACKUP_RETENTION_DAYS || '7', 7);
+}
+
+function getBackupMaxVersions() {
+    return parsePositiveInt(process.env.DB_BACKUP_MAX_VERSIONS || '7', 7);
+}
+
+function getBackupDir() {
+    return process.env.DB_BACKUP_DIR
+        ? path.resolve(process.env.DB_BACKUP_DIR)
+        : path.join(dataDir, 'backups');
+}
+
+function toBackupTimestamp(date = new Date()) {
+    const base = getBeijingTimestamp(date).replace(' ', '_').replace(/:/g, '-');
+    return `${base}-${String(date.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function buildBackupPath(backupDir) {
+    let backupPath = path.join(backupDir, `chat_backup_${toBackupTimestamp()}.db`);
+    let suffix = 1;
+    while (fs.existsSync(backupPath)) {
+        backupPath = path.join(backupDir, `chat_backup_${toBackupTimestamp()}_${suffix}.db`);
+        suffix += 1;
+    }
+    return backupPath;
+}
+
+function listManagedBackupFiles(backupDir = getBackupDir()) {
+    if (!fs.existsSync(backupDir)) return [];
+    return fs.readdirSync(backupDir, { withFileTypes: true })
+        .filter(item => item.isFile() && /^chat_backup_.+\.db$/.test(item.name))
+        .map(item => {
+            const fullPath = path.join(backupDir, item.name);
+            const stat = fs.statSync(fullPath);
+            return {
+                name: item.name,
+                path: fullPath,
+                mtimeMs: stat.mtimeMs,
+                size: stat.size
+            };
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+function cleanupOldBackups(options = {}) {
+    const backupDir = options.backupDir || getBackupDir();
+    const retentionDays = options.retentionDays || getBackupRetentionDays();
+    const maxVersions = options.maxVersions || getBackupMaxVersions();
+    const nowMs = options.nowMs || Date.now();
+    const cutoffMs = nowMs - retentionDays * DAY_MS;
+    const files = listManagedBackupFiles(backupDir);
+    const deleteSet = new Set();
+
+    files.forEach((file, index) => {
+        if (file.mtimeMs < cutoffMs || index >= maxVersions) {
+            deleteSet.add(file.path);
+        }
+    });
+
+    let deletedFiles = 0;
+    deleteSet.forEach(filePath => {
+        try {
+            fs.unlinkSync(filePath);
+            deletedFiles += 1;
+        } catch (e) {
+            logger.warn({ err: e.message, filePath }, 'Old database backup cleanup skipped file');
+        }
+    });
+
+    return {
+        backupDir,
+        retentionDays,
+        maxVersions,
+        totalFiles: files.length,
+        deletedFiles,
+        remainingFiles: listManagedBackupFiles(backupDir).length
+    };
 }
 
 async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
@@ -106,10 +234,36 @@ async function cleanupExpiredRefreshTokens() {
     }
 }
 
+async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) {
+    maintenanceState.storageGc.lastRunAt = getBeijingTimestamp();
+    maintenanceState.storageGc.retentionDays = days;
+    try {
+        const result = cleanupSoftDeletedStorage({ retentionDays: days });
+        maintenanceState.storageGc.lastSuccessAt = getBeijingTimestamp();
+        maintenanceState.storageGc.lastError = '';
+        maintenanceState.storageGc.lastAttachmentRows = result.attachmentRows;
+        maintenanceState.storageGc.lastKnowledgeDocRows = result.knowledgeDocRows;
+        maintenanceState.storageGc.lastMessageRows = result.messageRows;
+        maintenanceState.storageGc.totalAttachmentRows += result.attachmentRows;
+        maintenanceState.storageGc.totalKnowledgeDocRows += result.knowledgeDocRows;
+        maintenanceState.storageGc.totalMessageRows += result.messageRows;
+        return result;
+    } catch (e) {
+        maintenanceState.storageGc.lastError = e.message;
+        logger.error({ err: e.message }, 'Soft-deleted storage cleanup failed');
+        return { retentionDays: days, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0 };
+    }
+}
+
 async function optimizeDatabase() {
     maintenanceState.optimize.lastRunAt = getBeijingTimestamp();
+    const vacuumPages = getIncrementalVacuumPages();
+    maintenanceState.optimize.vacuumPages = vacuumPages;
     try {
         db.exec('PRAGMA optimize;');
+        if (vacuumPages > 0) {
+            db.exec(`PRAGMA incremental_vacuum(${vacuumPages});`);
+        }
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.optimize.lastError = '';
         return true;
@@ -117,6 +271,57 @@ async function optimizeDatabase() {
         maintenanceState.optimize.lastError = e.message;
         logger.error({ err: e.message }, 'SQLite optimize failed');
         return false;
+    }
+}
+
+async function backupDatabase(options = {}) {
+    if (maintenanceState.backup.running) {
+        logger.warn('Database backup skipped because another backup is still running');
+        return { skipped: true, reason: 'running' };
+    }
+
+    const backupDir = options.backupDir || getBackupDir();
+    const retentionDays = options.retentionDays || getBackupRetentionDays();
+    const maxVersions = options.maxVersions || getBackupMaxVersions();
+    maintenanceState.backup.lastRunAt = getBeijingTimestamp();
+    maintenanceState.backup.retentionDays = retentionDays;
+    maintenanceState.backup.maxVersions = maxVersions;
+    maintenanceState.backup.backupDir = backupDir;
+    maintenanceState.backup.running = true;
+
+    try {
+        fs.mkdirSync(backupDir, { recursive: true });
+        const backupPath = buildBackupPath(backupDir);
+        await db.backup(backupPath);
+        const stat = fs.statSync(backupPath);
+        const cleanup = cleanupOldBackups({ backupDir, retentionDays, maxVersions });
+
+        maintenanceState.backup.lastSuccessAt = getBeijingTimestamp();
+        maintenanceState.backup.lastError = '';
+        maintenanceState.backup.lastPath = backupPath;
+        maintenanceState.backup.lastSizeBytes = stat.size;
+        maintenanceState.backup.lastDeletedFiles = cleanup.deletedFiles;
+        maintenanceState.backup.totalDeletedFiles += cleanup.deletedFiles;
+
+        logger.info({
+            backupPath,
+            sizeBytes: stat.size,
+            deletedFiles: cleanup.deletedFiles,
+            retentionDays,
+            maxVersions
+        }, 'SQLite database backup completed');
+
+        return {
+            backupPath,
+            sizeBytes: stat.size,
+            cleanup
+        };
+    } catch (e) {
+        maintenanceState.backup.lastError = e.message;
+        logger.error({ err: e.message }, 'SQLite database backup failed');
+        return null;
+    } finally {
+        maintenanceState.backup.running = false;
     }
 }
 
@@ -130,23 +335,42 @@ function getMaintenanceStatus() {
 function startMaintenanceTasks() {
     const retentionDays = getAuditLogRetentionDays();
     const apiCallLogRetentionDays = getApiCallLogRetentionDays();
+    const storageGcRetentionDays = getStorageGcRetentionDays();
+    const backupRetentionDays = getBackupRetentionDays();
+    const backupMaxVersions = getBackupMaxVersions();
+    const backupDir = getBackupDir();
     maintenanceState.startedAt = getBeijingTimestamp();
     maintenanceState.retentionDays = retentionDays;
     maintenanceState.apiCallLogCleanup.retentionDays = apiCallLogRetentionDays;
+    maintenanceState.storageGc.retentionDays = storageGcRetentionDays;
+    maintenanceState.backup.retentionDays = backupRetentionDays;
+    maintenanceState.backup.maxVersions = backupMaxVersions;
+    maintenanceState.backup.backupDir = backupDir;
 
     cleanupOldLogs(retentionDays).catch(() => {});
     cleanupApiCallLogs(apiCallLogRetentionDays).catch(() => {});
     cleanupExpiredRefreshTokens().catch(() => {});
+    cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
+    backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
 
     setInterval(() => {
         cleanupOldLogs(retentionDays).catch(() => {});
         cleanupApiCallLogs(apiCallLogRetentionDays).catch(() => {});
         cleanupExpiredRefreshTokens().catch(() => {});
+        cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
+        backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
         optimizeDatabase().catch(() => {});
-    }, 24 * 60 * 60 * 1000).unref();
+    }, DAY_MS).unref();
 
-    logger.info({ retentionDays, apiCallLogRetentionDays }, 'Maintenance service started');
+    logger.info({
+        retentionDays,
+        apiCallLogRetentionDays,
+        storageGcRetentionDays,
+        backupRetentionDays,
+        backupMaxVersions,
+        backupDir
+    }, 'Maintenance service started');
 }
 
 module.exports = {
@@ -154,8 +378,16 @@ module.exports = {
     cleanupOldLogs,
     cleanupApiCallLogs,
     cleanupExpiredRefreshTokens,
+    cleanupSoftDeletedStorageJob,
+    backupDatabase,
+    cleanupOldBackups,
     optimizeDatabase,
     getAuditLogRetentionDays,
     getApiCallLogRetentionDays,
+    getStorageGcRetentionDays,
+    getIncrementalVacuumPages,
+    getBackupRetentionDays,
+    getBackupMaxVersions,
+    getBackupDir,
     getMaintenanceStatus
 };

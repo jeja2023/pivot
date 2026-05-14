@@ -5,6 +5,8 @@ const RAG_CONFIG_KEYS = {
     scoreThreshold: 'rag_score_threshold',
     topK: 'rag_top_k',
     candidateLimit: 'rag_candidate_limit',
+    chunkSize: 'rag_chunk_size',
+    chunkOverlap: 'rag_chunk_overlap',
     embeddingMode: 'rag_embedding_mode',
     embeddingApiUrl: 'rag_embedding_api_url',
     embeddingApiKey: 'rag_embedding_api_key',
@@ -39,7 +41,7 @@ function getUserSettingValue(userId, key) {
     return row?.value;
 }
 
-function normalizeEmbeddingMode(value) {
+function normalizeEmbeddingMode(_value) {
     return EMBEDDING_MODES.http;
 }
 
@@ -97,6 +99,8 @@ function getRagConfig(overrides = {}) {
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
     const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, 10);
     const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, 1000);
+    const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, 2000);
+    const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
 
     const scoreThreshold = clampNumber(
         overrides.scoreThreshold ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
@@ -116,11 +120,25 @@ function getRagConfig(overrides = {}) {
         Math.max(topK, 20),
         1000
     );
+    const chunkSize = clampInteger(
+        overrides.chunkSize ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
+        defaultChunkSize,
+        200,
+        2000
+    );
+    const chunkOverlap = clampInteger(
+        overrides.chunkOverlap ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
+        defaultChunkOverlap,
+        0,
+        Math.floor(chunkSize / 2)
+    );
 
     return {
         scoreThreshold,
         topK,
-        candidateLimit
+        candidateLimit,
+        chunkSize,
+        chunkOverlap
     };
 }
 
@@ -133,6 +151,12 @@ function toRagSettingValue(key, value) {
     }
     if (key === RAG_CONFIG_KEYS.candidateLimit) {
         return String(clampInteger(value, 300, 20, 1000));
+    }
+    if (key === RAG_CONFIG_KEYS.chunkSize) {
+        return String(clampInteger(value, 500, 200, 2000));
+    }
+    if (key === RAG_CONFIG_KEYS.chunkOverlap) {
+        return String(clampInteger(value, 100, 0, 1000));
     }
     if (key === RAG_CONFIG_KEYS.embeddingMode) {
         return normalizeEmbeddingMode(value);

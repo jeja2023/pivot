@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { db } = require('../db');
+const { getBeijingTimestamp } = require('../time');
 
 function checkDatabase() {
     try {
@@ -88,7 +89,7 @@ function getSystemHealthSnapshot() {
 
     return {
         status: overallStatus(checks),
-        timestamp: new Date().toISOString(),
+        timestamp: getBeijingTimestamp(),
         checks
     };
 }

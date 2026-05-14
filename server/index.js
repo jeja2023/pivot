@@ -45,7 +45,7 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
     fatalExit('未处理的 Promise 拒绝 (Unhandled Rejection)', reason);
 });
-const { db, stmts } = require('./db');
+const { stmts } = require('./db');
 const { authMiddleware, csrfMiddleware } = require('./auth');
 const {
     escapeCsvCell
@@ -168,8 +168,30 @@ const chatLimiter = rateLimit({
     message: { error: '您的提问速度过快，请稍作休息' }
 });
 
+const probeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyGenerator: (req) => {
+        if (req.isApiKey && req.apiKeyId) return `api_key_${req.apiKeyId}`;
+        return req.user ? `user_${req.user.id}` : getClientIp(req);
+    },
+    message: { error: '接口探测请求过于频繁，请稍后再试' }
+});
+
+const embeddingLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: (req) => {
+        if (req.isApiKey && req.apiKeyId) return `api_key_${req.apiKeyId}`;
+        return req.user ? `user_${req.user.id}` : getClientIp(req);
+    },
+    message: { error: '向量模型调用过于频繁，请稍后再试' }
+});
+
 app.locals.loginLimiter = loginLimiter;
 app.locals.chatLimiter = chatLimiter;
+app.locals.probeLimiter = probeLimiter;
+app.locals.embeddingLimiter = embeddingLimiter;
 
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
 if (corsOrigins.length > 0) {
@@ -188,16 +210,6 @@ app.get('/api/health', (req, res) => {
         timestamp: getBeijingTimestamp(),
         ...health
     });
-    try {
-        db.prepare('SELECT 1').get();
-        res.json({
-            status: 'ok',
-            service: 'pivot-ai',
-            timestamp: getBeijingTimestamp()
-        });
-    } catch (e) {
-        res.status(500).json({ status: 'error', error: '数据库不可用' });
-    }
 });
 
 app.get('/api/metrics', metricsAuthMiddleware, (req, res) => {
@@ -206,7 +218,7 @@ app.get('/api/metrics', metricsAuthMiddleware, (req, res) => {
 });
 
 // --- 模型接口 ---
-app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }));
+app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit, probeLimiter }));
 
 if (appConfig.compressionEnabled) {
     try {
@@ -347,8 +359,15 @@ const upload = createUploadMiddleware();
 const secureUpload = {
     single: (field) => [upload.single(field), uploadSecurityMiddleware]
 };
+const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 12,
+    keyGenerator: (req) => req.user ? `user_${req.user.id}` : getClientIp(req),
+    message: { error: '上传请求过于频繁，请稍后再试' }
+});
 app.use(createAttachmentsRouter({
     authMiddleware,
+    uploadLimiter,
     upload: secureUpload,
     normalizePage,
     normalizeLimit,
@@ -437,7 +456,8 @@ app.use('/api', createChatRouter({
 
 app.use('/v1', createOpenAIRouter({
     authMiddleware,
-    logAction
+    logAction,
+    embeddingLimiter: app.locals.embeddingLimiter
 }));
 
 // --- API 404 处理器 (确保 API 请求永远返回 JSON) ---

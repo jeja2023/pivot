@@ -12,6 +12,7 @@ const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 const { getMaintenanceStatus } = require('../services/maintenance');
 const { getSystemHealthSnapshot } = require('../services/system-health');
+const { getBeijingTimestamp } = require('../time');
 
 function normalizeHostAlias(value) {
     let host = String(value || '').trim();
@@ -265,7 +266,7 @@ function createAdminStatsRouter({
         }
 
         res.json({
-            updatedAt: new Date().toISOString(),
+            updatedAt: getBeijingTimestamp(),
             tokens: {
                 today: todayTokens,
                 total: totalTokens,

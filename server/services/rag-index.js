@@ -18,15 +18,50 @@ const { EMBEDDING_MODES, getEmbeddingConfig, getRagConfig, normalizeEmbeddingMod
 
 const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 
-function normalizeEmbeddingVector(data) {
+function normalizeVectorValues(vector) {
+    if (!Array.isArray(vector) || vector.length === 0) {
+        return null;
+    }
+    const normalized = vector.map(Number);
+    if (normalized.some(value => !Number.isFinite(value))) {
+        return null;
+    }
+    return normalized;
+}
+
+function normalizeEmbeddingVectors(data) {
+    if (Array.isArray(data?.data)) {
+        const vectors = data.data
+            .slice()
+            .sort((a, b) => (a?.index ?? 0) - (b?.index ?? 0))
+            .map(item => normalizeVectorValues(item?.embedding))
+            .filter(Boolean);
+        if (vectors.length > 0) return vectors;
+    }
+
+    if (Array.isArray(data?.embeddings)) {
+        const embeddings = data.embeddings;
+        const vectors = Array.isArray(embeddings[0])
+            ? embeddings.map(normalizeVectorValues).filter(Boolean)
+            : [normalizeVectorValues(embeddings)].filter(Boolean);
+        if (vectors.length > 0) return vectors;
+    }
+
     const vector = data?.data?.[0]?.embedding
         || data?.embedding
-        || data?.embeddings?.[0]
         || data?.response?.embedding;
-    if (!Array.isArray(vector) || vector.length === 0) {
+    const normalized = normalizeVectorValues(vector);
+    if (normalized) return [normalized];
+
+    throw new Error('Embedding 服务响应中未找到有效向量');
+}
+
+function normalizeEmbeddingVector(data) {
+    const vectors = normalizeEmbeddingVectors(data);
+    if (!vectors[0]) {
         throw new Error('Embedding 服务响应中未找到有效向量');
     }
-    return vector.map(Number);
+    return vectors[0];
 }
 
 function resolveEmbeddingUrl(url) {
@@ -72,6 +107,50 @@ async function requestEmbedding(text, httpConfig) {
         proxy: false
     });
     return normalizeEmbeddingVector(res.data);
+}
+
+async function requestEmbeddings(inputs, httpConfig, options = {}) {
+    const safeInputs = Array.isArray(inputs) ? inputs : [inputs];
+    const { url, apiKey } = httpConfig;
+    const model = options.model || httpConfig.model;
+    if (!url) {
+        throw new Error('未配置 Embedding HTTP 服务地址');
+    }
+    const targetUrl = resolveEmbeddingUrl(url);
+    const endpoint = targetUrl.toLowerCase();
+    const requestOne = async (input) => {
+        const res = await axios.post(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            headers: {
+                Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+                'Content-Type': 'application/json'
+            },
+            timeout: options.timeoutMs || 30000,
+            proxy: false
+        });
+        return normalizeEmbeddingVector(res.data);
+    };
+
+    if (safeInputs.length === 1 || endpoint.includes('/api/embeddings')) {
+        const vectors = [];
+        for (const input of safeInputs) {
+            vectors.push(await requestOne(input));
+        }
+        return vectors;
+    }
+
+    const res = await axios.post(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        headers: {
+            Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+            'Content-Type': 'application/json'
+        },
+        timeout: options.timeoutMs || 30000,
+        proxy: false
+    });
+    const vectors = normalizeEmbeddingVectors(res.data);
+    if (vectors.length !== safeInputs.length) {
+        throw new Error(`Embedding 服务返回向量数量不匹配: expected ${safeInputs.length}, got ${vectors.length}`);
+    }
+    return vectors;
 }
 
 async function generateEmbedding(text, mode = null, embeddingConfig = null, userId = null) {
@@ -333,7 +412,8 @@ async function retrieveContext(userId, query, topK = null) {
 
 async function indexDocumentChunks(docId, text, { onProgress, userId = null } = {}) {
     const startedAt = Date.now();
-    const chunks = chunkText(text);
+    const ragConfig = getRagConfig();
+    const chunks = chunkText(text, ragConfig.chunkSize, ragConfig.chunkOverlap);
     const batchSize = 5; // 限制并发数，防止 OOM 或 API 限流
     try {
         for (let i = 0; i < chunks.length; i += batchSize) {
@@ -396,8 +476,11 @@ async function testEmbeddingConnection(config = {}) {
 module.exports = {
     getEmbeddingConfig,
     generateEmbedding,
+    requestEmbedding,
+    requestEmbeddings,
     testEmbeddingConnection,
     normalizeEmbeddingVector,
+    normalizeEmbeddingVectors,
     resolveEmbeddingUrl,
     buildEmbeddingPayload,
     cosineSimilarity,

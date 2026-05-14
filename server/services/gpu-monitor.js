@@ -2,6 +2,7 @@
 const { exec } = require('child_process');
 const { aiSemaphore } = require('./concurrency');
 const { logger } = require('../logger');
+const { getBeijingTimestamp } = require('../time');
 
 const parsePositiveInt = (value, fallback) => {
     const parsed = parseInt(value, 10);
@@ -83,7 +84,7 @@ function getGpuMemoryUsage() {
 async function refreshGpuStatus() {
     const result = await getGpuMemoryUsage();
     state.available = result.gpus.length > 0;
-    state.updatedAt = new Date().toISOString();
+    state.updatedAt = getBeijingTimestamp();
     state.gpus = result.gpus;
     state.error = result.error;
     state.maxRatio = result.gpus.length ? Math.max(...result.gpus.map(g => g.ratio)) : 0;

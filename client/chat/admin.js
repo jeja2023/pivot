@@ -24,6 +24,18 @@ const escapeHtml = (str) => {
         .replace(/'/g, '&#039;');
 };
 
+function renderTableMessage(tbody, colspan, message, options = {}) {
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = colspan;
+    td.className = options.className || 'text-center';
+    td.style.padding = options.padding || '28px';
+    if (options.color) td.style.color = options.color;
+    td.textContent = message || '';
+    tr.appendChild(td);
+    tbody.replaceChildren(tr);
+}
 
 const escapeCsvValue = (value) => {
     let text = value === undefined || value === null ? '' : String(value);
@@ -260,9 +272,13 @@ async function loadSettings() {
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
+        const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
+        const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? 0.4;
         if (topKInput) topKInput.value = data.ragConfig?.topK ?? 3;
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? 300;
+        if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
+        if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
         updateEmbeddingSettingsForm(data.embeddingConfig);
         document.getElementById('tab-knowledge')?.classList.toggle('hidden', !ragCheckbox.checked);
     } catch (e) {
@@ -362,11 +378,15 @@ window.saveSettings = async () => {
     const scoreInput = document.getElementById('setting-rag-score-threshold');
     const topKInput = document.getElementById('setting-rag-top-k');
     const candidateInput = document.getElementById('setting-rag-candidate-limit');
+    const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
+    const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
     try {
         const payload = { rag_enabled: ragCheckbox.checked };
         if (scoreInput) payload.rag_score_threshold = scoreInput.value;
         if (topKInput) payload.rag_top_k = topKInput.value;
         if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
+        if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
+        if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
         const endpoint = currentUser?.role === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
         const res = await apiFetch(endpoint, {
             method: 'PUT',
@@ -379,6 +399,8 @@ window.saveSettings = async () => {
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? scoreInput.value;
         if (topKInput) topKInput.value = data.ragConfig?.topK ?? topKInput.value;
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? candidateInput.value;
+        if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
+        if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.embeddingConfig);
         document.getElementById('tab-knowledge')?.classList.toggle('hidden', !data.ragEnabled);
         showToast('系统设置已保存');
@@ -402,6 +424,8 @@ window.saveEmbeddingSettings = async () => {
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
+        const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
+        const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
 
         const payload = {
             rag_embedding_mode: 'http',
@@ -412,6 +436,8 @@ window.saveEmbeddingSettings = async () => {
         if (scoreInput) payload.rag_score_threshold = scoreInput.value;
         if (topKInput) payload.rag_top_k = topKInput.value;
         if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
+        if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
+        if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
 
         if (embeddingModeInput) embeddingModeInput.value = 'http';
         if (embeddingKeyInput && embeddingKeyInput.value.trim()) {

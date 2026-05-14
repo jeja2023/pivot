@@ -5,7 +5,7 @@ const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { clearAllRagCache } = require('../services/rag-cache');
-const { validateModelUrl } = require('../security');
+const { assertSafeOutboundUrl, validateModelUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
@@ -20,6 +20,8 @@ const allowedSettings = new Set([
     RAG_CONFIG_KEYS.scoreThreshold,
     RAG_CONFIG_KEYS.topK,
     RAG_CONFIG_KEYS.candidateLimit,
+    RAG_CONFIG_KEYS.chunkSize,
+    RAG_CONFIG_KEYS.chunkOverlap,
     RAG_CONFIG_KEYS.embeddingMode,
     RAG_CONFIG_KEYS.embeddingApiUrl,
     RAG_CONFIG_KEYS.embeddingApiKey,
@@ -146,7 +148,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             apiKey = savedConfig.apiKey || '';
         }
         try {
-            validateModelUrl(apiUrl, req.user);
+            await assertSafeOutboundUrl(apiUrl, req.user);
         } catch (e) {
             logAction(req, '向量模型列表拉取拦截', e.message);
             return res.json({ success: false, error: e.message });
@@ -156,6 +158,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         let lastError = null;
         for (const modelsUrl of candidates) {
             try {
+                await assertSafeOutboundUrl(modelsUrl, req.user);
                 const response = await axios.get(modelsUrl, {
                     headers: {
                         Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
@@ -288,7 +291,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
 
         const newHash = bcrypt.hashSync(newPassword, 10);
-        const revokeInfo = db.transaction(() => {
+        db.transaction(() => {
             db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
             return stmts.deleteUserRefreshTokens.run(req.user.id);
         })();

@@ -30,15 +30,15 @@ window.loadModels = async function(page = 1) {
         let defaultBtn = '';
         if (isAdmin) {
             if (isGlobalDefault) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" onclick="setGlobalDefaultModel(null, this).then(() => loadModels(${page}))">取消默认</button>`;
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-global-default" data-model-id="" data-page="${page}">取消默认</button>`;
             } else if (isGlobalModel) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" onclick="setGlobalDefaultModel(${m.id}, this).then(() => loadModels(${page}))">设为默认</button>`;
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-global-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
             }
         } else {
             if (isPersonalDefault) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" onclick="saveMyDefaultModel(null, this).then(() => loadModels(${page}))">取消默认</button>`;
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消默认</button>`;
             } else if (isMyModel) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" onclick="saveMyDefaultModel(${m.id}, this).then(() => loadModels(${page})).catch(() => {})">设为默认</button>`;
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
             }
         }
 
@@ -84,10 +84,10 @@ window.loadModels = async function(page = 1) {
             <td title="${escapeHtml(formatDateToCN(m.created_at))}">${escapeHtml(formatDateToCN(m.created_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                    <button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" onclick="testExistingModel(JSON.parse(decodeURIComponent('${encodeActionArg(m)}')))">测试</button>
+                    <button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="test" data-model="${encodeActionArg(m)}">测试</button>
                     ${defaultBtn}
-                    ${canEdit ? `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem;" onclick="prepareEditModel(JSON.parse(decodeURIComponent('${encodeActionArg(m)}')))">编辑</button>` : ''}
-                    ${canDelete ? `<button class="btn-danger" style="padding: 1px 5px; font-size: 0.68rem;" onclick="deleteModel(${m.id})">删除</button>` : ''}
+                    ${canEdit ? `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem;" data-model-action="edit" data-model="${encodeActionArg(m)}">编辑</button>` : ''}
+                    ${canDelete ? `<button class="btn-danger" style="padding: 1px 5px; font-size: 0.68rem;" data-model-action="delete" data-model-id="${m.id}">删除</button>` : ''}
                 </div>
             </td>
         </tr>
@@ -96,6 +96,27 @@ window.loadModels = async function(page = 1) {
     data.forEach(m => checkSingleModelStatus(m.id));
     renderPagination('models', total, page);
 }
+
+document.getElementById('model-list-body')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-model-action]');
+    if (!button) return;
+    const action = button.dataset.modelAction;
+    const modelId = button.dataset.modelId || null;
+    const page = Number.parseInt(button.dataset.page, 10) || pageState.models || 1;
+    const model = button.dataset.model ? JSON.parse(decodeURIComponent(button.dataset.model)) : null;
+
+    if (action === 'test' && model) return window.testExistingModel(model);
+    if (action === 'edit' && model) return window.prepareEditModel(model);
+    if (action === 'delete' && modelId) return window.deleteModel(modelId);
+    if (action === 'set-global-default') {
+        await window.setGlobalDefaultModel(modelId, button);
+        return window.loadModels(page);
+    }
+    if (action === 'set-personal-default') {
+        await window.saveMyDefaultModel(modelId, button);
+        return window.loadModels(page);
+    }
+});
 
 async function checkSingleModelStatus(id) {
     if (pendingTests.has(id)) return;
@@ -193,7 +214,6 @@ async function testConnection(url, api_key, model_name, id = null) {
 }
 
 // refreshModelSelector 已在 ui.js 中定义
-
 window.resetModelForm = () => {
     ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {
         const el = document.getElementById(id);
@@ -219,8 +239,13 @@ window.toggleKeyVisibility = async () => {
     };
 
     if (keyInput.type === 'password' && keyInput.value === '********' && modelId) {
-        // 使用标准的系统 prompt 替代简单的显示
-        const pwd = prompt("安全验证：请输入当前登录密码以查看明文密钥", "");
+        const pwd = await window.showInputPrompt({
+            title: '安全验证',
+            message: '请输入当前登录密码以查看明文密钥。',
+            type: 'password',
+            placeholder: '当前登录密码',
+            autocomplete: 'current-password'
+        });
         if (!pwd) return;
 
         try {
@@ -240,7 +265,7 @@ window.toggleKeyVisibility = async () => {
                 showToast(data.error || '获取密钥失败', 'error');
             }
         } catch (e) { 
-            showToast('请求失败，请检查网络', 'error'); 
+            showToast('请求失败，请检查网络', 'error');
         }
     } else {
         const isPassword = keyInput.type === 'password';

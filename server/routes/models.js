@@ -4,12 +4,13 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { encryptSecret, validateModelUrl } = require('../security');
+const { assertSafeOutboundUrl, encryptSecret, validateModelUrl } = require('../security');
 const {
     normalizeTags,
     normalizeBooleanFlag,
     getAccessibleModel
 } = require('../services/models');
+const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 
 function buildModelsListUrl(url) {
@@ -23,7 +24,7 @@ function buildModelsListUrl(url) {
     return modelsUrl;
 }
 
-function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit }) {
+function createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit, probeLimiter = (req, res, next) => next() }) {
     const router = express.Router();
 
     router.get('/models/available', authMiddleware, asyncHandler(async (req, res) => {
@@ -36,16 +37,43 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         const sql = `
-            SELECT id, name, model_name, supports_vision
+            SELECT id, name, model_name, supports_vision, supports_reasoning
             FROM models m
             ${where}
             ORDER BY m.is_default DESC, m.id ASC
         `;
-        const models = db.prepare(sql).all(...params);
+        const models = db.prepare(sql).all(...params).map(model => ({
+            ...model,
+            type: 'chat',
+            endpoint: '/v1/chat/completions',
+            capabilities: [
+                'chat',
+                Number(model.supports_vision || 0) === 1 ? 'vision' : null,
+                Number(model.supports_reasoning || 0) === 1 ? 'reasoning' : null
+            ].filter(Boolean)
+        }));
+
+        const embeddingConfig = getEmbeddingConfig(req.user?.id);
+        const embeddingModel = String(embeddingConfig.http?.model || '').trim();
+        const embeddingUrl = String(embeddingConfig.http?.url || '').trim();
+        if (embeddingModel && embeddingUrl && !models.some(model => model.model_name === embeddingModel && model.type === 'embedding')) {
+            models.push({
+                id: `embedding:${embeddingModel}`,
+                name: `${embeddingModel} (向量模型)`,
+                model_name: embeddingModel,
+                type: 'embedding',
+                endpoint: '/v1/embeddings',
+                capabilities: ['embeddings'],
+                source: embeddingConfig.source?.url === 'user' || embeddingConfig.source?.model === 'user' || embeddingConfig.source?.apiKey === 'user'
+                    ? 'personal'
+                    : 'system'
+            });
+        }
+
         res.json(models);
     }));
 
-    router.post('/models/fetch-remote', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/models/fetch-remote', authMiddleware, probeLimiter, asyncHandler(async (req, res) => {
         let { url, api_key, id } = req.body;
         if (!url) return res.status(400).json({ error: '请填写接口地址' });
 
@@ -53,7 +81,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         if (api_key) api_key = String(api_key).trim();
 
         try {
-            validateModelUrl(url, req.user);
+            await assertSafeOutboundUrl(url, req.user);
         } catch (e) {
             logAction(req, '模型列表拉取拦截', e.message);
             return res.json({ success: false, error: e.message });
@@ -98,7 +126,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
     }));
 
-    router.post('/models/test', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/models/test', authMiddleware, probeLimiter, asyncHandler(async (req, res) => {
         let { id, url, api_key, model_name, source } = req.body;
         const testId = crypto.randomUUID().slice(0, 8);
         const testSource = source || (id ? 'auto' : 'manual');
@@ -124,7 +152,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         if (api_key) api_key = api_key.trim();
 
         try {
-            validateModelUrl(url, req.user);
+            await assertSafeOutboundUrl(url, req.user);
         } catch (e) {
             logAction(req, '模型测试拦截', e.message);
             return res.json({ success: false, requestId: testId, error: e.message });
@@ -148,6 +176,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         try {
             const testUrl = chatUrl.replace('/chat/completions', '/models');
             req.log.debug({ testId, testUrl }, '探测模型路径');
+            await assertSafeOutboundUrl(testUrl, req.user);
             await axios.get(testUrl, {
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
