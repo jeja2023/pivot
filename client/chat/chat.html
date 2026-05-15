@@ -170,9 +170,18 @@
                             style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
                     </div>
                 </div>
-                <div class="form-item model-full-row">
-                    <label>可见部门</label>
-                    <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                <div class="model-scope-units-row model-full-row">
+                    <div class="form-item super-admin-only hidden" id="m-scope-wrap">
+                        <label>保存范围</label>
+                        <select id="m-scope" class="form-input">
+                            <option value="personal">个人模型</option>
+                            <option value="global">全局模型</option>
+                        </select>
+                    </div>
+                    <div class="form-item" id="m-units-wrap">
+                        <label>可见部门</label>
+                        <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                    </div>
                 </div>
                 <div class="model-form-row">
                     <div class="form-item">
@@ -390,6 +399,42 @@
                     </button>
                 </div>
 
+                <div class="sidebar-tools">
+                    <button id="agent-workbench-btn" class="sidebar-tool-btn" title="自动化任务">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4">
+                            <path d="M12 2v4"></path>
+                            <path d="M12 18v4"></path>
+                            <path d="m4.93 4.93 2.83 2.83"></path>
+                            <path d="m16.24 16.24 2.83 2.83"></path>
+                            <path d="M2 12h4"></path>
+                            <path d="M18 12h4"></path>
+                            <path d="m4.93 19.07 2.83-2.83"></path>
+                            <path d="m16.24 7.76 2.83-2.83"></path>
+                            <circle cx="12" cy="12" r="4"></circle>
+                        </svg>
+                        <span>自动化</span>
+                    </button>
+                    <button id="knowledge-workbench-btn" class="sidebar-tool-btn" title="知识库">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path>
+                            <path d="M8 7h8"></path>
+                            <path d="M8 11h6"></path>
+                        </svg>
+                        <span>知识库</span>
+                    </button>
+                    <button id="mcp-workbench-btn" class="sidebar-tool-btn" title="MCP">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3">
+                            <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                            <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                            <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+                            <path d="M10 6.5h4"></path>
+                            <path d="M6.5 10v4"></path>
+                            <path d="M10 17.5h3.5a3.5 3.5 0 0 0 3.5-3.5V10"></path>
+                        </svg>
+                        <span>MCP</span>
+                    </button>
+                </div>
                 <div class="sidebar-ctrls">
                     <div class="search-wrapper">
                         <input type="text" id="session-search-input" placeholder="搜索..." class="search-input">
@@ -499,6 +544,161 @@
         </main>
     </div>
 
+    <!-- 自动化工作台 -->
+    <div id="agent-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
+        <div class="modal agent-modal">
+            <div class="agent-modal-header">
+                <div>
+                    <h3>自动化任务</h3>
+                    <p>拆解目标、调用工具、追踪步骤，适合处理比单轮对话更完整的工作。</p>
+                </div>
+                <button id="agent-modal-close" class="btn-danger-outline agent-modal-close">关闭</button>
+            </div>
+            <div class="agent-workbench">
+                <div class="agent-run-panel">
+                    <div class="agent-panel-head">
+                        <div>
+                            <h3>新任务</h3>
+                            <p>选择模型并设定目标，任务会在后台运行。</p>
+                        </div>
+                        <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
+                    </div>
+                    <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
+                    <div class="agent-run-controls">
+                        <label>
+                            <span>模型</span>
+                            <select id="agent-model-select" class="form-input hidden"></select>
+                            <div id="agent-model-picker" class="agent-model-picker">
+                                <button id="agent-model-trigger" class="agent-model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                                    <span id="agent-selected-model-name">请选择模型</span>
+                                    <span id="agent-selected-model-caps" class="agent-model-caps" aria-label="当前模型能力"></span>
+                                </button>
+                                <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
+                            </div>
+                        </label>
+                        <label class="agent-steps-field">
+                            <span>步骤</span>
+                            <input id="agent-max-steps" class="form-input" type="number" min="1" max="8" value="5" title="最大步骤">
+                        </label>
+                        <button id="agent-run-btn" class="btn-primary">运行</button>
+                    </div>
+                    <div class="agent-quick-goals" aria-label="常用自动化目标">
+                        <button type="button" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
+                        <button type="button" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
+                        <button type="button" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
+                    </div>
+                    <div class="agent-tool-section-head">
+                        <strong>能力清单</strong>
+                        <span>自动化会按目标自动选择工具</span>
+                    </div>
+                    <div id="agent-tool-list" class="agent-tool-list"></div>
+                </div>
+                <div class="agent-history-panel">
+                    <div class="agent-history-head">
+                        <div>
+                            <h3>任务记录</h3>
+                            <p>查看自动化任务的执行步骤、工具调用和最终结果。</p>
+                        </div>
+                        <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                    </div>
+                    <div id="agent-runs-list" class="agent-runs-list"></div>
+                    <div id="agent-run-detail" class="agent-run-detail"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识库工作台 -->
+    <div id="knowledge-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
+        <div class="modal workspace-modal knowledge-workspace-modal">
+            <div class="workspace-modal-header">
+                <div>
+                    <h3>知识库</h3>
+                    <p>管理项目资料、索引状态和召回测试，让聊天与自动化任务可以稳定使用私有文档。</p>
+                </div>
+                <button id="knowledge-modal-close" class="btn-danger-outline workspace-modal-close">关闭</button>
+            </div>
+            <div class="workspace-modal-body">
+                <div class="workspace-panel knowledge-panel">
+                    <div class="workspace-toolbar knowledge-toolbar">
+                        <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf">
+                        <button id="rag-embedding-modal-open-btn" class="btn-secondary">RAG 配置</button>
+                        <button id="rag-debug-modal-open-btn" class="btn-secondary">召回测试</button>
+                        <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
+                        <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                        <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
+                        <button id="rag-batch-delete-btn" class="btn-secondary">批量删除</button>
+                        <button id="rag-retry-failed-btn" class="btn-secondary">重试失败</button>
+                        <button id="rag-upload-btn" class="btn-primary">上传文档</button>
+                    </div>
+                    <div id="rag-summary" class="rag-summary"></div>
+                    <div class="table-container workspace-table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all"></th>
+                                    <th style="width: 50px;" class="text-center">序号</th>
+                                    <th style="width: auto;">文档名称</th>
+                                    <th style="width: 120px;">状态</th>
+                                    <th style="width: 90px;" class="text-center">启用</th>
+                                    <th style="width: 90px;" class="text-center">分块</th>
+                                    <th style="width: 90px;" class="text-center">进度</th>
+                                    <th style="width: 150px;">上传时间</th>
+                                    <th style="width: 150px;">更新时间</th>
+                                    <th style="width: 210px;" class="text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rag-docs-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="pagination-ragDocs" class="pagination workspace-pagination"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP 工具工作台 -->
+    <div id="mcp-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
+        <div class="modal workspace-modal mcp-workspace-modal">
+            <div class="workspace-modal-header">
+                <div>
+                    <h3>MCP 工具</h3>
+                    <p>接入外部 MCP Server，刷新工具缓存，并供聊天与自动化任务调用。</p>
+                </div>
+                <button id="mcp-modal-close" class="btn-danger-outline workspace-modal-close">关闭</button>
+            </div>
+            <div class="workspace-modal-body">
+                <div class="workspace-section-head">
+                    <div>
+                        <h3>工具源</h3>
+                        <p>保存服务后可刷新工具列表，外部工具会进入自动化可用工具池。</p>
+                    </div>
+                    <button id="mcp-refresh-btn" class="btn-secondary">刷新</button>
+                </div>
+                <div class="mcp-layout">
+                    <div class="mcp-form">
+                        <input type="hidden" id="mcp-id">
+                        <input id="mcp-name" class="form-input" placeholder="服务名称">
+                        <input id="mcp-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
+                        <input id="mcp-key" class="form-input" type="password" placeholder="API Key，可选">
+                        <textarea id="mcp-desc" class="form-input" placeholder="说明，可选"></textarea>
+                        <label class="mcp-shared-row admin-only hidden">
+                            <input type="checkbox" id="mcp-shared"> 作为全局共享服务
+                        </label>
+                        <div class="agent-run-controls">
+                            <button id="mcp-save-btn" class="btn-primary">保存服务</button>
+                            <button id="mcp-reset-btn" class="btn-secondary">清空</button>
+                        </div>
+                    </div>
+                    <div class="mcp-list-wrap">
+                        <div id="mcp-server-list" class="mcp-server-list"></div>
+                        <div id="mcp-tool-cache" class="agent-tool-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 管理与配置面板 (符合第39条复用规范) -->
     <div id="admin-container" class="modal-overlay hidden">
         <div class="modal admin-panel">
@@ -514,7 +714,6 @@
                     <button id="tab-prompts" class="admin-tab">指令中心</button>
                     <button id="tab-attachments" class="admin-tab">附件库</button>
                     <button id="tab-labs" class="admin-tab admin-only hidden">实验室功能</button>
-                    <button id="tab-knowledge" class="admin-tab hidden">知识库</button>
                     <button id="tab-users" class="admin-tab admin-only hidden">用户管理</button>
                     <button id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
                     <button id="tab-monitor" class="admin-tab admin-only hidden">系统监控</button>
@@ -653,44 +852,6 @@
                             </table>
                         </div>
                         <div id="pagination-models" class="pagination"></div>
-                    </div>
-
-                    <!-- 知识库管理 (RAG) -->
-                    <div id="tab-content-knowledge" class="admin-tab-content hidden">
-                        <div
-                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3>知识库</h3>
-                            <div class="footer-actions" style="margin-bottom: 0;">
-                                <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf">
-                                <button id="rag-embedding-modal-open-btn" class="btn-secondary">RAG 配置</button>
-                                <button id="rag-debug-modal-open-btn" class="btn-secondary">召回测试</button>
-                                <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
-                                <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
-                                <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
-                                <button id="rag-batch-delete-btn" class="btn-secondary">批量删除</button>
-                                <button id="rag-retry-failed-btn" class="btn-secondary">重试失败</button>
-                                <button id="rag-upload-btn" class="btn-primary">上传文档</button>
-                            </div>
-                        </div>
-                        <div id="rag-summary" class="rag-summary"></div>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all"></th>
-                                        <th style="width: auto;">文档名称</th>
-                                        <th style="width: 120px;">状态</th>
-                                        <th style="width: 90px;" class="text-center">启用</th>
-                                        <th style="width: 90px;" class="text-center">分块</th>
-                                        <th style="width: 90px;" class="text-center">进度</th>
-                                        <th style="width: 150px;">上传时间</th>
-                                        <th style="width: 150px;">更新时间</th>
-                                        <th style="width: 210px;" class="text-center">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="rag-docs-body"></tbody>
-                            </table>
-                        </div>
                     </div>
 
                     <!-- 用户管理 -->
@@ -1150,6 +1311,8 @@
     <script src="/chat/auth.js?v=__APP_VERSION__"></script>
     <!-- 管理员面板模块化脚本 -->
     <script src="/chat/admin.js?v=__APP_VERSION__"></script>
+    <script src="/chat/agents.js?v=__APP_VERSION__"></script>
+    <script src="/chat/rag.js?v=__APP_VERSION__"></script>
     <!-- 主程序模块化脚本 -->
     <script src="/chat/render.js?v=__APP_VERSION__"></script>
     <script src="/chat/engine.js?v=__APP_VERSION__"></script>

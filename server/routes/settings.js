@@ -35,6 +35,8 @@ const userEmbeddingSettings = new Set([
     RAG_CONFIG_KEYS.embeddingModel
 ]);
 
+const isSuperAdmin = (user) => user?.username === 'admin';
+
 function buildEmbeddingModelListUrls(url) {
     const rawUrl = String(url || '').trim().replace(/\/+$/, '');
     const lowerUrl = rawUrl.toLowerCase();
@@ -128,7 +130,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({
             ragEnabled: settings.rag_enabled?.value === 'true',
             ragConfig: getRagConfig(),
-            embeddingConfig: getPublicEmbeddingConfig(req.user?.role === 'admin' ? null : req.user?.id),
+            embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings
@@ -206,10 +208,10 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
 
         if (parsedModelId !== null) {
-            const sql = req.user.role === 'admin'
+            const sql = isSuperAdmin(req.user)
                 ? 'SELECT id FROM models WHERE id = ?'
                 : 'SELECT id FROM models WHERE id = ? AND (user_id = ? OR user_id IS NULL)';
-            const model = req.user.role === 'admin'
+            const model = isSuperAdmin(req.user)
                 ? db.prepare(sql).get(parsedModelId)
                 : db.prepare(sql).get(parsedModelId, req.user.id);
             if (!model) {
@@ -224,6 +226,9 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.put('/admin/settings', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有 admin 超级管理员可以修改系统全局设置。' });
+        }
         const updates = req.body || {};
         const stmt = db.prepare(`
             INSERT INTO app_settings (key, value, updated_at, updated_by)

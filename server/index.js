@@ -51,6 +51,7 @@ const {
     escapeCsvCell
 } = require('./security');
 const { getBeijingTimestamp } = require('./time');
+const { normalizeAuditAction } = require('./audit-actions');
 const { createUploadMiddleware, uploadSecurityMiddleware } = require('./upload');
 const { createAuthRouter } = require('./routes/auth');
 const { createAttachmentsRouter } = require('./routes/attachments');
@@ -62,6 +63,8 @@ const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
 const { createSettingsRouter, isSettingEnabled } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
+const { createAgentsRouter } = require('./routes/agents');
+const { createMcpRouter } = require('./routes/mcp');
 const { ragRouter, retrieveContext } = require('./rag');
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const {
@@ -86,7 +89,7 @@ setImmediate(() => {
 const logAction = (req, action, details) => {
     const userId = req.user ? req.user.id : null;
     const ip = getClientIp(req);
-    stmts.insertLog.run(userId, action, details, ip, getBeijingTimestamp());
+    stmts.insertLog.run(userId, normalizeAuditAction(action), details, ip, getBeijingTimestamp());
 };
 
 // 移除冗余的分页格式化函数，已由 http.js 提供
@@ -425,6 +428,12 @@ app.use('/api', createSettingsRouter({
     logAction
 }));
 
+app.use('/api', createMcpRouter({
+    authMiddleware,
+    adminMiddleware,
+    logAction
+}));
+
 app.use('/api/rag', (req, res, next) => {
     if (!isSettingEnabled('rag_enabled')) {
         return res.status(403).json({ error: 'RAG 知识库功能未开启' });
@@ -441,6 +450,11 @@ app.use('/api', createSessionsRouter({
 }));
 
 app.use('/api', createPromptsRouter({
+    authMiddleware,
+    logAction
+}));
+
+app.use('/api', createAgentsRouter({
     authMiddleware,
     logAction
 }));
@@ -484,7 +498,7 @@ app.use((err, req, res, _next) => {
     // 如果是服务器内部错误 (500+)，记录到数据库审计日志
     if (status >= 500) {
         try {
-            logAction(req, 'SYSTEM_ERROR', JSON.stringify({
+            logAction(req, '系统错误', JSON.stringify({
                 message: err.message,
                 url: req.originalUrl || req.url,
                 method: req.method,

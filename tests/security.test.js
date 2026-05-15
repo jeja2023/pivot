@@ -18,6 +18,7 @@ const {
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
+const { estimateTokens } = require('../server/llm');
 const { normalizeUploadedOriginalName } = require('../server/upload');
 const { buildFtsQuery } = require('../server/search');
 const { createSseEventParser, createStreamAccumulator, extractStreamPayload } = require('../server/streaming');
@@ -39,11 +40,16 @@ const {
 } = require('../server/services/rag-index');
 const {
     getModelDailyUsage,
+    getOrCreateEmbeddingUsageModel,
     recordModelTokenUsage,
     contentContainsVisionInput,
     messagesContainVisionInput,
     modelSupportsVision
 } = require('../server/services/models');
+const {
+    estimateEmbeddingTokens,
+    normalizeTokenUsage
+} = require('../server/services/token-accounting');
 const {
     getLocalHostnames,
     isDockerInternalServiceHost,
@@ -93,6 +99,12 @@ const {
     toRagSettingValue
 } = require('../server/services/rag-config');
 const {
+    getAuditActionFilterValues,
+    localizeAuditDetails,
+    localizeAuditLogRow,
+    normalizeAuditAction
+} = require('../server/audit-actions');
+const {
     buildEmbeddingModelListUrls,
     extractEmbeddingModelIds
 } = require('../server/routes/settings');
@@ -108,6 +120,9 @@ const {
 const { cleanupSoftDeletedStorage } = require('../server/services/storage-gc');
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
 const { createModelsRouter } = require('../server/routes/models');
+const { createSettingsRouter } = require('../server/routes/settings');
+const { createPromptsRouter } = require('../server/routes/prompts');
+const { createMcpRouter } = require('../server/routes/mcp');
 const {
     buildEmbeddingModelItem,
     buildEmbeddingResponse,
@@ -118,9 +133,54 @@ const {
     getSystemHealthSnapshot,
     overallStatus
 } = require('../server/services/system-health');
+const {
+    getBuiltInToolDefinitions,
+    executeBuiltInTool
+} = require('../server/services/agent-tools');
+const {
+    cancelAgentRun,
+    createAgentRun,
+    formatToolList,
+    getRunDetailForUser,
+    getRunProgress,
+    getRunForUser,
+    listDeletedRunsForAdmin,
+    listRuns,
+    normalizeAgentGoal,
+    parseJsonObject,
+    rerunAgentRun,
+    softDeleteAgentRun
+} = require('../server/services/agent-runtime');
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
+
+function runExpressHandlers(handlers, req, res) {
+    return new Promise((resolve, reject) => {
+        let index = 0;
+        const originalJson = res.json?.bind(res);
+        if (originalJson) {
+            res.json = (data) => {
+                originalJson(data);
+                resolve();
+                return res;
+            };
+        }
+        const next = (err) => {
+            if (err) return reject(err);
+            const handler = handlers[index];
+            index += 1;
+            if (!handler) return resolve();
+            try {
+                const result = handler(req, res, next);
+                if (result && typeof result.then === 'function') result.catch(reject);
+            } catch (e) {
+                reject(e);
+            }
+        };
+        next();
+    });
+}
 
 test.after(async () => {
     await new Promise(resolve => setImmediate(resolve));
@@ -517,6 +577,23 @@ test('RAG embedding modes normalize legacy values to HTTP mode', () => {
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.embeddingMode, 'local'), 'http');
 });
 
+test('audit actions localize legacy RAG and integration labels', () => {
+    assert.equal(normalizeAuditAction('RAG_DOCUMENT_UPLOAD'), '知识库文档上传');
+    assert.equal(normalizeAuditAction('RAG_EMBEDDING_TEST'), '向量模型连接测试');
+    assert.equal(normalizeAuditAction('SYSTEM_ERROR'), '系统错误');
+    assert.equal(normalizeAuditAction('OpenAI Tools 调用'), 'OpenAI 工具调用');
+    assert.deepEqual(localizeAuditLogRow({ id: 1, action: 'RAG_FEEDBACK', details: '{"id":3,"helpful":true,"chunkId":9}' }), {
+        id: 1,
+        action: '知识库召回反馈',
+        details: '反馈ID: 3，分块ID: 9，是否有帮助: 是'
+    });
+    assert.equal(localizeAuditDetails('RAG_DOCUMENT_UPLOAD', '{"docId":287,"name":"开发命令.txt"}'), '文档ID: 287，文件名: 开发命令.txt');
+    assert.equal(localizeAuditDetails('知识库文档启停', '{"docId":1,"enabled":false}'), '文档ID: 1，状态: 停用');
+    assert.ok(getAuditActionFilterValues('知识库文档上传').includes('RAG_DOCUMENT_UPLOAD'));
+    assert.ok(getAuditActionFilterValues('RAG_DOCUMENT_UPLOAD').includes('知识库文档上传'));
+    assert.equal(normalizeAuditAction('创建自动化任务'), '创建自动化任务');
+});
+
 test('RAG embedding config prefers stored settings and masks API key', () => {
     const previousEnv = {
         mode: process.env.EMBEDDING_MODE,
@@ -657,6 +734,79 @@ test('RAG embedding config prefers user settings and falls back to system defaul
     }
 });
 
+test('non-root admin saves embedding config as personal settings', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ops_admin_${suffix}`, 'hash', 'Ops Admin', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `ops_admin_${suffix}`, role: 'admin', unit: 'QA' };
+
+    const keys = [
+        RAG_CONFIG_KEYS.embeddingMode,
+        RAG_CONFIG_KEYS.embeddingApiUrl,
+        RAG_CONFIG_KEYS.embeddingApiKey,
+        RAG_CONFIG_KEYS.embeddingModel
+    ];
+    const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
+    const router = createSettingsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const embeddingRoute = router.stack.find(layer => layer.route?.path === '/settings/embedding' && layer.route?.methods?.put);
+    const adminSettingsRoute = router.stack.find(layer => layer.route?.path === '/admin/settings' && layer.route?.methods?.put);
+    const req = {
+        body: {
+            rag_embedding_mode: 'http',
+            rag_embedding_api_url: 'https://personal-admin.example/v1',
+            rag_embedding_model: 'personal-admin-model'
+        },
+        user: adminUser
+    };
+    const jsonBodies = [];
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { jsonBodies.push(body); return this; }
+    };
+
+    try {
+        await runExpressHandlers(embeddingRoute.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(getEmbeddingConfig(adminUser.id).http.url, 'https://personal-admin.example/v1');
+        assert.equal(getEmbeddingConfig(adminUser.id).http.model, 'personal-admin-model');
+        assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(RAG_CONFIG_KEYS.embeddingApiUrl)?.value === 'https://personal-admin.example/v1', false);
+
+        const deniedReq = { body: { rag_embedding_api_url: 'https://global-denied.example/v1' }, user: adminUser };
+        const deniedRes = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(adminSettingsRoute.route.stack.map(layer => layer.handle), deniedReq, deniedRes);
+        assert.equal(deniedRes.statusCode, 403);
+    } finally {
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(adminUser.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        keys.forEach((key, index) => {
+            const row = previousRows[index];
+            if (row) {
+                db.prepare(`
+                    INSERT INTO app_settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by
+                `).run(row.key, row.value, row.updated_at, row.updated_by);
+            } else {
+                db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+            }
+        });
+    }
+});
+
 test('RAG embedding helpers support HTTP services', () => {
     assert.equal(resolveEmbeddingUrl('http://127.0.0.1:11434/api/embed'), 'http://127.0.0.1:11434/api/embed');
     assert.equal(resolveEmbeddingUrl('https://example.com/v1'), 'https://example.com/v1/embeddings');
@@ -679,6 +829,76 @@ test('RAG embedding helpers support HTTP services', () => {
     assert.deepEqual(normalizeEmbeddingVector({ embedding: ['1', 2] }), [1, 2]);
     assert.deepEqual(normalizeEmbeddingVector({ embeddings: [[0.1, 0.2]] }), [0.1, 0.2]);
     assert.throws(() => normalizeEmbeddingVector({ ok: true }), /有效向量/);
+});
+
+test('agent JSON parser extracts strict object from model text', () => {
+    assert.deepEqual(parseJsonObject('{"action":"final","answer":"ok"}'), { action: 'final', answer: 'ok' });
+    assert.deepEqual(parseJsonObject('```json\n{"tool":"models.list","input":{}}\n```'), { tool: 'models.list', input: {} });
+    assert.equal(parseJsonObject('no json here'), null);
+});
+
+test('built-in agent tools expose user-safe tool definitions and execute model list', async () => {
+    const user = { id: 1, role: 'user', unit: '' };
+    const tools = getBuiltInToolDefinitions(user);
+    assert.equal(tools.some(tool => tool.name === 'rag.search'), true);
+    assert.equal(tools.some(tool => tool.name === 'system.health'), false);
+    assert.equal(formatToolList(user).some(tool => tool.name === 'system.health'), false);
+    const limitedAdminTools = formatToolList({ id: 1, username: 'ops-admin', role: 'admin', unit: '' });
+    assert.equal(limitedAdminTools.some(tool => tool.name === 'system.health'), false);
+    const superAdminTools = formatToolList({ id: 1, username: 'admin', role: 'admin', unit: '' });
+    const systemHealth = superAdminTools.find(tool => tool.name === 'system.health');
+    assert.equal(systemHealth.admin, true);
+    assert.equal(systemHealth.title, '系统健康');
+    const result = await executeBuiltInTool('models.list', {}, user);
+    assert.equal(Array.isArray(result), true);
+});
+
+test('automation runs can be cancelled and rerun from an existing run', () => {
+    const suffix = Date.now();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_user_${suffix}`, 'hash', 'Agent User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `agent_user_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Agent Test Model', 'http://127.0.0.1:65530/v1/chat/completions', 'agent-test-model');
+
+    const run = createAgentRun({
+        user,
+        goal: '整理项目风险',
+        modelId: Number(modelInfo.lastInsertRowid),
+        maxSteps: 3
+    });
+    const cancelled = cancelAgentRun(run.id, user);
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(Boolean(cancelled.cancelled_at), true);
+    const detail = getRunDetailForUser(run.id, user);
+    assert.equal(detail.progress.errorCount, 0);
+    assert.equal(detail.progress.stepCount >= 1, true);
+
+    const rerun = rerunAgentRun(run.id, user);
+    assert.equal(rerun.goal, run.goal);
+    assert.equal(rerun.model_id, run.model_id);
+    assert.equal(rerun.max_steps, run.max_steps);
+    assert.equal(rerun.parent_run_id, run.id);
+
+    cancelAgentRun(rerun.id, user);
+    assert.equal(getRunForUser(rerun.id, user).status, 'cancelled');
+    assert.equal(getRunProgress({ status: 'completed', max_steps: 3 }, []).percent, 100);
+
+    const deleted = softDeleteAgentRun(run.id, user, '用户清理任务列表');
+    assert.equal(Boolean(deleted.deleted_at), true);
+    assert.equal(deleted.deleted_by_user, user.id);
+    assert.equal(getRunForUser(run.id, user), undefined);
+    assert.equal(getRunDetailForUser(run.id, user), null);
+    assert.equal(listRuns(user, 30).some(item => item.id === run.id), false);
+    assert.throws(() => listDeletedRunsForAdmin(user, 20), /admin 超级管理员/);
+    const adminAudit = listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
+    assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
+
+    assert.throws(() => normalizeAgentGoal('短'), /更明确/);
 });
 
 test('OpenAI embedding helpers normalize requests and responses', () => {
@@ -1239,6 +1459,52 @@ test('model usage events count toward daily model quota usage', () => {
     }
 });
 
+test('token accounting balances totals and tracks embedding usage models', () => {
+    assert.deepEqual(normalizeTokenUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 20 }), {
+        inputTokens: 10,
+        outputTokens: 10,
+        totalTokens: 20
+    });
+    assert.deepEqual(normalizeTokenUsage({ inputTokens: 5, outputTokens: 7, totalTokens: 9 }), {
+        inputTokens: 5,
+        outputTokens: 7,
+        totalTokens: 12
+    });
+    assert.equal(estimateEmbeddingTokens(['hello world', '测试'], estimateTokens), estimateTokens('hello world') + estimateTokens('测试'));
+
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`embed_usage_${suffix}`, 'hash', 'Embedding Usage', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    let modelId;
+
+    try {
+        modelId = getOrCreateEmbeddingUsageModel({
+            userId,
+            url: 'https://embedding-usage.example/v1',
+            model: 'bge-test'
+        });
+        const sameModelId = getOrCreateEmbeddingUsageModel({
+            userId,
+            url: 'https://embedding-usage.example/v1',
+            model: 'bge-test'
+        });
+        assert.equal(sameModelId, modelId);
+        recordModelTokenUsage(userId, modelId, 30, 'rag_embedding', 10, 0);
+        const event = db.prepare('SELECT token_count, input_tokens, output_tokens FROM model_usage_events WHERE user_id = ? AND model_id = ?').get(userId, modelId);
+        assert.deepEqual(event, { token_count: 30, input_tokens: 10, output_tokens: 20 });
+        const model = db.prepare('SELECT status, name FROM models WHERE id = ?').get(modelId);
+        assert.equal(model.status, 'usage_only');
+        assert.match(model.name, /bge-test/);
+    } finally {
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userId);
+        if (modelId) db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('local model host detection includes request and configured host aliases', () => {
     assert.equal(normalizeHostAlias('http://50.64.150.40:8080/v1'), '50.64.150.40');
     assert.equal(normalizeHostAlias('ai.example.com:3000'), 'ai.example.com');
@@ -1464,6 +1730,175 @@ test('model probe routes authenticate before rate limiting', () => {
         const handlers = route.route.stack.map(item => item.handle);
         assert.equal(handlers[0].name, 'authMiddleware');
         assert.equal(handlers[1].name, 'probeLimiter');
+    }
+});
+
+test('non-root admin creates private chat models and cannot delete global models', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`model_admin_${suffix}`, 'hash', 'Model Admin', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `model_admin_${suffix}`, role: 'admin', unit: 'QA' };
+    const globalInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, created_at)
+        VALUES (NULL, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`Global ${suffix}`, 'https://global-model.example/v1', 'global-chat');
+
+    const router = createModelsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        probeLimiter: (_req, _res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/models' && layer.route?.methods?.post);
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.delete);
+    const listRoute = router.stack.find(layer => layer.route?.path === '/models' && layer.route?.methods?.get);
+    assert.ok(createRoute);
+    assert.ok(deleteRoute);
+    assert.ok(listRoute);
+
+    try {
+        const createReq = {
+            body: {
+                name: `Private ${suffix}`,
+                url: 'https://private-model.example/v1',
+                model_name: 'private-chat',
+                scope: 'global',
+                allowed_units: 'ALL'
+            },
+            user: adminUser
+        };
+        const createRes = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), createReq, createRes);
+        assert.equal(createRes.statusCode, 200);
+        const privateModel = db.prepare('SELECT * FROM models WHERE name = ?').get(`Private ${suffix}`);
+        assert.equal(privateModel.user_id, adminUser.id);
+        assert.equal(privateModel.allowed_units || '', '');
+
+        const deleteReq = { params: { id: String(globalInfo.lastInsertRowid) }, user: adminUser };
+        const deleteRes = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), deleteReq, deleteRes);
+        assert.equal(deleteRes.statusCode, 403);
+
+        const listReq = { query: { page: '1', limit: '20' }, user: adminUser };
+        const listRes = {
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), listReq, listRes);
+        assert.equal(listRes.body.data.some(model => model.id === globalInfo.lastInsertRowid), true);
+        assert.equal(listRes.body.data.some(model => model.id === privateModel.id), true);
+    } finally {
+        db.prepare('DELETE FROM models WHERE name IN (?, ?)').run(`Global ${suffix}`, `Private ${suffix}`);
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('non-root admin cannot create global prompts or shared MCP servers', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`resource_admin_${suffix}`, 'hash', 'Resource Admin', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `resource_admin_${suffix}`, role: 'admin', unit: 'QA' };
+
+    const promptRouter = createPromptsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        logAction: () => {}
+    });
+    const mcpRouter = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const promptRoute = promptRouter.stack.find(layer => layer.route?.path === '/prompts' && layer.route?.methods?.post);
+    const mcpRoute = mcpRouter.stack.find(layer => layer.route?.path === '/mcp/servers' && layer.route?.methods?.post);
+
+    try {
+        const promptReq = {
+            body: { name: `Prompt ${suffix}`, content: 'test prompt', scope: 'global' },
+            user: adminUser
+        };
+        const promptRes = { json(body) { this.body = body; return this; }, status(code) { this.statusCode = code; return this; } };
+        await runExpressHandlers(promptRoute.route.stack.map(layer => layer.handle), promptReq, promptRes);
+        const prompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(promptRes.body.id);
+        assert.equal(prompt.scope, 'personal');
+        assert.equal(prompt.user_id, adminUser.id);
+
+        const mcpReq = {
+            body: {
+                name: `MCP ${suffix}`,
+                base_url: 'https://mcp-resource.example/rpc',
+                shared: true
+            },
+            user: adminUser
+        };
+        const mcpRes = { json(body) { this.body = body; return this; }, status(code) { this.statusCode = code; return this; } };
+        await runExpressHandlers(mcpRoute.route.stack.map(layer => layer.handle), mcpReq, mcpRes);
+        assert.equal(mcpRes.statusCode || 201, 201);
+        const server = db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(mcpRes.body.server.id);
+        assert.equal(server.user_id, adminUser.id);
+    } finally {
+        db.prepare('DELETE FROM prompts WHERE user_id = ?').run(adminUser.id);
+        db.prepare('DELETE FROM mcp_servers WHERE user_id = ?').run(adminUser.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('non-root admin cannot manage administrator accounts', async () => {
+    const suffix = Date.now().toString(36);
+    const adminInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`limited_admin_${suffix}`, 'hash', 'Limited Admin', 'QA', 'admin', 'active');
+    const targetInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`target_admin_${suffix}`, 'hash', 'Target Admin', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(adminInfo.lastInsertRowid), username: `limited_admin_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createAdminUsersRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        upload: { single: () => (_req, _res, next) => next() },
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/admin/users' && layer.route?.methods?.post);
+    const updateRoute = router.stack.find(layer => layer.route?.path === '/admin/users/:id' && layer.route?.methods?.put);
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/admin/users/:id' && layer.route?.methods?.delete);
+
+    try {
+        const createReq = {
+            body: { username: `new_admin_${suffix}`, password: 'Password123', nickname: 'New Admin', unit: 'QA', role: 'admin' },
+            user: adminUser
+        };
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), createReq, createRes);
+        assert.equal(createRes.statusCode, 403);
+
+        const updateReq = {
+            params: { id: String(targetInfo.lastInsertRowid) },
+            body: { nickname: 'Changed', unit: 'QA', role: 'user', status: 'active' },
+            user: adminUser
+        };
+        const updateRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(updateRoute.route.stack.map(layer => layer.handle), updateReq, updateRes);
+        assert.equal(updateRes.statusCode, 403);
+
+        const deleteReq = { params: { id: String(targetInfo.lastInsertRowid) }, user: adminUser };
+        const deleteRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), deleteReq, deleteRes);
+        assert.equal(deleteRes.statusCode, 403);
+    } finally {
+        db.prepare('DELETE FROM users WHERE username IN (?, ?, ?)').run(`limited_admin_${suffix}`, `target_admin_${suffix}`, `new_admin_${suffix}`);
     }
 });
 

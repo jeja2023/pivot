@@ -90,6 +90,13 @@ function formatSessionListTime(value) {
     if (!parsed) return value ? String(value).trim() : '';
 
     const now = new Date();
+    const diffMs = Math.max(0, now.getTime() - parsed.getTime());
+    const minuteMs = 60 * 1000;
+    const hourMs = 60 * minuteMs;
+    if (diffMs < minuteMs) return '刚刚';
+    if (diffMs < hourMs) return `${Math.floor(diffMs / minuteMs)} 分钟`;
+    if (diffMs < 24 * hourMs) return `${Math.floor(diffMs / hourMs)} 小时`;
+
     const dayKey = (date) => new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Shanghai',
         year: 'numeric',
@@ -97,29 +104,27 @@ function formatSessionListTime(value) {
         day: '2-digit'
     }).format(date);
 
-    if (dayKey(parsed) === dayKey(now)) {
-        return parsed.toLocaleTimeString('zh-CN', {
-            timeZone: 'Asia/Shanghai',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-    }
-
     const todayStart = new Date(dayKey(now) + 'T00:00:00+08:00');
     const parsedStart = new Date(dayKey(parsed) + 'T00:00:00+08:00');
     const dayDiff = Math.max(1, Math.round((todayStart - parsedStart) / (24 * 60 * 60 * 1000)));
-    if (dayDiff <= 99) return dayDiff + ' 天';
+    if (dayDiff === 1) return '昨天';
+    if (dayDiff <= 6) return `${dayDiff} 天`;
+    if (dayDiff <= 27) return `${Math.floor(dayDiff / 7)} 周`;
 
     const parts = new Intl.DateTimeFormat('zh-CN', {
         timeZone: 'Asia/Shanghai',
+        year: 'numeric',
         month: 'numeric',
         day: 'numeric'
     }).formatToParts(parsed).reduce((acc, part) => {
         acc[part.type] = part.value;
         return acc;
     }, {});
-    return parts.month + '/' + parts.day;
+    const currentYear = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric'
+    }).format(now);
+    return parts.year === currentYear ? `${parts.month}/${parts.day}` : `${parts.year}/${parts.month}/${parts.day}`;
 }
 function formatSessionGroupDate(value) {
     const parsed = parseChatDateTime(value);

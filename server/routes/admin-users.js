@@ -10,6 +10,7 @@ const {
     parseCsvLine
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
+const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
 
 function createAdminUsersRouter({
     authMiddleware,
@@ -43,6 +44,9 @@ function createAdminUsersRouter({
 
     router.post('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const { username, password, nickname, unit, role } = req.body;
+        if (role === 'admin' && !isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有 admin 超级管理员可以创建管理员账号' });
+        }
         const user = register(username, password, nickname, unit, role);
         logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
         res.json({ success: true, user });
@@ -54,9 +58,12 @@ function createAdminUsersRouter({
         const safeRole = role === 'admin' ? 'admin' : 'user';
         const safeStatus = status === 'disabled' ? 'disabled' : 'active';
 
-        const targetUser = db.prepare('SELECT username, deleted_at FROM users WHERE id = ?').get(targetUserId);
+        const targetUser = db.prepare('SELECT username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能修改' });
+        if (!isSuperAdmin(req.user) && (targetUser.role === 'admin' || safeRole === 'admin')) {
+            return res.status(403).json({ error: '只有 admin 超级管理员可以修改管理员账号或授予管理员角色' });
+        }
         
         if (targetUser.username === 'admin' && (safeRole !== 'admin' || safeStatus === 'disabled')) {
             return res.status(400).json({ error: '不能降低或禁用内置管理员权限' });
@@ -74,10 +81,11 @@ function createAdminUsersRouter({
     router.post('/admin/users/:id/password', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         const { password } = req.body;
-        const targetUser = db.prepare('SELECT username, deleted_at FROM users WHERE id = ?').get(targetUserId);
+        const targetUser = db.prepare('SELECT username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能重置密码' });
         if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员密码不可由其他用户重置' });
+        if (!isSuperAdmin(req.user) && targetUser.role === 'admin') return res.status(403).json({ error: '只有 admin 超级管理员可以重置管理员密码' });
         validatePassword(password);
         const hash = bcrypt.hashSync(password, 10);
         const resetPasswordTx = db.transaction(() => {
@@ -96,7 +104,11 @@ function createAdminUsersRouter({
         let conditions = [];
         let params = [];
         if (username) { conditions.push("u.username LIKE ?"); params.push(`%${username}%`); }
-        if (action) { conditions.push("al.action = ?"); params.push(action); }
+        if (action) {
+            const actionValues = getAuditActionFilterValues(action);
+            conditions.push(`al.action IN (${actionValues.map(() => '?').join(', ')})`);
+            params.push(...actionValues);
+        }
         if (details) { conditions.push("al.details LIKE ?"); params.push(`%${details}%`); }
         if (ip) { conditions.push("al.ip_address LIKE ?"); params.push(`%${ip}%`); }
         if (start) { conditions.push("al.timestamp >= ?"); params.push(start + ' 00:00:00'); }
@@ -113,7 +125,7 @@ function createAdminUsersRouter({
         `).all(...params);
         
         let csv = '\uFEFF序号,时间,用户,IP,操作,详情\n';
-        logs.forEach((l, i) => {
+        logs.map(localizeAuditLogRow).forEach((l, i) => {
             csv += [i + 1, l.timestamp, l.username || '系统', l.ip_address || '-', l.action, l.details || ''].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出审计日志', `导出 ${logs.length} 条日志${whereClause ? ' (已筛选)' : ''}`);
@@ -262,7 +274,7 @@ function createAdminUsersRouter({
                 try {
                     const userHash = password ? bcrypt.hashSync(String(password), 10) : hash;
                     db.prepare('INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                      .run(username, nickname || username, unit || '', role === 'admin' ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp());
+                      .run(username, nickname || username, unit || '', (role === 'admin' && isSuperAdmin(req.user)) ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp());
                     count++;
                 } catch (e) {
                     skipped++;
@@ -288,8 +300,9 @@ function createAdminUsersRouter({
             params.push(`%${username}%`);
         }
         if (action) {
-            conditions.push("l.action = ?");
-            params.push(action);
+            const actionValues = getAuditActionFilterValues(action);
+            conditions.push(`l.action IN (${actionValues.map(() => '?').join(', ')})`);
+            params.push(...actionValues);
         }
         if (details) {
             conditions.push("l.details LIKE ?");
@@ -326,7 +339,7 @@ function createAdminUsersRouter({
             ${whereClause}
         `).get(...params).count;
         
-        res.json({ data: logs, total });
+        res.json({ data: logs.map(localizeAuditLogRow), total });
     }));
 
     router.delete('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -336,6 +349,9 @@ function createAdminUsersRouter({
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.json({ success: true });
         if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员账号禁止删除' });
+        if (targetUser.role === 'admin' && !isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有 admin 超级管理员可以删除管理员账号' });
+        }
         if (targetUser.role === 'admin') {
             const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled' AND deleted_at IS NULL").get().count;
             if (adminCount <= 1) return res.status(400).json({ error: '系统必须保留至少一个可用管理员' });

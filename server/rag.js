@@ -31,6 +31,7 @@ const {
     debugRetrieveContext
 } = require('./services/rag-index');
 const { getEmbeddingConfig } = require('./services/rag-config');
+const { normalizeAuditAction } = require('./audit-actions');
 
 const ragRouter = express.Router();
 const debugQueryLimiter = rateLimit({
@@ -53,7 +54,7 @@ const upload = multer({
 function auditRagAction(req, action, details) {
     try {
         db.prepare('INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp) VALUES (?, ?, ?, ?, ?)')
-            .run(req.user?.id || null, action, JSON.stringify(details || {}), getClientIp(req), getBeijingTimestamp());
+            .run(req.user?.id || null, normalizeAuditAction(action), JSON.stringify(details || {}), getClientIp(req), getBeijingTimestamp());
     } catch (e) {
         req.log?.warn({ err: e.message, action }, 'RAG 审计日志写入失败');
     }
@@ -62,8 +63,12 @@ function auditRagAction(req, action, details) {
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 ragRouter.get('/docs', authMiddleware, (req, res) => {
-    const docs = db.prepare('SELECT * FROM knowledge_docs WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC').all(req.user.id);
-    res.json(docs);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+    const offset = (page - 1) * limit;
+    const total = db.prepare('SELECT COUNT(*) AS total FROM knowledge_docs WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id)?.total || 0;
+    const docs = db.prepare('SELECT * FROM knowledge_docs WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?').all(req.user.id, limit, offset);
+    res.json({ data: docs, total, page, limit });
 });
 
 ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
@@ -98,28 +103,28 @@ ragRouter.put('/docs/:id/enabled', authMiddleware, asyncHandler(async (req, res)
     const enabled = req.body?.enabled !== false;
     const changed = setKnowledgeDocumentEnabled({ docId: req.params.id, userId: req.user.id, enabled });
     if (!changed) return res.status(404).json({ error: '文档不存在' });
-    auditRagAction(req, 'RAG_DOCUMENT_ENABLED', { docId: req.params.id, enabled });
+    auditRagAction(req, '知识库文档启停', { docId: req.params.id, enabled });
     req.log?.info({ docId: req.params.id, enabled }, 'RAG 文档启停状态已更新');
     return res.json({ success: true });
 }));
 
 ragRouter.delete('/docs/:id', authMiddleware, (req, res) => {
     const deleted = deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
-    auditRagAction(req, 'RAG_DOCUMENT_DELETE', { docId: req.params.id, deleted });
+    auditRagAction(req, '知识库文档删除', { docId: req.params.id, deleted });
     req.log?.info({ docId: req.params.id, deleted }, 'RAG 文档删除');
     res.json({ success: true });
 });
 
 ragRouter.post('/docs/batch-delete', authMiddleware, asyncHandler(async (req, res) => {
     const result = batchDeleteKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds });
-    auditRagAction(req, 'RAG_DOCUMENT_BATCH_DELETE', result);
+    auditRagAction(req, '知识库文档批量删除', result);
     req.log?.info(result, 'RAG 文档批量删除');
     return res.json({ success: true, ...result });
 }));
 
 ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, res) => {
     const result = batchReindexKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds });
-    auditRagAction(req, 'RAG_DOCUMENT_BATCH_REINDEX', result);
+    auditRagAction(req, '知识库文档批量重建索引', result);
     req.log?.info(result, 'RAG 文档批量重建索引');
     return res.json({ success: true, ...result });
 }));
@@ -131,7 +136,7 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), asyncHandler(as
 
     const { docId } = createKnowledgeDocumentFromUpload({ userId: req.user.id, file: req.file });
     scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id });
-    auditRagAction(req, 'RAG_DOCUMENT_UPLOAD', { docId, name: req.file.originalname });
+    auditRagAction(req, '知识库文档上传', { docId, name: req.file.originalname });
     req.log?.info({ docId, name: req.file.originalname }, 'RAG 文档上传');
     res.json({ success: true, docId, message: '后台处理中' });
 }));
@@ -148,7 +153,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
         return res.status(409).json({ error: '文档正在处理中，请稍后再试' });
     }
     clearRagCacheForUser(req.user.id);
-    auditRagAction(req, 'RAG_DOCUMENT_REINDEX', { docId: doc.id });
+    auditRagAction(req, '知识库文档重新索引', { docId: doc.id });
     req.log?.info({ docId: doc.id }, 'RAG 文档重新索引');
     return res.json({ success: true, docId: doc.id, message: '已加入重新索引队列' });
 }));
@@ -156,7 +161,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
 ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, res) => {
     const result = scheduleFailedKnowledgeDocumentsForUser({ userId: req.user.id, limit: 50 });
     clearRagCacheForUser(req.user.id);
-    auditRagAction(req, 'RAG_DOCUMENT_RETRY_FAILED', result);
+    auditRagAction(req, '知识库失败文档重试', result);
     req.log?.info(result, 'RAG 失败文档批量重试');
     return res.json({ success: true, ...result });
 }));
@@ -183,7 +188,7 @@ ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (r
     };
     
     const result = await testEmbeddingConnection(config);
-    auditRagAction(req, 'RAG_EMBEDDING_TEST', { 
+    auditRagAction(req, '向量模型连接测试', {
         mode: config.mode, 
         apiUrl: config.apiUrl,
         success: result.success 
@@ -202,7 +207,7 @@ ragRouter.post('/feedback', authMiddleware, asyncHandler(async (req, res) => {
         note: req.body?.note
     });
     if (!result) return res.status(400).json({ error: '反馈内容无效' });
-    auditRagAction(req, 'RAG_FEEDBACK', { id: result.id, helpful: req.body?.helpful === true, chunkId: req.body?.chunkId });
+    auditRagAction(req, '知识库召回反馈', { id: result.id, helpful: req.body?.helpful === true, chunkId: req.body?.chunkId });
     return res.json({ success: true, ...result });
 }));
 

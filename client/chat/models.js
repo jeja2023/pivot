@@ -25,14 +25,19 @@ window.loadModels = async function(page = 1) {
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
         const isAdmin = currentUser.role === 'admin';
-        const isMyModel = !isAdmin && String(m.user_id) === String(currentUser.id);
+        const isSuperAdmin = currentUser.username === 'admin';
+        const isMyModel = String(m.user_id) === String(currentUser.id);
         
         let defaultBtn = '';
-        if (isAdmin) {
+        if (isSuperAdmin) {
             if (isGlobalDefault) {
                 defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-global-default" data-model-id="" data-page="${page}">取消默认</button>`;
             } else if (isGlobalModel) {
                 defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-global-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
+            } else if (isMyModel && isPersonalDefault) {
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消个人默认</button>`;
+            } else if (isMyModel) {
+                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为个人默认</button>`;
             }
         } else {
             if (isPersonalDefault) {
@@ -44,25 +49,25 @@ window.loadModels = async function(page = 1) {
 
         const isUserPrivateModel = m.user_id && m.owner_role !== 'admin';
         const isOwnModel = String(m.user_id) === String(currentUser.id);
-        const canEdit = isAdmin ? !isUserPrivateModel : isOwnModel;
-        const canDelete = isAdmin || isOwnModel;
+        const canEdit = isSuperAdmin ? !isUserPrivateModel : isOwnModel;
+        const canDelete = isSuperAdmin || isOwnModel;
         
         let displayUrl = escapeHtml(m.url);
-        if (isAdmin) {
+        if (isSuperAdmin) {
             if (isUserPrivateModel) displayUrl = '********';
         } else {
             if (!isOwnModel) displayUrl = '********';
         }
 
-        const capabilityIcons = [
+        const capabilityBadge = [
+            '<span class="model-capability-icon cap-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>',
             Number(m.supports_vision || 0) === 1
-                ? '<span class="model-capability-icon vision" title="支持视觉输入" aria-label="支持视觉输入"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>'
+                ? '<span class="model-capability-icon cap-icon vision" title="支持视觉输入" aria-label="支持视觉输入"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>'
                 : '',
             Number(m.supports_reasoning || 0) === 1
-                ? '<span class="model-capability-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>'
+                ? '<span class="model-capability-icon cap-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>'
                 : ''
         ].filter(Boolean).join('');
-        const capabilityBadge = capabilityIcons || '<span class="model-capability-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>';
 
         return `
         <tr id="model-row-${m.id}">
@@ -153,6 +158,7 @@ async function checkSingleModelStatus(id) {
 window.openModelModal = () => {
     resetModelForm();
     document.getElementById('model-modal-title').innerText = '添加新模型';
+    window.updateModelScopeControls?.();
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
 
@@ -160,6 +166,8 @@ window.closeModelModal = () => document.getElementById('model-modal-container').
 
 window.prepareEditModel = (model) => {
     document.getElementById('m-id').value = model.id;
+    const scopeEl = document.getElementById('m-scope');
+    if (scopeEl) scopeEl.value = model.user_id ? 'personal' : 'global';
     document.getElementById('m-name').value = model.name;
     document.getElementById('m-url').value = model.url;
     document.getElementById('m-model').value = model.model_name;
@@ -181,6 +189,7 @@ window.prepareEditModel = (model) => {
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
     if (supportsReasoningEl) supportsReasoningEl.checked = Number(model.supports_reasoning || 0) === 1;
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
+    window.updateModelScopeControls?.(model);
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
 
@@ -219,12 +228,34 @@ window.resetModelForm = () => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
+    const scopeEl = document.getElementById('m-scope');
+    if (scopeEl) scopeEl.value = 'personal';
     const supportsVisionEl = document.getElementById('m-supports-vision');
     if (supportsVisionEl) supportsVisionEl.checked = false;
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
     if (supportsReasoningEl) supportsReasoningEl.checked = false;
     const keyInput = document.getElementById('m-key');
     if (keyInput) keyInput.type = 'password';
+};
+
+window.updateModelScopeControls = (model = null) => {
+    const isSuperAdmin = currentUser?.username === 'admin';
+    const scopeWrap = document.getElementById('m-scope-wrap');
+    const scopeUnitsRow = scopeWrap?.closest('.model-scope-units-row');
+    const scopeEl = document.getElementById('m-scope');
+    const unitsEl = document.getElementById('m-units');
+    if (scopeWrap) scopeWrap.classList.toggle('hidden', !isSuperAdmin);
+    if (scopeUnitsRow) scopeUnitsRow.classList.toggle('scope-hidden', !isSuperAdmin);
+    if (scopeEl) {
+        scopeEl.disabled = Boolean(model?.id);
+        if (!isSuperAdmin) scopeEl.value = 'personal';
+    }
+    const isGlobal = isSuperAdmin && (scopeEl?.value === 'global' || (model && !model.user_id));
+    if (unitsEl) {
+        unitsEl.disabled = !isGlobal;
+        unitsEl.placeholder = isGlobal ? '多个部门用逗号分隔，留空表示全部可见' : '个人模型不需要设置可见部门';
+        if (!isGlobal) unitsEl.value = '';
+    }
 };
 
 window.toggleKeyVisibility = async () => {
@@ -293,7 +324,8 @@ window.addModel = async () => {
         max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
-        supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0
+        supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
+        scope: currentUser?.username === 'admin' ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
     const btn = document.getElementById('m-submit-btn');

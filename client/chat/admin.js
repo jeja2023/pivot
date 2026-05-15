@@ -109,7 +109,6 @@ let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, apiC
 
 const adminFeatureScripts = [
     '/chat/models.js',
-    '/chat/rag.js',
     '/chat/users.js',
     '/chat/stats.js',
     '/chat/extra.js'
@@ -169,17 +168,13 @@ window.closeModal = () => document.getElementById('admin-container').classList.a
 
 window.switchTab = async (tab) => {
     await window.ensureAdminFeatureScripts();
-    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'knowledge', 'prompts', 'attachments', 'ops', 'labs', 'account'];
+    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'labs', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
     loadTabData(tab);
-    if (tab === 'knowledge') {
-        bindEmbeddingModalEvents();
-        bindRagDebugModalEvents();
-    }
 };
 
 async function loadTabData(tab, page = 1) {
@@ -200,10 +195,6 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'apiCallLogs' && window.loadApiCallLogs) loadApiCallLogs(page);
     if (tab === 'userRecords' && window.loadUserRecordMessages) loadUserRecordMessages(page);
     if (tab === 'labs') loadSettings();
-    if (tab === 'knowledge') {
-        if (window.loadSettings) window.loadSettings();
-        if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
-    }
     if (tab === 'keys' && window.loadApiKeys) {
         loadApiKeys();
         const displayEl = document.getElementById('api-base-url-display');
@@ -280,7 +271,7 @@ async function loadSettings() {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        document.getElementById('tab-knowledge')?.classList.toggle('hidden', !ragCheckbox.checked);
+        document.getElementById('knowledge-workbench-btn')?.classList.toggle('hidden', !ragCheckbox.checked);
     } catch (e) {
         showToast(e.message || '系统设置加载失败', 'error');
     }
@@ -387,7 +378,7 @@ window.saveSettings = async () => {
         if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
         if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
         if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
-        const endpoint = currentUser?.role === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+        const endpoint = currentUser?.username === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
         const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -402,8 +393,9 @@ window.saveSettings = async () => {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        document.getElementById('tab-knowledge')?.classList.toggle('hidden', !data.ragEnabled);
-        showToast('系统设置已保存');
+        document.getElementById('knowledge-workbench-btn')?.classList.toggle('hidden', !data.ragEnabled);
+        document.getElementById('knowledge-workbench-modal')?.classList.toggle('hidden', !data.ragEnabled);
+        showToast(currentUser?.username === 'admin' ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
         showToast(e.message || '系统设置保存失败', 'error');
     } finally {
@@ -443,7 +435,8 @@ window.saveEmbeddingSettings = async () => {
         if (embeddingKeyInput && embeddingKeyInput.value.trim()) {
             payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
         }
-        const res = await apiFetch(`${API_BASE}/admin/settings`, {
+        const endpoint = currentUser?.username === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+        const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -451,7 +444,7 @@ window.saveEmbeddingSettings = async () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'RAG 配置保存失败');
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        showToast('RAG 配置已保存');
+        showToast(currentUser?.username === 'admin' ? '系统 RAG 配置已保存' : '个人 RAG 配置已保存');
         if (modal) modal.classList.add('hidden');
     } catch (e) {
         showToast(e.message || 'RAG 配置保存失败', 'error');
@@ -504,7 +497,7 @@ window.testEmbeddingConnection = async () => {
     }
 };
 
-function bindEmbeddingModalEvents() {
+window.bindEmbeddingModalEvents = function() {
     const openBtn = document.getElementById('rag-embedding-modal-open-btn');
     const cancelBtn = document.getElementById('rag-embedding-modal-cancel');
     const testBtn = document.getElementById('rag-embedding-test-btn');
@@ -554,9 +547,9 @@ function bindEmbeddingModalEvents() {
             keyToggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)';
         };
     }
-}
+};
 
-function bindRagDebugModalEvents() {
+window.bindRagDebugModalEvents = function() {
     const openBtn = document.getElementById('rag-debug-modal-open-btn');
     const closeBtn = document.getElementById('rag-debug-modal-close');
     const modal = document.getElementById('rag-debug-modal');
@@ -575,7 +568,7 @@ function bindRagDebugModalEvents() {
     modal.onclick = (e) => {
         if (e.target === modal) modal.classList.add('hidden');
     };
-}
+};
 
 function renderPagination(tab, total, currentPage) {
     const totalPages = Math.ceil(total / pageState.limit);

@@ -13,6 +13,8 @@ const {
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 
+const isSuperAdmin = (user) => user?.username === 'admin';
+
 function buildModelsListUrl(url) {
     let modelsUrl = String(url || '').trim();
     if (!modelsUrl.includes('/v1') && !modelsUrl.includes('localhost') && !modelsUrl.includes('127.0.0.1')) {
@@ -28,7 +30,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
     const router = express.Router();
 
     router.get('/models/available', authMiddleware, asyncHandler(async (req, res) => {
-        let where = "WHERE m.user_id IS NULL";
+        let where = "WHERE m.user_id IS NULL AND COALESCE(m.status, 'active') = 'active'";
         let params = [];
         
         if (req.user.role !== 'admin') {
@@ -205,21 +207,26 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let params = [];
 
         if (req.user.role !== 'admin') {
-            where = "WHERE (m.user_id = ? OR (m.user_id IS NULL AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)))";
+            where = "WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)))";
             params = [req.user.id, `,${(req.user.unit || '').trim()},`];
+        } else {
+            where = "WHERE COALESCE(m.status, 'active') = 'active'";
         }
 
         // 为管理员增加过滤：不显示普通用户的私有默认模型
         if (req.user.role === 'admin') {
-            const adminFilter = "(m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)";
+            const adminFilter = isSuperAdmin(req.user)
+                ? "(m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)"
+                : "(m.user_id IS NULL OR m.user_id = ?)";
             where = where ? `${where} AND ${adminFilter}` : `WHERE ${adminFilter}`;
+            if (!isSuperAdmin(req.user)) params.push(req.user.id);
         }
 
         const sql = `
             SELECT 
                 m.id, m.user_id, m.name, 
                 (CASE 
-                    WHEN ? = 'admin' AND (m.user_id IS NULL OR u.role = 'admin') THEN m.url
+                    WHEN ? = 1 AND (m.user_id IS NULL OR u.role = 'admin') THEN m.url
                     WHEN m.user_id = ? THEN m.url
                     ELSE '********'
                 END) as url,
@@ -234,7 +241,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             ORDER BY m.is_default DESC, m.id ASC 
             LIMIT ? OFFSET ?
         `;
-        const models = db.prepare(sql).all(req.user.role, req.user.id, ...params, limit, offset);
+        const models = db.prepare(sql).all(isSuperAdmin(req.user) ? 1 : 0, req.user.id, ...params, limit, offset);
         const countSql = `
             SELECT COUNT(*) as count 
             FROM models m
@@ -251,9 +258,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         validateModelUrl(url, req.user);
         if (monitor_url) validateModelUrl(monitor_url, req.user);
 
-        const targetUserId = req.user.role === 'admin' ? null : req.user.id;
+        const targetUserId = req.user.role === 'admin' && isSuperAdmin(req.user) && req.body.scope === 'global'
+            ? null
+            : req.user.id;
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
-        const allowedUnits = req.user.role === 'admin' ? normalizeTags(req.body.allowed_units) : '';
+        const allowedUnits = targetUserId === null ? normalizeTags(req.body.allowed_units) : '';
         
         const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
         const maxInputTokens = max_input_tokens !== undefined && max_input_tokens !== '' ? parseInt(max_input_tokens, 10) : null;
@@ -277,11 +286,13 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         let existing;
         if (req.user.role === 'admin') {
-            existing = db.prepare(`
-                SELECT m.* FROM models m
-                LEFT JOIN users u ON m.user_id = u.id
-                WHERE m.id = ? AND (m.user_id IS NULL OR u.role = 'admin')
-            `).get(req.params.id);
+            existing = isSuperAdmin(req.user)
+                ? db.prepare(`
+                    SELECT m.* FROM models m
+                    LEFT JOIN users u ON m.user_id = u.id
+                    WHERE m.id = ? AND (m.user_id IS NULL OR u.role = 'admin')
+                `).get(req.params.id)
+                : db.prepare('SELECT * FROM models WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
         } else {
             existing = db.prepare("SELECT * FROM models WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
         }
@@ -289,7 +300,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
-        const allowedUnits = req.user.role === 'admin' ? normalizeTags(req.body.allowed_units) : (existing.allowed_units || '');
+        const allowedUnits = req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null
+            ? normalizeTags(req.body.allowed_units)
+            : (existing.allowed_units || '');
         
         const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
         const maxInputTokens = max_input_tokens !== undefined && max_input_tokens !== '' ? parseInt(max_input_tokens, 10) : null;
@@ -299,7 +312,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const supportsReasoning = normalizeBooleanFlag(req.body.supports_reasoning);
 
         let info;
-        if (req.user.role === 'admin') {
+        if (req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null) {
             info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ? WHERE id = ?')
               .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, req.params.id);
         } else {
@@ -317,7 +330,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
     router.delete('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
         let info;
-        if (req.user.role === 'admin') {
+        if (req.user.role === 'admin' && isSuperAdmin(req.user)) {
             info = db.prepare('DELETE FROM models WHERE id = ?').run(req.params.id);
         } else {
             info = db.prepare('DELETE FROM models WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
@@ -343,11 +356,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         const model = getAccessibleModel(req.params.id, req.user);
         if (!model) return res.status(403).json({ error: '无权查看或模型不存在' });
-        if (model.user_id === null && req.user.role !== 'admin') {
-            logAction(req, '模型密钥查看拦截', `普通用户尝试查看全局模型密钥，模型ID: ${req.params.id}`);
+        if (model.user_id === null && !isSuperAdmin(req.user)) {
+            logAction(req, '模型密钥查看拦截', `非超级管理员尝试查看全局模型密钥，模型ID: ${req.params.id}`);
             return res.status(403).json({ error: '无权查看全局模型密钥' });
         }
-        if (model.user_id !== null && model.user_id !== req.user.id && req.user.role !== 'admin') {
+        if (model.user_id !== null && model.user_id !== req.user.id && !isSuperAdmin(req.user)) {
             return res.status(403).json({ error: '无权查看该模型密钥' });
         }
         logAction(req, '查看模型密钥', `模型ID: ${req.params.id}`);

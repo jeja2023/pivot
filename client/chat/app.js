@@ -228,11 +228,17 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'labs', 'knowledge', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'labs', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
 bind('admin-panel-btn', () => window.openAdminPanel());
+bind('agent-workbench-btn', () => window.openAgentWorkbench?.());
+bind('agent-modal-close', () => window.closeAgentWorkbench?.());
+bind('knowledge-workbench-btn', () => window.openKnowledgeWorkbench?.());
+bind('knowledge-modal-close', () => window.closeKnowledgeWorkbench?.());
+bind('mcp-workbench-btn', () => window.openMcpWorkbench?.());
+bind('mcp-modal-close', () => window.closeMcpWorkbench?.());
 bind('logout-btn', () => window.logout());
 
 document.addEventListener('click', async (event) => {
@@ -276,6 +282,14 @@ bind('model-add-btn', () => window.openModelModal());
 bind('modal-model-cancel', () => window.closeModelModal());
 bind('modal-model-test', () => window.testModelConfig());
 bind('m-submit-btn', () => window.addModel());
+bind('m-scope', () => window.updateModelScopeControls?.(), 'change');
+bind('agent-refresh-btn', () => window.loadAgentWorkbench?.());
+bind('agent-run-btn', () => window.createAgentRun?.());
+bind('agent-audit-btn', () => window.showAgentRunAudit?.());
+window.bindAgentGoalTemplates?.();
+bind('mcp-refresh-btn', () => window.loadMcpWorkbench?.());
+bind('mcp-save-btn', () => window.saveMcpServer?.());
+bind('mcp-reset-btn', () => window.resetMcpForm?.());
 
 // 知识库管理
 bind('rag-upload-btn', () => document.getElementById('rag-upload-input').click());

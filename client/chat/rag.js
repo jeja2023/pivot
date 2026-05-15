@@ -58,9 +58,11 @@ const renderRagActions = (doc) => {
 };
 
 let ragStatusRefreshTimer = null;
+let ragDocsPage = 1;
+const RAG_DOCS_PAGE_SIZE = 15;
 
 const shouldAutoRefreshRagDocs = () => {
-    const panel = document.getElementById('tab-content-knowledge');
+    const panel = document.getElementById('knowledge-workbench-modal');
     return Boolean(panel && !panel.classList.contains('hidden'));
 };
 
@@ -145,6 +147,7 @@ const ensureRagAuditModal = () => {
                 <table class="data-table compact-table">
                     <thead>
                         <tr>
+                            <th style="width: 50px;" class="text-center">序号</th>
                             <th>文档</th>
                             <th>用户</th>
                             <th>状态</th>
@@ -169,10 +172,11 @@ const ensureRagAuditModal = () => {
 
 const renderRagAuditRows = (items = []) => {
     if (!items.length) {
-        return '<tr><td colspan="6" class="text-center muted-text">暂无已删除知识库文档</td></tr>';
+        return '<tr><td colspan="7" class="text-center muted-text">暂无已删除知识库文档</td></tr>';
     }
-    return items.map(item => `
+    return items.map((item, index) => `
         <tr>
+            <td class="text-center">${index + 1}</td>
             <td title="${escapeRagHtml(item.name)}">${escapeRagHtml(item.name)}</td>
             <td>${escapeRagHtml(item.nickname || item.username || `用户 ${item.user_id || '-'}`)}</td>
             <td>${escapeRagHtml(getRagStatusLabel(item.status))}</td>
@@ -306,20 +310,45 @@ const renderRagDebugResults = (data) => {
     `;
 };
 
-window.loadKnowledgeDocs = async () => {
+function renderRagDocsPagination(total, page, limit) {
+    const container = document.getElementById('pagination-ragDocs');
+    if (!container) return;
+    const totalPages = Math.max(Math.ceil(Number(total || 0) / Number(limit || RAG_DOCS_PAGE_SIZE)), 1);
+    container.innerHTML = '';
+    if (totalPages <= 1) return;
+
+    const createButton = (label, targetPage, disabled) => `
+        <button type="button" class="btn-secondary rag-page-btn" data-rag-page="${targetPage}" ${disabled ? 'disabled' : ''}>${label}</button>
+    `;
+    container.innerHTML = `
+        ${createButton('首页', 1, page <= 1)}
+        ${createButton('上一页', page - 1, page <= 1)}
+        <span>第 ${page} / ${totalPages} 页（共 ${Number(total || 0)} 条，每页 ${limit} 条）</span>
+        ${createButton('下一页', page + 1, page >= totalPages)}
+        ${createButton('末页', totalPages, page >= totalPages)}
+    `;
+}
+
+window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     try {
+        ragDocsPage = Math.max(Number(page) || 1, 1);
         const [res, summaryRes] = await Promise.all([
-            fetch(`${API_BASE}/rag/docs`, { headers: authHeaders() }),
+            fetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}`, { headers: authHeaders() }),
             fetch(`${API_BASE}/rag/summary`, { headers: authHeaders() })
         ]);
-        const docs = await res.json();
+        const payload = await res.json();
+        const docs = Array.isArray(payload) ? payload : (payload.data || []);
+        const total = Array.isArray(payload) ? docs.length : Number(payload.total || docs.length);
+        const pageSize = Array.isArray(payload) ? RAG_DOCS_PAGE_SIZE : Number(payload.limit || RAG_DOCS_PAGE_SIZE);
+        const pageNo = Array.isArray(payload) ? ragDocsPage : Number(payload.page || ragDocsPage);
         const summary = await summaryRes.json().catch(() => null);
         renderRagSummary(summary);
         
         const body = document.getElementById('rag-docs-body');
-        body.innerHTML = docs.map((d) => `
+        body.innerHTML = docs.map((d, index) => `
             <tr>
                 <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
+                <td class="text-center">${(pageNo - 1) * pageSize + index + 1}</td>
                 <td title="${escapeRagHtml(d.name)}">${escapeRagHtml(d.name)}</td>
                 <td class="text-center">
                     <span class="status-badge ${escapeRagHtml(d.status)}" title="${escapeRagHtml(d.error_message || '')}">${getRagStatusLabel(d.status)}</span>
@@ -335,11 +364,32 @@ window.loadKnowledgeDocs = async () => {
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="9" class="text-center">暂无知识库文档</td></tr>';
+        `).join('') || '<tr><td colspan="10" class="text-center">暂无知识库文档</td></tr>';
+        renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
     } catch (e) {
         console.error('加载知识库失败', e);
     }
+};
+
+window.openKnowledgeWorkbench = async function() {
+    const modal = document.getElementById('knowledge-workbench-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.querySelectorAll('#knowledge-workbench-modal .admin-only').forEach(el => {
+        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+    });
+    document.querySelectorAll('#knowledge-workbench-modal .admin-root-only').forEach(el => {
+        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+    });
+    window.bindEmbeddingModalEvents?.();
+    window.bindRagDebugModalEvents?.();
+    await window.loadSettings?.();
+    await window.loadKnowledgeDocs?.();
+};
+
+window.closeKnowledgeWorkbench = function() {
+    document.getElementById('knowledge-workbench-modal')?.classList.add('hidden');
 };
 
 const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-doc-check:checked'))
@@ -571,6 +621,12 @@ document.addEventListener('click', (event) => {
 
     if (event.target.closest('#rag-debug-btn')) {
         window.debugRagQuery();
+        return;
+    }
+
+    const pageBtn = event.target.closest('.rag-page-btn');
+    if (pageBtn && !pageBtn.disabled) {
+        window.loadKnowledgeDocs(Number(pageBtn.dataset.ragPage || 1));
     }
 });
 
@@ -612,32 +668,32 @@ window.deleteKnowledgeDoc = async (id) => {
 // 注入额外样式
 const style = document.createElement('style');
 style.textContent = `
-    .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+    .status-badge { padding: 3px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
     .status-badge.ready { background: rgba(16, 185, 129, 0.1); color: #10b981; }
     .status-badge.processing { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
     .status-badge.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-    .rag-actions { display: inline-flex; gap: 6px; align-items: center; justify-content: center; }
-    .rag-actions button { padding: 2px 8px; font-size: 0.75rem; }
-    .rag-summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -6px 0 14px; color: var(--text-muted); font-size: 0.82rem; }
-    .rag-summary-items { display: flex; flex-wrap: wrap; gap: 8px; }
-    .rag-summary-items span { display: inline-flex; gap: 5px; align-items: baseline; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(148, 163, 184, 0.05); }
+    .rag-actions { display: inline-flex; gap: 5px; align-items: center; justify-content: center; }
+    .rag-actions button { padding: 1px 7px; font-size: 0.7rem; }
+    .rag-summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 10px; color: var(--text-muted); font-size: 0.76rem; }
+    .rag-summary-items { display: flex; flex-wrap: wrap; gap: 6px; }
+    .rag-summary-items span { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; background: rgba(148, 163, 184, 0.05); line-height: 1.35; }
     .rag-summary-items b { color: var(--text-main); font-weight: 700; }
     .rag-summary-error { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ef4444; }
     #rag-retry-failed-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .rag-debug-panel { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; }
-    .rag-debug-panel .form-input { margin: 0; height: 36px; flex: 1; }
-    .rag-debug-panel .rag-debug-param { flex: 0 0 88px; }
-    .rag-debug-panel button { height: 36px; white-space: nowrap; }
+    .rag-debug-panel { display: flex; gap: 7px; align-items: center; margin: 0 0 10px; }
+    .rag-debug-panel .form-input { margin: 0; height: 32px; flex: 1; font-size: 0.8rem; padding: 5px 9px; }
+    .rag-debug-panel .rag-debug-param { flex: 0 0 80px; }
+    .rag-debug-panel button { height: 32px; white-space: nowrap; font-size: 0.78rem; padding: 0 11px; }
     .rag-debug-results { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(148, 163, 184, 0.04); overflow: hidden; }
-    .rag-debug-meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; color: var(--text-muted); font-size: 0.78rem; border-bottom: 1px solid var(--border); }
-    .rag-debug-list { display: grid; gap: 8px; padding: 10px; max-height: 320px; overflow: auto; }
-    .rag-debug-item { border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; background: var(--bg-secondary); }
+    .rag-debug-meta { display: flex; flex-wrap: wrap; gap: 7px; padding: 8px 10px; color: var(--text-muted); font-size: 0.72rem; border-bottom: 1px solid var(--border); }
+    .rag-debug-list { display: grid; gap: 7px; padding: 8px; max-height: 300px; overflow: auto; }
+    .rag-debug-item { border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px; background: var(--bg-secondary); }
     .rag-debug-item.matched { border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.06); }
-    .rag-debug-item-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 0.82rem; }
-    .rag-debug-item p { margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; }
-    .rag-feedback-actions { display: flex; gap: 6px; margin-top: 8px; }
-    .rag-feedback-actions button { padding: 2px 8px; font-size: 0.75rem; }
-    .rag-debug-empty { padding: 12px; color: var(--text-muted); text-align: center; }
+    .rag-debug-item-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; font-size: 0.76rem; }
+    .rag-debug-item p { margin: 0; color: var(--text-muted); font-size: 0.74rem; line-height: 1.45; }
+    .rag-feedback-actions { display: flex; gap: 5px; margin-top: 7px; }
+    .rag-feedback-actions button { padding: 1px 7px; font-size: 0.7rem; }
+    .rag-debug-empty { padding: 10px; color: var(--text-muted); text-align: center; font-size: 0.76rem; }
     .rag-detail-modal-overlay { z-index: 5400; }
     .rag-detail-modal {
         width: min(980px, calc(100vw - 36px));

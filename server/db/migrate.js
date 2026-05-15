@@ -211,6 +211,92 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_key ON api_call_logs(api_key_id, created_at);
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            session_id TEXT,
+            model_id INTEGER,
+            title TEXT,
+            goal TEXT NOT NULL,
+            status TEXT DEFAULT 'queued',
+            final_answer TEXT,
+            error_message TEXT,
+            max_steps INTEGER DEFAULT 6,
+            deleted_at DATETIME,
+            deleted_by_user INTEGER,
+            delete_reason TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (session_id) REFERENCES sessions(id),
+            FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            step_index INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT,
+            tool_name TEXT,
+            input TEXT,
+            output TEXT,
+            status TEXT DEFAULT 'success',
+            duration_ms INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS mcp_servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            api_key TEXT,
+            description TEXT,
+            status TEXT DEFAULT 'active',
+            last_error TEXT,
+            last_checked_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS mcp_tool_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            server_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            input_schema TEXT,
+            cached_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(server_id, name),
+            FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
+        CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
+    `);
+    ensureColumn('agent_runs', 'session_id', 'TEXT');
+    ensureColumn('agent_runs', 'model_id', 'INTEGER');
+    ensureColumn('agent_runs', 'title', 'TEXT');
+    ensureColumn('agent_runs', 'final_answer', 'TEXT');
+    ensureColumn('agent_runs', 'error_message', 'TEXT');
+    ensureColumn('agent_runs', 'max_steps', 'INTEGER DEFAULT 6');
+    ensureColumn('agent_runs', 'parent_run_id', 'TEXT');
+    ensureColumn('agent_runs', 'cancelled_at', 'DATETIME');
+    ensureColumn('agent_runs', 'completed_at', 'DATETIME');
+    ensureColumn('agent_runs', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_runs', 'deleted_by_user', 'INTEGER');
+    ensureColumn('agent_runs', 'delete_reason', 'TEXT');
+    ensureColumn('agent_steps', 'duration_ms', 'INTEGER DEFAULT 0');
+    ensureColumn('mcp_servers', 'user_id', 'INTEGER');
+    ensureColumn('mcp_servers', 'api_key', 'TEXT');
+    ensureColumn('mcp_servers', 'description', 'TEXT');
+    ensureColumn('mcp_servers', 'last_error', 'TEXT');
+    ensureColumn('mcp_servers', 'last_checked_at', 'DATETIME');
+    ensureColumn('mcp_servers', 'updated_at', 'DATETIME');
+
     try {
         db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)");
         db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)");

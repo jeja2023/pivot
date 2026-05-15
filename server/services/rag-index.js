@@ -15,6 +15,12 @@ const {
     buildRagSearchTerms
 } = require('./rag-tokenizer');
 const { EMBEDDING_MODES, getEmbeddingConfig, getRagConfig, normalizeEmbeddingMode } = require('./rag-config');
+const {
+    getOrCreateEmbeddingUsageModel,
+    recordModelTokenUsage
+} = require('./models');
+const { estimateTokens } = require('../llm');
+const { estimateEmbeddingTokens } = require('./token-accounting');
 
 const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 
@@ -159,7 +165,15 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
 
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
-        return requestEmbedding(text, targetHttpConfig);
+        const vector = await requestEmbedding(text, targetHttpConfig);
+        recordEmbeddingUsage({
+            userId,
+            config,
+            httpConfig: targetHttpConfig,
+            inputs: [text],
+            source: 'rag_embedding'
+        });
+        return vector;
     }
 
     throw new Error(`不支持的 Embedding 模式: ${targetMode}`);
@@ -177,6 +191,23 @@ function cosineSimilarity(vecA, vecB) {
     }
     if (normA === 0 || normB === 0) return 0;
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source }) {
+    if (!userId) return;
+    try {
+        const model = String(httpConfig?.model || config?.http?.model || '').trim() || 'embedding';
+        const url = String(httpConfig?.url || config?.http?.url || '').trim();
+        const usageModelId = getOrCreateEmbeddingUsageModel({
+            userId: config?.source?.url === 'user' || config?.source?.model === 'user' || config?.source?.apiKey === 'user' ? userId : null,
+            url,
+            model
+        });
+        const inputTokens = estimateEmbeddingTokens(inputs, estimateTokens);
+        recordModelTokenUsage(userId, usageModelId, inputTokens, source, inputTokens, 0);
+    } catch (e) {
+        logger.warn({ err: e.message }, '向量模型用量统计写入失败');
+    }
 }
 
 function chunkText(text, chunkSize = 500, overlap = 100) {

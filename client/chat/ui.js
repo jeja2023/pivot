@@ -74,9 +74,11 @@ window.refreshModelSelector = async function() {
         const settings = settingsRes.ok ? await settingsRes.json() : {};
         const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
         
-        const models = (window.currentUser && window.currentUser.role === 'admin')
-            ? data.filter(model => !model.user_id || model.owner_role === 'admin')
-            : data;
+        const models = data.filter(model => {
+            if (!model.user_id) return true;
+            if (String(model.user_id) === String(window.currentUser?.id)) return true;
+            return window.currentUser?.username === 'admin' && model.owner_role === 'admin';
+        });
 
         if (models.length === 0) {
             triggerBtn.innerHTML = '<span>暂无可用模型</span>';
@@ -88,6 +90,11 @@ window.refreshModelSelector = async function() {
             const hasVision = Number(model.supports_vision || 0) === 1;
             const hasReasoning = Number(model.supports_reasoning || 0) === 1;
             const meta = describeSelectorModel(model, false).split(' | ').slice(1).join(' | ');
+
+            const textIcon = `
+                <div class="cap-icon text" title="文本模型">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+                </div>`;
             
             const visionIcon = hasVision ? `
                 <div class="cap-icon vision" title="支持视觉输入">
@@ -103,7 +110,7 @@ window.refreshModelSelector = async function() {
                     <div class="model-item-header">
                         <span class="model-item-name">${escapeSelectorText(model.name)}${model.user_id ? ' (个人)' : ''}</span>
                         <div class="model-item-caps">
-                            ${visionIcon}${reasoningIcon}
+                            ${textIcon}${visionIcon}${reasoningIcon}
                         </div>
                     </div>
                     <div class="model-item-meta">${escapeSelectorText(meta)}</div>
@@ -166,6 +173,11 @@ window.selectDropdownModel = function(id, shouldClose = true) {
     
     const hasVision = Number(model.supports_vision || 0) === 1;
     const hasReasoning = Number(model.supports_reasoning || 0) === 1;
+
+    const textIcon = `
+        <div class="cap-icon text" title="文本模型">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+        </div>`;
     
     const visionIcon = hasVision ? `
         <div class="cap-icon vision" title="支持视觉">
@@ -176,7 +188,7 @@ window.selectDropdownModel = function(id, shouldClose = true) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg>
         </div>` : '';
     
-    document.getElementById('selected-model-caps').innerHTML = visionIcon + reasoningIcon;
+    document.getElementById('selected-model-caps').innerHTML = textIcon + visionIcon + reasoningIcon;
 
     document.querySelectorAll('.model-item').forEach(el => {
         el.classList.toggle('active', String(el.dataset.id) === String(id));

@@ -11,7 +11,7 @@ window.loadPrompts = async function() {
             <p>${escapeHtml(p.content)}</p>
             <div class="prompt-actions">
                 <button class="btn-secondary" data-prompt-action="apply" data-prompt="${encodeActionArg(p)}">应用</button>
-                ${(p.scope !== 'global' || currentUser.role === 'admin') ? `<button class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
+                ${(p.scope !== 'global' || currentUser.username === 'admin') ? `<button class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
             </div>
         </div>
     `).join('');
@@ -41,14 +41,14 @@ window.applyPrompt = async (content) => {
     });
 };
 
-window.openPromptModal = () => { resetPromptForm(); document.getElementById('prompt-modal-title').innerText = '添加指令'; document.getElementById('p-scope').disabled = currentUser.role !== 'admin'; document.getElementById('prompt-modal-container').classList.remove('hidden'); };
+window.openPromptModal = () => { resetPromptForm(); document.getElementById('prompt-modal-title').innerText = '添加指令'; document.getElementById('p-scope').disabled = currentUser.username !== 'admin'; document.getElementById('prompt-modal-container').classList.remove('hidden'); };
 window.closePromptModal = () => document.getElementById('prompt-modal-container').classList.add('hidden');
-window.resetPromptForm = () => { document.getElementById('p-id').value = ''; document.getElementById('p-name').value = ''; document.getElementById('p-category').value = '通用'; document.getElementById('p-scope').value = currentUser.role === 'admin' ? 'global' : 'personal'; document.getElementById('p-content').value = ''; };
+window.resetPromptForm = () => { document.getElementById('p-id').value = ''; document.getElementById('p-name').value = ''; document.getElementById('p-category').value = '通用'; document.getElementById('p-scope').value = currentUser.username === 'admin' ? 'global' : 'personal'; document.getElementById('p-content').value = ''; };
 
 window.prepareEditPrompt = (p) => {
     document.getElementById('p-id').value = p.id; document.getElementById('p-name').value = p.name;
     document.getElementById('p-category').value = p.category || '通用'; document.getElementById('p-scope').value = p.scope || 'personal';
-    document.getElementById('p-scope').disabled = currentUser.role !== 'admin'; document.getElementById('p-content').value = p.content;
+    document.getElementById('p-scope').disabled = currentUser.username !== 'admin' || p.scope === 'global'; document.getElementById('p-content').value = p.content;
     document.getElementById('prompt-modal-title').innerText = '编辑指令'; document.getElementById('prompt-modal-container').classList.remove('hidden');
 };
 

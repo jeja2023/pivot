@@ -173,6 +173,14 @@ function tokenUsageSubquery() {
     `;
 }
 
+function balancedInputSql(alias) {
+    return `COALESCE(${alias}.input_tokens, 0)`;
+}
+
+function balancedOutputSql(alias) {
+    return `MAX(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
+}
+
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 function createAdminStatsRouter({
@@ -328,8 +336,8 @@ function createAdminStatsRouter({
         const query = `
             SELECT u.username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
-                   COALESCE(SUM(usage.input_tokens), 0) as input_tokens,
-                   COALESCE(SUM(usage.output_tokens), 0) as output_tokens,
+                   COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
+                   COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
                    COALESCE(SUM(usage.token_count), 0) as total_tokens,
                    MAX(usage.created_at) as last_active
             FROM (${tokenUsageSubquery()}) usage
@@ -461,7 +469,10 @@ function createAdminStatsRouter({
 
         const query = `
             SELECT usage.id, usage.created_at, u.username, u.nickname, md.name as model_name,
-                   usage.role, usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
+                   usage.role, usage.token_count,
+                   ${balancedInputSql('usage')} AS input_tokens,
+                   ${balancedOutputSql('usage')} AS output_tokens,
+                   usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
@@ -480,7 +491,10 @@ function createAdminStatsRouter({
         const canViewAll = isSuperAdmin(req.user);
         const query = `
             SELECT usage.created_at, u.username, u.nickname, md.name as model_name, usage.role,
-                   usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
+                   usage.token_count,
+                   ${balancedInputSql('usage')} AS input_tokens,
+                   ${balancedOutputSql('usage')} AS output_tokens,
+                   usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
@@ -515,7 +529,9 @@ function createAdminStatsRouter({
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         const rows = db.prepare(`
             SELECT l.id, l.created_at, l.model_name, l.status, l.error_message,
-                   l.input_tokens, l.output_tokens, l.total_tokens, l.stream, l.ip_address,
+                   COALESCE(l.input_tokens, 0) AS input_tokens,
+                   MAX(COALESCE(l.output_tokens, 0), COALESCE(l.total_tokens, 0) - COALESCE(l.input_tokens, 0)) AS output_tokens,
+                   l.total_tokens, l.stream, l.ip_address,
                    l.request_messages, l.response_text,
                    u.username, u.nickname, k.name AS api_key_name, k.key_preview
             FROM api_call_logs l

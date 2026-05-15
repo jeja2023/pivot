@@ -7,6 +7,7 @@ const {
     getAccessibleModel,
     getModelDailyUsage,
     getUserAccessibleModels,
+    getOrCreateEmbeddingUsageModel,
     recordModelTokenUsage,
     modelSupportsVision,
     messagesContainVisionInput
@@ -32,6 +33,11 @@ const {
 } = require('../services/model-adapter');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { requestEmbeddings } = require('../services/rag-index');
+const { executeBuiltInTool, getBuiltInToolDefinitions } = require('../services/agent-tools');
+const {
+    estimateEmbeddingTokens,
+    normalizeTokenUsage
+} = require('../services/token-accounting');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -47,6 +53,11 @@ function stringifyForAudit(value) {
 
 function recordApiCallLog(req, modelCfg, messages, data = {}) {
     if (!req.isApiKey || !req.apiKeyId) return;
+    const usage = normalizeTokenUsage({
+        inputTokens: data.inputTokens,
+        outputTokens: data.outputTokens,
+        totalTokens: data.totalTokens
+    });
     db.prepare(`
         INSERT INTO api_call_logs (
             user_id, api_key_id, model_id, model_name, request_messages, response_text,
@@ -62,9 +73,9 @@ function recordApiCallLog(req, modelCfg, messages, data = {}) {
         data.responseText ? String(data.responseText).slice(0, 200000) : '',
         data.status || 'success',
         data.errorMessage ? String(data.errorMessage).slice(0, 4000) : '',
-        Number(data.inputTokens) || 0,
-        Number(data.outputTokens) || 0,
-        Number(data.totalTokens) || 0,
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.totalTokens,
         data.stream ? 1 : 0,
         req.ip,
         getBeijingTimestamp()
@@ -131,9 +142,10 @@ function buildEmbeddingModelItem(config) {
 }
 
 function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens = 0 } = {}) {
-    if (!req.isApiKey || !req.apiKeyId || totalTokens <= 0) return;
+    const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens });
+    if (!req.isApiKey || !req.apiKeyId || usage.totalTokens <= 0) return;
     db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
-      .run(totalTokens, inputTokens, outputTokens, req.apiKeyId);
+      .run(usage.totalTokens, usage.inputTokens, usage.outputTokens, req.apiKeyId);
 }
 
 function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_req, _res, next) => next() }) {
@@ -154,10 +166,67 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         if (embeddingModel && !data.some(item => item.id === embeddingModel.id && item.capabilities?.includes('embeddings'))) {
             data.push(embeddingModel);
         }
+        data.push({
+            id: 'pivot-tools',
+            object: 'model',
+            created: 0,
+            owned_by: 'pivot',
+            display_name: 'Pivot Built-in Tools',
+            capabilities: ['tools'],
+            tools: getBuiltInToolDefinitions(req.user).map(tool => ({
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.input_schema
+            }))
+        });
         res.json({
             object: 'list',
             data
         });
+    }));
+
+    router.get('/tools', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({
+            object: 'list',
+            data: getBuiltInToolDefinitions(req.user).map(tool => ({
+                type: 'function',
+                function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.input_schema
+                }
+            }))
+        });
+    }));
+
+    router.post('/tools/call', authMiddleware, asyncHandler(async (req, res) => {
+        const name = String(req.body?.name || req.body?.tool || '').trim();
+        if (!name) {
+            return res.status(400).json({ error: { message: 'Tool name is required.', type: 'invalid_request_error' } });
+        }
+        try {
+            const args = req.body?.arguments || req.body?.input || {};
+            const result = await executeBuiltInTool(name, args, req.user);
+            const inputTokens = estimateTokens(JSON.stringify(args));
+            const outputTokens = estimateTokens(JSON.stringify(result));
+            updateApiKeyUsage(req, { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
+            recordApiCallLog(req, { name: 'pivot-tools', model_name: name }, [{ role: 'tool', content: name }], {
+                responseText: JSON.stringify(result),
+                inputTokens,
+                outputTokens,
+                totalTokens: inputTokens + outputTokens,
+                stream: false
+            });
+            logAction(req, 'OpenAI 工具调用', `工具: ${name}`);
+            res.json({ object: 'tool_result', tool: name, result });
+        } catch (e) {
+            recordApiCallLog(req, { name: 'pivot-tools', model_name: name }, [{ role: 'tool', content: name }], {
+                status: 'error',
+                errorMessage: e.message,
+                stream: false
+            });
+            res.status(e.status || 400).json({ error: { message: e.message, type: 'tool_error' } });
+        }
     }));
 
     router.post('/embeddings', authMiddleware, embeddingLimiter, asyncHandler(async (req, res) => {
@@ -197,10 +266,16 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         }
 
         const startedAt = Date.now();
-        const promptTokens = estimateTokens(JSON.stringify(inputs));
+        const promptTokens = estimateEmbeddingTokens(inputs, estimateTokens);
         try {
             const vectors = await requestEmbeddings(inputs, config.http, { model: configuredModel });
             const payload = buildEmbeddingResponse({ vectors, model: configuredModel, promptTokens });
+            const usageModelId = getOrCreateEmbeddingUsageModel({
+                userId: config.source?.url === 'user' || config.source?.model === 'user' || config.source?.apiKey === 'user' ? req.user.id : null,
+                url: config.http.url,
+                model: configuredModel
+            });
+            recordModelTokenUsage(req.user.id, usageModelId, payload.usage.total_tokens, req.isApiKey ? 'embedding_api_key' : 'embedding_cookie', payload.usage.prompt_tokens, 0);
             updateApiKeyUsage(req, {
                 inputTokens: payload.usage.prompt_tokens,
                 totalTokens: payload.usage.total_tokens
@@ -216,7 +291,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 totalTokens: payload.usage.total_tokens,
                 stream: false
             });
-            logAction(req, 'OpenAI Embeddings 接口调用', `模型: ${configuredModel}, 输入数: ${inputs.length}`);
+            logAction(req, 'OpenAI 向量接口调用', `模型: ${configuredModel}，输入数: ${inputs.length}`);
             return res.json(payload);
         } catch (e) {
             const errorMsg = e.response?.data?.error?.message || e.message;
@@ -234,11 +309,46 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
 
     // 2. 聊天补全接口
     router.post('/chat/completions', authMiddleware, asyncHandler(async (req, res) => {
-        const { model, messages, stream, temperature, max_tokens } = req.body;
+        const { model, messages, stream, temperature, max_tokens, tool_choice } = req.body;
         const userId = req.user.id;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: { message: 'messages must be a non-empty array.', type: 'invalid_request_error' } });
+        }
+
+        if (model === 'pivot-tools' || tool_choice?.type === 'function') {
+            const toolName = model === 'pivot-tools'
+                ? String(req.body?.tool || req.body?.name || '').trim()
+                : String(tool_choice?.function?.name || '').trim();
+            if (!toolName) {
+                return res.status(400).json({ error: { message: 'Tool name is required for pivot tool calls.', type: 'invalid_request_error' } });
+            }
+            let args = req.body?.arguments || req.body?.input || {};
+            if (typeof args === 'string') {
+                try {
+                    args = JSON.parse(args);
+                } catch (e) {}
+            }
+            const result = await executeBuiltInTool(toolName, args, req.user);
+            const content = JSON.stringify(result, null, 2);
+            const promptTokens = estimateTokens(JSON.stringify(args));
+            const completionTokens = estimateTokens(content);
+            updateApiKeyUsage(req, { inputTokens: promptTokens, outputTokens: completionTokens, totalTokens: promptTokens + completionTokens });
+            recordApiCallLog(req, { name: 'pivot-tools', model_name: toolName }, messages, {
+                responseText: content,
+                inputTokens: promptTokens,
+                outputTokens: completionTokens,
+                totalTokens: promptTokens + completionTokens,
+                stream: false
+            });
+            return res.json({
+                id: `chatcmpl-tool-${Date.now()}`,
+                object: 'chat.completion',
+                created: Math.floor(Date.now() / 1000),
+                model: 'pivot-tools',
+                choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
+            });
         }
 
         // 1. 获取模型配置 (通过模型标识符或 ID)
@@ -265,22 +375,17 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         const unsupportedCapability = detectUnsupportedCapability(plainUserContent);
         if (unsupportedCapability) {
             const fallback = buildCapabilityFallbackMessage(unsupportedCapability);
-            const promptTokens = estimateTokens(JSON.stringify(messages));
-            const completionTokens = estimateTokens(fallback);
-            const totalTokens = promptTokens + completionTokens;
-            if (req.isApiKey && req.apiKeyId && totalTokens > 0) {
-                updateApiKeyUsage(req, {
-                    inputTokens: promptTokens,
-                    outputTokens: completionTokens,
-                    totalTokens
-                });
+            const usage = normalizeTokenUsage({
+                inputTokens: estimateTokens(JSON.stringify(messages)),
+                outputTokens: estimateTokens(fallback)
+            });
+            if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
+                updateApiKeyUsage(req, usage);
             }
-            recordModelTokenUsage(userId, modelCfg.id, totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+            recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
             recordApiCallLog(req, modelCfg, messages, {
                 responseText: fallback,
-                inputTokens: promptTokens,
-                outputTokens: completionTokens,
-                totalTokens,
+                ...usage,
                 stream: !!stream
             });
             logAction(req, 'OpenAI 能力不支持提示', `能力: ${unsupportedCapability.code}, 模型: ${model}`);
@@ -290,7 +395,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 created: Math.floor(Date.now() / 1000),
                 model: String(model || modelCfg.id),
                 choices: [{ index: 0, message: { role: 'assistant', content: fallback }, finish_reason: 'stop' }],
-                usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens }
+                usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens, total_tokens: usage.totalTokens }
             });
         }
         
@@ -389,25 +494,21 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     accumulator.finish();
                     const totalContent = accumulator.getContent();
                     const apiUsage = accumulator.getUsage();
-                    const promptTokens = apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(messages));
-                    const completionTokens = apiUsage?.completion_tokens || estimateTokens(totalContent);
-                    const tokens = apiUsage?.total_tokens || (promptTokens + completionTokens);
-                    if (req.isApiKey && req.apiKeyId && tokens > 0) {
-                        updateApiKeyUsage(req, {
-                            inputTokens: promptTokens,
-                            outputTokens: completionTokens,
-                            totalTokens: tokens
-                        });
+                    const usage = normalizeTokenUsage({
+                        inputTokens: apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(messages)),
+                        outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
+                        totalTokens: apiUsage?.total_tokens
+                    });
+                    if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
+                        updateApiKeyUsage(req, usage);
                     }
-                    recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+                    recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
                     recordApiCallLog(req, modelCfg, messages, {
                         responseText: totalContent,
-                        inputTokens: promptTokens,
-                        outputTokens: completionTokens,
-                        totalTokens: tokens,
+                        ...usage,
                         stream: true
                     });
-                    logAction(req, 'OpenAI 流式调用完成', `模型: ${modelCfg.name}, 估算Tokens: ${tokens}`);
+                    logAction(req, 'OpenAI 流式接口调用完成', `模型: ${modelCfg.name}，估算令牌数: ${usage.totalTokens}`);
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
                     releaseSemaphore();
@@ -424,22 +525,18 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 });
             } else {
                 res.json(response.data);
-                const promptTokens = response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(messages));
-                const completionTokens = response.data?.usage?.completion_tokens || estimateTokens(JSON.stringify(response.data?.choices || []));
-                const tokens = response.data?.usage?.total_tokens || (promptTokens + completionTokens);
-                if (req.isApiKey && req.apiKeyId && tokens > 0) {
-                    updateApiKeyUsage(req, {
-                        inputTokens: promptTokens,
-                        outputTokens: completionTokens,
-                        totalTokens: tokens
-                    });
+                const usage = normalizeTokenUsage({
+                    inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(messages)),
+                    outputTokens: response.data?.usage?.completion_tokens || estimateTokens(JSON.stringify(response.data?.choices || [])),
+                    totalTokens: response.data?.usage?.total_tokens
+                });
+                if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
+                    updateApiKeyUsage(req, usage);
                 }
-                recordModelTokenUsage(userId, modelCfg.id, tokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', promptTokens, completionTokens);
+                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
                 recordApiCallLog(req, modelCfg, messages, {
                     responseText: JSON.stringify(response.data?.choices || []),
-                    inputTokens: promptTokens,
-                    outputTokens: completionTokens,
-                    totalTokens: tokens,
+                    ...usage,
                     stream: false
                 });
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
