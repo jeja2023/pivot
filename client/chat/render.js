@@ -9,8 +9,12 @@ const ICONS = {
     speed: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
 };
 
-const escapeCodeHtml = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const escapeAttrValue = (value) => escapeCodeHtml(value).replace(/"/g, '&quot;');
+const escapeCodeHtml = (value) => window.PivotSafeHtml
+    ? window.PivotSafeHtml.escapeHtml(value)
+    : String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeAttrValue = (value) => window.PivotSafeHtml
+    ? window.PivotSafeHtml.escapeAttr(value)
+    : escapeCodeHtml(value).replace(/"/g, '&quot;');
 
 function parseChatDateTime(value) {
     if (!value) return '';
@@ -319,14 +323,17 @@ function renderMarkdown(content) {
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
 
-    if (window.DOMPurify) {
-        return DOMPurify.sanitize(rawHtml, { 
+    if (window.PivotSafeHtml) {
+        return window.PivotSafeHtml.sanitizeHtml(rawHtml, {
             ADD_TAGS: [
                 'details', 'summary', 'thought', 
                 'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot', 'mspace', 'mtext', 'mstyle', 'merror'
             ], 
             ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel'] 
         });
+    }
+    if (window.DOMPurify) {
+        return DOMPurify.sanitize(rawHtml);
     }
     return rawHtml;
 }

@@ -2,7 +2,8 @@
 
 const API_BASE = '/api';
 const APP_NAME = '智枢';
-const APP_VERSION = (window.APP_VERSION_TAG && window.APP_VERSION_TAG !== '__APP_VERSION__') ? window.APP_VERSION_TAG : 'v0.0.30';
+const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
+const APP_VERSION = (appVersionTag && appVersionTag !== '__APP_VERSION__') ? appVersionTag : 'v0.0.30';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION} 保留所有权利`;
 localStorage.removeItem('pivot_token');
 let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';

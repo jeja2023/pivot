@@ -8,6 +8,12 @@ function initSchema() {
             updated_at DATETIME
         );
 
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            description TEXT,
+            applied_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -264,6 +270,8 @@ function initSchema() {
             metadata TEXT,
             started_at DATETIME,
             last_heartbeat_at DATETIME,
+            locked_by TEXT,
+            lock_expires_at DATETIME,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,

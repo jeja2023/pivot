@@ -8,6 +8,7 @@ const { getRunnableModelForUser, recordModelTokenUsage } = require('./models');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
 const { clampText, executeBuiltInTool, getBuiltInToolDefinitions } = require('./agent-tools');
 const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
+const { createAgentQueue } = require('./agent-queue');
 
 const MAX_STEPS = 8;
 const DEFAULT_STEPS = 5;
@@ -18,11 +19,12 @@ const AGENT_MAX_CONCURRENT_RUNS = Math.max(Number.parseInt(process.env.AGENT_MAX
 const AGENT_DEFAULT_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_RUN_TIMEOUT_MS || '600000', 10) || 600000, 60000);
 const AGENT_TOOL_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_TOOL_TIMEOUT_MS || '120000', 10) || 120000, 30000);
 const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_STALE_RUNNING_MINUTES || '30', 10) || 30, 5);
+const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
+const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
 const RUN_MODES = new Set(['standard', 'deep', 'audit']);
 const APPROVAL_POLICIES = new Set(['safe_mcp_auto', 'approve_all_mcp']);
-const activeAgentRuns = new Set();
-const pendingAgentQueue = [];
+let agentQueue = null;
 
 function createRunId() {
     return `run_${crypto.randomBytes(12).toString('hex')}`;
@@ -243,7 +245,8 @@ function updateRun(runId, fields = {}) {
         'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
         'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
         'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
-        'resume_from_step', 'metadata', 'input_tokens', 'output_tokens', 'total_tokens'
+        'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
+        'input_tokens', 'output_tokens', 'total_tokens'
     ];
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (entries.length === 0) return;
@@ -257,6 +260,33 @@ function getRunStatus(runId) {
 
 function getRunUser(runId) {
     return db.prepare('SELECT u.id, u.username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?').get(runId);
+}
+
+function markRunError(runId, message) {
+    updateRun(runId, {
+        status: 'error',
+        error_message: message,
+        completed_at: getBeijingTimestamp(),
+        last_heartbeat_at: getBeijingTimestamp(),
+        updated_at: getBeijingTimestamp()
+    });
+}
+
+function getAgentQueue() {
+    if (!agentQueue) {
+        agentQueue = createAgentQueue({
+            db,
+            logger,
+            instanceId: AGENT_INSTANCE_ID,
+            maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
+            lockMs: AGENT_QUEUE_LOCK_MS,
+            getRunUser,
+            runAgent,
+            markRunError,
+            getTimestamp: getBeijingTimestamp
+        });
+    }
+    return agentQueue;
 }
 
 function getRunProgress(run, steps = []) {
@@ -809,39 +839,8 @@ async function runAgent(runId, user) {
     }
 }
 
-function processAgentQueue() {
-    while (activeAgentRuns.size < AGENT_MAX_CONCURRENT_RUNS && pendingAgentQueue.length > 0) {
-        const next = pendingAgentQueue.shift();
-        if (!next || activeAgentRuns.has(next.runId)) continue;
-        if (getRunStatus(next.runId) !== 'queued') continue;
-        activeAgentRuns.add(next.runId);
-        runAgent(next.runId, next.user).catch(err => {
-            logger.error({ err: err.message, runId: next.runId }, 'Agent run failed outside runtime guard');
-            updateRun(next.runId, {
-                status: 'error',
-                error_message: err.message,
-                completed_at: getBeijingTimestamp(),
-                last_heartbeat_at: getBeijingTimestamp(),
-                updated_at: getBeijingTimestamp()
-            });
-        }).finally(() => {
-            activeAgentRuns.delete(next.runId);
-            processAgentQueue();
-        });
-    }
-}
-
-function enqueueAgentRun(runId, user) {
-    if (!pendingAgentQueue.some(item => item.runId === runId) && !activeAgentRuns.has(runId)) {
-        pendingAgentQueue.push({ runId, user, enqueuedAt: Date.now() });
-        pendingAgentQueue.sort((a, b) => {
-            const left = db.prepare('SELECT priority, created_at FROM agent_runs WHERE id = ?').get(a.runId) || {};
-            const right = db.prepare('SELECT priority, created_at FROM agent_runs WHERE id = ?').get(b.runId) || {};
-            return (Number(right.priority || 0) - Number(left.priority || 0))
-                || String(left.created_at || '').localeCompare(String(right.created_at || ''));
-        });
-    }
-    setImmediate(processAgentQueue);
+function enqueueAgentRun(runId, _user) {
+    getAgentQueue().enqueueRun(runId);
 }
 
 function recoverAgentRuns() {
@@ -858,7 +857,9 @@ function recoverAgentRuns() {
             error_message: '服务重启或心跳超时，任务已标记为异常。',
             completed_at: now,
             updated_at: now,
-            last_heartbeat_at: now
+            last_heartbeat_at: now,
+            locked_by: null,
+            lock_expires_at: null
         });
         insertStep(run.id, listSteps(run.id).length + 1, {
             type: 'control',
@@ -867,17 +868,8 @@ function recoverAgentRuns() {
         });
     });
 
-    const queued = db.prepare(`
-        SELECT id FROM agent_runs
-        WHERE status = 'queued' AND deleted_at IS NULL
-        ORDER BY priority DESC, created_at ASC
-        LIMIT 100
-    `).all();
-    queued.forEach(run => {
-        const user = getRunUser(run.id);
-        if (user) enqueueAgentRun(run.id, user);
-    });
-    logger.info({ recoveredQueued: queued.length, staleRunning: staleRunning.length }, 'Agent runtime recovery completed');
+    const recoveredQueued = getAgentQueue().recoverQueued(100);
+    logger.info({ recoveredQueued, staleRunning: staleRunning.length }, 'Agent runtime recovery completed');
 }
 
 function approveAgentTool(runId, user, approve = true) {
@@ -920,6 +912,7 @@ function approveAgentTool(runId, user, approve = true) {
 }
 
 function getAgentRuntimeStatus(user = null) {
+    const queueStatus = getAgentQueue().getStatus();
     const queuedTotal = db.prepare(`
         SELECT COUNT(*) AS count FROM agent_runs
         WHERE status = 'queued' AND deleted_at IS NULL
@@ -930,8 +923,10 @@ function getAgentRuntimeStatus(user = null) {
     `).get(user.id).count || 0 : 0;
     return {
         maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
-        active: activeAgentRuns.size,
-        queued: pendingAgentQueue.length,
+        instanceId: queueStatus.instanceId,
+        active: queueStatus.active,
+        queued: queueStatus.queued,
+        hinted: queueStatus.hinted,
         databaseQueued: queuedTotal,
         userQueued
     };
@@ -1230,6 +1225,15 @@ function runDueAgentSchedules(limit = 20) {
     due.forEach(schedule => {
         const user = { id: schedule.user_id, username: schedule.username, nickname: schedule.nickname, unit: schedule.unit, role: schedule.role };
         try {
+            const claimed = db.prepare(`
+                UPDATE agent_schedules
+                SET next_run_at = NULL, updated_at = ?
+                WHERE id = ?
+                  AND status = 'active'
+                  AND deleted_at IS NULL
+                  AND next_run_at = ?
+            `).run(getBeijingTimestamp(), schedule.id, schedule.next_run_at);
+            if (claimed.changes === 0) return;
             const run = runAgentScheduleNow(schedule.id, user);
             const nextRunAt = computeNextScheduleRun(schedule.frequency, schedule.time_of_day, schedule.day_of_week, getBeijingTimestamp());
             db.prepare('UPDATE agent_schedules SET next_run_at = ?, last_run_id = ?, last_run_at = ?, updated_at = ? WHERE id = ?')

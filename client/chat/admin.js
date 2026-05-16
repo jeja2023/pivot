@@ -117,7 +117,8 @@ const adminFeatureScripts = [
 let adminFeatureLoadPromise = null;
 
 const loadScriptOnce = (src) => new Promise((resolve, reject) => {
-    const versionTag = window.APP_VERSION_TAG ? `?v=${encodeURIComponent(window.APP_VERSION_TAG)}` : '';
+    const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
+    const versionTag = appVersionTag && appVersionTag !== '__APP_VERSION__' ? `?v=${encodeURIComponent(appVersionTag)}` : '';
     const versionedSrc = `${src}${versionTag}`;
     const existing = Array.from(document.scripts).find(script => {
         const current = script.getAttribute('src') || '';

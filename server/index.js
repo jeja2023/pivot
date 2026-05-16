@@ -12,6 +12,7 @@ if (process.platform === 'win32') {
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const cors = require('cors');
 const helmet = require('helmet');
 const { logger, httpLogger } = require('./logger');
@@ -132,6 +133,10 @@ async function getCachedDirSize(dir) {
 
 const app = express();
 app.locals.appVersion = appVersion;
+app.use((req, res, next) => {
+    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    next();
+});
 app.use(httpLogger); // 注入请求日志和请求 ID
 app.use(metricsMiddleware);
 const rateLimit = require('express-rate-limit');
@@ -150,8 +155,9 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "script-src": ["'self'", "'unsafe-inline'", "blob:"],
-            "script-src-attr": ["'unsafe-inline'"], // 允许 HTML 标签中的 onclick 等内联事件
+            "script-src": ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`, "blob:"],
+            "script-src-elem": ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`, "blob:"],
+            "script-src-attr": ["'none'"],
             "img-src": ["'self'", "data:", "blob:"],
             "style-src": ["'self'", "'unsafe-inline'"],
             "connect-src": ["'self'"],
@@ -253,13 +259,13 @@ const noCacheHeaders = (res) => {
 // 需要禁止缓存的路径前缀（业务代码，频繁更新）
 const noCachePrefixes = ['/chat/', '/common/styles/'];
 const noCacheExact = new Set(['/manifest.json', '/sw.js', '/version.json', '/pwa-manager.js']);
-const pwaResetHtml = `<!DOCTYPE html>
+const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pivot PWA 缓存清理</title>
-    <style>
+    <style nonce="${nonce}">
         body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; }
         main { width: min(520px, calc(100vw - 32px)); padding: 28px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12); }
         h1 { margin: 0 0 12px; font-size: 22px; }
@@ -281,7 +287,7 @@ const pwaResetHtml = `<!DOCTYPE html>
         </div>
         <div id="status">等待操作</div>
     </main>
-    <script>
+    <script nonce="${nonce}">
         async function clearPivotPwa() {
             var status = document.getElementById('status');
             try {
@@ -345,7 +351,7 @@ app.get('/version.json', (req, res) => {
 
 app.get('/pwa-reset', (req, res) => {
     noCacheHeaders(res);
-    res.type('html').send(pwaResetHtml);
+    res.type('html').send(renderPwaResetHtml(res.locals.cspNonce));
 });
 
 // 静态文件服务：通过 setHeaders 动态控制缓存策略

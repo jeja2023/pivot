@@ -1,6 +1,6 @@
 <!-- 对话主页面 Chat Main Page -->
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-app-version="__APP_VERSION__">
 
 <head>
     <meta charset="UTF-8">
@@ -19,9 +19,6 @@
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="manifest" href="/manifest.json?v=__APP_VERSION__">
     <meta name="theme-color" content="#3b82f6">
-    <script>
-        window.APP_VERSION_TAG = "__APP_VERSION__";
-    </script>
 </head>
 
 <body class="light-mode">
@@ -1534,6 +1531,7 @@
     </div>
 
     <!-- 模块化加载业务逻辑 -->
+    <script src="/chat/safe-html.js?v=__APP_VERSION__"></script>
     <script src="/chat/config.js?v=__APP_VERSION__"></script>
     <script src="/chat/ui.js?v=__APP_VERSION__"></script>
     <script src="/chat/auth.js?v=__APP_VERSION__"></script>

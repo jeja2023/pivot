@@ -7,7 +7,8 @@
     "start": "chcp 65001 >nul && node server/index.js",
     "dev": "chcp 65001 >nul && nodemon --ignore client server/index.js",
     "lint": "eslint . --ext .js",
-    "check": "node scripts/check_syntax.js",
+    "check:text": "node scripts/check_text_integrity.js",
+    "check": "npm run check:text && node scripts/check_syntax.js",
     "test": "npm run check && node tests/security.test.js",
     "verify": "npm run check && npm run lint && node tests/security.test.js",
     "backup": "node scripts/backup_db.js"

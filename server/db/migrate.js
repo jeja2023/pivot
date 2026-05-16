@@ -21,6 +21,37 @@ const recordMigration = (key, value = 'done') => {
       .run(key, value, getBeijingTimestamp());
 };
 
+const ensureMigrationTable = () => {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            description TEXT,
+            applied_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+    `);
+};
+
+const hasSchemaMigration = (id) => Boolean(db.prepare('SELECT id FROM schema_migrations WHERE id = ?').get(id));
+
+const recordSchemaMigration = (id, description = '') => {
+    db.prepare(`
+        INSERT OR IGNORE INTO schema_migrations (id, description, applied_at)
+        VALUES (?, ?, ?)
+    `).run(id, description, getBeijingTimestamp());
+    recordMigration(id);
+};
+
+const runSchemaMigration = (id, description, fn) => {
+    if (hasSchemaMigration(id)) return false;
+    const migrate = db.transaction(() => {
+        fn();
+        recordSchemaMigration(id, description);
+    });
+    migrate();
+    logger.info({ id }, 'Schema migration applied');
+    return true;
+};
+
 const hashApiKey = (key) => crypto.createHash('sha256').update(String(key || '')).digest('hex');
 const previewApiKey = (key) => {
     const text = String(key || '');
@@ -29,6 +60,7 @@ const previewApiKey = (key) => {
 };
 
 function runMigrations() {
+    ensureMigrationTable();
     ensureColumn('users', 'nickname', 'TEXT');
     ensureColumn('users', 'unit', 'TEXT');
     ensureColumn('users', 'default_model_id', 'INTEGER');
@@ -314,6 +346,8 @@ function runMigrations() {
     ensureColumn('agent_runs', 'metadata', 'TEXT');
     ensureColumn('agent_runs', 'started_at', 'DATETIME');
     ensureColumn('agent_runs', 'last_heartbeat_at', 'DATETIME');
+    ensureColumn('agent_runs', 'locked_by', 'TEXT');
+    ensureColumn('agent_runs', 'lock_expires_at', 'DATETIME');
     ensureColumn('agent_runs', 'input_tokens', 'INTEGER DEFAULT 0');
     ensureColumn('agent_runs', 'output_tokens', 'INTEGER DEFAULT 0');
     ensureColumn('agent_runs', 'total_tokens', 'INTEGER DEFAULT 0');
@@ -437,6 +471,7 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_status_created ON agent_runs(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_status_priority ON agent_runs(status, priority, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_queue_claim ON agent_runs(status, priority, created_at, locked_by, lock_expires_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
         CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
         CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
@@ -546,6 +581,9 @@ function runMigrations() {
     } catch (e) {
         logger.error({ err: e.message }, '全文搜索索引初始化失败');
     }
+
+    recordSchemaMigration('20260516_schema_migrations_v1', 'Track applied schema migrations in a dedicated table.');
+    recordSchemaMigration('20260516_agent_queue_locks_v1', 'Add database-backed agent queue lock fields and indexes.');
 }
 
-module.exports = { runMigrations, recordMigration };
+module.exports = { runMigrations, recordMigration, recordSchemaMigration, runSchemaMigration };
