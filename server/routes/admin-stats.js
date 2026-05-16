@@ -57,13 +57,7 @@ function getRequestHostAliases(req) {
 
 function isLikelyContainerRuntime() {
     if (process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS === 'true') return true;
-    if (process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS === 'false') return false;
-    if (process.env.KUBERNETES_SERVICE_HOST) return true;
-    try {
-        return fs.existsSync('/.dockerenv');
-    } catch (e) {
-        return false;
-    }
+    return false;
 }
 
 function isDockerInternalServiceHost(host) {
@@ -101,7 +95,7 @@ function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_U
         // Keep the conservative defaults above.
     }
     addHostAlias(names, publicUrl);
-    addHostAlias(names, process.env.PIVOT_LOCAL_MODEL_HOSTS || process.env.MODEL_LOCAL_HOSTS || '');
+    addHostAlias(names, process.env.PIVOT_LOCAL_MODEL_HOSTS || '');
     requestHosts.forEach(host => addHostAlias(names, host));
     return names;
 }

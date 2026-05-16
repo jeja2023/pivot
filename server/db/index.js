@@ -43,7 +43,7 @@ const ensureSetting = (key, value) => {
     `).run(key, String(value), getBeijingTimestamp());
 };
 
-ensureSetting('rag_enabled', process.env.ENABLE_RAG === 'true' ? 'true' : 'false');
+ensureSetting('rag_enabled', 'true');
 ensureSetting('rag_score_threshold', process.env.RAG_SCORE_THRESHOLD || '0.4');
 ensureSetting('rag_top_k', process.env.RAG_TOP_K || '3');
 ensureSetting('rag_candidate_limit', process.env.RAG_CANDIDATE_LIMIT || '300');

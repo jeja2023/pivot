@@ -246,6 +246,27 @@ function initSchema() {
             error_message TEXT,
             max_steps INTEGER DEFAULT 6,
             parent_run_id TEXT,
+            priority INTEGER DEFAULT 0,
+            run_mode TEXT DEFAULT 'standard',
+            tool_policy TEXT DEFAULT 'all',
+            tool_allowlist TEXT,
+            approval_policy TEXT DEFAULT 'safe_mcp_auto',
+            timeout_ms INTEGER DEFAULT 600000,
+            tool_timeout_ms INTEGER DEFAULT 120000,
+            retry_limit INTEGER DEFAULT 1,
+            retry_count INTEGER DEFAULT 0,
+            max_token_budget INTEGER DEFAULT 0,
+            export_count INTEGER DEFAULT 0,
+            template_id INTEGER,
+            schedule_id INTEGER,
+            context_config TEXT,
+            resume_from_step INTEGER DEFAULT 0,
+            metadata TEXT,
+            started_at DATETIME,
+            last_heartbeat_at DATETIME,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
             cancelled_at DATETIME,
             deleted_at DATETIME,
             deleted_by_user INTEGER,
@@ -268,9 +289,83 @@ function initSchema() {
             tool_name TEXT,
             input TEXT,
             output TEXT,
+            error_message TEXT,
             status TEXT DEFAULT 'success',
             duration_ms INTEGER DEFAULT 0,
+            started_at DATETIME,
+            completed_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            scope TEXT DEFAULT 'personal',
+            name TEXT NOT NULL,
+            description TEXT,
+            goal_template TEXT NOT NULL,
+            run_mode TEXT DEFAULT 'standard',
+            tool_policy TEXT DEFAULT 'all',
+            tool_allowlist TEXT,
+            approval_policy TEXT DEFAULT 'safe_mcp_auto',
+            max_steps INTEGER DEFAULT 5,
+            max_token_budget INTEGER DEFAULT 0,
+            retry_limit INTEGER DEFAULT 1,
+            context_config TEXT,
+            allowed_units TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            template_id INTEGER,
+            model_id INTEGER,
+            name TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            frequency TEXT DEFAULT 'manual',
+            time_of_day TEXT DEFAULT '09:00',
+            day_of_week INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            run_config TEXT,
+            next_run_at DATETIME,
+            last_run_at DATETIME,
+            last_run_id TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (template_id) REFERENCES agent_templates(id),
+            FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            type TEXT DEFAULT 'summary',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            run_id TEXT,
+            type TEXT DEFAULT 'info',
+            title TEXT NOT NULL,
+            body TEXT,
+            status TEXT DEFAULT 'unread',
+            read_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 
@@ -300,6 +395,24 @@ function initSchema() {
             FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS mcp_database_connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mcp_server_id INTEGER UNIQUE NOT NULL,
+            user_id INTEGER,
+            database_type TEXT NOT NULL,
+            host TEXT,
+            port INTEGER,
+            database_name TEXT,
+            username TEXT,
+            password TEXT,
+            options TEXT,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -313,10 +426,16 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_user ON api_call_logs(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_key ON api_call_logs(api_key_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
         CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
+        CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);

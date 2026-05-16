@@ -1,6 +1,22 @@
 // --- 模型管理模块 Model Management ---
 const pendingTests = new Set();
 
+function renderModelCapabilityBadges(model) {
+    const icons = [
+        '<span class="model-capability-icon cap-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>'
+    ];
+
+    if (Number(model.supports_vision || 0) === 1) {
+        icons.push('<span class="model-capability-icon cap-icon vision" title="支持视觉输入" aria-label="支持视觉输入"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>');
+    }
+
+    if (Number(model.supports_reasoning || 0) === 1) {
+        icons.push('<span class="model-capability-icon cap-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>');
+    }
+
+    return icons.join('');
+}
+
 window.loadModels = async function(page = 1) {
     const [modelRes, settingsRes] = await Promise.all([
         fetch(`${API_BASE}/models?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() }),
@@ -59,15 +75,7 @@ window.loadModels = async function(page = 1) {
             if (!isOwnModel) displayUrl = '********';
         }
 
-        const capabilityBadge = [
-            '<span class="model-capability-icon cap-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>',
-            Number(m.supports_vision || 0) === 1
-                ? '<span class="model-capability-icon cap-icon vision" title="支持视觉输入" aria-label="支持视觉输入"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>'
-                : '',
-            Number(m.supports_reasoning || 0) === 1
-                ? '<span class="model-capability-icon cap-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>'
-                : ''
-        ].filter(Boolean).join('');
+        const capabilityBadge = renderModelCapabilityBadges(m);
 
         return `
         <tr id="model-row-${m.id}">
@@ -79,7 +87,7 @@ window.loadModels = async function(page = 1) {
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
             <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens">${formatTokenAmount(m.daily_token_limit)}</td>
-            <td class="text-center"><div class="model-capability-icons">${capabilityBadge}</div></td>
+            <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">

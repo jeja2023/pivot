@@ -2,12 +2,20 @@ const axios = require('axios');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { decryptSecret, validateModelUrl } = require('../security');
+const {
+    executeDatabaseMcpTool,
+    getDatabaseConnectionForServer,
+    listDatabaseMcpTools
+} = require('./database-mcp');
 
 const MCP_TIMEOUT_MS = 20000;
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 function normalizeServerRow(row) {
     if (!row) return null;
+    const databaseConnection = String(row.base_url || '').startsWith('pivot-db://')
+        ? getDatabaseConnectionForServer(row.id)
+        : null;
     return {
         id: row.id,
         user_id: row.user_id,
@@ -19,7 +27,9 @@ function normalizeServerRow(row) {
         last_checked_at: row.last_checked_at || '',
         created_at: row.created_at,
         updated_at: row.updated_at,
-        has_api_key: Boolean(row.api_key)
+        has_api_key: Boolean(row.api_key),
+        server_type: databaseConnection ? 'database' : 'external',
+        database_connection: databaseConnection
     };
 }
 
@@ -44,6 +54,21 @@ function listMcpServers(user) {
 }
 
 async function callMcpJsonRpc(server, method, params = {}) {
+    if (String(server.base_url || '').startsWith('pivot-db://')) {
+        if (method === 'tools/list') return { tools: listDatabaseMcpTools(server) };
+        if (method === 'tools/call') {
+            const result = await executeDatabaseMcpTool(server, params?.name, params?.arguments || {});
+            return {
+                content: [{
+                    type: 'text',
+                    text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+                }],
+                structuredContent: result
+            };
+        }
+        throw new Error(`Unsupported database MCP method: ${method}`);
+    }
+
     const url = String(server.base_url || '').trim().replace(/\/+$/, '');
     const response = await axios.post(url, {
         jsonrpc: '2.0',
@@ -96,7 +121,9 @@ function upsertToolCache(serverId, tools = []) {
 }
 
 async function refreshMcpTools(server, user) {
-    validateModelUrl(server.base_url, user);
+    if (!String(server.base_url || '').startsWith('pivot-db://')) {
+        validateModelUrl(server.base_url, user);
+    }
     try {
         const result = await callMcpJsonRpc(server, 'tools/list', {});
         const tools = Array.isArray(result?.tools) ? result.tools : Array.isArray(result) ? result : [];
@@ -153,7 +180,9 @@ async function executeMcpTool(fullName, input, user) {
     if (!match) throw new Error('Invalid MCP tool name.');
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
-    validateModelUrl(server.base_url, user);
+    if (!String(server.base_url || '').startsWith('pivot-db://')) {
+        validateModelUrl(server.base_url, user);
+    }
     return callMcpJsonRpc(server, 'tools/call', {
         name: match[2],
         arguments: input || {}

@@ -237,6 +237,7 @@ module.exports = {
     decryptSecret,
     validateModelUrl,
     assertSafeOutboundUrl,
+    isPrivateHost,
     isSensitiveOutboundHost,
     escapeCsvCell,
     parseCsvLine,

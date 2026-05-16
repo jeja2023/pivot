@@ -2,6 +2,13 @@
 let sidebarState = { page: 1, limit: 20, cursor: '', hasMore: true, isLoading: false, archived: false };
 const sessionMenuData = new Map();
 
+window.markActiveSessionInList = function(id) {
+    const activeId = String(id || '');
+    document.querySelectorAll('#session-list .session-item').forEach(item => {
+        item.classList.toggle('active', String(item.dataset.sessionId || '') === activeId);
+    });
+};
+
 function updateSessionListStatus(text = '') {
     const list = document.getElementById('session-list');
     if (!list) return;
@@ -76,6 +83,7 @@ window.loadSessions = async function(append = false) {
             
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
+            div.dataset.sessionId = String(s.id);
             sessionMenuData.set(String(s.id), {
                 id: String(s.id),
                 title,

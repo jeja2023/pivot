@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const zlib = require('node:zlib');
+const Sqlite = require('better-sqlite3');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-security-suite-please-do-not-use';
 const generatedTestDataDir = !process.env.DATA_DIR;
@@ -41,6 +42,8 @@ const {
 const {
     getModelDailyUsage,
     getOrCreateEmbeddingUsageModel,
+    getRunnableModelForUser,
+    getUserRunnableModels,
     recordModelTokenUsage,
     contentContainsVisionInput,
     messagesContainVisionInput,
@@ -139,16 +142,29 @@ const {
 } = require('../server/services/agent-tools');
 const {
     cancelAgentRun,
+    computeNextScheduleRun,
+    createAgentSchedule,
+    createAgentTemplate,
     createAgentRun,
     formatToolList,
+    listAgentArtifacts,
+    listAgentNotifications,
+    listAgentSchedules,
+    listAgentTemplates,
     getRunDetailForUser,
     getRunProgress,
     getRunForUser,
     listDeletedRunsForAdmin,
     listRuns,
+    normalizeApprovalPolicy,
     normalizeAgentGoal,
+    normalizeToolAllowlist,
+    normalizeToolPolicy,
     parseJsonObject,
     rerunAgentRun,
+    resumeAgentRun,
+    runAgentScheduleNow,
+    saveAgentRunArtifact,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 const { db } = require('../server/db');
@@ -849,11 +865,16 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     const systemHealth = superAdminTools.find(tool => tool.name === 'system.health');
     assert.equal(systemHealth.admin, true);
     assert.equal(systemHealth.title, '系统健康');
+    assert.equal(normalizeToolPolicy('builtin_only'), 'builtin_only');
+    assert.equal(normalizeToolPolicy('unknown'), 'all');
+    assert.equal(normalizeApprovalPolicy('approve_all_mcp'), 'approve_all_mcp');
+    assert.equal(normalizeApprovalPolicy('bad'), 'safe_mcp_auto');
+    assert.deepEqual(normalizeToolAllowlist('["rag.search","rag.search","models.list"]'), ['rag.search', 'models.list']);
     const result = await executeBuiltInTool('models.list', {}, user);
     assert.equal(Array.isArray(result), true);
 });
 
-test('automation runs can be cancelled and rerun from an existing run', () => {
+test('agent runs can be cancelled and rerun from an existing run', () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -869,8 +890,19 @@ test('automation runs can be cancelled and rerun from an existing run', () => {
         user,
         goal: '整理项目风险',
         modelId: Number(modelInfo.lastInsertRowid),
-        maxSteps: 3
+        maxSteps: 3,
+        runMode: 'audit',
+        toolPolicy: 'builtin_only',
+        approvalPolicy: 'approve_all_mcp',
+        retryLimit: 2,
+        maxTokenBudget: 100000,
+        toolAllowlist: ['rag.search', 'models.list']
     });
+    assert.equal(run.run_mode, 'audit');
+    assert.equal(run.tool_policy, 'builtin_only');
+    assert.equal(run.approval_policy, 'approve_all_mcp');
+    assert.equal(run.retry_limit, 2);
+    assert.equal(run.max_token_budget, 100000);
     const cancelled = cancelAgentRun(run.id, user);
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(Boolean(cancelled.cancelled_at), true);
@@ -883,6 +915,9 @@ test('automation runs can be cancelled and rerun from an existing run', () => {
     assert.equal(rerun.model_id, run.model_id);
     assert.equal(rerun.max_steps, run.max_steps);
     assert.equal(rerun.parent_run_id, run.id);
+    assert.equal(rerun.run_mode, run.run_mode);
+    assert.equal(rerun.tool_policy, run.tool_policy);
+    assert.equal(rerun.approval_policy, run.approval_policy);
 
     cancelAgentRun(rerun.id, user);
     assert.equal(getRunForUser(rerun.id, user).status, 'cancelled');
@@ -899,6 +934,102 @@ test('automation runs can be cancelled and rerun from an existing run', () => {
     assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
 
     assert.throws(() => normalizeAgentGoal('短'), /更明确/);
+});
+
+test('agent model visibility excludes other users private models', () => {
+    const suffix = Date.now();
+    const ownerInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_owner_${suffix}`, 'hash', 'Owner', 'QA', 'user', 'active');
+    const otherInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_other_${suffix}`, 'hash', 'Other', 'QA', 'user', 'active');
+    const owner = { id: Number(ownerInfo.lastInsertRowid), username: `agent_owner_${suffix}`, role: 'user', unit: 'QA' };
+    const other = { id: Number(otherInfo.lastInsertRowid), username: `agent_other_${suffix}`, role: 'user', unit: 'QA' };
+    const superAdmin = { id: 1, username: 'admin', role: 'admin', unit: '' };
+    const privateModel = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(owner.id, 'Owner Private Agent Model', 'http://127.0.0.1:65530/v1/chat/completions', `owner-private-${suffix}`);
+    const globalModel = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, allowed_units, status, created_at)
+        VALUES (NULL, ?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run('QA Global Agent Model', 'http://127.0.0.1:65530/v1/chat/completions', `qa-global-${suffix}`, 'QA');
+
+    const privateId = Number(privateModel.lastInsertRowid);
+    const globalId = Number(globalModel.lastInsertRowid);
+    assert.equal(getRunnableModelForUser(privateId, owner)?.id, privateId);
+    assert.equal(getRunnableModelForUser(privateId, other), null);
+    assert.equal(getRunnableModelForUser(privateId, superAdmin), null);
+    assert.equal(getRunnableModelForUser(globalId, other)?.id, globalId);
+    assert.equal(getUserRunnableModels(owner).some(model => model.id === privateId), true);
+    assert.equal(getUserRunnableModels(other).some(model => model.id === privateId), false);
+    assert.equal(getUserRunnableModels(superAdmin).some(model => model.id === privateId), false);
+    assert.throws(() => createAgentRun({
+        user: superAdmin,
+        goal: '检查其他用户私有模型是否可用于自动化',
+        modelId: privateId,
+        maxSteps: 3
+    }), /accessible model/);
+});
+
+test('enterprise agent templates schedules artifacts and resume are user scoped', () => {
+    const suffix = Date.now();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_enterprise_${suffix}`, 'hash', 'Agent Enterprise', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `agent_enterprise_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Enterprise Agent Model', 'http://127.0.0.1:65530/v1/chat/completions', `agent-enterprise-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+
+    const template = createAgentTemplate(user, {
+        name: '风险审查',
+        goalTemplate: '检查项目风险并给出建议',
+        runMode: 'audit',
+        toolPolicy: 'builtin_only',
+        toolAllowlist: ['rag.search'],
+        contextConfig: { mode: 'knowledge', notes: '仅检查当前用户资料' },
+        maxSteps: 4
+    });
+    assert.equal(template.run_mode, 'audit');
+    assert.equal(listAgentTemplates(user).some(item => item.id === template.id), true);
+
+    const nextDaily = computeNextScheduleRun('daily', '09:00', 1, '2026-05-16 10:00:00');
+    assert.equal(nextDaily.startsWith('2026-05-17 09:00'), true);
+    const schedule = createAgentSchedule(user, {
+        name: '每日风险巡检',
+        goal: '每天检查项目风险',
+        modelId,
+        templateId: template.id,
+        frequency: 'daily',
+        timeOfDay: '09:00',
+        runMode: 'audit',
+        toolPolicy: 'builtin_only',
+        contextConfig: { mode: 'knowledge' }
+    });
+    assert.equal(Boolean(schedule.next_run_at), true);
+    assert.equal(listAgentSchedules(user).some(item => item.id === schedule.id), true);
+
+    const run = runAgentScheduleNow(schedule.id, user);
+    assert.equal(run.schedule_id, schedule.id);
+    assert.equal(run.template_id, template.id);
+    assert.equal(JSON.parse(run.context_config).mode, 'knowledge');
+    cancelAgentRun(run.id, user);
+    const saved = saveAgentRunArtifact(run.id, user, { content: '风险结果摘要', title: '风险摘要' });
+    assert.equal(saved.title, '风险摘要');
+    assert.equal(listAgentArtifacts(user).some(item => item.id === saved.id), true);
+    assert.equal(listAgentNotifications(user, 20).some(item => item.run_id === run.id), true);
+
+    const resumed = resumeAgentRun(run.id, user);
+    assert.equal(resumed.parent_run_id, run.id);
+    assert.equal(resumed.resume_from_step >= 1, true);
+    cancelAgentRun(resumed.id, user);
 });
 
 test('OpenAI embedding helpers normalize requests and responses', () => {
@@ -1510,7 +1641,9 @@ test('local model host detection includes request and configured host aliases', 
     assert.equal(normalizeHostAlias('ai.example.com:3000'), 'ai.example.com');
 
     const previousAliases = process.env.PIVOT_LOCAL_MODEL_HOSTS;
+    const previousLegacyAliases = process.env.MODEL_LOCAL_HOSTS;
     process.env.PIVOT_LOCAL_MODEL_HOSTS = '203.0.113.10,llama-server:8080';
+    process.env.MODEL_LOCAL_HOSTS = '198.51.100.44';
     try {
         const names = getLocalHostnames({
             publicUrl: 'https://50.64.150.40/app',
@@ -1521,17 +1654,24 @@ test('local model host detection includes request and configured host aliases', 
         assert.equal(names.has('models.internal'), true);
         assert.equal(names.has('203.0.113.10'), true);
         assert.equal(names.has('llama-server'), true);
+        assert.equal(names.has('198.51.100.44'), false);
     } finally {
         if (previousAliases === undefined) {
             delete process.env.PIVOT_LOCAL_MODEL_HOSTS;
         } else {
             process.env.PIVOT_LOCAL_MODEL_HOSTS = previousAliases;
         }
+        if (previousLegacyAliases === undefined) {
+            delete process.env.MODEL_LOCAL_HOSTS;
+        } else {
+            process.env.MODEL_LOCAL_HOSTS = previousLegacyAliases;
+        }
     }
 });
 
 test('docker internal service names are local only when container trust is enabled', () => {
     const previousTrust = process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
+    const previousKubernetesHost = process.env.KUBERNETES_SERVICE_HOST;
     try {
         process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'true';
         assert.equal(isDockerInternalServiceHost('llama-server'), true);
@@ -1543,11 +1683,20 @@ test('docker internal service names are local only when container trust is enabl
         process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'false';
         assert.equal(isDockerInternalServiceHost('llama-server'), false);
         assert.equal(isLocalModelHost('llama-server', new Set()), false);
+
+        delete process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
+        process.env.KUBERNETES_SERVICE_HOST = '10.96.0.1';
+        assert.equal(isDockerInternalServiceHost('llama-server'), false);
     } finally {
         if (previousTrust === undefined) {
             delete process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
         } else {
             process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = previousTrust;
+        }
+        if (previousKubernetesHost === undefined) {
+            delete process.env.KUBERNETES_SERVICE_HOST;
+        } else {
+            process.env.KUBERNETES_SERVICE_HOST = previousKubernetesHost;
         }
     }
 });
@@ -1851,6 +2000,92 @@ test('non-root admin cannot create global prompts or shared MCP servers', async 
         db.prepare('DELETE FROM prompts WHERE user_id = ?').run(adminUser.id);
         db.prepare('DELETE FROM mcp_servers WHERE user_id = ?').run(adminUser.id);
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('database MCP preset exposes SQLite readonly tools and rejects writes', async () => {
+    const suffix = Date.now().toString(36);
+    const sqlitePath = path.join(process.env.DATA_DIR, `mcp-sqlite-${suffix}.db`);
+    const source = new Sqlite(sqlitePath);
+    source.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+        INSERT INTO widgets (name) VALUES ('alpha'), ('beta');
+    `);
+    source.close();
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_db_${suffix}`, 'hash', 'MCP DB Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `mcp_db_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/database-connections' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    assert.ok(createRoute);
+    assert.ok(refreshRoute);
+    assert.ok(callRoute);
+
+    let serverId = null;
+    try {
+        const createReq = {
+            body: {
+                name: `SQLite MCP ${suffix}`,
+                database_type: 'sqlite',
+                database_name: sqlitePath,
+                max_rows: 5
+            },
+            user: adminUser
+        };
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), createReq, createRes);
+        assert.equal(createRes.statusCode, 201);
+        serverId = createRes.body.server.id;
+        assert.equal(createRes.body.server.server_type, 'database');
+        assert.equal(createRes.body.server.database_connection.has_password, false);
+
+        const refreshReq = { params: { id: String(serverId) }, user: adminUser };
+        const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), refreshReq, refreshRes);
+        assert.equal(refreshRes.statusCode, 200);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.run_readonly_query'), true);
+
+        const queryReq = {
+            body: {
+                name: `mcp.${serverId}.db.run_readonly_query`,
+                input: { sql: 'SELECT name FROM widgets ORDER BY id', limit: 2 }
+            },
+            user: adminUser
+        };
+        const queryRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), queryReq, queryRes);
+        assert.equal(queryRes.statusCode, 200);
+        assert.deepEqual(queryRes.body.result.structuredContent.rows.map(row => row.name), ['alpha', 'beta']);
+
+        const writeReq = {
+            body: {
+                name: `mcp.${serverId}.db.run_readonly_query`,
+                input: { sql: 'DELETE FROM widgets' }
+            },
+            user: adminUser
+        };
+        const writeRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await assert.rejects(
+            runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), writeReq, writeRes),
+            /Only readonly SQL|blocked write/
+        );
+    } finally {
+        if (serverId) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_database_connections WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        fs.rmSync(sqlitePath, { force: true });
     }
 });
 

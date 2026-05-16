@@ -373,13 +373,13 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
 };
 
 window.openKnowledgeWorkbench = async function() {
-    const modal = document.getElementById('knowledge-workbench-modal');
-    if (!modal) return;
-    modal.classList.remove('hidden');
-    document.querySelectorAll('#knowledge-workbench-modal .admin-only').forEach(el => {
+    window.showMainWorkspace?.('knowledge');
+    const panel = document.getElementById('knowledge-workbench-modal');
+    if (!panel) return;
+    panel.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.role !== 'admin');
     });
-    document.querySelectorAll('#knowledge-workbench-modal .admin-root-only').forEach(el => {
+    panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.username !== 'admin');
     });
     window.bindEmbeddingModalEvents?.();
@@ -389,7 +389,7 @@ window.openKnowledgeWorkbench = async function() {
 };
 
 window.closeKnowledgeWorkbench = function() {
-    document.getElementById('knowledge-workbench-modal')?.classList.add('hidden');
+    window.showMainWorkspace?.('chat');
 };
 
 const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-doc-check:checked'))
@@ -484,13 +484,31 @@ window.sendRagFeedback = async (button) => {
 
 window.debugRagQuery = async () => {
     const input = document.getElementById('rag-debug-query');
+    const button = document.getElementById('rag-debug-btn');
+    const results = document.getElementById('rag-debug-results');
+    if (button?.disabled) return;
     const query = input?.value?.trim();
     if (!query) {
         showToast('请输入要测试的问题', 'error');
         return;
     }
 
+    const originalText = button?.textContent || '开始测试';
     try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = '测试中...';
+            button.setAttribute('aria-busy', 'true');
+        }
+        if (results) {
+            results.innerHTML = `
+                <div class="rag-debug-loading">
+                    <span class="rag-debug-spinner"></span>
+                    <strong>正在测试召回效果</strong>
+                    <small>正在检索知识库分块，请稍候</small>
+                </div>
+            `;
+        }
         const res = await fetch(`${API_BASE}/rag/debug-query`, {
             method: 'POST',
             headers: {
@@ -509,6 +527,15 @@ window.debugRagQuery = async () => {
         renderRagDebugResults(data);
     } catch (e) {
         showToast(e.message || '检索测试失败', 'error');
+        if (results) {
+            results.innerHTML = `<div class="rag-debug-empty">检索测试失败，请调整问题或稍后重试</div>`;
+        }
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+            button.removeAttribute('aria-busy');
+        }
     }
 };
 
@@ -672,8 +699,8 @@ style.textContent = `
     .status-badge.ready { background: rgba(16, 185, 129, 0.1); color: #10b981; }
     .status-badge.processing { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
     .status-badge.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-    .rag-actions { display: inline-flex; gap: 5px; align-items: center; justify-content: center; }
-    .rag-actions button { padding: 1px 7px; font-size: 0.7rem; }
+    .rag-actions { display: inline-flex; gap: 4px; align-items: center; justify-content: center; }
+    .rag-actions button { height: 22px; min-height: 22px; padding: 0 7px; font-size: 0.66rem; border-radius: 6px; }
     .rag-summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 10px; color: var(--text-muted); font-size: 0.76rem; }
     .rag-summary-items { display: flex; flex-wrap: wrap; gap: 6px; }
     .rag-summary-items span { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; background: rgba(148, 163, 184, 0.05); line-height: 1.35; }

@@ -15,7 +15,6 @@ const {
 } = require('../services/rag-config');
 
 const allowedSettings = new Set([
-    'rag_enabled',
     'default_model_id',
     RAG_CONFIG_KEYS.scoreThreshold,
     RAG_CONFIG_KEYS.topK,
@@ -68,9 +67,6 @@ function extractEmbeddingModelIds(data) {
 const toSettingValue = (key, value) => {
     if (value === null || value === undefined || value === '') {
         return '';
-    }
-    if (key === 'rag_enabled') {
-        return value === true || value === 'true' || value === 1 || value === '1' ? 'true' : 'false';
     }
     if (Object.values(RAG_CONFIG_KEYS).includes(key)) {
         return toRagSettingValue(key, value);
@@ -128,7 +124,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.get('/settings', authMiddleware, (req, res) => {
         const settings = getSettings();
         res.json({
-            ragEnabled: settings.rag_enabled?.value === 'true',
+            ragEnabled: true,
             ragConfig: getRagConfig(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
@@ -267,7 +263,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         const settings = getSettings();
         res.json({
             success: true,
-            ragEnabled: settings.rag_enabled?.value === 'true',
+            ragEnabled: true,
             ragConfig: getRagConfig(),
             embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,

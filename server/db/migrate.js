@@ -271,11 +271,23 @@ function runMigrations() {
             UNIQUE(server_id, name),
             FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
-        CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
-        CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
+        CREATE TABLE IF NOT EXISTS mcp_database_connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mcp_server_id INTEGER UNIQUE NOT NULL,
+            user_id INTEGER,
+            database_type TEXT NOT NULL,
+            host TEXT,
+            port INTEGER,
+            database_name TEXT,
+            username TEXT,
+            password TEXT,
+            options TEXT,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     `);
     ensureColumn('agent_runs', 'session_id', 'TEXT');
     ensureColumn('agent_runs', 'model_id', 'INTEGER');
@@ -284,18 +296,159 @@ function runMigrations() {
     ensureColumn('agent_runs', 'error_message', 'TEXT');
     ensureColumn('agent_runs', 'max_steps', 'INTEGER DEFAULT 6');
     ensureColumn('agent_runs', 'parent_run_id', 'TEXT');
+    ensureColumn('agent_runs', 'priority', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'run_mode', "TEXT DEFAULT 'standard'");
+    ensureColumn('agent_runs', 'tool_policy', "TEXT DEFAULT 'all'");
+    ensureColumn('agent_runs', 'tool_allowlist', 'TEXT');
+    ensureColumn('agent_runs', 'approval_policy', "TEXT DEFAULT 'safe_mcp_auto'");
+    ensureColumn('agent_runs', 'timeout_ms', 'INTEGER DEFAULT 600000');
+    ensureColumn('agent_runs', 'tool_timeout_ms', 'INTEGER DEFAULT 120000');
+    ensureColumn('agent_runs', 'retry_limit', 'INTEGER DEFAULT 1');
+    ensureColumn('agent_runs', 'retry_count', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'max_token_budget', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'export_count', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'template_id', 'INTEGER');
+    ensureColumn('agent_runs', 'schedule_id', 'INTEGER');
+    ensureColumn('agent_runs', 'context_config', 'TEXT');
+    ensureColumn('agent_runs', 'resume_from_step', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'metadata', 'TEXT');
+    ensureColumn('agent_runs', 'started_at', 'DATETIME');
+    ensureColumn('agent_runs', 'last_heartbeat_at', 'DATETIME');
+    ensureColumn('agent_runs', 'input_tokens', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'output_tokens', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_runs', 'total_tokens', 'INTEGER DEFAULT 0');
     ensureColumn('agent_runs', 'cancelled_at', 'DATETIME');
     ensureColumn('agent_runs', 'completed_at', 'DATETIME');
     ensureColumn('agent_runs', 'deleted_at', 'DATETIME');
     ensureColumn('agent_runs', 'deleted_by_user', 'INTEGER');
     ensureColumn('agent_runs', 'delete_reason', 'TEXT');
+    ensureColumn('agent_steps', 'error_message', 'TEXT');
     ensureColumn('agent_steps', 'duration_ms', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_steps', 'started_at', 'DATETIME');
+    ensureColumn('agent_steps', 'completed_at', 'DATETIME');
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            scope TEXT DEFAULT 'personal',
+            name TEXT NOT NULL,
+            description TEXT,
+            goal_template TEXT NOT NULL,
+            run_mode TEXT DEFAULT 'standard',
+            tool_policy TEXT DEFAULT 'all',
+            tool_allowlist TEXT,
+            approval_policy TEXT DEFAULT 'safe_mcp_auto',
+            max_steps INTEGER DEFAULT 5,
+            max_token_budget INTEGER DEFAULT 0,
+            retry_limit INTEGER DEFAULT 1,
+            context_config TEXT,
+            allowed_units TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            template_id INTEGER,
+            model_id INTEGER,
+            name TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            frequency TEXT DEFAULT 'manual',
+            time_of_day TEXT DEFAULT '09:00',
+            day_of_week INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            run_config TEXT,
+            next_run_at DATETIME,
+            last_run_at DATETIME,
+            last_run_id TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (template_id) REFERENCES agent_templates(id),
+            FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            type TEXT DEFAULT 'summary',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            run_id TEXT,
+            type TEXT DEFAULT 'info',
+            title TEXT NOT NULL,
+            body TEXT,
+            status TEXT DEFAULT 'unread',
+            read_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+    `);
+    ensureColumn('agent_templates', 'scope', "TEXT DEFAULT 'personal'");
+    ensureColumn('agent_templates', 'description', 'TEXT');
+    ensureColumn('agent_templates', 'tool_allowlist', 'TEXT');
+    ensureColumn('agent_templates', 'max_token_budget', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_templates', 'retry_limit', 'INTEGER DEFAULT 1');
+    ensureColumn('agent_templates', 'context_config', 'TEXT');
+    ensureColumn('agent_templates', 'allowed_units', "TEXT DEFAULT ''");
+    ensureColumn('agent_templates', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_schedules', 'template_id', 'INTEGER');
+    ensureColumn('agent_schedules', 'model_id', 'INTEGER');
+    ensureColumn('agent_schedules', 'frequency', "TEXT DEFAULT 'manual'");
+    ensureColumn('agent_schedules', 'time_of_day', "TEXT DEFAULT '09:00'");
+    ensureColumn('agent_schedules', 'day_of_week', 'INTEGER DEFAULT 1');
+    ensureColumn('agent_schedules', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('agent_schedules', 'run_config', 'TEXT');
+    ensureColumn('agent_schedules', 'next_run_at', 'DATETIME');
+    ensureColumn('agent_schedules', 'last_run_at', 'DATETIME');
+    ensureColumn('agent_schedules', 'last_run_id', 'TEXT');
+    ensureColumn('agent_schedules', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_notifications', 'read_at', 'DATETIME');
+    ensureColumn('agent_notifications', 'status', "TEXT DEFAULT 'unread'");
     ensureColumn('mcp_servers', 'user_id', 'INTEGER');
     ensureColumn('mcp_servers', 'api_key', 'TEXT');
     ensureColumn('mcp_servers', 'description', 'TEXT');
     ensureColumn('mcp_servers', 'last_error', 'TEXT');
     ensureColumn('mcp_servers', 'last_checked_at', 'DATETIME');
     ensureColumn('mcp_servers', 'updated_at', 'DATETIME');
+    ensureColumn('mcp_database_connections', 'user_id', 'INTEGER');
+    ensureColumn('mcp_database_connections', 'host', 'TEXT');
+    ensureColumn('mcp_database_connections', 'port', 'INTEGER');
+    ensureColumn('mcp_database_connections', 'database_name', 'TEXT');
+    ensureColumn('mcp_database_connections', 'username', 'TEXT');
+    ensureColumn('mcp_database_connections', 'password', 'TEXT');
+    ensureColumn('mcp_database_connections', 'options', 'TEXT');
+    ensureColumn('mcp_database_connections', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('mcp_database_connections', 'created_at', 'DATETIME');
+    ensureColumn('mcp_database_connections', 'updated_at', 'DATETIME');
+
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_user_status_created ON agent_runs(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status_priority ON agent_runs(status, priority, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
+        CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
+    `);
 
     try {
         db.exec("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)");

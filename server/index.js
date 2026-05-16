@@ -61,7 +61,7 @@ const { createPromptsRouter } = require('./routes/prompts');
 const { createSessionsRouter } = require('./routes/sessions');
 const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
-const { createSettingsRouter, isSettingEnabled } = require('./routes/settings');
+const { createSettingsRouter } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
 const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
@@ -74,6 +74,7 @@ const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
 const { getSystemHealthSnapshot } = require('./services/system-health');
+const { recoverAgentRuns, startAgentScheduleRunner } = require('./services/agent-runtime');
 // 启动后台维护任务
 startMaintenanceTasks();
 
@@ -82,6 +83,8 @@ startGpuMonitor().catch(() => {});
 startModelEndpointMonitor().catch(() => {});
 setImmediate(() => {
     recoverStaleKnowledgeDocumentIndexes();
+    recoverAgentRuns();
+    startAgentScheduleRunner();
 });
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
@@ -434,12 +437,7 @@ app.use('/api', createMcpRouter({
     logAction
 }));
 
-app.use('/api/rag', (req, res, next) => {
-    if (!isSettingEnabled('rag_enabled')) {
-        return res.status(403).json({ error: 'RAG 知识库功能未开启' });
-    }
-    next();
-}, ragRouter);
+app.use('/api/rag', ragRouter);
 
 // --- 对话接口 ---
 app.use('/api', createSessionsRouter({
@@ -464,7 +462,7 @@ app.use('/api', createChatRouter({
     chatLimiter: app.locals.chatLimiter,
     logAction,
     retrieveContext,
-    isRagEnabled: () => isSettingEnabled('rag_enabled'),
+    isRagEnabled: () => true,
     publicUrl: appConfig.publicUrl
 }));
 

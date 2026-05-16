@@ -168,7 +168,7 @@ window.closeModal = () => document.getElementById('admin-container').classList.a
 
 window.switchTab = async (tab) => {
     await window.ensureAdminFeatureScripts();
-    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'labs', 'account'];
+    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     
@@ -194,7 +194,6 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'details' && window.loadDetails) loadDetails(page);
     if (tab === 'apiCallLogs' && window.loadApiCallLogs) loadApiCallLogs(page);
     if (tab === 'userRecords' && window.loadUserRecordMessages) loadUserRecordMessages(page);
-    if (tab === 'labs') loadSettings();
     if (tab === 'keys' && window.loadApiKeys) {
         loadApiKeys();
         const displayEl = document.getElementById('api-base-url-display');
@@ -253,13 +252,10 @@ window.fetchRemoteModels = async function() {
 };
 
 async function loadSettings() {
-    const ragCheckbox = document.getElementById('setting-rag-enabled');
-    if (!ragCheckbox) return;
     try {
         const res = await apiFetch(`${API_BASE}/settings`);
         if (!res.ok) throw new Error('系统设置加载失败');
         const data = await res.json();
-        ragCheckbox.checked = data.ragEnabled === true;
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
@@ -271,7 +267,6 @@ async function loadSettings() {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        document.getElementById('knowledge-workbench-btn')?.classList.toggle('hidden', !ragCheckbox.checked);
     } catch (e) {
         showToast(e.message || '系统设置加载失败', 'error');
     }
@@ -363,16 +358,13 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
 }
 
 window.saveSettings = async () => {
-    const ragCheckbox = document.getElementById('setting-rag-enabled');
-    if (!ragCheckbox) return;
-    ragCheckbox.disabled = true;
     const scoreInput = document.getElementById('setting-rag-score-threshold');
     const topKInput = document.getElementById('setting-rag-top-k');
     const candidateInput = document.getElementById('setting-rag-candidate-limit');
     const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
     const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
     try {
-        const payload = { rag_enabled: ragCheckbox.checked };
+        const payload = {};
         if (scoreInput) payload.rag_score_threshold = scoreInput.value;
         if (topKInput) payload.rag_top_k = topKInput.value;
         if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
@@ -386,20 +378,15 @@ window.saveSettings = async () => {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '系统设置保存失败');
-        ragCheckbox.checked = data.ragEnabled === true;
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? scoreInput.value;
         if (topKInput) topKInput.value = data.ragConfig?.topK ?? topKInput.value;
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? candidateInput.value;
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        document.getElementById('knowledge-workbench-btn')?.classList.toggle('hidden', !data.ragEnabled);
-        document.getElementById('knowledge-workbench-modal')?.classList.toggle('hidden', !data.ragEnabled);
         showToast(currentUser?.username === 'admin' ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
         showToast(e.message || '系统设置保存失败', 'error');
-    } finally {
-        ragCheckbox.disabled = false;
     }
 };
 

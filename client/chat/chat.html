@@ -400,7 +400,7 @@
                 </div>
 
                 <div class="sidebar-tools">
-                    <button id="agent-workbench-btn" class="sidebar-tool-btn" title="自动化任务">
+                    <button id="agent-workbench-btn" class="sidebar-tool-btn" data-workspace-view="agent" title="智能体">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4">
                             <path d="M12 2v4"></path>
                             <path d="M12 18v4"></path>
@@ -412,9 +412,9 @@
                             <path d="m16.24 7.76 2.83-2.83"></path>
                             <circle cx="12" cy="12" r="4"></circle>
                         </svg>
-                        <span>自动化</span>
+                        <span>智能体</span>
                     </button>
-                    <button id="knowledge-workbench-btn" class="sidebar-tool-btn" title="知识库">
+                    <button id="knowledge-workbench-btn" class="sidebar-tool-btn" data-workspace-view="knowledge" title="知识库">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3">
                             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
                             <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path>
@@ -423,7 +423,7 @@
                         </svg>
                         <span>知识库</span>
                     </button>
-                    <button id="mcp-workbench-btn" class="sidebar-tool-btn" title="MCP">
+                    <button id="mcp-workbench-btn" class="sidebar-tool-btn" data-workspace-view="mcp" title="MCP">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3">
                             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
@@ -483,6 +483,7 @@
         </aside>
 
         <main class="chat-container">
+            <section id="chat-workspace-view" class="main-workspace-view chat-workspace-view">
             <header class="chat-header">
                 <div class="header-left" style="display: flex; align-items: center; gap: 12px;">
                     <button id="sidebar-toggle-btn" class="icon-btn" title="切换侧边栏">
@@ -519,7 +520,29 @@
                         accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx">
                     <textarea id="user-input" class="form-input" placeholder="输入消息..."></textarea>
                     <div class="input-actions">
-                        <button id="upload-btn" class="btn-icon" title="上传附件（图片每次仅支持解析 1 张）">
+                        <label class="chat-tool-toggle chat-tool-rag" data-tooltip="让知识库参与本轮回答">
+                            <input type="checkbox" id="chat-rag-enabled">
+                            <span class="chat-tool-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                </svg>
+                            </span>
+                        </label>
+                        <label class="chat-tool-toggle chat-tool-mcp" data-tooltip="允许本轮对话按需调用 MCP 工具">
+                            <input type="checkbox" id="chat-mcp-enabled">
+                            <span class="chat-tool-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M8 6h8"></path>
+                                    <path d="M8 12h8"></path>
+                                    <path d="M8 18h8"></path>
+                                    <path d="M4 6h.01"></path>
+                                    <path d="M4 12h.01"></path>
+                                    <path d="M4 18h.01"></path>
+                                </svg>
+                            </span>
+                        </label>
+                        <button id="upload-btn" class="btn-icon has-tooltip" data-tooltip="上传附件，支持图片、PDF、Word、Excel、文本">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path
@@ -541,18 +564,19 @@
                     </div>
                 </div>
             </div>
+            </section>
         </main>
     </div>
 
-    <!-- 自动化工作台 -->
-    <div id="agent-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
-        <div class="modal agent-modal">
+    <!-- 智能体工作台 -->
+    <section id="agent-workbench-modal" class="main-workspace-view agent-workspace-view hidden">
+        <div class="agent-modal">
             <div class="agent-modal-header">
                 <div>
-                    <h3>自动化任务</h3>
+                    <h3>智能体</h3>
                     <p>拆解目标、调用工具、追踪步骤，适合处理比单轮对话更完整的工作。</p>
                 </div>
-                <button id="agent-modal-close" class="btn-danger-outline agent-modal-close">关闭</button>
+                <button id="agent-modal-close" class="btn-secondary agent-modal-close">返回对话</button>
             </div>
             <div class="agent-workbench">
                 <div class="agent-run-panel">
@@ -564,59 +588,200 @@
                         <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
                     </div>
                     <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
-                    <div class="agent-run-controls">
-                        <label>
-                            <span>模型</span>
-                            <select id="agent-model-select" class="form-input hidden"></select>
-                            <div id="agent-model-picker" class="agent-model-picker">
-                                <button id="agent-model-trigger" class="agent-model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
-                                    <span id="agent-selected-model-name">请选择模型</span>
-                                    <span id="agent-selected-model-caps" class="agent-model-caps" aria-label="当前模型能力"></span>
-                                </button>
-                                <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
+                    <div class="agent-quick-goals" aria-label="常用智能体目标">
+                        <button type="button" data-agent-run-mode="audit" data-agent-mcp="true" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
+                        <button type="button" data-agent-run-mode="standard" data-agent-mcp="false" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
+                        <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
+                    </div>
+                    <div class="agent-run-primary">
+                        <div class="agent-run-controls">
+                            <label>
+                                <span>模型</span>
+                                <select id="agent-model-select" class="form-input hidden"></select>
+                                <div id="agent-model-picker" class="agent-model-picker">
+                                    <button id="agent-model-trigger" class="agent-model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                                        <span id="agent-selected-model-name">请选择模型</span>
+                                        <span id="agent-selected-model-caps" class="agent-model-caps" aria-label="当前模型能力"></span>
+                                    </button>
+                                    <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
+                                </div>
+                            </label>
+                            <label class="agent-steps-field">
+                                <span>步骤</span>
+                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="8" value="5" title="最大步骤">
+                            </label>
+                            <button id="agent-run-btn" class="btn-primary">运行</button>
+                        </div>
+                    </div>
+                    <details class="agent-collapse-section">
+                        <summary>
+                            <span>高级设置</span>
+                            <small>MCP、预算、上下文</small>
+                        </summary>
+                        <div class="agent-collapse-body">
+                            <div class="agent-policy-controls">
+                                <label class="agent-toggle-field" title="开启后，智能体可以调用已接入的 MCP 工具。关闭时仅使用内置只读能力。">
+                                    <input id="agent-allow-mcp" type="checkbox" checked>
+                                    <span>允许 MCP 工具</span>
+                                </label>
+                                <label>
+                                    <span>运行模式</span>
+                                    <select id="agent-run-mode" class="form-input">
+                                        <option value="standard">标准</option>
+                                        <option value="deep">深度</option>
+                                        <option value="audit">审查</option>
+                                    </select>
+                                </label>
                             </div>
-                        </label>
-                        <label class="agent-steps-field">
-                            <span>步骤</span>
-                            <input id="agent-max-steps" class="form-input" type="number" min="1" max="8" value="5" title="最大步骤">
-                        </label>
-                        <button id="agent-run-btn" class="btn-primary">运行</button>
-                    </div>
-                    <div class="agent-quick-goals" aria-label="常用自动化目标">
-                        <button type="button" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
-                        <button type="button" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
-                        <button type="button" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
-                    </div>
-                    <div class="agent-tool-section-head">
-                        <strong>能力清单</strong>
-                        <span>自动化会按目标自动选择工具</span>
-                    </div>
-                    <div id="agent-tool-list" class="agent-tool-list"></div>
+                            <div class="agent-enterprise-controls">
+                                <label>
+                                    <span>MCP 审批</span>
+                                    <select id="agent-approval-policy" class="form-input">
+                                        <option value="safe_mcp_auto">只审批高风险</option>
+                                        <option value="approve_all_mcp">所有 MCP 均审批</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Token 预算</span>
+                                    <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="不限">
+                                </label>
+                                <label>
+                                    <span>失败重试</span>
+                                    <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
+                                </label>
+                            </div>
+                            <div class="agent-context-controls">
+                                <label>
+                                    <span>上下文来源</span>
+                                    <select id="agent-context-mode" class="form-input">
+                                        <option value="auto">自动选择</option>
+                                        <option value="recent">最近会话</option>
+                                        <option value="knowledge">知识库优先</option>
+                                        <option value="custom">自定义说明</option>
+                                        <option value="none">不扩展</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>补充说明</span>
+                                    <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
+                                </label>
+                            </div>
+                        </div>
+                    </details>
+                    <details class="agent-collapse-section">
+                        <summary>
+                            <span>模板与计划</span>
+                            <small>模板、定时、通知</small>
+                        </summary>
+                        <div class="agent-collapse-body">
+                            <div class="agent-template-strip">
+                                <div class="agent-tool-section-head compact">
+                                    <strong>模板库</strong>
+                                    <button id="agent-save-template-btn" class="btn-secondary" type="button">保存模板</button>
+                                </div>
+                                <div id="agent-template-list" class="agent-template-list"></div>
+                            </div>
+                            <div class="agent-schedule-controls">
+                                <label>
+                                    <span>计划执行</span>
+                                    <select id="agent-schedule-frequency" class="form-input">
+                                        <option value="manual">立即运行</option>
+                                        <option value="daily">每天</option>
+                                        <option value="weekly">每周</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>时间</span>
+                                    <input id="agent-schedule-time" class="form-input" type="time" value="09:00">
+                                </label>
+                                <label>
+                                    <span>星期</span>
+                                    <select id="agent-schedule-weekday" class="form-input">
+                                        <option value="1">周一</option>
+                                        <option value="2">周二</option>
+                                        <option value="3">周三</option>
+                                        <option value="4">周四</option>
+                                        <option value="5">周五</option>
+                                        <option value="6">周六</option>
+                                        <option value="0">周日</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="agent-ops-grid">
+                                <div>
+                                    <div class="agent-tool-section-head compact">
+                                        <strong>计划队列</strong>
+                                        <span>定时与手动计划</span>
+                                    </div>
+                                    <div id="agent-schedule-list" class="agent-ops-list"></div>
+                                </div>
+                                <div>
+                                    <div class="agent-tool-section-head compact">
+                                        <strong>通知中心</strong>
+                                        <span>审批、失败与完成</span>
+                                    </div>
+                                    <div id="agent-notification-list" class="agent-ops-list"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                    <details class="agent-collapse-section agent-collapse-results">
+                        <summary>
+                            <span>能力与结果</span>
+                            <small>工具、状态、沉淀</small>
+                        </summary>
+                        <div class="agent-collapse-body">
+                            <div id="agent-runtime-status" class="agent-runtime-status"></div>
+                            <div class="agent-tool-section-head compact">
+                                <strong>能力清单</strong>
+                                <span>智能体会按目标选择工具</span>
+                            </div>
+                            <div id="agent-tool-list" class="agent-tool-list"></div>
+                            <div class="agent-tool-section-head compact">
+                                <strong>结果沉淀</strong>
+                                <span>已保存的智能体输出</span>
+                            </div>
+                            <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
+                        </div>
+                    </details>
                 </div>
                 <div class="agent-history-panel">
                     <div class="agent-history-head">
                         <div>
                             <h3>任务记录</h3>
-                            <p>查看自动化任务的执行步骤、工具调用和最终结果。</p>
+                            <p>查看智能体任务的执行步骤、工具调用和最终结果。</p>
                         </div>
                         <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                    </div>
+                    <div id="agent-metrics" class="agent-runtime-status agent-metrics"></div>
+                    <div class="agent-history-filters">
+                        <select id="agent-filter-status" class="form-input">
+                            <option value="">全部状态</option>
+                            <option value="queued">排队中</option>
+                            <option value="running">运行中</option>
+                            <option value="approval_required">待审批</option>
+                            <option value="completed">已完成</option>
+                            <option value="error">失败</option>
+                            <option value="cancelled">已停止</option>
+                        </select>
+                        <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
                     </div>
                     <div id="agent-runs-list" class="agent-runs-list"></div>
                     <div id="agent-run-detail" class="agent-run-detail"></div>
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
     <!-- 知识库工作台 -->
-    <div id="knowledge-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
-        <div class="modal workspace-modal knowledge-workspace-modal">
+    <section id="knowledge-workbench-modal" class="main-workspace-view knowledge-workspace-view hidden">
+        <div class="workspace-modal knowledge-workspace-modal">
             <div class="workspace-modal-header">
                 <div>
                     <h3>知识库</h3>
-                    <p>管理项目资料、索引状态和召回测试，让聊天与自动化任务可以稳定使用私有文档。</p>
+                    <p>管理项目资料、索引状态和召回测试，让聊天与智能体任务可以稳定使用私有文档。</p>
                 </div>
-                <button id="knowledge-modal-close" class="btn-danger-outline workspace-modal-close">关闭</button>
+                <button id="knowledge-modal-close" class="btn-secondary workspace-modal-close">返回对话</button>
             </div>
             <div class="workspace-modal-body">
                 <div class="workspace-panel knowledge-panel">
@@ -655,37 +820,69 @@
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
     <!-- MCP 工具工作台 -->
-    <div id="mcp-workbench-modal" class="modal-overlay hidden" style="z-index: 1800;">
-        <div class="modal workspace-modal mcp-workspace-modal">
+    <section id="mcp-workbench-modal" class="main-workspace-view mcp-workspace-view hidden">
+        <div class="workspace-modal mcp-workspace-modal">
             <div class="workspace-modal-header">
                 <div>
                     <h3>MCP 工具</h3>
-                    <p>接入外部 MCP Server，刷新工具缓存，并供聊天与自动化任务调用。</p>
+                    <p>接入外部 MCP Server 或内置数据库 MCP 工具，刷新工具缓存，并供聊天与智能体任务调用。</p>
                 </div>
-                <button id="mcp-modal-close" class="btn-danger-outline workspace-modal-close">关闭</button>
+                <button id="mcp-modal-close" class="btn-secondary workspace-modal-close">返回对话</button>
             </div>
             <div class="workspace-modal-body">
                 <div class="workspace-section-head">
                     <div>
                         <h3>工具源</h3>
-                        <p>保存服务后可刷新工具列表，外部工具会进入自动化可用工具池。</p>
+                        <p>保存服务后可刷新工具列表，外部工具会进入智能体可用工具池。</p>
                     </div>
                     <button id="mcp-refresh-btn" class="btn-secondary">刷新</button>
                 </div>
                 <div class="mcp-layout">
                     <div class="mcp-form">
                         <input type="hidden" id="mcp-id">
+                        <select id="mcp-source-type" class="form-input">
+                            <option value="external">外部 MCP Server</option>
+                            <option value="database">数据库 MCP Server</option>
+                        </select>
                         <input id="mcp-name" class="form-input" placeholder="服务名称">
-                        <input id="mcp-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
-                        <input id="mcp-key" class="form-input" type="password" placeholder="API Key，可选">
+                        <div id="mcp-external-fields" class="mcp-field-group">
+                            <input id="mcp-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
+                            <input id="mcp-key" class="form-input" type="password" placeholder="API Key，可选">
+                        </div>
+                        <div id="mcp-db-fields" class="mcp-field-group hidden">
+                            <div class="mcp-form-row">
+                                <select id="mcp-db-type" class="form-input">
+                                    <option value="postgres">PostgreSQL</option>
+                                    <option value="mysql">MySQL / MariaDB</option>
+                                    <option value="sqlserver">SQL Server</option>
+                                    <option value="sqlite">SQLite</option>
+                                    <option value="mongodb">MongoDB</option>
+                                </select>
+                                <input id="mcp-db-port" class="form-input" type="number" placeholder="端口">
+                            </div>
+                            <input id="mcp-db-host" class="form-input" placeholder="主机地址，例如 10.0.0.8">
+                            <input id="mcp-db-name" class="form-input" placeholder="数据库名；SQLite 填文件路径">
+                            <div class="mcp-form-row">
+                                <input id="mcp-db-user" class="form-input" placeholder="用户名">
+                                <input id="mcp-db-password" class="form-input" type="password" placeholder="密码">
+                            </div>
+                            <div class="mcp-form-row">
+                                <input id="mcp-db-schema" class="form-input" placeholder="Schema，可选">
+                                <input id="mcp-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
+                            </div>
+                            <label class="mcp-shared-row">
+                                <input type="checkbox" id="mcp-db-ssl"> 启用 SSL / TLS
+                            </label>
+                        </div>
                         <textarea id="mcp-desc" class="form-input" placeholder="说明，可选"></textarea>
                         <label class="mcp-shared-row admin-only hidden">
                             <input type="checkbox" id="mcp-shared"> 作为全局共享服务
                         </label>
                         <div class="agent-run-controls">
+                            <button id="mcp-test-db-btn" class="btn-secondary hidden" type="button">测试连接</button>
                             <button id="mcp-save-btn" class="btn-primary">保存服务</button>
                             <button id="mcp-reset-btn" class="btn-secondary">清空</button>
                         </div>
@@ -697,9 +894,63 @@
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
     <!-- 管理与配置面板 (符合第39条复用规范) -->
+    <div id="mcp-edit-modal" class="modal-overlay hidden" style="z-index: 1900;">
+        <div class="modal mcp-edit-modal">
+            <div class="mcp-edit-header">
+                <h3>编辑 MCP 服务</h3>
+            </div>
+            <div class="mcp-edit-form">
+                <input type="hidden" id="mcp-edit-id">
+                <select id="mcp-edit-source-type" class="form-input" disabled>
+                    <option value="external">外部 MCP Server</option>
+                    <option value="database">数据库 MCP Server</option>
+                </select>
+                <input id="mcp-edit-name" class="form-input" placeholder="服务名称">
+                <div id="mcp-edit-external-fields" class="mcp-field-group">
+                    <input id="mcp-edit-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
+                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="API Key，可选">
+                </div>
+                <div id="mcp-edit-db-fields" class="mcp-field-group hidden">
+                    <div class="mcp-form-row">
+                        <select id="mcp-edit-db-type" class="form-input">
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                            <option value="sqlserver">SQL Server</option>
+                            <option value="sqlite">SQLite</option>
+                            <option value="mongodb">MongoDB</option>
+                        </select>
+                        <input id="mcp-edit-db-port" class="form-input" type="number" placeholder="端口">
+                    </div>
+                    <input id="mcp-edit-db-host" class="form-input" placeholder="主机地址，例如 10.0.0.8">
+                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填文件路径">
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-db-user" class="form-input" placeholder="用户名">
+                        <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码">
+                    </div>
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-db-schema" class="form-input" placeholder="Schema，可选">
+                        <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
+                    </div>
+                    <label class="mcp-shared-row">
+                        <input type="checkbox" id="mcp-edit-db-ssl"> 启用 SSL / TLS
+                    </label>
+                </div>
+                <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选"></textarea>
+                <label class="mcp-shared-row admin-only hidden">
+                    <input type="checkbox" id="mcp-edit-shared"> 作为全局共享服务
+                </label>
+                <div class="mcp-edit-actions">
+                    <button id="mcp-edit-test-db-btn" class="btn-secondary hidden" type="button">测试连接</button>
+                    <button id="mcp-edit-save-btn" class="btn-primary" type="button">保存修改</button>
+                    <button id="mcp-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="admin-container" class="modal-overlay hidden">
         <div class="modal admin-panel">
             <div class="admin-layout">
@@ -713,7 +964,6 @@
                     <button id="tab-models" class="admin-tab">模型配置</button>
                     <button id="tab-prompts" class="admin-tab">指令中心</button>
                     <button id="tab-attachments" class="admin-tab">附件库</button>
-                    <button id="tab-labs" class="admin-tab admin-only hidden">实验室功能</button>
                     <button id="tab-users" class="admin-tab admin-only hidden">用户管理</button>
                     <button id="tab-logs" class="admin-tab admin-only hidden">审计日志</button>
                     <button id="tab-monitor" class="admin-tab admin-only hidden">系统监控</button>
@@ -743,45 +993,6 @@
                         <div class="stat-card trend-card" style="margin-top: 20px;">
                             <h4>近 30 天 Token 趋势</h4>
                             <canvas id="usage-trend-chart" height="220"></canvas>
-                        </div>
-                    </section>
-
-                    <!-- 实验室功能 -->
-                    <section id="tab-content-labs" class="admin-tab-content hidden">
-                        <div
-                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <div>
-                                <h3 style="margin: 0;">实验室功能</h3>
-                                <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">
-                                    抢先体验研发中的实验性特性，功能可能不够稳定。</p>
-                            </div>
-                            <button id="labs-refresh-btn" class="btn-secondary">刷新</button>
-                        </div>
-                        <div class="lab-grid">
-                            <div class="lab-card">
-                                <span class="lab-tag">实验性</span>
-                                <div class="lab-card-header">
-                                    <div class="lab-card-icon">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-                                            viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"
-                                            stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z">
-                                            </path>
-                                        </svg>
-                                    </div>
-                                    <label class="switch">
-                                        <input type="checkbox" id="setting-rag-enabled">
-                                        <span class="switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="lab-card-body">
-                                    <h4>RAG 知识库检索</h4>
-                                    <p>开启后管理员和用户可以上传知识库文档，后端会自动进行分片与向量化处理，实现基于私有文档的 AI 问答能力。</p>
-                                </div>
-                            </div>
-
-                            <!-- 可以在此添加更多实验功能卡片 -->
                         </div>
                     </section>
 
@@ -840,7 +1051,7 @@
                                         <th style="width: 160px;">名称</th>
                                         <th style="width: 250px;">后端 URL</th>
                                         <th style="width: 70px;">每日额度</th>
-                                        <th style="width: 70px;">能力</th>
+                                        <th style="width: 72px;">能力</th>
                                         <th style="width: 80px;">可见部门</th>
                                         <th style="width: 80px;">添加用户</th>
                                         <th style="width: 70px;">状态</th>
@@ -1431,10 +1642,13 @@
     </style>
     <!-- 召回测试弹窗 (RAG Debug) -->
     <div id="rag-debug-modal" class="modal-overlay hidden">
-        <div class="modal" style="width: min(1040px, calc(100vw - 36px)); min-height: 520px; max-height: min(850px, calc(100vh - 36px)); display: flex; flex-direction: column; padding: 24px;">
-            <div class="modal-header" style="margin-bottom: 20px; border-bottom: none; padding-bottom: 0;">
-                <h3 style="font-size: 1.15rem; color: var(--text-main);">知识库召回测试</h3>
-                <p class="model-modal-desc" style="margin-top: 4px;">测试知识库检索准确度，查看匹配详情。</p>
+        <div class="modal rag-debug-modal">
+            <div class="rag-debug-modal-head">
+                <div>
+                    <h3>知识库召回测试</h3>
+                    <p class="model-modal-desc">测试知识库检索准确度，查看匹配详情。</p>
+                </div>
+                <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" type="button">关闭</button>
             </div>
             
             <div class="modal-form" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
@@ -1472,10 +1686,6 @@
                         请输入测试问题并点击“开始测试”
                     </div>
                 </div>
-            </div>
-            
-            <div class="modal-footer" style="margin-top: 20px; padding-top: 0; border-top: none;">
-                <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" style="height: 34px; padding: 0 20px; font-size: 0.85rem;">关闭</button>
             </div>
         </div>
     </div>

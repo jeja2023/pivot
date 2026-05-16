@@ -8,7 +8,8 @@ const { assertSafeOutboundUrl, encryptSecret, validateModelUrl } = require('../s
 const {
     normalizeTags,
     normalizeBooleanFlag,
-    getAccessibleModel
+    getAccessibleModel,
+    getUserRunnableModels
 } = require('../services/models');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
@@ -30,22 +31,15 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
     const router = express.Router();
 
     router.get('/models/available', authMiddleware, asyncHandler(async (req, res) => {
-        let where = "WHERE m.user_id IS NULL AND COALESCE(m.status, 'active') = 'active'";
-        let params = [];
-        
-        if (req.user.role !== 'admin') {
-            where += " AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)";
-            params.push(`,${(req.user.unit || '').trim()},`);
-        }
-
-        const sql = `
-            SELECT id, name, model_name, supports_vision, supports_reasoning
-            FROM models m
-            ${where}
-            ORDER BY m.is_default DESC, m.id ASC
-        `;
-        const models = db.prepare(sql).all(...params).map(model => ({
-            ...model,
+        const models = getUserRunnableModels(req.user).map(model => ({
+            id: model.id,
+            user_id: model.user_id,
+            name: model.name,
+            model_name: model.model_name,
+            daily_token_limit: model.daily_token_limit,
+            allowed_units: model.allowed_units,
+            supports_vision: model.supports_vision,
+            supports_reasoning: model.supports_reasoning,
             type: 'chat',
             endpoint: '/v1/chat/completions',
             capabilities: [

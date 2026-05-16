@@ -167,6 +167,15 @@ window.formatChatCompactDateTime = formatChatCompactDateTime;
 window.formatSessionListTime = formatSessionListTime;
 window.formatSessionGroupDate = formatSessionGroupDate;
 
+window.scrollMessagesToBottom = function() {
+    const container = document.getElementById('message-container');
+    if (!container) return;
+    const apply = () => { container.scrollTop = container.scrollHeight; };
+    apply();
+    requestAnimationFrame(apply);
+    setTimeout(apply, 80);
+};
+
 const customRenderer = new marked.Renderer();
 customRenderer.code = (code, infostring, escaped) => {
     if (typeof code === 'object' && code !== null) {
@@ -373,7 +382,7 @@ function appendMessage(role, content, id = null, stats = null) {
     `;
     container.appendChild(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
-    container.scrollTop = container.scrollHeight;
+    window.scrollMessagesToBottom?.();
     return div.querySelector('.message-content');
 }
 

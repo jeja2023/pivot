@@ -81,6 +81,52 @@ function getAccessibleModel(modelId, user) {
     return model;
 }
 
+function getUserRunnableModels(user) {
+    if (!user?.id) return [];
+    const rows = db.prepare(`
+        SELECT *
+        FROM models
+        WHERE COALESCE(status, 'active') = 'active'
+          AND (user_id IS NULL OR user_id = ?)
+        ORDER BY is_default DESC, id ASC
+    `).all(user.id);
+
+    return rows.filter(model => {
+        if (model.user_id === user.id) return true;
+        if (model.user_id) return false;
+        if (!model.allowed_units) return true;
+        const units = model.allowed_units.split(',').map(unit => unit.trim()).filter(Boolean);
+        const userUnit = (user.unit || '').trim();
+        return Boolean(userUnit && units.includes(userUnit));
+    });
+}
+
+function getRunnableModelForUser(modelId, user) {
+    if (!modelId || !user?.id) return null;
+    const isNumeric = /^\d+$/.test(String(modelId));
+    const sql = isNumeric
+        ? `SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id IS NULL OR user_id = ?)`
+        : `SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id IS NULL OR user_id = ?)`;
+    const params = isNumeric ? [modelId, modelId, user.id] : [modelId, user.id];
+    const model = db.prepare(sql).get(...params);
+    if (!model) return null;
+    if (model.user_id && model.user_id !== user.id) return null;
+    if (!model.user_id && model.allowed_units) {
+        const units = model.allowed_units.split(',').map(unit => unit.trim()).filter(Boolean);
+        const userUnit = (user.unit || '').trim();
+        if (!userUnit || !units.includes(userUnit)) return null;
+    }
+    if (model.api_key) {
+        try {
+            model.api_key = decryptSecret(model.api_key);
+        } catch (e) {
+            model.api_key = '';
+            model.secret_error = e.message || '模型密钥解密失败';
+        }
+    }
+    return model;
+}
+
 function getModelDailyUsage(userId, modelId) {
     const messageTokens = db.prepare(`
         SELECT COALESCE(SUM(token_count), 0) AS tokens
@@ -161,6 +207,8 @@ module.exports = {
     contentContainsVisionInput,
     messagesContainVisionInput,
     getAccessibleModel,
+    getRunnableModelForUser,
+    getUserRunnableModels,
     getModelDailyUsage,
     getOrCreateEmbeddingUsageModel,
     recordModelTokenUsage,

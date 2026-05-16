@@ -40,6 +40,7 @@ const {
     updateLastAssistantStats
 } = require('../services/chat-messages');
 const { maybeGenerateTitle } = require('../services/chat-title');
+const { executeMcpTool, listCachedMcpTools } = require('../services/mcp-client');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -125,6 +126,200 @@ function buildVisionUnsupportedMessage(modelCfg) {
     return `${name} 未配置视觉输入能力，不能处理图片或扫描件内容。请切换到已开启“视觉输入（图片/扫描件）”的模型，或联系管理员在模型配置中启用该能力。普通文档会先抽取文本，不受此限制。`;
 }
 
+function compactText(value, maxLength = 12000) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    if (!text) return '';
+    return text.length > maxLength ? `${text.slice(0, maxLength)}\n...内容已截断...` : text;
+}
+
+function extractModelText(data) {
+    const choiceContent = data?.choices?.[0]?.message?.content;
+    if (typeof choiceContent === 'string') return choiceContent;
+    if (Array.isArray(choiceContent)) {
+        return choiceContent.map(part => part?.text || part?.content || '').filter(Boolean).join('\n');
+    }
+    if (typeof data?.output_text === 'string') return data.output_text;
+    if (Array.isArray(data?.output)) {
+        return data.output.map(item => {
+            if (typeof item?.content === 'string') return item.content;
+            if (Array.isArray(item?.content)) {
+                return item.content.map(part => part?.text || part?.content || '').filter(Boolean).join('\n');
+            }
+            return '';
+        }).filter(Boolean).join('\n');
+    }
+    return '';
+}
+
+function parsePlannerJson(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced ? fenced[1].trim() : raw;
+    try {
+        return JSON.parse(candidate);
+    } catch (e) {
+        const start = candidate.indexOf('{');
+        const end = candidate.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            try {
+                return JSON.parse(candidate.slice(start, end + 1));
+            } catch (inner) {}
+        }
+    }
+    return null;
+}
+
+function formatMcpToolsForPlanner(tools) {
+    return tools.slice(0, 40).map(tool => ({
+        name: tool.fullName,
+        server: tool.serverName,
+        tool: tool.name,
+        description: tool.description || '',
+        input_schema: tool.input_schema || { type: 'object' }
+    }));
+}
+
+function buildChatMcpPlannerMessages(history, userPrompt, tools) {
+    const recentMessages = history
+        .filter(message => ['user', 'assistant'].includes(message.role) && typeof message.content === 'string')
+        .slice(-8)
+        .map(message => ({ role: message.role, content: compactText(message.content, 1200) }));
+    return [
+        {
+            role: 'system',
+            content: [
+                '你是 Pivot 普通对话里的 MCP 工具调度器。',
+                '你只能返回严格 JSON，不要返回 Markdown、解释或多余文本。',
+                'Schema: {"action":"none|tool","tool":"mcp.server.tool","input":{},"reason":"简短中文原因"}',
+                '只有当用户问题明确需要访问已保存 MCP 服务中的外部数据、数据库结构或数据库查询结果时，才选择 action=tool。',
+                '一轮最多选择一个工具。数据库查询必须保持只读，只生成 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等读取类输入。',
+                '如果用户只是闲聊、写作、总结当前上下文或知识库足够回答，返回 {"action":"none","reason":"不需要 MCP"}。',
+                '可用 MCP 工具:',
+                compactText(formatMcpToolsForPlanner(tools), 18000)
+            ].join('\n')
+        },
+        {
+            role: 'user',
+            content: [
+                '最近对话:',
+                compactText(recentMessages, 6000),
+                '',
+                '用户本轮问题:',
+                userPrompt
+            ].join('\n')
+        }
+    ];
+}
+
+async function callChatMcpPlanner(modelCfg, messages) {
+    const modelName = modelCfg.model_name || modelCfg.name || 'default';
+    const headers = buildModelHeaders(modelCfg, { acceptJson: true });
+    if (shouldUseResponsesApi(modelName)) {
+        try {
+            const response = await axios({
+                method: 'post',
+                url: buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false }),
+                headers,
+                data: {
+                    model: modelName,
+                    input: convertChatMessagesToResponsesInput(messages),
+                    stream: false,
+                    temperature: 0,
+                    max_output_tokens: 600
+                },
+                responseType: 'json',
+                timeout: 120000,
+                proxy: false,
+                httpAgent,
+                httpsAgent
+            });
+            return extractModelText(response.data);
+        } catch (e) {
+            if (![404, 405, 502, 503].includes(e.response?.status)) throw e;
+        }
+    }
+    const response = await axios({
+        method: 'post',
+        url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }),
+        headers,
+        data: {
+            model: modelName,
+            messages,
+            stream: false,
+            temperature: 0,
+            max_tokens: 600
+        },
+        responseType: 'json',
+        timeout: 120000,
+        proxy: false,
+        httpAgent,
+        httpsAgent
+    });
+    return extractModelText(response.data);
+}
+
+function extractMcpResultText(result) {
+    if (Array.isArray(result?.content)) {
+        const text = result.content
+            .map(item => item?.text || item?.content || '')
+            .filter(Boolean)
+            .join('\n');
+        if (text) return text;
+    }
+    if (result?.structuredContent !== undefined) return JSON.stringify(result.structuredContent, null, 2);
+    return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+}
+
+async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log }) {
+    if (!tools.length) {
+        writeSse(JSON.stringify({ type: 'mcp', status: 'empty', message: '没有可用的 MCP 工具缓存' }));
+        return '';
+    }
+    try {
+        writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用 MCP 工具' }));
+        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, tools));
+        const plan = parsePlannerJson(plannerText);
+        const toolNames = new Set(tools.map(tool => tool.fullName));
+        if (!plan || plan.action !== 'tool' || !toolNames.has(plan.tool)) {
+            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用 MCP 工具' }));
+            return '';
+        }
+
+        const selected = tools.find(tool => tool.fullName === plan.tool);
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'running',
+            tool: plan.tool,
+            serverName: selected?.serverName || '',
+            message: `正在调用 MCP 工具：${selected?.serverName || 'MCP'} / ${selected?.name || plan.tool}`
+        }));
+        const result = await executeMcpTool(plan.tool, plan.input || {}, user);
+        const resultText = compactText(extractMcpResultText(result), 18000);
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'done',
+            tool: plan.tool,
+            message: 'MCP 工具调用完成，正在生成回答'
+        }));
+        return [
+            '以下是本轮普通对话启用 MCP 后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+            `工具: ${plan.tool}`,
+            `调用原因: ${plan.reason || ''}`,
+            '结果:',
+            resultText
+        ].join('\n');
+    } catch (e) {
+        log?.warn?.({ err: e.message }, '普通对话 MCP 调用失败');
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'error',
+            message: `MCP 工具调用失败：${e.message}`
+        }));
+        return `本轮尝试调用 MCP 工具失败：${e.message}`;
+    }
+}
+
 function createChatRouter({
     authMiddleware,
     chatLimiter,
@@ -143,6 +338,8 @@ function createChatRouter({
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
         const { content, displayContent, regenerate } = req.body;
+        const mcpEnabled = Boolean(req.body.mcpEnabled) && Boolean(req.body.mcpConfirmed);
+        const ragEnabled = req.body.ragEnabled !== false;
         const sessionId = String(req.body.sessionId || '').trim();
         const modelId = req.body.modelId ? parseInt(req.body.modelId) : null;
         const userId = req.user.id;
@@ -324,7 +521,7 @@ function createChatRouter({
         }
 
         let history = await getContext(sessionId, userId, modelCfg);
-        if (typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
+        if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
             const ragContext = await retrieveContext(userId, modelContent);
             if (ragContext) {
                 history.push({ role: 'system', content: ragContext });
@@ -350,6 +547,22 @@ function createChatRouter({
                 releaseSemaphore();
                 writeSse(JSON.stringify({ error: '对话内容不能为空', code: 'EMPTY_MESSAGE' }));
                 return res.end();
+            }
+        }
+
+        if (mcpEnabled) {
+            const mcpTools = listCachedMcpTools(null, req.user);
+            const mcpContext = await maybeBuildMcpChatContext({
+                modelCfg,
+                history: visionHistory,
+                userPrompt: modelContent,
+                tools: mcpTools,
+                user: req.user,
+                writeSse,
+                log: req.log
+            });
+            if (mcpContext) {
+                visionHistory.push({ role: 'system', content: mcpContext });
             }
         }
 

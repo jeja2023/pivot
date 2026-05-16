@@ -127,6 +127,22 @@ async function readChatErrorMessage(response) {
     }
 }
 
+function confirmChatMcpUse() {
+    const title = '允许调用 MCP 工具';
+    const message = '本轮对话可能访问已保存的 MCP 服务或数据库 MCP 工具。数据库工具会继续受只读限制保护，确认后才会让模型按需调用。';
+    return new Promise(resolve => {
+        if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
+        window.showConfirm(title, message, () => resolve(true));
+        const cancelBtn = document.getElementById('modal-confirm-cancel');
+        const overlay = document.getElementById('confirm-container');
+        const settleCancel = () => resolve(false);
+        cancelBtn?.addEventListener('click', settleCancel, { once: true });
+        overlay?.addEventListener('click', (event) => {
+            if (event.target === overlay) settleCancel();
+        }, { once: true });
+    });
+}
+
 window.createSession = async function(title) {
     const res = await apiFetch(API_BASE + '/sessions', {
         method: 'POST',
@@ -141,8 +157,10 @@ window.createSession = async function(title) {
     return session;
 }
 
-window.selectSession = async function(id, title) {
+window.selectSession = async function(id, title, options = {}) {
+    window.showMainWorkspace?.('chat');
     currentSessionId = id;
+    window.markActiveSessionInList?.(id);
     if (title) document.getElementById('current-title').innerText = title;
     
     const res = await apiFetch(API_BASE + `/sessions/${id}`);
@@ -164,7 +182,8 @@ window.selectSession = async function(id, title) {
             tps: m.tokens_per_sec,
             tokenCount: m.token_count
         }));
-    if (window.loadSessions) window.loadSessions();
+    window.scrollMessagesToBottom?.();
+    if (options.refreshSidebar && window.loadSessions) window.loadSessions();
 }
 
 window.sendMessage = async function(isRegenerate = false) {
@@ -192,6 +211,14 @@ window.sendMessage = async function(isRegenerate = false) {
             .map(a => '\n\n---\n【参考文档: ' + a.name + '】\n' + a.extractedText + '\n---')
             .join('');
         if (docTexts) content += docTexts;
+    }
+
+    const ragEnabled = Boolean(document.getElementById('chat-rag-enabled')?.checked);
+    const mcpEnabled = Boolean(document.getElementById('chat-mcp-enabled')?.checked);
+    let mcpConfirmed = false;
+    if (mcpEnabled) {
+        mcpConfirmed = await confirmChatMcpUse();
+        if (!mcpConfirmed) return;
     }
 
     document.getElementById('user-input').value = '';
@@ -232,7 +259,16 @@ window.sendMessage = async function(isRegenerate = false) {
         const response = await apiFetch(API_BASE + '/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-            body: JSON.stringify({ sessionId: currentSessionId, content, displayContent: stripInternalReferenceText(displayContent || content), modelId, regenerate: isRegenerate }),
+            body: JSON.stringify({
+                sessionId: currentSessionId,
+                content,
+                displayContent: stripInternalReferenceText(displayContent || content),
+                modelId,
+                regenerate: isRegenerate,
+                ragEnabled,
+                mcpEnabled,
+                mcpConfirmed
+            }),
             signal: currentAbortController.signal
         });
 
@@ -243,6 +279,7 @@ window.sendMessage = async function(isRegenerate = false) {
             const data = await response.json();
             fullAiContent = data.content || data.error || '';
             if (textBody) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            window.scrollMessagesToBottom?.();
             if (window.loadSessions) window.loadSessions();
             return;
         }
@@ -295,6 +332,11 @@ window.sendMessage = async function(isRegenerate = false) {
                     }
                     return;
                 }
+                if (data.type === 'mcp') {
+                    updateAssistantStatus(data.message || '正在处理 MCP 工具');
+                    if (data.status === 'error') showToast(data.message || 'MCP 工具调用失败', 'warning');
+                    return;
+                }
                 if (data.error) throw new Error(data.detail || data.error);
                 if (data.content) {
                     if (!firstTokenTime) firstTokenTime = Date.now();
@@ -318,6 +360,7 @@ window.sendMessage = async function(isRegenerate = false) {
             if (container.scrollHeight - container.scrollTop - container.clientHeight < 120) container.scrollTop = container.scrollHeight;
         }
         flushStreamRender();
+        window.scrollMessagesToBottom?.();
 
         const finalElapsed = (Date.now() - startTime) / 1000;
         const finalTps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
@@ -330,14 +373,15 @@ window.sendMessage = async function(isRegenerate = false) {
         // 延迟刷新侧边栏，等待后台标题生成完成
         setTimeout(() => {
             if (window.loadSessions) window.loadSessions();
-            selectSession(currentSessionId);
         }, 1500);
     } catch (e) {
         if (e.name === 'AbortError') {
             fullAiContent += '\n\n[已由用户中断生成]';
             textBody.innerHTML = renderAiMessage(fullAiContent);
+            window.scrollMessagesToBottom?.();
         } else {
             updateAssistantStatus(e.message, 'error');
+            window.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }
     } finally {

@@ -15,6 +15,47 @@ window.resizeUserInput = () => {
 userInput?.addEventListener('input', resizeUserInput);
 userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
 
+const chatMcpToggle = document.getElementById('chat-mcp-enabled');
+if (chatMcpToggle) {
+    chatMcpToggle.checked = localStorage.getItem('pivot_chat_mcp_enabled') === 'true';
+    chatMcpToggle.addEventListener('change', () => {
+        localStorage.setItem('pivot_chat_mcp_enabled', chatMcpToggle.checked ? 'true' : 'false');
+    });
+}
+const chatRagToggle = document.getElementById('chat-rag-enabled');
+if (chatRagToggle) {
+    chatRagToggle.checked = localStorage.getItem('pivot_chat_rag_enabled') === 'true';
+    chatRagToggle.addEventListener('change', () => {
+        localStorage.setItem('pivot_chat_rag_enabled', chatRagToggle.checked ? 'true' : 'false');
+    });
+}
+
+window.showMainWorkspace = function(view = 'chat') {
+    const target = ['chat', 'agent', 'knowledge', 'mcp'].includes(view) ? view : 'chat';
+    const chatContainer = document.querySelector('.chat-container');
+    const viewMap = {
+        chat: 'chat-workspace-view',
+        agent: 'agent-workbench-modal',
+        knowledge: 'knowledge-workbench-modal',
+        mcp: 'mcp-workbench-modal'
+    };
+    if (target !== 'chat' && chatContainer) {
+        const targetPanel = document.getElementById(viewMap[target]);
+        if (targetPanel && targetPanel.parentElement !== chatContainer) {
+            chatContainer.appendChild(targetPanel);
+        }
+    }
+    Object.entries(viewMap).forEach(([key, id]) => {
+        document.getElementById(id)?.classList.toggle('hidden', key !== target);
+    });
+    document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.workspaceView === target);
+    });
+    document.querySelector('.chat-container')?.setAttribute('data-active-workspace', target);
+    if (target !== 'agent') window.updateAgentAutoRefresh?.();
+    return target;
+};
+
 // --- 全局确认弹窗 ---
 let confirmCallback = null;
 window.showConfirm = (title, message, callback) => {
@@ -195,8 +236,9 @@ const bind = (id, fn, event = 'click') => document.getElementById(id)?.addEventL
 
 // 会话管理
 bind('new-chat-btn', async () => {
+    window.showMainWorkspace('chat');
     const s = await createSession('新对话');
-    if (s) selectSession(s.id, s.title);
+    if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
 bind('send-btn', sendMessage);
 bind('stop-btn', () => { currentAbortController?.abort(); });
@@ -228,7 +270,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'labs', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
@@ -272,8 +314,6 @@ document.addEventListener('click', async (event) => {
 bind('ops-refresh-btn', () => window.loadOpsSummary());
 bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
-bind('labs-refresh-btn', () => window.loadSettings());
-bind('setting-rag-enabled', () => window.saveSettings(), 'change');
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());
 bind('modal-prompt-cancel', () => window.closePromptModal());
@@ -287,9 +327,12 @@ bind('agent-refresh-btn', () => window.loadAgentWorkbench?.());
 bind('agent-run-btn', () => window.createAgentRun?.());
 bind('agent-audit-btn', () => window.showAgentRunAudit?.());
 window.bindAgentGoalTemplates?.();
+window.bindAgentFilters?.();
 bind('mcp-refresh-btn', () => window.loadMcpWorkbench?.());
 bind('mcp-save-btn', () => window.saveMcpServer?.());
 bind('mcp-reset-btn', () => window.resetMcpForm?.());
+bind('mcp-edit-cancel-btn', () => window.closeMcpEditModal?.());
+bind('mcp-edit-save-btn', () => window.saveMcpServer?.('edit'));
 
 // 知识库管理
 bind('rag-upload-btn', () => document.getElementById('rag-upload-input').click());

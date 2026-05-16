@@ -2,6 +2,7 @@ const { db } = require('../db');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
+const { getUserRunnableModels } = require('./models');
 
 const MAX_TEXT = 12000;
 const isSuperAdmin = (user) => user?.username === 'admin';
@@ -99,21 +100,17 @@ function getBuiltInToolDefinitions(user) {
 }
 
 function getUserAccessibleModels(user) {
-    const params = [];
-    let sql = "SELECT id, name, model_name, user_id, daily_token_limit, allowed_units, supports_vision, supports_reasoning, status FROM models WHERE status = 'active'";
-    if (!isSuperAdmin(user)) {
-        sql += ' AND (user_id IS NULL OR user_id = ?)';
-        params.push(user.id);
-    }
-    sql += ' ORDER BY user_id IS NOT NULL, name ASC';
-    const rows = db.prepare(sql).all(...params);
-    if (isSuperAdmin(user)) return rows;
-    return rows.filter(model => {
-        if (model.user_id === user.id) return true;
-        if (!model.allowed_units) return true;
-        const units = String(model.allowed_units).split(',').map(item => item.trim()).filter(Boolean);
-        return units.length === 0 || units.includes(user.unit);
-    });
+    return getUserRunnableModels(user).map(model => ({
+        id: model.id,
+        name: model.name,
+        model_name: model.model_name,
+        user_id: model.user_id,
+        daily_token_limit: model.daily_token_limit,
+        allowed_units: model.allowed_units,
+        supports_vision: model.supports_vision,
+        supports_reasoning: model.supports_reasoning,
+        status: model.status
+    }));
 }
 
 async function executeBuiltInTool(name, input = {}, user) {

@@ -3,6 +3,10 @@ let agentRunsCache = [];
 let mcpServersCache = [];
 let agentRefreshTimer = null;
 let activeAgentRunId = '';
+let agentToolsCache = [];
+let agentTemplatesCache = [];
+let agentSchedulesCache = [];
+let agentArtifactsCache = [];
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 
@@ -12,7 +16,8 @@ function agentStatusLabel(status) {
         running: '运行中',
         completed: '已完成',
         error: '失败',
-        cancelled: '已停止'
+        cancelled: '已停止',
+        approval_required: '待审批'
     };
     return map[status] || status || '-';
 }
@@ -24,10 +29,36 @@ function isAgentRunActive(status) {
 function agentRunMeta(run) {
     const parts = [];
     if (run.model_name) parts.push(`模型 ${run.model_name}`);
+    if (run.run_mode) parts.push(agentRunModeLabel(run.run_mode));
+    if (run.tool_policy === 'builtin_only') parts.push('仅内置工具');
     if (Number(run.tool_count || 0) > 0) parts.push(`工具 ${run.tool_count}`);
     if (Number(run.error_count || 0) > 0) parts.push(`错误 ${run.error_count}`);
     if (Number(run.step_count || 0) > 0) parts.push(`步骤 ${run.step_count}`);
     return parts.join(' · ');
+}
+
+function agentRunModeLabel(mode) {
+    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式' };
+    return map[mode] || '标准模式';
+}
+
+function agentToolPolicyLabel(policy) {
+    return policy === 'builtin_only' ? '仅内置工具' : '内置 + MCP';
+}
+
+function agentDownload(url) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+function formatAgentTokenUsage(run) {
+    const total = Number(run?.total_tokens || 0);
+    if (!total) return '';
+    return `Token ${total}（入 ${Number(run.input_tokens || 0)} / 出 ${Number(run.output_tokens || 0)}）`;
 }
 
 const formatAgentAuditDate = (dateStr) => {
@@ -144,7 +175,7 @@ function updateAgentModelCaps() {
     const caps = document.getElementById('agent-selected-model-caps');
     const name = document.getElementById('agent-selected-model-name');
     if (!select || !caps || !name) return;
-    const model = (window._cachedModels || []).find(item => String(item.id) === String(select.value));
+    const model = (window._cachedAgentModels || []).find(item => String(item.id) === String(select.value));
     name.textContent = model ? `${model.name}${model.user_id ? ' (个人)' : ''}` : '请选择模型';
     caps.innerHTML = agentModelCapabilityMarkup(model);
 }
@@ -182,12 +213,12 @@ const agentToolDisplayMap = {
 
 function agentToolTitle(tool) {
     const name = typeof tool === 'string' ? tool : tool?.name;
-    if (String(name || '').startsWith('mcp.')) return '外部 MCP 工具';
+    if (String(name || '').startsWith('mcp.')) return 'MCP 工具';
     return tool?.title || agentToolDisplayMap[name]?.title || name || '工具';
 }
 
 function agentToolDescription(tool) {
-    if (String(tool?.name || '').startsWith('mcp.')) return '来自外部 MCP 服务，可由自动化任务按需调用。';
+    if (String(tool?.name || '').startsWith('mcp.')) return '来自已保存的 MCP 服务，可由智能体任务按需调用。';
     return agentToolDisplayMap[tool?.name]?.description || tool?.description || '';
 }
 
@@ -208,15 +239,16 @@ function agentStepTitle(step) {
 async function loadAgentModels() {
     const select = document.getElementById('agent-model-select');
     if (!select) return;
-    const models = window._cachedModels || [];
-    if (models.length === 0 && window.refreshModelSelector) await window.refreshModelSelector();
-    const nextModels = window._cachedModels || [];
+    const res = await apiFetch(`${API_BASE}/models/available`);
+    if (!res.ok) throw new Error('智能体模型列表加载失败');
+    const nextModels = (await res.json()).filter(model => model.type !== 'embedding');
+    window._cachedAgentModels = nextModels;
     select.innerHTML = nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
         .join('');
     const list = document.getElementById('agent-model-list');
     if (list) {
-        list.innerHTML = nextModels.map(model => {
+        list.innerHTML = nextModels.length ? nextModels.map(model => {
             const meta = [];
             meta.push(model.user_id ? '个人模型' : '全局模型');
             if (model.model_name && model.model_name !== model.name) meta.push(model.model_name);
@@ -230,7 +262,7 @@ async function loadAgentModels() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('');
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于智能体的模型</div>';
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -261,17 +293,64 @@ async function loadAgentTools() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
     const visibleTools = (data.tools || []).filter(tool => currentUser?.role === 'admin' || !isAdminOnlyAgentTool(tool));
+    agentToolsCache = visibleTools;
     list.innerHTML = `
         ${visibleTools.map(tool => `
-            <div class="agent-tool-chip ${isAdminOnlyAgentTool(tool) ? 'admin-tool' : ''}">
+            <label class="agent-tool-chip agent-tool-select ${isAdminOnlyAgentTool(tool) ? 'admin-tool' : ''}">
+                <input type="checkbox" data-agent-tool-allow="${agentEscape(tool.name)}" checked>
                 <strong>
                     ${agentEscape(agentToolTitle(tool))}
                     ${isAdminOnlyAgentTool(tool) ? '<em>管理员</em>' : ''}
+                    ${tool.source === 'mcp' ? '<em>MCP</em>' : '<em>内置</em>'}
+                    ${tool.requiresApproval ? '<em>需审批</em>' : ''}
                 </strong>
                 <span>${agentEscape(agentToolDescription(tool))}</span>
-            </div>
+            </label>
         `).join('') || '<div class="empty-state">暂无可用能力</div>'}
     `;
+}
+
+async function loadAgentRuntimeStatus() {
+    const target = document.getElementById('agent-runtime-status');
+    if (!target) return;
+    const res = await apiFetch(`${API_BASE}/agents/runtime`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        target.innerHTML = '';
+        return;
+    }
+    target.innerHTML = `
+        <span>并发 ${Number(data.active || 0)} / ${Number(data.maxConcurrent || 0)}</span>
+        <span>队列 ${Number(data.databaseQueued || data.queued || 0)}</span>
+        <span>我的排队 ${Number(data.userQueued || 0)}</span>
+    `;
+}
+
+async function loadAgentMetrics() {
+    const target = document.getElementById('agent-metrics');
+    if (!target) return;
+    const res = await apiFetch(`${API_BASE}/agents/metrics?days=7`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        target.innerHTML = '';
+        return;
+    }
+    target.innerHTML = `
+        <span>7日任务 ${Number(data.total || 0)}</span>
+        <span>成功率 ${Number(data.successRate || 0)}%</span>
+        <span>失败 ${Number(data.error || 0)}</span>
+        <span>Token ${Number(data.totalTokens || 0)}</span>
+    `;
+}
+
+function filteredAgentRuns() {
+    const status = document.getElementById('agent-filter-status')?.value || '';
+    const query = document.getElementById('agent-filter-query')?.value.trim().toLowerCase() || '';
+    return agentRunsCache.filter(run => {
+        if (status && run.status !== status) return false;
+        if (query && !`${run.title || ''} ${run.goal || ''}`.toLowerCase().includes(query)) return false;
+        return true;
+    });
 }
 
 async function loadAgentRuns() {
@@ -282,20 +361,25 @@ async function loadAgentRuns() {
     if (!res.ok) throw new Error(data.error || '任务列表加载失败');
     agentRunsCache = data.data || [];
     updateAgentAutoRefresh();
+    const displayRuns = filteredAgentRuns();
     if (agentRunsCache.length === 0) {
         list.innerHTML = '';
         activeAgentRunId = '';
         document.getElementById('agent-run-detail').innerHTML = `
             <div class="agent-empty-state agent-empty-hero">
-                <strong>还没有自动化任务</strong>
+                <strong>还没有智能体任务</strong>
                 <span>在左侧输入目标并点击运行后，这里会显示任务记录、执行步骤和最终结果。</span>
             </div>
         `;
         return;
     }
-    const hasSelectedRun = activeAgentRunId && agentRunsCache.some(run => run.id === activeAgentRunId);
-    const selectedRunId = hasSelectedRun ? activeAgentRunId : agentRunsCache[0].id;
-    list.innerHTML = agentRunsCache.map(run => `
+    if (displayRuns.length === 0) {
+        list.innerHTML = '<div class="empty-state agent-empty-state">没有匹配的任务记录。</div>';
+        return;
+    }
+    const hasSelectedRun = activeAgentRunId && displayRuns.some(run => run.id === activeAgentRunId);
+    const selectedRunId = hasSelectedRun ? activeAgentRunId : displayRuns[0].id;
+    list.innerHTML = displayRuns.map(run => `
         <button class="agent-run-item ${run.id === selectedRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}" ${run.id === selectedRunId ? 'aria-current="true"' : ''} title="${agentEscape(run.title || run.goal)}">
             <span class="agent-run-status ${agentEscape(run.status)}">${agentStatusLabel(run.status)}</span>
             <strong>${agentEscape(run.title || run.goal)}</strong>
@@ -334,6 +418,8 @@ window.openAgentRun = async function(runId) {
     const canCancel = isAgentRunActive(run.status);
     const canRerun = !isAgentRunActive(run.status);
     const canDelete = !isAgentRunActive(run.status);
+    const canApprove = run.status === 'approval_required';
+    const tokenUsage = formatAgentTokenUsage(run);
     detail.innerHTML = `
         <div class="agent-progress-summary">
             <div class="agent-progress-bar"><span style="width: ${Math.max(0, Math.min(Number(progress.percent || 0), 100))}%"></span></div>
@@ -342,9 +428,16 @@ window.openAgentRun = async function(runId) {
                 <span>工具 ${Number(progress.toolCount || 0)}</span>
                 <span>错误 ${Number(progress.errorCount || 0)}</span>
                 <span>耗时 ${Number(progress.totalDurationMs || 0)} 毫秒</span>
+                <span>${agentEscape(agentRunModeLabel(run.run_mode))}</span>
+                <span>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</span>
+                ${tokenUsage ? `<span>${agentEscape(tokenUsage)}</span>` : ''}
                 ${canCancel ? `<button class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止</button>` : ''}
+                ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
+                ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">断点续跑</button>` : ''}
+                ${run.final_answer || run.error_message ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
                 ${canDelete ? `<button class="btn-danger-outline" data-agent-delete="${agentEscape(run.id)}">移除记录</button>` : ''}
+                <button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>
             </div>
         </div>
         ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
@@ -354,8 +447,13 @@ window.openAgentRun = async function(runId) {
         </div>
     `;
     detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => window.cancelAgentRun(run.id));
+    detail.querySelector('[data-agent-approve]')?.addEventListener('click', () => window.approveAgentRun(run.id, true));
+    detail.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.approveAgentRun(run.id, false));
     detail.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
+    detail.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.resumeAgentRun(run.id));
+    detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.saveAgentArtifact(run.id));
     detail.querySelector('[data-agent-delete]')?.addEventListener('click', () => window.deleteAgentRun(run.id));
+    detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
 };
 
 function ensureAgentAuditModal() {
@@ -368,7 +466,7 @@ function ensureAgentAuditModal() {
         <div class="modal rag-detail-modal agent-audit-modal">
             <div class="rag-detail-header">
                 <div>
-                    <h3>自动化删除审计</h3>
+                    <h3>智能体删除审计</h3>
                     <p class="model-modal-desc">仅 admin 超级管理员可查看，普通用户移除的任务记录会保留在这里。</p>
                 </div>
                 <button type="button" id="agent-audit-close-btn" class="btn-danger-outline">关闭</button>
@@ -403,7 +501,7 @@ function ensureAgentAuditModal() {
 
 function renderAgentAuditRows(items = []) {
     if (!items.length) {
-        return '<tr><td colspan="8" class="text-center muted-text">暂无已移除的自动化任务记录</td></tr>';
+        return '<tr><td colspan="8" class="text-center muted-text">暂无已移除的智能体任务记录</td></tr>';
     }
     return items.map((item, index) => {
         const userName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
@@ -438,37 +536,227 @@ function updateAgentAutoRefresh() {
         agentRefreshTimer = setInterval(async () => {
             try {
                 await loadAgentRuns();
+                await loadAgentRuntimeStatus();
+                await loadAgentMetrics();
                 if (activeAgentRunId) await window.openAgentRun(activeAgentRunId);
             } catch (e) {}
         }, 3000);
     }
 }
 
+function getSelectedAgentToolAllowlist() {
+    const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
+    if (!checked.length || checked.length === agentToolsCache.length) return [];
+    return checked;
+}
+
+function getAgentContextConfig() {
+    return {
+        mode: document.getElementById('agent-context-mode')?.value || 'auto',
+        notes: document.getElementById('agent-context-notes')?.value || ''
+    };
+}
+
+function getAgentRunPayload(goalOverride = '') {
+    const goal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
+    const allowMcp = document.getElementById('agent-allow-mcp')?.checked !== false;
+    return {
+        goal,
+        modelId: document.getElementById('agent-model-select')?.value,
+        maxSteps: document.getElementById('agent-max-steps')?.value || 5,
+        runMode: document.getElementById('agent-run-mode')?.value || 'standard',
+        toolPolicy: allowMcp ? 'all' : 'builtin_only',
+        approvalPolicy: document.getElementById('agent-approval-policy')?.value || 'safe_mcp_auto',
+        maxTokenBudget: document.getElementById('agent-token-budget')?.value || 0,
+        retryLimit: document.getElementById('agent-retry-limit')?.value || 1,
+        toolAllowlist: getSelectedAgentToolAllowlist(),
+        contextConfig: getAgentContextConfig(),
+        sessionId: window.currentSessionId || null
+    };
+}
+
+function applyAgentTemplate(template) {
+    if (!template) return;
+    const goalInput = document.getElementById('agent-goal-input');
+    if (goalInput) goalInput.value = template.goal_template || '';
+    const runMode = document.getElementById('agent-run-mode');
+    if (runMode) runMode.value = template.run_mode || 'standard';
+    const allowMcp = document.getElementById('agent-allow-mcp');
+    if (allowMcp) allowMcp.checked = template.tool_policy !== 'builtin_only';
+    const approval = document.getElementById('agent-approval-policy');
+    if (approval) approval.value = template.approval_policy || 'safe_mcp_auto';
+    const steps = document.getElementById('agent-max-steps');
+    if (steps) steps.value = template.max_steps || 5;
+    const budget = document.getElementById('agent-token-budget');
+    if (budget) budget.value = template.max_token_budget || '';
+    const retry = document.getElementById('agent-retry-limit');
+    if (retry) retry.value = template.retry_limit || 1;
+    const context = agentParsePayload(template.context_config || '{}') || {};
+    const contextMode = document.getElementById('agent-context-mode');
+    if (contextMode) contextMode.value = context.mode || 'auto';
+    const contextNotes = document.getElementById('agent-context-notes');
+    if (contextNotes) contextNotes.value = context.notes || '';
+}
+
+async function loadAgentTemplates() {
+    const list = document.getElementById('agent-template-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/agents/templates`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '模板库加载失败');
+    agentTemplatesCache = data.data || [];
+    list.innerHTML = agentTemplatesCache.length ? agentTemplatesCache.slice(0, 8).map(template => `
+        <button type="button" class="agent-template-item" data-agent-template-id="${agentEscape(template.id)}" title="${agentEscape(template.description || template.goal_template)}">
+            <strong>${agentEscape(template.name)}</strong>
+            <span>${agentEscape(template.scope === 'shared' ? '共享' : '个人')}</span>
+        </button>
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无模板</div>';
+    list.querySelectorAll('[data-agent-template-id]').forEach(btn => {
+        btn.addEventListener('click', () => applyAgentTemplate(agentTemplatesCache.find(item => String(item.id) === String(btn.dataset.agentTemplateId))));
+    });
+}
+
+async function saveCurrentAgentTemplate() {
+    const payload = getAgentRunPayload();
+    if (!payload.goal) return showToast('请先填写任务目标', 'error');
+    const name = window.prompt('模板名称', payload.goal.slice(0, 24));
+    if (!name) return;
+    const res = await apiFetch(`${API_BASE}/agents/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            name,
+            goalTemplate: payload.goal,
+            description: '从智能体工作台保存',
+            ...payload
+        })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '保存模板失败', 'error');
+    showToast('模板已保存', 'success');
+    await loadAgentTemplates();
+}
+
+async function loadAgentSchedules() {
+    const list = document.getElementById('agent-schedule-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/agents/schedules`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '计划队列加载失败');
+    agentSchedulesCache = data.data || [];
+    list.innerHTML = agentSchedulesCache.length ? agentSchedulesCache.slice(0, 5).map(schedule => `
+        <div class="agent-ops-item">
+            <strong>${agentEscape(schedule.name)}</strong>
+            <span>${agentEscape(schedule.frequency === 'daily' ? '每天' : schedule.frequency === 'weekly' ? '每周' : '手动')} · 下次 ${agentEscape(schedule.next_run_at || '-')}</span>
+            <button type="button" class="btn-secondary" data-agent-schedule-run="${agentEscape(schedule.id)}">运行</button>
+        </div>
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无计划</div>';
+    list.querySelectorAll('[data-agent-schedule-run]').forEach(btn => {
+        btn.addEventListener('click', () => runAgentSchedule(btn.dataset.agentScheduleRun));
+    });
+}
+
+async function runAgentSchedule(scheduleId) {
+    const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}/run`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
+    showToast('计划任务已入队', 'success');
+    await loadAgentRuns();
+    await window.openAgentRun(data.run.id);
+}
+
+async function loadAgentNotifications() {
+    const list = document.getElementById('agent-notification-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/agents/notifications?limit=8`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '通知加载失败');
+    const items = data.data || [];
+    list.innerHTML = items.length ? items.slice(0, 5).map(item => `
+        <button type="button" class="agent-ops-item ${item.status === 'unread' ? 'unread' : ''}" data-agent-notification-id="${agentEscape(item.id)}" data-agent-notification-run="${agentEscape(item.run_id || '')}">
+            <strong>${agentEscape(item.title)}</strong>
+            <span>${agentEscape(agentShortText(item.body || item.created_at, 72))}</span>
+        </button>
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无通知</div>';
+    list.querySelectorAll('[data-agent-notification-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            await apiFetch(`${API_BASE}/agents/notifications/${encodeURIComponent(btn.dataset.agentNotificationId)}/read`, { method: 'POST' });
+            if (btn.dataset.agentNotificationRun) await window.openAgentRun(btn.dataset.agentNotificationRun);
+            await loadAgentNotifications();
+        });
+    });
+}
+
+async function loadAgentArtifacts() {
+    const list = document.getElementById('agent-artifact-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/agents/artifacts?limit=8`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '结果沉淀加载失败');
+    agentArtifactsCache = data.data || [];
+    list.innerHTML = agentArtifactsCache.length ? agentArtifactsCache.slice(0, 4).map(item => `
+        <div class="agent-ops-item">
+            <strong>${agentEscape(item.title)}</strong>
+            <span>${agentEscape(formatDateToCN(item.created_at))}</span>
+        </div>
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无沉淀结果</div>';
+}
+
 window.createAgentRun = async function() {
-    const goal = document.getElementById('agent-goal-input')?.value.trim();
-    const modelId = document.getElementById('agent-model-select')?.value;
-    const maxSteps = document.getElementById('agent-max-steps')?.value || 5;
-    if (!goal) return showToast('请输入自动化目标', 'error');
-    if (!modelId) return showToast('请选择模型', 'error');
+    const payload = getAgentRunPayload();
+    const frequency = document.getElementById('agent-schedule-frequency')?.value || 'manual';
+    if (!payload.goal) return showToast('????????', 'error');
+    if (!payload.modelId) return showToast('?????', 'error');
+    if (frequency !== 'manual') {
+        const scheduleRes = await apiFetch(`${API_BASE}/agents/schedules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...payload,
+                name: payload.goal.slice(0, 40),
+                frequency,
+                timeOfDay: document.getElementById('agent-schedule-time')?.value || '09:00',
+                dayOfWeek: document.getElementById('agent-schedule-weekday')?.value || 1
+            })
+        });
+        const scheduleData = await scheduleRes.json().catch(() => ({}));
+        if (!scheduleRes.ok) return showToast(scheduleData.error || '??????', 'error');
+        showToast('????????', 'success');
+        await loadAgentSchedules();
+        return;
+    }
     const res = await apiFetch(`${API_BASE}/agents/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal, modelId, maxSteps, sessionId: window.currentSessionId || null })
+        body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (!res.ok) return showToast(data.error || '创建任务失败', 'error');
-    showToast('自动化任务已启动', 'success');
+    if (!res.ok) return showToast(data.error || '??????', 'error');
+    showToast('????????', 'success');
     document.getElementById('agent-goal-input').value = '';
-    await loadAgentRuns();
+    await Promise.all([loadAgentRuns(), loadAgentSchedules(), loadAgentNotifications()]);
     await window.openAgentRun(data.run.id);
 };
 
+window.approveAgentRun = async function(runId, approve = true) {
+    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '审批处理失败', 'error');
+    showToast(approve ? '已批准工具调用，任务继续排队' : '已拒绝工具调用', 'success');
+    await loadAgentRuns();
+    await window.openAgentRun(runId);
+};
+
 window.cancelAgentRun = function(runId) {
-    showConfirm('停止自动化任务', '确定停止这个正在执行的自动化任务吗？', async () => {
+    showConfirm('停止智能体任务', '确定停止这个正在执行的智能体任务吗？', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '停止失败', 'error');
-        showToast('自动化任务已停止', 'success');
+        showToast('智能体任务已停止', 'success');
         await loadAgentRuns();
         const stillExists = agentRunsCache.some(run => run.id === runId);
         if (stillExists) await window.openAgentRun(runId);
@@ -479,17 +767,38 @@ window.rerunAgentRun = async function(runId) {
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '重新运行失败', 'error');
-    showToast('已创建新的自动化任务', 'success');
+    showToast('已创建新的智能体任务', 'success');
     await loadAgentRuns();
     await window.openAgentRun(data.run.id);
 };
 
+window.resumeAgentRun = async function(runId) {
+    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '断点续跑失败', 'error');
+    showToast('已从上次执行位置创建续跑任务', 'success');
+    await loadAgentRuns();
+    await window.openAgentRun(data.run.id);
+};
+
+window.saveAgentArtifact = async function(runId) {
+    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/artifacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '保存结果失败', 'error');
+    showToast('结果已沉淀', 'success');
+    await loadAgentArtifacts();
+};
+
 window.deleteAgentRun = function(runId) {
-    showConfirm('移除自动化任务记录', '确定从任务列表移除这条自动化任务记录吗？记录会保留给超级管理员审计。', async () => {
+    showConfirm('移除智能体任务记录', '确定从任务列表移除这条智能体任务记录吗？记录会保留给超级管理员审计。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '移除记录失败', 'error');
-        showToast('自动化任务记录已移除', 'success');
+        showToast('智能体任务记录已移除', 'success');
         activeAgentRunId = '';
         const detail = document.getElementById('agent-run-detail');
         if (detail) detail.innerHTML = '';
@@ -499,7 +808,7 @@ window.deleteAgentRun = function(runId) {
 
 window.showAgentRunAudit = async function() {
     if (currentUser?.username !== 'admin') {
-        showToast('仅 admin 超级管理员可查看自动化删除审计', 'error');
+        showToast('仅 admin 超级管理员可查看智能体删除审计', 'error');
         return;
     }
     try {
@@ -518,24 +827,35 @@ window.showAgentRunAudit = async function() {
 window.loadAgentWorkbench = async function() {
     try {
         await loadAgentModels();
-        await Promise.all([loadAgentTools(), loadAgentRuns()]);
+        await Promise.all([
+            loadAgentTools(),
+            loadAgentRuns(),
+            loadAgentRuntimeStatus(),
+            loadAgentMetrics(),
+            loadAgentTemplates(),
+            loadAgentSchedules(),
+            loadAgentNotifications(),
+            loadAgentArtifacts()
+        ]);
     } catch (e) {
         showToast(e.message, 'error');
     }
 };
 
 window.openAgentWorkbench = async function() {
-    const modal = document.getElementById('agent-workbench-modal');
-    if (!modal) return;
-    modal.classList.remove('hidden');
-    modal.querySelectorAll('.admin-root-only').forEach(el => {
+    window.showMainWorkspace?.('agent');
+    const panel = document.getElementById('agent-workbench-modal');
+    if (!panel) return;
+    panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.username !== 'admin');
     });
     await window.loadAgentWorkbench();
+    window.bindAgentFilters?.();
+    window.bindAgentEnterpriseControls?.();
 };
 
 window.closeAgentWorkbench = function() {
-    document.getElementById('agent-workbench-modal')?.classList.add('hidden');
+    window.showMainWorkspace?.('chat');
     updateAgentAutoRefresh();
 };
 
@@ -547,43 +867,232 @@ window.bindAgentGoalTemplates = function() {
             const input = document.getElementById('agent-goal-input');
             if (!input) return;
             input.value = btn.dataset.agentGoalTemplate || '';
+            if (btn.dataset.agentRunMode) {
+                const mode = document.getElementById('agent-run-mode');
+                if (mode) mode.value = btn.dataset.agentRunMode;
+            }
+            if (btn.dataset.agentMcp) {
+                const allowMcp = document.getElementById('agent-allow-mcp');
+                if (allowMcp) allowMcp.checked = btn.dataset.agentMcp === 'true';
+            }
             input.focus();
         });
     });
 };
 
+window.bindAgentFilters = function() {
+    ['agent-filter-status', 'agent-filter-query'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.boundAgentFilter === '1') return;
+        el.dataset.boundAgentFilter = '1';
+        el.addEventListener('input', () => loadAgentRuns());
+        el.addEventListener('change', () => loadAgentRuns());
+    });
+};
+
+window.bindAgentEnterpriseControls = function() {
+    const saveTemplateBtn = document.getElementById('agent-save-template-btn');
+    if (saveTemplateBtn && saveTemplateBtn.dataset.boundAgentTemplateSave !== '1') {
+        saveTemplateBtn.dataset.boundAgentTemplateSave = '1';
+        saveTemplateBtn.addEventListener('click', saveCurrentAgentTemplate);
+    }
+    const frequency = document.getElementById('agent-schedule-frequency');
+    const weekday = document.getElementById('agent-schedule-weekday');
+    if (frequency && frequency.dataset.boundAgentSchedule !== '1') {
+        frequency.dataset.boundAgentSchedule = '1';
+        const update = () => weekday?.classList.toggle('is-disabled', frequency.value !== 'weekly');
+        frequency.addEventListener('change', update);
+        update();
+    }
+};
+
+const mcpDbDefaultPorts = {
+    postgres: 5432,
+    mysql: 3306,
+    sqlserver: 1433,
+    sqlite: '',
+    mongodb: 27017
+};
+
+const mcpDbToolLabels = {
+    postgres: 'PostgreSQL MCP',
+    mysql: 'MySQL / MariaDB MCP',
+    sqlserver: 'SQL Server MCP',
+    sqlite: 'SQLite MCP',
+    mongodb: 'MongoDB MCP'
+};
+
+const mcpToolDisplayMap = {
+    'db.list_tables': {
+        title: '列出数据表',
+        description: '列出当前数据库中可查询的表和视图。'
+    },
+    'db.describe_table': {
+        title: '查看表结构',
+        description: '查看字段、类型、默认值和可空性，辅助模型生成安全 SQL。'
+    },
+    'db.run_readonly_query': {
+        title: '执行只读 SQL',
+        description: '执行只读查询，限制返回行数，并阻止写入或管理类语句。'
+    },
+    'db.list_collections': {
+        title: '列出集合',
+        description: '列出 MongoDB 数据库中的集合。'
+    },
+    'db.sample_collection': {
+        title: '读取集合样本',
+        description: '读取少量文档样本，辅助理解字段结构。'
+    },
+    'db.aggregate': {
+        title: '执行聚合分析',
+        description: '执行只读聚合管道，并限制返回文档数量。'
+    }
+};
+
+function mcpToolTitle(tool) {
+    return mcpToolDisplayMap[tool?.name]?.title || tool?.name || 'MCP 工具';
+}
+
+function mcpToolDescription(tool) {
+    return mcpToolDisplayMap[tool?.name]?.description || tool?.description || tool?.serverName || '';
+}
+
+function mcpFormPrefix(mode = 'create') {
+    return mode === 'edit' ? 'mcp-edit' : 'mcp';
+}
+
+function mcpFormEl(name, mode = 'create') {
+    return document.getElementById(`${mcpFormPrefix(mode)}-${name}`);
+}
+
+function mcpTemplateMarkup() {
+    return `
+        <div class="agent-tool-chip mcp-template-chip" data-mcp-template="database">
+            <strong>数据库 MCP Server</strong>
+            <span>支持 PostgreSQL、MySQL / MariaDB、SQL Server、SQLite、MongoDB。</span>
+        </div>
+    `;
+}
+
+function setMcpSourceType(type, mode = 'create') {
+    const sourceType = type === 'database' ? 'database' : 'external';
+    const select = mcpFormEl('source-type', mode);
+    if (select) select.value = sourceType;
+    mcpFormEl('external-fields', mode)?.classList.toggle('hidden', sourceType !== 'external');
+    mcpFormEl('db-fields', mode)?.classList.toggle('hidden', sourceType !== 'database');
+    mcpFormEl('test-db-btn', mode)?.classList.toggle('hidden', sourceType !== 'database');
+    const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
+    const port = mcpFormEl('db-port', mode);
+    if (sourceType === 'database' && port && !port.value) port.value = mcpDbDefaultPorts[dbType] || '';
+    updateMcpDbTypeFields(mode);
+}
+
+function updateMcpDbTypeFields(mode = 'create') {
+    const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
+    mcpFormEl('db-host', mode)?.classList.toggle('hidden', dbType === 'sqlite');
+    mcpFormEl('db-port', mode)?.classList.toggle('hidden', dbType === 'sqlite');
+    mcpFormEl('db-user', mode)?.classList.toggle('hidden', dbType === 'sqlite');
+    mcpFormEl('db-password', mode)?.classList.toggle('hidden', dbType === 'sqlite');
+}
+
+function bindMcpFormControls(mode = 'create') {
+    const sourceType = mcpFormEl('source-type', mode);
+    if (sourceType && sourceType.dataset.boundMcpSource !== '1') {
+        sourceType.dataset.boundMcpSource = '1';
+        sourceType.addEventListener('change', () => setMcpSourceType(sourceType.value, mode));
+    }
+    const dbType = mcpFormEl('db-type', mode);
+    if (dbType && dbType.dataset.boundMcpType !== '1') {
+        dbType.dataset.boundMcpType = '1';
+        dbType.addEventListener('change', () => {
+            const port = mcpFormEl('db-port', mode);
+            if (port) port.value = mcpDbDefaultPorts[dbType.value] || '';
+            updateMcpDbTypeFields(mode);
+        });
+    }
+    const testButton = mcpFormEl('test-db-btn', mode);
+    if (testButton && testButton.dataset.boundMcpTest !== '1') {
+        testButton.dataset.boundMcpTest = '1';
+        testButton.addEventListener('click', () => window.testMcpDatabaseConnection(mode));
+    }
+    updateMcpDbTypeFields(mode);
+}
+
 window.openMcpWorkbench = async function() {
-    const modal = document.getElementById('mcp-workbench-modal');
-    if (!modal) return;
-    modal.classList.remove('hidden');
-    document.querySelectorAll('#mcp-workbench-modal .admin-only').forEach(el => {
+    window.showMainWorkspace?.('mcp');
+    const panel = document.getElementById('mcp-workbench-modal');
+    if (!panel) return;
+    bindMcpFormControls();
+    setMcpSourceType(document.getElementById('mcp-source-type')?.value || 'external');
+    panel.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.username !== 'admin');
     });
     await window.loadMcpWorkbench?.();
 };
 
 window.closeMcpWorkbench = function() {
-    document.getElementById('mcp-workbench-modal')?.classList.add('hidden');
+    window.showMainWorkspace?.('chat');
+};
+
+window.closeMcpEditModal = function() {
+    document.getElementById('mcp-edit-modal')?.classList.add('hidden');
 };
 
 window.resetMcpForm = function() {
-    ['mcp-id', 'mcp-name', 'mcp-url', 'mcp-key', 'mcp-desc'].forEach(id => {
+    [
+        'mcp-id', 'mcp-name', 'mcp-url', 'mcp-key', 'mcp-desc',
+        'mcp-db-host', 'mcp-db-port', 'mcp-db-name', 'mcp-db-user',
+        'mcp-db-password', 'mcp-db-schema', 'mcp-db-max-rows'
+    ].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    const shared = document.getElementById('mcp-shared');
+    setMcpSourceType('external', 'create');
+    const dbType = mcpFormEl('db-type');
+    if (dbType) dbType.value = 'postgres';
+    updateMcpDbTypeFields('create');
+    const dbSsl = mcpFormEl('db-ssl');
+    if (dbSsl) dbSsl.checked = false;
+    const shared = mcpFormEl('shared');
     if (shared) shared.checked = false;
 };
 
-function fillMcpForm(server) {
-    document.getElementById('mcp-id').value = server.id || '';
-    document.getElementById('mcp-name').value = server.name || '';
-    document.getElementById('mcp-url').value = server.base_url || '';
-    document.getElementById('mcp-key').value = server.has_api_key ? '********' : '';
-    document.getElementById('mcp-desc').value = server.description || '';
-    const shared = document.getElementById('mcp-shared');
+function fillMcpForm(server, mode = 'create') {
+    const database = server.database_connection || {};
+    setMcpSourceType(server.server_type === 'database' ? 'database' : 'external', mode);
+    mcpFormEl('id', mode).value = server.id || '';
+    mcpFormEl('name', mode).value = server.name || '';
+    mcpFormEl('url', mode).value = server.base_url || '';
+    mcpFormEl('key', mode).value = server.has_api_key ? '********' : '';
+    mcpFormEl('desc', mode).value = server.description || '';
+    if (server.server_type === 'database') {
+        mcpFormEl('db-type', mode).value = database.database_type || 'postgres';
+        mcpFormEl('db-host', mode).value = database.host || '';
+        mcpFormEl('db-port', mode).value = database.port || mcpDbDefaultPorts[database.database_type] || '';
+        mcpFormEl('db-name', mode).value = database.database_name || '';
+        mcpFormEl('db-user', mode).value = database.username || '';
+        mcpFormEl('db-password', mode).value = database.has_password ? '********' : '';
+        mcpFormEl('db-schema', mode).value = database.schema || '';
+        mcpFormEl('db-max-rows', mode).value = database.max_rows || '';
+        mcpFormEl('db-ssl', mode).checked = Boolean(database.ssl);
+        updateMcpDbTypeFields(mode);
+    }
+    const shared = mcpFormEl('shared', mode);
     if (shared) shared.checked = !server.user_id;
 }
+
+window.openMcpEditModal = function(serverId) {
+    const server = mcpServersCache.find(item => String(item.id) === String(serverId));
+    if (!server) return showToast('未找到 MCP 服务', 'error');
+    const modal = document.getElementById('mcp-edit-modal');
+    if (!modal) return;
+    bindMcpFormControls('edit');
+    fillMcpForm(server, 'edit');
+    document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
+        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+    });
+    modal.classList.remove('hidden');
+};
 
 async function loadMcpServers() {
     const list = document.getElementById('mcp-server-list');
@@ -593,14 +1102,28 @@ async function loadMcpServers() {
     if (!res.ok) throw new Error(data.error || 'MCP 服务加载失败');
     mcpServersCache = data.data || [];
     if (mcpServersCache.length === 0) {
-        list.innerHTML = '<div class="empty-state">还没有 MCP 服务</div>';
+        list.innerHTML = `
+            <div class="mcp-empty-panel">
+                <strong>还没有已保存的 MCP 服务</strong>
+                <span>左侧可选择数据库 MCP Server，填写连接信息后保存。</span>
+                <div class="mcp-template-list">${mcpTemplateMarkup()}</div>
+            </div>
+        `;
         return;
     }
-    list.innerHTML = mcpServersCache.map(server => `
+    list.innerHTML = mcpServersCache.map(server => {
+        const database = server.database_connection || {};
+        const endpoint = server.server_type === 'database'
+            ? `${database.database_type || 'database'}://${database.host || 'local'}${database.port ? `:${database.port}` : ''}/${database.database_name || ''}`
+            : server.base_url;
+        const typeLabel = server.server_type === 'database'
+            ? (mcpDbToolLabels[database.database_type] || '数据库 MCP')
+            : '外部服务';
+        return `
         <div class="mcp-server-card">
             <div>
-                <strong>${agentEscape(server.name)}</strong>
-                <span>${agentEscape(server.base_url)}</span>
+                <strong>${agentEscape(server.name)} <em>${agentEscape(typeLabel)}</em></strong>
+                <span>${agentEscape(endpoint)}</span>
                 ${server.last_error ? `<small class="error-text">${agentEscape(server.last_error)}</small>` : `<small>${server.last_checked_at ? `上次刷新 ${agentEscape(formatDateToCN(server.last_checked_at))}` : '尚未刷新工具'}</small>`}
             </div>
             <div class="mcp-card-actions">
@@ -609,10 +1132,10 @@ async function loadMcpServers() {
                 <button class="btn-danger-outline" data-mcp-delete="${server.id}">删除</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
     list.querySelectorAll('[data-mcp-edit]').forEach(btn => btn.addEventListener('click', () => {
-        const server = mcpServersCache.find(item => String(item.id) === String(btn.dataset.mcpEdit));
-        if (server) fillMcpForm(server);
+        window.openMcpEditModal(btn.dataset.mcpEdit);
     }));
     list.querySelectorAll('[data-mcp-refresh]').forEach(btn => btn.addEventListener('click', () => window.refreshMcpTools(btn.dataset.mcpRefresh)));
     list.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete)));
@@ -626,27 +1149,99 @@ async function loadMcpTools() {
     if (!res.ok) throw new Error(data.error || 'MCP 工具加载失败');
     const tools = data.tools || [];
     box.innerHTML = `
-        <div class="agent-tool-title">外部 MCP 工具 ${tools.length}</div>
+        <div class="agent-tool-title">已缓存可调用工具：${tools.length} 个</div>
         ${tools.map(tool => `
             <div class="agent-tool-chip">
-                <strong>${agentEscape(tool.fullName)}</strong>
-                <span>${agentEscape(tool.description || tool.serverName || '')}</span>
+                <strong>${agentEscape(mcpToolTitle(tool))}<em>${agentEscape(tool.serverName || 'MCP 服务')}</em></strong>
+                <span>${agentEscape(mcpToolDescription(tool))}</span>
+                <span>服务：${agentEscape(tool.serverName || '-')} · 原始工具：${agentEscape(tool.name || tool.fullName || '-')}</span>
             </div>
-        `).join('') || '<div class="empty-state">刷新 MCP 服务后会显示工具</div>'}
+        `).join('') || `
+            <div class="mcp-empty-panel compact">
+                <strong>内置 MCP 模板</strong>
+                <span>模板已可选；保存连接并刷新后，这里会显示模型可调用的实际工具。</span>
+                <div class="mcp-template-list">${mcpTemplateMarkup()}</div>
+            </div>
+        `}
     `;
 }
 
-window.saveMcpServer = async function() {
-    const id = document.getElementById('mcp-id')?.value;
-    const payload = {
-        name: document.getElementById('mcp-name')?.value.trim(),
-        base_url: document.getElementById('mcp-url')?.value.trim(),
-        api_key: document.getElementById('mcp-key')?.value,
-        description: document.getElementById('mcp-desc')?.value.trim(),
-        shared: document.getElementById('mcp-shared')?.checked || false
+function collectMcpDatabasePayload(mode = 'create') {
+    return {
+        id: mcpFormEl('id', mode)?.value || undefined,
+        name: mcpFormEl('name', mode)?.value.trim(),
+        description: mcpFormEl('desc', mode)?.value.trim(),
+        shared: mcpFormEl('shared', mode)?.checked || false,
+        database_type: mcpFormEl('db-type', mode)?.value || 'postgres',
+        host: mcpFormEl('db-host', mode)?.value.trim(),
+        port: mcpFormEl('db-port', mode)?.value,
+        database_name: mcpFormEl('db-name', mode)?.value.trim(),
+        username: mcpFormEl('db-user', mode)?.value.trim(),
+        password: mcpFormEl('db-password', mode)?.value,
+        schema: mcpFormEl('db-schema', mode)?.value.trim(),
+        max_rows: mcpFormEl('db-max-rows', mode)?.value,
+        ssl: mcpFormEl('db-ssl', mode)?.checked || false
     };
-    if (!payload.name || !payload.base_url) return showToast('请填写服务名称和 URL', 'error');
-    const res = await apiFetch(`${API_BASE}/mcp/servers${id ? `/${encodeURIComponent(id)}` : ''}`, {
+}
+
+function validateMcpDatabasePayload(payload, { requireName = true } = {}) {
+    if (requireName && !payload.name) return '请填写连接名称';
+    if (!payload.database_name) return '请填写数据库名；SQLite 请填写文件路径';
+    if (payload.database_type !== 'sqlite' && !payload.host) return '请填写数据库主机地址';
+    return '';
+}
+
+window.testMcpDatabaseConnection = async function(mode = 'create') {
+    if ((mcpFormEl('source-type', mode)?.value || 'external') !== 'database') {
+        return showToast('请先选择数据库 MCP Server', 'error');
+    }
+    const payload = collectMcpDatabasePayload(mode);
+    const error = validateMcpDatabasePayload(payload, { requireName: false });
+    if (error) return showToast(error, 'error');
+
+    const button = mcpFormEl('test-db-btn', mode);
+    const originalText = button?.textContent || '测试连接';
+    if (button) {
+        button.disabled = true;
+        button.textContent = '测试中...';
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/mcp/database-connections/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.error || '连接测试失败', 'error');
+        return showToast('数据库连接测试通过', 'success');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+};
+
+window.saveMcpServer = async function(mode = 'create') {
+    const id = mcpFormEl('id', mode)?.value;
+    const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
+    let payload = {
+        name: mcpFormEl('name', mode)?.value.trim(),
+        base_url: mcpFormEl('url', mode)?.value.trim(),
+        api_key: mcpFormEl('key', mode)?.value,
+        description: mcpFormEl('desc', mode)?.value.trim(),
+        shared: mcpFormEl('shared', mode)?.checked || false
+    };
+    let endpoint = `${API_BASE}/mcp/servers${id ? `/${encodeURIComponent(id)}` : ''}`;
+    if (sourceType === 'database') {
+        payload = collectMcpDatabasePayload(mode);
+        endpoint = `${API_BASE}/mcp/database-connections${id ? `/${encodeURIComponent(id)}` : ''}`;
+        const error = validateMcpDatabasePayload(payload);
+        if (error) return showToast(error, 'error');
+    } else if (!payload.name || !payload.base_url) {
+        return showToast('请填写服务名称和 URL', 'error');
+    }
+    const res = await apiFetch(endpoint, {
         method: id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -654,7 +1249,11 @@ window.saveMcpServer = async function() {
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '保存失败', 'error');
     showToast('MCP 服务已保存', 'success');
-    window.resetMcpForm();
+    if (mode === 'edit') {
+        window.closeMcpEditModal();
+    } else {
+        window.resetMcpForm();
+    }
     await window.loadMcpWorkbench();
 };
 

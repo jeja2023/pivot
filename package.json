@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.27",
+  "version": "0.0.31",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "server/index.js",
   "scripts": {
@@ -23,8 +23,12 @@
     "express-rate-limit": "^8.4.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.16.0",
+    "mssql": "^11.0.1",
     "multer": "^2.1.1",
+    "mysql2": "^3.14.1",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.16.3",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "pino-pretty": "^13.1.3",
