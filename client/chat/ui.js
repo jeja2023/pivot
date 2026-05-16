@@ -37,20 +37,30 @@ const describeSelectorModel = (model, simple = false) => {
 
 window.updateContextUsage = (meta = null) => {
     const pill = document.getElementById('context-usage-pill');
-    if (!pill) return;
+    const ring = document.getElementById('context-usage-ring');
+    if (!pill || !ring) return;
+
     pill.classList.remove('is-warn', 'is-critical');
 
     if (!meta) {
-        pill.innerText = '上下文 -';
-        pill.title = '当前会话上下文用量';
+        ring.style.setProperty('--progress', '0');
+        pill.dataset.tooltip = '上下文用量: -';
         return;
     }
 
-    const percent = Number(meta.percent || 0);
+    const percent = Math.min(100, Math.max(0, Number(meta.percent || 0)));
     const archived = Number(meta.archivedCount || 0);
     const summaryCount = Number(meta.summaryCount || 0);
-    pill.innerText = `上下文 ${percent}%`;
-    pill.title = `活动 Token: ${Number(meta.activeTokens || 0).toLocaleString()} / ${Number(meta.threshold || 0).toLocaleString()}，已软归档 ${archived} 条，摘要 ${summaryCount} 条`;
+    const active = Number(meta.activeTokens || 0).toLocaleString();
+    const limit = Number(meta.threshold || 0).toLocaleString();
+
+    ring.style.setProperty('--progress', percent);
+    pill.dataset.tooltip = `上下文用量: ${percent}% (已用 ${active}, 总共 ${limit})`;
+    
+    // 如果有归档或摘要，也加上去
+    if (archived > 0 || summaryCount > 0) {
+        pill.dataset.tooltip += ` | 归档: ${archived}, 摘要: ${summaryCount}`;
+    }
 
     if (meta.status === 'critical') pill.classList.add('is-critical');
     else if (meta.status === 'warn') pill.classList.add('is-warn');

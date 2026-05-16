@@ -10,7 +10,12 @@ const userInput = document.getElementById('user-input');
 window.resizeUserInput = () => {
     if (!userInput) return;
     userInput.style.height = 'auto';
-    userInput.style.height = `${Math.min(userInput.scrollHeight, 180)}px`;
+    const sh = userInput.scrollHeight;
+    if (sh > 96) {
+        userInput.style.height = `${Math.min(sh, 180)}px`;
+    } else {
+        userInput.style.height = '96px';
+    }
 };
 userInput?.addEventListener('input', resizeUserInput);
 userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
@@ -249,6 +254,13 @@ bind('upload-btn', () => {
         return showToast('当前选中的模型不具备视觉或文档分析能力', 'error');
     }
     document.getElementById('file-input').click();
+});
+bind('clear-input-btn', () => {
+    if (userInput) {
+        userInput.value = '';
+        window.resizeUserInput();
+        userInput.focus();
+    }
 });
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
 bind('session-active-filter', () => window.setArchiveFilter(false));

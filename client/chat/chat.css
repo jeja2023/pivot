@@ -476,22 +476,40 @@ input::-webkit-contacts-auto-fill-button {
 }
 .chat-header { padding: 0.5rem 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
 .chat-header .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
-.context-pill {
-    display: inline-flex;
+.context-usage-btn {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    display: flex;
     align-items: center;
-    min-height: 26px;
-    padding: 0 10px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--primary);
-    background: rgba(16, 163, 127, 0.08);
-    border: 1px solid rgba(16, 163, 127, 0.16);
-    white-space: nowrap;
-    flex: 0 0 auto;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s;
+    border-radius: 50%;
 }
-.context-pill.is-warn { color: #b45309; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.22); }
-.context-pill.is-critical { color: #b91c1c; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.22); }
+.context-usage-btn:hover {
+    background: rgba(15, 23, 42, 0.05);
+}
+
+.context-mini-ring {
+    --progress: 0;
+    --ring-color: var(--primary);
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: 
+        radial-gradient(closest-side, white 72%, transparent 75%),
+        conic-gradient(var(--ring-color) calc(var(--progress) * 1%), rgba(148, 163, 184, 0.25) 0);
+    transition: --progress 0.3s ease;
+}
+
+.context-usage-btn.is-warn .context-mini-ring { --ring-color: #f59e0b; }
+.context-usage-btn.is-critical .context-mini-ring { --ring-color: #ef4444; }
 .icon-btn {
     background: none; border: none; color: var(--text-muted); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
@@ -1285,27 +1303,31 @@ input::-webkit-contacts-auto-fill-button {
 .input-wrapper textarea {
     border: none;
     margin: 0;
-    padding: 15px 188px 15px 18px;
-    min-height: 62px;
+    padding: 12px 120px 42px 16px;
+    min-height: 96px;
     max-height: 180px;
-    height: 62px;
+    height: 96px;
     resize: none;
     border-radius: 18px; 
-    font-size: 0.92rem;
+    font-size: 0.88rem;
     line-height: 1.5;
     background: transparent;
     outline: none;
     overflow-y: auto;
+    box-sizing: border-box;
+    transition: none;
 }
 .input-wrapper textarea::placeholder { color: #94a3b8; }
 .input-wrapper textarea::-webkit-scrollbar { width: 8px; }
 .input-wrapper textarea::-webkit-scrollbar-track { background: transparent; }
 .input-wrapper textarea::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.28); border-radius: 999px; }
-.input-actions { position: absolute; right: 12px; bottom: 11px; display: flex; gap: 8px; align-items: center; }
+.input-actions { position: absolute; bottom: 10px; display: flex; gap: 5px; align-items: center; }
+.input-actions.left { left: 10px; }
+.input-actions.right { right: 10px; }
 .chat-tool-toggle {
     position: relative;
-    height: 36px;
-    width: 36px;
+    height: 30px;
+    width: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1325,8 +1347,8 @@ input::-webkit-contacts-auto-fill-button {
     pointer-events: none;
 }
 .chat-tool-icon {
-    width: 18px;
-    height: 18px;
+    width: 15px;
+    height: 15px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1394,8 +1416,8 @@ input::-webkit-contacts-auto-fill-button {
 }
 .btn-icon {
     position: relative;
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -1408,9 +1430,10 @@ input::-webkit-contacts-auto-fill-button {
     justify-content: center;
 }
 .btn-icon:hover { background: rgba(15, 23, 42, 0.05); color: var(--primary); transform: translateY(-1px); }
+.btn-icon svg { width: 17px; height: 17px; }
 .input-wrapper .btn-primary {
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     padding: 0;
     border-radius: 50%;
     position: static;
@@ -1418,8 +1441,8 @@ input::-webkit-contacts-auto-fill-button {
 }
 .input-wrapper #stop-btn {
     display: flex;
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     padding: 0;
     border-radius: 50%;
     align-items: center;
