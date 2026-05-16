@@ -21,6 +21,7 @@ const {
 } = require('./models');
 const { estimateTokens } = require('../llm');
 const { estimateEmbeddingTokens } = require('./token-accounting');
+const { recordSlowRagRetrieval } = require('./observability');
 
 const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 
@@ -391,10 +392,19 @@ async function retrieveContext(userId, query, topK = null) {
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
     const config = getRagConfig({ topK });
+    const recordRetrieval = (payload) => {
+        recordRagRetrieval(payload);
+        recordSlowRagRetrieval({
+            ...payload,
+            userId,
+            query: normalizedQuery,
+            topK: config.topK
+        });
+    };
 
     const cachedResult = getFromCache(userId, normalizedQuery, config.topK);
     if (cachedResult !== null) {
-        recordRagRetrieval({ status: 'cache_hit', durationMs: Date.now() - startedAt, cacheHit: true });
+        recordRetrieval({ status: 'cache_hit', durationMs: Date.now() - startedAt, cacheHit: true });
         return cachedResult;
     }
 
@@ -404,7 +414,7 @@ async function retrieveContext(userId, query, topK = null) {
 
         if (chunks.length === 0) {
             setToCache(userId, normalizedQuery, config.topK, '');
-            recordRagRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
+            recordRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
         }
 
@@ -414,7 +424,7 @@ async function retrieveContext(userId, query, topK = null) {
 
         if (topChunks.length === 0) {
             setToCache(userId, normalizedQuery, config.topK, '');
-            recordRagRetrieval({
+            recordRetrieval({
                 status: 'no_match',
                 durationMs: Date.now() - startedAt,
                 candidates: chunks.length,
@@ -426,7 +436,7 @@ async function retrieveContext(userId, query, topK = null) {
 
         const injectedContext = formatInjectedContext(topChunks);
         setToCache(userId, normalizedQuery, config.topK, injectedContext);
-        recordRagRetrieval({
+        recordRetrieval({
             status: 'hit',
             durationMs: Date.now() - startedAt,
             candidates: chunks.length,
@@ -436,7 +446,7 @@ async function retrieveContext(userId, query, topK = null) {
         return injectedContext;
     } catch (e) {
         logger.error({ err: e.message }, 'RAG 检索失败');
-        recordRagRetrieval({ status: 'error', durationMs: Date.now() - startedAt });
+        recordRetrieval({ status: 'error', durationMs: Date.now() - startedAt });
         return '';
     }
 }

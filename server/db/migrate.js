@@ -119,6 +119,10 @@ function runMigrations() {
     ensureColumn('sessions', 'updated_at', 'DATETIME');
     ensureColumn('sessions', 'deleted_at', 'DATETIME');
     ensureColumn('sessions', 'deleted_by_user', 'INTEGER DEFAULT 0');
+    ensureColumn('sessions', 'parent_session_id', 'TEXT');
+    ensureColumn('sessions', 'forked_from_message_id', 'INTEGER');
+    ensureColumn('sessions', 'fork_root_session_id', 'TEXT');
+    ensureColumn('sessions', 'fork_note', 'TEXT');
     db.prepare('UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL').run();
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_users_deleted ON users(deleted_at);
@@ -417,9 +421,43 @@ function runMigrations() {
             type TEXT DEFAULT 'summary',
             title TEXT NOT NULL,
             content TEXT NOT NULL,
+            current_version_id INTEGER,
+            note TEXT,
+            updated_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_artifact_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artifact_id INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            note TEXT,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(artifact_id, version),
+            FOREIGN KEY (artifact_id) REFERENCES agent_artifacts(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_dag_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            node_key TEXT NOT NULL,
+            title TEXT,
+            tool_name TEXT,
+            input TEXT,
+            depends_on TEXT,
+            condition TEXT,
+            status TEXT DEFAULT 'pending',
+            output TEXT,
+            error_message TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            started_at DATETIME,
+            completed_at DATETIME,
+            UNIQUE(run_id, node_key),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS agent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -454,6 +492,9 @@ function runMigrations() {
     ensureColumn('agent_schedules', 'last_run_at', 'DATETIME');
     ensureColumn('agent_schedules', 'last_run_id', 'TEXT');
     ensureColumn('agent_schedules', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_artifacts', 'current_version_id', 'INTEGER');
+    ensureColumn('agent_artifacts', 'note', 'TEXT');
+    ensureColumn('agent_artifacts', 'updated_at', 'DATETIME');
     ensureColumn('agent_notifications', 'read_at', 'DATETIME');
     ensureColumn('agent_notifications', 'status', "TEXT DEFAULT 'unread'");
     ensureColumn('mcp_servers', 'user_id', 'INTEGER');
@@ -484,11 +525,49 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
+        CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS capability_packages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            package_key TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL,
+            source_ref TEXT NOT NULL,
+            user_id INTEGER,
+            scope TEXT DEFAULT 'user',
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'enabled',
+            config TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS observability_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            source TEXT,
+            severity TEXT DEFAULT 'warning',
+            duration_ms INTEGER DEFAULT 0,
+            threshold_ms INTEGER DEFAULT 0,
+            message TEXT,
+            details TEXT,
+            status TEXT DEFAULT 'open',
+            alerted_at DATETIME,
+            acknowledged_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
+        CREATE INDEX IF NOT EXISTS idx_capability_packages_user ON capability_packages(user_id, status, type);
+        CREATE INDEX IF NOT EXISTS idx_observability_events_type_created ON observability_events(type, created_at);
+        CREATE INDEX IF NOT EXISTS idx_observability_events_status_created ON observability_events(status, created_at);
     `);
 
     try {
@@ -590,6 +669,7 @@ function runMigrations() {
 
     recordSchemaMigration('20260516_schema_migrations_v1', 'Track applied schema migrations in a dedicated table.');
     recordSchemaMigration('20260516_agent_queue_locks_v1', 'Add database-backed agent queue lock fields and indexes.');
+    recordSchemaMigration('20260516_branch_artifact_observability_capabilities_v1', 'Add conversation forks, artifact versions, DAG nodes, capability packages, and observability events.');
 }
 
 module.exports = { runMigrations, recordMigration, recordSchemaMigration, runSchemaMigration };

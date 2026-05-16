@@ -234,6 +234,17 @@
     .monitor-panels { grid-template-columns: 1fr; }
 }
 .monitor-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
+
+.observability-webhook-inline {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.observability-webhook-inline input {
+    min-width: 0;
+}
 .monitor-row {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 4px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08);

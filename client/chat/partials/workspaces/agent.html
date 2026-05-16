@@ -60,6 +60,7 @@
                                         <option value="standard">标准</option>
                                         <option value="deep">深度</option>
                                         <option value="audit">审查</option>
+                                        <option value="dag">DAG</option>
                                     </select>
                                 </label>
                             </div>
@@ -96,6 +97,10 @@
                                     <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
                                 </label>
                             </div>
+                            <label class="agent-dag-config-field">
+                                <span>DAG 编排 JSON</span>
+                                <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
+                            </label>
                         </div>
                     </details>
                     <details class="agent-collapse-section">
@@ -166,6 +171,7 @@
                                 <strong>能力清单</strong>
                                 <span>智能体会按目标选择工具</span>
                             </div>
+                            <div id="agent-capability-list" class="agent-capability-list"></div>
                             <div id="agent-tool-list" class="agent-tool-list"></div>
                             <div class="agent-tool-section-head compact">
                                 <strong>结果沉淀</strong>

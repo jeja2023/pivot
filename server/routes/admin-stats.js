@@ -11,6 +11,12 @@ const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 const { getMaintenanceStatus } = require('../services/maintenance');
+const {
+    getObservabilitySettings,
+    listObservabilityEvents,
+    saveObservabilitySettings,
+    updateObservabilityEventStatus
+} = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { getBeijingTimestamp } = require('../time');
 
@@ -221,6 +227,13 @@ function createAdminStatsRouter({
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const httpMetrics = getHttpMetricsSnapshot();
         const ragMetrics = getRagMetricsSnapshot();
+        const observabilityEvents = listObservabilityEvents({ limit: 12 });
+        const observabilityOpen = db.prepare(`
+            SELECT type, COUNT(*) AS count
+            FROM observability_events
+            WHERE status IN ('open', 'alerted')
+            GROUP BY type
+        `).all();
         const memory = process.memoryUsage();
         const cpu = process.cpuUsage();
         
@@ -345,6 +358,11 @@ function createAdminStatsRouter({
             gpu,
             modelEndpoints,
             rag: ragMetrics,
+            observability: {
+                events: observabilityEvents,
+                openByType: observabilityOpen,
+                settings: getObservabilitySettings()
+            },
             health,
             maintenance,
             storage: {
@@ -354,6 +372,34 @@ function createAdminStatsRouter({
             },
             activeUsers: activeUsersCount
         });
+    }));
+
+    router.get('/observability/events', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listObservabilityEvents({
+            type: req.query.type,
+            status: req.query.status,
+            limit: req.query.limit
+        }) });
+    }));
+
+    router.put('/observability/events/:id/status', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const event = updateObservabilityEventStatus(req.params.id, req.body?.status);
+        if (!event) return res.status(404).json({ error: '观测事件不存在。' });
+        logAction(req, '更新观测事件状态', `事件ID: ${event.id}，状态: ${event.status}`);
+        res.json({ success: true, event });
+    }));
+
+    router.get('/observability/settings', authMiddleware, adminMiddleware, asyncHandler(async (_req, res) => {
+        res.json(getObservabilitySettings());
+    }));
+
+    router.put('/observability/settings', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const settings = await saveObservabilitySettings({
+            webhookUrl: req.body?.webhookUrl,
+            enabled: req.body?.enabled
+        }, req.user);
+        logAction(req, '更新慢查询与告警设置', settings.webhookConfigured ? '已配置 webhook' : '未配置 webhook');
+        res.json({ success: true, settings });
     }));
     
     router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {

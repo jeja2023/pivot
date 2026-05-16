@@ -190,6 +190,28 @@ window.regenerateMsg = async (id) => {
     }
 };
 
+window.forkSessionFromMessage = async (messageId) => {
+    if (!currentSessionId) return showToast('请先选择会话', 'error');
+    const title = await window.showInputPrompt({
+        title: '分叉会话',
+        message: '新会话会保留这条消息之前的上下文，可继续探索另一条路线。',
+        placeholder: '分支标题',
+        value: `分支：${document.getElementById('current-title')?.innerText || '新会话'}`,
+        required: false
+    });
+    if (title === null) return;
+    const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(currentSessionId)}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, title })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '会话分叉失败', 'error');
+    await window.loadSessions?.();
+    await selectSession(data.session.id, data.session.title, { refreshSidebar: true });
+    showToast(`已创建分支，复制 ${data.copiedMessages || 0} 条上下文`, 'success');
+};
+
 window.exportSession = async (id) => {
     showToast('正在导出...', 'info');
     try {
@@ -331,6 +353,7 @@ document.addEventListener('click', async (event) => {
 bind('ops-refresh-btn', () => window.loadOpsSummary());
 bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
+bind('observability-webhook-save', () => window.saveObservabilityWebhook?.());
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());
 bind('modal-prompt-cancel', () => window.closePromptModal());

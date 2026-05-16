@@ -1,0 +1,222 @@
+const axios = require('axios');
+const { db } = require('../db/connection');
+const { logger } = require('../logger');
+const { getBeijingTimestamp } = require('../time');
+const { assertSafeOutboundUrl } = require('../security');
+
+const EVENT_TYPES = new Set(['sql', 'model', 'rag', 'agent', 'system']);
+const EVENT_STATUSES = new Set(['open', 'ack', 'resolved']);
+const SEVERITIES = new Set(['info', 'warning', 'critical']);
+const SLOW_SQL_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '500', 10) || 500, 1);
+const SLOW_MODEL_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_MODEL_MS || '30000', 10) || 30000, 1);
+const SLOW_RAG_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_RAG_MS || '3000', 10) || 3000, 1);
+const WEBHOOK_TIMEOUT_MS = Math.max(Number.parseInt(process.env.PIVOT_ALERT_WEBHOOK_TIMEOUT_MS || '5000', 10) || 5000, 1000);
+
+let recordingSql = false;
+
+function safeJson(value) {
+    try {
+        return JSON.stringify(value === undefined ? null : value);
+    } catch (e) {
+        return JSON.stringify({ error: 'details_not_serializable' });
+    }
+}
+
+function getSetting(key) {
+    try {
+        return db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)?.value || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function normalizeSeverity(severity, durationMs, thresholdMs) {
+    if (SEVERITIES.has(severity)) return severity;
+    if (Number(durationMs || 0) >= Number(thresholdMs || 1) * 4) return 'critical';
+    return 'warning';
+}
+
+async function sendWebhookAlert(event) {
+    const url = getSetting('observability_webhook_url') || process.env.PIVOT_ALERT_WEBHOOK_URL || '';
+    if (!url) return;
+    try {
+        await assertSafeOutboundUrl(url, { username: 'admin', role: 'admin' });
+        await axios.post(url, {
+            source: 'pivot',
+            type: event.type,
+            severity: event.severity,
+            title: event.message,
+            durationMs: event.duration_ms,
+            thresholdMs: event.threshold_ms,
+            details: event.details ? JSON.parse(event.details) : null,
+            createdAt: event.created_at
+        }, {
+            timeout: WEBHOOK_TIMEOUT_MS,
+            proxy: false,
+            headers: { 'Content-Type': 'application/json', 'User-Agent': 'Pivot-Alert/1.0' }
+        });
+        db.prepare('UPDATE observability_events SET alerted_at = ? WHERE id = ?')
+            .run(getBeijingTimestamp(), event.id);
+    } catch (e) {
+        logger.warn({ err: e.message, eventId: event.id }, 'Observability webhook alert failed');
+    }
+}
+
+function recordObservabilityEvent(input = {}) {
+    const type = EVENT_TYPES.has(input.type) ? input.type : 'system';
+    const durationMs = Math.max(0, Math.round(Number(input.durationMs || input.duration_ms || 0)));
+    const thresholdMs = Math.max(0, Math.round(Number(input.thresholdMs || input.threshold_ms || 0)));
+    const severity = normalizeSeverity(input.severity, durationMs, thresholdMs);
+    const now = getBeijingTimestamp();
+    try {
+        const info = db.prepare(`
+            INSERT INTO observability_events (
+                type, source, severity, duration_ms, threshold_ms, message, details, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
+        `).run(
+            type,
+            String(input.source || '').slice(0, 160),
+            severity,
+            durationMs,
+            thresholdMs,
+            String(input.message || '').slice(0, 500),
+            safeJson(input.details || {}),
+            now
+        );
+        const event = db.prepare('SELECT * FROM observability_events WHERE id = ?').get(info.lastInsertRowid);
+        if (event && (severity === 'warning' || severity === 'critical')) {
+            sendWebhookAlert(event);
+        }
+        return event;
+    } catch (e) {
+        logger.warn({ err: e.message, type, source: input.source }, 'Observability event write failed');
+        return null;
+    }
+}
+
+function recordSlowSql(sql, durationMs, params = []) {
+    if (recordingSql || durationMs < SLOW_SQL_MS) return null;
+    recordingSql = true;
+    try {
+        return recordObservabilityEvent({
+            type: 'sql',
+            source: 'sqlite',
+            durationMs,
+            thresholdMs: SLOW_SQL_MS,
+            message: '慢 SQL 执行',
+            details: {
+                sql: String(sql || '').replace(/\s+/g, ' ').trim().slice(0, 2000),
+                paramCount: Array.isArray(params) ? params.length : 0
+            }
+        });
+    } finally {
+        recordingSql = false;
+    }
+}
+
+function recordSlowModelResponse(modelCfg, durationMs, details = {}) {
+    if (durationMs < SLOW_MODEL_MS) return null;
+    return recordObservabilityEvent({
+        type: 'model',
+        source: modelCfg?.name || modelCfg?.model_name || modelCfg?.url || 'model',
+        durationMs,
+        thresholdMs: SLOW_MODEL_MS,
+        message: '模型端点慢响应',
+        details: {
+            modelId: modelCfg?.id || null,
+            modelName: modelCfg?.model_name || modelCfg?.name || '',
+            url: modelCfg?.url || '',
+            ...details
+        }
+    });
+}
+
+function recordSlowRagRetrieval(query, durationMs, details = {}) {
+    const payload = query && typeof query === 'object'
+        ? query
+        : { query, durationMs, ...details };
+    const actualDuration = Number(payload.durationMs || payload.duration_ms || 0);
+    if (actualDuration < SLOW_RAG_MS) return null;
+    return recordObservabilityEvent({
+        type: 'rag',
+        source: 'rag.retrieve',
+        durationMs: actualDuration,
+        thresholdMs: SLOW_RAG_MS,
+        message: 'RAG 慢检索',
+        details: {
+            query: String(payload.query || '').slice(0, 500),
+            ...payload
+        }
+    });
+}
+
+function listObservabilityEvents(options = {}) {
+    const limit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 50, 1), 200);
+    const type = EVENT_TYPES.has(options.type) ? options.type : '';
+    const status = EVENT_STATUSES.has(options.status) ? options.status : '';
+    let sql = 'SELECT * FROM observability_events WHERE 1=1';
+    const params = [];
+    if (type) {
+        sql += ' AND type = ?';
+        params.push(type);
+    }
+    if (status) {
+        sql += ' AND status = ?';
+        params.push(status);
+    }
+    sql += ' ORDER BY created_at DESC, id DESC LIMIT ?';
+    params.push(limit);
+    return db.prepare(sql).all(...params).map(row => ({
+        ...row,
+        details: (() => {
+            try { return JSON.parse(row.details || '{}'); } catch (e) { return {}; }
+        })()
+    }));
+}
+
+function updateObservabilityEventStatus(id, status = 'ack') {
+    const nextStatus = EVENT_STATUSES.has(status) ? status : 'ack';
+    const now = getBeijingTimestamp();
+    const info = db.prepare(`
+        UPDATE observability_events
+        SET status = ?, acknowledged_at = CASE WHEN ? = 'ack' THEN COALESCE(acknowledged_at, ?) ELSE acknowledged_at END
+        WHERE id = ?
+    `).run(nextStatus, nextStatus, now, id);
+    if (info.changes === 0) return null;
+    return db.prepare('SELECT * FROM observability_events WHERE id = ?').get(id);
+}
+
+function getObservabilitySettings() {
+    return {
+        slowSqlMs: SLOW_SQL_MS,
+        slowModelMs: SLOW_MODEL_MS,
+        slowRagMs: SLOW_RAG_MS,
+        webhookUrl: getSetting('observability_webhook_url') || '',
+        webhookConfigured: Boolean(getSetting('observability_webhook_url') || process.env.PIVOT_ALERT_WEBHOOK_URL)
+    };
+}
+
+async function saveObservabilitySettings(body = {}, user = null) {
+    const value = String(body.webhookUrl || body.webhook_url || '').trim();
+    if (value) await assertSafeOutboundUrl(value, user || { username: 'admin', role: 'admin' });
+    db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at, updated_by)
+        VALUES ('observability_webhook_url', ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at,
+            updated_by = excluded.updated_by
+    `).run(value, getBeijingTimestamp(), user?.id || null);
+    return getObservabilitySettings();
+}
+
+module.exports = {
+    getObservabilitySettings,
+    listObservabilityEvents,
+    recordObservabilityEvent,
+    recordSlowModelResponse,
+    recordSlowRagRetrieval,
+    recordSlowSql,
+    saveObservabilitySettings,
+    updateObservabilityEventStatus
+};

@@ -188,23 +188,23 @@
     border: 1px solid rgba(148, 163, 184, 0.24);
     border-radius: 8px;
     background: #fff;
-    margin: 7px 0;
+    margin: 8px 0;
     overflow: hidden;
     flex: 0 0 auto;
 }
 
 .agent-collapse-section summary {
-    height: 38px;
-    min-height: 38px;
+    height: 40px;
+    min-height: 40px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 0 11px;
+    padding: 0 12px;
     cursor: pointer;
     list-style: none;
     color: var(--text-main);
-    font-size: 0.82rem;
+    font-size: 0.84rem;
     font-weight: 800;
 }
 
@@ -234,21 +234,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    font-size: 0.68rem;
+    font-size: 0.69rem;
     font-weight: 600;
 }
 
 .agent-collapse-body {
-    padding: 0 10px 10px;
+    padding: 10px;
     border-top: 1px solid rgba(148, 163, 184, 0.16);
     background: #fbfdff;
 }
 
 .agent-collapse-results[open] .agent-collapse-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     max-height: min(360px, calc(100vh - 470px));
     min-height: 220px;
     overflow-y: auto;
-    padding-right: 8px;
+    padding: 10px 8px 10px 10px;
 }
 
 .agent-collapse-results[open] #agent-tool-list {
@@ -258,37 +261,37 @@
 
 .agent-policy-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 132px;
-    gap: 7px;
+    grid-template-columns: minmax(0, 1.3fr) minmax(112px, 0.7fr);
+    gap: 9px;
     align-items: end;
-    margin: 10px 0 7px;
+    margin: 0 0 9px;
 }
 
 .agent-context-controls,
 .agent-schedule-controls {
     display: grid;
     grid-template-columns: 132px minmax(0, 1fr);
-    gap: 7px;
+    gap: 9px;
     align-items: end;
-    margin: 0 0 8px;
+    margin: 0 0 9px;
 }
 
 .agent-schedule-controls {
-    grid-template-columns: minmax(0, 1fr) 88px 84px;
+    grid-template-columns: minmax(0, 1fr) 112px 82px;
 }
 
 .agent-enterprise-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 86px 70px;
-    gap: 7px;
+    grid-template-columns: minmax(0, 1.35fr) 88px 72px;
+    gap: 9px;
     align-items: end;
-    margin: 0 0 8px;
+    margin: 0 0 9px;
 }
 
 .agent-enterprise-controls label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     min-width: 0;
 }
 
@@ -296,45 +299,45 @@
 .agent-schedule-controls label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     min-width: 0;
 }
 
 .agent-context-controls label > span,
 .agent-schedule-controls label > span {
-    color: var(--text-muted);
-    font-size: 0.68rem;
+    color: #475569;
+    font-size: 0.7rem;
     font-weight: 700;
 }
 
 .agent-context-controls .form-input,
 .agent-schedule-controls .form-input {
-    height: 32px;
+    height: 34px;
     margin: 0;
-    padding: 4px 9px;
-    font-size: 0.82rem;
+    padding: 5px 10px;
+    font-size: 0.83rem;
     border-radius: 8px;
 }
 
 .agent-template-strip {
-    margin: 10px 0 8px;
+    margin: 0 0 10px;
 }
 
 .agent-template-list {
     display: flex;
     gap: 6px;
     overflow-x: auto;
-    padding: 6px 0 1px;
+    padding: 7px 0 1px;
 }
 
 .agent-template-item {
     flex: 0 0 auto;
-    min-width: 104px;
-    max-width: 150px;
+    min-width: 112px;
+    max-width: 160px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: #fff;
-    padding: 6px 8px;
+    padding: 8px 9px;
     text-align: left;
     cursor: pointer;
 }
@@ -353,26 +356,30 @@
 }
 
 .agent-template-item strong {
-    font-size: 0.74rem;
+    font-size: 0.76rem;
     color: var(--text-main);
 }
 
 .agent-template-item span {
     margin-top: 2px;
-    font-size: 0.66rem;
+    font-size: 0.68rem;
     color: var(--text-muted);
 }
 
 .agent-ops-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 10px;
+    margin-bottom: 0;
+}
+
+.agent-ops-grid > div {
+    min-width: 0;
 }
 
 .agent-ops-list {
     display: grid;
-    gap: 5px;
+    gap: 6px;
     max-height: 112px;
     overflow: auto;
     padding-right: 2px;
@@ -382,12 +389,12 @@
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 6px;
+    gap: 5px 7px;
     align-items: center;
     border: 1px solid var(--border);
     border-radius: 7px;
     background: #f8fafc;
-    padding: 6px 8px;
+    padding: 7px 8px;
     color: var(--text-main);
     text-align: left;
 }
@@ -406,7 +413,7 @@ button.agent-ops-item {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.72rem;
+    font-size: 0.74rem;
 }
 
 .agent-ops-item span {
@@ -416,7 +423,7 @@ button.agent-ops-item {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    font-size: 0.66rem;
+    font-size: 0.68rem;
 }
 
 .agent-ops-item .btn-secondary {
@@ -430,11 +437,26 @@ button.agent-ops-item {
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
+    min-height: 34px;
+    align-items: center;
+}
+
+.agent-template-strip .agent-tool-section-head.compact {
+    margin-bottom: 4px;
+}
+
+.agent-collapse-results .agent-tool-section-head.compact {
+    min-height: 24px;
+    margin: 0;
+}
+
+.agent-collapse-results .agent-tool-section-head.compact:not(:first-of-type) {
+    padding-top: 4px;
 }
 
 .agent-artifact-list {
-    max-height: 112px;
-    margin-top: 8px;
+    max-height: 122px;
+    margin-top: 0;
 }
 
 .is-disabled {
@@ -442,42 +464,42 @@ button.agent-ops-item {
 }
 
 .agent-enterprise-controls label > span {
-    color: var(--text-muted);
-    font-size: 0.68rem;
+    color: #475569;
+    font-size: 0.7rem;
     font-weight: 700;
 }
 
 .agent-enterprise-controls .form-input {
-    height: 32px;
+    height: 34px;
     margin: 0;
-    padding: 4px 9px;
-    font-size: 0.82rem;
+    padding: 5px 10px;
+    font-size: 0.83rem;
     border-radius: 8px;
 }
 
 .agent-policy-controls label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     min-width: 0;
 }
 
 .agent-policy-controls label > span {
-    color: var(--text-muted);
-    font-size: 0.68rem;
+    color: #475569;
+    font-size: 0.7rem;
     font-weight: 700;
 }
 
 .agent-policy-controls .form-input {
-    height: 32px;
+    height: 34px;
     margin: 0;
-    padding: 4px 9px;
-    font-size: 0.82rem;
+    padding: 5px 10px;
+    font-size: 0.83rem;
     border-radius: 8px;
 }
 
 .agent-toggle-field {
-    height: 32px;
+    height: 34px;
     flex-direction: row !important;
     align-items: center;
     gap: 8px !important;
@@ -496,24 +518,24 @@ button.agent-ops-item {
 }
 
 .agent-runtime-status {
-    min-height: 28px;
+    min-height: 30px;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 7px;
     margin-bottom: 8px;
 }
 
 .agent-runtime-status span {
-    height: 22px;
+    height: 24px;
     display: inline-flex;
     align-items: center;
-    padding: 0 8px;
+    padding: 0 9px;
     border: 1px solid rgba(148, 163, 184, 0.28);
     border-radius: 999px;
     background: rgba(248, 250, 252, 0.9);
     color: var(--text-secondary);
-    font-size: 0.7rem;
+    font-size: 0.71rem;
     font-weight: 700;
 }
 
@@ -678,9 +700,13 @@ button.agent-ops-item {
 .agent-tool-section-head strong {
     font-size: 0.8rem;
     color: var(--text-main);
+    min-width: 0;
 }
 
 .agent-tool-section-head span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--text-muted);
     font-size: 0.7rem;
     white-space: nowrap;
@@ -689,11 +715,11 @@ button.agent-ops-item {
 .agent-tool-list {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 5px;
-    margin-top: 8px;
+    gap: 7px;
+    margin-top: 0;
     max-height: none;
     overflow: auto;
-    padding-right: 4px;
+    padding-right: 2px;
 }
 
 .agent-tool-title {
@@ -704,15 +730,15 @@ button.agent-ops-item {
 
 .agent-tool-chip {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 7px 8px;
+    border-radius: 8px;
+    padding: 8px 9px;
     background: #f8fafc;
 }
 
 .agent-tool-select {
     display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    column-gap: 7px;
+    grid-template-columns: 16px minmax(0, 1fr);
+    column-gap: 8px;
     align-items: start;
     cursor: pointer;
 }
@@ -735,9 +761,11 @@ button.agent-ops-item {
 .agent-tool-chip strong {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
     gap: 6px;
-    font-size: 0.75rem;
+    font-size: 0.76rem;
+    line-height: 1.35;
     color: var(--text-main);
 }
 
@@ -760,10 +788,11 @@ button.agent-ops-item {
 }
 
 .agent-tool-chip span {
-    margin-top: 3px;
-    font-size: 0.68rem;
+    margin-top: 4px;
+    font-size: 0.69rem;
     color: var(--text-muted);
-    line-height: 1.35;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 .agent-history-head {
@@ -816,10 +845,16 @@ button.agent-ops-item {
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 
-.agent-run-item:hover {
+.agent-run-item:hover,
+.agent-run-item:focus-visible {
     border-color: var(--primary);
     background: #fff;
     transform: none;
+}
+
+.agent-run-item:focus-visible {
+    outline: 2px solid rgba(16, 163, 127, 0.22);
+    outline-offset: 2px;
 }
 
 .agent-run-item.active {
@@ -847,6 +882,17 @@ button.agent-ops-item {
     min-height: 2.7em;
 }
 
+.agent-run-item:hover strong,
+.agent-run-item:focus-visible strong {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    -webkit-box-orient: initial;
+    min-height: 0;
+    overflow-wrap: anywhere;
+}
+
 .agent-run-item small {
     color: var(--text-muted);
     font-size: 0.7rem;
@@ -860,6 +906,14 @@ button.agent-ops-item {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.agent-run-item:hover em,
+.agent-run-item:focus-visible em {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .agent-run-status {
@@ -1150,6 +1204,205 @@ button.agent-ops-item {
     padding: 9px;
 }
 
+.agent-dag-config-field,
+.agent-dag-config-field span {
+    display: block;
+}
+
+.agent-dag-config-field {
+    margin-top: 2px;
+}
+
+.agent-dag-config-field span {
+    margin-bottom: 6px;
+    color: #334155;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.agent-dag-spec,
+.agent-artifact-content {
+    min-height: 120px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+}
+
+.agent-dag-spec {
+    width: 100%;
+    min-height: 112px;
+    margin: 0;
+    padding: 9px 10px;
+    line-height: 1.5;
+    color: #0f172a;
+    background: #fff;
+}
+
+.agent-capability-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 7px;
+    margin-bottom: 0;
+}
+
+.agent-capability-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 9px;
+    background: #fff;
+    font-size: 0.74rem;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.agent-capability-item:hover {
+    border-color: rgba(16, 163, 127, 0.32);
+    background: rgba(16, 163, 127, 0.04);
+}
+
+.agent-capability-item.disabled {
+    background: #f8fafc;
+    color: var(--text-muted);
+}
+
+.agent-capability-item input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--primary);
+    flex: 0 0 auto;
+}
+
+.agent-capability-item span {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.agent-capability-item strong,
+.agent-capability-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-capability-item strong {
+    color: var(--text-main);
+    font-size: 0.74rem;
+    line-height: 1.25;
+}
+
+.agent-capability-item small {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+
+.agent-capability-list .empty-state.compact,
+.agent-tool-list .empty-state {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fff 0%, rgba(248, 250, 252, 0.75) 100%);
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-align: center;
+}
+
+.agent-dag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.agent-dag-node {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px;
+    background: #fff;
+}
+
+.agent-dag-node.completed {
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.agent-dag-node.error {
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.agent-dag-node-head,
+.agent-artifact-version {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.agent-dag-node-head span,
+.agent-dag-node small,
+.agent-artifact-version small {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.agent-dag-node pre,
+.agent-artifact-diff pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow: auto;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 9px;
+    font-size: 0.7rem;
+}
+
+.agent-artifact-modal {
+    max-width: 860px;
+}
+
+.agent-artifact-editor,
+.agent-artifact-version-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.agent-artifact-version {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    background: #fff;
+}
+
+.agent-artifact-version.current {
+    border-color: rgba(16, 185, 129, 0.45);
+}
+
+.agent-artifact-version > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agent-artifact-version-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .agent-empty-state {
     min-height: 100%;
     display: flex;
@@ -1163,6 +1416,23 @@ button.agent-ops-item {
     color: var(--text-muted);
     text-align: center;
     padding: 22px;
+}
+
+.agent-empty-state.compact {
+    min-height: 58px;
+    width: 100%;
+    padding: 12px;
+    gap: 0;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.agent-template-list .agent-empty-state.compact {
+    flex: 1 1 100%;
+}
+
+.agent-ops-list .agent-empty-state.compact {
+    min-height: 64px;
 }
 
 .agent-empty-state strong {

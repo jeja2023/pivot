@@ -3,14 +3,17 @@ const { asyncHandler, normalizeLimit } = require('../http');
 const {
     cancelAgentRun,
     approveAgentTool,
+    createAgentArtifactVersion,
     createAgentSchedule,
     createAgentTemplate,
     createAgentRun,
     deleteAgentSchedule,
     deleteAgentTemplate,
+    diffAgentArtifactVersions,
     exportAgentRun,
     formatToolList,
     listAgentArtifacts,
+    listAgentArtifactVersions,
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
@@ -23,6 +26,7 @@ const {
     markAgentNotificationRead,
     rerunAgentRun,
     resumeAgentRun,
+    rollbackAgentArtifactVersion,
     runAgentScheduleNow,
     saveAgentRunArtifact,
     softDeleteAgentRun
@@ -115,6 +119,32 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         res.json({ data: listAgentArtifacts(req.user, normalizeLimit(req.query.limit, 30, 100)) });
     }));
 
+    router.get('/agents/artifacts/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
+        const result = listAgentArtifactVersions(req.params.id, req.user);
+        if (!result) return res.status(404).json({ error: '智能体结果不存在。' });
+        res.json(result);
+    }));
+
+    router.post('/agents/artifacts/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
+        const artifact = createAgentArtifactVersion(req.params.id, req.user, req.body || {});
+        if (!artifact) return res.status(404).json({ error: '智能体结果不存在。' });
+        logAction(req, '新增智能体结果版本', `结果ID: ${artifact.id}，版本: ${artifact.current_version || '-'}`);
+        res.status(201).json({ success: true, artifact });
+    }));
+
+    router.get('/agents/artifacts/:id/diff', authMiddleware, asyncHandler(async (req, res) => {
+        const result = diffAgentArtifactVersions(req.params.id, req.user, req.query.from, req.query.to);
+        if (!result) return res.status(404).json({ error: '智能体结果不存在。' });
+        res.json(result);
+    }));
+
+    router.post('/agents/artifacts/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
+        const artifact = rollbackAgentArtifactVersion(req.params.id, req.user, req.body?.version, req.body?.note || '');
+        if (!artifact) return res.status(404).json({ error: '智能体结果不存在。' });
+        logAction(req, '回滚智能体结果版本', `结果ID: ${artifact.id}，目标版本: ${req.body?.version}`);
+        res.json({ success: true, artifact });
+    }));
+
     router.get('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listRuns(req.user, normalizeLimit(req.query.limit, 30, 100)) });
     }));
@@ -142,7 +172,8 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             maxTokenBudget: req.body?.maxTokenBudget,
             templateId: req.body?.templateId,
             scheduleId: req.body?.scheduleId,
-            contextConfig: req.body?.contextConfig
+            contextConfig: req.body?.contextConfig,
+            dagSpec: req.body?.dagSpec
         });
         logAction(req, '创建智能体任务', `任务ID: ${run.id}，目标: ${String(req.body?.goal || '').slice(0, 120)}`);
         res.status(202).json({ success: true, run });

@@ -7,6 +7,7 @@ let agentToolsCache = [];
 let agentTemplatesCache = [];
 let agentSchedulesCache = [];
 let agentArtifactsCache = [];
+let capabilityPackagesCache = [];
 let agentRealtimeSource = null;
 let agentRealtimeConnected = false;
 let agentRealtimeRefreshTimer = null;
@@ -40,8 +41,23 @@ function agentRunMeta(run) {
     return parts.join(' · ');
 }
 
+function agentRunTooltip(run) {
+    const lines = [];
+    const title = run.title || run.goal || '';
+    const goal = run.goal || '';
+    const meta = agentRunMeta(run);
+    if (title) lines.push(`标题：${title}`);
+    lines.push(`状态：${agentStatusLabel(run.status)}`);
+    if (run.created_at) lines.push(`创建时间：${formatDateToCN(run.created_at)}`);
+    if (run.started_at) lines.push(`开始时间：${formatDateToCN(run.started_at)}`);
+    if (run.completed_at) lines.push(`完成时间：${formatDateToCN(run.completed_at)}`);
+    if (meta) lines.push(`详情：${meta}`);
+    if (goal && goal !== title) lines.push(`目标：${goal}`);
+    return lines.join('\n');
+}
+
 function agentRunModeLabel(mode) {
-    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式' };
+    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式', dag: 'DAG 编排' };
     return map[mode] || '标准模式';
 }
 
@@ -158,6 +174,22 @@ function agentStepMarkup(step) {
             </div>
             <div class="agent-step-body">${renderMarkdown(agentEscape(preview))}</div>
             ${raw ? `<details class="agent-step-raw"><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
+        </div>
+    `;
+}
+
+function agentDagNodeMarkup(node) {
+    const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
+    const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
+    return `
+        <div class="agent-dag-node ${agentEscape(node.status)}">
+            <div class="agent-dag-node-head">
+                <strong>${agentEscape(node.title || node.node_key)}</strong>
+                <span>${agentEscape(node.status || 'pending')} · ${agentEscape(agentToolTitle(node.tool_name))}</span>
+            </div>
+            ${deps.length ? `<small>依赖：${agentEscape(deps.join(', '))}</small>` : ''}
+            ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
+            ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
         </div>
     `;
 }
@@ -313,6 +345,41 @@ async function loadAgentTools() {
     `;
 }
 
+async function loadCapabilityPackages() {
+    const list = document.getElementById('agent-capability-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/capabilities/packages`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '能力市场加载失败');
+    capabilityPackagesCache = data.data || [];
+    const visible = capabilityPackagesCache.slice(0, 12);
+    list.innerHTML = visible.length ? visible.map(item => `
+        <label class="agent-capability-item ${item.enabled ? 'enabled' : 'disabled'}">
+            <input type="checkbox" data-capability-key="${agentEscape(item.package_key)}" ${item.enabled ? 'checked' : ''}>
+            <span>
+                <strong>${agentEscape(item.name)}</strong>
+                <small>${agentEscape(item.type === 'builtin_tool' ? '内置工具' : item.type === 'database_connection' ? '数据库连接' : 'MCP 服务')}</small>
+            </span>
+        </label>
+    `).join('') : '<div class="empty-state compact">暂无能力包</div>';
+    list.querySelectorAll('[data-capability-key]').forEach(input => {
+        input.addEventListener('change', async () => {
+            const res = await apiFetch(`${API_BASE}/capabilities/packages/${encodeURIComponent(input.dataset.capabilityKey)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: input.checked })
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                input.checked = !input.checked;
+                return showToast(result.error || '能力包状态更新失败', 'error');
+            }
+            showToast(input.checked ? '能力包已启用' : '能力包已停用', 'success');
+            await loadAgentTools();
+        });
+    });
+}
+
 async function loadAgentRuntimeStatus() {
     const target = document.getElementById('agent-runtime-status');
     if (!target) return;
@@ -382,14 +449,18 @@ async function loadAgentRuns() {
     }
     const hasSelectedRun = activeAgentRunId && displayRuns.some(run => run.id === activeAgentRunId);
     const selectedRunId = hasSelectedRun ? activeAgentRunId : displayRuns[0].id;
-    list.innerHTML = displayRuns.map(run => `
-        <button class="agent-run-item ${run.id === selectedRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}" ${run.id === selectedRunId ? 'aria-current="true"' : ''} title="${agentEscape(run.title || run.goal)}">
+    list.innerHTML = displayRuns.map(run => {
+        const meta = agentRunMeta(run);
+        const tooltip = agentRunTooltip(run);
+        return `
+        <button class="agent-run-item ${run.id === selectedRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}" ${run.id === selectedRunId ? 'aria-current="true"' : ''} title="${agentEscape(tooltip)}" aria-label="${agentEscape(tooltip)}">
             <span class="agent-run-status ${agentEscape(run.status)}">${agentStatusLabel(run.status)}</span>
             <strong>${agentEscape(run.title || run.goal)}</strong>
             <small>${agentEscape(formatDateToCN(run.created_at))}</small>
-            ${agentRunMeta(run) ? `<em>${agentEscape(agentRunMeta(run))}</em>` : ''}
+            ${meta ? `<em>${agentEscape(meta)}</em>` : ''}
         </button>
-    `).join('');
+    `;
+    }).join('');
     list.querySelectorAll('[data-agent-run-id]').forEach(btn => {
         btn.addEventListener('click', () => window.openAgentRun(btn.dataset.agentRunId));
     });
@@ -417,6 +488,7 @@ window.openAgentRun = async function(runId) {
     }
     const run = data.run;
     const steps = data.steps || [];
+    const dagNodes = data.dagNodes || [];
     const progress = data.progress || {};
     const canCancel = isAgentRunActive(run.status);
     const canRerun = !isAgentRunActive(run.status);
@@ -445,6 +517,15 @@ window.openAgentRun = async function(runId) {
         </div>
         ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
+        ${dagNodes.length ? `
+            <div class="agent-dag-list">
+                <div class="agent-tool-section-head compact">
+                    <strong>DAG 节点</strong>
+                    <span>${dagNodes.length} 个节点</span>
+                </div>
+                ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
+            </div>
+        ` : ''}
         <div class="agent-step-list">
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
         </div>
@@ -624,11 +705,12 @@ function getAgentContextConfig() {
 function getAgentRunPayload(goalOverride = '') {
     const goal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
     const allowMcp = document.getElementById('agent-allow-mcp')?.checked !== false;
-    return {
+    const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
+    const payload = {
         goal,
         modelId: document.getElementById('agent-model-select')?.value,
         maxSteps: document.getElementById('agent-max-steps')?.value || 5,
-        runMode: document.getElementById('agent-run-mode')?.value || 'standard',
+        runMode,
         toolPolicy: allowMcp ? 'all' : 'builtin_only',
         approvalPolicy: document.getElementById('agent-approval-policy')?.value || 'safe_mcp_auto',
         maxTokenBudget: document.getElementById('agent-token-budget')?.value || 0,
@@ -637,6 +719,20 @@ function getAgentRunPayload(goalOverride = '') {
         contextConfig: getAgentContextConfig(),
         sessionId: window.currentSessionId || null
     };
+    if (runMode === 'dag') {
+        const rawDag = document.getElementById('agent-dag-spec')?.value.trim();
+        if (rawDag) {
+            try {
+                payload.dagSpec = JSON.parse(rawDag);
+            } catch (e) {
+                showToast('DAG 编排 JSON 格式不正确', 'error');
+                payload._invalid = true;
+            }
+        } else {
+            payload.dagSpec = { nodes: [] };
+        }
+    }
+    return payload;
 }
 
 function applyAgentTemplate(template) {
@@ -759,18 +855,134 @@ async function loadAgentArtifacts() {
     if (!res.ok) throw new Error(data.error || '结果沉淀加载失败');
     agentArtifactsCache = data.data || [];
     list.innerHTML = agentArtifactsCache.length ? agentArtifactsCache.slice(0, 4).map(item => `
-        <div class="agent-ops-item">
+        <button type="button" class="agent-ops-item" data-agent-artifact-id="${agentEscape(item.id)}">
             <strong>${agentEscape(item.title)}</strong>
-            <span>${agentEscape(formatDateToCN(item.created_at))}</span>
-        </div>
+            <span>v${Number(item.current_version || 1)} · ${Number(item.version_count || 1)} 版 · ${agentEscape(formatDateToCN(item.updated_at || item.created_at))}</span>
+        </button>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无沉淀结果</div>';
+    list.querySelectorAll('[data-agent-artifact-id]').forEach(btn => {
+        btn.addEventListener('click', () => window.openAgentArtifactVersions(btn.dataset.agentArtifactId));
+    });
 }
+
+function ensureAgentArtifactModal() {
+    let modal = document.getElementById('agent-artifact-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'agent-artifact-modal';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.innerHTML = `
+        <div class="modal rag-detail-modal agent-artifact-modal">
+            <div class="rag-detail-header">
+                <div>
+                    <h3 id="agent-artifact-title">结果版本</h3>
+                    <p class="model-modal-desc" id="agent-artifact-desc"></p>
+                </div>
+                <button type="button" id="agent-artifact-close-btn" class="btn-danger-outline">关闭</button>
+            </div>
+            <div class="agent-artifact-editor">
+                <label>
+                    <span>版本备注</span>
+                    <input id="agent-artifact-note" class="form-input" placeholder="说明本次修改、回滚或校订原因">
+                </label>
+                <label>
+                    <span>当前内容</span>
+                    <textarea id="agent-artifact-content" class="form-input agent-artifact-content"></textarea>
+                </label>
+                <button type="button" id="agent-artifact-save-version" class="btn-primary">保存新版本</button>
+            </div>
+            <div id="agent-artifact-diff" class="agent-artifact-diff"></div>
+            <div id="agent-artifact-version-list" class="agent-artifact-version-list"></div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', event => {
+        if (event.target === modal || event.target.closest('#agent-artifact-close-btn')) {
+            modal.classList.add('hidden');
+        }
+    });
+    return modal;
+}
+
+async function loadAgentArtifactModal(artifactId) {
+    const modal = ensureAgentArtifactModal();
+    const res = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/versions`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '版本加载失败', 'error');
+    const artifact = data.artifact || {};
+    const versions = data.versions || [];
+    modal.querySelector('#agent-artifact-title').textContent = artifact.title || '结果版本';
+    modal.querySelector('#agent-artifact-desc').textContent = `${versions.length} 个版本 · 当前 v${artifact.current_version || 1}`;
+    modal.querySelector('#agent-artifact-content').value = artifact.content || '';
+    modal.querySelector('#agent-artifact-note').value = '';
+    modal.querySelector('#agent-artifact-diff').innerHTML = '';
+    modal.querySelector('#agent-artifact-save-version').onclick = async () => {
+        const content = modal.querySelector('#agent-artifact-content').value;
+        const note = modal.querySelector('#agent-artifact-note').value;
+        const saveRes = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/versions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, note })
+        });
+        const saveData = await saveRes.json().catch(() => ({}));
+        if (!saveRes.ok) return showToast(saveData.error || '保存版本失败', 'error');
+        showToast('新版本已保存', 'success');
+        await loadAgentArtifacts();
+        await loadAgentArtifactModal(artifactId);
+    };
+    const list = modal.querySelector('#agent-artifact-version-list');
+    list.innerHTML = versions.map(version => `
+        <div class="agent-artifact-version ${version.id === artifact.current_version_id ? 'current' : ''}">
+            <div>
+                <strong>v${Number(version.version)}</strong>
+                <span>${agentEscape(version.note || '无备注')}</span>
+                <small>${agentEscape(formatDateToCN(version.created_at))}</small>
+            </div>
+            <div class="agent-artifact-version-actions">
+                ${version.version > 1 ? `<button type="button" class="btn-secondary" data-artifact-diff="${version.version}">对比上一版</button>` : ''}
+                ${version.id !== artifact.current_version_id ? `<button type="button" class="btn-secondary" data-artifact-rollback="${version.version}">回滚</button>` : ''}
+            </div>
+        </div>
+    `).join('') || '<div class="empty-state compact">暂无版本</div>';
+    list.querySelectorAll('[data-artifact-diff]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const to = Number(btn.dataset.artifactDiff);
+            const diffRes = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/diff?from=${to - 1}&to=${to}`);
+            const diffData = await diffRes.json().catch(() => ({}));
+            if (!diffRes.ok) return showToast(diffData.error || '对比失败', 'error');
+            modal.querySelector('#agent-artifact-diff').innerHTML = `
+                <strong>v${to - 1} → v${to}</strong>
+                <pre>${agentEscape((diffData.diff || []).filter(row => row.type !== 'same').map(row => `${row.type === 'add' ? '+' : row.type === 'remove' ? '-' : ' '} ${row.text}`).join('\n') || '无差异')}</pre>
+            `;
+        });
+    });
+    list.querySelectorAll('[data-artifact-rollback]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            showConfirm('回滚结果版本', `确定回滚到 v${btn.dataset.artifactRollback} 吗？会生成一个新的当前版本。`, async () => {
+                const rollbackRes = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/rollback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version: Number(btn.dataset.artifactRollback) })
+                });
+                const rollbackData = await rollbackRes.json().catch(() => ({}));
+                if (!rollbackRes.ok) return showToast(rollbackData.error || '回滚失败', 'error');
+                showToast('已回滚并生成新版本', 'success');
+                await loadAgentArtifacts();
+                await loadAgentArtifactModal(artifactId);
+            });
+        });
+    });
+    modal.classList.remove('hidden');
+}
+
+window.openAgentArtifactVersions = loadAgentArtifactModal;
 
 window.createAgentRun = async function() {
     const payload = getAgentRunPayload();
     const frequency = document.getElementById('agent-schedule-frequency')?.value || 'manual';
     if (!payload.goal) return showToast('????????', 'error');
     if (!payload.modelId) return showToast('?????', 'error');
+    if (payload._invalid) return;
     if (frequency !== 'manual') {
         const scheduleRes = await apiFetch(`${API_BASE}/agents/schedules`, {
             method: 'POST',
@@ -892,6 +1104,7 @@ window.loadAgentWorkbench = async function() {
     try {
         await loadAgentModels();
         await Promise.all([
+            loadCapabilityPackages(),
             loadAgentTools(),
             loadAgentRuns(),
             loadAgentRuntimeStatus(),

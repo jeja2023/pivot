@@ -41,6 +41,7 @@ const {
 } = require('../services/chat-messages');
 const { maybeGenerateTitle } = require('../services/chat-title');
 const { executeMcpTool, listCachedMcpTools } = require('../services/mcp-client');
+const { filterMcpToolsByCapability } = require('../services/capability-market');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -551,7 +552,7 @@ function createChatRouter({
         }
 
         if (mcpEnabled) {
-            const mcpTools = listCachedMcpTools(null, req.user);
+            const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user);
             const mcpContext = await maybeBuildMcpChatContext({
                 modelCfg,
                 history: visionHistory,

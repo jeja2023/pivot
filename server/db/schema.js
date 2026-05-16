@@ -55,9 +55,15 @@ function initSchema() {
             system_prompt TEXT,
             deleted_at DATETIME,
             deleted_by_user INTEGER DEFAULT 0,
+            parent_session_id TEXT,
+            forked_from_message_id INTEGER,
+            fork_root_session_id TEXT,
+            fork_note TEXT,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (parent_session_id) REFERENCES sessions(id),
+            FOREIGN KEY (forked_from_message_id) REFERENCES messages(id)
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -361,9 +367,45 @@ function initSchema() {
             type TEXT DEFAULT 'summary',
             title TEXT NOT NULL,
             content TEXT NOT NULL,
+            current_version_id INTEGER,
+            note TEXT,
+            updated_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_artifact_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artifact_id INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            note TEXT,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(artifact_id, version),
+            FOREIGN KEY (artifact_id) REFERENCES agent_artifacts(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_dag_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            node_key TEXT NOT NULL,
+            title TEXT,
+            tool_name TEXT,
+            input TEXT,
+            depends_on TEXT,
+            condition TEXT,
+            status TEXT DEFAULT 'pending',
+            output TEXT,
+            error_message TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            started_at DATETIME,
+            completed_at DATETIME,
+            UNIQUE(run_id, node_key),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS agent_notifications (
@@ -424,6 +466,37 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
+        CREATE TABLE IF NOT EXISTS capability_packages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            package_key TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL,
+            source_ref TEXT NOT NULL,
+            user_id INTEGER,
+            scope TEXT DEFAULT 'user',
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'enabled',
+            config TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS observability_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            source TEXT,
+            severity TEXT DEFAULT 'warning',
+            duration_ms INTEGER DEFAULT 0,
+            threshold_ms INTEGER DEFAULT 0,
+            message TEXT,
+            details TEXT,
+            status TEXT DEFAULT 'open',
+            alerted_at DATETIME,
+            acknowledged_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -442,7 +515,12 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
+        CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_capability_packages_user ON capability_packages(user_id, status, type);
+        CREATE INDEX IF NOT EXISTS idx_observability_events_type_created ON observability_events(type, created_at);
+        CREATE INDEX IF NOT EXISTS idx_observability_events_status_created ON observability_events(status, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);

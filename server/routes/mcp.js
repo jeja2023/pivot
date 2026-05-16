@@ -15,6 +15,13 @@ const {
 } = require('../services/mcp-client');
 const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../services/agent-tools');
 const {
+    filterBuiltInToolsByCapability,
+    filterMcpToolsByCapability,
+    isCapabilityEnabled,
+    listCapabilityPackages,
+    setCapabilityPackageStatus
+} = require('../services/capability-market');
+const {
     DEFAULT_PORTS,
     testDatabaseConnection,
     validateDatabaseConnectionPayload
@@ -44,6 +51,17 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listMcpServers(req.user) });
+    }));
+
+    router.get('/capabilities/packages', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listCapabilityPackages(req.user) });
+    }));
+
+    router.put('/capabilities/packages/:key', authMiddleware, asyncHandler(async (req, res) => {
+        const item = setCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
+        if (!item) return res.status(404).json({ error: '能力包不存在。' });
+        logAction(req, '更新能力包状态', `${item.package_key}: ${item.status}`);
+        res.json({ success: true, item });
     }));
 
     router.get('/mcp/database-types', authMiddleware, asyncHandler(async (_req, res) => {
@@ -232,12 +250,24 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.get('/mcp/tools', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ tools: listCachedMcpTools(null, req.user) });
+        res.json({ tools: filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user) });
     }));
 
     router.post('/mcp/tools/call', authMiddleware, asyncHandler(async (req, res) => {
         const name = String(req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: 'Tool name is required.' });
+        if (name.startsWith('mcp.')) {
+            const cached = listCachedMcpTools(null, req.user).find(tool => tool.fullName === name);
+            const sourceRef = cached?.serverId || cached?.server_id || cached?.serverName || '';
+            const type = String(cached?.name || '').startsWith('db.') || String(cached?.fullName || '').includes('.db.')
+                ? 'database_connection'
+                : 'mcp_server';
+            if (sourceRef && !isCapabilityEnabled(type, sourceRef, req.user)) {
+                return res.status(403).json({ error: '该 MCP 能力包已停用。' });
+            }
+        } else if (!isCapabilityEnabled('builtin_tool', name, req.user)) {
+            return res.status(403).json({ error: '该内置能力包已停用。' });
+        }
         const result = name.startsWith('mcp.')
             ? await executeMcpTool(name, req.body?.input || {}, req.user)
             : await executeBuiltInTool(name, req.body?.input || {}, req.user);
@@ -257,7 +287,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             }
             if (method === 'tools/list') {
                 return sendJsonRpc(res, id, {
-                    tools: getBuiltInToolDefinitions(req.user).map(tool => ({
+                    tools: filterBuiltInToolsByCapability(getBuiltInToolDefinitions(req.user), req.user).map(tool => ({
                         name: tool.name,
                         description: tool.description,
                         inputSchema: tool.input_schema
@@ -265,6 +295,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 });
             }
             if (method === 'tools/call') {
+                if (!isCapabilityEnabled('builtin_tool', params?.name, req.user)) {
+                    throw new Error('该内置能力包已停用。');
+                }
                 const result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
                 return sendJsonRpc(res, id, {
                     content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]

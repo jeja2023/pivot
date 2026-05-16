@@ -8,6 +8,10 @@ const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
+const {
+    filterBuiltInToolsByCapability,
+    filterMcpToolsByCapability
+} = require('./capability-market');
 
 const MAX_STEPS = 8;
 const DEFAULT_STEPS = 5;
@@ -21,7 +25,7 @@ const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_S
 const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
 const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
-const RUN_MODES = new Set(['standard', 'deep', 'audit']);
+const RUN_MODES = new Set(['standard', 'deep', 'audit', 'dag']);
 const APPROVAL_POLICIES = new Set(['safe_mcp_auto', 'approve_all_mcp']);
 let agentQueue = null;
 
@@ -104,6 +108,42 @@ function normalizeContextConfig(value) {
 
 function serializeContextConfig(value) {
     return JSON.stringify(normalizeContextConfig(value));
+}
+
+function normalizeDagSpec(value) {
+    let parsed = value;
+    if (typeof value === 'string') {
+        try {
+            parsed = JSON.parse(value);
+        } catch (e) {
+            parsed = {};
+        }
+    }
+    const rawNodes = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.nodes) ? parsed.nodes : []);
+    const seen = new Set();
+    const nodes = rawNodes.slice(0, 24).map((node, index) => {
+        const key = String(node.id || node.key || `node_${index + 1}`).trim().replace(/[^\w.-]/g, '_').slice(0, 60) || `node_${index + 1}`;
+        const uniqueKey = seen.has(key) ? `${key}_${index + 1}` : key;
+        seen.add(uniqueKey);
+        const dependsOn = Array.isArray(node.dependsOn || node.depends_on)
+            ? (node.dependsOn || node.depends_on).map(item => String(item || '').trim()).filter(Boolean).slice(0, 12)
+            : String(node.dependsOn || node.depends_on || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 12);
+        return {
+            id: uniqueKey,
+            title: String(node.title || uniqueKey).trim().slice(0, 120),
+            tool: String(node.tool || node.toolName || node.tool_name || '').trim(),
+            input: node.input && typeof node.input === 'object' ? node.input : {},
+            dependsOn,
+            condition: ['always', 'success'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success'
+        };
+    }).filter(node => node.tool);
+    const validKeys = new Set(nodes.map(node => node.id));
+    return {
+        nodes: nodes.map(node => ({
+            ...node,
+            dependsOn: node.dependsOn.filter(dep => validKeys.has(dep) && dep !== node.id)
+        }))
+    };
 }
 
 function withTimeout(promise, timeoutMs, label = '操作') {
@@ -234,6 +274,21 @@ function listSteps(runId) {
         ...step,
         input: parseJsonObject(step.input) || step.input,
         output: parseJsonObject(step.output) || step.output
+    }));
+}
+
+function listDagNodes(runId) {
+    return db.prepare(`
+        SELECT id, run_id, node_key, title, tool_name, input, depends_on, condition, status,
+               output, error_message, duration_ms, started_at, completed_at, created_at
+        FROM agent_dag_nodes
+        WHERE run_id = ?
+        ORDER BY id ASC
+    `).all(runId).map(node => ({
+        ...node,
+        input: parseJsonObject(node.input) || {},
+        depends_on: parseJsonObject(node.depends_on) || [],
+        output: parseJsonObject(node.output) || node.output
     }));
 }
 
@@ -374,7 +429,7 @@ function getRunDetailForUser(runId, user) {
     const run = getRunForUser(runId, user);
     if (!run) return null;
     const steps = listSteps(run.id);
-    return { run, steps, progress: getRunProgress(run, steps) };
+    return { run, steps, dagNodes: listDagNodes(run.id), progress: getRunProgress(run, steps) };
 }
 
 function isRunCancelled(runId) {
@@ -430,7 +485,8 @@ function createChildRunFromExisting(run, user) {
         templateId: run.template_id,
         scheduleId: run.schedule_id,
         contextConfig: parseJsonObject(run.context_config) || {},
-        parentRunId: run.id
+        parentRunId: run.id,
+        metadata: getRunMetadata(run)
     });
 }
 
@@ -556,7 +612,7 @@ function formatToolList(user, options = {}) {
         if (allowed && !allowed.has(name)) return false;
         return true;
     };
-    const builtIns = getBuiltInToolDefinitions(user).map(tool => ({
+    const builtIns = filterBuiltInToolsByCapability(getBuiltInToolDefinitions(user), user).map(tool => ({
         name: tool.name,
         title: tool.title,
         description: tool.description,
@@ -566,7 +622,7 @@ function formatToolList(user, options = {}) {
         requiresApproval: false,
         admin: Boolean(tool.admin)
     })).filter(tool => isAllowed(tool.name, 'builtin'));
-    const mcpTools = listCachedMcpTools(null, user).map(tool => ({
+    const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, user), user).map(tool => ({
         name: tool.fullName,
         title: tool.name,
         description: `[${tool.serverName}] ${tool.description || tool.name}`,
@@ -678,6 +734,192 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     return content || '任务已完成，但模型没有返回总结。';
 }
 
+function upsertDagNode(runId, node, patch = {}) {
+    const existing = db.prepare('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?').get(runId, node.id);
+    const now = getBeijingTimestamp();
+    const row = {
+        title: patch.title ?? node.title,
+        toolName: patch.toolName ?? node.tool,
+        input: patch.input ?? node.input ?? {},
+        dependsOn: patch.dependsOn ?? node.dependsOn ?? [],
+        condition: patch.condition ?? node.condition ?? 'success',
+        status: patch.status ?? 'pending',
+        output: patch.output ?? null,
+        errorMessage: patch.errorMessage ?? '',
+        durationMs: patch.durationMs ?? null,
+        startedAt: patch.startedAt ?? null,
+        completedAt: patch.completedAt ?? null
+    };
+    if (existing) {
+        db.prepare(`
+            UPDATE agent_dag_nodes
+            SET title = ?, tool_name = ?, input = ?, depends_on = ?, condition = ?, status = ?,
+                output = ?, error_message = ?, duration_ms = ?, started_at = ?, completed_at = ?
+            WHERE id = ?
+        `).run(
+            row.title,
+            row.toolName,
+            JSON.stringify(row.input),
+            JSON.stringify(row.dependsOn),
+            row.condition,
+            row.status,
+            row.output === null ? null : JSON.stringify(row.output),
+            row.errorMessage,
+            row.durationMs,
+            row.startedAt,
+            row.completedAt,
+            existing.id
+        );
+        return existing.id;
+    }
+    const info = db.prepare(`
+        INSERT INTO agent_dag_nodes (
+            run_id, node_key, title, tool_name, input, depends_on, condition, status,
+            output, error_message, duration_ms, started_at, completed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        runId,
+        node.id,
+        row.title,
+        row.toolName,
+        JSON.stringify(row.input),
+        JSON.stringify(row.dependsOn),
+        row.condition,
+        row.status,
+        row.output === null ? null : JSON.stringify(row.output),
+        row.errorMessage,
+        row.durationMs,
+        row.startedAt,
+        row.completedAt,
+        now
+    );
+    return info.lastInsertRowid;
+}
+
+async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }) {
+    const metadata = getRunMetadata(run);
+    const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
+    if (!dagSpec.nodes.length) {
+        throw new Error('DAG 模式需要至少配置一个有效节点。');
+    }
+
+    dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
+    const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
+    const observations = [];
+    let stepIndex = listSteps(run.id).length + 1;
+
+    while ([...states.values()].some(state => state.status === 'pending')) {
+        assertRunWithinBudget();
+        assertRunNotCancelled(run.id);
+        const readyNodes = dagSpec.nodes.filter(node => {
+            const state = states.get(node.id);
+            if (state?.status !== 'pending') return false;
+            return node.dependsOn.every(dep => ['completed', 'error', 'skipped'].includes(states.get(dep)?.status));
+        });
+        if (!readyNodes.length) {
+            throw new Error('DAG 编排存在循环依赖或无法满足的依赖。');
+        }
+
+        const runnable = [];
+        readyNodes.forEach(node => {
+            const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
+            if (node.condition !== 'always' && depStates.some(status => status !== 'completed')) {
+                states.set(node.id, { status: 'skipped' });
+                upsertDagNode(run.id, node, {
+                    status: 'skipped',
+                    output: { status: 'skipped', reason: 'dependency_not_completed' },
+                    completedAt: getBeijingTimestamp()
+                });
+                insertStep(run.id, stepIndex, {
+                    type: 'dag',
+                    title: `跳过 DAG 节点：${node.title}`,
+                    toolName: node.tool,
+                    input: node.input,
+                    output: { status: 'skipped', dependsOn: node.dependsOn }
+                });
+                stepIndex += 1;
+            } else {
+                runnable.push(node);
+            }
+        });
+
+        await Promise.all(runnable.slice(0, 4).map(async node => {
+            const selectedTool = toolList.find(tool => tool.name === node.tool);
+            if (maybePauseForApproval(run, selectedTool, node.input || {})) {
+                const err = new Error('DAG 节点等待 MCP 工具审批。');
+                err.code = 'AGENT_APPROVAL_REQUIRED';
+                throw err;
+            }
+            const startedAt = Date.now();
+            const startedAtText = getBeijingTimestamp();
+            states.set(node.id, { status: 'running' });
+            upsertDagNode(run.id, node, { status: 'running', startedAt: startedAtText });
+            try {
+                const output = await withTimeout(
+                    executeToolByName(node.tool, node.input || {}, user, toolList),
+                    Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
+                    `DAG 工具调用 ${node.tool}`
+                );
+                assertRunNotCancelled(run.id);
+                const compactOutput = clampText(output, 12000);
+                states.set(node.id, { status: 'completed', output: compactOutput });
+                upsertDagNode(run.id, node, {
+                    status: 'completed',
+                    output: compactOutput,
+                    durationMs: Date.now() - startedAt,
+                    completedAt: getBeijingTimestamp()
+                });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, output: compactOutput });
+                insertStep(run.id, stepIndex, {
+                    type: 'dag',
+                    title: `DAG 节点完成：${node.title}`,
+                    toolName: node.tool,
+                    input: node.input,
+                    output: compactOutput,
+                    durationMs: Date.now() - startedAt
+                });
+            } catch (e) {
+                states.set(node.id, { status: 'error', error: e.message });
+                upsertDagNode(run.id, node, {
+                    status: 'error',
+                    output: { error: e.message },
+                    errorMessage: e.message,
+                    durationMs: Date.now() - startedAt,
+                    completedAt: getBeijingTimestamp()
+                });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, error: e.message });
+                insertStep(run.id, stepIndex, {
+                    type: 'dag',
+                    title: `DAG 节点失败：${node.title}`,
+                    toolName: node.tool,
+                    input: node.input,
+                    output: { error: e.message },
+                    errorMessage: e.message,
+                    status: 'error',
+                    durationMs: Date.now() - startedAt
+                });
+            } finally {
+                stepIndex += 1;
+                updateRun(run.id, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            }
+        }));
+    }
+
+    const answer = await withTimeout(
+        synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
+        Math.min(180000, Math.max(deadline - Date.now(), 1000)),
+        'DAG 结果总结'
+    );
+    updateRun(run.id, {
+        status: 'completed',
+        final_answer: answer,
+        completed_at: getBeijingTimestamp(),
+        last_heartbeat_at: getBeijingTimestamp(),
+        updated_at: getBeijingTimestamp()
+    });
+    createAgentNotification(user.id, run.id, 'completed', '智能体 DAG 任务已完成', run.title || run.goal);
+}
+
 async function runAgent(runId, user) {
     try {
         const run = getRunForUser(runId, user, { includeDeleted: true });
@@ -711,6 +953,11 @@ async function runAgent(runId, user) {
             last_heartbeat_at: startedAt,
             updated_at: startedAt
         });
+
+        if (normalizeRunMode(run.run_mode) === 'dag') {
+            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget });
+            return;
+        }
 
         for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
             assertRunWithinBudget();
@@ -1116,7 +1363,8 @@ function normalizeSchedulePayload(body = {}) {
             approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy),
             retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
             maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
-            contextConfig: normalizeContextConfig(body.contextConfig || body.context_config)
+            contextConfig: normalizeContextConfig(body.contextConfig || body.context_config),
+            dagSpec: normalizeDagSpec(body.dagSpec || body.dag_spec || {})
         }
     };
 }
@@ -1200,6 +1448,7 @@ function runAgentScheduleNow(scheduleId, user) {
         templateId: schedule.template_id,
         scheduleId: schedule.id,
         contextConfig: cfg.contextConfig,
+        dagSpec: cfg.dagSpec,
         priority: 1
     });
     db.prepare('UPDATE agent_schedules SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?')
@@ -1285,13 +1534,122 @@ function markAgentNotificationRead(notificationId, user) {
 
 function listAgentArtifacts(user, limit = 30) {
     return db.prepare(`
-        SELECT a.*, r.title AS run_title, r.status AS run_status
+        SELECT a.*, r.title AS run_title, r.status AS run_status,
+               v.version AS current_version,
+               (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
+        LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
         WHERE a.user_id = ?
-        ORDER BY a.created_at DESC, a.id DESC
+        ORDER BY COALESCE(a.updated_at, a.created_at) DESC, a.id DESC
         LIMIT ?
     `).all(user.id, normalizePositiveInt(limit, 30, 1, 100));
+}
+
+function getAgentArtifactForUser(artifactId, user) {
+    return db.prepare(`
+        SELECT a.*, r.title AS run_title, r.status AS run_status,
+               v.version AS current_version,
+               (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
+        FROM agent_artifacts a
+        LEFT JOIN agent_runs r ON r.id = a.run_id
+        LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
+        WHERE a.id = ? AND a.user_id = ?
+    `).get(artifactId, user.id);
+}
+
+function listAgentArtifactVersions(artifactId, user) {
+    const artifact = getAgentArtifactForUser(artifactId, user);
+    if (!artifact) return null;
+    const versions = db.prepare(`
+        SELECT id, artifact_id, version, content, note, created_by, created_at
+        FROM agent_artifact_versions
+        WHERE artifact_id = ?
+        ORDER BY version DESC
+    `).all(artifact.id);
+    return { artifact, versions };
+}
+
+function nextArtifactVersion(artifactId) {
+    const row = db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS version FROM agent_artifact_versions WHERE artifact_id = ?').get(artifactId);
+    return Number(row?.version || 1);
+}
+
+function createAgentArtifactVersion(artifactId, user, body = {}) {
+    const artifact = getAgentArtifactForUser(artifactId, user);
+    if (!artifact) return null;
+    const content = String(body.content ?? artifact.content ?? '').trim();
+    if (!content) {
+        const err = new Error('版本内容不能为空。');
+        err.status = 400;
+        throw err;
+    }
+    const note = String(body.note || '').trim().slice(0, 500);
+    const now = getBeijingTimestamp();
+    const version = nextArtifactVersion(artifact.id);
+    let versionId = 0;
+    db.transaction(() => {
+        const info = db.prepare(`
+            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(artifact.id, version, content, note, user.id, now);
+        versionId = info.lastInsertRowid;
+        db.prepare(`
+            UPDATE agent_artifacts
+            SET content = ?, note = ?, current_version_id = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        `).run(content, note, versionId, now, artifact.id, user.id);
+    })();
+    return getAgentArtifactForUser(artifact.id, user);
+}
+
+function buildLineDiff(fromContent, toContent) {
+    const fromLines = String(fromContent || '').split(/\r?\n/);
+    const toLines = String(toContent || '').split(/\r?\n/);
+    const max = Math.max(fromLines.length, toLines.length);
+    const rows = [];
+    for (let i = 0; i < max; i += 1) {
+        const before = fromLines[i] ?? '';
+        const after = toLines[i] ?? '';
+        if (before === after) rows.push({ type: 'same', line: i + 1, text: before });
+        else {
+            if (before) rows.push({ type: 'remove', line: i + 1, text: before });
+            if (after) rows.push({ type: 'add', line: i + 1, text: after });
+        }
+        if (rows.length >= 400) {
+            rows.push({ type: 'truncated', line: i + 1, text: 'Diff 已截断，仅展示前 400 行变化。' });
+            break;
+        }
+    }
+    return rows;
+}
+
+function diffAgentArtifactVersions(artifactId, user, fromVersion, toVersion) {
+    const artifact = getAgentArtifactForUser(artifactId, user);
+    if (!artifact) return null;
+    const from = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(fromVersion));
+    const to = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(toVersion));
+    if (!from || !to) {
+        const err = new Error('对比版本不存在。');
+        err.status = 404;
+        throw err;
+    }
+    return { artifact, from, to, diff: buildLineDiff(from.content, to.content) };
+}
+
+function rollbackAgentArtifactVersion(artifactId, user, version, note = '') {
+    const artifact = getAgentArtifactForUser(artifactId, user);
+    if (!artifact) return null;
+    const target = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(version));
+    if (!target) {
+        const err = new Error('回滚版本不存在。');
+        err.status = 404;
+        throw err;
+    }
+    return createAgentArtifactVersion(artifact.id, user, {
+        content: target.content,
+        note: String(note || `回滚到 v${target.version}`).slice(0, 500)
+    });
 }
 
 function saveAgentRunArtifact(runId, user, body = {}) {
@@ -1304,12 +1662,24 @@ function saveAgentRunArtifact(runId, user, body = {}) {
         throw err;
     }
     const title = String(body.title || detail.run.title || detail.run.goal || '智能体结果').trim().slice(0, 120);
-    const info = db.prepare(`
-        INSERT INTO agent_artifacts (run_id, user_id, type, title, content, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(runId, user.id, String(body.type || 'summary').slice(0, 40), title, content, getBeijingTimestamp());
+    const note = String(body.note || '初始沉淀').trim().slice(0, 500);
+    const now = getBeijingTimestamp();
+    let artifactId = 0;
+    db.transaction(() => {
+        const info = db.prepare(`
+            INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(runId, user.id, String(body.type || 'summary').slice(0, 40), title, content, note, now, now);
+        artifactId = info.lastInsertRowid;
+        const versionInfo = db.prepare(`
+            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
+            VALUES (?, 1, ?, ?, ?, ?)
+        `).run(artifactId, content, note, user.id, now);
+        db.prepare('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?')
+            .run(versionInfo.lastInsertRowid, artifactId);
+    })();
     createAgentNotification(user.id, runId, 'artifact', '智能体结果已沉淀', title);
-    return db.prepare('SELECT * FROM agent_artifacts WHERE id = ?').get(info.lastInsertRowid);
+    return getAgentArtifactForUser(artifactId, user);
 }
 
 function exportAgentRun(runId, user, format = 'json') {
@@ -1379,7 +1749,8 @@ function createAgentRun({
     scheduleId = null,
     contextConfig = {},
     resumeFromStep = 0,
-    metadata = {}
+    metadata = {},
+    dagSpec = null
 }) {
     const cleanGoal = normalizeAgentGoal(goal);
     const modelCfg = getRunnableModelForUser(modelId, user);
@@ -1388,6 +1759,10 @@ function createAgentRun({
     const now = getBeijingTimestamp();
     const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
     const normalizedRunMode = normalizeRunMode(runMode);
+    const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+    if (normalizedRunMode === 'dag') {
+        runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
+    }
     db.prepare(`
         INSERT INTO agent_runs (
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
@@ -1419,7 +1794,7 @@ function createAgentRun({
         scheduleId || null,
         serializeContextConfig(contextConfig),
         normalizePositiveInt(resumeFromStep, 0, 0, 999),
-        JSON.stringify(metadata && typeof metadata === 'object' ? metadata : {}),
+        JSON.stringify(runMetadata),
         now,
         now
     );
@@ -1431,6 +1806,7 @@ function createAgentRun({
 
 module.exports = {
     createAgentRun,
+    createAgentArtifactVersion,
     createAgentSchedule,
     createAgentTemplate,
     cancelAgentRun,
@@ -1438,9 +1814,12 @@ module.exports = {
     deleteAgentSchedule,
     deleteAgentTemplate,
     approveAgentTool,
+    diffAgentArtifactVersions,
     exportAgentRun,
     formatToolList,
+    getAgentArtifactForUser,
     listAgentArtifacts,
+    listAgentArtifactVersions,
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
@@ -1453,6 +1832,7 @@ module.exports = {
     listRuns,
     listSteps,
     normalizeAgentGoal,
+    normalizeDagSpec,
     normalizeRunMode,
     normalizeApprovalPolicy,
     normalizeToolAllowlist,
@@ -1464,6 +1844,7 @@ module.exports = {
     runAgentScheduleNow,
     runDueAgentSchedules,
     runAgent,
+    rollbackAgentArtifactVersion,
     saveAgentRunArtifact,
     softDeleteAgentRun
     ,

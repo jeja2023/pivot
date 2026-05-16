@@ -3,6 +3,7 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
+const { recordSlowModelResponse } = require('./observability');
 const { parsePositiveInt } = require('../number');
 
 const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 1);
@@ -112,6 +113,7 @@ function recordModelSuccess(modelCfg, latencyMs) {
     runtime.lastError = '';
     runtime.lastLatencyMs = Number.isFinite(latencyMs) ? latencyMs : runtime.lastLatencyMs;
     runtime.lastSuccessAt = getBeijingTimestamp();
+    recordSlowModelResponse(modelCfg, latencyMs);
 }
 
 function recordModelFailure(modelCfg, err) {

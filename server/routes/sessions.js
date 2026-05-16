@@ -273,6 +273,90 @@ function createSessionsRouter({
         res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
     }));
 
+    router.post('/sessions/:id/fork', authMiddleware, asyncHandler(async (req, res) => {
+        const source = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!source) return res.status(404).json({ error: '会话不存在' });
+
+        const requestedMessageId = Number.parseInt(req.body?.messageId, 10);
+        const fallbackMessage = db.prepare(`
+            SELECT id
+            FROM messages
+            WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(source.id, req.user.id);
+        const forkedFromMessageId = Number.isSafeInteger(requestedMessageId)
+            ? requestedMessageId
+            : Number(fallbackMessage?.id || 0);
+        if (!forkedFromMessageId) return res.status(400).json({ error: '当前会话没有可分叉的消息' });
+
+        const forkMessage = db.prepare(`
+            SELECT id
+            FROM messages
+            WHERE id = ? AND session_id = ? AND user_id = ? AND deleted_at IS NULL
+        `).get(forkedFromMessageId, source.id, req.user.id);
+        if (!forkMessage) return res.status(404).json({ error: '分叉消息不存在' });
+
+        const newSessionId = uuidv4();
+        const now = getBeijingTimestamp();
+        const baseTitle = String(req.body?.title || source.title || '新分支').trim();
+        const title = (baseTitle.startsWith('分支：') ? baseTitle : `分支：${baseTitle}`).slice(0, 80);
+        const forkNote = String(req.body?.note || '').trim().slice(0, 500);
+        const rootSessionId = source.fork_root_session_id || source.parent_session_id || source.id;
+        const copiedMessages = db.prepare(`
+            SELECT role, content, token_count, is_summary, context_archived, compressed_at, model_id, created_at
+            FROM messages
+            WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL AND id <= ?
+            ORDER BY id ASC
+        `).all(source.id, req.user.id, forkedFromMessageId);
+
+        db.transaction(() => {
+            db.prepare(`
+                INSERT INTO sessions (
+                    id, user_id, title, tags, system_prompt, parent_session_id, forked_from_message_id,
+                    fork_root_session_id, fork_note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                newSessionId,
+                req.user.id,
+                title,
+                source.tags || '',
+                source.system_prompt || '',
+                source.id,
+                forkedFromMessageId,
+                rootSessionId,
+                forkNote,
+                now,
+                now
+            );
+
+            const insertMessage = db.prepare(`
+                INSERT INTO messages (
+                    session_id, user_id, role, content, token_count, is_summary, context_archived,
+                    compressed_at, model_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            copiedMessages.forEach(message => {
+                insertMessage.run(
+                    newSessionId,
+                    req.user.id,
+                    message.role,
+                    message.content,
+                    message.token_count || 0,
+                    message.is_summary || 0,
+                    message.context_archived || 0,
+                    message.compressed_at || null,
+                    message.model_id || null,
+                    message.created_at || now
+                );
+            });
+        })();
+
+        const forkedSession = stmts.getSessionById.get(newSessionId, req.user.id);
+        logAction(req, '分叉会话', `源会话ID: ${source.id}，新会话ID: ${newSessionId}，消息ID: ${forkedFromMessageId}`);
+        res.status(201).json({ success: true, session: forkedSession, copiedMessages: copiedMessages.length });
+    }));
+
     router.get('/sessions/:id/export', authMiddleware, asyncHandler(async (req, res) => {
         const session = stmts.getSessionById.get(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });

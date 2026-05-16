@@ -541,6 +541,22 @@ window.loadMonitorSummary = async function() {
             ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join('');
         }
 
+        const observability = data.observability || {};
+        const observabilityEl = document.getElementById('monitor-observability-list');
+        const webhookInput = document.getElementById('observability-webhook-url');
+        if (webhookInput && observability.settings) {
+            webhookInput.value = observability.settings.webhookUrl || '';
+        }
+        if (observabilityEl) {
+            const events = observability.events || [];
+            observabilityEl.innerHTML = events.length ? events.map(item => `
+                <div class="monitor-row">
+                    <span title="${escapeHtml(item.message || '')}">${escapeHtml(item.type || '-')} · ${escapeHtml(item.severity || '-')}</span>
+                    <strong>${formatMetricNumber(item.duration_ms, 1)} ms</strong>
+                </div>
+            `).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
+        }
+
         const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
         const endpointListEl = document.getElementById('monitor-endpoint-list');
         if (endpointListEl) {
@@ -607,6 +623,19 @@ function scheduleMonitorRefresh() {
         monitorTimer = setTimeout(() => window.loadMonitorSummary(), 10000);
     }
 }
+
+window.saveObservabilityWebhook = async function() {
+    const input = document.getElementById('observability-webhook-url');
+    const res = await apiFetch(`${API_BASE}/stats/observability/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookUrl: input?.value || '', enabled: true })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '告警设置保存失败', 'error');
+    showToast('告警设置已保存', 'success');
+    window.loadMonitorSummary();
+};
 
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
 window.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
