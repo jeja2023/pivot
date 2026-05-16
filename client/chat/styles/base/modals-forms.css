@@ -1,0 +1,49 @@
+/* 对话页面样式 Chat Page Style */
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+#confirm-container { z-index: 7000 !important; }
+#confirm-container .modal {
+    width: 340px !important;
+    padding: 22px;
+    border-radius: 12px;
+    text-align: left;
+}
+#confirm-container h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-main);
+}
+#confirm-message {
+    margin-top: 10px !important;
+    line-height: 1.55;
+    font-size: 0.84rem;
+}
+.modal { background: var(--surface); padding: 2.5rem; border-radius: var(--radius-lg); width: 420px; text-align: center; box-shadow: var(--shadow-md); border: 1px solid var(--border); }
+.subtitle { margin-bottom: 25px; color: var(--text-muted); font-size: 1rem; }
+
+/* 表单输入框样式 - 适配深色模式 */
+.form-input { 
+    width: 100%; height: 54px; padding: 0 20px; margin-bottom: 15px; 
+    border: 1px solid var(--border); border-radius: var(--radius-md); 
+    background: var(--bg-main); color: var(--text-main); font-size: 1.1rem;
+    transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.form-input:focus { 
+    outline: none; border-color: var(--primary); 
+    background: white;
+    box-shadow: none; 
+}
+.form-group { margin-bottom: 1.5rem; text-align: left; }
+
+/* 隐藏浏览器原生的密码显示/清除按钮，避免图标冲突 */
+input::-ms-reveal,
+input::-ms-clear {
+    display: none;
+}
+input::-webkit-contacts-auto-fill-button {
+    visibility: hidden;
+    display: none !important;
+    pointer-events: none;
+}
+
+#app { display: flex; height: 100vh; }

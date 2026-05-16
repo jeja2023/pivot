@@ -1,0 +1,354 @@
+    <!-- 用户认证弹窗 -->
+    <div id="auth-container" class="modal-overlay">
+        <div class="modal">
+            <img src="/common/logo.png" alt="Zhi-Shu Logo" class="auth-logo">
+            <h2 id="auth-title">智枢</h2>
+            <form class="form-group" id="auth-form" autocomplete="on">
+                <input type="text" id="username" class="form-input" placeholder="用户名">
+                <div class="reg-only hidden">
+                    <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
+                    <input type="text" id="unit" class="form-input" placeholder="工作单位">
+                </div>
+                <div style="position: relative; margin-bottom: 15px;">
+                    <input type="password" id="password" class="form-input" placeholder="密码" style="margin-bottom: 0; padding-right: 45px;">
+                    <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="password" data-icon-id="eye-icon-auth" title="显示/隐藏明文">
+                        <svg id="eye-icon-auth" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="reg-only hidden" style="position: relative; margin-bottom: 15px;">
+                    <input type="password" id="confirm-password" class="form-input" placeholder="确认密码" style="margin-bottom: 0; padding-right: 45px;">
+                    <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="confirm-password" data-icon-id="eye-icon-auth-conf" title="显示/隐藏明文">
+                        <svg id="eye-icon-auth-conf" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
+                </div>
+            </form>
+            <button id="auth-submit" class="btn-primary" style="width: 100%;">进入系统</button>
+            <p style="margin-top: 15px; font-size: 0.85rem;">
+                <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
+            </p>
+            <p class="copyright-text auth-copyright"></p>
+        </div>
+    </div>
+
+    <!-- 自定义重命名弹窗 -->
+    <div id="rename-container" class="modal-overlay hidden" style="z-index: 1100;">
+        <div class="modal" style="width: 320px;">
+            <h3>修改对话名称</h3>
+            <div class="form-group" style="margin-top: 15px;">
+                <input type="text" id="new-session-title" class="form-input" placeholder="请输入新名称">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="modal-rename-cancel" class="btn-secondary" style="flex: 1;">取消</button>
+                <button id="modal-rename-save" class="btn-primary" style="flex: 1;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义标签编辑弹窗 -->
+    <div id="tags-container" class="modal-overlay hidden" style="z-index: 1100;">
+        <div class="modal" style="width: 340px;">
+            <h3>编辑会话标签</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 5px;">多个标签请使用英文逗号分隔</p>
+            <div class="form-group" style="margin-top: 15px;">
+                <input type="text" id="session-tags-input" class="form-input" placeholder="例如: 工作, 灵感, 重要">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="modal-tags-cancel" class="btn-secondary" style="flex: 1;">取消</button>
+                <button id="modal-tags-save" class="btn-primary" style="flex: 1;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用确认弹窗 -->
+    <div id="confirm-container" class="modal-overlay hidden" style="z-index: 1500;">
+        <div class="modal" style="width: 320px;">
+            <h3 id="confirm-title">确认操作</h3>
+            <p id="confirm-message" style="margin-top: 10px; color: var(--text-muted);"></p>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="modal-confirm-cancel" class="btn-secondary" style="flex: 1;">取消</button>
+                <button id="confirm-ok-btn" class="btn-danger" style="flex: 1;">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模型配置弹窗 (Add/Edit Model Modal) -->
+    <div id="input-prompt-container" class="modal-overlay hidden" style="z-index: 1600;">
+        <div class="modal" style="width: 360px;">
+            <h3 id="input-prompt-title">安全验证</h3>
+            <p id="input-prompt-message" style="margin: 15px 0; color: var(--text-muted); line-height: 1.5;"></p>
+            <input id="input-prompt-field" class="form-input" autocomplete="off">
+            <p id="input-prompt-error" class="hidden" style="margin: -6px 0 12px; color: var(--danger); font-size: 0.82rem;"></p>
+            <div style="display: flex; gap: 10px;">
+                <button id="modal-input-prompt-cancel" class="btn-secondary" style="flex: 1;">取消</button>
+                <button id="modal-input-prompt-ok" class="btn-primary" style="flex: 1;">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="model-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal model-config-modal">
+            <div class="model-modal-header">
+                <h3 id="model-modal-title">添加新模型</h3>
+                <p class="model-modal-desc">配置 OpenAI 兼容格式的大模型接口</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="m-id">
+                <div class="form-item">
+                    <label>接口地址 (Endpoint)</label>
+                    <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
+                </div>
+                <div class="form-item">
+                    <label>API Key (可选)</label>
+                    <div style="position: relative;">
+                        <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
+                            style="padding-right: 45px;">
+                        <button type="button" class="btn-toggle-pw" data-static-action="toggle-model-key" title="显示/隐藏明文">
+                            <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-item">
+                    <label>模型展示名称</label>
+                    <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
+                </div>
+                <div class="form-item">
+                    <label>模型标识 (Model ID)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
+                            style="flex: 1;">
+                        <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从 API 获取模型列表"
+                            style="padding: 0 12px; height: 38px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="m-model-select-container" class="hidden" style="margin-top: 8px;">
+                        <select id="m-model-select" class="form-input"
+                            style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
+                    </div>
+                </div>
+                <div class="model-scope-units-row model-full-row">
+                    <div class="form-item super-admin-only hidden" id="m-scope-wrap">
+                        <label>保存范围</label>
+                        <select id="m-scope" class="form-input">
+                            <option value="personal">个人模型</option>
+                            <option value="global">全局模型</option>
+                        </select>
+                    </div>
+                    <div class="form-item" id="m-units-wrap">
+                        <label>可见部门</label>
+                        <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                    </div>
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>每日额度 (Token)</label>
+                        <input type="text" id="m-daily-limit" class="form-input"
+                            placeholder="0 表示不限，可填 8K / 1M">
+                    </div>
+                    <div class="form-item">
+                        <label>Temperature (温度)</label>
+                        <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
+                            placeholder="留空使用默认">
+                    </div>
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>输入 Token 上限</label>
+                        <input type="text" id="m-max-input-tokens" class="form-input"
+                            placeholder="留空使用默认，可填 128K">
+                    </div>
+                    <div class="form-item">
+                        <label>输出 Token 上限</label>
+                        <input type="text" id="m-max-tokens" class="form-input"
+                            placeholder="留空使用默认，可填 8K">
+                    </div>
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item">
+                        <label>远端健康检查 URL</label>
+                        <input type="text" id="m-monitor-url" class="form-input"
+                            placeholder="例如: http://10.0.0.8:8000/health">
+                    </div>
+                    <div class="form-item">
+                        <label>端点并发上限</label>
+                        <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
+                            placeholder="0 使用系统默认">
+                    </div>
+                </div>
+                <div class="model-form-row">
+                    <div class="form-item model-capability-row">
+                        <div>
+                            <label>思考模型</label>
+                            <small>开启后，该模型会在列表与选择器中标记为支持推理/思考输出。</small>
+                        </div>
+                        <label class="switch" title="思考模型">
+                            <input type="checkbox" id="m-supports-reasoning">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="form-item model-capability-row">
+                        <div>
+                            <label>视觉输入（图片/扫描件）</label>
+                            <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                        </div>
+                        <label class="switch" title="视觉输入（图片/扫描件）">
+                            <input type="checkbox" id="m-supports-vision">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="model-modal-actions">
+                    <button id="modal-model-cancel" class="btn-secondary">取消</button>
+                    <button id="modal-model-test" class="btn-secondary"
+                        style="border-color: var(--primary); color: var(--primary); width: auto; padding: 0 15px;">测试连接</button>
+                    <button id="m-submit-btn" class="btn-primary">保存配置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 用户管理弹窗 -->
+    <div id="user-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3 id="user-modal-title">添加用户</h3>
+                <p class="model-modal-desc">维护系统账号、角色与启用状态</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="u-id">
+                <div class="form-item">
+                    <label>用户名</label>
+                    <input type="text" id="u-username" class="form-input" placeholder="3-32 位字母、数字或符号">
+                </div>
+                <div class="form-item" id="u-password-wrap">
+                    <label>初始密码</label>
+                    <input type="password" id="u-password" class="form-input" placeholder="至少 8 位，包含字母和数字">
+                </div>
+                <div class="form-item">
+                    <label>显示名称</label>
+                    <input type="text" id="u-nickname" class="form-input" placeholder="用户显示名称">
+                </div>
+                <div class="form-item">
+                    <label>工作单位</label>
+                    <input type="text" id="u-unit" class="form-input" placeholder="所属单位">
+                </div>
+                <div class="form-item">
+                    <label>角色</label>
+                    <select id="u-role" class="form-input">
+                        <option value="user">普通用户</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>状态</label>
+                    <select id="u-status" class="form-input">
+                        <option value="active">启用</option>
+                        <option value="disabled">禁用</option>
+                    </select>
+                </div>
+                <div class="model-modal-actions">
+                    <button id="modal-user-cancel" class="btn-secondary">取消</button>
+                    <button id="modal-user-save" class="btn-primary">保存用户</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 超级管理员用户输入输出记录 -->
+    <div id="user-records-modal" class="modal-overlay hidden" style="z-index: 5300;">
+        <div class="modal user-records-modal">
+            <div class="user-records-panel">
+                <div class="user-records-header">
+                    <div>
+                        <h3>用户输入输出记录</h3>
+                        <p id="user-records-title" class="model-modal-desc"></p>
+                    </div>
+                    <div class="user-records-toolbar">
+                        <select id="user-record-session-select" class="form-input">
+                            <option value="">全部会话</option>
+                        </select>
+                        <label class="user-records-check">
+                            <input type="checkbox" id="user-record-include-deleted" checked>
+                            <span>包含已删除</span>
+                        </label>
+                        <button id="user-record-refresh-btn" class="btn-secondary">刷新</button>
+                        <button type="button" class="btn-danger-outline user-records-header-close"
+                            data-static-action="close-user-records" title="关闭弹窗">关闭</button>
+                    </div>
+                </div>
+                <div class="table-container user-records-table-wrap">
+                    <table class="data-table compact-table user-records-table">
+                        <thead>
+                            <tr>
+                                <th class="col-time">时间</th>
+                                <th class="col-session">会话</th>
+                                <th class="col-model">模型</th>
+                                <th class="col-token">输入 Token</th>
+                                <th class="col-token">输出 Token</th>
+                                <th class="col-content">用户输入</th>
+                                <th class="col-content">模型输出</th>
+                            </tr>
+                        </thead>
+                        <tbody id="user-records-body">
+                            <tr>
+                                <td colspan="7" class="text-center">请选择用户查看记录</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="pagination-userRecords" class="pagination"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 指令模板弹窗 -->
+    <div id="prompt-modal-container" class="modal-overlay hidden" style="z-index: 200;">
+        <div class="modal model-modal">
+            <div class="model-modal-header">
+                <h3 id="prompt-modal-title">添加指令</h3>
+                <p class="model-modal-desc">保存常用角色、流程和写作模板</p>
+            </div>
+            <div class="model-form">
+                <input type="hidden" id="p-id">
+                <div class="form-item">
+                    <label>名称</label>
+                    <input type="text" id="p-name" class="form-input" placeholder="例如: 会议纪要助手">
+                </div>
+                <div class="form-item">
+                    <label>分类</label>
+                    <input type="text" id="p-category" class="form-input" placeholder="例如: 办公">
+                </div>
+                <div class="form-item">
+                    <label>范围</label>
+                    <select id="p-scope" class="form-input">
+                        <option value="personal">个人</option>
+                        <option value="global">全局</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>指令内容</label>
+                    <textarea id="p-content" class="form-input" style="height: 160px; padding-top: 12px;"
+                        placeholder="输入系统角色或任务流程指令"></textarea>
+                </div>
+                <div class="model-modal-actions">
+                    <button id="modal-prompt-cancel" class="btn-secondary">取消</button>
+                    <button id="modal-prompt-save" class="btn-primary">保存指令</button>
+                </div>
+            </div>
+        </div>
+    </div>

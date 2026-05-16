@@ -1,0 +1,41 @@
+<section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>系统监控</h3>
+                                <p>实时查看服务健康、资源占用、并发保护与模型消耗。</p>
+                            </div>
+                            <div class="monitor-toolbar">
+                                <p id="monitor-updated-at" class="monitor-updated-at">等待刷新</p>
+                                <label class="monitor-auto-refresh">
+                                    <input type="checkbox" id="monitor-auto-refresh" checked>
+                                    <span>自动刷新</span>
+                                </label>
+                                <button type="button" class="btn-secondary monitor-routes-btn"
+                                    data-static-action="open-monitor-routes">接口详情</button>
+                                <button id="monitor-refresh-btn" class="btn-secondary">刷新</button>
+                            </div>
+                        </div>
+                        <div id="monitor-summary-grid" class="monitor-grid"></div>
+                        <div class="monitor-panels">
+                            <div class="stat-card monitor-panel-card">
+                                <h4>GPU 与并发保护</h4>
+                                <div id="monitor-gpu-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card monitor-panel-card">
+                                <h4>系统资源</h4>
+                                <div id="monitor-resource-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card monitor-panel-card">
+                                <h4>健康与维护</h4>
+                                <div id="monitor-health-maintenance-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card monitor-panel-card">
+                                <h4>今日模型 Token</h4>
+                                <div id="monitor-model-list" class="monitor-list"></div>
+                            </div>
+                            <div class="stat-card monitor-panel-card">
+                                <h4>知识库与存储</h4>
+                                <div id="monitor-rag-storage-list" class="monitor-list"></div>
+                            </div>
+                        </div>
+                    </section>

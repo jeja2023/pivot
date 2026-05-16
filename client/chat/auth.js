@@ -171,9 +171,7 @@ window.loadApiKeys = async function() {
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
                     <td class="text-center">
-                        <button class="btn-icon" style="color: var(--danger);" title="删除" data-api-key-action="delete" data-api-key-id="${k.id}">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
-                        </button>
+                        <button class="btn-danger" type="button" title="删除" data-api-key-action="delete" data-api-key-id="${k.id}">删除</button>
                     </td>
                 </tr>
             `).join('');
@@ -266,24 +264,21 @@ window.loadAvailableModels = async function() {
         };
         const renderModelChip = (model) => {
             const isEmbedding = model.type === 'embedding';
-            const color = isEmbedding ? '#059669' : '#6366f1';
-            const bg = isEmbedding ? 'rgba(5, 150, 105, 0.06)' : 'rgba(99, 102, 241, 0.06)';
-            const border = isEmbedding ? 'rgba(5, 150, 105, 0.18)' : 'rgba(99, 102, 241, 0.15)';
             const endpoint = model.endpoint || (isEmbedding ? '/v1/embeddings' : '/v1/chat/completions');
             const modelName = model.model_name || model.id;
             return `
-                <code style="display: inline-flex; flex-direction: column; gap: 2px; background: ${bg}; padding: 6px 12px; border-radius: 6px; color: ${color}; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid ${border}; text-align: center;" title="友好名称: ${escapeHtml(model.name || modelName)}&#10;接口: ${escapeHtml(endpoint)}">
+                <code class="api-model-chip ${isEmbedding ? 'is-embedding' : 'is-chat'}" title="友好名称: ${escapeHtml(model.name || modelName)}&#10;接口: ${escapeHtml(endpoint)}">
                     <span>${escapeHtml(modelName)}</span>
-                    <small style="font-family: inherit; color: var(--text-muted); font-size: 0.68rem;">${escapeHtml(renderCapabilityText(model))}</small>
+                    <small>${escapeHtml(renderCapabilityText(model))}</small>
                 </code>
             `;
         };
         // 简化展示：只显示模型标识 (model 参数值)，使用标签形式排列
         listEl.innerHTML = `
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; justify-content: center; text-align: center;">
+            <div class="api-model-chip-list">
                 ${models.map(renderModelChip).join('')}
             </div>
-            <p style="margin-top: 12px; font-size: 0.75rem; color: var(--text-muted);">* 以上为外部调用时 model 参数需填写的具体值；聊天模型用于 /v1/chat/completions，向量模型用于 /v1/embeddings。</p>
+            <p class="api-model-note">* 以上为外部调用时 model 参数需填写的具体值；聊天模型用于 /v1/chat/completions，向量模型用于 /v1/embeddings。</p>
         `;
     } catch (e) {
         listEl.innerHTML = `<span style="color: var(--danger);">加载失败: ${escapeHtml(e.message)}</span>`;

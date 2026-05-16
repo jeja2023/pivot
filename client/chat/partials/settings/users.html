@@ -1,0 +1,46 @@
+<!-- 用户管理 -->
+                    <div id="tab-content-users" class="admin-tab-content hidden">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>用户管理</h3>
+                                <p>维护账号、显示名、单位、角色和登录状态，支持导入导出用户数据。</p>
+                            </div>
+                            <div class="footer-actions" style="margin-bottom: 0;">
+                                <input type="file" id="user-import-input" class="hidden" accept=".csv">
+                                <button id="user-add-btn" class="btn-primary">添加用户</button>
+                                <button id="user-template-btn" class="btn-secondary">下载模板</button>
+                                <button id="user-import-btn" class="btn-secondary">导入用户</button>
+                                <button id="user-export-btn" class="btn-secondary">导出用户</button>
+                            </div>
+                        </div>
+                        <div class="table-container users-table-wrap">
+                            <table class="data-table compact-table users-table">
+                                <colgroup>
+                                    <col class="col-id">
+                                    <col class="col-username">
+                                    <col class="col-nickname">
+                                    <col class="col-unit">
+                                    <col class="col-role">
+                                    <col class="col-status">
+                                    <col class="col-created">
+                                    <col class="col-login">
+                                    <col class="col-actions">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>用户名</th>
+                                        <th>显示名</th>
+                                        <th>单位</th>
+                                        <th>角色</th>
+                                        <th>状态</th>
+                                        <th>注册时间</th>
+                                        <th>最后登录</th>
+                                        <th class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-users" class="pagination"></div>
+                    </div>

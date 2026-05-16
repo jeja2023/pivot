@@ -1,0 +1,29 @@
+<!-- 附件库 -->
+                    <section id="tab-content-attachments" class="admin-tab-content attachments-tab hidden">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>附件库</h3>
+                                <p>查看上传文件、关联会话、类型、大小和上传时间，支持快速检索附件。</p>
+                            </div>
+                            <input id="attachment-search-input" class="form-input"
+                                style="width: 240px; height: 38px; margin: 0;" placeholder="搜索文件名">
+                        </div>
+                        <div class="table-container attachments-table-wrap">
+                            <table class="data-table attachments-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-center">序号</th>
+                                        <th id="attachment-user-header" class="hidden">用户</th>
+                                        <th>文件名</th>
+                                        <th>关联会话</th>
+                                        <th>文件类型</th>
+                                        <th>大小</th>
+                                        <th>上传时间</th>
+                                        <th class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="attachment-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-attachments" class="pagination"></div>
+                    </section>

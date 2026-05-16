@@ -1,4 +1,5 @@
 // --- 管理员面板核心逻辑 Admin Core ---
+/* exported formatDateToCN, escapeHtml, renderTableMessage, escapeCsvValue, formatTokenAmount, formatTokenCount, formatTokenInputValue, parseTokenAmount, encodeActionArg, downloadFileByFetch, renderPagination */
 const formatDateToCN = (dateStr) => {
     if (!dateStr) return '-';
     const text = String(dateStr).trim();

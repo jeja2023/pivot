@@ -14,6 +14,33 @@ const { getMaintenanceStatus } = require('../services/maintenance');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { getBeijingTimestamp } = require('../time');
 
+const USAGE_ROLE_LABELS = {
+    user: '提问',
+    assistant: '回答',
+    system: '系统',
+    tool: '工具',
+    deleted_session: '已删会话',
+    rag_embedding: '知识库向量',
+    agent_planner: '智能体规划',
+    agent_summary: '智能体总结',
+    openai_api_key: 'OpenAI 兼容接口',
+    openai_cookie: '网页登录接口',
+    embedding_api_key: '向量接口',
+    embedding_cookie: '网页登录向量',
+    api: 'API 调用',
+    unknown: '未知'
+};
+
+function formatUsageRoleLabel(role) {
+    const key = String(role || 'unknown').trim() || 'unknown';
+    if (USAGE_ROLE_LABELS[key]) return USAGE_ROLE_LABELS[key];
+    if (key.startsWith('agent_')) return '智能体调用';
+    if (key.includes('embedding')) return '向量调用';
+    if (key.includes('api_key')) return 'API Key 调用';
+    if (key.includes('cookie')) return '网页登录调用';
+    return '其它调用';
+}
+
 function normalizeHostAlias(value) {
     let host = String(value || '').trim();
     if (!host) return '';
@@ -508,7 +535,7 @@ function createAdminStatsRouter({
         const details = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,输入Token,输出Token,总Token\n';
         details.forEach(d => {
-            const roleLabel = d.role === 'deleted_session' ? '已删会话' : (d.usage_source === 'api' ? d.role : (d.role === 'user' ? '提问' : '回答'));
+            const roleLabel = formatUsageRoleLabel(d.role);
             csv += [d.created_at, d.username, d.nickname || '', d.model_name || '未知', roleLabel, d.input_tokens || 0, d.output_tokens || 0, d.token_count].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出用量明细', `导出 ${details.length} 条明细`);

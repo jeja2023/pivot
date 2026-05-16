@@ -1,0 +1,7 @@
+/* Core chat styles. Keep import order stable. */
+@import url("./base/modals-forms.css");
+@import url("./base/sidebar.css");
+@import url("./base/chat-shell.css");
+@import url("./base/markdown.css");
+@import url("./base/input.css");
+@import url("./base/attachments.css");

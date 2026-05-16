@@ -1,0 +1,61 @@
+@media (max-width: 980px) {
+    .agent-workbench,
+    .mcp-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-workspace-view .admin-layout {
+        flex-direction: column;
+    }
+
+    .settings-workspace-view .admin-sidebar {
+        width: 100%;
+        flex: 0 0 auto;
+        max-height: 220px;
+    }
+
+    .settings-workspace-view .admin-content {
+        min-height: 420px;
+    }
+
+    .agent-history-panel {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    .agent-runs-list {
+        grid-column: 1;
+        grid-row: 2;
+        flex-direction: row;
+        flex-basis: auto;
+        padding: 0 0 8px;
+        margin-bottom: 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .agent-run-item {
+        flex: 0 0 176px;
+    }
+
+    .agent-run-detail {
+        grid-column: 1;
+        grid-row: 3;
+        padding: 0;
+    }
+
+    .agent-policy-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-enterprise-controls,
+    .agent-history-filters {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-runtime-status {
+        align-items: flex-start;
+    }
+}
+.ops-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06); border-color: var(--primary); }
+.ops-card span { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }

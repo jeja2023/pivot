@@ -1,0 +1,64 @@
+<!-- 审计日志 -->
+                    <div id="tab-content-logs" class="admin-tab-content audit-log-tab hidden">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>审计日志</h3>
+                                <p>按用户、操作、详情、IP 和日期筛选系统行为记录，便于追踪与审计。</p>
+                            </div>
+                            <button id="logs-export-btn" class="btn-secondary">导出日志</button>
+                        </div>
+                        <div class="filter-bar audit-log-filter-bar">
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-user">用户</label>
+                                <input type="text" id="log-filter-user" class="form-input" placeholder="用户名">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-action">操作类型</label>
+                                <input type="text" id="log-filter-action" class="form-input" placeholder="例如: 登录">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-details">详情关键字</label>
+                                <input type="text" id="log-filter-details" class="form-input" placeholder="搜索详情...">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-ip">IP 地址</label>
+                                <input type="text" id="log-filter-ip" class="form-input" placeholder="IP">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-start">开始日期</label>
+                                <input type="date" id="log-filter-start" class="form-input">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="log-filter-end">结束日期</label>
+                                <input type="date" id="log-filter-end" class="form-input">
+                            </div>
+                            <div class="filter-item filter-actions">
+                                <button type="button" data-static-action="query-logs" class="btn-primary">查询</button>
+                                <button type="button" data-static-action="reset-logs" class="btn-secondary">重置</button>
+                            </div>
+                        </div>
+                        <div class="table-container logs-table-wrap">
+                            <table class="data-table log-table audit-log-table">
+                                <colgroup>
+                                    <col class="col-index">
+                                    <col class="col-time">
+                                    <col class="col-user">
+                                    <col class="col-ip">
+                                    <col class="col-action">
+                                    <col class="col-details">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th class="text-center">序号</th>
+                                        <th>时间</th>
+                                        <th>用户</th>
+                                        <th>IP 地址</th>
+                                        <th>操作</th>
+                                        <th>详情</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="log-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-logs" class="pagination"></div>
+                    </div>

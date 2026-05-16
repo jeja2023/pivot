@@ -1,4 +1,5 @@
 // --- UI 渲染模块 Render (完整功能版) ---
+/* exported appendMessage, renderAttachmentPreviews, rememberThoughtStateBeforeRender, restoreThoughtStateAfterRender */
 const ICONS = {
     user: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="white" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
     ai: `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
@@ -181,7 +182,7 @@ window.scrollMessagesToBottom = function() {
 };
 
 const customRenderer = new marked.Renderer();
-customRenderer.code = (code, infostring, escaped) => {
+customRenderer.code = (code, infostring, _escaped) => {
     if (typeof code === 'object' && code !== null) {
         infostring = code.lang || code.info || '';
         code = code.text || code.raw || '';
@@ -338,7 +339,7 @@ function renderMarkdown(content) {
     return rawHtml;
 }
 
-function renderAiMessage(content, isStreaming = false, thoughtOpenStates = []) {
+function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) {
     if (!content) return '';
     // 使用全局变量传递状态给 marked 渲染器
     window._tempThoughtCounter = 0;

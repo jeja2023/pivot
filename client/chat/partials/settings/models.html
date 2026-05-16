@@ -1,0 +1,42 @@
+<!-- 模型管理 -->
+                    <div id="tab-content-models" class="admin-tab-content">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>模型配置</h3>
+                                <p>管理聊天模型、服务地址、额度、能力标记、可见范围和启用状态。</p>
+                            </div>
+                            <button id="model-add-btn" class="btn-primary">+ 添加模型</button>
+                        </div>
+                        <div class="table-container models-table-wrap">
+                            <table class="data-table compact-table models-table">
+                                <colgroup>
+                                    <col class="col-index">
+                                    <col class="col-name">
+                                    <col class="col-url">
+                                    <col class="col-limit">
+                                    <col class="col-capability">
+                                    <col class="col-units">
+                                    <col class="col-owner">
+                                    <col class="col-status">
+                                    <col class="col-created">
+                                    <col class="col-actions">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th class="text-center">序号</th>
+                                        <th>名称</th>
+                                        <th>后端 URL</th>
+                                        <th>每日额度</th>
+                                        <th>能力</th>
+                                        <th>可见部门</th>
+                                        <th>添加用户</th>
+                                        <th>状态</th>
+                                        <th>添加时间</th>
+                                        <th class="text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="model-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div id="pagination-models" class="pagination"></div>
+                    </div>

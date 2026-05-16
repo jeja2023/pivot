@@ -2,7 +2,9 @@
 window.loadPrompts = async function() {
     const res = await fetch(`${API_BASE}/prompts`, { headers: authHeaders() });
     const data = await res.json();
-    document.getElementById('prompt-grid').innerHTML = data.map(p => `
+    const grid = document.getElementById('prompt-grid');
+    if (!grid) return;
+    grid.innerHTML = data.length ? data.map(p => `
         <div class="prompt-card">
             <div class="prompt-card-head">
                 <h4>${escapeHtml(p.name)}</h4>
@@ -10,11 +12,11 @@ window.loadPrompts = async function() {
             </div>
             <p>${escapeHtml(p.content)}</p>
             <div class="prompt-actions">
-                <button class="btn-secondary" data-prompt-action="apply" data-prompt="${encodeActionArg(p)}">应用</button>
-                ${(p.scope !== 'global' || currentUser.username === 'admin') ? `<button class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
+                <button type="button" class="btn-secondary" data-prompt-action="apply" data-prompt="${encodeActionArg(p)}">应用</button>
+                ${(p.scope !== 'global' || currentUser.username === 'admin') ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
             </div>
         </div>
-    `).join('');
+    `).join('') : '<div class="prompt-empty-state">暂无指令模板</div>';
 }
 
 document.getElementById('prompt-grid')?.addEventListener('click', (event) => {
@@ -92,13 +94,14 @@ window.loadAttachments = async function(page = 1) {
     const res = await fetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
     const { data, total, isSuperAdmin } = await res.json();
     const showOwner = isSuperAdmin === true;
+    const attachmentsTab = document.getElementById('tab-content-attachments');
+    if (attachmentsTab) attachmentsTab.classList.toggle('attachments-show-owner', showOwner);
     let ownerHeader = document.getElementById('attachment-user-header');
     if (!ownerHeader && showOwner) {
         const firstHeader = document.querySelector('#tab-content-attachments thead tr th:first-child');
         if (firstHeader) {
             ownerHeader = document.createElement('th');
             ownerHeader.id = 'attachment-user-header';
-            ownerHeader.style.width = '120px';
             ownerHeader.textContent = '用户';
             firstHeader.insertAdjacentElement('afterend', ownerHeader);
         }
@@ -118,8 +121,7 @@ window.loadAttachments = async function(page = 1) {
             <td title="${escapeHtml(formatDateToCN(item.created_at))}">${escapeHtml(formatDateToCN(item.created_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 5px; justify-content: center;">
-                    <button class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-preview data-attachment-url="${escapeHtml(item.url)}" data-attachment-name="${escapeHtml(item.file_name)}" data-attachment-type="${escapeHtml(item.file_type || '')}">Preview</button>
-                    <a class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; text-decoration: none;" href="${escapeHtml(item.url)}" target="_blank">打开</a>
+                    <button class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-preview data-attachment-url="${escapeHtml(item.url)}" data-attachment-name="${escapeHtml(item.file_name)}" data-attachment-type="${escapeHtml(item.file_type || '')}">预览</button>
                     <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-action="delete" data-attachment-id="${item.id}">删除</button>
                 </div>
             </td>

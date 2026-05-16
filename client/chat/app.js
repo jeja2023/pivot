@@ -1,4 +1,5 @@
 /* 智枢前端主程序 Main Entry */
+/* exported handleUnauthorized */
 function handleUnauthorized() {
     localStorage.removeItem('pivot_token');
     if (typeof setCsrfToken === 'function') setCsrfToken('');

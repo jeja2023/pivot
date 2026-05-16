@@ -1,0 +1,6 @@
+/* Workspace styles. Keep import order stable. */
+@import url("./workspaces/agent.css");
+@import url("./workspaces/shared.css");
+@import url("./workspaces/knowledge.css");
+@import url("./workspaces/mcp.css");
+@import url("./workspaces/responsive.css");

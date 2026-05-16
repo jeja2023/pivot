@@ -64,7 +64,6 @@ window.loadModels = async function(page = 1) {
         const isGlobalModel = !m.user_id;
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
-        const isAdmin = currentUser.role === 'admin';
         const isSuperAdmin = currentUser.username === 'admin';
         const isMyModel = String(m.user_id) === String(currentUser.id);
         
@@ -110,7 +109,7 @@ window.loadModels = async function(page = 1) {
                 </div>
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
-            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens">${formatTokenAmount(m.daily_token_limit)}<br><small>${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
+            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens / ${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}">${formatTokenAmount(m.daily_token_limit)} / <small>${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
             <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>

@@ -1,0 +1,25 @@
+<!-- 运营概览 -->
+                    <section id="tab-content-ops" class="admin-tab-content hidden">
+                        <div class="ops-page-head">
+                            <div>
+                                <h3 id="ops-title">数据概览</h3>
+                                <p>系统规模、端点运行状态与近期 Token 趋势。</p>
+                            </div>
+                            <button id="ops-refresh-btn" class="btn-secondary">刷新</button>
+                        </div>
+                        <div id="ops-summary-grid" class="ops-grid"></div>
+                        <div class="stat-card ops-section-card">
+                            <div class="ops-section-title">
+                                <h4>模型端点状态</h4>
+                                <span>运行时监控</span>
+                            </div>
+                            <div id="monitor-endpoint-list" class="monitor-list"></div>
+                        </div>
+                        <div class="stat-card trend-card ops-section-card">
+                            <div class="ops-section-title">
+                                <h4>近 30 天 Token 趋势</h4>
+                                <span>按日期汇总</span>
+                            </div>
+                            <canvas id="usage-trend-chart" height="220"></canvas>
+                        </div>
+                    </section>

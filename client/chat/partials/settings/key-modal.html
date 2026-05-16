@@ -1,0 +1,35 @@
+<div id="key-modal" class="modal-overlay hidden" style="z-index: 5000;">
+        <div class="modal" style="width: 550px; padding: 30px; position: relative;">
+            <button type="button" class="btn-secondary settings-dialog-close"
+                data-static-action="close-key-modal">关闭</button>
+            <div id="key-input-view">
+                <h3 style="margin-bottom: 20px;">新建 API Key</h3>
+                <div class="form-item" style="margin-bottom: 20px;">
+                    <label>密钥名称</label>
+                    <input type="text" id="new-key-name" class="form-input" placeholder="例如：沉浸式翻译" style="width: 100%;">
+                </div>
+                <button type="button" data-static-action="confirm-create-key" class="btn-primary"
+                    style="width: 100%; height: 42px;">确定创建</button>
+            </div>
+            <div id="key-result-view" class="hidden">
+                <h3 style="margin-bottom: 15px; color: var(--primary);">创建成功</h3>
+                <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">
+                    请立即复制并妥善保存此密钥。出于安全考虑，它将<strong>不会再次完整显示</strong>：</p>
+                <div
+                    style="background: rgba(15, 23, 42, 0.04); padding: 16px 50px 16px 16px; border-radius: 10px; font-family: 'Fira Code', 'JetBrains Mono', monospace; border: 1px dashed var(--primary); position: relative; font-size: 0.9rem; color: var(--text-main); margin-bottom: 25px; overflow: hidden;">
+                    <span id="generated-key-text" style="display: block; white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"></span>
+                    <button type="button" data-static-action="copy-generated-key"
+                        style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: white; border: 1px solid var(--border); border-radius: 6px; padding: 6px; color: var(--primary); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"
+                        title="复制到剪贴板">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+                        </svg>
+                    </button>
+                </div>
+                <button type="button" data-static-action="close-key-modal" class="btn-secondary"
+                    style="width: 100%; height: 42px;">我已妥善保存</button>
+            </div>
+        </div>
+    </div>

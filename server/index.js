@@ -28,10 +28,11 @@ const {
 } = require('./http');
 const { validateConfig } = require('./config');
 const { applyAppVersionTemplate, getAppVersion } = require('./version');
+const { loadChatHtmlTemplate } = require('./chat-template');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
 const appVersion = getAppVersion();
-const chatHtmlTemplate = fs.readFileSync(path.join(__dirname, '../client/chat/chat.html'), 'utf8');
+const chatHtmlTemplate = loadChatHtmlTemplate();
 
 let shuttingDown = false;
 const fatalExit = (reason, err) => {

@@ -1,5 +1,6 @@
 /* 对话页面逻辑 Chat Page Logic */
 
+/* exported API_BASE, APP_NAME, APP_VERSION, APP_COPYRIGHT, csrfToken, currentUser, currentSessionId, authHeaders, authFetch, apiFetch, checkLogin, setCsrfToken */
 const API_BASE = '/api';
 const APP_NAME = '智枢';
 const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';

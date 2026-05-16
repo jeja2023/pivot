@@ -6,6 +6,33 @@ function formatEstimatedCost(value, currency = 'CNY') {
     return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
 }
 
+const USAGE_ROLE_LABELS = {
+    user: '提问',
+    assistant: '回答',
+    system: '系统',
+    tool: '工具',
+    deleted_session: '已删会话',
+    rag_embedding: '知识库向量',
+    agent_planner: '智能体规划',
+    agent_summary: '智能体总结',
+    openai_api_key: 'OpenAI 兼容接口',
+    openai_cookie: '网页登录接口',
+    embedding_api_key: '向量接口',
+    embedding_cookie: '网页登录向量',
+    api: 'API 调用',
+    unknown: '未知'
+};
+
+function formatUsageRoleLabel(role) {
+    const key = String(role || 'unknown').trim() || 'unknown';
+    if (USAGE_ROLE_LABELS[key]) return USAGE_ROLE_LABELS[key];
+    if (key.startsWith('agent_')) return '智能体调用';
+    if (key.includes('embedding')) return '向量调用';
+    if (key.includes('api_key')) return 'API Key 调用';
+    if (key.includes('cookie')) return '网页登录调用';
+    return '其它调用';
+}
+
 function ensureStatsExportActions() {
     const exportBtn = document.getElementById('stats-export-btn');
     if (!exportBtn || document.getElementById('model-cost-export-btn')) return;
@@ -17,7 +44,7 @@ function ensureStatsExportActions() {
     costBtn.id = 'model-cost-export-btn';
     costBtn.type = 'button';
     costBtn.className = 'btn-secondary';
-    costBtn.textContent = 'Export Costs';
+    costBtn.textContent = '导出费用';
     costBtn.addEventListener('click', () => window.exportModelCosts?.());
     wrap.appendChild(costBtn);
     if (currentUser?.role === 'admin') {
@@ -25,25 +52,20 @@ function ensureStatsExportActions() {
         complianceBtn.id = 'compliance-export-btn';
         complianceBtn.type = 'button';
         complianceBtn.className = 'btn-secondary';
-        complianceBtn.textContent = 'Compliance Pack';
+        complianceBtn.textContent = '合规审计包';
         complianceBtn.addEventListener('click', () => window.exportCompliancePackage?.());
         wrap.appendChild(complianceBtn);
     }
 }
 
 window.loadDetails = async function(page = 1) {
-    const isAdmin = currentUser.role === 'admin';
     const titleEl = document.getElementById('details-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
         const res = await fetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
         const { data, total } = await res.json();
         document.getElementById('details-list-body').innerHTML = data.map((d, i) => {
-            const roleLabel = d.role === 'deleted_session'
-                ? '已删会话'
-                : d.usage_source === 'api'
-                    ? d.role
-                    : (d.role === 'user' ? '提问' : '回答');
+            const roleLabel = formatUsageRoleLabel(d.role);
             return `
                 <tr>
                     <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
@@ -63,7 +85,6 @@ window.loadDetails = async function(page = 1) {
 
 window.loadStats = async function() {
     ensureStatsExportActions();
-    const isAdmin = currentUser.role === 'admin';
     const titleEl = document.getElementById('stats-title');
     if (titleEl) titleEl.innerText = '用量统计';
     try {
@@ -78,8 +99,8 @@ window.loadStats = async function() {
                 <td class="text-center">${s.msg_count}</td>
                 <td class="text-center" title="${Number(s.input_tokens || 0).toLocaleString()}">${formatTokenCount(s.input_tokens)}</td>
                 <td class="text-center" title="${Number(s.output_tokens || 0).toLocaleString()}">${formatTokenCount(s.output_tokens)}</td>
-                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)}<br><small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || 'CNY'))}</small></td>
-                <td style="color: var(--text-muted); font-size: 0.85rem;">${s.last_active || '-'}</td>
+                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)} / <small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || 'CNY'))}</small></td>
+                <td>${s.last_active || '-'}</td>
             </tr>
         `).join('');
     } catch (e) { showToast('加载统计失败', 'error'); }

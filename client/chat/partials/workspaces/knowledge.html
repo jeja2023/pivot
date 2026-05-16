@@ -1,0 +1,48 @@
+<!-- 知识库工作台 -->
+    <section id="knowledge-workbench-modal" class="main-workspace-view knowledge-workspace-view hidden">
+        <div class="workspace-modal knowledge-workspace-modal">
+            <div class="workspace-modal-header">
+                <div>
+                    <h3>知识库</h3>
+                    <p>管理项目资料、索引状态和召回测试，让聊天与智能体任务可以稳定使用私有文档。</p>
+                </div>
+                <button id="knowledge-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
+            </div>
+            <div class="workspace-modal-body">
+                <div class="workspace-panel knowledge-panel">
+                    <div class="workspace-toolbar knowledge-toolbar">
+                        <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf">
+                        <button id="rag-embedding-modal-open-btn" class="btn-secondary">RAG 配置</button>
+                        <button id="rag-debug-modal-open-btn" class="btn-secondary">召回测试</button>
+                        <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
+                        <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                        <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
+                        <button id="rag-batch-delete-btn" class="btn-secondary">批量删除</button>
+                        <button id="rag-retry-failed-btn" class="btn-secondary">重试失败</button>
+                        <button id="rag-upload-btn" class="btn-primary">上传文档</button>
+                    </div>
+                    <div id="rag-summary" class="rag-summary"></div>
+                    <div class="table-container workspace-table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all"></th>
+                                    <th style="width: 50px;" class="text-center">序号</th>
+                                    <th style="width: auto;">文档名称</th>
+                                    <th style="width: 120px;">状态</th>
+                                    <th style="width: 90px;" class="text-center">启用</th>
+                                    <th style="width: 90px;" class="text-center">分块</th>
+                                    <th style="width: 90px;" class="text-center">进度</th>
+                                    <th style="width: 150px;">上传时间</th>
+                                    <th style="width: 150px;">更新时间</th>
+                                    <th style="width: 210px;" class="text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rag-docs-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="pagination-ragDocs" class="pagination workspace-pagination"></div>
+                </div>
+            </div>
+        </div>
+    </section>

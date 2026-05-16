@@ -1,0 +1,128 @@
+<!-- MCP 工具工作台 -->
+    <section id="mcp-workbench-modal" class="main-workspace-view mcp-workspace-view hidden">
+        <div class="workspace-modal mcp-workspace-modal">
+            <div class="workspace-modal-header">
+                <div>
+                    <h3>MCP 工具</h3>
+                    <p>接入外部 MCP Server 或内置数据库 MCP 工具，刷新工具缓存，并供聊天与智能体任务调用。</p>
+                </div>
+                <button id="mcp-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
+            </div>
+            <div class="workspace-modal-body">
+                <div class="workspace-section-head">
+                    <div>
+                        <h3>工具源</h3>
+                        <p>保存服务后可刷新工具列表，外部工具会进入智能体可用工具池。</p>
+                    </div>
+                    <button id="mcp-refresh-btn" class="btn-secondary">刷新</button>
+                </div>
+                <div class="mcp-layout">
+                    <div class="mcp-form">
+                        <input type="hidden" id="mcp-id">
+                        <select id="mcp-source-type" class="form-input">
+                            <option value="external">外部 MCP Server</option>
+                            <option value="database">数据库 MCP Server</option>
+                        </select>
+                        <input id="mcp-name" class="form-input" placeholder="服务名称">
+                        <div id="mcp-external-fields" class="mcp-field-group">
+                            <input id="mcp-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
+                            <input id="mcp-key" class="form-input" type="password" placeholder="API Key，可选">
+                        </div>
+                        <div id="mcp-db-fields" class="mcp-field-group hidden">
+                            <div class="mcp-form-row">
+                                <select id="mcp-db-type" class="form-input">
+                                    <option value="postgres">PostgreSQL</option>
+                                    <option value="mysql">MySQL / MariaDB</option>
+                                    <option value="sqlserver">SQL Server</option>
+                                    <option value="sqlite">SQLite</option>
+                                    <option value="mongodb">MongoDB</option>
+                                </select>
+                                <input id="mcp-db-port" class="form-input" type="number" placeholder="端口">
+                            </div>
+                            <input id="mcp-db-host" class="form-input" placeholder="主机地址，例如 10.0.0.8">
+                            <input id="mcp-db-name" class="form-input" placeholder="数据库名；SQLite 填文件路径">
+                            <div class="mcp-form-row">
+                                <input id="mcp-db-user" class="form-input" placeholder="用户名">
+                                <input id="mcp-db-password" class="form-input" type="password" placeholder="密码">
+                            </div>
+                            <div class="mcp-form-row">
+                                <input id="mcp-db-schema" class="form-input" placeholder="Schema，可选">
+                                <input id="mcp-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
+                            </div>
+                            <label class="mcp-shared-row">
+                                <input type="checkbox" id="mcp-db-ssl"> 启用 SSL / TLS
+                            </label>
+                        </div>
+                        <textarea id="mcp-desc" class="form-input" placeholder="说明，可选"></textarea>
+                        <label class="mcp-shared-row admin-only hidden">
+                            <input type="checkbox" id="mcp-shared"> 作为全局共享服务
+                        </label>
+                        <div class="agent-run-controls">
+                            <button id="mcp-test-db-btn" class="btn-secondary hidden" type="button">测试连接</button>
+                            <button id="mcp-save-btn" class="btn-primary">保存服务</button>
+                            <button id="mcp-reset-btn" class="btn-secondary">清空</button>
+                        </div>
+                    </div>
+                    <div class="mcp-list-wrap">
+                        <div id="mcp-server-list" class="mcp-server-list"></div>
+                        <div id="mcp-tool-cache" class="agent-tool-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 管理与配置面板 (符合第39条复用规范) -->
+    <div id="mcp-edit-modal" class="modal-overlay hidden" style="z-index: 1900;">
+        <div class="modal mcp-edit-modal">
+            <div class="mcp-edit-header">
+                <h3>编辑 MCP 服务</h3>
+            </div>
+            <div class="mcp-edit-form">
+                <input type="hidden" id="mcp-edit-id">
+                <select id="mcp-edit-source-type" class="form-input" disabled>
+                    <option value="external">外部 MCP Server</option>
+                    <option value="database">数据库 MCP Server</option>
+                </select>
+                <input id="mcp-edit-name" class="form-input" placeholder="服务名称">
+                <div id="mcp-edit-external-fields" class="mcp-field-group">
+                    <input id="mcp-edit-url" class="form-input" placeholder="MCP JSON-RPC URL，例如 http://localhost:8787/mcp">
+                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="API Key，可选">
+                </div>
+                <div id="mcp-edit-db-fields" class="mcp-field-group hidden">
+                    <div class="mcp-form-row">
+                        <select id="mcp-edit-db-type" class="form-input">
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                            <option value="sqlserver">SQL Server</option>
+                            <option value="sqlite">SQLite</option>
+                            <option value="mongodb">MongoDB</option>
+                        </select>
+                        <input id="mcp-edit-db-port" class="form-input" type="number" placeholder="端口">
+                    </div>
+                    <input id="mcp-edit-db-host" class="form-input" placeholder="主机地址，例如 10.0.0.8">
+                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填文件路径">
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-db-user" class="form-input" placeholder="用户名">
+                        <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码">
+                    </div>
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-db-schema" class="form-input" placeholder="Schema，可选">
+                        <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
+                    </div>
+                    <label class="mcp-shared-row">
+                        <input type="checkbox" id="mcp-edit-db-ssl"> 启用 SSL / TLS
+                    </label>
+                </div>
+                <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选"></textarea>
+                <label class="mcp-shared-row admin-only hidden">
+                    <input type="checkbox" id="mcp-edit-shared"> 作为全局共享服务
+                </label>
+                <div class="mcp-edit-actions">
+                    <button id="mcp-edit-test-db-btn" class="btn-secondary hidden" type="button">测试连接</button>
+                    <button id="mcp-edit-save-btn" class="btn-primary" type="button">保存修改</button>
+                    <button id="mcp-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
