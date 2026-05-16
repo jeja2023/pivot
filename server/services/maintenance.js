@@ -5,6 +5,7 @@ const path = require('path');
 const { db, dataDir } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
+const { parsePositiveInt, parseNonNegativeInt } = require('../number');
 const { cleanupSoftDeletedStorage } = require('./storage-gc');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -68,28 +69,19 @@ const maintenanceState = {
 };
 
 function getAuditLogRetentionDays() {
-    const days = parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '180', 10);
-    return Number.isFinite(days) && days > 0 ? days : 180;
+    return parsePositiveInt(process.env.AUDIT_LOG_RETENTION_DAYS || '180', 180);
 }
 
 function getApiCallLogRetentionDays() {
-    const days = parseInt(process.env.API_CALL_LOG_RETENTION_DAYS || '30', 10);
-    return Number.isFinite(days) && days > 0 ? days : 30;
+    return parsePositiveInt(process.env.API_CALL_LOG_RETENTION_DAYS || '30', 30);
 }
 
 function getStorageGcRetentionDays() {
-    const days = parseInt(process.env.STORAGE_GC_RETENTION_DAYS || '30', 10);
-    return Number.isFinite(days) && days > 0 ? days : 30;
+    return parsePositiveInt(process.env.STORAGE_GC_RETENTION_DAYS || '30', 30);
 }
 
 function getIncrementalVacuumPages() {
-    const pages = parseInt(process.env.SQLITE_INCREMENTAL_VACUUM_PAGES || '200', 10);
-    return Number.isFinite(pages) && pages >= 0 ? pages : 200;
-}
-
-function parsePositiveInt(value, fallback) {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    return parseNonNegativeInt(process.env.SQLITE_INCREMENTAL_VACUUM_PAGES || '200', 200);
 }
 
 function getBackupRetentionDays() {

@@ -1,5 +1,5 @@
 const { db } = require('./connection');
-const logger = require('../logger');
+const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { recordMigration } = require('./migrate');
 const fs = require('fs');

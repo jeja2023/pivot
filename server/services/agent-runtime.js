@@ -1,14 +1,13 @@
 const crypto = require('crypto');
-const axios = require('axios');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-const { estimateTokens } = require('../llm');
-const { getRunnableModelForUser, recordModelTokenUsage } = require('./models');
-const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
+const { getRunnableModelForUser } = require('./models');
 const { clampText, executeBuiltInTool, getBuiltInToolDefinitions } = require('./agent-tools');
 const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
+const { callModelText, recordAgentModelUsage } = require('./agent-model');
+const { publishUserEvent } = require('./realtime-events');
 
 const MAX_STEPS = 8;
 const DEFAULT_STEPS = 5;
@@ -251,7 +250,42 @@ function updateRun(runId, fields = {}) {
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (entries.length === 0) return;
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
+    const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
+    if (info.changes > 0 && entries.some(([key]) => [
+        'status',
+        'final_answer',
+        'error_message',
+        'completed_at',
+        'cancelled_at',
+        'deleted_at',
+        'last_heartbeat_at'
+    ].includes(key))) {
+        publishAgentRunEvent(runId, 'updated');
+    }
+}
+
+function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
+    const run = db.prepare(`
+        SELECT id, user_id, title, goal, status, updated_at, started_at, completed_at, last_heartbeat_at, error_message
+        FROM agent_runs
+        WHERE id = ?
+    `).get(runId);
+    if (!run) return 0;
+    return publishUserEvent(run.user_id, 'agent.run', {
+        reason,
+        run: {
+            id: run.id,
+            title: run.title,
+            goal: run.goal,
+            status: run.status,
+            updated_at: run.updated_at,
+            started_at: run.started_at,
+            completed_at: run.completed_at,
+            last_heartbeat_at: run.last_heartbeat_at,
+            error_message: run.error_message
+        },
+        ...extra
+    });
 }
 
 function getRunStatus(runId) {
@@ -325,7 +359,9 @@ function createAgentNotification(userId, runId, type, title, body = '') {
         String(body || '').slice(0, 1000),
         getBeijingTimestamp()
     );
-    return db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(info.lastInsertRowid);
+    const notification = db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(info.lastInsertRowid);
+    publishUserEvent(userId, 'agent.notification', { notification });
+    return notification;
 }
 
 function setRunMetadata(runId, patch = {}) {
@@ -478,7 +514,7 @@ function softDeleteAgentRun(runId, user, reason = '') {
 
 function insertStep(runId, stepIndex, data = {}) {
     const now = getBeijingTimestamp();
-    db.prepare(`
+    const info = db.prepare(`
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
             status, duration_ms, started_at, completed_at, created_at
@@ -499,6 +535,16 @@ function insertStep(runId, stepIndex, data = {}) {
         data.completedAt || now,
         now
     );
+    if (info.changes > 0) {
+        publishAgentRunEvent(runId, 'step', {
+            step: {
+                index: stepIndex,
+                type: data.type || 'note',
+                status: data.status || 'success',
+                title: data.title || ''
+            }
+        });
+    }
 }
 
 function formatToolList(user, options = {}) {
@@ -531,54 +577,6 @@ function formatToolList(user, options = {}) {
         serverName: tool.serverName
     })).filter(tool => isAllowed(tool.name, 'mcp'));
     return [...builtIns, ...mcpTools];
-}
-
-async function callModelJson(modelCfg, messages) {
-    const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), {
-        model: modelCfg.model_name || modelCfg.name,
-        messages,
-        stream: false,
-        temperature: 0.2,
-        max_tokens: 1200
-    }, {
-        headers: buildModelHeaders(modelCfg, { acceptJson: true }),
-        timeout: 180000,
-        proxy: false
-    });
-    return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
-}
-
-async function callModelText(modelCfg, messages) {
-    try {
-        return await callModelJson(modelCfg, messages);
-    } catch (e) {
-        if (!e.response || e.response.status < 400) throw e;
-        throw e;
-    }
-}
-
-function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '') {
-    const inputTokens = estimateTokens(JSON.stringify(messages || []));
-    const outputTokens = estimateTokens(output || '');
-    recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
-    if (runId) {
-        db.prepare(`
-            UPDATE agent_runs
-            SET input_tokens = COALESCE(input_tokens, 0) + ?,
-                output_tokens = COALESCE(output_tokens, 0) + ?,
-                total_tokens = COALESCE(total_tokens, 0) + ?,
-                last_heartbeat_at = ?,
-                updated_at = ?
-            WHERE id = ?
-        `).run(inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId);
-        const run = db.prepare('SELECT max_token_budget, total_tokens FROM agent_runs WHERE id = ?').get(runId);
-        if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
-            const err = new Error(`智能体任务已超过 Token 预算 ${run.max_token_budget}`);
-            err.code = 'AGENT_BUDGET_EXCEEDED';
-            throw err;
-        }
-    }
-    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
 function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}) {
@@ -1280,7 +1278,9 @@ function markAgentNotificationRead(notificationId, user) {
     if (!notification) return null;
     db.prepare("UPDATE agent_notifications SET status = 'read', read_at = ? WHERE id = ?")
         .run(getBeijingTimestamp(), notificationId);
-    return db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(notificationId);
+    const updated = db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(notificationId);
+    publishUserEvent(user.id, 'agent.notification', { notification: updated, reason: 'read' });
+    return updated;
 }
 
 function listAgentArtifacts(user, limit = 30) {
@@ -1424,7 +1424,9 @@ function createAgentRun({
         now
     );
     enqueueAgentRun(runId, user);
-    return getRunForUser(runId, user);
+    const run = getRunForUser(runId, user);
+    publishAgentRunEvent(runId, 'created');
+    return run;
 }
 
 module.exports = {

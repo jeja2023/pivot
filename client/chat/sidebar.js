@@ -1,6 +1,118 @@
 // --- 侧边栏模块 Sidebar (完整功能版) ---
 let sidebarState = { page: 1, limit: 20, cursor: '', hasMore: true, isLoading: false, archived: false };
 const sessionMenuData = new Map();
+const selectedSessionIds = new Set();
+let sessionBatchMode = false;
+
+function ensureSessionTagTools() {
+    const controls = document.querySelector('.sidebar-ctrls');
+    if (!controls) return;
+    if (!document.getElementById('session-batch-toggle')) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.id = 'session-batch-toggle';
+        toggle.className = 'session-batch-toggle';
+        toggle.dataset.sessionBatchToggle = '1';
+        toggle.textContent = '批量';
+        controls.appendChild(toggle);
+    }
+    if (document.getElementById('session-tag-tools')) return;
+    const tools = document.createElement('div');
+    tools.id = 'session-tag-tools';
+    tools.className = 'session-tag-tools';
+    tools.innerHTML = `
+        <div id="session-tag-summary" class="session-tag-summary hidden"></div>
+        <div id="session-batch-tags" class="session-batch-tags hidden">
+            <span id="session-batch-count">已选择 0 个</span>
+            <button type="button" data-session-batch-action="add">添加标签</button>
+            <button type="button" data-session-batch-action="remove">移除标签</button>
+            <button type="button" data-session-batch-action="replace">替换标签</button>
+            <button type="button" data-session-batch-action="clear">取消选择</button>
+            <button type="button" data-session-batch-action="done">完成</button>
+        </div>
+    `;
+    controls.insertAdjacentElement('afterend', tools);
+}
+
+async function loadSessionTagSummary() {
+    ensureSessionTagTools();
+    const target = document.getElementById('session-tag-summary');
+    if (!target) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/sessions/tags/summary?includeArchived=true`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const rows = (data.data || []).slice(0, 12);
+        target.classList.toggle('hidden', rows.length === 0);
+        target.innerHTML = rows.map(row => `
+            <span class="tag-summary-chip" title="${escapeAttrValue(`${row.count} 个会话`)}">
+                <button type="button" class="tag-chip-main" data-session-tag-filter="${escapeAttrValue(row.tag)}">#${escapeHtml(row.tag)}<small>${Number(row.count || 0)}</small></button>
+                <button type="button" class="tag-chip-action" data-session-tag-rename="${escapeAttrValue(row.tag)}" title="重命名标签">改</button>
+                <button type="button" class="tag-chip-action danger" data-session-tag-remove="${escapeAttrValue(row.tag)}" title="删除标签">删</button>
+            </span>
+        `).join('');
+    } catch (e) {
+        console.warn('Failed to load tag summary', e);
+    }
+}
+
+function setSessionBatchMode(enabled) {
+    sessionBatchMode = Boolean(enabled);
+    if (!sessionBatchMode) selectedSessionIds.clear();
+    updateSessionBatchBar();
+}
+
+function updateSessionBatchBar() {
+    ensureSessionTagTools();
+    const bar = document.getElementById('session-batch-tags');
+    const count = document.getElementById('session-batch-count');
+    const list = document.getElementById('session-list');
+    const toggle = document.getElementById('session-batch-toggle');
+    if (!bar || !count) return;
+    count.textContent = `已选择 ${selectedSessionIds.size} 个`;
+    bar.classList.toggle('hidden', !sessionBatchMode);
+    list?.classList.toggle('session-batch-mode', sessionBatchMode);
+    toggle?.classList.toggle('active', sessionBatchMode);
+    if (toggle) toggle.textContent = sessionBatchMode ? '退出' : '批量';
+    bar.querySelectorAll('[data-session-batch-action="add"], [data-session-batch-action="remove"], [data-session-batch-action="replace"]').forEach(button => {
+        button.disabled = selectedSessionIds.size === 0;
+    });
+    document.querySelectorAll('[data-session-select-id]').forEach(input => {
+        input.checked = selectedSessionIds.has(String(input.dataset.sessionSelectId || ''));
+        input.closest('.session-item')?.classList.toggle('selected', input.checked);
+    });
+}
+
+async function runBatchTagAction(operation) {
+    if (operation === 'done') {
+        setSessionBatchMode(false);
+        return;
+    }
+    if (operation === 'clear') {
+        selectedSessionIds.clear();
+        updateSessionBatchBar();
+        return;
+    }
+    if (selectedSessionIds.size === 0) return;
+    const tags = await window.showInputPrompt?.({
+        title: operation === 'add' ? '添加标签' : (operation === 'remove' ? '移除标签' : '替换标签'),
+        message: '多个标签请用逗号分隔',
+        placeholder: '项目A, 紧急'
+    });
+    if (!tags) return;
+    const res = await apiFetch(`${API_BASE}/sessions/tags/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionIds: [...selectedSessionIds], operation, tags })
+    });
+    if (res.ok) {
+        selectedSessionIds.clear();
+        await window.loadSessions();
+        await loadSessionTagSummary();
+        setSessionBatchMode(false);
+        showToast('标签已更新');
+    }
+}
 
 window.markActiveSessionInList = function(id) {
     const activeId = String(id || '');
@@ -25,6 +137,7 @@ function updateSessionListStatus(text = '') {
 
 window.loadSessions = async function(append = false) {
     if (sidebarState.isLoading) return;
+    ensureSessionTagTools();
     
     const searchVal = document.getElementById('session-search-input')?.value || '';
     const tagMatch = searchVal.match(/#(\S+)/);
@@ -82,7 +195,7 @@ window.loadSessions = async function(append = false) {
             const sessionInfoTitle = escapeAttrValue([safeHTMLTitle, sessionTimeTitle, msgCount ? `${msgCount} 条消息` : ''].filter(Boolean).join(' · '));
             
             const div = document.createElement('div');
-            div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}`;
+            div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''} ${selectedSessionIds.has(String(s.id)) ? 'selected' : ''}`;
             div.dataset.sessionId = String(s.id);
             sessionMenuData.set(String(s.id), {
                 id: String(s.id),
@@ -91,7 +204,11 @@ window.loadSessions = async function(append = false) {
                 isArchived: Number(s.is_archived || 0),
                 tags: String(s.tags || '')
             });
+            const checked = selectedSessionIds.has(String(s.id)) ? 'checked' : '';
             div.innerHTML = `
+                <label class="session-select-box">
+                    <input type="checkbox" data-session-select-id="${escapeAttrValue(String(s.id))}" ${checked} aria-label="选择会话">
+                </label>
                 <div class="session-main" title="${sessionInfoTitle}">
                     <div class="session-title-row">
                         <span class="session-title-text">
@@ -109,24 +226,117 @@ window.loadSessions = async function(append = false) {
                     </div>
                 </div>
             `;
-            div.onclick = () => selectSession(s.id, title);
             list.appendChild(div);
         });
         
         sidebarState.hasMore = hasMore;
         sidebarState.cursor = result.nextCursor || '';
         sidebarState.page++;
+        updateSessionBatchBar();
+        if (!append) await loadSessionTagSummary();
         updateSessionListStatus(hasMore ? '' : (sessions.length ? '已加载全部' : '暂无会话'));
     } catch (e) { console.error('加载会话失败:', e); }
     finally { sidebarState.isLoading = false; }
 };
 
 document.getElementById('session-list')?.addEventListener('click', (event) => {
+    const selector = event.target.closest('[data-session-select-id]');
+    if (selector) {
+        event.stopPropagation();
+        const id = String(selector.dataset.sessionSelectId || '');
+        if (selector.checked) selectedSessionIds.add(id);
+        else selectedSessionIds.delete(id);
+        updateSessionBatchBar();
+        return;
+    }
+
     const button = event.target.closest('[data-session-menu-id]');
-    if (!button) return;
-    const session = sessionMenuData.get(String(button.dataset.sessionMenuId));
-    if (!session) return;
-    window.toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
+    if (button) {
+        event.stopPropagation();
+        const session = sessionMenuData.get(String(button.dataset.sessionMenuId));
+        if (session) {
+            window.toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
+        }
+        return;
+    }
+
+    const item = event.target.closest('.session-item');
+    if (item) {
+        const id = item.dataset.sessionId;
+        if (sessionBatchMode) {
+            if (selectedSessionIds.has(String(id))) selectedSessionIds.delete(String(id));
+            else selectedSessionIds.add(String(id));
+            updateSessionBatchBar();
+            return;
+        }
+        const session = sessionMenuData.get(String(id));
+        if (session) {
+            window.selectSession(session.id, session.title);
+        }
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const batchToggle = event.target.closest('[data-session-batch-toggle]');
+    if (batchToggle) {
+        setSessionBatchMode(!sessionBatchMode);
+        return;
+    }
+
+    const filter = event.target.closest('[data-session-tag-filter]');
+    if (filter) {
+        const tag = filter.dataset.sessionTagFilter || '';
+        const input = document.getElementById('session-search-input');
+        if (input) input.value = `#${tag}`;
+        await window.loadSessions();
+        return;
+    }
+
+    const rename = event.target.closest('[data-session-tag-rename]');
+    if (rename) {
+        const fromTag = rename.dataset.sessionTagRename || '';
+        const toTag = await window.showInputPrompt?.({
+            title: '重命名标签',
+            message: fromTag,
+            value: fromTag,
+            placeholder: '新的标签名'
+        });
+        if (!toTag || toTag === fromTag) return;
+        const res = await apiFetch(`${API_BASE}/sessions/tags/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fromTag, toTag })
+        });
+        if (res.ok) {
+            await window.loadSessions();
+            await loadSessionTagSummary();
+            showToast('标签已重命名');
+        }
+        return;
+    }
+
+    const remove = event.target.closest('[data-session-tag-remove]');
+    if (remove) {
+        const tag = remove.dataset.sessionTagRemove || '';
+        showConfirm('删除标签', `确定从所有会话中移除标签「${tag}」吗？`, async () => {
+            const res = await apiFetch(`${API_BASE}/sessions/tags/remove`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag })
+            });
+            if (res.ok) {
+                await window.loadSessions();
+                await loadSessionTagSummary();
+                showToast('标签已删除');
+            }
+        });
+        return;
+    }
+
+    const batch = event.target.closest('[data-session-batch-action]');
+    if (batch) {
+        await runBatchTagAction(batch.dataset.sessionBatchAction);
+    }
 });
 
 window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
@@ -152,8 +362,26 @@ window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     makeItem('导出为 Markdown', '', () => exportSession(id));
     makeItem('删除', 'danger', () => deleteSession(id));
     document.body.appendChild(menu);
-    const rect = e.currentTarget.getBoundingClientRect();
-    menu.style.top = `${rect.bottom + 5}px`; menu.style.left = `${rect.right - 120}px`;
+
+    // 获取触发按钮的矩形区域
+    const button = e.target.closest('[data-session-menu-id]');
+    const rect = button ? button.getBoundingClientRect() : e.currentTarget.getBoundingClientRect();
+    
+    // 计算初始位置
+    let top = rect.bottom + 5;
+    let left = rect.right - 130; // 菜单宽度约 130px
+
+    // 视口边界检查
+    const menuHeight = 240; // 预估高度
+    if (top + menuHeight > window.innerHeight) {
+        top = rect.top - menuHeight - 5;
+        if (top < 0) top = 10;
+    }
+    if (left < 10) left = 10;
+
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
+
     const close = () => { menu.remove(); document.removeEventListener('click', close); };
     setTimeout(() => document.addEventListener('click', close), 0);
 };

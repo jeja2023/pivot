@@ -21,8 +21,6 @@ const stmts = {
     // 会话与消息
     getSessions: db.prepare('SELECT * FROM sessions WHERE user_id = ? AND is_archived = ? AND deleted_at IS NULL ORDER BY is_pinned DESC, updated_at DESC'),
     getSessionById: db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL'),
-    getMessages: db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id ASC'),
-    getMessagesForContext: db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id ASC'),
     updateSessionTitle: db.prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     // 模型
     getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, user_id, status, created_at FROM models ORDER BY id DESC'),
@@ -34,6 +32,10 @@ const stmts = {
     deleteRefreshToken: db.prepare('DELETE FROM refresh_tokens WHERE token = ?'),
     deleteUserRefreshTokens: db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?')
 };
+
+const messageSql = 'SELECT * FROM messages WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id ASC';
+stmts.getMessages = db.prepare(messageSql);
+stmts.getMessagesForContext = stmts.getMessages;
 
 const ensureSetting = (key, value) => {
     db.prepare(`

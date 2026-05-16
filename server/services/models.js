@@ -2,8 +2,9 @@
 const { db } = require('../db');
 const { encryptSecret, decryptSecret } = require('../security');
 const { normalizeTokenUsage } = require('./token-accounting');
+const { normalizePriceCurrency, normalizePriceValue } = require('./model-costs');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -202,6 +203,8 @@ module.exports = {
     modelListFields,
     normalizeTags,
     normalizeBooleanFlag,
+    normalizePriceCurrency,
+    normalizePriceValue,
     modelSupportsVision,
     modelSupportsReasoning,
     contentContainsVisionInput,

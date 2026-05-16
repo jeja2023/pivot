@@ -4,7 +4,7 @@ const dns = require('dns').promises;
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const logger = require('./logger');
+const { logger } = require('./logger');
 
 const encryptedPrefix = 'enc:v1:';
 const uploadRoot = path.resolve(__dirname, '../uploads');

@@ -1447,6 +1447,22 @@
         <img id="viewer-img" src="">
     </div>
 
+    <div id="attachment-preview-modal" class="hidden" style="z-index: 2100;">
+        <div class="attachment-preview-shell">
+            <div class="attachment-preview-head">
+                <div>
+                    <h3 id="attachment-preview-title">&#38468;&#20214;&#39044;&#35272;</h3>
+                    <p id="attachment-preview-meta"></p>
+                </div>
+                <div class="attachment-preview-actions">
+                    <a id="attachment-preview-open" class="btn-secondary" href="#" target="_blank" rel="noopener noreferrer">&#26032;&#26631;&#31614;&#25171;&#24320;</a>
+                    <button type="button" id="attachment-preview-close" class="btn-secondary">&#20851;&#38381;</button>
+                </div>
+            </div>
+            <div id="attachment-preview-content" class="attachment-preview-content"></div>
+        </div>
+    </div>
+
     <!-- 页面逻辑 -->
 
     <!-- API Key 创建/显示弹窗 -->
@@ -1534,6 +1550,7 @@
     <script src="/chat/safe-html.js?v=__APP_VERSION__"></script>
     <script src="/chat/config.js?v=__APP_VERSION__"></script>
     <script src="/chat/ui.js?v=__APP_VERSION__"></script>
+    <script src="/chat/attachment-preview.js?v=__APP_VERSION__"></script>
     <script src="/chat/auth.js?v=__APP_VERSION__"></script>
     <!-- 管理员面板模块化脚本 -->
     <script src="/chat/admin.js?v=__APP_VERSION__"></script>

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { db, stmts } = require('./db');
 const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
+const { parsePositiveInt } = require('./number');
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -16,11 +17,6 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET) || JWT_
 const AUTH_COOKIE_NAME = 'pivot_access_token';
 const REFRESH_COOKIE_NAME = 'pivot_refresh_token';
 const CSRF_COOKIE_NAME = 'pivot_csrf_token';
-
-const parsePositiveInt = (value, fallback) => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
 
 const ACCESS_TOKEN_EXPIRES_MINUTES = parsePositiveInt(process.env.ACCESS_TOKEN_EXPIRES_MINUTES, 480);
 const REFRESH_TOKEN_EXPIRES_DAYS = parsePositiveInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS, 30);

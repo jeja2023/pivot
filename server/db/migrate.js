@@ -1,5 +1,5 @@
 const { db } = require('./connection');
-const logger = require('../logger');
+const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const crypto = require('crypto');
 const { buildRagSearchContent } = require('../services/rag-tokenizer');
@@ -61,6 +61,9 @@ const previewApiKey = (key) => {
 
 function runMigrations() {
     ensureMigrationTable();
+    // Historical compatibility migrations stay idempotent because LAN deployments
+    // may upgrade from different SQLite snapshots. New schema changes should use
+    // runSchemaMigration(...) with a stable id instead of extending this block.
     ensureColumn('users', 'nickname', 'TEXT');
     ensureColumn('users', 'unit', 'TEXT');
     ensureColumn('users', 'default_model_id', 'INTEGER');
@@ -104,6 +107,9 @@ function runMigrations() {
     ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_vision', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_reasoning', 'INTEGER DEFAULT 0');
+    ensureColumn('models', 'input_price_per_million', 'REAL DEFAULT 0');
+    ensureColumn('models', 'output_price_per_million', 'REAL DEFAULT 0');
+    ensureColumn('models', 'price_currency', "TEXT DEFAULT 'CNY'");
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');

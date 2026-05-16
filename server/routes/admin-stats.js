@@ -175,6 +175,10 @@ function balancedOutputSql(alias) {
     return `MAX(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
 }
 
+function usageCostSql(usageAlias = 'usage', modelAlias = 'm') {
+    return `ROUND(((${balancedInputSql(usageAlias)}) * COALESCE(${modelAlias}.input_price_per_million, 0) + (${balancedOutputSql(usageAlias)}) * COALESCE(${modelAlias}.output_price_per_million, 0)) / 1000000.0, 6)`;
+}
+
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 function createAdminStatsRouter({
@@ -333,6 +337,8 @@ function createAdminStatsRouter({
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
                    COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
                    COALESCE(SUM(usage.token_count), 0) as total_tokens,
+                   COALESCE(SUM(${usageCostSql('usage', 'm')}), 0) as estimated_cost,
+                   COALESCE(m.price_currency, 'CNY') as price_currency,
                    MAX(usage.created_at) as last_active
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
@@ -466,6 +472,8 @@ function createAdminStatsRouter({
                    usage.role, usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
+                   ${usageCostSql('usage', 'md')} AS estimated_cost,
+                   COALESCE(md.price_currency, 'CNY') AS price_currency,
                    usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
@@ -488,6 +496,8 @@ function createAdminStatsRouter({
                    usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
+                   ${usageCostSql('usage', 'md')} AS estimated_cost,
+                   COALESCE(md.price_currency, 'CNY') AS price_currency,
                    usage.usage_source
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
@@ -504,6 +514,105 @@ function createAdminStatsRouter({
         logAction(req, '导出用量明细', `导出 ${details.length} 条明细`);
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=usage_details.csv');
+        res.send(csv);
+    }));
+
+    router.get('/model-costs', authMiddleware, asyncHandler(async (req, res) => {
+        const canViewAll = isSuperAdmin(req.user);
+        const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
+        const start = String(req.query.start || '').trim();
+        const end = String(req.query.end || '').trim();
+        const conditions = [];
+        const params = [];
+        if (start) {
+            conditions.push('date(usage.created_at) >= date(?)');
+            params.push(start);
+        }
+        if (end) {
+            conditions.push('date(usage.created_at) <= date(?)');
+            params.push(end);
+        }
+        if (!start && !end) {
+            conditions.push("usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')");
+            params.push(days);
+        }
+        if (!canViewAll) {
+            conditions.push('usage.user_id = ?');
+            params.push(req.user.id);
+        }
+        const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const rows = db.prepare(`
+            SELECT md.id AS model_id, COALESCE(md.name, 'Unknown') AS model_name,
+                   COALESCE(md.model_name, '') AS upstream_model,
+                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.input_price_per_million, 0) AS input_price_per_million,
+                   COALESCE(md.output_price_per_million, 0) AS output_price_per_million,
+                   COUNT(usage.id) AS usage_count,
+                   COALESCE(SUM(${balancedInputSql('usage')}), 0) AS input_tokens,
+                   COALESCE(SUM(${balancedOutputSql('usage')}), 0) AS output_tokens,
+                   COALESCE(SUM(usage.token_count), 0) AS total_tokens,
+                   COALESCE(SUM(${usageCostSql('usage', 'md')}), 0) AS estimated_cost,
+                   MIN(usage.created_at) AS first_used_at,
+                   MAX(usage.created_at) AS last_used_at
+            FROM (${tokenUsageSubquery()}) usage
+            LEFT JOIN models md ON md.id = usage.model_id
+            ${whereClause}
+            GROUP BY usage.model_id
+            ORDER BY estimated_cost DESC, total_tokens DESC
+        `).all(...params);
+        const totals = rows.reduce((acc, row) => {
+            acc.input_tokens += Number(row.input_tokens || 0);
+            acc.output_tokens += Number(row.output_tokens || 0);
+            acc.total_tokens += Number(row.total_tokens || 0);
+            acc.estimated_cost += Number(row.estimated_cost || 0);
+            return acc;
+        }, { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost: 0 });
+        totals.estimated_cost = Math.round(totals.estimated_cost * 1e6) / 1e6;
+        res.json({ data: rows, totals, days, start, end });
+    }));
+
+    router.get('/model-costs/export', authMiddleware, asyncHandler(async (req, res) => {
+        const canViewAll = isSuperAdmin(req.user);
+        const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
+        const conditions = ["usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
+        const params = [days];
+        if (!canViewAll) {
+            conditions.push('usage.user_id = ?');
+            params.push(req.user.id);
+        }
+        const rows = db.prepare(`
+            SELECT COALESCE(md.name, 'Unknown') AS model_name,
+                   COALESCE(md.model_name, '') AS upstream_model,
+                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.input_price_per_million, 0) AS input_price_per_million,
+                   COALESCE(md.output_price_per_million, 0) AS output_price_per_million,
+                   COALESCE(SUM(${balancedInputSql('usage')}), 0) AS input_tokens,
+                   COALESCE(SUM(${balancedOutputSql('usage')}), 0) AS output_tokens,
+                   COALESCE(SUM(usage.token_count), 0) AS total_tokens,
+                   COALESCE(SUM(${usageCostSql('usage', 'md')}), 0) AS estimated_cost
+            FROM (${tokenUsageSubquery()}) usage
+            LEFT JOIN models md ON md.id = usage.model_id
+            WHERE ${conditions.join(' AND ')}
+            GROUP BY usage.model_id
+            ORDER BY estimated_cost DESC, total_tokens DESC
+        `).all(...params);
+        let csv = '\uFEFFModel,Upstream Model,Currency,Input Price / 1M,Output Price / 1M,Input Tokens,Output Tokens,Total Tokens,Estimated Cost\n';
+        rows.forEach(row => {
+            csv += [
+                row.model_name,
+                row.upstream_model,
+                row.price_currency,
+                row.input_price_per_million,
+                row.output_price_per_million,
+                row.input_tokens,
+                row.output_tokens,
+                row.total_tokens,
+                row.estimated_cost
+            ].map(escapeCsvCell).join(',') + '\n';
+        });
+        logAction(req, '导出模型费用统计', `导出 ${rows.length} 个模型费用统计`);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=model_costs.csv');
         res.send(csv);
     }));
 

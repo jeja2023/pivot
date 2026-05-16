@@ -3,6 +3,7 @@ const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
 const { getUserRunnableModels } = require('./models');
+const { parsePositiveInt } = require('../number');
 
 const MAX_TEXT = 12000;
 const isSuperAdmin = (user) => user?.username === 'admin';
@@ -11,12 +12,6 @@ function clampText(value, max = MAX_TEXT) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (!text) return '';
     return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
-}
-
-function parsePositiveInt(value, fallback, max = 100) {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return Math.min(parsed, max);
 }
 
 function assertAdmin(user) {

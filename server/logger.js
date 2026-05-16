@@ -99,8 +99,4 @@ const httpLogger = pinoHttp({
 });
 
 // 导出
-logger.logger = logger;
-logger.httpLogger = httpLogger;
-
-module.exports = logger;
-
+module.exports = { logger, httpLogger };

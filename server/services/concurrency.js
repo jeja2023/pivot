@@ -1,10 +1,6 @@
 /* AI concurrency protection */
 const { logger } = require('../logger');
-
-const parsePositiveInt = (value, fallback) => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+const { parsePositiveInt } = require('../number');
 
 class ConcurrencyLimitError extends Error {
     constructor(message, code = 'AI_QUEUE_FULL') {

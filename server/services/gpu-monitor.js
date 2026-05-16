@@ -3,11 +3,7 @@ const { exec } = require('child_process');
 const { aiSemaphore } = require('./concurrency');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-
-const parsePositiveInt = (value, fallback) => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+const { parsePositiveInt } = require('../number');
 
 const parseRatio = (value, fallback) => {
     const parsed = Number(value);

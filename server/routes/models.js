@@ -8,6 +8,8 @@ const { assertSafeOutboundUrl, encryptSecret, validateModelUrl } = require('../s
 const {
     normalizeTags,
     normalizeBooleanFlag,
+    normalizePriceCurrency,
+    normalizePriceValue,
     getAccessibleModel,
     getUserRunnableModels
 } = require('../services/models');
@@ -40,6 +42,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             allowed_units: model.allowed_units,
             supports_vision: model.supports_vision,
             supports_reasoning: model.supports_reasoning,
+            input_price_per_million: model.input_price_per_million || 0,
+            output_price_per_million: model.output_price_per_million || 0,
+            price_currency: model.price_currency || 'CNY',
             type: 'chat',
             endpoint: '/v1/chat/completions',
             capabilities: [
@@ -227,6 +232,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 m.model_name, m.is_default, 
                 m.daily_token_limit, m.allowed_units, m.created_at,
                 m.temperature, m.max_input_tokens, m.max_tokens, m.monitor_url, m.max_concurrent, m.supports_vision, m.supports_reasoning,
+                m.input_price_per_million, m.output_price_per_million, m.price_currency,
                 (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
                 u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
             FROM models m
@@ -264,9 +270,12 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const maxConcurrent = Math.max(parseInt(req.body.max_concurrent, 10) || 0, 0);
         const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
         const supportsReasoning = normalizeBooleanFlag(req.body.supports_reasoning);
+        const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
+        const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
+        const priceCurrency = normalizePriceCurrency(req.body.price_currency);
 
-        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning);
+        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, inputPricePerMillion, outputPricePerMillion, priceCurrency);
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
         res.json({ success: true });
@@ -304,14 +313,17 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const maxConcurrent = Math.max(parseInt(req.body.max_concurrent, 10) || 0, 0);
         const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
         const supportsReasoning = normalizeBooleanFlag(req.body.supports_reasoning);
+        const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
+        const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
+        const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
 
         let info;
         if (req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null) {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ? WHERE id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, req.params.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id);
         } else {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ? WHERE id = ? AND user_id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, req.params.id, req.user.id);
+            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?')
+              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id);
         }
 
         if (info.changes > 0) {

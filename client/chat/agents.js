@@ -7,6 +7,9 @@ let agentToolsCache = [];
 let agentTemplatesCache = [];
 let agentSchedulesCache = [];
 let agentArtifactsCache = [];
+let agentRealtimeSource = null;
+let agentRealtimeConnected = false;
+let agentRealtimeRefreshTimer = null;
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 
@@ -528,6 +531,13 @@ function renderAgentAuditRows(items = []) {
 function updateAgentAutoRefresh() {
     const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
     const hasActiveRun = agentRunsCache.some(run => isAgentRunActive(run.status));
+    if (agentRealtimeConnected) {
+        if (agentRefreshTimer) {
+            clearInterval(agentRefreshTimer);
+            agentRefreshTimer = null;
+        }
+        return;
+    }
     if (agentRefreshTimer && (!modalOpen || !hasActiveRun)) {
         clearInterval(agentRefreshTimer);
         agentRefreshTimer = null;
@@ -543,6 +553,60 @@ function updateAgentAutoRefresh() {
         }, 3000);
     }
 }
+
+function scheduleAgentRealtimeRefresh(payload = {}) {
+    clearTimeout(agentRealtimeRefreshTimer);
+    agentRealtimeRefreshTimer = setTimeout(async () => {
+        try {
+            const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
+            if (!modalOpen) return;
+            await Promise.all([
+                loadAgentRuns(),
+                loadAgentRuntimeStatus(),
+                loadAgentNotifications()
+            ]);
+            if (payload.type === 'agent.run') await loadAgentMetrics();
+            const runId = payload.run?.id || payload.notification?.run_id || '';
+            if (activeAgentRunId && (!runId || runId === activeAgentRunId)) {
+                await window.openAgentRun(activeAgentRunId);
+            }
+        } catch (e) {}
+    }, 300);
+}
+
+function handleAgentRealtimeEvent(event) {
+    const payload = JSON.parse(event.data || '{}');
+    if (payload.type === 'agent.notification' && payload.notification?.status === 'unread') {
+        showToast(payload.notification.title || '收到新的智能体通知', 'info');
+    }
+    scheduleAgentRealtimeRefresh(payload);
+}
+
+window.initAgentRealtime = function() {
+    if (agentRealtimeSource || !window.EventSource || !currentUser) return;
+    agentRealtimeSource = new EventSource(`${API_BASE}/events`);
+    agentRealtimeSource.addEventListener('connected', () => {
+        agentRealtimeConnected = true;
+        updateAgentAutoRefresh();
+    });
+    agentRealtimeSource.addEventListener('agent.run', handleAgentRealtimeEvent);
+    agentRealtimeSource.addEventListener('agent.notification', handleAgentRealtimeEvent);
+    agentRealtimeSource.onerror = () => {
+        agentRealtimeConnected = false;
+        updateAgentAutoRefresh();
+    };
+};
+
+window.closeAgentRealtime = function() {
+    if (agentRealtimeRefreshTimer) clearTimeout(agentRealtimeRefreshTimer);
+    agentRealtimeRefreshTimer = null;
+    agentRealtimeConnected = false;
+    if (agentRealtimeSource) {
+        agentRealtimeSource.close();
+        agentRealtimeSource = null;
+    }
+    updateAgentAutoRefresh();
+};
 
 function getSelectedAgentToolAllowlist() {
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);

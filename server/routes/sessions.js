@@ -14,6 +14,33 @@ const normalizeTags = (value) => String(value || '')
     .slice(0, 8)
     .join(',');
 
+const splitTags = (value) => String(value || '')
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+
+function normalizeTagList(value, limit = 8) {
+    return [...new Set(
+        (Array.isArray(value) ? value : splitTags(value))
+            .map(tag => String(tag || '').trim())
+            .filter(Boolean)
+    )].slice(0, limit);
+}
+
+function applyTagOperation(existingTags, nextTags, operation = 'replace') {
+    const current = normalizeTagList(existingTags);
+    const incoming = normalizeTagList(nextTags);
+    if (operation === 'add') return [...new Set([...current, ...incoming])].slice(0, 8).join(',');
+    if (operation === 'remove') return current.filter(tag => !incoming.includes(tag)).join(',');
+    return incoming.join(',');
+}
+
+function renameTagValue(existingTags, fromTag, toTag) {
+    const current = normalizeTagList(existingTags);
+    if (!current.includes(fromTag)) return current.join(',');
+    return [...new Set(current.map(tag => (tag === fromTag ? toTag : tag)).filter(Boolean))].slice(0, 8).join(',');
+}
+
 const SESSION_SORT_EXPR = 'COALESCE(s.updated_at, s.created_at)';
 const SESSION_SORT_DATE_EXPR = `date(${SESSION_SORT_EXPR})`;
 
@@ -81,7 +108,8 @@ function createSessionsRouter({
         const page = normalizePage(req.query.page || 1);
         const limit = normalizeLimit(req.query.limit || 20);
         const keyword = String(req.query.keyword || '').trim();
-        const tag = String(req.query.tag || '').trim();
+        const tagList = normalizeTagList(req.query.tag);
+        const tagMode = String(req.query.tagMode || 'any').toLowerCase() === 'all' ? 'all' : 'any';
         const archived = req.query.archived === 'true' ? 1 : 0;
         const cursor = decodeSessionCursor(req.query.cursor);
         const offset = (page - 1) * limit;
@@ -100,9 +128,10 @@ function createSessionsRouter({
             query += ` AND s.title LIKE ? `;
             params.push(`%${keyword}%`);
         }
-        if (tag) {
-            query += ` AND (',' || COALESCE(s.tags, '') || ',') LIKE ? `;
-            params.push(`%,${tag},%`);
+        if (tagList.length > 0) {
+            const tagClause = tagList.map(() => `(',' || COALESCE(s.tags, '') || ',') LIKE ?`).join(tagMode === 'all' ? ' AND ' : ' OR ');
+            query += ` AND (${tagClause}) `;
+            params.push(...tagList.map(item => `%,${item},%`));
         }
         if (cursor) {
             query += ` AND (
@@ -142,9 +171,10 @@ function createSessionsRouter({
             countQuery += ` AND s.title LIKE ?`;
             countParams.push(`%${keyword}%`);
         }
-        if (tag) {
-            countQuery += ` AND (',' || COALESCE(s.tags, '') || ',') LIKE ?`;
-            countParams.push(`%,${tag},%`);
+        if (tagList.length > 0) {
+            const tagClause = tagList.map(() => `(',' || COALESCE(s.tags, '') || ',') LIKE ?`).join(tagMode === 'all' ? ' AND ' : ' OR ');
+            countQuery += ` AND (${tagClause})`;
+            countParams.push(...tagList.map(item => `%,${item},%`));
         }
         const total = db.prepare(countQuery).get(...countParams).count;
 
@@ -169,6 +199,49 @@ function createSessionsRouter({
         const rows = db.prepare("SELECT tags FROM sessions WHERE user_id = ? AND deleted_at IS NULL AND tags IS NOT NULL AND tags != ''").all(req.user.id);
         const tags = [...new Set(rows.flatMap(row => String(row.tags).split(',').map(tag => tag.trim()).filter(Boolean)))].sort();
         res.json(tags);
+    }));
+
+    router.get('/sessions/tags/summary', authMiddleware, asyncHandler(async (req, res) => {
+        const includeArchived = req.query.includeArchived === 'true';
+        const rows = db.prepare(`
+            SELECT id, title, tags, is_archived, is_pinned, updated_at, created_at
+            FROM sessions
+            WHERE user_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND COALESCE(is_archived, 0) = 0'}
+            ORDER BY COALESCE(updated_at, created_at) DESC
+        `).all(req.user.id);
+
+        const byTag = new Map();
+        rows.forEach(row => {
+            splitTags(row.tags).forEach(tag => {
+                const current = byTag.get(tag) || {
+                    tag,
+                    count: 0,
+                    activeCount: 0,
+                    archivedCount: 0,
+                    pinnedCount: 0,
+                    lastUsedAt: '',
+                    recentSessionId: '',
+                    recentSessionTitle: ''
+                };
+                current.count += 1;
+                if (Number(row.is_archived || 0) === 1) current.archivedCount += 1;
+                else current.activeCount += 1;
+                if (Number(row.is_pinned || 0) === 1) current.pinnedCount += 1;
+                const rowTime = String(row.updated_at || row.created_at || '');
+                if (!current.lastUsedAt || rowTime > current.lastUsedAt) {
+                    current.lastUsedAt = rowTime;
+                    current.recentSessionId = row.id;
+                    current.recentSessionTitle = row.title || '';
+                }
+                byTag.set(tag, current);
+            });
+        });
+
+        const data = [...byTag.values()].sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return a.tag.localeCompare(b.tag, 'zh-CN');
+        });
+        res.json({ data, total: data.length });
     }));
 
     router.get('/sessions/search/content', authMiddleware, asyncHandler(async (req, res) => {
@@ -250,6 +323,73 @@ function createSessionsRouter({
         if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, '更新对话标签', `会话ID: ${req.params.id}，标签: ${tags || '-'}`);
         res.json({ success: true, tags });
+    }));
+
+    router.post('/sessions/tags/batch', authMiddleware, asyncHandler(async (req, res) => {
+        const sessionIds = [...new Set((Array.isArray(req.body?.sessionIds) ? req.body.sessionIds : [])
+            .map(id => String(id || '').trim())
+            .filter(Boolean))]
+            .slice(0, 200);
+        const operation = ['add', 'remove', 'replace'].includes(req.body?.operation) ? req.body.operation : 'replace';
+        const nextTags = normalizeTagList(req.body?.tags);
+        if (sessionIds.length === 0) return res.status(400).json({ error: 'sessionIds required' });
+
+        const placeholders = sessionIds.map(() => '?').join(', ');
+        const rows = db.prepare(`
+            SELECT id, tags
+            FROM sessions
+            WHERE user_id = ? AND deleted_at IS NULL AND id IN (${placeholders})
+        `).all(req.user.id, ...sessionIds);
+        if (rows.length === 0) return res.status(404).json({ error: 'No matching sessions found' });
+
+        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
+        const now = getBeijingTimestamp();
+        db.transaction(() => {
+            rows.forEach(row => update.run(applyTagOperation(row.tags, nextTags, operation), now, row.id, req.user.id));
+        })();
+        logAction(req, '批量更新对话标签', `数量: ${rows.length}，操作: ${operation}，标签: ${nextTags.join(',') || '-'}`);
+        res.json({ success: true, affected: rows.length, operation, tags: nextTags.join(',') });
+    }));
+
+    router.post('/sessions/tags/rename', authMiddleware, asyncHandler(async (req, res) => {
+        const fromTag = String(req.body?.fromTag || '').trim();
+        const toTag = String(req.body?.toTag || '').trim();
+        if (!fromTag || !toTag) return res.status(400).json({ error: 'fromTag and toTag required' });
+        if (fromTag === toTag) return res.json({ success: true, affected: 0, fromTag, toTag });
+
+        const rows = db.prepare(`
+            SELECT id, tags
+            FROM sessions
+            WHERE user_id = ? AND deleted_at IS NULL
+              AND (',' || COALESCE(tags, '') || ',') LIKE ?
+        `).all(req.user.id, `%,${fromTag},%`);
+
+        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
+        const now = getBeijingTimestamp();
+        db.transaction(() => {
+            rows.forEach(row => update.run(renameTagValue(row.tags, fromTag, toTag), now, row.id, req.user.id));
+        })();
+        logAction(req, '重命名对话标签', `标签: ${fromTag} -> ${toTag}，影响: ${rows.length}`);
+        res.json({ success: true, affected: rows.length, fromTag, toTag });
+    }));
+
+    router.post('/sessions/tags/remove', authMiddleware, asyncHandler(async (req, res) => {
+        const tag = String(req.body?.tag || '').trim();
+        if (!tag) return res.status(400).json({ error: 'tag required' });
+        const rows = db.prepare(`
+            SELECT id, tags
+            FROM sessions
+            WHERE user_id = ? AND deleted_at IS NULL
+              AND (',' || COALESCE(tags, '') || ',') LIKE ?
+        `).all(req.user.id, `%,${tag},%`);
+
+        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
+        const now = getBeijingTimestamp();
+        db.transaction(() => {
+            rows.forEach(row => update.run(applyTagOperation(row.tags, [tag], 'remove'), now, row.id, req.user.id));
+        })();
+        logAction(req, '删除对话标签', `标签: ${tag}，影响: ${rows.length}`);
+        res.json({ success: true, affected: rows.length, tag });
     }));
 
     router.put('/sessions/:id/system-prompt', authMiddleware, asyncHandler(async (req, res) => {

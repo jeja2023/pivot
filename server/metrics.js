@@ -234,7 +234,7 @@ function renderPrometheusMetrics() {
     for (const stat of routeStats.values()) {
         let cumulative = 0;
         stat.buckets.forEach((count, index) => {
-            cumulative = count;
+            cumulative += count;
             lines.push(line('pivot_http_request_duration_seconds_bucket', {
                 method: stat.method,
                 route: stat.route,

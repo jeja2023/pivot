@@ -58,6 +58,7 @@ window.showApp = () => {
     if (window.loadSessions) window.loadSessions();
     if (window.loadSettings) window.loadSettings();
     if (window.refreshModelSelector) window.refreshModelSelector();
+    if (window.initAgentRealtime) window.initAgentRealtime();
 };
 
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
@@ -119,6 +120,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
 });
 
 window.logout = () => {
+    if (window.closeAgentRealtime) window.closeAgentRealtime();
     apiFetch(API_BASE + '/auth/logout', {
         method: 'POST'
     }).catch(() => {});

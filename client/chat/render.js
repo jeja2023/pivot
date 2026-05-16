@@ -216,7 +216,7 @@ customRenderer.link = (href, title, text) => {
     if (isDoc) {
         const docName = escapeCodeHtml(safeText.replace('附件:', '').replace('文件:', '').trim());
         return `
-            <a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="doc-card-link">
+            <a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="doc-card-link" data-attachment-preview data-attachment-url="${safeHref}" data-attachment-name="${escapeAttrValue(safeText)}">
                 <div class="doc-card">
                     <div class="doc-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
                     <div class="doc-info"><div class="doc-name">${docName}</div><div class="doc-action">点击下载/预览</div></div>

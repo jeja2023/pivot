@@ -3,11 +3,7 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
-
-const parsePositiveInt = (value, fallback) => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+const { parsePositiveInt } = require('../number');
 
 const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 1);
 const MAX_QUEUE_SIZE = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_SIZE, 20);

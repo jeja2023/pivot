@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -123,6 +124,7 @@ const {
 const { cleanupSoftDeletedStorage } = require('../server/services/storage-gc');
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
 const { createModelsRouter } = require('../server/routes/models');
+const { createSessionsRouter } = require('../server/routes/sessions');
 const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
 const { createMcpRouter } = require('../server/routes/mcp');
@@ -140,6 +142,18 @@ const {
     getBuiltInToolDefinitions,
     executeBuiltInTool
 } = require('../server/services/agent-tools');
+const {
+    buildComplianceAuditPackage,
+    buildZipArchive
+} = require('../server/services/compliance-package');
+const {
+    calculateUsageCost
+} = require('../server/services/model-costs');
+const {
+    getRealtimeStats,
+    publishUserEvent,
+    subscribeUserEvents
+} = require('../server/services/realtime-events');
 const {
     cancelAgentRun,
     computeNextScheduleRun,
@@ -196,6 +210,31 @@ function runExpressHandlers(handlers, req, res) {
         };
         next();
     });
+}
+
+function createFakeSseResponse() {
+    const events = new EventEmitter();
+    return {
+        chunks: [],
+        headers: {},
+        writableEnded: false,
+        destroyed: false,
+        setHeader(name, value) {
+            this.headers[name.toLowerCase()] = value;
+        },
+        flushHeaders() {},
+        write(chunk) {
+            this.chunks.push(String(chunk));
+        },
+        end() {
+            this.writableEnded = true;
+            events.emit('close');
+        },
+        on(event, handler) {
+            events.on(event, handler);
+            return this;
+        }
+    };
 }
 
 test.after(async () => {
@@ -272,6 +311,25 @@ test('createSseEventParser parses chunked SSE payloads', () => {
     assert.equal(payloads.length, 1);
     const extracted = extractStreamPayload(JSON.parse(payloads[0]));
     assert.deepEqual(extracted, { delta: 'hello', isThought: false, usage: null });
+});
+
+test('realtime SSE events are scoped to the subscribed user', () => {
+    const first = createFakeSseResponse();
+    const second = createFakeSseResponse();
+    const unsubscribeFirst = subscribeUserEvents({ id: 101 }, first, { heartbeatMs: 0 });
+    const unsubscribeSecond = subscribeUserEvents({ id: 202 }, second, { heartbeatMs: 0 });
+
+    const delivered = publishUserEvent(101, 'agent.run', { run: { id: 'run-test', status: 'queued' } });
+
+    assert.equal(delivered, 1);
+    assert.match(first.headers['content-type'], /text\/event-stream/);
+    assert.match(first.chunks.join(''), /event: agent\.run/);
+    assert.match(first.chunks.join(''), /run-test/);
+    assert.doesNotMatch(second.chunks.join(''), /run-test/);
+    assert.equal(getRealtimeStats().clients >= 2, true);
+
+    unsubscribeFirst();
+    unsubscribeSecond();
 });
 
 test('createStreamAccumulator wraps reasoning deltas and captures usage', () => {
@@ -2220,6 +2278,121 @@ test('available models route includes configured embedding model', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+    }
+});
+
+test('session tag summary and batch operations are scoped to current user', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`tag_user_${suffix}`, 'hash', 'Tag User', 'QA', 'user', 'active');
+    const otherInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`tag_other_${suffix}`, 'hash', 'Other User', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const otherId = Number(otherInfo.lastInsertRowid);
+    const sessionA = `tag-a-${suffix}`;
+    const sessionB = `tag-b-${suffix}`;
+    const sessionOther = `tag-other-${suffix}`;
+    db.prepare('INSERT INTO sessions (id, user_id, title, tags, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')
+        .run(sessionA, userId, 'Tag A', 'alpha,beta');
+    db.prepare('INSERT INTO sessions (id, user_id, title, tags, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')
+        .run(sessionB, userId, 'Tag B', 'beta');
+    db.prepare('INSERT INTO sessions (id, user_id, title, tags, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')
+        .run(sessionOther, otherId, 'Other', 'alpha');
+
+    const currentUser = { id: userId, username: `tag_user_${suffix}`, role: 'user', unit: 'QA' };
+    const router = createSessionsRouter({
+        authMiddleware: (req, _res, next) => { req.user = currentUser; next(); },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100),
+        logAction: () => {}
+    });
+    const summaryRoute = router.stack.find(layer => layer.route?.path === '/sessions/tags/summary');
+    const batchRoute = router.stack.find(layer => layer.route?.path === '/sessions/tags/batch');
+    const renameRoute = router.stack.find(layer => layer.route?.path === '/sessions/tags/rename');
+
+    try {
+        const summaryReq = { query: {}, user: currentUser };
+        const summaryRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(summaryRoute.route.stack.map(layer => layer.handle), summaryReq, summaryRes);
+        assert.equal(summaryRes.statusCode, 200);
+        const alpha = summaryRes.body.data.find(item => item.tag === 'alpha');
+        assert.equal(alpha.count, 1);
+
+        const batchReq = {
+            body: { sessionIds: [sessionA, sessionB, sessionOther], operation: 'add', tags: 'gamma' },
+            user: currentUser
+        };
+        const batchRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(batchRoute.route.stack.map(layer => layer.handle), batchReq, batchRes);
+        assert.equal(batchRes.body.affected, 2);
+        assert.match(db.prepare('SELECT tags FROM sessions WHERE id = ?').get(sessionA).tags, /gamma/);
+        assert.doesNotMatch(db.prepare('SELECT tags FROM sessions WHERE id = ?').get(sessionOther).tags, /gamma/);
+
+        const renameReq = { body: { fromTag: 'gamma', toTag: 'delta' }, user: currentUser };
+        const renameRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(renameRoute.route.stack.map(layer => layer.handle), renameReq, renameRes);
+        assert.equal(renameRes.body.affected, 2);
+        assert.match(db.prepare('SELECT tags FROM sessions WHERE id = ?').get(sessionB).tags, /delta/);
+    } finally {
+        db.prepare('DELETE FROM sessions WHERE id IN (?, ?, ?)').run(sessionA, sessionB, sessionOther);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(userId, otherId);
+    }
+});
+
+test('model cost helpers and compliance package generate auditable exports', () => {
+    assert.equal(calculateUsageCost({
+        inputTokens: 1000000,
+        outputTokens: 500000,
+        inputPricePerMillion: 2,
+        outputPricePerMillion: 6
+    }), 5);
+
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`compliance_${suffix}`, 'hash', 'Compliance User', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, input_price_per_million, output_price_per_million, price_currency, created_at)
+        VALUES (?, ?, ?, ?, 'active', ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userId, 'Cost Model', 'https://model.example/v1', 'cost-model', 1.5, 4.5, 'CNY');
+    const modelId = Number(modelInfo.lastInsertRowid);
+    const sessionId = `compliance-session-${suffix}`;
+    db.prepare('INSERT INTO sessions (id, user_id, title, tags, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')
+        .run(sessionId, userId, 'Compliance Session', 'audit');
+    db.prepare('INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime(\'now\', \'+8 hours\'))')
+        .run(sessionId, userId, 'user', 'hello', 10, modelId);
+    db.prepare('INSERT INTO model_usage_events (user_id, model_id, source, token_count, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime(\'now\', \'+8 hours\'))')
+        .run(userId, modelId, 'api', 30, 10, 20);
+    db.prepare('INSERT INTO audit_logs (user_id, action, details, timestamp) VALUES (?, ?, ?, datetime(\'now\', \'+8 hours\'))')
+        .run(userId, `COMPLIANCE_${suffix}`, 'export package test');
+
+    try {
+        const archive = buildComplianceAuditPackage({
+            db,
+            escapeCsvCell: value => `"${String(value ?? '').replace(/"/g, '""')}"`,
+            generatedAt: '2026-05-16 00:00:00',
+            filters: {}
+        });
+        assert.ok(Buffer.isBuffer(archive));
+        assert.equal(archive.readUInt32LE(0), 0x04034b50);
+        assert.ok(archive.includes(Buffer.from('manifest.json')));
+        assert.ok(archive.includes(Buffer.from('model_costs.csv')));
+
+        const smallZip = buildZipArchive([{ name: 'hello.txt', content: 'world' }]);
+        assert.equal(smallZip.readUInt32LE(0), 0x04034b50);
+    } finally {
+        db.prepare('DELETE FROM audit_logs WHERE action = ?').run(`COMPLIANCE_${suffix}`);
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });
 

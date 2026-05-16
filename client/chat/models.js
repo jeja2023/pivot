@@ -1,6 +1,30 @@
 // --- 模型管理模块 Model Management ---
 const pendingTests = new Set();
 
+function ensureModelCostFields() {
+    if (document.getElementById('m-input-price')) return;
+    const dailyInput = document.getElementById('m-daily-limit');
+    const anchorRow = dailyInput?.closest('.model-form-row');
+    if (!anchorRow) return;
+    const row = document.createElement('div');
+    row.className = 'model-form-row model-cost-row';
+    row.innerHTML = `
+        <div class="form-item">
+            <label>Input price / 1M Token</label>
+            <input type="number" id="m-input-price" class="form-input" min="0" step="0.000001" placeholder="0 = no cost tracking">
+        </div>
+        <div class="form-item">
+            <label>Output price / 1M Token</label>
+            <input type="number" id="m-output-price" class="form-input" min="0" step="0.000001" placeholder="0 = no cost tracking">
+        </div>
+        <div class="form-item">
+            <label>Currency</label>
+            <input type="text" id="m-price-currency" class="form-input" placeholder="CNY">
+        </div>
+    `;
+    anchorRow.insertAdjacentElement('afterend', row);
+}
+
 function renderModelCapabilityBadges(model) {
     const icons = [
         '<span class="model-capability-icon cap-icon text" title="文本模型" aria-label="文本模型"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>'
@@ -86,7 +110,7 @@ window.loadModels = async function(page = 1) {
                 </div>
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
-            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens">${formatTokenAmount(m.daily_token_limit)}</td>
+            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens">${formatTokenAmount(m.daily_token_limit)}<br><small>${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
             <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
@@ -164,6 +188,7 @@ async function checkSingleModelStatus(id) {
 }
 
 window.openModelModal = () => {
+    ensureModelCostFields();
     resetModelForm();
     document.getElementById('model-modal-title').innerText = '添加新模型';
     window.updateModelScopeControls?.();
@@ -173,6 +198,7 @@ window.openModelModal = () => {
 window.closeModelModal = () => document.getElementById('model-modal-container').classList.add('hidden');
 
 window.prepareEditModel = (model) => {
+    ensureModelCostFields();
     document.getElementById('m-id').value = model.id;
     const scopeEl = document.getElementById('m-scope');
     if (scopeEl) scopeEl.value = model.user_id ? 'personal' : 'global';
@@ -196,6 +222,12 @@ window.prepareEditModel = (model) => {
     if (supportsVisionEl) supportsVisionEl.checked = Number(model.supports_vision || 0) === 1;
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
     if (supportsReasoningEl) supportsReasoningEl.checked = Number(model.supports_reasoning || 0) === 1;
+    const inputPriceEl = document.getElementById('m-input-price');
+    if (inputPriceEl) inputPriceEl.value = model.input_price_per_million || '';
+    const outputPriceEl = document.getElementById('m-output-price');
+    if (outputPriceEl) outputPriceEl.value = model.output_price_per_million || '';
+    const currencyEl = document.getElementById('m-price-currency');
+    if (currencyEl) currencyEl.value = model.price_currency || 'CNY';
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     window.updateModelScopeControls?.(model);
     document.getElementById('model-modal-container').classList.remove('hidden');
@@ -232,10 +264,13 @@ async function testConnection(url, api_key, model_name, id = null) {
 
 // refreshModelSelector 已在 ui.js 中定义
 window.resetModelForm = () => {
-    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url'].forEach(id => {
+    ensureModelCostFields();
+    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url', 'm-input-price', 'm-output-price'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
+    const currencyEl = document.getElementById('m-price-currency');
+    if (currencyEl) currencyEl.value = 'CNY';
     const scopeEl = document.getElementById('m-scope');
     if (scopeEl) scopeEl.value = 'personal';
     const supportsVisionEl = document.getElementById('m-supports-vision');
@@ -333,6 +368,9 @@ window.addModel = async () => {
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
         supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
+        input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
+        output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
+        price_currency: (document.getElementById('m-price-currency')?.value || 'CNY').trim(),
         scope: currentUser?.username === 'admin' ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');

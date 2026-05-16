@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const logger = require('../logger');
+const { logger } = require('../logger');
 
 const dataDir = process.env.DATA_DIR
     ? path.resolve(process.env.DATA_DIR)

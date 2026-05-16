@@ -11,6 +11,7 @@ const {
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
+const { buildComplianceAuditPackage } = require('../services/compliance-package');
 
 function createAdminUsersRouter({
     authMiddleware,
@@ -132,6 +133,22 @@ function createAdminUsersRouter({
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=audit_logs.csv');
         res.send(csv);
+    }));
+
+    router.get('/admin/compliance/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const start = String(req.query.start || '').trim();
+        const end = String(req.query.end || '').trim();
+        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
+        const packageBuffer = buildComplianceAuditPackage({
+            db,
+            escapeCsvCell,
+            generatedAt: getBeijingTimestamp(),
+            filters: { start, end, includeDeleted }
+        });
+        logAction(req, '导出合规审计包', `范围: ${start || '-'} ~ ${end || '-'}，包含删除: ${includeDeleted ? '是' : '否'}`);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename=pivot_compliance_audit.zip');
+        res.send(packageBuffer);
     }));
 
     router.get('/admin/users/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {

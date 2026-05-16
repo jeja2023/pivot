@@ -35,6 +35,7 @@ const browserGlobals = {
     console: 'readonly',
     document: 'readonly',
     Event: 'readonly',
+    EventSource: 'readonly',
     fetch: 'readonly',
     hljs: 'readonly',
     katex: 'readonly',

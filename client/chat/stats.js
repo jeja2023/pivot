@@ -1,5 +1,36 @@
 /* 统计与日志模块 Stats & Logs */
 
+function formatEstimatedCost(value, currency = 'CNY') {
+    const amount = Number(value || 0);
+    if (amount <= 0) return `${currency} 0`;
+    return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+}
+
+function ensureStatsExportActions() {
+    const exportBtn = document.getElementById('stats-export-btn');
+    if (!exportBtn || document.getElementById('model-cost-export-btn')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'export-action-group';
+    exportBtn.parentElement?.insertBefore(wrap, exportBtn);
+    wrap.appendChild(exportBtn);
+    const costBtn = document.createElement('button');
+    costBtn.id = 'model-cost-export-btn';
+    costBtn.type = 'button';
+    costBtn.className = 'btn-secondary';
+    costBtn.textContent = 'Export Costs';
+    costBtn.addEventListener('click', () => window.exportModelCosts?.());
+    wrap.appendChild(costBtn);
+    if (currentUser?.role === 'admin') {
+        const complianceBtn = document.createElement('button');
+        complianceBtn.id = 'compliance-export-btn';
+        complianceBtn.type = 'button';
+        complianceBtn.className = 'btn-secondary';
+        complianceBtn.textContent = 'Compliance Pack';
+        complianceBtn.addEventListener('click', () => window.exportCompliancePackage?.());
+        wrap.appendChild(complianceBtn);
+    }
+}
+
 window.loadDetails = async function(page = 1) {
     const isAdmin = currentUser.role === 'admin';
     const titleEl = document.getElementById('details-title');
@@ -31,6 +62,7 @@ window.loadDetails = async function(page = 1) {
 }
 
 window.loadStats = async function() {
+    ensureStatsExportActions();
     const isAdmin = currentUser.role === 'admin';
     const titleEl = document.getElementById('stats-title');
     if (titleEl) titleEl.innerText = '用量统计';
@@ -46,7 +78,7 @@ window.loadStats = async function() {
                 <td class="text-center">${s.msg_count}</td>
                 <td class="text-center" title="${Number(s.input_tokens || 0).toLocaleString()}">${formatTokenCount(s.input_tokens)}</td>
                 <td class="text-center" title="${Number(s.output_tokens || 0).toLocaleString()}">${formatTokenCount(s.output_tokens)}</td>
-                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)}</td>
+                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)}<br><small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || 'CNY'))}</small></td>
                 <td style="color: var(--text-muted); font-size: 0.85rem;">${s.last_active || '-'}</td>
             </tr>
         `).join('');
@@ -556,6 +588,13 @@ function scheduleMonitorRefresh() {
 }
 
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
+window.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
+window.exportCompliancePackage = () => {
+    const start = document.getElementById('log-filter-start')?.value || '';
+    const end = document.getElementById('log-filter-end')?.value || '';
+    const params = new URLSearchParams({ start, end });
+    downloadFileByFetch(`${API_BASE}/admin/compliance/export?${params.toString()}`, 'pivot_compliance_audit.zip');
+};
 
 window.openMonitorRoutesModal = () => {
     document.getElementById('monitor-routes-modal')?.classList.remove('hidden');

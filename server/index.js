@@ -66,6 +66,7 @@ const { createSettingsRouter } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
 const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
+const { createEventsRouter } = require('./routes/events');
 const { ragRouter, retrieveContext } = require('./rag');
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const {
@@ -389,13 +390,7 @@ app.use(createAttachmentsRouter({
 // 根路径跳转至对话页面
 app.get('/', (req, res) => {
     noCacheHeaders(res);
-    const htmlPath = path.join(__dirname, '../client/chat/chat.html');
-    try {
-        const content = fs.readFileSync(htmlPath, 'utf8');
-        res.send(applyAppVersionTemplate(content, getAppVersion()));
-    } catch (e) {
-        res.sendFile(htmlPath);
-    }
+    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
 });
 
 app.use('/api', createAuthRouter({
@@ -461,6 +456,10 @@ app.use('/api', createPromptsRouter({
 app.use('/api', createAgentsRouter({
     authMiddleware,
     logAction
+}));
+
+app.use('/api', createEventsRouter({
+    authMiddleware
 }));
 
 app.use('/api', createChatRouter({
