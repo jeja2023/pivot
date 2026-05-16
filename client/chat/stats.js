@@ -191,8 +191,8 @@ window.loadOpsSummary = async function() {
             ? [['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)]]
             : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
         const gridEl = document.getElementById('ops-summary-grid');
-        gridEl.style.gridTemplateColumns = `repeat(${cards.length}, 1fr)`;
-        gridEl.innerHTML = cards.map(([l, v]) => `<div class="ops-card"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
+        gridEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(132px, 1fr))';
+        gridEl.innerHTML = cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
         renderTrendChart('usage-trend-chart', trend);
     } catch (e) { showToast('加载概览失败', 'error'); }
 }
@@ -382,9 +382,9 @@ window.loadMonitorSummary = async function() {
 
         document.getElementById('monitor-summary-grid').innerHTML = cards.map(([label, value, hint]) => `
             <div class="monitor-card">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                <div class="monitor-card-head">
                     <span>${escapeHtml(label)}</span>
-                    <span style="opacity: 0.5;">${cardIcons[label] || ''}</span>
+                    <span class="monitor-card-icon">${cardIcons[label] || ''}</span>
                 </div>
                 <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
                 <small title="${escapeHtml(hint)}">${escapeHtml(hint)}</small>
@@ -404,16 +404,16 @@ window.loadMonitorSummary = async function() {
             ['CPU 型号', `<strong>${escapeHtml(data.system.cpuModel)}</strong>`],
             ['系统时长', `<strong>${formatDuration(data.system.uptime)}</strong>`],
             ['进程时长', `<strong>${formatDuration(data.process.uptimeSeconds)}</strong>`],
-            ['系统内存', `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 1; min-width: 0;">
-                <strong style="font-size: 0.8rem; white-space: nowrap;">${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${memBarWidth}%)</strong>
-                <div style="width: 100%; max-width: 120px; height: 4px; background: rgba(148, 163, 184, 0.1); border-radius: 2px; overflow: hidden;">
-                    <div style="width: ${memBarWidth}%; height: 100%; background: ${memBarColor}; transition: width 0.5s ease;"></div>
+            ['系统内存', `<div class="monitor-meter-cell">
+                <strong>${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${memBarWidth}%)</strong>
+                <div class="monitor-meter-track">
+                    <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
                 </div>
             </div>`],
-            ['硬盘空间', `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 1; min-width: 0;" title="${escapeHtml(disk.path || '')}">
-                <strong style="font-size: 0.8rem; white-space: nowrap;">${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)</strong>
-                <div style="width: 100%; max-width: 120px; height: 4px; background: rgba(148, 163, 184, 0.1); border-radius: 2px; overflow: hidden;">
-                    <div style="width: ${diskBarWidth}%; height: 100%; background: ${diskBarColor}; transition: width 0.5s ease;"></div>
+            ['硬盘空间', `<div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')}">
+                <strong>${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)</strong>
+                <div class="monitor-meter-track">
+                    <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
                 </div>
             </div>`],
             ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free)}</strong>`],
@@ -463,11 +463,11 @@ window.loadMonitorSummary = async function() {
             } else {
                 msg += `，本机指标仅供参考。`;
             }
-            endpointNotice = `<div class="monitor-empty is-info" style="padding: 6px 12px; font-size: 0.78rem;">${msg}</div>`;
+            endpointNotice = `<div class="monitor-empty is-info">${msg}</div>`;
         } else if (endpoints.hasLocalModels) {
-            endpointNotice = '<div class="monitor-empty" style="color: #059669; background: #f0fdf4; border: 1px solid rgba(5, 150, 105, 0.1); border-radius: 8px; padding: 6px 12px; font-size: 0.78rem;"><strong>本地模式：</strong>模型部署在本地，数据真实。</div>';
+            endpointNotice = '<div class="monitor-empty is-ok"><strong>本地模式：</strong>模型部署在本地，数据真实。</div>';
         } else {
-            endpointNotice = '<div class="monitor-empty" style="padding: 6px 0;">未检测到活跃端点。</div>';
+            endpointNotice = '<div class="monitor-empty">未检测到活跃端点。</div>';
         }
 
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
@@ -479,17 +479,17 @@ window.loadMonitorSummary = async function() {
                     <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${usedRate.toFixed(0)}%`)}</strong>
                 </div>`;
             }).join('')
-            : `<div class="monitor-empty is-warning" style="margin-top: 6px; padding: 6px 12px; font-size: 0.78rem;"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
+            : `<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
 
         document.getElementById('monitor-gpu-list').innerHTML = [
             endpointNotice,
-            `<div class="monitor-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 0;">
-                <div style="display: flex; align-items: center; gap: 12px; padding: 5px 0; border-right: 1px solid rgba(148, 163, 184, 0.15);">
-                    <span style="width: 72px; flex-shrink: 0;">保护状态</span>
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>保护状态</span>
                     <strong>${escapeHtml(gpu.overloaded ? '保护中' : '正常')}</strong>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px; padding: 5px 0 5px 12px;">
-                    <span style="width: 72px; flex-shrink: 0;">拒绝阈值</span>
+                <div>
+                    <span>拒绝阈值</span>
                     <strong>${escapeHtml(`${((gpu.thresholds?.reject || 0) * 100).toFixed(0)}%`)}</strong>
                 </div>
             </div>`,

@@ -154,7 +154,8 @@ window.ensureAdminFeatureScripts = async () => {
 window.openAdminPanel = async () => {
     await window.ensureAdminFeatureScripts();
     const adminContainer = document.getElementById('admin-container');
-    adminContainer.classList.remove('hidden');
+    window.showMainWorkspace?.('settings');
+    adminContainer?.classList.remove('hidden');
     
     if (currentUser.role === 'admin') {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
@@ -165,7 +166,7 @@ window.openAdminPanel = async () => {
     await window.switchTab('ops');
 };
 
-window.closeModal = () => document.getElementById('admin-container').classList.add('hidden');
+window.closeModal = () => window.showMainWorkspace?.('chat');
 
 window.switchTab = async (tab) => {
     await window.ensureAdminFeatureScripts();
