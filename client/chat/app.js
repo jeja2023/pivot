@@ -39,6 +39,7 @@ if (chatRagToggle) {
 window.showMainWorkspace = function(view = 'chat') {
     const target = ['chat', 'agent', 'knowledge', 'mcp', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
+    const isFullWorkspace = target !== 'chat';
     const viewMap = {
         chat: 'chat-workspace-view',
         agent: 'agent-workbench-modal',
@@ -46,7 +47,7 @@ window.showMainWorkspace = function(view = 'chat') {
         mcp: 'mcp-workbench-modal',
         settings: 'admin-container'
     };
-    if (target !== 'chat' && chatContainer) {
+    if (isFullWorkspace && chatContainer) {
         const targetPanel = document.getElementById(viewMap[target]);
         if (targetPanel && targetPanel.parentElement !== chatContainer) {
             chatContainer.appendChild(targetPanel);
@@ -61,7 +62,9 @@ window.showMainWorkspace = function(view = 'chat') {
     document.querySelectorAll('.footer-mini-btn[data-workspace-view]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.workspaceView === target);
     });
-    document.querySelector('.chat-container')?.setAttribute('data-active-workspace', target);
+    chatContainer?.setAttribute('data-active-workspace', target);
+    document.body?.setAttribute('data-active-workspace', target);
+    document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
     if (target !== 'agent') window.updateAgentAutoRefresh?.();
     return target;
 };

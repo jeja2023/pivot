@@ -503,6 +503,26 @@ function runMigrations() {
     ensureColumn('mcp_servers', 'last_error', 'TEXT');
     ensureColumn('mcp_servers', 'last_checked_at', 'DATETIME');
     ensureColumn('mcp_servers', 'updated_at', 'DATETIME');
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS mcp_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            server_id INTEGER,
+            tool_name TEXT,
+            source TEXT DEFAULT 'manual',
+            status TEXT DEFAULT 'success',
+            duration_ms INTEGER DEFAULT 0,
+            input_preview TEXT,
+            output_preview TEXT,
+            error_message TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_server_created ON mcp_call_logs(server_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_user_created ON mcp_call_logs(user_id, created_at);
+    `);
+    ensureColumn('mcp_call_logs', 'source', "TEXT DEFAULT 'manual'");
+    ensureColumn('mcp_call_logs', 'input_preview', 'TEXT');
+    ensureColumn('mcp_call_logs', 'output_preview', 'TEXT');
     ensureColumn('mcp_database_connections', 'user_id', 'INTEGER');
     ensureColumn('mcp_database_connections', 'host', 'TEXT');
     ensureColumn('mcp_database_connections', 'port', 'INTEGER');
@@ -670,6 +690,7 @@ function runMigrations() {
     recordSchemaMigration('20260516_schema_migrations_v1', 'Track applied schema migrations in a dedicated table.');
     recordSchemaMigration('20260516_agent_queue_locks_v1', 'Add database-backed agent queue lock fields and indexes.');
     recordSchemaMigration('20260516_branch_artifact_observability_capabilities_v1', 'Add conversation forks, artifact versions, DAG nodes, capability packages, and observability events.');
+    recordSchemaMigration('20260517_mcp_call_logs_v1', 'Track MCP tool calls for audit and health governance.');
 }
 
 module.exports = { runMigrations, recordMigration, recordSchemaMigration, runSchemaMigration };

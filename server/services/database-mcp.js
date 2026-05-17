@@ -10,6 +10,7 @@ const DEFAULT_PORTS = {
     mongodb: 27017,
     sqlite: 0
 };
+const DATABASE_CONNECT_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.MCP_DATABASE_CONNECT_TIMEOUT_MS || '10000', 10) || 10000);
 
 const SQL_TOOL_DEFINITIONS = [
     {
@@ -226,7 +227,8 @@ async function withPostgres(connection, handler) {
         database: connection.database_name,
         user: connection.username,
         password: connection.password,
-        ssl: connection.ssl ? { rejectUnauthorized: false } : false
+        ssl: connection.ssl ? { rejectUnauthorized: false } : false,
+        connectionTimeoutMillis: DATABASE_CONNECT_TIMEOUT_MS
     });
     await client.connect();
     try {
@@ -244,7 +246,8 @@ async function withMysql(connection, handler) {
         database: connection.database_name,
         user: connection.username,
         password: connection.password,
-        ssl: connection.ssl ? {} : undefined
+        ssl: connection.ssl ? {} : undefined,
+        connectTimeout: DATABASE_CONNECT_TIMEOUT_MS
     });
     try {
         return await handler(client);
@@ -264,7 +267,9 @@ async function withSqlServer(connection, handler) {
         options: {
             encrypt: Boolean(connection.ssl),
             trustServerCertificate: true
-        }
+        },
+        connectionTimeout: DATABASE_CONNECT_TIMEOUT_MS,
+        requestTimeout: DATABASE_CONNECT_TIMEOUT_MS
     });
     try {
         return await handler(pool);
@@ -404,7 +409,7 @@ async function executeMongoTool(connection, name, input = {}) {
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
     const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS });
     await client.connect();
     try {
         const database = client.db(connection.database_name);
@@ -462,7 +467,7 @@ async function testDatabaseConnection(connection) {
             ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
             : '';
         const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
-        const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
+        const client = new MongoClient(uri, { serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS });
         await client.connect();
         try {
             await client.db(connection.database_name).command({ ping: 1 });
@@ -500,7 +505,7 @@ function validateDatabaseConnectionPayload(payload, user) {
     } else {
         if (!host || !databaseName) throw new Error('请填写数据库主机和数据库名。');
         if (!username && type !== 'mongodb') throw new Error('请填写数据库用户名。');
-        if (isPrivateHost(host) && user?.role !== 'admin') {
+        if (process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN === 'true' && isPrivateHost(host) && user?.role !== 'admin') {
             throw new Error('普通用户不能配置内网或本机数据库地址。');
         }
     }

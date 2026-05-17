@@ -16,6 +16,7 @@ const {
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentDetail,
     getKnowledgeDocumentForUser,
+    getKnowledgeQualityReport,
     getKnowledgeDocumentSummaryForUser,
     getRagFeedbackSummary,
     recordRagFeedback,
@@ -86,6 +87,10 @@ ragRouter.get('/summary', authMiddleware, (req, res) => {
     const summary = getKnowledgeDocumentSummaryForUser(req.user.id);
     summary.feedback = getRagFeedbackSummary(req.user.id);
     res.json(summary);
+});
+
+ragRouter.get('/quality-report', authMiddleware, (req, res) => {
+    res.json(getKnowledgeQualityReport(req.user.id));
 });
 
 ragRouter.get('/docs/:id', authMiddleware, (req, res) => {

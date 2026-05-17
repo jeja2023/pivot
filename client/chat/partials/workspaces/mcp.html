@@ -16,6 +16,7 @@
                     </div>
                     <button id="mcp-refresh-btn" class="btn-secondary">刷新</button>
                 </div>
+                <div id="mcp-governance-panel" class="workspace-governance-panel"></div>
                 <div class="mcp-layout">
                     <div class="mcp-form">
                         <input type="hidden" id="mcp-id">
@@ -54,7 +55,7 @@
                             </label>
                         </div>
                         <textarea id="mcp-desc" class="form-input" placeholder="说明，可选"></textarea>
-                        <label class="mcp-shared-row admin-only hidden">
+                        <label class="mcp-shared-row super-admin-only hidden">
                             <input type="checkbox" id="mcp-shared"> 作为全局共享服务
                         </label>
                         <div class="agent-run-controls">
@@ -115,7 +116,7 @@
                     </label>
                 </div>
                 <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选"></textarea>
-                <label class="mcp-shared-row admin-only hidden">
+                <label class="mcp-shared-row super-admin-only hidden">
                     <input type="checkbox" id="mcp-edit-shared"> 作为全局共享服务
                 </label>
                 <div class="mcp-edit-actions">

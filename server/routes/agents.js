@@ -20,6 +20,7 @@ const {
     getAgentMetrics,
     getAgentRuntimeStatus,
     getRunDetailForUser,
+    preflightAgentRun,
     listDeletedRunsForAdmin,
     listRuns,
     listSteps,
@@ -48,6 +49,10 @@ function createAgentsRouter({ authMiddleware, logAction }) {
 
     router.get('/agents/metrics', authMiddleware, asyncHandler(async (req, res) => {
         res.json(getAgentMetrics(req.user, req.query.days));
+    }));
+
+    router.post('/agents/preflight', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(preflightAgentRun(req.user, req.body || {}));
     }));
 
     router.get('/agents/templates', authMiddleware, asyncHandler(async (req, res) => {

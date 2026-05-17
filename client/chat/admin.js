@@ -157,23 +157,37 @@ window.openAdminPanel = async () => {
     const adminContainer = document.getElementById('admin-container');
     window.showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
+    const isAdmin = currentUser?.role === 'admin';
+    const isSuperAdmin = currentUser?.username === 'admin';
+    const titleEl = adminContainer?.querySelector('.settings-workspace-header h3');
+    const descEl = adminContainer?.querySelector('.settings-workspace-header p');
+    if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
+    if (descEl) descEl.innerText = isAdmin
+        ? '集中管理模型、用户、审计、监控、用量、API 接入与账号安全。'
+        : '管理你的模型、指令、附件、用量、API 接入与账号安全。';
     
-    if (currentUser.role === 'admin') {
+    if (isAdmin) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
     } else {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     }
+    document.querySelectorAll('.super-admin-only').forEach(el => {
+        el.classList.toggle('hidden', !isSuperAdmin);
+    });
     await loadSettings();
-    await window.switchTab('ops');
+    await window.switchTab(isAdmin ? 'ops' : 'models');
 };
 
 window.closeModal = () => window.showMainWorkspace?.('chat');
 
 window.switchTab = async (tab) => {
     await window.ensureAdminFeatureScripts();
+    const adminTabs = new Set(['ops', 'users', 'logs', 'monitor', 'report']);
+    if (adminTabs.has(tab) && currentUser?.role !== 'admin') tab = 'models';
     const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
+    document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
     
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');

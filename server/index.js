@@ -485,7 +485,7 @@ app.use(['/api', '/v1'], (req, res) => {
 
 // --- 全局错误处理中间件 ---
 app.use((err, req, res, _next) => {
-    const status = err.status || 500;
+    const status = err.status || err.statusCode || 500;
     const isClientError = status >= 400 && status < 500;
 
     // 记录到日志系统

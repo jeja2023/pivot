@@ -448,6 +448,20 @@ function initSchema() {
             FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS mcp_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            server_id INTEGER,
+            tool_name TEXT,
+            source TEXT DEFAULT 'manual',
+            status TEXT DEFAULT 'success',
+            duration_ms INTEGER DEFAULT 0,
+            input_preview TEXT,
+            output_preview TEXT,
+            error_message TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+
         CREATE TABLE IF NOT EXISTS mcp_database_connections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             mcp_server_id INTEGER UNIQUE NOT NULL,
@@ -523,6 +537,8 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_observability_events_status_created ON observability_events(status, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_server_created ON mcp_call_logs(server_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_user_created ON mcp_call_logs(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);

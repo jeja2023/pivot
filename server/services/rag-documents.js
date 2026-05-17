@@ -310,6 +310,72 @@ function getRagFeedbackSummary(userId) {
     return summary;
 }
 
+function getKnowledgeQualityReport(userId) {
+    const overview = db.prepare(`
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready,
+            SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
+            SUM(CASE WHEN COALESCE(is_enabled, 1) = 0 THEN 1 ELSE 0 END) AS disabled,
+            SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS emptyReady,
+            COALESCE(SUM(chunk_count), 0) AS chunks,
+            COALESCE(SUM(source_size), 0) AS sourceSize
+        FROM knowledge_docs
+        WHERE user_id = ? AND deleted_at IS NULL
+    `).get(userId);
+    const problemDocs = db.prepare(`
+        SELECT d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
+               d.progress, d.error_message, d.updated_at,
+               COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0) AS unhelpful,
+               COALESCE(SUM(CASE WHEN f.helpful = 1 THEN 1 ELSE 0 END), 0) AS helpful
+        FROM knowledge_docs d
+        LEFT JOIN rag_feedback f ON f.user_id = d.user_id AND f.doc_name = d.name
+        WHERE d.user_id = ? AND d.deleted_at IS NULL
+        GROUP BY d.id
+        HAVING d.status = 'error'
+            OR COALESCE(d.is_enabled, 1) = 0
+            OR (d.status = 'ready' AND COALESCE(d.chunk_count, 0) = 0)
+            OR unhelpful > helpful
+        ORDER BY
+            CASE
+                WHEN d.status = 'error' THEN 0
+                WHEN COALESCE(d.is_enabled, 1) = 0 THEN 1
+                WHEN COALESCE(d.chunk_count, 0) = 0 THEN 2
+                ELSE 3
+            END,
+            COALESCE(d.updated_at, d.created_at) DESC
+        LIMIT 12
+    `).all(userId);
+    const recommendations = [];
+    if (Number(overview.error || 0) > 0) recommendations.push('存在索引失败文档，建议先使用“重试失败”恢复可用资料。');
+    if (Number(overview.disabled || 0) > 0) recommendations.push('存在停用文档，确认是否需要重新启用或移出知识库。');
+    if (Number(overview.emptyReady || 0) > 0) recommendations.push('存在已就绪但无分块文档，建议重新上传或重建索引。');
+    if (problemDocs.some(doc => Number(doc.unhelpful || 0) > Number(doc.helpful || 0))) {
+        recommendations.push('部分文档收到较多负反馈，建议检查内容时效性、命名和切片质量。');
+    }
+    if (recommendations.length === 0) recommendations.push('知识库质量状态正常，可以通过召回测试持续观察命中效果。');
+    return {
+        overview: {
+            total: Number(overview.total || 0),
+            ready: Number(overview.ready || 0),
+            processing: Number(overview.processing || 0),
+            error: Number(overview.error || 0),
+            disabled: Number(overview.disabled || 0),
+            emptyReady: Number(overview.emptyReady || 0),
+            chunks: Number(overview.chunks || 0),
+            sourceSize: Number(overview.sourceSize || 0)
+        },
+        problemDocs,
+        recommendations,
+        queue: {
+            running: runningIndexCount,
+            pending: pendingIndexes.size,
+            maxConcurrent: maxConcurrentIndexes
+        }
+    };
+}
+
 function drainKnowledgeDocumentIndexQueue() {
     while (runningIndexCount < maxConcurrentIndexes && pendingIndexes.size > 0) {
         const [key, job] = pendingIndexes.entries().next().value;
@@ -491,6 +557,7 @@ module.exports = {
     getKnowledgeDocumentDetail,
     getKnowledgeSourcePath,
     getKnowledgeDocumentSummaryForUser,
+    getKnowledgeQualityReport,
     getRagFeedbackSummary,
     markKnowledgeDocumentError,
     markKnowledgeDocumentProcessing,

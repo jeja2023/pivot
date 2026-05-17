@@ -95,7 +95,7 @@ function getPublicEmbeddingConfig(userId = null) {
     };
 }
 
-function getRagConfig(overrides = {}) {
+function getRagConfig(overrides = {}, userId = null) {
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
     const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, 10);
     const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, 1000);
@@ -103,31 +103,31 @@ function getRagConfig(overrides = {}) {
     const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
 
     const scoreThreshold = clampNumber(
-        overrides.scoreThreshold ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
+        overrides.scoreThreshold ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.scoreThreshold) ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
         defaultScoreThreshold,
         0,
         1
     );
     const topK = clampInteger(
-        overrides.topK ?? getSettingValue(RAG_CONFIG_KEYS.topK),
+        overrides.topK ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.topK) ?? getSettingValue(RAG_CONFIG_KEYS.topK),
         defaultTopK,
         1,
         10
     );
     const candidateLimit = clampInteger(
-        overrides.candidateLimit ?? getSettingValue(RAG_CONFIG_KEYS.candidateLimit),
+        overrides.candidateLimit ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.candidateLimit) ?? getSettingValue(RAG_CONFIG_KEYS.candidateLimit),
         defaultCandidateLimit,
         Math.max(topK, 20),
         1000
     );
     const chunkSize = clampInteger(
-        overrides.chunkSize ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
+        overrides.chunkSize ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
         defaultChunkSize,
         200,
         2000
     );
     const chunkOverlap = clampInteger(
-        overrides.chunkOverlap ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
+        overrides.chunkOverlap ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkOverlap) ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
         defaultChunkOverlap,
         0,
         Math.floor(chunkSize / 2)

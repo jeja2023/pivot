@@ -134,6 +134,29 @@ function validateModelUrl(rawUrl, user) {
     return parsed;
 }
 
+function validateMcpEndpointUrl(rawUrl) {
+    let parsed;
+    try {
+        parsed = new URL(String(rawUrl || '').trim());
+    } catch (e) {
+        const err = new Error('MCP endpoint URL is invalid.');
+        err.status = 400;
+        throw err;
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        const err = new Error('MCP endpoint URL must use HTTP or HTTPS.');
+        err.status = 400;
+        throw err;
+    }
+    if (parsed.username || parsed.password) {
+        const err = new Error('MCP endpoint URL must not include username or password.');
+        err.status = 400;
+        throw err;
+    }
+    return parsed;
+}
+
 function escapeCsvCell(value) {
     let text = value === undefined || value === null ? '' : String(value);
     if (/^[=+\-@]/.test(text)) text = `'${text}`;
@@ -236,6 +259,7 @@ module.exports = {
     encryptSecret,
     decryptSecret,
     validateModelUrl,
+    validateMcpEndpointUrl,
     assertSafeOutboundUrl,
     isPrivateHost,
     isSensitiveOutboundHost,
@@ -246,4 +270,3 @@ module.exports = {
     toProjectRelativePath,
     isPathInsideUploadRoot
 };
-

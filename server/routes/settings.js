@@ -28,6 +28,11 @@ const allowedSettings = new Set([
 ]);
 
 const userEmbeddingSettings = new Set([
+    RAG_CONFIG_KEYS.scoreThreshold,
+    RAG_CONFIG_KEYS.topK,
+    RAG_CONFIG_KEYS.candidateLimit,
+    RAG_CONFIG_KEYS.chunkSize,
+    RAG_CONFIG_KEYS.chunkOverlap,
     RAG_CONFIG_KEYS.embeddingMode,
     RAG_CONFIG_KEYS.embeddingApiUrl,
     RAG_CONFIG_KEYS.embeddingApiKey,
@@ -125,7 +130,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         const settings = getSettings();
         res.json({
             ragEnabled: true,
-            ragConfig: getRagConfig(),
+            ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
@@ -189,6 +194,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
         res.json({
             success: true,
+            ragConfig: getRagConfig({}, req.user?.id),
             embeddingConfig: getPublicEmbeddingConfig(req.user?.id)
         });
     }));

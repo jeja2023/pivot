@@ -34,6 +34,9 @@ async function loadAuthConfig() {
 window.showAuth = () => {
     document.getElementById('auth-container').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+    document.body?.classList.remove('is-main-workspace-full');
+    document.body?.setAttribute('data-active-workspace', 'auth');
+    document.querySelector('.chat-container')?.setAttribute('data-active-workspace', 'chat');
     if (window.updateContextUsage) window.updateContextUsage(null);
 };
 
@@ -41,6 +44,7 @@ window.showApp = () => {
     if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    if (window.showMainWorkspace) window.showMainWorkspace('chat');
 
     // 更新用户信息显示
     const userDisplay = document.getElementById('user-info') || document.getElementById('current-username');

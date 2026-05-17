@@ -281,6 +281,28 @@ const renderRagSummary = (summary) => {
     if (candidateInput && !candidateInput.value) candidateInput.value = summary.config?.candidateLimit ?? 300;
 };
 
+const renderRagQualityReport = (report) => {
+    const el = document.getElementById('rag-quality-report');
+    if (!el || !report) return;
+    const overview = report.overview || {};
+    const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
+    const recommendations = Array.isArray(report.recommendations) ? report.recommendations : [];
+    el.innerHTML = `
+        <div class="governance-head">
+            <strong>质量诊断</strong>
+            <span>异常 ${Number(overview.error || 0)} · 停用 ${Number(overview.disabled || 0)} · 空分块 ${Number(overview.emptyReady || 0)}</span>
+        </div>
+        <div class="governance-list">
+            ${recommendations.slice(0, 3).map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}
+            ${problemDocs.slice(0, 4).map(doc => `
+                <span class="${doc.status === 'error' ? 'is-error' : ''}">
+                    ${escapeRagHtml(doc.name || '文档')} · ${escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
+                </span>
+            `).join('')}
+        </div>
+    `;
+};
+
 const renderRagDebugResults = (data) => {
     const el = document.getElementById('rag-debug-results');
     if (!el) return;
@@ -332,9 +354,10 @@ function renderRagDocsPagination(total, page, limit) {
 window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     try {
         ragDocsPage = Math.max(Number(page) || 1, 1);
-        const [res, summaryRes] = await Promise.all([
+        const [res, summaryRes, qualityRes] = await Promise.all([
             fetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/rag/summary`, { headers: authHeaders() })
+            fetch(`${API_BASE}/rag/summary`, { headers: authHeaders() }),
+            fetch(`${API_BASE}/rag/quality-report`, { headers: authHeaders() })
         ]);
         const payload = await res.json();
         const docs = Array.isArray(payload) ? payload : (payload.data || []);
@@ -342,7 +365,9 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
         const pageSize = Array.isArray(payload) ? RAG_DOCS_PAGE_SIZE : Number(payload.limit || RAG_DOCS_PAGE_SIZE);
         const pageNo = Array.isArray(payload) ? ragDocsPage : Number(payload.page || ragDocsPage);
         const summary = await summaryRes.json().catch(() => null);
+        const quality = await qualityRes.json().catch(() => null);
         renderRagSummary(summary);
+        renderRagQualityReport(quality);
         
         const body = document.getElementById('rag-docs-body');
         body.innerHTML = docs.map((d, index) => `

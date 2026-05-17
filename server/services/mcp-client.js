@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, validateModelUrl } = require('../security');
+const { decryptSecret, validateMcpEndpointUrl } = require('../security');
 const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServer,
@@ -10,6 +10,41 @@ const {
 
 const MCP_TIMEOUT_MS = 20000;
 const isSuperAdmin = (user) => user?.username === 'admin';
+const PREVIEW_LIMIT = 1800;
+
+function previewValue(value, limit = PREVIEW_LIMIT) {
+    let text = '';
+    try {
+        text = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch (e) {
+        text = String(value || '');
+    }
+    return String(text || '').slice(0, limit);
+}
+
+function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status = 'success', durationMs = 0, input, output, error }) {
+    try {
+        db.prepare(`
+            INSERT INTO mcp_call_logs (
+                user_id, server_id, tool_name, source, status, duration_ms,
+                input_preview, output_preview, error_message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            user?.id || null,
+            serverId || null,
+            String(toolName || '').slice(0, 240),
+            String(source || 'manual').slice(0, 40),
+            status === 'error' ? 'error' : 'success',
+            Math.max(Number(durationMs) || 0, 0),
+            previewValue(input),
+            status === 'error' ? '' : previewValue(output),
+            status === 'error' ? String(error?.message || error || '').slice(0, 1000) : '',
+            getBeijingTimestamp()
+        );
+    } catch (e) {
+        // Audit logging must never block the tool call path.
+    }
+}
 
 function normalizeServerRow(row) {
     if (!row) return null;
@@ -122,7 +157,7 @@ function upsertToolCache(serverId, tools = []) {
 
 async function refreshMcpTools(server, user) {
     if (!String(server.base_url || '').startsWith('pivot-db://')) {
-        validateModelUrl(server.base_url, user);
+        validateMcpEndpointUrl(server.base_url);
     }
     try {
         const result = await callMcpJsonRpc(server, 'tools/list', {});
@@ -175,18 +210,44 @@ function formatMcpTool(row) {
     };
 }
 
-async function executeMcpTool(fullName, input, user) {
+async function executeMcpTool(fullName, input, user, options = {}) {
     const match = String(fullName || '').match(/^mcp\.(\d+)\.(.+)$/);
     if (!match) throw new Error('Invalid MCP tool name.');
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
     if (!String(server.base_url || '').startsWith('pivot-db://')) {
-        validateModelUrl(server.base_url, user);
+        validateMcpEndpointUrl(server.base_url);
     }
-    return callMcpJsonRpc(server, 'tools/call', {
-        name: match[2],
-        arguments: input || {}
-    });
+    const startedAt = Date.now();
+    try {
+        const result = await callMcpJsonRpc(server, 'tools/call', {
+            name: match[2],
+            arguments: input || {}
+        });
+        recordMcpCallLog({
+            user,
+            serverId: server.id,
+            toolName: match[2],
+            source: options.source || 'manual',
+            status: 'success',
+            durationMs: Date.now() - startedAt,
+            input,
+            output: result
+        });
+        return result;
+    } catch (e) {
+        recordMcpCallLog({
+            user,
+            serverId: server.id,
+            toolName: match[2],
+            source: options.source || 'manual',
+            status: 'error',
+            durationMs: Date.now() - startedAt,
+            input,
+            error: e
+        });
+        throw e;
+    }
 }
 
 module.exports = {
@@ -195,5 +256,6 @@ module.exports = {
     listCachedMcpTools,
     listMcpServers,
     normalizeServerRow,
+    recordMcpCallLog,
     refreshMcpTools
 };

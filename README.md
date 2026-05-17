@@ -1,11 +1,19 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.36-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.37-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
-## 最新版本：0.0.36
+## 最新版本：0.0.37
+
+### v0.0.37 更新摘要
+
+- **主工作区与监控页优化**：搜索、设置、MCP、知识库和智能体保持右侧主工作区展示；系统监控页改为明确区域布局，慢查询与异常告警完整显示并减少不必要的纵向滚动。
+- **权限模型收口**：普通用户和非内置 `admin` 管理员可使用自己的 MCP、知识库、搜索、系统设置和智能体配置；内置用户名 `admin` 保留全局/共享/审计能力。
+- **MCP、知识库、智能体治理增强**：新增 MCP 调用日志与治理概览、知识库质量报告、智能体任务预检，并记录智能体触发的 MCP 调用来源。
+- **局域网数据库 MCP 适配**：数据库 MCP 默认允许个人连接局域网数据库；如需恢复旧限制，可设置 `MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN=true`。
+- **文档与版本同步**：版本升级至 `v0.0.37`；`npm test` 已通过，安全测试 `64/64`。
 
 ### v0.0.36 更新摘要
 
@@ -100,6 +108,7 @@
 
 - **外部 MCP Server**：支持配置个人或全局 MCP Server，保存服务后可刷新工具缓存，并供普通对话和智能体任务调用。
 - **数据库 MCP Server**：内置数据库 MCP 预设，通过可视化表单填写类型、主机、端口、数据库名、用户名、密码、Schema、SSL 和最大返回行数。
+- **局域网数据库连接**：默认允许用户连接自己的局域网数据库；如需恢复旧限制，可在服务端环境变量中设置 `MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN=true`。
 - **统一数据库入口**：数据库类型作为连接字段选择，不再按数据库种类拆成多个工具入口。
 - **支持数据库类型**：PostgreSQL、MySQL/MariaDB、SQL Server、SQLite 和 MongoDB。
 - **只读安全边界**：SQL 数据库提供表列表、结构查看和只读查询；MongoDB 提供集合列表、样本读取和聚合读取。
@@ -335,6 +344,7 @@ AGENT_STALE_RUNNING_MINUTES=30
 
 # 数据库 MCP
 MCP_SQLITE_ROOTS=
+MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN=false
 
 # RAG 检索与缓存
 EMBEDDING_MODE=http
@@ -417,4 +427,4 @@ node -e "require('./server/db'); console.log('db init ok')"
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.36（智能体模板展示优化、设置页 UI 精简与版本同步）
+**当前版本**：v0.0.37（权限模型收口、MCP/知识库/智能体治理、局域网数据库 MCP 与监控布局优化）

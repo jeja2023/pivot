@@ -327,7 +327,7 @@ async function loadAgentTools() {
     const res = await apiFetch(`${API_BASE}/agents/tools`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
-    const visibleTools = (data.tools || []).filter(tool => currentUser?.role === 'admin' || !isAdminOnlyAgentTool(tool));
+    const visibleTools = (data.tools || []).filter(tool => currentUser?.username === 'admin' || !isAdminOnlyAgentTool(tool));
     agentToolsCache = visibleTools;
     list.innerHTML = `
         ${visibleTools.map(tool => `
@@ -411,6 +411,41 @@ async function loadAgentMetrics() {
         <span>失败 ${Number(data.error || 0)}</span>
         <span>Token ${Number(data.totalTokens || 0)}</span>
     `;
+}
+
+function renderAgentPreflight(data) {
+    const target = document.getElementById('agent-preflight-panel');
+    if (!target || !data) return;
+    const statusText = data.status === 'blocked' ? '阻断' : data.status === 'warning' ? '有风险' : '可运行';
+    const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || [])].slice(0, 5);
+    const summary = data.summary || {};
+    target.className = `workspace-governance-panel agent-preflight-panel ${agentEscape(data.status || 'ready')}`;
+    target.innerHTML = `
+        <div class="governance-head">
+            <strong>任务预检：${agentEscape(statusText)}</strong>
+            <span>工具 ${Number(summary.toolCount || 0)} · MCP ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
+        </div>
+        <div class="governance-list">
+            ${messages.map(item => `<span>${agentEscape(item)}</span>`).join('') || '<span>预检通过。</span>'}
+        </div>
+    `;
+}
+
+async function preflightAgentPayload(payload) {
+    const target = document.getElementById('agent-preflight-panel');
+    if (target) {
+        target.className = 'workspace-governance-panel agent-preflight-panel';
+        target.innerHTML = '<div class="governance-head"><strong>任务预检中...</strong></div>';
+    }
+    const res = await apiFetch(`${API_BASE}/agents/preflight`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '任务预检失败');
+    renderAgentPreflight(data);
+    return data;
 }
 
 function filteredAgentRuns() {
@@ -983,6 +1018,8 @@ window.createAgentRun = async function() {
     if (!payload.goal) return showToast('????????', 'error');
     if (!payload.modelId) return showToast('?????', 'error');
     if (payload._invalid) return;
+    const preflight = await preflightAgentPayload(payload);
+    if (preflight.status === 'blocked') return showToast('任务预检未通过，请先处理阻断项', 'error');
     if (frequency !== 'manual') {
         const scheduleRes = await apiFetch(`${API_BASE}/agents/schedules`, {
             method: 'POST',
@@ -1302,6 +1339,9 @@ window.openMcpWorkbench = async function() {
     bindMcpFormControls();
     setMcpSourceType(document.getElementById('mcp-source-type')?.value || 'external');
     panel.querySelectorAll('.admin-only').forEach(el => {
+        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+    });
+    panel.querySelectorAll('.super-admin-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.username !== 'admin');
     });
     await window.loadMcpWorkbench?.();
@@ -1366,6 +1406,9 @@ window.openMcpEditModal = function(serverId) {
     bindMcpFormControls('edit');
     fillMcpForm(server, 'edit');
     document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
+        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+    });
+    document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
         el.classList.toggle('hidden', currentUser?.username !== 'admin');
     });
     modal.classList.remove('hidden');
@@ -1440,6 +1483,42 @@ async function loadMcpTools() {
                 <div class="mcp-template-list">${mcpTemplateMarkup()}</div>
             </div>
         `}
+    `;
+}
+
+async function loadMcpGovernance() {
+    const panel = document.getElementById('mcp-governance-panel');
+    if (!panel) return;
+    const [govRes, logsRes] = await Promise.all([
+        apiFetch(`${API_BASE}/mcp/governance`),
+        apiFetch(`${API_BASE}/mcp/call-logs?limit=6`)
+    ]);
+    const gov = await govRes.json().catch(() => ({}));
+    const logs = await logsRes.json().catch(() => ({}));
+    if (!govRes.ok || !logsRes.ok) {
+        panel.innerHTML = '';
+        return;
+    }
+    const s = gov.summary || {};
+    const recentLogs = logs.data || [];
+    panel.innerHTML = `
+        <div class="governance-head">
+            <strong>MCP 治理</strong>
+            <span>7 日调用 ${Number(s.calls7d || 0)} · 错误 ${Number(s.callErrors7d || 0)} · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
+        </div>
+        <div class="governance-metrics">
+            <span><b>${Number(s.active || 0)}</b>活跃</span>
+            <span><b>${Number(s.error || 0)}</b>异常</span>
+            <span><b>${Number(s.unchecked || 0)}</b>未检查</span>
+            <span><b>${Number(s.databaseServers || 0)}</b>数据库</span>
+        </div>
+        <div class="governance-list">
+            ${recentLogs.map(log => `
+                <span class="${log.status === 'error' ? 'is-error' : ''}">
+                    ${agentEscape(log.server_name || 'MCP')} / ${agentEscape(log.tool_name || '-')} · ${agentEscape(log.source || 'manual')} · ${Number(log.duration_ms || 0)}ms
+                </span>
+            `).join('') || '<span>暂无调用记录。</span>'}
+        </div>
     `;
 }
 
@@ -1554,7 +1633,7 @@ window.deleteMcpServer = function(id) {
 
 window.loadMcpWorkbench = async function() {
     try {
-        await Promise.all([loadMcpServers(), loadMcpTools()]);
+        await Promise.all([loadMcpServers(), loadMcpTools(), loadMcpGovernance()]);
     } catch (e) {
         showToast(e.message, 'error');
     }

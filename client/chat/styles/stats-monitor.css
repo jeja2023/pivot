@@ -436,15 +436,17 @@
 #tab-content-monitor {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     min-height: 0;
+    height: 100%;
     overflow: hidden;
 }
 #tab-content-monitor.hidden {
     display: none !important;
 }
-.settings-workspace-view .admin-content:has(#tab-content-monitor:not(.hidden)) {
+.settings-workspace-view .admin-content.is-monitor-tab-active {
     overflow-y: hidden;
+    padding: 18px;
 }
 .settings-workspace-view #tab-content-monitor .monitor-toolbar {
     display: flex;
@@ -452,6 +454,16 @@
     justify-content: flex-end;
     gap: 8px;
     flex-wrap: wrap;
+}
+.settings-workspace-view #tab-content-monitor .settings-page-head {
+    margin-bottom: 0 !important;
+}
+.settings-workspace-view #tab-content-monitor .settings-page-head h3 {
+    font-size: 1rem;
+}
+.settings-workspace-view #tab-content-monitor .settings-page-head p {
+    font-size: 0.72rem;
+    line-height: 1.35;
 }
 .monitor-updated-at {
     margin: 0;
@@ -493,9 +505,9 @@
 }
 .settings-workspace-view #tab-content-monitor .monitor-card {
     position: relative;
-    min-height: 66px;
-    gap: 5px;
-    padding: 9px 11px;
+    min-height: 60px;
+    gap: 4px;
+    padding: 8px 10px;
     border-radius: 8px;
     border-color: rgba(148, 163, 184, 0.14);
     background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -539,47 +551,49 @@
     font-weight: 600;
 }
 .settings-workspace-view #tab-content-monitor .monitor-panels {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    align-items: start;
-    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+        "gpu resource health"
+        "models rag observability";
+    align-items: stretch;
+    gap: 8px;
     margin-top: 0;
+    min-height: 0;
+    flex: 1 1 auto;
 }
 .settings-workspace-view #tab-content-monitor .monitor-panel-card {
     min-height: 0;
-    padding: 12px 14px;
+    padding: 10px 14px;
     border-radius: 8px;
     text-align: left;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
-.settings-workspace-view #tab-content-monitor .monitor-panel-card:first-child {
-    grid-column: span 4;
-}
-.settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(2) {
-    grid-column: span 4;
-}
-.settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(3) {
-    grid-column: span 4;
-}
-.settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(4),
-.settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(5) {
-    grid-column: span 6;
-}
+.settings-workspace-view #tab-content-monitor .monitor-panel-gpu { grid-area: gpu; }
+.settings-workspace-view #tab-content-monitor .monitor-panel-resource { grid-area: resource; }
+.settings-workspace-view #tab-content-monitor .monitor-panel-health { grid-area: health; }
+.settings-workspace-view #tab-content-monitor .monitor-panel-models { grid-area: models; }
+.settings-workspace-view #tab-content-monitor .monitor-panel-rag { grid-area: rag; }
+.settings-workspace-view #tab-content-monitor .monitor-panel-observability { grid-area: observability; }
 .settings-workspace-view #tab-content-monitor .monitor-panel-card h4 {
-    margin: 0 0 8px;
-    font-size: 0.88rem;
+    margin: 0 0 7px;
+    font-size: 0.84rem;
     line-height: 1.25;
     text-align: left;
 }
 .settings-workspace-view #tab-content-monitor .monitor-list {
     gap: 0;
     padding: 0;
+    min-height: 0;
 }
 .settings-workspace-view #tab-content-monitor .monitor-row {
     display: grid;
     grid-template-columns: 96px minmax(0, 1fr);
     align-items: center;
     gap: 10px;
-    min-height: 24px;
-    padding: 4px 0;
+    min-height: 21px;
+    padding: 3px 0;
     border-bottom: 1px solid rgba(148, 163, 184, 0.09);
 }
 .settings-workspace-view #tab-content-monitor .monitor-row:last-child {
@@ -610,7 +624,7 @@
     color: #d97706;
 }
 .settings-workspace-view #tab-content-monitor .monitor-empty {
-    padding: 6px 8px;
+    padding: 5px 8px;
     font-size: 0.72rem;
     border-radius: 8px;
 }
@@ -618,7 +632,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0;
     padding: 0;
-    min-height: 30px;
+    min-height: 28px;
     border: 1px solid rgba(148, 163, 184, 0.1);
     border-radius: 8px;
     overflow: hidden;
@@ -628,7 +642,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 6px 10px;
+    padding: 5px 10px;
     min-width: 0;
 }
 .settings-workspace-view #tab-content-monitor .monitor-split-row span {
@@ -669,13 +683,41 @@
     }
     .settings-workspace-view #tab-content-monitor .monitor-panels {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+            "gpu resource"
+            "health models"
+            "rag observability";
     }
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card,
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card:first-child,
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(2),
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(3),
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(4),
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card:nth-child(5) {
-        grid-column: span 1;
+}
+@media (max-height: 900px) and (min-width: 1181px) {
+    .settings-workspace-view .admin-content.is-monitor-tab-active {
+        padding: 14px;
+    }
+    #tab-content-monitor {
+        gap: 7px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-grid {
+        gap: 7px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-card {
+        min-height: 54px;
+        padding: 7px 10px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-card-icon {
+        width: 20px;
+        height: 20px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-card strong {
+        font-size: 0.94rem;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-panel-card {
+        padding: 9px 14px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-row {
+        min-height: 20px;
+        padding: 2px 0;
+    }
+    .observability-webhook-inline {
+        margin-bottom: 6px;
     }
 }

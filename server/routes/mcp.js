@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, encryptSecret, validateModelUrl } = require('../security');
+const { decryptSecret, encryptSecret, validateMcpEndpointUrl } = require('../security');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { debugRetrieveContext } = require('../services/rag-index');
 const {
@@ -28,6 +28,25 @@ const {
 } = require('../services/database-mcp');
 const isSuperAdmin = (user) => user?.username === 'admin';
 
+function getDatabaseTestErrorStatus(err) {
+    const status = Number(err?.status || err?.statusCode || 0);
+    if (status >= 400 && status < 500) return status;
+    const message = String(err?.message || '');
+    if (/普通用户|Non-admin/.test(message)) return 403;
+    if (/请选择|请填写|SQLite file|Unsupported database type|driver is not installed/.test(message)) return 400;
+    return 502;
+}
+
+function sanitizeDatabaseConnectionForLog(connection, body = {}) {
+    return {
+        database_type: connection?.database_type || body?.database_type || body?.databaseType || '',
+        host: connection?.host || body?.host || '',
+        port: connection?.port || body?.port || '',
+        database_name: connection?.database_name || body?.database_name || body?.databaseName || '',
+        username: connection?.username || body?.username || ''
+    };
+}
+
 function decryptExistingDatabasePassword(row) {
     return decryptSecret(row?.password || '');
 }
@@ -51,6 +70,79 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listMcpServers(req.user) });
+    }));
+
+    router.get('/mcp/governance', authMiddleware, asyncHandler(async (req, res) => {
+        const isAdmin = isSuperAdmin(req.user);
+        const serverScope = isAdmin ? 's.status != \'deleted\'' : "s.status != 'deleted' AND (s.user_id IS NULL OR s.user_id = ?)";
+        const scopeParams = isAdmin ? [] : [req.user.id];
+        const summary = db.prepare(`
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN s.last_error IS NOT NULL AND s.last_error != '' THEN 1 ELSE 0 END) AS error,
+                SUM(CASE WHEN s.last_checked_at IS NULL OR s.last_checked_at = '' THEN 1 ELSE 0 END) AS unchecked,
+                SUM(CASE WHEN s.base_url LIKE 'pivot-db://%' THEN 1 ELSE 0 END) AS databaseServers
+            FROM mcp_servers s
+            WHERE ${serverScope}
+        `).get(...scopeParams);
+        const recentWindow = "datetime('now', '+8 hours', '-7 days')";
+        const callScope = isAdmin
+            ? `l.created_at >= ${recentWindow}`
+            : `(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?) AND l.created_at >= ${recentWindow}`;
+        const callParams = isAdmin ? [] : [req.user.id, req.user.id];
+        const callSummary = db.prepare(`
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN l.status = 'error' THEN 1 ELSE 0 END) AS errors,
+                ROUND(AVG(l.duration_ms), 0) AS avgDurationMs
+            FROM mcp_call_logs l
+            LEFT JOIN mcp_servers s ON s.id = l.server_id
+            WHERE ${callScope}
+        `).get(...callParams);
+        const topTools = db.prepare(`
+            SELECT l.tool_name, s.name AS server_name, COUNT(*) AS count,
+                   SUM(CASE WHEN l.status = 'error' THEN 1 ELSE 0 END) AS errors,
+                   ROUND(AVG(l.duration_ms), 0) AS avgDurationMs
+            FROM mcp_call_logs l
+            LEFT JOIN mcp_servers s ON s.id = l.server_id
+            WHERE ${callScope}
+            GROUP BY l.server_id, l.tool_name
+            ORDER BY count DESC
+            LIMIT 8
+        `).all(...callParams);
+        res.json({
+            summary: {
+                total: Number(summary.total || 0),
+                active: Number(summary.active || 0),
+                error: Number(summary.error || 0),
+                unchecked: Number(summary.unchecked || 0),
+                databaseServers: Number(summary.databaseServers || 0),
+                calls7d: Number(callSummary.total || 0),
+                callErrors7d: Number(callSummary.errors || 0),
+                avgDurationMs: Number(callSummary.avgDurationMs || 0)
+            },
+            topTools
+        });
+    }));
+
+    router.get('/mcp/call-logs', authMiddleware, asyncHandler(async (req, res) => {
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 30, 1), 100);
+        const isAdmin = isSuperAdmin(req.user);
+        const where = isAdmin ? "s.status != 'deleted'" : "(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?)";
+        const params = isAdmin ? [limit] : [req.user.id, req.user.id, limit];
+        const rows = db.prepare(`
+            SELECT l.id, l.user_id, u.username, u.nickname, l.server_id, s.name AS server_name,
+                   l.tool_name, l.source, l.status, l.duration_ms, l.input_preview,
+                   l.output_preview, l.error_message, l.created_at
+            FROM mcp_call_logs l
+            LEFT JOIN mcp_servers s ON s.id = l.server_id
+            LEFT JOIN users u ON u.id = l.user_id
+            WHERE ${where}
+            ORDER BY l.created_at DESC, l.id DESC
+            LIMIT ?
+        `).all(...params);
+        res.json({ data: rows });
     }));
 
     router.get('/capabilities/packages', authMiddleware, asyncHandler(async (req, res) => {
@@ -93,10 +185,26 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             }
         }
 
-        const connection = validateDatabaseConnectionPayload({ ...req.body, password }, req.user);
-        const result = await testDatabaseConnection(connection);
-        logAction(req, '测试数据库 MCP 连接', `${connection.database_type}: ${connection.host || connection.database_name}`);
-        res.json({ success: true, result });
+        let connection;
+        try {
+            connection = validateDatabaseConnectionPayload({ ...req.body, password }, req.user);
+            const result = await testDatabaseConnection(connection);
+            logAction(req, '测试数据库 MCP 连接', `${connection.database_type}: ${connection.host || connection.database_name}`);
+            res.json({ success: true, result });
+        } catch (err) {
+            const status = getDatabaseTestErrorStatus(err);
+            (req.log || console).warn({
+                status,
+                code: err?.code,
+                message: err?.message,
+                connection: sanitizeDatabaseConnectionForLog(connection, req.body)
+            }, 'MCP database connection test failed');
+            res.status(status).json({
+                success: false,
+                error: err?.message || 'Database connection test failed.',
+                code: err?.code || 'MCP_DATABASE_CONNECTION_TEST_FAILED'
+            });
+        }
     }));
 
     router.post('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
@@ -106,7 +214,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const description = String(req.body?.description || '').trim();
         const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
         if (!name || !baseUrl) return res.status(400).json({ error: 'Name and Base URL are required.' });
-        validateModelUrl(baseUrl, req.user);
+        validateMcpEndpointUrl(baseUrl);
         const now = getBeijingTimestamp();
         const info = db.prepare(`
             INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
@@ -219,7 +327,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const nextApiKey = apiKeyInput === undefined || apiKeyInput === '********'
             ? encryptSecret(existing.api_key || '')
             : encryptSecret(String(apiKeyInput || '').trim());
-        validateModelUrl(baseUrl, req.user);
+        validateMcpEndpointUrl(baseUrl);
         db.prepare(`
             UPDATE mcp_servers
             SET name = ?, base_url = ?, api_key = ?, description = ?, status = ?, updated_at = ?

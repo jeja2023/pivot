@@ -338,7 +338,7 @@ async function debugRetrieveContext(userId, query, {
     scoreThreshold = null,
     queryVector = null
 } = {}) {
-    const config = getRagConfig({ topK, candidateLimit, scoreThreshold });
+    const config = getRagConfig({ topK, candidateLimit, scoreThreshold }, userId);
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) {
         return {
@@ -391,7 +391,7 @@ async function retrieveContext(userId, query, topK = null) {
     const startedAt = Date.now();
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
-    const config = getRagConfig({ topK });
+    const config = getRagConfig({ topK }, userId);
     const recordRetrieval = (payload) => {
         recordRagRetrieval(payload);
         recordSlowRagRetrieval({
@@ -453,7 +453,7 @@ async function retrieveContext(userId, query, topK = null) {
 
 async function indexDocumentChunks(docId, text, { onProgress, userId = null } = {}) {
     const startedAt = Date.now();
-    const ragConfig = getRagConfig();
+    const ragConfig = getRagConfig({}, userId);
     const chunks = chunkText(text, ragConfig.chunkSize, ragConfig.chunkOverlap);
     const batchSize = 5; // 限制并发数，防止 OOM 或 API 限流
     try {
