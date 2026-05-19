@@ -18,6 +18,16 @@ const { getBeijingTimestamp } = require('../time');
 
 const isSuperAdmin = (user) => user?.username === 'admin';
 
+function canManageModel(model, user) {
+    if (!model || !user) return false;
+    if (model.user_id === user.id) return true;
+    return model.user_id === null && isSuperAdmin(user);
+}
+
+function canUseStoredModelSecret(model, user) {
+    return canManageModel(model, user);
+}
+
 function buildModelsListUrl(url) {
     let modelsUrl = String(url || '').trim();
     if (!modelsUrl.includes('/v1') && !modelsUrl.includes('localhost') && !modelsUrl.includes('127.0.0.1')) {
@@ -91,7 +101,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         // 处理掩码情况：只能复用当前用户可访问模型且 URL 未被替换时的真实 Key
         if (id && api_key === '********') {
             const storedModel = getAccessibleModel(id, req.user);
-            if (!storedModel || String(storedModel.id) !== String(id)) {
+            if (!storedModel || String(storedModel.id) !== String(id) || !canUseStoredModelSecret(storedModel, req.user)) {
                 logAction(req, '模型列表拉取拦截', `无权复用模型密钥，模型ID: ${id}`);
                 return res.status(403).json({ success: false, error: '无权访问该模型或模型不存在' });
             }
@@ -134,7 +144,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         if (id) {
             const storedModel = getAccessibleModel(id, req.user);
-            if (!storedModel || String(storedModel.id) !== String(id)) {
+            if (!storedModel || String(storedModel.id) !== String(id) || !canUseStoredModelSecret(storedModel, req.user)) {
                 return res.status(403).json({ error: '无权测试该模型或模型不存在' });
             }
             if (storedModel.secret_error) {
@@ -225,7 +235,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             SELECT 
                 m.id, m.user_id, m.name, 
                 (CASE 
-                    WHEN ? = 1 AND (m.user_id IS NULL OR u.role = 'admin') THEN m.url
+                    WHEN ? = 1 AND m.user_id IS NULL THEN m.url
                     WHEN m.user_id = ? THEN m.url
                     ELSE '********'
                 END) as url,
@@ -287,19 +297,8 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         validateModelUrl(url, req.user);
         if (monitor_url) validateModelUrl(monitor_url, req.user);
 
-        let existing;
-        if (req.user.role === 'admin') {
-            existing = isSuperAdmin(req.user)
-                ? db.prepare(`
-                    SELECT m.* FROM models m
-                    LEFT JOIN users u ON m.user_id = u.id
-                    WHERE m.id = ? AND (m.user_id IS NULL OR u.role = 'admin')
-                `).get(req.params.id)
-                : db.prepare('SELECT * FROM models WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-        } else {
-            existing = db.prepare("SELECT * FROM models WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-        }
-        if (!existing) return res.status(403).json({ error: '无权操作或模型不存在' });
+        const existing = db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.id);
+        if (!canManageModel(existing, req.user)) return res.status(403).json({ error: '无权操作或模型不存在' });
 
         const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
@@ -335,8 +334,12 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
     }));
 
     router.delete('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const existing = db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.id);
+        if (!canManageModel(existing, req.user)) {
+            return res.status(403).json({ error: '无权删除或模型不存在' });
+        }
         let info;
-        if (req.user.role === 'admin' && isSuperAdmin(req.user)) {
+        if (req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null) {
             info = db.prepare('DELETE FROM models WHERE id = ?').run(req.params.id);
         } else {
             info = db.prepare('DELETE FROM models WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
@@ -353,6 +356,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const { password } = req.body;
         if (!password) return res.status(400).json({ error: '需要输入密码进行二次验证' });
 
+        const model = getAccessibleModel(req.params.id, req.user);
+        if (!canUseStoredModelSecret(model, req.user)) return res.status(403).json({ error: '无权查看该模型密钥' });
+
         const bcrypt = require('bcryptjs');
         const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
         if (!bcrypt.compareSync(password, user.password_hash)) {
@@ -360,15 +366,6 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             return res.status(401).json({ error: '密码错误' });
         }
 
-        const model = getAccessibleModel(req.params.id, req.user);
-        if (!model) return res.status(403).json({ error: '无权查看或模型不存在' });
-        if (model.user_id === null && !isSuperAdmin(req.user)) {
-            logAction(req, '模型密钥查看拦截', `非超级管理员尝试查看全局模型密钥，模型ID: ${req.params.id}`);
-            return res.status(403).json({ error: '无权查看全局模型密钥' });
-        }
-        if (model.user_id !== null && model.user_id !== req.user.id && !isSuperAdmin(req.user)) {
-            return res.status(403).json({ error: '无权查看该模型密钥' });
-        }
         logAction(req, '查看模型密钥', `模型ID: ${req.params.id}`);
         res.json({ key: model.api_key || '' });
     }));

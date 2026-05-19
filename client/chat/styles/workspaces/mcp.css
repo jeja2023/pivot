@@ -220,16 +220,95 @@
     color: var(--danger) !important;
 }
 
+.mcp-governance-panel {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.9fr) auto minmax(220px, 1.4fr);
+    align-items: center;
+    gap: 8px 12px;
+    margin: 0 0 8px;
+    padding: 7px 10px;
+    min-height: 42px;
+}
+
+.mcp-governance-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.mcp-governance-title strong {
+    flex: 0 0 auto;
+    color: var(--text-main);
+    font-size: 0.84rem;
+}
+
+.mcp-governance-title span {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-governance-panel .governance-metrics,
+.mcp-governance-panel .governance-list {
+    flex-wrap: nowrap;
+    gap: 5px;
+    min-width: 0;
+}
+
+.mcp-governance-panel .governance-metrics {
+    justify-content: center;
+}
+
+.mcp-governance-panel .governance-list {
+    justify-content: flex-end;
+    overflow: hidden;
+}
+
+.mcp-governance-panel .governance-metrics span,
+.mcp-governance-panel .governance-list span {
+    min-height: 22px;
+    padding: 2px 7px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.mcp-governance-panel .governance-list span {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mcp-governance-empty {
+    color: var(--text-muted);
+}
+
 .mcp-workspace-modal .workspace-modal-body {
     overflow: hidden;
 }
 
 .mcp-workspace-modal .mcp-layout {
-    height: calc(100% - 53px);
+    height: calc(100% - 50px);
 }
 
 .mcp-list-wrap {
     padding: 12px;
     min-height: 0;
     overflow: auto;
+}
+
+@media (max-width: 1180px) {
+    .mcp-governance-panel {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .mcp-governance-panel .governance-metrics,
+    .mcp-governance-panel .governance-list {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
 }

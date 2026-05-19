@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -15,6 +16,7 @@ if (generatedTestDataDir) {
 
 const {
     assertSafeOutboundUrl,
+    encryptSecret,
     resolveUploadUrlPath,
     isSensitiveOutboundHost,
     toProjectRelativePath,
@@ -181,6 +183,10 @@ const {
     saveAgentRunArtifact,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
+const {
+    normalizeDatabaseConnectionError,
+    validateDatabaseConnectionPayload
+} = require('../server/services/database-mcp');
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
@@ -2010,6 +2016,85 @@ test('non-root admin creates private chat models and cannot delete global models
     }
 });
 
+test('model ownership boundaries protect personal model secrets from admins', async () => {
+    const suffix = Date.now().toString(36);
+    const password = 'Password123';
+    const passwordHash = require('bcryptjs').hashSync(password, 4);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`model_owner_${suffix}`, passwordHash, 'Model Owner', 'QA', 'user', 'active');
+    const owner = { id: Number(userInfo.lastInsertRowid), username: `model_owner_${suffix}`, role: 'user', unit: 'QA' };
+    const superAdmin = { id: 1, username: 'admin', role: 'admin', unit: '' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, api_key, model_name, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(owner.id, `Owner Private ${suffix}`, 'https://owner-model.example/v1', encryptSecret(`secret-${suffix}`), 'owner-chat');
+
+    const makeRouter = user => createModelsRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        probeLimiter: (_req, _res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+
+    try {
+        const superRouter = makeRouter(superAdmin);
+        const deleteRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.delete);
+        const keyRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
+        const updateRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.put);
+
+        const keyRes = makeRes();
+        await runExpressHandlers(keyRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelInfo.lastInsertRowid) },
+            body: { password },
+            user: superAdmin
+        }, keyRes);
+        assert.equal(keyRes.statusCode, 403);
+
+        const deleteRes = makeRes();
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelInfo.lastInsertRowid) },
+            user: superAdmin
+        }, deleteRes);
+        assert.equal(deleteRes.statusCode, 403);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM models WHERE id = ?').get(modelInfo.lastInsertRowid).count, 1);
+
+        const updateRes = makeRes();
+        await runExpressHandlers(updateRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelInfo.lastInsertRowid) },
+            body: {
+                name: `Updated ${suffix}`,
+                url: 'https://owner-model.example/v1',
+                model_name: 'owner-chat',
+                api_key: '********'
+            },
+            user: superAdmin
+        }, updateRes);
+        assert.equal(updateRes.statusCode, 403);
+
+        const ownerRouter = makeRouter(owner);
+        const ownerKeyRoute = ownerRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
+        const ownerKeyRes = makeRes();
+        await runExpressHandlers(ownerKeyRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelInfo.lastInsertRowid) },
+            body: { password },
+            user: owner
+        }, ownerKeyRes);
+        assert.equal(ownerKeyRes.statusCode, 200);
+        assert.equal(ownerKeyRes.body.key, `secret-${suffix}`);
+    } finally {
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(owner.id);
+    }
+});
+
 test('non-root admin cannot create global prompts or shared MCP servers', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -2145,6 +2230,304 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
         fs.rmSync(sqlitePath, { force: true });
     }
+});
+
+test('built-in reports MCP lists and queries configured files only', async () => {
+    const suffix = Date.now().toString(36);
+    const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-reports-${suffix}-`));
+    const csvPath = path.join(reportDir, 'sales.csv');
+    fs.writeFileSync(csvPath, 'dept,amount\nops,10\nrnd,25\nops,30\n', 'utf8');
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_reports_${suffix}`, 'hash', 'MCP Reports Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `mcp_reports_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/builtin-services' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    let serverId = null;
+    try {
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `Reports MCP ${suffix}`,
+                service_type: 'reports',
+                roots: reportDir,
+                extensions: 'csv',
+                maxRows: 20
+            },
+            user: adminUser
+        }, createRes);
+        assert.equal(createRes.statusCode, 201);
+        serverId = createRes.body.server.id;
+        assert.equal(createRes.body.server.server_type, 'reports');
+
+        const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), { params: { id: String(serverId) }, user: adminUser }, refreshRes);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'reports.query_table'), true);
+
+        const listRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: `mcp.${serverId}.reports.list_files`, input: { query: 'sales' } },
+            user: adminUser
+        }, listRes);
+        assert.equal(listRes.body.result.structuredContent.files[0].path, '0:sales.csv');
+
+        const queryRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${serverId}.reports.query_table`,
+                input: { path: '0:sales.csv', filters: { dept: 'ops' }, columns: ['amount'], limit: 5 }
+            },
+            user: adminUser
+        }, queryRes);
+        assert.deepEqual(queryRes.body.result.structuredContent.rows.map(row => row.amount), ['10', '30']);
+    } finally {
+        if (serverId) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        fs.rmSync(reportDir, { recursive: true, force: true });
+    }
+});
+
+test('visualization and report MCP compose independently from data-source MCPs', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_workflow_${suffix}`, 'hash', 'MCP Workflow Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `mcp_workflow_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/builtin-services' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    const serverIds = [];
+    try {
+        async function createBuiltin(serviceType, name) {
+            const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+            await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+                body: { name, service_type: serviceType },
+                user: adminUser
+            }, res);
+            assert.equal(res.statusCode, 201);
+            serverIds.push(res.body.server.id);
+            return res.body.server.id;
+        }
+
+        const vizServerId = await createBuiltin('visualization', `Viz MCP ${suffix}`);
+        const reportServerId = await createBuiltin('report', `Report MCP ${suffix}`);
+
+        for (const id of serverIds) {
+            const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+            await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), { params: { id: String(id) }, user: adminUser }, refreshRes);
+            assert.equal(refreshRes.statusCode, 200);
+        }
+
+        const chartRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${vizServerId}.viz.build_chart`,
+                input: {
+                    rows: [
+                        { dept: 'ops', amount: 10 },
+                        { dept: 'rnd', amount: 25 },
+                        { dept: 'ops', amount: 30 }
+                    ],
+                    chartType: 'bar',
+                    xAxis: 'dept',
+                    yAxis: 'amount',
+                    aggregation: 'sum',
+                    title: '部门销售'
+                }
+            },
+            user: adminUser
+        }, chartRes);
+        const chart = chartRes.body.result.structuredContent;
+        assert.equal(chart.type, 'pivot_chart');
+        assert.equal(chart.chartType, 'bar');
+        assert.deepEqual(chart.labels, ['ops', 'rnd']);
+        assert.deepEqual(chart.series[0].data, [40, 25]);
+
+        const tableRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${vizServerId}.viz.build_table`,
+                input: { rows: [{ dept: 'ops', amount: 40 }, { dept: 'rnd', amount: 25 }], columns: ['dept', 'amount'], title: '部门明细' }
+            },
+            user: adminUser
+        }, tableRes);
+        const table = tableRes.body.result.structuredContent;
+        assert.equal(table.type, 'pivot_table');
+        assert.match(table.markdown, /\| dept \| amount \|/);
+
+        const reportRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${reportServerId}.report.compose`,
+                input: {
+                    title: '经营分析报告',
+                    sections: [
+                        { type: 'summary', title: '一、摘要', text: '整体平稳。' },
+                        { type: 'table', title: '二、明细表', table },
+                        { type: 'chart', title: '三、趋势图', chart }
+                    ]
+                }
+            },
+            user: adminUser
+        }, reportRes);
+        const report = reportRes.body.result.structuredContent;
+        assert.equal(report.type, 'pivot_report');
+        assert.match(report.markdown, /# 经营分析报告/);
+        assert.match(report.markdown, /```pivot-chart/);
+        assert.match(report.markdown, /\| ops \| 40 \|/);
+    } finally {
+        for (const id of serverIds) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('built-in IM MCP enforces target whitelist and sends LAN webhook payloads', async () => {
+    const suffix = Date.now().toString(36);
+    const received = [];
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            received.push({ headers: req.headers, body: JSON.parse(body || '{}') });
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: true, id: 'msg-1' }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_im_${suffix}`, 'hash', 'MCP IM Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `mcp_im_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/builtin-services' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    let serverId = null;
+    try {
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `IM MCP ${suffix}`,
+                service_type: 'im',
+                endpointUrl: `http://127.0.0.1:${port}/message`,
+                authHeader: 'x-pivot-token',
+                secret: 'secret-token',
+                allowedTargets: 'user:alice\ngroup:ops',
+                maxMessageLength: 200
+            },
+            user: adminUser
+        }, createRes);
+        assert.equal(createRes.statusCode, 201);
+        serverId = createRes.body.server.id;
+        assert.equal(createRes.body.server.server_type, 'im');
+        assert.equal(createRes.body.server.builtin_config.has_secret, true);
+
+        const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), { params: { id: String(serverId) }, user: adminUser }, refreshRes);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'im.send_user_message'), true);
+
+        const sendRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: `mcp.${serverId}.im.send_user_message`, input: { target: 'alice', title: 'Hi', message: 'hello' } },
+            user: adminUser
+        }, sendRes);
+        assert.equal(sendRes.body.result.structuredContent.ok, true);
+        assert.equal(received[0].headers['x-pivot-token'], 'secret-token');
+        assert.equal(received[0].body.target, 'alice');
+        assert.equal(received[0].body.targetType, 'user');
+
+        await assert.rejects(
+            runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+                body: { name: `mcp.${serverId}.im.send_user_message`, input: { target: 'mallory', message: 'nope' } },
+                user: adminUser
+            }, { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } }),
+            /allowed target/
+        );
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        if (serverId) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('database MCP allows private LAN hosts by default and restricts only when configured', () => {
+    const previous = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
+    const user = { id: 1001, username: 'lan_user', role: 'user' };
+    try {
+        delete process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
+        const connection = validateDatabaseConnectionPayload({
+            database_type: 'mysql',
+            host: '192.168.1.88',
+            port: 3306,
+            database_name: 'biz',
+            username: 'reader',
+            password: 'secret'
+        }, user);
+        assert.equal(connection.host, '192.168.1.88');
+
+        process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = 'true';
+        assert.throws(() => validateDatabaseConnectionPayload({
+            database_type: 'mysql',
+            host: '192.168.1.88',
+            port: 3306,
+            database_name: 'biz',
+            username: 'reader',
+            password: 'secret'
+        }, user), /普通用户不能配置内网|private/i);
+    } finally {
+        if (previous === undefined) delete process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
+        else process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = previous;
+    }
+});
+
+test('database MCP connection errors return actionable diagnostics', () => {
+    const refused = normalizeDatabaseConnectionError(
+        Object.assign(new Error('connect ECONNREFUSED 192.168.1.88:3306'), { code: 'ECONNREFUSED' }),
+        { database_type: 'mysql', host: '192.168.1.88', port: 3306, database_name: 'biz' }
+    );
+    assert.equal(refused.status, 502);
+    assert.equal(refused.code, 'DB_CONNECTION_REFUSED');
+    assert.match(refused.hint, /Pivot|Docker|端口/);
+    assert.equal(refused.diagnostics.host, '192.168.1.88');
+
+    const auth = normalizeDatabaseConnectionError(
+        Object.assign(new Error("Access denied for user 'reader'@'192.168.1.20'"), { code: 'ER_ACCESS_DENIED_ERROR' }),
+        { database_type: 'mysql', host: '192.168.1.88', port: 3306, database_name: 'biz' }
+    );
+    assert.equal(auth.status, 403);
+    assert.equal(auth.code, 'DB_AUTH_FAILED');
+    assert.match(auth.hint, /Pivot|授权|pg_hba|user@/);
 });
 
 test('non-root admin cannot manage administrator accounts', async () => {

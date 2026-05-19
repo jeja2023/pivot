@@ -86,14 +86,13 @@ window.loadModels = async function(page = 1) {
             }
         }
 
-        const isUserPrivateModel = m.user_id && m.owner_role !== 'admin';
         const isOwnModel = String(m.user_id) === String(currentUser.id);
-        const canEdit = isSuperAdmin ? !isUserPrivateModel : isOwnModel;
-        const canDelete = isSuperAdmin || isOwnModel;
+        const canEdit = isOwnModel || (isSuperAdmin && isGlobalModel);
+        const canDelete = canEdit;
         
         let displayUrl = escapeHtml(m.url);
         if (isSuperAdmin) {
-            if (isUserPrivateModel) displayUrl = '********';
+            if (!isGlobalModel && !isOwnModel) displayUrl = '********';
         } else {
             if (!isOwnModel) displayUrl = '********';
         }

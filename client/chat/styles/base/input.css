@@ -40,11 +40,20 @@
 .input-wrapper textarea::-webkit-scrollbar { width: 8px; }
 .input-wrapper textarea::-webkit-scrollbar-track { background: transparent; }
 .input-wrapper textarea::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.28); border-radius: 999px; }
-.input-actions { position: absolute; bottom: 10px; display: flex; gap: 5px; align-items: center; }
+.input-actions { position: absolute; bottom: 10px; z-index: 4; display: flex; gap: 5px; align-items: center; pointer-events: auto; }
 .input-actions.left { left: 10px; }
 .input-actions.right { right: 10px; }
+.input-actions.left input[type="checkbox"][id^="chat-"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
 .chat-tool-toggle {
     position: relative;
+    z-index: 1;
     height: 30px;
     width: 30px;
     display: inline-flex;
@@ -54,38 +63,39 @@
     border: none;
     border-radius: 50%;
     background: transparent;
-    color: var(--text-muted);
+    color: #64748b;
     box-shadow: none;
     cursor: pointer;
     user-select: none;
     transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
-.chat-tool-toggle input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-}
 .chat-tool-icon {
-    width: 15px;
-    height: 15px;
+    width: 18px;
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #64748b;
+    color: currentColor;
     transition: color 0.18s ease, transform 0.18s ease;
 }
+.chat-tool-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2.25;
+}
 .chat-tool-toggle:hover {
-    color: var(--text-main);
-    background: rgba(15, 23, 42, 0.05);
+    color: var(--primary);
+    background: rgba(16, 185, 129, 0.08);
     transform: translateY(-1px);
 }
-.chat-tool-toggle:has(input:checked) {
-    background: rgba(16, 185, 129, 0.12);
-    color: var(--primary);
-    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.2);
+.chat-tool-toggle.is-active,
+.chat-tool-toggle[aria-pressed="true"] {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 6px 14px rgba(16, 185, 129, 0.28);
 }
-.chat-tool-toggle:has(input:checked) .chat-tool-icon {
-    color: var(--primary);
+.chat-tool-toggle.is-active .chat-tool-icon,
+.chat-tool-toggle[aria-pressed="true"] .chat-tool-icon {
     transform: scale(1.04);
 }
 .chat-tool-toggle::after,

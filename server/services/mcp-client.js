@@ -7,6 +7,13 @@ const {
     getDatabaseConnectionForServer,
     listDatabaseMcpTools
 } = require('./database-mcp');
+const {
+    executeBuiltinMcpTool,
+    getBuiltinConfigForServer,
+    getBuiltinServiceTypeFromUrl,
+    isInternalMcpUrl,
+    listBuiltinMcpTools
+} = require('./builtin-mcp');
 
 const MCP_TIMEOUT_MS = 20000;
 const isSuperAdmin = (user) => user?.username === 'admin';
@@ -51,6 +58,8 @@ function normalizeServerRow(row) {
     const databaseConnection = String(row.base_url || '').startsWith('pivot-db://')
         ? getDatabaseConnectionForServer(row.id)
         : null;
+    const builtinType = getBuiltinServiceTypeFromUrl(row.base_url);
+    const builtinConfig = builtinType ? getBuiltinConfigForServer(row.id) : null;
     return {
         id: row.id,
         user_id: row.user_id,
@@ -63,8 +72,9 @@ function normalizeServerRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         has_api_key: Boolean(row.api_key),
-        server_type: databaseConnection ? 'database' : 'external',
-        database_connection: databaseConnection
+        server_type: databaseConnection ? 'database' : (builtinType || 'external'),
+        database_connection: databaseConnection,
+        builtin_config: builtinConfig
     };
 }
 
@@ -102,6 +112,20 @@ async function callMcpJsonRpc(server, method, params = {}) {
             };
         }
         throw new Error(`Unsupported database MCP method: ${method}`);
+    }
+    if (getBuiltinServiceTypeFromUrl(server.base_url)) {
+        if (method === 'tools/list') return { tools: listBuiltinMcpTools(server) };
+        if (method === 'tools/call') {
+            const result = await executeBuiltinMcpTool(server, params?.name, params?.arguments || {});
+            return {
+                content: [{
+                    type: 'text',
+                    text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+                }],
+                structuredContent: result
+            };
+        }
+        throw new Error(`Unsupported built-in MCP method: ${method}`);
     }
 
     const url = String(server.base_url || '').trim().replace(/\/+$/, '');
@@ -156,7 +180,7 @@ function upsertToolCache(serverId, tools = []) {
 }
 
 async function refreshMcpTools(server, user) {
-    if (!String(server.base_url || '').startsWith('pivot-db://')) {
+    if (!isInternalMcpUrl(server.base_url)) {
         validateMcpEndpointUrl(server.base_url);
     }
     try {
@@ -215,7 +239,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
     if (!match) throw new Error('Invalid MCP tool name.');
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
-    if (!String(server.base_url || '').startsWith('pivot-db://')) {
+    if (!isInternalMcpUrl(server.base_url)) {
         validateMcpEndpointUrl(server.base_url);
     }
     const startedAt = Date.now();

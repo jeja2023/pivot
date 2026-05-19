@@ -169,8 +169,7 @@
                                     d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                             </svg>
                         </button>
-                        <label class="chat-tool-toggle chat-tool-rag" data-tooltip="让知识库参与本轮回答">
-                            <input type="checkbox" id="chat-rag-enabled">
+                        <button type="button" id="chat-rag-enabled" class="chat-tool-toggle chat-tool-rag" data-chat-tool-toggle="rag" data-tooltip="让知识库参与本轮回答" aria-label="让知识库参与本轮回答" aria-pressed="false">
                             <span class="chat-tool-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
@@ -179,9 +178,8 @@
                                     <path d="M8 11h6"></path>
                                 </svg>
                             </span>
-                        </label>
-                        <label class="chat-tool-toggle chat-tool-mcp" data-tooltip="允许本轮对话按需调用 MCP 工具">
-                            <input type="checkbox" id="chat-mcp-enabled">
+                        </button>
+                        <button type="button" id="chat-mcp-enabled" class="chat-tool-toggle chat-tool-mcp" data-chat-tool-toggle="mcp" data-tooltip="允许本轮对话按需调用 MCP 工具" aria-label="允许本轮对话按需调用 MCP 工具" aria-pressed="false">
                             <span class="chat-tool-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
@@ -192,7 +190,7 @@
                                     <path d="M10 17.5h3.5a3.5 3.5 0 0 0 3.5-3.5V10"></path>
                                 </svg>
                             </span>
-                        </label>
+                        </button>
                     </div>
                     <div class="input-actions right">
                         <div id="context-usage-pill" class="context-usage-btn has-tooltip" title="当前会话上下文用量" data-tooltip="上下文用量: -">

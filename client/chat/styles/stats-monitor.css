@@ -623,6 +623,140 @@
 .settings-workspace-view #tab-content-monitor .monitor-row.is-warning strong {
     color: #d97706;
 }
+.settings-workspace-view #tab-content-monitor .monitor-panel-models .monitor-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.settings-workspace-view #tab-content-monitor .monitor-model-token-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    min-height: auto;
+    padding: 5px 0;
+}
+.settings-workspace-view #tab-content-monitor .monitor-model-token-row .monitor-model-token-name {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+}
+.settings-workspace-view #tab-content-monitor .monitor-model-token-row .monitor-model-token-value {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-panel-gpu .monitor-list,
+.settings-workspace-view #tab-content-monitor .monitor-panel-observability .monitor-list {
+    gap: 3px;
+}
+.settings-workspace-view #tab-content-monitor .monitor-panel-observability .monitor-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.settings-workspace-view #tab-content-monitor .monitor-gpu-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    min-height: auto;
+    padding: 5px 0;
+}
+.settings-workspace-view #tab-content-monitor .monitor-gpu-row .monitor-gpu-name {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+}
+.settings-workspace-view #tab-content-monitor .monitor-gpu-row .monitor-gpu-usage {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-gpu-row .monitor-gpu-usage small {
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+.settings-workspace-view #tab-content-monitor .observability-webhook-inline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 58px;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.settings-workspace-view #tab-content-monitor .observability-webhook-inline .form-input {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    margin: 0;
+    padding: 0 10px;
+}
+.settings-workspace-view #tab-content-monitor .observability-webhook-inline .btn-secondary {
+    width: 58px;
+    height: 34px;
+    margin: 0;
+    padding: 0;
+    justify-content: center;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.09);
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-row:last-child {
+    border-bottom: 0;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-main span {
+    color: #64748b;
+    font-size: 0.7rem;
+    font-weight: 800;
+    line-height: 1.2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-main strong {
+    color: var(--text-main);
+    font-size: 0.73rem;
+    font-weight: 800;
+    line-height: 1.35;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-align: left;
+    white-space: normal;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-main small {
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-duration {
+    color: var(--text-main);
+    font-size: 0.74rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: right;
+    white-space: nowrap;
+}
 .settings-workspace-view #tab-content-monitor .monitor-empty {
     padding: 5px 8px;
     font-size: 0.72rem;

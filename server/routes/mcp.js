@@ -23,12 +23,19 @@ const {
 } = require('../services/capability-market');
 const {
     DEFAULT_PORTS,
+    normalizeDatabaseConnectionError,
     testDatabaseConnection,
     validateDatabaseConnectionPayload
 } = require('../services/database-mcp');
+const {
+    BUILTIN_MCP_PREFIXES,
+    getBuiltinServiceTypeFromUrl,
+    normalizeBuiltinPayload
+} = require('../services/builtin-mcp');
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 function getDatabaseTestErrorStatus(err) {
+    if (err?.normalizedStatus) return err.normalizedStatus;
     const status = Number(err?.status || err?.statusCode || 0);
     if (status >= 400 && status < 500) return status;
     const message = String(err?.message || '');
@@ -82,7 +89,11 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 SUM(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN s.last_error IS NOT NULL AND s.last_error != '' THEN 1 ELSE 0 END) AS error,
                 SUM(CASE WHEN s.last_checked_at IS NULL OR s.last_checked_at = '' THEN 1 ELSE 0 END) AS unchecked,
-                SUM(CASE WHEN s.base_url LIKE 'pivot-db://%' THEN 1 ELSE 0 END) AS databaseServers
+                SUM(CASE WHEN s.base_url LIKE 'pivot-db://%' THEN 1 ELSE 0 END) AS databaseServers,
+                SUM(CASE WHEN s.base_url LIKE 'pivot-reports://%' THEN 1 ELSE 0 END) AS reportServers,
+                SUM(CASE WHEN s.base_url LIKE 'pivot-visualization://%' THEN 1 ELSE 0 END) AS visualizationServers,
+                SUM(CASE WHEN s.base_url LIKE 'pivot-report://%' THEN 1 ELSE 0 END) AS reportComposerServers,
+                SUM(CASE WHEN s.base_url LIKE 'pivot-im://%' THEN 1 ELSE 0 END) AS imServers
             FROM mcp_servers s
             WHERE ${serverScope}
         `).get(...scopeParams);
@@ -118,6 +129,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 error: Number(summary.error || 0),
                 unchecked: Number(summary.unchecked || 0),
                 databaseServers: Number(summary.databaseServers || 0),
+                reportServers: Number(summary.reportServers || 0),
+                visualizationServers: Number(summary.visualizationServers || 0),
+                reportComposerServers: Number(summary.reportComposerServers || 0),
+                imServers: Number(summary.imServers || 0),
                 calls7d: Number(callSummary.total || 0),
                 callErrors7d: Number(callSummary.errors || 0),
                 avgDurationMs: Number(callSummary.avgDurationMs || 0)
@@ -192,17 +207,22 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             logAction(req, '测试数据库 MCP 连接', `${connection.database_type}: ${connection.host || connection.database_name}`);
             res.json({ success: true, result });
         } catch (err) {
-            const status = getDatabaseTestErrorStatus(err);
+            const failure = normalizeDatabaseConnectionError(err, connection || req.body);
+            const status = failure.status || getDatabaseTestErrorStatus(err);
             (req.log || console).warn({
                 status,
-                code: err?.code,
-                message: err?.message,
+                code: failure.code || err?.code,
+                message: failure.detail || failure.message || err?.message,
+                hint: failure.hint,
                 connection: sanitizeDatabaseConnectionForLog(connection, req.body)
             }, 'MCP database connection test failed');
             res.status(status).json({
                 success: false,
-                error: err?.message || 'Database connection test failed.',
-                code: err?.code || 'MCP_DATABASE_CONNECTION_TEST_FAILED'
+                error: failure.message || err?.message || 'Database connection test failed.',
+                code: failure.code || err?.code || 'MCP_DATABASE_CONNECTION_TEST_FAILED',
+                detail: failure.detail || '',
+                hint: failure.hint || '',
+                diagnostics: failure.diagnostics || sanitizeDatabaseConnectionForLog(connection, req.body)
             });
         }
     }));
@@ -265,6 +285,88 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
     }));
 
+    router.post('/mcp/builtin-services', authMiddleware, asyncHandler(async (req, res) => {
+        const name = String(req.body?.name || '').trim();
+        const description = String(req.body?.description || '').trim();
+        const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
+        if (!name) return res.status(400).json({ error: 'Please enter a MCP service name.' });
+
+        const service = normalizeBuiltinPayload(req.body?.service_type || req.body?.serviceType, req.body);
+        const now = getBeijingTimestamp();
+        const userId = shared ? null : req.user.id;
+        const tx = db.transaction(() => {
+            const info = db.prepare(`
+                INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+                VALUES (?, ?, ?, '', ?, 'active', ?, ?)
+            `).run(userId, name, `${BUILTIN_MCP_PREFIXES[service.serviceType]}pending`, description, now, now);
+            const serverId = info.lastInsertRowid;
+            db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
+              .run(`${BUILTIN_MCP_PREFIXES[service.serviceType]}connection/${serverId}`, serverId);
+            db.prepare(`
+                INSERT INTO mcp_builtin_configs (
+                    mcp_server_id, user_id, service_type, config, secret, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+            `).run(
+                serverId,
+                userId,
+                service.serviceType,
+                JSON.stringify(service.config),
+                encryptSecret(service.secret),
+                now,
+                now
+            );
+            return serverId;
+        });
+        const serverId = tx();
+        logAction(req, '新增内置 MCP 服务', `${name}: ${service.serviceType}`);
+        res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
+    }));
+
+    router.put('/mcp/builtin-services/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        if (!existing) return res.status(404).json({ error: 'MCP server not found.' });
+        const serviceType = getBuiltinServiceTypeFromUrl(existing.base_url);
+        if (!serviceType) return res.status(400).json({ error: 'This MCP service is not a built-in report or IM preset.' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'Only admin super administrator can edit global MCP services.' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'No permission to edit this MCP service.' });
+
+        const configRow = db.prepare('SELECT * FROM mcp_builtin_configs WHERE mcp_server_id = ?').get(existing.id);
+        if (!configRow) return res.status(404).json({ error: 'Built-in MCP configuration not found.' });
+
+        const name = String(req.body?.name || existing.name).trim();
+        const description = String(req.body?.description ?? existing.description ?? '').trim();
+        const status = ['active', 'paused'].includes(req.body?.status) ? req.body.status : existing.status;
+        const service = normalizeBuiltinPayload(serviceType, {
+            ...req.body,
+            service_type: serviceType,
+            secret: req.body?.secret === undefined || req.body?.secret === '********'
+                ? decryptSecret(configRow.secret || '')
+                : req.body?.secret
+        });
+        const now = getBeijingTimestamp();
+        db.transaction(() => {
+            db.prepare(`
+                UPDATE mcp_servers
+                SET name = ?, description = ?, status = ?, updated_at = ?
+                WHERE id = ?
+            `).run(name, description, status, now, existing.id);
+            db.prepare(`
+                UPDATE mcp_builtin_configs
+                SET service_type = ?, config = ?, secret = ?, status = ?, updated_at = ?
+                WHERE mcp_server_id = ?
+            `).run(
+                service.serviceType,
+                JSON.stringify(service.config),
+                encryptSecret(service.secret),
+                status,
+                now,
+                existing.id
+            );
+        })();
+        logAction(req, '修改内置 MCP 服务', `${name}: ${service.serviceType}`);
+        res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
+    }));
+
     router.put('/mcp/database-connections/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: 'MCP server not found.' });
@@ -316,6 +418,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: 'MCP server not found.' });
         if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '数据库预设请使用数据库连接表单编辑。' });
+        if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '内置 MCP 预设请使用对应的内置服务表单编辑。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以编辑全局 MCP 服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该 MCP 服务。' });
 
@@ -345,6 +448,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const now = getBeijingTimestamp();
         db.prepare("UPDATE mcp_servers SET status = 'deleted', updated_at = ? WHERE id = ?").run(now, existing.id);
         db.prepare("UPDATE mcp_database_connections SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
+        db.prepare("UPDATE mcp_builtin_configs SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
         logAction(req, '删除 MCP 服务', existing.name);
         res.json({ success: true });
     }));

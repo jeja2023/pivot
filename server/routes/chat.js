@@ -261,6 +261,20 @@ async function callChatMcpPlanner(modelCfg, messages) {
 }
 
 function extractMcpResultText(result) {
+    if (result?.structuredContent?.type === 'pivot_chart') {
+        return [
+            'MCP 返回了可视化图表配置。回答用户时，如果需要展示图表，请原样输出下面的 fenced code block，语言必须保持为 pivot-chart：',
+            '```pivot-chart',
+            JSON.stringify(result.structuredContent, null, 2),
+            '```'
+        ].join('\n');
+    }
+    if (result?.structuredContent?.type === 'pivot_report' && result.structuredContent.markdown) {
+        return result.structuredContent.markdown;
+    }
+    if (result?.structuredContent?.type === 'pivot_table' && result.structuredContent.markdown) {
+        return result.structuredContent.markdown;
+    }
     if (Array.isArray(result?.content)) {
         const text = result.content
             .map(item => item?.text || item?.content || '')
@@ -305,6 +319,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         }));
         return [
             '以下是本轮普通对话启用 MCP 后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+            '如果工具结果包含 ```pivot-chart 代码块，且用户需要图表，请在最终回答中原样保留该代码块，前端会自动渲染为可视化图表。',
             `工具: ${plan.tool}`,
             `调用原因: ${plan.reason || ''}`,
             '结果:',

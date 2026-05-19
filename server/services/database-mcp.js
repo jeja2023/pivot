@@ -12,6 +12,110 @@ const DEFAULT_PORTS = {
 };
 const DATABASE_CONNECT_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.MCP_DATABASE_CONNECT_TIMEOUT_MS || '10000', 10) || 10000);
 
+function createDatabaseMcpError(message, code, status = 400) {
+    const err = new Error(message);
+    err.code = code;
+    err.status = status;
+    return err;
+}
+
+function databaseConnectionDiagnostics(connection = {}) {
+    return {
+        database_type: connection.database_type || connection.databaseType || '',
+        host: connection.host || '',
+        port: connection.port || '',
+        database_name: connection.database_name || connection.databaseName || '',
+        ssl: Boolean(connection.ssl || connection.options?.ssl),
+        source: 'Pivot server runtime'
+    };
+}
+
+function normalizeDatabaseConnectionError(err, connection = {}) {
+    const rawCode = String(err?.code || '').toUpperCase();
+    const rawMessage = String(err?.message || err || '');
+    const diagnostics = databaseConnectionDiagnostics(connection);
+    const base = {
+        status: Number(err?.status || err?.statusCode || 0) || 502,
+        code: rawCode || 'DB_CONNECTION_FAILED',
+        message: rawMessage || 'Database connection failed.',
+        detail: rawMessage || '',
+        hint: '',
+        diagnostics
+    };
+
+    if (err?.status === 403 || rawCode === 'MCP_PRIVATE_HOST_RESTRICTED') {
+        return {
+            ...base,
+            status: 403,
+            code: 'MCP_PRIVATE_HOST_RESTRICTED',
+            message: '当前用户不允许配置内网或本机数据库地址。',
+            hint: '如需允许普通用户连接个人局域网数据库，请确认服务端环境变量 MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN=false，并重启服务。'
+        };
+    }
+
+    if (['ECONNREFUSED'].includes(rawCode) || /ECONNREFUSED|connection refused/i.test(rawMessage)) {
+        return {
+            ...base,
+            status: 502,
+            code: 'DB_CONNECTION_REFUSED',
+            message: `数据库主机拒绝连接：${diagnostics.host || '-'}:${diagnostics.port || '-'}`,
+            hint: '请确认数据库监听的是内网地址/0.0.0.0，端口已对 Pivot 服务器或容器开放；Docker 部署时，127.0.0.1 指向容器自身，不是宿主机或你的电脑。'
+        };
+    }
+
+    if (['ETIMEDOUT', 'ETIMEOUT', 'ESOCKETTIMEDOUT'].includes(rawCode) || /timed?\s*out|timeout/i.test(rawMessage)) {
+        return {
+            ...base,
+            status: 504,
+            code: 'DB_CONNECTION_TIMEOUT',
+            message: `数据库连接超时：${diagnostics.host || '-'}:${diagnostics.port || '-'}`,
+            hint: '请检查 Pivot 服务器到数据库主机的网络路由、防火墙、安全组和端口映射；可通过 MCP_DATABASE_CONNECT_TIMEOUT_MS 临时调大超时时间。'
+        };
+    }
+
+    if (['ENOTFOUND', 'EAI_AGAIN'].includes(rawCode) || /getaddrinfo|ENOTFOUND|EAI_AGAIN/i.test(rawMessage)) {
+        return {
+            ...base,
+            status: 502,
+            code: 'DB_HOST_NOT_FOUND',
+            message: `数据库主机无法解析：${diagnostics.host || '-'}`,
+            hint: '请改用数据库服务器的内网 IP，或确认生产环境容器/服务器能解析该主机名。'
+        };
+    }
+
+    if (
+        ['ER_ACCESS_DENIED_ERROR', 'ELOGIN', 'LOGIN_FAILED'].includes(rawCode) ||
+        ['28P01', '28000'].includes(String(err?.code || '')) ||
+        /access denied|login failed|password authentication failed|authentication failed|auth failed/i.test(rawMessage)
+    ) {
+        return {
+            ...base,
+            status: 403,
+            code: 'DB_AUTH_FAILED',
+            message: '数据库账号认证失败或该账号不允许从 Pivot 服务器地址登录。',
+            hint: '用户名和密码即使正确，也需要数据库授权允许来自 Pivot 服务器/容器出口 IP 的连接。例如 MySQL 需要 user@PivotIP 或 user@% 授权，PostgreSQL 需要 pg_hba.conf 放行。'
+        };
+    }
+
+    if (/self[- ]signed|certificate|tls|ssl|handshake/i.test(rawMessage)) {
+        return {
+            ...base,
+            status: 502,
+            code: 'DB_TLS_FAILED',
+            message: '数据库 TLS/SSL 握手失败。',
+            hint: '请确认是否需要勾选 SSL/TLS；如果数据库没有启用 TLS，请关闭该选项。如果启用了自签证书，需要允许信任服务器证书。'
+        };
+    }
+
+    return {
+        ...base,
+        status: base.status >= 400 && base.status <= 599 ? base.status : 502,
+        code: base.code,
+        message: rawMessage || '数据库连接失败。',
+        hint: '请确认这是从 Pivot 服务器所在机器或容器发起连接，而不是从浏览器所在电脑发起连接。'
+    };
+}
+
 const SQL_TOOL_DEFINITIONS = [
     {
         name: 'db.list_tables',
@@ -490,7 +594,7 @@ async function executeDatabaseMcpTool(server, name, input = {}) {
 
 function validateDatabaseConnectionPayload(payload, user) {
     const type = normalizeDatabaseType(payload.database_type || payload.databaseType);
-    if (!type) throw new Error('请选择数据库类型。');
+    if (!type) throw createDatabaseMcpError('请选择数据库类型。', 'DB_TYPE_REQUIRED', 400);
     const host = String(payload.host || '').trim();
     const databaseName = String(payload.database_name || payload.databaseName || '').trim();
     const username = String(payload.username || '').trim();
@@ -500,13 +604,13 @@ function validateDatabaseConnectionPayload(payload, user) {
     const ssl = payload.ssl === true || payload.ssl === 'true';
 
     if (type === 'sqlite') {
-        if (!databaseName) throw new Error('请填写 SQLite 文件路径。');
+        if (!databaseName) throw createDatabaseMcpError('请填写 SQLite 文件路径。', 'DB_SQLITE_PATH_REQUIRED', 400);
         resolveSafeSqlitePath(databaseName);
     } else {
-        if (!host || !databaseName) throw new Error('请填写数据库主机和数据库名。');
-        if (!username && type !== 'mongodb') throw new Error('请填写数据库用户名。');
+        if (!host || !databaseName) throw createDatabaseMcpError('请填写数据库主机和数据库名。', 'DB_HOST_OR_NAME_REQUIRED', 400);
+        if (!username && type !== 'mongodb') throw createDatabaseMcpError('请填写数据库用户名。', 'DB_USERNAME_REQUIRED', 400);
         if (process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN === 'true' && isPrivateHost(host) && user?.role !== 'admin') {
-            throw new Error('普通用户不能配置内网或本机数据库地址。');
+            throw createDatabaseMcpError('普通用户不能配置内网或本机数据库地址。', 'MCP_PRIVATE_HOST_RESTRICTED', 403);
         }
     }
 
@@ -528,6 +632,7 @@ module.exports = {
     listDatabaseMcpTools,
     normalizeDatabaseConnection,
     normalizeDatabaseType,
+    normalizeDatabaseConnectionError,
     testDatabaseConnection,
     validateDatabaseConnectionPayload
 };

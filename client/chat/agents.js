@@ -1236,6 +1236,13 @@ const mcpDbToolLabels = {
     mongodb: 'MongoDB MCP'
 };
 
+const mcpBuiltinToolLabels = {
+    reports: '报表与数据文件 MCP',
+    visualization: '可视化图表 MCP',
+    report: '报告编排 MCP',
+    im: '局域网消息通知 MCP'
+};
+
 const mcpToolDisplayMap = {
     'db.list_tables': {
         title: '列出数据表',
@@ -1263,6 +1270,57 @@ const mcpToolDisplayMap = {
     }
 };
 
+Object.assign(mcpToolDisplayMap, {
+    'reports.list_files': {
+        title: '列出报表文件',
+        description: '扫描配置目录内的报表、表格和数据文件。'
+    },
+    'reports.read_file_summary': {
+        title: '读取文件摘要',
+        description: '读取文件元数据、表头、工作表和少量样本。'
+    },
+    'reports.query_table': {
+        title: '查询表格数据',
+        description: '按列筛选 CSV、Excel 表格并返回限定行数。'
+    },
+    'reports.compare_files': {
+        title: '对比数据文件',
+        description: '对比两个文件的工作表、字段和样本结构。'
+    },
+    'viz.build_chart': {
+        title: '生成可视化图表',
+        description: '从上一步传入的表格行生成可直接渲染的图表配置。'
+    },
+    'viz.build_table': {
+        title: '生成展示表格',
+        description: '从上一步传入的表格行生成 Markdown 表格展示块。'
+    },
+    'report.compose': {
+        title: '组装固定报告',
+        description: '把摘要、表格、图表和指标块组装为固定格式报告。'
+    },
+    'report.validate_template': {
+        title: '校验报告模板',
+        description: '校验报告章节模板是否满足编排要求。'
+    },
+    'im.list_allowed_targets': {
+        title: '查看通知目标',
+        description: '查看局域网即时聊天服务允许发送的用户或群组。'
+    },
+    'im.send_user_message': {
+        title: '发送用户消息',
+        description: '向一个白名单用户发送局域网聊天消息。'
+    },
+    'im.send_group_message': {
+        title: '发送群组消息',
+        description: '向一个白名单群组发送局域网聊天消息。'
+    },
+    'im.send_markdown': {
+        title: '发送 Markdown 消息',
+        description: '向白名单目标发送 Markdown 格式通知。'
+    }
+});
+
 function mcpToolTitle(tool) {
     return mcpToolDisplayMap[tool?.name]?.title || tool?.name || 'MCP 工具';
 }
@@ -1285,15 +1343,33 @@ function mcpTemplateMarkup() {
             <strong>数据库 MCP Server</strong>
             <span>支持 PostgreSQL、MySQL / MariaDB、SQL Server、SQLite、MongoDB。</span>
         </div>
+        <div class="agent-tool-chip mcp-template-chip" data-mcp-template="reports">
+            <strong>报表与数据文件 MCP</strong>
+            <span>只负责读取局域网文件、抽样和表格查询。</span>
+        </div>
+        <div class="agent-tool-chip mcp-template-chip" data-mcp-template="visualization">
+            <strong>可视化图表 MCP</strong>
+            <span>只负责把上一步数据行转换成图表或表格展示块。</span>
+        </div>
+        <div class="agent-tool-chip mcp-template-chip" data-mcp-template="report">
+            <strong>报告编排 MCP</strong>
+            <span>只负责把摘要、表格、图表按固定格式组装为报告。</span>
+        </div>
+        <div class="agent-tool-chip mcp-template-chip" data-mcp-template="im">
+            <strong>局域网消息通知 MCP</strong>
+            <span>只负责把报告摘要或链接推送到内网聊天工具。</span>
+        </div>
     `;
 }
 
 function setMcpSourceType(type, mode = 'create') {
-    const sourceType = type === 'database' ? 'database' : 'external';
+    const sourceType = ['database', 'reports', 'visualization', 'report', 'im'].includes(type) ? type : 'external';
     const select = mcpFormEl('source-type', mode);
     if (select) select.value = sourceType;
     mcpFormEl('external-fields', mode)?.classList.toggle('hidden', sourceType !== 'external');
     mcpFormEl('db-fields', mode)?.classList.toggle('hidden', sourceType !== 'database');
+    mcpFormEl('reports-fields', mode)?.classList.toggle('hidden', sourceType !== 'reports');
+    mcpFormEl('im-fields', mode)?.classList.toggle('hidden', sourceType !== 'im');
     mcpFormEl('test-db-btn', mode)?.classList.toggle('hidden', sourceType !== 'database');
     const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
     const port = mcpFormEl('db-port', mode);
@@ -1359,7 +1435,11 @@ window.resetMcpForm = function() {
     [
         'mcp-id', 'mcp-name', 'mcp-url', 'mcp-key', 'mcp-desc',
         'mcp-db-host', 'mcp-db-port', 'mcp-db-name', 'mcp-db-user',
-        'mcp-db-password', 'mcp-db-schema', 'mcp-db-max-rows'
+        'mcp-db-password', 'mcp-db-schema', 'mcp-db-max-rows',
+        'mcp-reports-roots', 'mcp-reports-extensions', 'mcp-reports-max-file-mb',
+        'mcp-reports-max-rows', 'mcp-im-endpoint-url', 'mcp-im-auth-header',
+        'mcp-im-token', 'mcp-im-allowed-targets', 'mcp-im-default-target',
+        'mcp-im-max-message-length'
     ].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -1370,13 +1450,16 @@ window.resetMcpForm = function() {
     updateMcpDbTypeFields('create');
     const dbSsl = mcpFormEl('db-ssl');
     if (dbSsl) dbSsl.checked = false;
+    const imAllowAtAll = mcpFormEl('im-allow-at-all');
+    if (imAllowAtAll) imAllowAtAll.checked = false;
     const shared = mcpFormEl('shared');
     if (shared) shared.checked = false;
 };
 
 function fillMcpForm(server, mode = 'create') {
     const database = server.database_connection || {};
-    setMcpSourceType(server.server_type === 'database' ? 'database' : 'external', mode);
+    const serverType = ['database', 'reports', 'visualization', 'report', 'im'].includes(server.server_type) ? server.server_type : 'external';
+    setMcpSourceType(serverType, mode);
     mcpFormEl('id', mode).value = server.id || '';
     mcpFormEl('name', mode).value = server.name || '';
     mcpFormEl('url', mode).value = server.base_url || '';
@@ -1393,6 +1476,23 @@ function fillMcpForm(server, mode = 'create') {
         mcpFormEl('db-max-rows', mode).value = database.max_rows || '';
         mcpFormEl('db-ssl', mode).checked = Boolean(database.ssl);
         updateMcpDbTypeFields(mode);
+    }
+    if (server.server_type === 'reports') {
+        const config = server.builtin_config?.config || {};
+        mcpFormEl('reports-roots', mode).value = (config.roots || []).join('\n');
+        mcpFormEl('reports-extensions', mode).value = (config.extensions || []).join(',');
+        mcpFormEl('reports-max-file-mb', mode).value = config.maxFileMb || '';
+        mcpFormEl('reports-max-rows', mode).value = config.maxRows || '';
+    }
+    if (server.server_type === 'im') {
+        const config = server.builtin_config?.config || {};
+        mcpFormEl('im-endpoint-url', mode).value = config.endpointUrl || '';
+        mcpFormEl('im-auth-header', mode).value = config.authHeader || 'Authorization';
+        mcpFormEl('im-token', mode).value = server.builtin_config?.has_secret ? '********' : '';
+        mcpFormEl('im-allowed-targets', mode).value = (config.allowedTargets || []).join('\n');
+        mcpFormEl('im-default-target', mode).value = config.defaultTarget || '';
+        mcpFormEl('im-max-message-length', mode).value = config.maxMessageLength || '';
+        mcpFormEl('im-allow-at-all', mode).checked = Boolean(config.allowAtAll);
     }
     const shared = mcpFormEl('shared', mode);
     if (shared) shared.checked = !server.user_id;
@@ -1433,12 +1533,21 @@ async function loadMcpServers() {
     }
     list.innerHTML = mcpServersCache.map(server => {
         const database = server.database_connection || {};
+        const builtin = server.builtin_config?.config || {};
         const endpoint = server.server_type === 'database'
             ? `${database.database_type || 'database'}://${database.host || 'local'}${database.port ? `:${database.port}` : ''}/${database.database_name || ''}`
-            : server.base_url;
+            : server.server_type === 'reports'
+                ? `reports://${(builtin.roots || []).length} roots`
+                : server.server_type === 'visualization'
+                    ? 'visualization://local'
+                    : server.server_type === 'report'
+                        ? 'report://composer'
+                        : server.server_type === 'im'
+                            ? `im://${builtin.endpointUrl || 'endpoint'}`
+                            : server.base_url;
         const typeLabel = server.server_type === 'database'
             ? (mcpDbToolLabels[database.database_type] || '数据库 MCP')
-            : '外部服务';
+            : (mcpBuiltinToolLabels[server.server_type] || '外部服务');
         return `
         <div class="mcp-server-card">
             <div>
@@ -1499,12 +1608,18 @@ async function loadMcpGovernance() {
         panel.innerHTML = '';
         return;
     }
+    panel.className = 'workspace-governance-panel mcp-governance-panel';
     const s = gov.summary || {};
     const recentLogs = logs.data || [];
+    const recentLogMarkup = recentLogs.slice(0, 3).map(log => `
+        <span class="${log.status === 'error' ? 'is-error' : ''}">
+            ${agentEscape(log.server_name || 'MCP')} / ${agentEscape(log.tool_name || '-')} · ${Number(log.duration_ms || 0)}ms
+        </span>
+    `).join('') || '<span class="mcp-governance-empty">暂无调用记录</span>';
     panel.innerHTML = `
-        <div class="governance-head">
+        <div class="mcp-governance-title">
             <strong>MCP 治理</strong>
-            <span>7 日调用 ${Number(s.calls7d || 0)} · 错误 ${Number(s.callErrors7d || 0)} · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
+            <span>7 日 ${Number(s.calls7d || 0)} 调用 · ${Number(s.callErrors7d || 0)} 错误 · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
         </div>
         <div class="governance-metrics">
             <span><b>${Number(s.active || 0)}</b>活跃</span>
@@ -1512,12 +1627,8 @@ async function loadMcpGovernance() {
             <span><b>${Number(s.unchecked || 0)}</b>未检查</span>
             <span><b>${Number(s.databaseServers || 0)}</b>数据库</span>
         </div>
-        <div class="governance-list">
-            ${recentLogs.map(log => `
-                <span class="${log.status === 'error' ? 'is-error' : ''}">
-                    ${agentEscape(log.server_name || 'MCP')} / ${agentEscape(log.tool_name || '-')} · ${agentEscape(log.source || 'manual')} · ${Number(log.duration_ms || 0)}ms
-                </span>
-            `).join('') || '<span>暂无调用记录。</span>'}
+        <div class="governance-list mcp-governance-logs">
+            ${recentLogMarkup}
         </div>
     `;
 }
@@ -1547,6 +1658,51 @@ function validateMcpDatabasePayload(payload, { requireName = true } = {}) {
     return '';
 }
 
+function collectMcpBuiltinPayload(type, mode = 'create') {
+    const base = {
+        id: mcpFormEl('id', mode)?.value || undefined,
+        name: mcpFormEl('name', mode)?.value.trim(),
+        description: mcpFormEl('desc', mode)?.value.trim(),
+        shared: mcpFormEl('shared', mode)?.checked || false,
+        service_type: type
+    };
+    if (type === 'reports') {
+        return {
+            ...base,
+            roots: mcpFormEl('reports-roots', mode)?.value || '',
+            extensions: mcpFormEl('reports-extensions', mode)?.value || '',
+            maxFileMb: mcpFormEl('reports-max-file-mb', mode)?.value,
+            maxRows: mcpFormEl('reports-max-rows', mode)?.value
+        };
+    }
+    return {
+        ...base,
+        endpointUrl: mcpFormEl('im-endpoint-url', mode)?.value.trim(),
+        authHeader: mcpFormEl('im-auth-header', mode)?.value.trim(),
+        secret: mcpFormEl('im-token', mode)?.value,
+        allowedTargets: mcpFormEl('im-allowed-targets', mode)?.value || '',
+        defaultTarget: mcpFormEl('im-default-target', mode)?.value.trim(),
+        maxMessageLength: mcpFormEl('im-max-message-length', mode)?.value,
+        allowAtAll: mcpFormEl('im-allow-at-all', mode)?.checked || false
+    };
+}
+
+function validateMcpBuiltinPayload(type, payload) {
+    if (!payload.name) return '请填写服务名称';
+    if (type === 'reports' && !String(payload.roots || '').trim()) return '请至少填写一个报表/数据文件目录';
+    if (type === 'im' && !payload.endpointUrl) return '请填写局域网聊天工具 Webhook/API URL';
+    return '';
+}
+
+function formatMcpDatabaseError(data, fallback = '数据库连接失败') {
+    const parts = [data?.error || fallback];
+    if (data?.hint) parts.push(data.hint);
+    if (data?.diagnostics?.host) {
+        parts.push(`目标：${data.diagnostics.host}${data.diagnostics.port ? `:${data.diagnostics.port}` : ''}`);
+    }
+    return parts.filter(Boolean).join('\n');
+}
+
 window.testMcpDatabaseConnection = async function(mode = 'create') {
     if ((mcpFormEl('source-type', mode)?.value || 'external') !== 'database') {
         return showToast('请先选择数据库 MCP Server', 'error');
@@ -1568,7 +1724,7 @@ window.testMcpDatabaseConnection = async function(mode = 'create') {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!res.ok) return showToast(data.error || '连接测试失败', 'error');
+        if (!res.ok) return showToast(formatMcpDatabaseError(data, '连接测试失败'), 'error');
         return showToast('数据库连接测试通过', 'success');
     } finally {
         if (button) {
@@ -1594,6 +1750,11 @@ window.saveMcpServer = async function(mode = 'create') {
         endpoint = `${API_BASE}/mcp/database-connections${id ? `/${encodeURIComponent(id)}` : ''}`;
         const error = validateMcpDatabasePayload(payload);
         if (error) return showToast(error, 'error');
+    } else if (['reports', 'visualization', 'report', 'im'].includes(sourceType)) {
+        payload = collectMcpBuiltinPayload(sourceType, mode);
+        endpoint = `${API_BASE}/mcp/builtin-services${id ? `/${encodeURIComponent(id)}` : ''}`;
+        const error = validateMcpBuiltinPayload(sourceType, payload);
+        if (error) return showToast(error, 'error');
     } else if (!payload.name || !payload.base_url) {
         return showToast('请填写服务名称和 URL', 'error');
     }
@@ -1603,7 +1764,7 @@ window.saveMcpServer = async function(mode = 'create') {
         body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (!res.ok) return showToast(data.error || '保存失败', 'error');
+    if (!res.ok) return showToast(formatMcpDatabaseError(data, '保存失败'), 'error');
     showToast('MCP 服务已保存', 'success');
     if (mode === 'edit') {
         window.closeMcpEditModal();

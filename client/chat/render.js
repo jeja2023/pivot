@@ -189,6 +189,9 @@ customRenderer.code = (code, infostring, _escaped) => {
         code = code.text || code.raw || '';
     }
     const language = String(infostring || '').trim().split(/\s+/)[0];
+    if (language === 'pivot-chart') {
+        return `<div class="pivot-chart-block" data-pivot-chart="${escapeAttrValue(code)}"><div class="pivot-chart-title">图表</div><canvas height="300"></canvas></div>`;
+    }
     const languageLabel = language || 'code';
     let codeHtml;
     if (language && typeof hljs !== 'undefined' && hljs.getLanguage(language)) {
@@ -340,6 +343,177 @@ function renderMarkdown(content) {
     return rawHtml;
 }
 
+function normalizePivotChartSpec(raw) {
+    let spec = null;
+    try {
+        spec = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (e) {
+        return null;
+    }
+    if (!spec || spec.type !== 'pivot_chart' || !Array.isArray(spec.labels) || !Array.isArray(spec.series)) return null;
+    return {
+        chartType: ['bar', 'line', 'pie'].includes(spec.chartType) ? spec.chartType : 'bar',
+        title: String(spec.title || '图表'),
+        labels: spec.labels.map(label => String(label ?? '')).slice(0, 80),
+        series: spec.series.slice(0, 20).map(item => ({
+            name: String(item?.name || '数据'),
+            data: Array.isArray(item?.data) ? item.data.map(value => Number(value) || 0).slice(0, 80) : []
+        })),
+        source: spec.source || {}
+    };
+}
+
+function drawPivotChart(canvas, spec) {
+    const ctx = canvas?.getContext?.('2d');
+    if (!ctx || !spec) return;
+    const rect = canvas.getBoundingClientRect();
+    const parentWidth = canvas.parentElement?.clientWidth || 0;
+    const width = Math.max(rect.width || parentWidth || 620, 320);
+    const height = Number(canvas.getAttribute('height')) || 300;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const palette = ['#10a37f', '#2563eb', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'];
+    const padLeft = 52;
+    const padRight = 22;
+    const padTop = 42;
+    const padBottom = 56;
+    const chartW = width - padLeft - padRight;
+    const chartH = height - padTop - padBottom;
+    const allValues = spec.series.flatMap(item => item.data);
+    const max = Math.max(...allValues, 1);
+
+    ctx.fillStyle = '#111827';
+    ctx.font = '600 14px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(spec.title, 12, 22);
+
+    if (spec.chartType === 'pie') {
+        const values = spec.series[0]?.data || [];
+        const total = values.reduce((sum, value) => sum + Math.max(value, 0), 0) || 1;
+        const radius = Math.min(chartW, chartH) * 0.36;
+        const cx = padLeft + chartW * 0.38;
+        const cy = padTop + chartH * 0.5;
+        let start = -Math.PI / 2;
+        values.forEach((value, index) => {
+            const angle = (Math.max(value, 0) / total) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, radius, start, start + angle);
+            ctx.closePath();
+            ctx.fillStyle = palette[index % palette.length];
+            ctx.fill();
+            start += angle;
+        });
+        ctx.font = '12px sans-serif';
+        spec.labels.slice(0, 8).forEach((label, index) => {
+            const x = padLeft + chartW * 0.72;
+            const y = padTop + 18 + index * 22;
+            ctx.fillStyle = palette[index % palette.length];
+            ctx.fillRect(x, y - 10, 10, 10);
+            ctx.fillStyle = '#475569';
+            ctx.fillText(`${label}: ${values[index] ?? 0}`, x + 16, y);
+        });
+        return;
+    }
+
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = padTop + chartH * (i / 4);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(width - padRight, y);
+        ctx.stroke();
+    }
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i += 1) {
+        const value = max - max * (i / 4);
+        ctx.fillText(Number(value.toFixed(1)).toLocaleString(), padLeft - 8, padTop + chartH * (i / 4) + 4);
+    }
+
+    const labels = spec.labels.length ? spec.labels : [''];
+    if (spec.chartType === 'line') {
+        spec.series.forEach((item, seriesIndex) => {
+            const points = labels.map((_, index) => ({
+                x: padLeft + (labels.length === 1 ? chartW / 2 : chartW * index / (labels.length - 1)),
+                y: padTop + chartH - ((item.data[index] || 0) / max) * chartH
+            }));
+            ctx.beginPath();
+            points.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
+            ctx.strokeStyle = palette[seriesIndex % palette.length];
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = palette[seriesIndex % palette.length];
+            points.forEach(point => {
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        });
+    } else {
+        const groupCount = Math.max(spec.series.length, 1);
+        const slotW = chartW / labels.length;
+        const barW = Math.max(Math.min(slotW / groupCount * 0.68, 34), 4);
+        labels.forEach((_, labelIndex) => {
+            spec.series.forEach((item, seriesIndex) => {
+                const value = item.data[labelIndex] || 0;
+                const h = (value / max) * chartH;
+                const x = padLeft + labelIndex * slotW + slotW / 2 - (groupCount * barW) / 2 + seriesIndex * barW;
+                const y = padTop + chartH - h;
+                ctx.fillStyle = palette[seriesIndex % palette.length];
+                ctx.fillRect(x, y, Math.max(barW - 2, 2), h);
+            });
+        });
+    }
+
+    const labelStep = Math.max(1, Math.ceil(labels.length / Math.max(4, Math.floor(width / 90))));
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    labels.forEach((label, index) => {
+        if (index % labelStep !== 0 && index !== labels.length - 1) return;
+        const x = padLeft + (labels.length === 1 ? chartW / 2 : chartW * index / Math.max(labels.length - 1, 1));
+        ctx.fillText(String(label).slice(0, 12), x, height - padBottom + 24);
+    });
+
+    ctx.textAlign = 'left';
+    spec.series.slice(0, 4).forEach((item, index) => {
+        const x = padLeft + index * 120;
+        const y = height - 14;
+        ctx.fillStyle = palette[index % palette.length];
+        ctx.fillRect(x, y - 10, 10, 10);
+        ctx.fillStyle = '#475569';
+        ctx.fillText(item.name.slice(0, 14), x + 16, y);
+    });
+}
+
+function renderPivotCharts(root = document) {
+    root.querySelectorAll?.('.pivot-chart-block[data-pivot-chart]').forEach(block => {
+        if (block.dataset.rendered === '1') return;
+        const spec = normalizePivotChartSpec(block.dataset.pivotChart || '');
+        const canvas = block.querySelector('canvas');
+        const title = block.querySelector('.pivot-chart-title');
+        if (!spec || !canvas) {
+            block.classList.add('is-error');
+            if (title) title.textContent = '图表配置无法解析';
+            return;
+        }
+        if (title) title.textContent = spec.title;
+        drawPivotChart(canvas, spec);
+        block.dataset.rendered = '1';
+    });
+}
+
+window.renderPivotCharts = renderPivotCharts;
+
 function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) {
     if (!content) return '';
     // 使用全局变量传递状态给 marked 渲染器
@@ -392,6 +566,7 @@ function appendMessage(role, content, id = null, stats = null) {
     `;
     container.appendChild(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
+    if (role === 'assistant') renderPivotCharts(div);
     window.scrollMessagesToBottom?.();
     return div.querySelector('.message-content');
 }

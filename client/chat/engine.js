@@ -72,6 +72,7 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
         textBody.innerHTML = renderAiMessage(content, true, thoughtState.openStates);
         restoreThoughtStateAfterRender(textBody, thoughtState);
     }
+    window.renderPivotCharts?.(textBody);
 
     const elapsed = (Date.now() - startTime) / 1000;
     const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
@@ -129,7 +130,7 @@ async function readChatErrorMessage(response) {
 
 function confirmChatMcpUse() {
     const title = '允许调用 MCP 工具';
-    const message = '本轮对话可能访问已保存的 MCP 服务或数据库 MCP 工具。数据库工具会继续受只读限制保护，确认后才会让模型按需调用。';
+    const message = 'MCP 可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
     return new Promise(resolve => {
         if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
         window.showConfirm(title, message, () => resolve(true));
@@ -141,6 +142,47 @@ function confirmChatMcpUse() {
             if (event.target === overlay) settleCancel();
         }, { once: true });
     });
+}
+
+const CHAT_MCP_CONSENT_KEY = 'pivot_chat_mcp_consent_session';
+
+function hasChatMcpConsent() {
+    try {
+        return sessionStorage.getItem(CHAT_MCP_CONSENT_KEY) === 'true';
+    } catch (e) {
+        return false;
+    }
+}
+
+function rememberChatMcpConsent() {
+    try {
+        sessionStorage.setItem(CHAT_MCP_CONSENT_KEY, 'true');
+    } catch (e) {
+        // 忽略浏览器存储限制，当前这次确认仍然有效。
+    }
+}
+
+async function ensureChatMcpConsent() {
+    if (hasChatMcpConsent()) return true;
+    const confirmed = await confirmChatMcpUse();
+    if (confirmed) rememberChatMcpConsent();
+    return confirmed;
+}
+
+window.confirmChatMcpUse = confirmChatMcpUse;
+window.hasChatMcpConsent = hasChatMcpConsent;
+window.ensureChatMcpConsent = ensureChatMcpConsent;
+
+function isChatToolEnabled(id, storageKey) {
+    const button = document.getElementById(id);
+    const wrapper = button?.closest?.('.chat-tool-toggle');
+    const stateNode = wrapper || button;
+    if (button?.dataset.enabled === 'true' || stateNode?.dataset.enabled === 'true') return true;
+    if (button?.dataset.enabled === 'false' || stateNode?.dataset.enabled === 'false') return false;
+    if (button?.getAttribute('aria-pressed') === 'true' || stateNode?.getAttribute('aria-pressed') === 'true') return true;
+    if (button?.getAttribute('aria-pressed') === 'false' || stateNode?.getAttribute('aria-pressed') === 'false') return false;
+    if (typeof button?.checked === 'boolean') return button.checked;
+    return localStorage.getItem(storageKey) === 'true';
 }
 
 window.createSession = async function(title) {
@@ -213,11 +255,11 @@ window.sendMessage = async function(isRegenerate = false) {
         if (docTexts) content += docTexts;
     }
 
-    const ragEnabled = Boolean(document.getElementById('chat-rag-enabled')?.checked);
-    const mcpEnabled = Boolean(document.getElementById('chat-mcp-enabled')?.checked);
+    const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
+    const mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
     if (mcpEnabled) {
-        mcpConfirmed = await confirmChatMcpUse();
+        mcpConfirmed = await ensureChatMcpConsent();
         if (!mcpConfirmed) return;
     }
 

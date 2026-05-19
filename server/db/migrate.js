@@ -330,6 +330,19 @@ function runMigrations() {
             FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS mcp_builtin_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mcp_server_id INTEGER UNIQUE NOT NULL,
+            user_id INTEGER,
+            service_type TEXT NOT NULL,
+            config TEXT,
+            secret TEXT,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     `);
     ensureColumn('agent_runs', 'session_id', 'TEXT');
     ensureColumn('agent_runs', 'model_id', 'INTEGER');
@@ -533,6 +546,13 @@ function runMigrations() {
     ensureColumn('mcp_database_connections', 'status', "TEXT DEFAULT 'active'");
     ensureColumn('mcp_database_connections', 'created_at', 'DATETIME');
     ensureColumn('mcp_database_connections', 'updated_at', 'DATETIME');
+    ensureColumn('mcp_builtin_configs', 'user_id', 'INTEGER');
+    ensureColumn('mcp_builtin_configs', 'service_type', 'TEXT');
+    ensureColumn('mcp_builtin_configs', 'config', 'TEXT');
+    ensureColumn('mcp_builtin_configs', 'secret', 'TEXT');
+    ensureColumn('mcp_builtin_configs', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('mcp_builtin_configs', 'created_at', 'DATETIME');
+    ensureColumn('mcp_builtin_configs', 'updated_at', 'DATETIME');
 
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
@@ -552,6 +572,8 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_server ON mcp_database_connections(mcp_server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_server ON mcp_builtin_configs(mcp_server_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_user ON mcp_builtin_configs(user_id, service_type, status);
     `);
 
     db.exec(`

@@ -21,7 +21,11 @@
                     <div class="mcp-form">
                         <input type="hidden" id="mcp-id">
                         <select id="mcp-source-type" class="form-input">
-                            <option value="external">外部 MCP Server</option>
+                            <option value="reports">报表与数据文件 MCP</option>
+                            <option value="visualization">可视化图表 MCP</option>
+                            <option value="report">报告编排 MCP</option>
+                            <option value="im">局域网消息通知 MCP</option>
+                            <option value="external" selected>外部 MCP Server</option>
                             <option value="database">数据库 MCP Server</option>
                         </select>
                         <input id="mcp-name" class="form-input" placeholder="服务名称">
@@ -54,6 +58,29 @@
                                 <input type="checkbox" id="mcp-db-ssl"> 启用 SSL / TLS
                             </label>
                         </div>
+                        <div id="mcp-reports-fields" class="mcp-field-group hidden">
+                            <textarea id="mcp-reports-roots" class="form-input" placeholder="报表/数据文件目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>
+                            <div class="mcp-form-row">
+                                <input id="mcp-reports-extensions" class="form-input" placeholder="允许扩展名：csv,xlsx,xls,json,txt,md">
+                                <input id="mcp-reports-max-file-mb" class="form-input" type="number" min="1" max="200" placeholder="单文件 MB，默认 20">
+                            </div>
+                            <input id="mcp-reports-max-rows" class="form-input" type="number" min="1" max="5000" placeholder="单次最大读取行数，默认 500">
+                        </div>
+                        <div id="mcp-im-fields" class="mcp-field-group hidden">
+                            <input id="mcp-im-endpoint-url" class="form-input" placeholder="局域网聊天工具 Webhook/API URL，例如 http://10.0.0.8:9000/api/message">
+                            <div class="mcp-form-row">
+                                <input id="mcp-im-auth-header" class="form-input" placeholder="认证 Header，默认 Authorization">
+                                <input id="mcp-im-token" class="form-input" type="password" placeholder="Token / 密钥，可选">
+                            </div>
+                            <textarea id="mcp-im-allowed-targets" class="form-input" placeholder="允许发送目标，每行一个；可写 user:zhangsan 或 group:ops"></textarea>
+                            <div class="mcp-form-row">
+                                <input id="mcp-im-default-target" class="form-input" placeholder="默认目标，可选">
+                                <input id="mcp-im-max-message-length" class="form-input" type="number" min="100" max="10000" placeholder="消息最大长度，默认 2000">
+                            </div>
+                            <label class="mcp-shared-row">
+                                <input type="checkbox" id="mcp-im-allow-at-all"> 允许 @all / 全员通知
+                            </label>
+                        </div>
                         <textarea id="mcp-desc" class="form-input" placeholder="说明，可选"></textarea>
                         <label class="mcp-shared-row super-admin-only hidden">
                             <input type="checkbox" id="mcp-shared"> 作为全局共享服务
@@ -82,6 +109,10 @@
             <div class="mcp-edit-form">
                 <input type="hidden" id="mcp-edit-id">
                 <select id="mcp-edit-source-type" class="form-input" disabled>
+                    <option value="reports">报表与数据文件 MCP</option>
+                    <option value="visualization">可视化图表 MCP</option>
+                    <option value="report">报告编排 MCP</option>
+                    <option value="im">局域网消息通知 MCP</option>
                     <option value="external">外部 MCP Server</option>
                     <option value="database">数据库 MCP Server</option>
                 </select>
@@ -113,6 +144,29 @@
                     </div>
                     <label class="mcp-shared-row">
                         <input type="checkbox" id="mcp-edit-db-ssl"> 启用 SSL / TLS
+                    </label>
+                </div>
+                <div id="mcp-edit-reports-fields" class="mcp-field-group hidden">
+                    <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="报表/数据文件目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-reports-extensions" class="form-input" placeholder="允许扩展名：csv,xlsx,xls,json,txt,md">
+                        <input id="mcp-edit-reports-max-file-mb" class="form-input" type="number" min="1" max="200" placeholder="单文件 MB，默认 20">
+                    </div>
+                    <input id="mcp-edit-reports-max-rows" class="form-input" type="number" min="1" max="5000" placeholder="单次最大读取行数，默认 500">
+                </div>
+                <div id="mcp-edit-im-fields" class="mcp-field-group hidden">
+                    <input id="mcp-edit-im-endpoint-url" class="form-input" placeholder="局域网聊天工具 Webhook/API URL，例如 http://10.0.0.8:9000/api/message">
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-im-auth-header" class="form-input" placeholder="认证 Header，默认 Authorization">
+                        <input id="mcp-edit-im-token" class="form-input" type="password" placeholder="Token / 密钥，可选">
+                    </div>
+                    <textarea id="mcp-edit-im-allowed-targets" class="form-input" placeholder="允许发送目标，每行一个；可写 user:zhangsan 或 group:ops"></textarea>
+                    <div class="mcp-form-row">
+                        <input id="mcp-edit-im-default-target" class="form-input" placeholder="默认目标，可选">
+                        <input id="mcp-edit-im-max-message-length" class="form-input" type="number" min="100" max="10000" placeholder="消息最大长度，默认 2000">
+                    </div>
+                    <label class="mcp-shared-row">
+                        <input type="checkbox" id="mcp-edit-im-allow-at-all"> 允许 @all / 全员通知
                     </label>
                 </div>
                 <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选"></textarea>

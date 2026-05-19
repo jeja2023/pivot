@@ -48,9 +48,9 @@ function getAccessibleModel(modelId, user) {
         if (user.role === 'admin' && user.username === 'admin') {
             // 管理员可以按 ID 或 model_name 查找
             const sql = isNumeric ?
-                "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?)" :
-                "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ?";
-            const params = isNumeric ? [modelId, modelId] : [modelId];
+                "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id IS NULL OR user_id = ?)" :
+                "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id IS NULL OR user_id = ?)";
+            const params = isNumeric ? [modelId, modelId, user.id] : [modelId, user.id];
             model = db.prepare(sql).get(...params);
         } else {
             // 普通用户只能查找自己有权访问的模型 (按 ID 或 model_name)
@@ -72,7 +72,6 @@ function getAccessibleModel(modelId, user) {
             model.secret_error = e.message || '模型密钥解密失败';
         }
     }
-    if (user.role === 'admin' && user.username === 'admin') return model;
     if (model.user_id === user.id) return model;
     if (!model.user_id && model.allowed_units) {
         const units = model.allowed_units.split(',').map(u => u.trim()).filter(Boolean);
@@ -180,13 +179,9 @@ function migrateModelSecrets() {
 function getUserAccessibleModels(user) {
     let sql = "SELECT * FROM models WHERE status = 'active'";
     let params = [];
-    if (!(user.role === 'admin' && user.username === 'admin')) {
-        sql += ' AND (user_id IS NULL OR user_id = ?)';
-        params.push(user.id);
-    }
+    sql += ' AND (user_id IS NULL OR user_id = ?)';
+    params.push(user.id);
     let models = db.prepare(sql).all(...params);
-    
-    if (user.role === 'admin' && user.username === 'admin') return models;
 
     return models.filter(m => {
         if (m.user_id === user.id) return true;

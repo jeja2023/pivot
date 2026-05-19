@@ -495,9 +495,15 @@ window.loadMonitorSummary = async function() {
             ? gpu.gpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
                 const gpuName = item.name || 'GPU';
-                return `<div class="monitor-row">
-                    <span title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
-                    <strong>${escapeHtml(`${formatBytes(item.usedBytes)} / ${usedRate.toFixed(0)}%`)}</strong>
+                const gpuDetails = [];
+                if (Number.isFinite(Number(item.utilization))) gpuDetails.push(`利用率 ${Number(item.utilization).toFixed(0)}%`);
+                if (Number.isFinite(Number(item.temperature))) gpuDetails.push(`${Number(item.temperature).toFixed(0)}°C`);
+                return `<div class="monitor-row monitor-gpu-row">
+                    <span class="monitor-gpu-name" title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
+                    <strong class="monitor-gpu-usage">
+                        ${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} · ${usedRate.toFixed(0)}%`)}
+                        ${gpuDetails.length ? `<small>${escapeHtml(gpuDetails.join(' · '))}</small>` : ''}
+                    </strong>
                 </div>`;
             }).join('')
             : `<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
@@ -521,9 +527,9 @@ window.loadMonitorSummary = async function() {
         document.getElementById('monitor-model-list').innerHTML = models.length
             ? models.map(item => {
                 const modelName = item.model_name || '未知模型';
-                return `<div class="monitor-row">
-                    <span title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>
-                    <strong title="${Number(item.tokens || 0).toLocaleString()} Tokens">${formatTokenCount(item.tokens)}</strong>
+                return `<div class="monitor-row monitor-model-token-row">
+                    <span class="monitor-model-token-name" title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>
+                    <strong class="monitor-model-token-value" title="${Number(item.tokens || 0).toLocaleString()} Tokens">${formatTokenCount(item.tokens)}</strong>
                 </div>`;
             }).join('')
             : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
@@ -550,9 +556,13 @@ window.loadMonitorSummary = async function() {
         if (observabilityEl) {
             const events = observability.events || [];
             observabilityEl.innerHTML = events.length ? events.map(item => `
-                <div class="monitor-row">
-                    <span title="${escapeHtml(item.message || '')}">${escapeHtml(item.type || '-')} · ${escapeHtml(item.severity || '-')}</span>
-                    <strong>${formatMetricNumber(item.duration_ms, 1)} ms</strong>
+                <div class="monitor-observability-row">
+                    <div class="monitor-observability-main" title="${escapeHtml([item.type, item.severity, item.source, item.message].filter(Boolean).join(' · '))}">
+                        <span>${escapeHtml(item.type || '-')} · ${escapeHtml(item.severity || '-')}</span>
+                        ${item.message ? `<strong>${escapeHtml(item.message)}</strong>` : ''}
+                        ${item.source ? `<small>${escapeHtml(item.source)}</small>` : ''}
+                    </div>
+                    <div class="monitor-observability-duration">${formatMetricNumber(item.duration_ms, 1)} ms</div>
                 </div>
             `).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
         }

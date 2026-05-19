@@ -21,20 +21,90 @@ window.resizeUserInput = () => {
 userInput?.addEventListener('input', resizeUserInput);
 userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
 
-const chatMcpToggle = document.getElementById('chat-mcp-enabled');
-if (chatMcpToggle) {
-    chatMcpToggle.checked = localStorage.getItem('pivot_chat_mcp_enabled') === 'true';
-    chatMcpToggle.addEventListener('change', () => {
-        localStorage.setItem('pivot_chat_mcp_enabled', chatMcpToggle.checked ? 'true' : 'false');
+const CHAT_TOOL_TOGGLE_STORAGE = {
+    rag: 'pivot_chat_rag_enabled',
+    mcp: 'pivot_chat_mcp_enabled'
+};
+
+function findChatToolToggle(target) {
+    let node = target;
+    while (node && node !== document) {
+        if (node.matches?.('[data-chat-tool-toggle], #chat-rag-enabled, #chat-mcp-enabled, .chat-tool-toggle')) return node;
+        node = node.parentElement || node.parentNode;
+    }
+    return null;
+}
+
+function getChatToolName(button) {
+    if (!button) return '';
+    if (button.dataset?.chatToolToggle) return button.dataset.chatToolToggle;
+    if (button.id === 'chat-rag-enabled') return 'rag';
+    if (button.id === 'chat-mcp-enabled') return 'mcp';
+    if (button.querySelector?.('#chat-rag-enabled')) return 'rag';
+    if (button.querySelector?.('#chat-mcp-enabled')) return 'mcp';
+    return '';
+}
+
+function setChatToolToggleState(button, enabled) {
+    if (!button) return;
+    const target = button.matches?.('.chat-tool-toggle') ? button : button.closest?.('.chat-tool-toggle') || button;
+    const nestedInput = target.querySelector?.('input[type="checkbox"][id^="chat-"]');
+    if ('checked' in button) button.checked = enabled;
+    if (target !== button && 'checked' in target) target.checked = enabled;
+    if (nestedInput) nestedInput.checked = enabled;
+    target.dataset.enabled = enabled ? 'true' : 'false';
+    target.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    target.classList.toggle('is-active', enabled);
+    button.dataset.enabled = enabled ? 'true' : 'false';
+    button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    button.classList.toggle('is-active', enabled);
+}
+
+function syncChatToolToggles() {
+    document.querySelectorAll('[data-chat-tool-toggle], #chat-rag-enabled, #chat-mcp-enabled').forEach(button => {
+        const tool = getChatToolName(button);
+        const storageKey = CHAT_TOOL_TOGGLE_STORAGE[tool];
+        setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true');
     });
 }
-const chatRagToggle = document.getElementById('chat-rag-enabled');
-if (chatRagToggle) {
-    chatRagToggle.checked = localStorage.getItem('pivot_chat_rag_enabled') === 'true';
-    chatRagToggle.addEventListener('change', () => {
-        localStorage.setItem('pivot_chat_rag_enabled', chatRagToggle.checked ? 'true' : 'false');
-    });
+
+async function toggleChatTool(button) {
+    const tool = getChatToolName(button);
+    const storageKey = CHAT_TOOL_TOGGLE_STORAGE[tool];
+    const enabled = button.dataset.enabled !== 'true' && button.getAttribute('aria-pressed') !== 'true' && button.checked !== true;
+    button.dataset.lastToggleAt = String(Date.now());
+    if (tool === 'mcp' && enabled) {
+        const confirmed = await (window.ensureChatMcpConsent?.() || Promise.resolve(true));
+        if (!confirmed) {
+            setChatToolToggleState(button, false);
+            if (storageKey) localStorage.setItem(storageKey, 'false');
+            return;
+        }
+    }
+    setChatToolToggleState(button, enabled);
+    if (storageKey) localStorage.setItem(storageKey, enabled ? 'true' : 'false');
 }
+
+async function handleChatToolToggleEvent(event) {
+    const button = findChatToolToggle(event.target);
+    if (!button || button.disabled) return;
+    if (event.type === 'click' && Date.now() - Number(button.dataset.lastToggleAt || 0) < 450) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    await toggleChatTool(button);
+}
+
+syncChatToolToggles();
+document.addEventListener('DOMContentLoaded', syncChatToolToggles);
+window.addEventListener('pageshow', syncChatToolToggles);
+document.addEventListener('pointerdown', handleChatToolToggleEvent, true);
+document.addEventListener('click', handleChatToolToggleEvent, true);
+window.setChatToolToggleState = setChatToolToggleState;
+window.syncChatToolToggles = syncChatToolToggles;
 
 window.showMainWorkspace = function(view = 'chat') {
     const target = ['chat', 'agent', 'knowledge', 'mcp', 'settings'].includes(view) ? view : 'chat';
