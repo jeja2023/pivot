@@ -11,6 +11,13 @@ const DEFAULT_PORTS = {
     sqlite: 0
 };
 const DATABASE_CONNECT_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.MCP_DATABASE_CONNECT_TIMEOUT_MS || '10000', 10) || 10000);
+const DATABASE_TEST_CONNECT_TIMEOUT_MS = Math.max(
+    1000,
+    Number.parseInt(
+        process.env.MCP_DATABASE_TEST_TIMEOUT_MS || String(DATABASE_CONNECT_TIMEOUT_MS),
+        10
+    ) || DATABASE_CONNECT_TIMEOUT_MS
+);
 
 function createDatabaseMcpError(message, code, status = 400) {
     const err = new Error(message);
@@ -63,13 +70,23 @@ function normalizeDatabaseConnectionError(err, connection = {}) {
         };
     }
 
+    if (rawCode === 'DB_CONNECTION_TEST_TIMEOUT') {
+        return {
+            ...base,
+            status: 504,
+            code: 'DB_CONNECTION_TEST_TIMEOUT',
+            message: `数据库测试连接超时：${diagnostics.host || '-'}:${diagnostics.port || '-'}`,
+            hint: `测试连接已按 MCP_DATABASE_TEST_TIMEOUT_MS 结束。局域网环境连接慢或超时的常见原因：1. 目标数据库（如 MySQL）启用了 DNS 反向解析导致握手变慢，可在其配置文件中添加 skip-name-resolve 解决；2. 防火墙、安全组未开放此端口。可在环境变量中调大 MCP_DATABASE_TEST_TIMEOUT_MS 解决。`
+        };
+    }
+
     if (['ETIMEDOUT', 'ETIMEOUT', 'ESOCKETTIMEDOUT'].includes(rawCode) || /timed?\s*out|timeout/i.test(rawMessage)) {
         return {
             ...base,
             status: 504,
             code: 'DB_CONNECTION_TIMEOUT',
             message: `数据库连接超时：${diagnostics.host || '-'}:${diagnostics.port || '-'}`,
-            hint: '请检查 Pivot 服务器到数据库主机的网络路由、防火墙、安全组和端口映射；可通过 MCP_DATABASE_CONNECT_TIMEOUT_MS 临时调大超时时间。'
+            hint: '局域网连接超时，请检查 Pivot 服务器到数据库主机的物理路由、防火墙或安全组规则；如果是 MySQL 数据库，请排查其是否在进行反向 DNS 解析，建议配置 skip-name-resolve；同时可以调大环境变量 MCP_DATABASE_CONNECT_TIMEOUT_MS。'
         };
     }
 
@@ -323,8 +340,45 @@ function buildRelationalConnectionConfig(connection) {
     };
 }
 
+function getConnectionTimeoutMs(connection) {
+    return Math.max(1000, Number.parseInt(connection?.connect_timeout_ms || DATABASE_CONNECT_TIMEOUT_MS, 10) || DATABASE_CONNECT_TIMEOUT_MS);
+}
+
+function getDatabaseTestTimeoutMs() {
+    return DATABASE_TEST_CONNECT_TIMEOUT_MS;
+}
+
+function buildDatabaseTestConnectionConfig(connection = {}) {
+    const options = connection.options || {};
+    return {
+        ...connection,
+        ssl: connection.ssl !== undefined ? connection.ssl : options.ssl,
+        schema: connection.schema || options.schema || '',
+        connect_timeout_ms: getDatabaseTestTimeoutMs()
+    };
+}
+
+function createTimeoutError(connection, timeoutMs, phase = 'database connection test') {
+    const err = new Error(`${phase} timed out after ${timeoutMs}ms`);
+    err.code = 'DB_CONNECTION_TEST_TIMEOUT';
+    err.status = 504;
+    err.connection = databaseConnectionDiagnostics(connection);
+    return err;
+}
+
+function withOperationTimeout(promise, timeoutMs, connection, phase) {
+    let timer;
+    // 增加外层超时缓冲时间，让驱动底层自身的超时逻辑先触发，从而返回更具体的错误原因而不是通用超时
+    const outerTimeoutMs = timeoutMs + 5000;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(createTimeoutError(connection, timeoutMs, phase)), outerTimeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
 async function withPostgres(connection, handler) {
     const { Client } = optionalRequire('pg', 'Install it with npm install pg.');
+    const timeoutMs = getConnectionTimeoutMs(connection);
     const client = new Client({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.postgres,
@@ -332,7 +386,7 @@ async function withPostgres(connection, handler) {
         user: connection.username,
         password: connection.password,
         ssl: connection.ssl ? { rejectUnauthorized: false } : false,
-        connectionTimeoutMillis: DATABASE_CONNECT_TIMEOUT_MS
+        connectionTimeoutMillis: timeoutMs
     });
     await client.connect();
     try {
@@ -344,6 +398,7 @@ async function withPostgres(connection, handler) {
 
 async function withMysql(connection, handler) {
     const mysql = optionalRequire('mysql2/promise', 'Install it with npm install mysql2.');
+    const timeoutMs = getConnectionTimeoutMs(connection);
     const client = await mysql.createConnection({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.mysql,
@@ -351,7 +406,7 @@ async function withMysql(connection, handler) {
         user: connection.username,
         password: connection.password,
         ssl: connection.ssl ? {} : undefined,
-        connectTimeout: DATABASE_CONNECT_TIMEOUT_MS
+        connectTimeout: timeoutMs
     });
     try {
         return await handler(client);
@@ -362,7 +417,8 @@ async function withMysql(connection, handler) {
 
 async function withSqlServer(connection, handler) {
     const sql = optionalRequire('mssql', 'Install it with npm install mssql.');
-    const pool = await sql.connect({
+    const timeoutMs = getConnectionTimeoutMs(connection);
+    const pool = new sql.ConnectionPool({
         server: connection.host,
         port: connection.port || DEFAULT_PORTS.sqlserver,
         database: connection.database_name,
@@ -372,9 +428,10 @@ async function withSqlServer(connection, handler) {
             encrypt: Boolean(connection.ssl),
             trustServerCertificate: true
         },
-        connectionTimeout: DATABASE_CONNECT_TIMEOUT_MS,
-        requestTimeout: DATABASE_CONNECT_TIMEOUT_MS
+        connectionTimeout: timeoutMs,
+        requestTimeout: timeoutMs
     });
+    await pool.connect();
     try {
         return await handler(pool);
     } finally {
@@ -513,7 +570,8 @@ async function executeMongoTool(connection, name, input = {}) {
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
     const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS });
+    const timeoutMs = getConnectionTimeoutMs(connection);
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, connectTimeoutMS: timeoutMs, socketTimeoutMS: timeoutMs });
     await client.connect();
     try {
         const database = client.db(connection.database_name);
@@ -541,46 +599,50 @@ async function executeMongoTool(connection, name, input = {}) {
 }
 
 async function testDatabaseConnection(connection) {
-    if (connection.database_type === 'sqlite') {
-        return withSqlite(connection, client => {
+    const timeoutMs = getDatabaseTestTimeoutMs();
+    const testConnection = buildDatabaseTestConnectionConfig(connection);
+    if (testConnection.database_type === 'sqlite') {
+        return withSqlite(testConnection, client => {
             client.prepare('SELECT 1 AS ok').get();
-            return { database_type: connection.database_type };
+            return { database_type: testConnection.database_type };
         });
     }
-    if (connection.database_type === 'postgres') {
-        return withPostgres(connection, async client => {
+    if (testConnection.database_type === 'postgres') {
+        return withOperationTimeout(withPostgres(testConnection, async client => {
             await client.query('SELECT 1 AS ok');
-            return { database_type: connection.database_type };
-        });
+            return { database_type: testConnection.database_type };
+        }), timeoutMs, testConnection, 'PostgreSQL connection test');
     }
-    if (connection.database_type === 'mysql') {
-        return withMysql(connection, async client => {
-            await client.execute('SELECT 1 AS ok');
-            return { database_type: connection.database_type };
-        });
+    if (testConnection.database_type === 'mysql') {
+        return withOperationTimeout(withMysql(testConnection, async client => {
+            await client.query({ sql: 'SELECT 1 AS ok', timeout: timeoutMs });
+            return { database_type: testConnection.database_type };
+        }), timeoutMs, testConnection, 'MySQL connection test');
     }
-    if (connection.database_type === 'sqlserver') {
-        return withSqlServer(connection, async pool => {
+    if (testConnection.database_type === 'sqlserver') {
+        return withOperationTimeout(withSqlServer(testConnection, async pool => {
             await pool.request().query('SELECT 1 AS ok');
-            return { database_type: connection.database_type };
-        });
+            return { database_type: testConnection.database_type };
+        }), timeoutMs, testConnection, 'SQL Server connection test');
     }
-    if (connection.database_type === 'mongodb') {
+    if (testConnection.database_type === 'mongodb') {
         const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
-        const auth = connection.username
-            ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
+        const auth = testConnection.username
+            ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';
-        const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
-        const client = new MongoClient(uri, { serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS });
-        await client.connect();
-        try {
-            await client.db(connection.database_name).command({ ping: 1 });
-            return { database_type: connection.database_type };
-        } finally {
-            await client.close();
-        }
+        const uri = `mongodb://${auth}${testConnection.host}:${testConnection.port || DEFAULT_PORTS.mongodb}`;
+        const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, connectTimeoutMS: timeoutMs, socketTimeoutMS: timeoutMs });
+        return withOperationTimeout((async () => {
+            await client.connect();
+            try {
+                await client.db(testConnection.database_name).command({ ping: 1 });
+                return { database_type: testConnection.database_type };
+            } finally {
+                await client.close();
+            }
+        })(), timeoutMs, testConnection, 'MongoDB connection test');
     }
-    throw new Error(`Unsupported database type: ${connection.database_type}`);
+    throw new Error(`Unsupported database type: ${testConnection.database_type}`);
 }
 
 async function executeDatabaseMcpTool(server, name, input = {}) {
@@ -628,6 +690,7 @@ function validateDatabaseConnectionPayload(payload, user) {
 module.exports = {
     DEFAULT_PORTS,
     executeDatabaseMcpTool,
+    buildDatabaseTestConnectionConfig,
     getDatabaseConnectionForServer,
     listDatabaseMcpTools,
     normalizeDatabaseConnection,

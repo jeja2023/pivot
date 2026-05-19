@@ -707,55 +707,101 @@
 }
 .settings-workspace-view #tab-content-monitor .monitor-observability-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 10px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.09);
+    grid-template-columns: minmax(0, 1fr) minmax(74px, auto);
+    align-items: center;
+    gap: 12px;
+    min-height: 54px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #ffffff;
 }
 .settings-workspace-view #tab-content-monitor .monitor-observability-row:last-child {
-    border-bottom: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-row.is-warning {
+    border-left: 3px solid #f59e0b;
+    background: #fffbeb;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-row.is-critical {
+    border-left: 3px solid #ef4444;
+    background: #fef2f2;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-row.is-info {
+    border-left: 3px solid #3b82f6;
+    background: #eff6ff;
 }
 .settings-workspace-view #tab-content-monitor .monitor-observability-main {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
-.settings-workspace-view #tab-content-monitor .monitor-observability-main span {
+.settings-workspace-view #tab-content-monitor .monitor-observability-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-title strong {
+    color: var(--text-main);
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.25;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-badges {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 4px;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-badges span {
+    color: #475569;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 3px 6px;
+    white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-main small {
     color: #64748b;
     font-size: 0.7rem;
-    font-weight: 800;
+    font-weight: 700;
     line-height: 1.2;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.settings-workspace-view #tab-content-monitor .monitor-observability-main strong {
-    color: var(--text-main);
-    font-size: 0.73rem;
-    font-weight: 800;
-    line-height: 1.35;
-    overflow: visible;
-    overflow-wrap: anywhere;
-    text-align: left;
-    white-space: normal;
-}
-.settings-workspace-view #tab-content-monitor .monitor-observability-main small {
-    color: #64748b;
-    font-size: 0.68rem;
-    font-weight: 700;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
-}
 .settings-workspace-view #tab-content-monitor .monitor-observability-duration {
-    color: var(--text-main);
-    font-size: 0.74rem;
-    font-weight: 800;
-    line-height: 1.25;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 1px;
     text-align: right;
     white-space: nowrap;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-duration strong {
+    color: #0f172a;
+    font-size: 0.82rem;
+    font-weight: 900;
+    line-height: 1.1;
+}
+.settings-workspace-view #tab-content-monitor .monitor-observability-duration small {
+    color: #64748b;
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
 }
 .settings-workspace-view #tab-content-monitor .monitor-empty {
     padding: 5px 8px;

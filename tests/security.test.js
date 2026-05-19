@@ -124,6 +124,7 @@ const {
     optimizeDatabase
 } = require('../server/services/maintenance');
 const { cleanupSoftDeletedStorage } = require('../server/services/storage-gc');
+const { aiSemaphore } = require('../server/services/concurrency');
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
 const { createModelsRouter } = require('../server/routes/models');
 const { createSessionsRouter } = require('../server/routes/sessions');
@@ -184,9 +185,11 @@ const {
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 const {
+    buildDatabaseTestConnectionConfig,
     normalizeDatabaseConnectionError,
     validateDatabaseConnectionPayload
 } = require('../server/services/database-mcp');
+const { callModelText } = require('../server/services/agent-model');
 const { db } = require('../server/db');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
@@ -938,6 +941,36 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     assert.equal(Array.isArray(result), true);
 });
 
+test('agent model calls wait for global model queue instead of failing immediately', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    await aiSemaphore.acquire();
+    let releasedGlobal = false;
+    let called = false;
+    axios.post = async () => {
+        called = true;
+        return { data: { choices: [{ message: { content: 'queued ok' } }] } };
+    };
+    try {
+        const pending = callModelText({
+            id: 901001,
+            name: 'Queued Agent Model',
+            url: 'http://127.0.0.1:65530/v1/chat/completions',
+            model_name: 'queued-agent-model'
+        }, [{ role: 'user', content: 'hello' }]);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        assert.equal(called, false);
+        aiSemaphore.release();
+        releasedGlobal = true;
+        const result = await pending;
+        assert.equal(result, 'queued ok');
+        assert.equal(called, true);
+    } finally {
+        axios.post = originalPost;
+        if (!releasedGlobal) aiSemaphore.release();
+    }
+});
+
 test('agent runs can be cancelled and rerun from an existing run', () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
@@ -967,6 +1000,25 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(run.approval_policy, 'approve_all_mcp');
     assert.equal(run.retry_limit, 2);
     assert.equal(run.max_token_budget, 100000);
+
+    const repairedTitleRun = createAgentRun({
+        user,
+        goal: '请使用数据库 MCP 查询 hcd_b 表并输出部门统计',
+        title: '????????',
+        modelId: Number(modelInfo.lastInsertRowid),
+        maxSteps: 3,
+        toolPolicy: 'builtin_only'
+    });
+    assert.equal(repairedTitleRun.title, '请使用数据库 MCP 查询 hcd_b 表并输出部门统计'.slice(0, 40));
+    db.prepare('UPDATE agent_runs SET title = ? WHERE id = ?').run('????????', repairedTitleRun.id);
+    const realtime = createFakeSseResponse();
+    const unsubscribeRealtime = subscribeUserEvents(user, realtime, { heartbeatMs: 0 });
+    cancelAgentRun(repairedTitleRun.id, user);
+    const realtimePayload = realtime.chunks.join('');
+    assert.doesNotMatch(realtimePayload, /\?{3,}/);
+    assert.match(realtimePayload, /请使用数据库 MCP 查询 hcd_b 表并输出部门统计/);
+    unsubscribeRealtime();
+
     const cancelled = cancelAgentRun(run.id, user);
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(Boolean(cancelled.cancelled_at), true);
@@ -1705,8 +1757,12 @@ test('local model host detection includes request and configured host aliases', 
     assert.equal(normalizeHostAlias('ai.example.com:3000'), 'ai.example.com');
 
     const previousAliases = process.env.PIVOT_LOCAL_MODEL_HOSTS;
+    const previousAdvertiseAliases = process.env.PIVOT_ADVERTISE_HOSTS;
+    const previousCorsOrigin = process.env.CORS_ORIGIN;
     const previousLegacyAliases = process.env.MODEL_LOCAL_HOSTS;
     process.env.PIVOT_LOCAL_MODEL_HOSTS = '203.0.113.10,llama-server:8080';
+    process.env.PIVOT_ADVERTISE_HOSTS = '192.168.31.10,pivot.local:4088';
+    process.env.CORS_ORIGIN = 'http://pivot.example.com:4088';
     process.env.MODEL_LOCAL_HOSTS = '198.51.100.44';
     try {
         const names = getLocalHostnames({
@@ -1718,12 +1774,27 @@ test('local model host detection includes request and configured host aliases', 
         assert.equal(names.has('models.internal'), true);
         assert.equal(names.has('203.0.113.10'), true);
         assert.equal(names.has('llama-server'), true);
+        assert.equal(names.has('192.168.31.10'), true);
+        assert.equal(names.has('pivot.local'), true);
+        assert.equal(names.has('pivot.example.com'), true);
+        assert.equal(isLocalModelHost('http://192.168.31.10:8000/v1', names), true);
+        assert.equal(isLocalModelHost('http://pivot.example.com:8000/v1', names), true);
         assert.equal(names.has('198.51.100.44'), false);
     } finally {
         if (previousAliases === undefined) {
             delete process.env.PIVOT_LOCAL_MODEL_HOSTS;
         } else {
             process.env.PIVOT_LOCAL_MODEL_HOSTS = previousAliases;
+        }
+        if (previousAdvertiseAliases === undefined) {
+            delete process.env.PIVOT_ADVERTISE_HOSTS;
+        } else {
+            process.env.PIVOT_ADVERTISE_HOSTS = previousAdvertiseAliases;
+        }
+        if (previousCorsOrigin === undefined) {
+            delete process.env.CORS_ORIGIN;
+        } else {
+            process.env.CORS_ORIGIN = previousCorsOrigin;
         }
         if (previousLegacyAliases === undefined) {
             delete process.env.MODEL_LOCAL_HOSTS;
@@ -2013,6 +2084,79 @@ test('non-root admin creates private chat models and cannot delete global models
     } finally {
         db.prepare('DELETE FROM models WHERE name IN (?, ?)').run(`Global ${suffix}`, `Private ${suffix}`);
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+    }
+});
+
+test('visible global models can be tested by admins and users without exposing ownership controls', async () => {
+    const suffix = Date.now().toString(36);
+    const axios = require('axios');
+    const originalGet = axios.get;
+    const adminInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`global_test_admin_${suffix}`, 'hash', 'Global Test Admin', 'QA', 'admin', 'active');
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`global_test_user_${suffix}`, 'hash', 'Global Test User', 'OPS', 'user', 'active');
+    const adminUser = { id: Number(adminInfo.lastInsertRowid), username: `global_test_admin_${suffix}`, role: 'admin', unit: 'QA' };
+    const normalUser = { id: Number(userInfo.lastInsertRowid), username: `global_test_user_${suffix}`, role: 'user', unit: 'OPS' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, api_key, model_name, allowed_units, created_at)
+        VALUES (NULL, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`Visible Global ${suffix}`, 'https://global-visible.example/v1', encryptSecret(`global-secret-${suffix}`), 'global-visible-chat', 'OPS');
+
+    const makeRouter = user => createModelsRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        probeLimiter: (_req, _res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+
+    try {
+        const seenAuthHeaders = [];
+        axios.get = async (_url, options = {}) => {
+            seenAuthHeaders.push(options.headers?.Authorization || '');
+            return { data: { data: [{ id: 'global-visible-chat' }] }, status: 200 };
+        };
+
+        for (const user of [adminUser, normalUser]) {
+            const router = makeRouter(user);
+            const testRoute = router.stack.find(layer => layer.route?.path === '/models/test');
+            const res = makeRes();
+            await runExpressHandlers(testRoute.route.stack.map(layer => layer.handle), {
+                body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
+                user,
+                log: { debug() {}, info() {}, error() {}, warn() {} }
+            }, res);
+            assert.equal(res.statusCode, 200);
+            assert.equal(res.body.success, true);
+        }
+
+        assert.deepEqual(seenAuthHeaders, [
+            `Bearer global-secret-${suffix}`,
+            `Bearer global-secret-${suffix}`
+        ]);
+
+        const userRouter = makeRouter(normalUser);
+        const keyRoute = userRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
+        const keyRes = makeRes();
+        await runExpressHandlers(keyRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelInfo.lastInsertRowid) },
+            body: { password: 'irrelevant' },
+            user: normalUser
+        }, keyRes);
+        assert.equal(keyRes.statusCode, 403);
+    } finally {
+        axios.get = originalGet;
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(adminUser.id, normalUser.id);
     }
 });
 
@@ -2511,6 +2655,26 @@ test('database MCP allows private LAN hosts by default and restricts only when c
     }
 });
 
+test('database MCP test config flattens options used by drivers', () => {
+    const previousTimeout = process.env.MCP_DATABASE_TEST_TIMEOUT_MS;
+    const connection = validateDatabaseConnectionPayload({
+        database_type: 'mysql',
+        host: '192.168.1.88',
+        port: 3306,
+        database_name: 'biz',
+        username: 'reader',
+        password: 'secret',
+        schema: 'reporting',
+        ssl: true
+    }, { id: 1002, username: 'lan_ssl_user', role: 'user' });
+    const testConfig = buildDatabaseTestConnectionConfig(connection);
+    assert.equal(testConfig.ssl, true);
+    assert.equal(testConfig.schema, 'reporting');
+    assert.equal(testConfig.connect_timeout_ms >= 1000, true);
+    if (previousTimeout === undefined) delete process.env.MCP_DATABASE_TEST_TIMEOUT_MS;
+    else process.env.MCP_DATABASE_TEST_TIMEOUT_MS = previousTimeout;
+});
+
 test('database MCP connection errors return actionable diagnostics', () => {
     const refused = normalizeDatabaseConnectionError(
         Object.assign(new Error('connect ECONNREFUSED 192.168.1.88:3306'), { code: 'ECONNREFUSED' }),
@@ -2528,6 +2692,14 @@ test('database MCP connection errors return actionable diagnostics', () => {
     assert.equal(auth.status, 403);
     assert.equal(auth.code, 'DB_AUTH_FAILED');
     assert.match(auth.hint, /Pivot|授权|pg_hba|user@/);
+
+    const testTimeout = normalizeDatabaseConnectionError(
+        Object.assign(new Error('database TCP probe timed out after 5000ms'), { code: 'DB_CONNECTION_TEST_TIMEOUT', status: 504 }),
+        { database_type: 'mysql', host: '192.168.1.88', port: 3306, database_name: 'biz' }
+    );
+    assert.equal(testTimeout.status, 504);
+    assert.equal(testTimeout.code, 'DB_CONNECTION_TEST_TIMEOUT');
+    assert.match(testTimeout.hint, /MCP_DATABASE_TEST_TIMEOUT_MS|skip-name-resolve|反向 DNS/);
 });
 
 test('non-root admin cannot manage administrator accounts', async () => {

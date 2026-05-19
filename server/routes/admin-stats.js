@@ -128,6 +128,10 @@ function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_U
         // Keep the conservative defaults above.
     }
     addHostAlias(names, publicUrl);
+    addHostAlias(names, process.env.PUBLIC_URL || '');
+    addHostAlias(names, process.env.CORS_ORIGIN || '');
+    addHostAlias(names, process.env.PIVOT_HOST || '');
+    addHostAlias(names, process.env.PIVOT_ADVERTISE_HOSTS || '');
     addHostAlias(names, process.env.PIVOT_LOCAL_MODEL_HOSTS || '');
     requestHosts.forEach(host => addHostAlias(names, host));
     return names;

@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { assertSafeOutboundUrl, encryptSecret, validateModelUrl } = require('../security');
+const { assertSafeOutboundUrl, encryptSecret, decryptSecret, validateModelUrl } = require('../security');
 const {
     normalizeTags,
     normalizeBooleanFlag,
@@ -26,6 +26,38 @@ function canManageModel(model, user) {
 
 function canUseStoredModelSecret(model, user) {
     return canManageModel(model, user);
+}
+
+function canTestModel(model, user) {
+    if (!model || !user) return false;
+    if (model.user_id === user.id) return true;
+    return model.user_id === null;
+}
+
+function getTestableModel(modelId, user) {
+    if (!modelId || !user?.id) return null;
+    const isNumeric = /^\d+$/.test(String(modelId));
+    const sql = isNumeric
+        ? "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id IS NULL OR user_id = ?)"
+        : "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id IS NULL OR user_id = ?)";
+    const params = isNumeric ? [modelId, modelId, user.id] : [modelId, user.id];
+    const model = db.prepare(sql).get(...params);
+    if (!model) return null;
+    if (model.user_id && model.user_id !== user.id) return null;
+    if (!model.user_id && user.role !== 'admin' && model.allowed_units) {
+        const units = String(model.allowed_units || '').split(',').map(unit => unit.trim()).filter(Boolean);
+        const userUnit = String(user.unit || '').trim();
+        if (!userUnit || !units.includes(userUnit)) return null;
+    }
+    if (model.api_key) {
+        try {
+            model.api_key = decryptSecret(model.api_key);
+        } catch (e) {
+            model.api_key = '';
+            model.secret_error = e.message || '模型密钥解密失败';
+        }
+    }
+    return model;
 }
 
 function buildModelsListUrl(url) {
@@ -143,8 +175,8 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const testSource = source || (id ? 'auto' : 'manual');
 
         if (id) {
-            const storedModel = getAccessibleModel(id, req.user);
-            if (!storedModel || String(storedModel.id) !== String(id) || !canUseStoredModelSecret(storedModel, req.user)) {
+            const storedModel = getTestableModel(id, req.user);
+            if (!storedModel || String(storedModel.id) !== String(id) || !canTestModel(storedModel, req.user)) {
                 return res.status(403).json({ error: '无权测试该模型或模型不存在' });
             }
             if (storedModel.secret_error) {

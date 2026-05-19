@@ -203,6 +203,25 @@ function normalizeAgentGoal(goal) {
     return cleanGoal;
 }
 
+function looksLikeCorruptTitle(value) {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    if (/^[?\uFFFD\s._-]+$/.test(text) && /[?\uFFFD]{3,}/.test(text)) return true;
+    const questionCount = (text.match(/[?\uFFFD]/g) || []).length;
+    return questionCount >= 3 && questionCount / Math.max(text.length, 1) > 0.55;
+}
+
+function normalizeAgentTitle(title, goal) {
+    const fallback = String(goal || '').trim().slice(0, 40) || '智能体任务';
+    const cleanTitle = String(title || '').trim();
+    if (looksLikeCorruptTitle(cleanTitle)) return fallback;
+    return cleanTitle.slice(0, 80);
+}
+
+function getAgentRunTitle(run) {
+    return normalizeAgentTitle(run?.title, run?.goal);
+}
+
 function getRunForUser(runId, user, options = {}) {
     const includeDeleted = Boolean(options.includeDeleted);
     return db.prepare(`
@@ -330,7 +349,7 @@ function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
         reason,
         run: {
             id: run.id,
-            title: run.title,
+            title: getAgentRunTitle(run),
             goal: run.goal,
             status: run.status,
             updated_at: run.updated_at,
@@ -403,6 +422,12 @@ function getRunMetadata(run) {
 
 function createAgentNotification(userId, runId, type, title, body = '') {
     if (!userId || !title) return null;
+    const run = runId
+        ? db.prepare('SELECT title, goal FROM agent_runs WHERE id = ?').get(runId)
+        : null;
+    const fallbackTitle = run ? getAgentRunTitle(run) : '智能体通知';
+    const safeTitle = looksLikeCorruptTitle(title) ? fallbackTitle : String(title || '').trim();
+    const safeBody = looksLikeCorruptTitle(body) ? fallbackTitle : String(body || '').trim();
     const info = db.prepare(`
         INSERT INTO agent_notifications (user_id, run_id, type, title, body, status, created_at)
         VALUES (?, ?, ?, ?, ?, 'unread', ?)
@@ -410,8 +435,8 @@ function createAgentNotification(userId, runId, type, title, body = '') {
         userId,
         runId || null,
         String(type || 'info').slice(0, 40),
-        String(title || '').slice(0, 160),
-        String(body || '').slice(0, 1000),
+        safeTitle.slice(0, 160),
+        safeBody.slice(0, 1000),
         getBeijingTimestamp()
     );
     const notification = db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(info.lastInsertRowid);
@@ -461,7 +486,7 @@ function cancelAgentRun(runId, user) {
         title: '用户停止任务',
         output: { status: 'cancelled' }
     });
-    createAgentNotification(user.id, runId, 'cancelled', '智能体任务已停止', run.title || run.goal);
+    createAgentNotification(user.id, runId, 'cancelled', '智能体任务已停止', getAgentRunTitle(run));
     return getRunForUser(runId, user);
 }
 
@@ -521,7 +546,7 @@ function resumeAgentRun(runId, user) {
         goal: resumeGoal,
         modelId: run.model_id,
         sessionId: run.session_id,
-        title: `继续：${run.title || run.goal}`.slice(0, 80),
+        title: `继续：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
         runMode: run.run_mode,
@@ -917,7 +942,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
     });
-    createAgentNotification(user.id, run.id, 'completed', '智能体 DAG 任务已完成', run.title || run.goal);
+    createAgentNotification(user.id, run.id, 'completed', '智能体 DAG 任务已完成', getAgentRunTitle(run));
 }
 
 async function runAgent(runId, user) {
@@ -985,7 +1010,7 @@ async function runAgent(runId, user) {
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', run.title || run.goal);
+                createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
                 return;
             }
 
@@ -1049,7 +1074,7 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', run.title || run.goal);
+        createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
     } catch (e) {
         if (e.code === 'AGENT_RUN_CANCELLED') {
             updateRun(runId, { updated_at: getBeijingTimestamp() });
@@ -1139,7 +1164,7 @@ function approveAgentTool(runId, user, approve = true) {
             toolName: pending.tool || '',
             output: { status: 'rejected' }
         });
-        createAgentNotification(user.id, runId, 'cancelled', '智能体审批已拒绝', pending.tool || run.title || run.goal);
+        createAgentNotification(user.id, runId, 'cancelled', '智能体审批已拒绝', pending.tool || getAgentRunTitle(run));
         return getRunForUser(runId, user);
     }
     const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
@@ -1724,7 +1749,7 @@ function saveAgentRunArtifact(runId, user, body = {}) {
         err.status = 400;
         throw err;
     }
-    const title = String(body.title || detail.run.title || detail.run.goal || '智能体结果').trim().slice(0, 120);
+    const title = String(body.title || getAgentRunTitle(detail.run) || '智能体结果').trim().slice(0, 120);
     const note = String(body.note || '初始沉淀').trim().slice(0, 500);
     const now = getBeijingTimestamp();
     let artifactId = 0;
@@ -1758,7 +1783,7 @@ function exportAgentRun(runId, user, format = 'json') {
         .run(getBeijingTimestamp(), runId);
     if (format === 'markdown') {
         const lines = [
-            `# ${detail.run.title || '智能体任务报告'}`,
+            `# ${getAgentRunTitle(detail.run) || '智能体任务报告'}`,
             '',
             `- 状态：${detail.run.status}`,
             `- 模型：${detail.run.model_name || detail.run.model_id || '-'}`,
@@ -1839,7 +1864,7 @@ function createAgentRun({
         user.id,
         sessionId || null,
         modelCfg.id,
-        title || cleanGoal.slice(0, 40),
+        normalizeAgentTitle(title, cleanGoal),
         cleanGoal,
         'queued',
         normalizeMaxSteps(maxSteps),

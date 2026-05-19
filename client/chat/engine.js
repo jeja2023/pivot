@@ -229,6 +229,10 @@ window.selectSession = async function(id, title, options = {}) {
 }
 
 window.sendMessage = async function(isRegenerate = false) {
+    if (currentAbortController) {
+        showToast('当前仍有回答正在生成，请等待完成或先停止生成。', 'warning');
+        return;
+    }
     const userVisibleContent = document.getElementById('user-input').value.trim();
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
@@ -277,6 +281,10 @@ window.sendMessage = async function(isRegenerate = false) {
         } else return;
     }
 
+    const requestSessionId = String(currentSessionId);
+    const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
+    const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
+
     if (!isRegenerate) {
         appendMessage('user', displayContent, null, { createdAt: new Date() });
     }
@@ -302,7 +310,7 @@ window.sendMessage = async function(isRegenerate = false) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
             body: JSON.stringify({
-                sessionId: currentSessionId,
+                sessionId: requestSessionId,
                 content,
                 displayContent: stripInternalReferenceText(displayContent || content),
                 modelId,
@@ -320,8 +328,8 @@ window.sendMessage = async function(isRegenerate = false) {
         if (responseType.includes('application/json')) {
             const data = await response.json();
             fullAiContent = data.content || data.error || '';
-            if (textBody) textBody.innerHTML = renderAiMessage(fullAiContent, false);
-            window.scrollMessagesToBottom?.();
+            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             if (window.loadSessions) window.loadSessions();
             return;
         }
@@ -398,19 +406,27 @@ window.sendMessage = async function(isRegenerate = false) {
                 break;
             }
             sseParser.write(decoder.decode(value, { stream: true }));
-            const container = document.getElementById('message-container');
-            if (container.scrollHeight - container.scrollTop - container.clientHeight < 120) container.scrollTop = container.scrollHeight;
+            if (isViewingRequestSession()) {
+                const container = document.getElementById('message-container');
+                if (container.scrollHeight - container.scrollTop - container.clientHeight < 120) container.scrollTop = container.scrollHeight;
+            }
         }
         flushStreamRender();
-        window.scrollMessagesToBottom?.();
+        if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 
         const finalElapsed = (Date.now() - startTime) / 1000;
         const finalTps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
         await apiFetch(API_BASE + '/chat/stats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId: currentSessionId, costTime: finalElapsed, tps: finalTps })
+            body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
         });
+
+        if (isViewingRequestSession() && !document.body.contains(aiMsgEl)) {
+            await selectSession(requestSessionId);
+        } else if (!isViewingRequestSession()) {
+            showToast('原会话的回答已生成完成，可切回查看。', 'info');
+        }
         
         // 延迟刷新侧边栏，等待后台标题生成完成
         setTimeout(() => {
@@ -419,11 +435,11 @@ window.sendMessage = async function(isRegenerate = false) {
     } catch (e) {
         if (e.name === 'AbortError') {
             fullAiContent += '\n\n[已由用户中断生成]';
-            textBody.innerHTML = renderAiMessage(fullAiContent);
-            window.scrollMessagesToBottom?.();
+            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent);
+            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {
-            updateAssistantStatus(e.message, 'error');
-            window.scrollMessagesToBottom?.();
+            if (isRequestMessageVisible()) updateAssistantStatus(e.message, 'error');
+            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }
     } finally {

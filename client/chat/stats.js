@@ -247,6 +247,27 @@ const formatMsDuration = (milliseconds) => {
     return `${Math.ceil(value)} ms`;
 };
 
+const formatObservabilityDuration = (milliseconds) => {
+    const value = Math.max(0, Number(milliseconds) || 0);
+    if (value >= 60000) return `${(value / 60000).toFixed(1)} min`;
+    if (value >= 1000) return `${(value / 1000).toFixed(1)} s`;
+    return `${Math.ceil(value)} ms`;
+};
+
+const observabilityTypeLabels = {
+    model: '模型',
+    sql: 'SQL',
+    rag: '知识库',
+    http: '接口',
+    system: '系统'
+};
+
+const observabilitySeverityLabels = {
+    info: '提示',
+    warning: '预警',
+    critical: '严重'
+};
+
 const formatHealthStatus = (status) => {
     if (status === 'ok') return '正常';
     if (status === 'degraded') return '需关注';
@@ -474,23 +495,6 @@ window.loadMonitorSummary = async function() {
             healthEl.innerHTML = [...healthRows, ...maintenanceRows].join('');
         }
 
-        let endpointNotice = '';
-        if (endpoints.hasRemoteModels) {
-            const remoteNames = (endpoints.remoteModels || []).map(m => m.name).join('、');
-            const localNames = (endpoints.localModels || []).map(m => m.name).join('、');
-            let msg = `<strong>集群模式：</strong>检测到远端模型（${escapeHtml(remoteNames)}）`;
-            if (localNames) {
-                msg += `，本机运行模型（${escapeHtml(localNames)}），本机指标仅供本机模型参考。`;
-            } else {
-                msg += `，本机指标仅供参考。`;
-            }
-            endpointNotice = `<div class="monitor-empty is-info">${msg}</div>`;
-        } else if (endpoints.hasLocalModels) {
-            endpointNotice = '<div class="monitor-empty is-ok"><strong>本地模式：</strong>模型部署在本地，数据真实。</div>';
-        } else {
-            endpointNotice = '<div class="monitor-empty">未检测到活跃端点。</div>';
-        }
-
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
             ? gpu.gpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
@@ -508,8 +512,10 @@ window.loadMonitorSummary = async function() {
             }).join('')
             : `<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
 
+        const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>本机指标：</strong>仅显示 Pivot 部署服务器上的 NVIDIA GPU 与全局并发保护；模型端点本地/远端状态请查看“模型端点状态”。</div>';
+
         document.getElementById('monitor-gpu-list').innerHTML = [
-            endpointNotice,
+            gpuScopeNotice,
             `<div class="monitor-row monitor-split-row">
                 <div>
                     <span>保护状态</span>
@@ -555,16 +561,31 @@ window.loadMonitorSummary = async function() {
         }
         if (observabilityEl) {
             const events = observability.events || [];
-            observabilityEl.innerHTML = events.length ? events.map(item => `
-                <div class="monitor-observability-row">
-                    <div class="monitor-observability-main" title="${escapeHtml([item.type, item.severity, item.source, item.message].filter(Boolean).join(' · '))}">
-                        <span>${escapeHtml(item.type || '-')} · ${escapeHtml(item.severity || '-')}</span>
-                        ${item.message ? `<strong>${escapeHtml(item.message)}</strong>` : ''}
-                        ${item.source ? `<small>${escapeHtml(item.source)}</small>` : ''}
+            observabilityEl.innerHTML = events.length ? events.map(item => {
+                const typeLabel = observabilityTypeLabels[item.type] || item.type || '-';
+                const severityLabel = observabilitySeverityLabels[item.severity] || item.severity || '-';
+                const title = item.message || item.source || '异常事件';
+                const source = item.source || item.details?.modelName || item.details?.route || item.details?.query || '';
+                const severityClass = item.severity === 'critical' ? ' is-critical' : item.severity === 'info' ? ' is-info' : ' is-warning';
+                return `
+                <div class="monitor-observability-row${severityClass}">
+                    <div class="monitor-observability-main" title="${escapeHtml([typeLabel, severityLabel, source, item.message].filter(Boolean).join(' · '))}">
+                        <div class="monitor-observability-title">
+                            <strong>${escapeHtml(title)}</strong>
+                            <span class="monitor-observability-badges">
+                                <span>${escapeHtml(typeLabel)}</span>
+                                <span>${escapeHtml(severityLabel)}</span>
+                            </span>
+                        </div>
+                        ${source ? `<small>${escapeHtml(source)}</small>` : ''}
                     </div>
-                    <div class="monitor-observability-duration">${formatMetricNumber(item.duration_ms, 1)} ms</div>
+                    <div class="monitor-observability-duration" title="${formatMetricNumber(item.duration_ms, 1)} ms">
+                        <strong>${escapeHtml(formatObservabilityDuration(item.duration_ms))}</strong>
+                        <small>耗时</small>
+                    </div>
                 </div>
-            `).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
+            `;
+            }).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
         }
 
         const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];

@@ -14,6 +14,35 @@ let agentRealtimeRefreshTimer = null;
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 
+function agentLooksLikeCorruptTitle(value) {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    if (/^[?\uFFFD\s._-]+$/.test(text) && /[?\uFFFD]{3,}/.test(text)) return true;
+    const questionCount = (text.match(/[?\uFFFD]/g) || []).length;
+    return questionCount >= 3 && questionCount / Math.max(text.length, 1) > 0.55;
+}
+
+function agentDisplayTitle(item) {
+    const title = String(item?.title || '').trim();
+    const goal = String(item?.goal || '').trim();
+    if (!agentLooksLikeCorruptTitle(title)) return title;
+    return goal || '智能体任务';
+}
+
+function agentNotificationTitle(item) {
+    const title = String(item?.title || '').trim();
+    if (!agentLooksLikeCorruptTitle(title)) return title;
+    const body = String(item?.body || '').trim();
+    if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
+    return '智能体通知';
+}
+
+function agentNotificationBody(item) {
+    const body = String(item?.body || item?.created_at || '').trim();
+    if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
+    return item?.created_at || '任务状态已更新';
+}
+
 function agentStatusLabel(status) {
     const map = {
         queued: '排队中',
@@ -43,7 +72,7 @@ function agentRunMeta(run) {
 
 function agentRunTooltip(run) {
     const lines = [];
-    const title = run.title || run.goal || '';
+    const title = agentDisplayTitle(run);
     const goal = run.goal || '';
     const meta = agentRunMeta(run);
     if (title) lines.push(`标题：${title}`);
@@ -490,7 +519,7 @@ async function loadAgentRuns() {
         return `
         <button class="agent-run-item ${run.id === selectedRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}" ${run.id === selectedRunId ? 'aria-current="true"' : ''} title="${agentEscape(tooltip)}" aria-label="${agentEscape(tooltip)}">
             <span class="agent-run-status ${agentEscape(run.status)}">${agentStatusLabel(run.status)}</span>
-            <strong>${agentEscape(run.title || run.goal)}</strong>
+            <strong>${agentEscape(agentDisplayTitle(run))}</strong>
             <small>${agentEscape(formatDateToCN(run.created_at))}</small>
             ${meta ? `<em>${agentEscape(meta)}</em>` : ''}
         </button>
@@ -630,7 +659,7 @@ function renderAgentAuditRows(items = []) {
             <tr>
                 <td class="text-center">${index + 1}</td>
                 <td title="${agentEscape(item.goal || item.title)}">
-                    <strong>${agentEscape(item.title || item.goal || '-')}</strong>
+                    <strong>${agentEscape(agentDisplayTitle(item) || '-')}</strong>
                     <small>${agentEscape(agentShortText(item.goal || '', 90))}</small>
                 </td>
                 <td>${agentEscape(userName)}</td>
@@ -693,7 +722,7 @@ function scheduleAgentRealtimeRefresh(payload = {}) {
 function handleAgentRealtimeEvent(event) {
     const payload = JSON.parse(event.data || '{}');
     if (payload.type === 'agent.notification' && payload.notification?.status === 'unread') {
-        showToast(payload.notification.title || '收到新的智能体通知', 'info');
+        showToast(agentNotificationTitle(payload.notification) || '收到新的智能体通知', 'info');
     }
     scheduleAgentRealtimeRefresh(payload);
 }
@@ -869,8 +898,8 @@ async function loadAgentNotifications() {
     const items = data.data || [];
     list.innerHTML = items.length ? items.slice(0, 5).map(item => `
         <button type="button" class="agent-ops-item ${item.status === 'unread' ? 'unread' : ''}" data-agent-notification-id="${agentEscape(item.id)}" data-agent-notification-run="${agentEscape(item.run_id || '')}">
-            <strong>${agentEscape(item.title)}</strong>
-            <span>${agentEscape(agentShortText(item.body || item.created_at, 72))}</span>
+            <strong>${agentEscape(agentNotificationTitle(item))}</strong>
+            <span>${agentEscape(agentNotificationBody(item))}</span>
         </button>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无通知</div>';
     list.querySelectorAll('[data-agent-notification-id]').forEach(btn => {
@@ -1015,8 +1044,8 @@ window.openAgentArtifactVersions = loadAgentArtifactModal;
 window.createAgentRun = async function() {
     const payload = getAgentRunPayload();
     const frequency = document.getElementById('agent-schedule-frequency')?.value || 'manual';
-    if (!payload.goal) return showToast('????????', 'error');
-    if (!payload.modelId) return showToast('?????', 'error');
+    if (!payload.goal) return showToast('请先填写任务目标', 'error');
+    if (!payload.modelId) return showToast('请选择模型', 'error');
     if (payload._invalid) return;
     const preflight = await preflightAgentPayload(payload);
     if (preflight.status === 'blocked') return showToast('任务预检未通过，请先处理阻断项', 'error');
@@ -1033,8 +1062,8 @@ window.createAgentRun = async function() {
             })
         });
         const scheduleData = await scheduleRes.json().catch(() => ({}));
-        if (!scheduleRes.ok) return showToast(scheduleData.error || '??????', 'error');
-        showToast('????????', 'success');
+        if (!scheduleRes.ok) return showToast(scheduleData.error || '计划创建失败', 'error');
+        showToast('计划任务已创建', 'success');
         await loadAgentSchedules();
         return;
     }
@@ -1044,8 +1073,8 @@ window.createAgentRun = async function() {
         body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (!res.ok) return showToast(data.error || '??????', 'error');
-    showToast('????????', 'success');
+    if (!res.ok) return showToast(data.error || '任务创建失败', 'error');
+    showToast('智能体任务已入队', 'success');
     document.getElementById('agent-goal-input').value = '';
     await Promise.all([loadAgentRuns(), loadAgentSchedules(), loadAgentNotifications()]);
     await window.openAgentRun(data.run.id);

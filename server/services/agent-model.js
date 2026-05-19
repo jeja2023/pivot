@@ -5,20 +5,48 @@ const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
+const { aiSemaphore } = require('./concurrency');
+const {
+    acquireModelSlot,
+    recordModelFailure,
+    recordModelSuccess
+} = require('./model-runtime');
+
+async function withAgentModelConcurrency(modelCfg, operation) {
+    let globalAcquired = false;
+    let endpointRelease = null;
+    const startedAt = Date.now();
+    try {
+        await aiSemaphore.acquire();
+        globalAcquired = true;
+        endpointRelease = await acquireModelSlot(modelCfg);
+        const result = await operation();
+        recordModelSuccess(modelCfg, Date.now() - startedAt);
+        return result;
+    } catch (err) {
+        recordModelFailure(modelCfg, err);
+        throw err;
+    } finally {
+        if (endpointRelease) endpointRelease();
+        if (globalAcquired) aiSemaphore.release();
+    }
+}
 
 async function callModelJson(modelCfg, messages) {
-    const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), {
-        model: modelCfg.model_name || modelCfg.name,
-        messages,
-        stream: false,
-        temperature: 0.2,
-        max_tokens: 1200
-    }, {
-        headers: buildModelHeaders(modelCfg, { acceptJson: true }),
-        timeout: 180000,
-        proxy: false
+    return withAgentModelConcurrency(modelCfg, async () => {
+        const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), {
+            model: modelCfg.model_name || modelCfg.name,
+            messages,
+            stream: false,
+            temperature: 0.2,
+            max_tokens: 1200
+        }, {
+            headers: buildModelHeaders(modelCfg, { acceptJson: true }),
+            timeout: 180000,
+            proxy: false
+        });
+        return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     });
-    return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
 }
 
 async function callModelText(modelCfg, messages) {
@@ -52,5 +80,6 @@ function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent
 module.exports = {
     callModelJson,
     callModelText,
-    recordAgentModelUsage
+    recordAgentModelUsage,
+    withAgentModelConcurrency
 };
