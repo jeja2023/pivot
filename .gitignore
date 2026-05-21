@@ -4,6 +4,8 @@ data/
 uploads/
 *.log
 *.db
+.codex-sidebar-data/
+.codex-sidebar-server.*.log
 .DS_Store
 dist/
 build/
