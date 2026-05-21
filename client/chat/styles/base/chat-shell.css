@@ -21,8 +21,23 @@ body.is-main-workspace-full .chat-container {
 .chat-container[data-active-workspace="agent"],
 .chat-container[data-active-workspace="knowledge"],
 .chat-container[data-active-workspace="mcp"],
+.chat-container[data-active-workspace="manual"],
 .chat-container[data-active-workspace="settings"] {
     background: #f8fafc;
+}
+
+.manual-workspace-body {
+    padding: 0;
+    overflow: hidden;
+    background: #fff;
+}
+
+.manual-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
 }
 .chat-header { padding: 0.5rem 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
 .chat-header .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }

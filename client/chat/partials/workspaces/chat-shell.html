@@ -67,9 +67,24 @@
                         <span class="user-identity-text">
                             <span id="user-info" class="user-name-text"></span>
                         </span>
-                        <span id="admin-tag" class="admin-badge hidden">管理员</span>
+                        <span id="admin-tag" class="admin-badge hidden" title="系统管理员" aria-label="系统管理员">
+                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.6">
+                                <path d="M12 3 5 6v5c0 4.5 2.8 8.5 7 10 4.2-1.5 7-5.5 7-10V6l-7-3z" />
+                                <path d="m9 12 2 2 4-5" />
+                            </svg>
+                        </span>
                     </div>
                     <div class="footer-btns">
+                        <button id="manual-link-btn" class="footer-mini-btn" type="button" data-workspace-view="manual" title="打开使用手册">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z" />
+                                <path d="M8 7h8" />
+                                <path d="M8 11h6" />
+                            </svg>
+                            <span>手册</span>
+                        </button>
                         <button id="admin-panel-btn" class="footer-mini-btn" data-workspace-view="settings" title="系统设置">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2.5">

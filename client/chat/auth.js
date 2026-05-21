@@ -48,11 +48,20 @@ window.showApp = () => {
 
     // 更新用户信息显示
     const userDisplay = document.getElementById('user-info') || document.getElementById('current-username');
-    if (userDisplay) userDisplay.innerText = currentUser.nickname || currentUser.username;
+    const displayName = currentUser.nickname || currentUser.username;
+    if (userDisplay) {
+        userDisplay.innerText = displayName;
+        userDisplay.title = displayName;
+    }
     
+    const isSuperAdmin = currentUser.username === 'admin';
+    const tag = document.getElementById('admin-tag');
+    if (tag) {
+        tag.classList.toggle('hidden', !isSuperAdmin);
+        tag.title = '系统管理员';
+    }
+
     if (currentUser.role === 'admin') {
-        const tag = document.getElementById('admin-tag');
-        if (tag) tag.classList.remove('hidden');
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
         const btn = document.getElementById('admin-panel-btn');
         if (btn) btn.classList.remove('hidden');

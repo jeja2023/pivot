@@ -29,6 +29,7 @@ const {
 const { validateConfig } = require('./config');
 const { applyAppVersionTemplate, getAppVersion } = require('./version');
 const { loadChatHtmlTemplate } = require('./chat-template');
+const { MANUAL_PATH, renderManualHtml } = require('./manual-page');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
 const appVersion = getAppVersion();
@@ -354,6 +355,21 @@ app.get('/version.json', (req, res) => {
 app.get('/pwa-reset', (req, res) => {
     noCacheHeaders(res);
     res.type('html').send(renderPwaResetHtml(res.locals.cspNonce));
+});
+
+app.get(['/manual', '/manual/'], async (req, res) => {
+    noCacheHeaders(res);
+    try {
+        const markdown = await fs.promises.readFile(MANUAL_PATH, 'utf8');
+        res.type('html').send(renderManualHtml(markdown, {
+            appVersion,
+            nonce: res.locals.cspNonce,
+            embedded: req.query.embed === '1'
+        }));
+    } catch (err) {
+        logger.error({ err, manualPath: MANUAL_PATH }, '用户使用手册读取失败');
+        res.status(500).type('text/plain; charset=utf-8').send('用户使用手册暂时无法打开，请联系管理员检查部署文件。');
+    }
 });
 
 // 静态文件服务：通过 setHeaders 动态控制缓存策略

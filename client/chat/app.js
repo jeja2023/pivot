@@ -107,7 +107,7 @@ window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
 
 window.showMainWorkspace = function(view = 'chat') {
-    const target = ['chat', 'agent', 'knowledge', 'mcp', 'settings'].includes(view) ? view : 'chat';
+    const target = ['chat', 'agent', 'knowledge', 'mcp', 'manual', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {
@@ -115,6 +115,7 @@ window.showMainWorkspace = function(view = 'chat') {
         agent: 'agent-workbench-modal',
         knowledge: 'knowledge-workbench-modal',
         mcp: 'mcp-workbench-modal',
+        manual: 'manual-workbench-modal',
         settings: 'admin-container'
     };
     if (isFullWorkspace && chatContainer) {
@@ -135,9 +136,19 @@ window.showMainWorkspace = function(view = 'chat') {
     chatContainer?.setAttribute('data-active-workspace', target);
     document.body?.setAttribute('data-active-workspace', target);
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
+    if (target === 'manual') window.ensureManualFrameLoaded?.();
     if (target !== 'agent') window.updateAgentAutoRefresh?.();
     return target;
 };
+
+window.ensureManualFrameLoaded = () => {
+    const frame = document.getElementById('manual-frame');
+    if (!frame || frame.getAttribute('src')) return;
+    frame.setAttribute('src', frame.dataset.src || '/manual?embed=1');
+};
+
+window.openManualWorkbench = () => window.showMainWorkspace?.('manual');
+window.closeManualWorkbench = () => window.showMainWorkspace?.('chat');
 
 // --- 全局确认弹窗 ---
 let confirmCallback = null;
@@ -393,6 +404,8 @@ bind('knowledge-workbench-btn', () => window.openKnowledgeWorkbench?.());
 bind('knowledge-modal-close', () => window.closeKnowledgeWorkbench?.());
 bind('mcp-workbench-btn', () => window.openMcpWorkbench?.());
 bind('mcp-modal-close', () => window.closeMcpWorkbench?.());
+bind('manual-link-btn', () => window.openManualWorkbench?.());
+bind('manual-modal-close', () => window.closeManualWorkbench?.());
 bind('logout-btn', () => window.logout());
 
 document.addEventListener('click', async (event) => {

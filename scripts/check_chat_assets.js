@@ -27,11 +27,28 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="knowledge-workbench-modal"',
     'id="mcp-workbench-modal"',
     'id="admin-container"',
+    'id="manual-workbench-modal"',
     'id="rag-debug-modal"',
+    'id="manual-link-btn"',
+    'data-workspace-view="manual"',
+    'data-src="/manual?embed=1"',
     'src="/chat/app.js?v=__APP_VERSION__"'
 ].forEach(needle => {
     if (!html.includes(needle)) fail(`assembled chat template is missing ${needle}`);
 });
+
+const manualPath = path.join(rootDir, '使用手册.md');
+if (!fs.existsSync(manualPath)) fail('使用手册.md is required for the /manual page and Docker deployment');
+const dockerignorePath = path.join(rootDir, '.dockerignore');
+if (fs.existsSync(dockerignorePath)) {
+    const ignoredEntries = fs.readFileSync(dockerignorePath, 'utf8')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#'));
+    if (ignoredEntries.includes('使用手册.md') || ignoredEntries.includes('*.md')) {
+        fail('使用手册.md must not be excluded by .dockerignore');
+    }
+}
 
 function collectFiles(dir, extension, files = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
