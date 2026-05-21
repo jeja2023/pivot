@@ -1,6 +1,7 @@
 /* Agent and MCP workbench */
 let agentRunsCache = [];
 let mcpServersCache = [];
+let mcpCallLogsCache = [];
 let agentRefreshTimer = null;
 let activeAgentRunId = '';
 let agentToolsCache = [];
@@ -56,7 +57,7 @@ function agentStatusLabel(status) {
 }
 
 function isAgentRunActive(status) {
-    return status === 'queued' || status === 'running';
+    return status === 'queued' || status === 'running' || status === 'approval_required';
 }
 
 function agentRunMeta(run) {
@@ -301,6 +302,64 @@ function agentStepTitle(step) {
 }
 
 async function loadAgentModels() {
+    const select = document.getElementById('agent-model-select');
+    if (!select) return;
+    const loaded = typeof window.loadSelectableModels === 'function'
+        ? await window.loadSelectableModels()
+        : { models: [], defaultModelId: '' };
+    const defaultModelId = loaded.defaultModelId || '';
+    const nextModels = (loaded.models || []).filter(model => model.type !== 'embedding');
+    window._cachedAgentModels = nextModels;
+    select.innerHTML = nextModels
+        .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
+        .join('');
+    const list = document.getElementById('agent-model-list');
+    if (list) {
+        list.innerHTML = nextModels.length ? nextModels.map(model => {
+            const meta = [];
+            meta.push(model.user_id ? '个人模型' : '全局模型');
+            if (model.model_name && model.model_name !== model.name) meta.push(model.model_name);
+            const title = typeof describeSelectorModel === 'function' ? describeSelectorModel(model, false) : model.name;
+            return `
+                <button type="button" role="option" class="agent-model-option" data-agent-model-id="${agentEscape(model.id)}" title="${agentEscape(title)}">
+                    <span>
+                        <strong>${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</strong>
+                        <small>${agentEscape(meta.join(' · '))}</small>
+                    </span>
+                    <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
+                </button>
+            `;
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于智能体的模型</div>';
+        list.querySelectorAll('[data-agent-model-id]').forEach(item => {
+            item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
+        });
+    }
+    const trigger = document.getElementById('agent-model-trigger');
+    if (trigger && trigger.dataset.agentModelBound !== '1') {
+        trigger.dataset.agentModelBound = '1';
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setAgentModelListOpen(document.getElementById('agent-model-list')?.classList.contains('hidden'));
+        });
+        document.addEventListener('click', (event) => {
+            if (!event.target.closest('#agent-model-picker')) setAgentModelListOpen(false);
+        });
+    }
+    if (select.dataset.agentCapsBound !== '1') {
+        select.dataset.agentCapsBound = '1';
+        select.addEventListener('change', () => selectAgentModel(select.value, false));
+    }
+    const mainSelectedId = document.getElementById('model-selector')?.value || '';
+    const initialId = (mainSelectedId && nextModels.some(model => String(model.id) === String(mainSelectedId)))
+        ? mainSelectedId
+        : (defaultModelId && nextModels.some(model => String(model.id) === String(defaultModelId)))
+            ? defaultModelId
+            : (nextModels[0]?.id || '');
+    if (nextModels.length) select.value = initialId;
+    selectAgentModel(select.value || initialId, false);
+}
+
+async function _loadAgentModelsLegacy() {
     const select = document.getElementById('agent-model-select');
     if (!select) return;
     const res = await apiFetch(`${API_BASE}/models/available`);
@@ -755,7 +814,8 @@ window.closeAgentRealtime = function() {
 
 function getSelectedAgentToolAllowlist() {
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
-    if (!checked.length || checked.length === agentToolsCache.length) return [];
+    if (!checked.length) return ['__none__'];
+    if (checked.length === agentToolsCache.length) return [];
     return checked;
 }
 
@@ -820,6 +880,11 @@ function applyAgentTemplate(template) {
     if (contextMode) contextMode.value = context.mode || 'auto';
     const contextNotes = document.getElementById('agent-context-notes');
     if (contextNotes) contextNotes.value = context.notes || '';
+    const allowlist = agentParsePayload(template.tool_allowlist || '[]');
+    const selectedTools = Array.isArray(allowlist) ? allowlist.map(item => String(item || '').trim()).filter(Boolean) : [];
+    document.querySelectorAll('[data-agent-tool-allow]').forEach(input => {
+        input.checked = selectedTools.length === 0 ? true : selectedTools.includes(input.dataset.agentToolAllow);
+    });
 }
 
 async function loadAgentTemplates() {
@@ -830,13 +895,19 @@ async function loadAgentTemplates() {
     if (!res.ok) throw new Error(data.error || '模板库加载失败');
     agentTemplatesCache = data.data || [];
     list.innerHTML = agentTemplatesCache.length ? agentTemplatesCache.slice(0, 8).map(template => `
-        <button type="button" class="agent-template-item" data-agent-template-id="${agentEscape(template.id)}" title="${agentEscape(template.description || template.goal_template)}">
-            <strong>${agentEscape(template.name)}</strong>
-            <span>${agentEscape(template.scope === 'shared' ? '共享' : '个人')}</span>
-        </button>
+        <div class="agent-template-item" title="${agentEscape(template.description || template.goal_template)}">
+            <button type="button" class="agent-template-apply" data-agent-template-id="${agentEscape(template.id)}">
+                <strong>${agentEscape(template.name)}</strong>
+                <span>${agentEscape(template.scope === 'shared' ? '共享' : '个人')}</span>
+            </button>
+            ${template.scope === 'personal' ? `<button type="button" class="agent-mini-danger" data-agent-template-delete="${agentEscape(template.id)}">删除</button>` : ''}
+        </div>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无模板</div>';
     list.querySelectorAll('[data-agent-template-id]').forEach(btn => {
         btn.addEventListener('click', () => applyAgentTemplate(agentTemplatesCache.find(item => String(item.id) === String(btn.dataset.agentTemplateId))));
+    });
+    list.querySelectorAll('[data-agent-template-delete]').forEach(btn => {
+        btn.addEventListener('click', () => deleteAgentTemplate(btn.dataset.agentTemplateDelete));
     });
 }
 
@@ -861,6 +932,16 @@ async function saveCurrentAgentTemplate() {
     await loadAgentTemplates();
 }
 
+function deleteAgentTemplate(templateId) {
+    showConfirm('删除智能体模板', '确定删除这个智能体模板吗？已创建的任务记录不会受影响。', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || '删除模板失败', 'error');
+        showToast('模板已删除', 'success');
+        await loadAgentTemplates();
+    });
+}
+
 async function loadAgentSchedules() {
     const list = document.getElementById('agent-schedule-list');
     if (!list) return;
@@ -872,11 +953,17 @@ async function loadAgentSchedules() {
         <div class="agent-ops-item">
             <strong>${agentEscape(schedule.name)}</strong>
             <span>${agentEscape(schedule.frequency === 'daily' ? '每天' : schedule.frequency === 'weekly' ? '每周' : '手动')} · 下次 ${agentEscape(schedule.next_run_at || '-')}</span>
-            <button type="button" class="btn-secondary" data-agent-schedule-run="${agentEscape(schedule.id)}">运行</button>
+            <div class="agent-ops-actions">
+                <button type="button" class="btn-secondary" data-agent-schedule-run="${agentEscape(schedule.id)}">运行</button>
+                <button type="button" class="btn-danger-outline" data-agent-schedule-delete="${agentEscape(schedule.id)}">删除</button>
+            </div>
         </div>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无计划</div>';
     list.querySelectorAll('[data-agent-schedule-run]').forEach(btn => {
         btn.addEventListener('click', () => runAgentSchedule(btn.dataset.agentScheduleRun));
+    });
+    list.querySelectorAll('[data-agent-schedule-delete]').forEach(btn => {
+        btn.addEventListener('click', () => deleteAgentSchedule(btn.dataset.agentScheduleDelete));
     });
 }
 
@@ -887,6 +974,16 @@ async function runAgentSchedule(scheduleId) {
     showToast('计划任务已入队', 'success');
     await loadAgentRuns();
     await window.openAgentRun(data.run.id);
+}
+
+function deleteAgentSchedule(scheduleId) {
+    showConfirm('删除智能体计划', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || '删除计划失败', 'error');
+        showToast('计划已删除', 'success');
+        await loadAgentSchedules();
+    });
 }
 
 async function loadAgentNotifications() {
@@ -1550,6 +1647,13 @@ async function loadMcpServers() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'MCP 服务加载失败');
     mcpServersCache = data.data || [];
+    const logsByServer = new Map();
+    mcpCallLogsCache.forEach(log => {
+        const key = String(log.server_id || '');
+        if (!key) return;
+        if (!logsByServer.has(key)) logsByServer.set(key, []);
+        logsByServer.get(key).push(log);
+    });
     if (mcpServersCache.length === 0) {
         list.innerHTML = `
             <div class="mcp-empty-panel">
@@ -1577,12 +1681,36 @@ async function loadMcpServers() {
         const typeLabel = server.server_type === 'database'
             ? (mcpDbToolLabels[database.database_type] || '数据库 MCP')
             : (mcpBuiltinToolLabels[server.server_type] || '外部服务');
+        const callLogs = (logsByServer.get(String(server.id)) || []).slice(0, 3);
+        const callLogMarkup = callLogs.length ? `
+            <div class="mcp-call-log-title">最近调用</div>
+            ${callLogs.map(log => {
+            const statusClass = log.status === 'error' ? ' is-error' : '';
+            const toolName = log.tool_name || '-';
+            const when = log.created_at ? formatDateToCN(log.created_at) : '';
+            const detail = log.status === 'error'
+                ? (log.error_message || '调用失败')
+                : (log.output_preview || log.source || '调用成功');
+            return `
+                <div class="mcp-call-log${statusClass}" title="${agentEscape([toolName, detail, when].filter(Boolean).join(' · '))}">
+                    <strong>${agentEscape(toolName)}</strong>
+                    <span>${Number(log.duration_ms || 0)}ms</span>
+                    <small>${agentEscape(detail)}</small>
+                </div>
+            `;
+        }).join('')}
+        ` : '<div class="mcp-call-log-empty">暂无调用记录</div>';
         return `
         <div class="mcp-server-card">
-            <div>
-                <strong>${agentEscape(server.name)} <em>${agentEscape(typeLabel)}</em></strong>
-                <span>${agentEscape(endpoint)}</span>
-                ${server.last_error ? `<small class="error-text">${agentEscape(server.last_error)}</small>` : `<small>${server.last_checked_at ? `上次刷新 ${agentEscape(formatDateToCN(server.last_checked_at))}` : '尚未刷新工具'}</small>`}
+            <div class="mcp-server-main">
+                <div class="mcp-server-summary">
+                    <strong>${agentEscape(server.name)} <em>${agentEscape(typeLabel)}</em></strong>
+                    <span>${agentEscape(endpoint)}</span>
+                    ${server.last_error ? `<small class="error-text">${agentEscape(server.last_error)}</small>` : `<small>${server.last_checked_at ? `上次刷新 ${agentEscape(formatDateToCN(server.last_checked_at))}` : '尚未刷新工具'}</small>`}
+                </div>
+                <div class="mcp-server-call-logs">
+                    ${callLogMarkup}
+                </div>
             </div>
             <div class="mcp-card-actions">
                 <button class="btn-secondary" data-mcp-edit="${server.id}">编辑</button>
@@ -1607,14 +1735,31 @@ async function loadMcpTools() {
     if (!res.ok) throw new Error(data.error || 'MCP 工具加载失败');
     const tools = data.tools || [];
     box.innerHTML = `
-        <div class="agent-tool-title">已缓存可调用工具：${tools.length} 个</div>
-        ${tools.map(tool => `
-            <div class="agent-tool-chip">
-                <strong>${agentEscape(mcpToolTitle(tool))}<em>${agentEscape(tool.serverName || 'MCP 服务')}</em></strong>
-                <span>${agentEscape(mcpToolDescription(tool))}</span>
-                <span>服务：${agentEscape(tool.serverName || '-')} · 原始工具：${agentEscape(tool.name || tool.fullName || '-')}</span>
+        <div class="mcp-tool-cache-head">
+            <strong>已缓存可调用工具</strong>
+            <span>${tools.length} 个</span>
+        </div>
+        ${tools.length ? `
+            <div class="mcp-tool-grid">
+                ${tools.map(tool => `
+                    <div class="mcp-tool-card" title="${agentEscape([
+                        mcpToolTitle(tool),
+                        mcpToolDescription(tool),
+                        tool.name || tool.fullName || ''
+                    ].filter(Boolean).join(' · '))}">
+                        <div class="mcp-tool-card-head">
+                            <strong>${agentEscape(mcpToolTitle(tool))}</strong>
+                            <em>${agentEscape(tool.serverName || 'MCP 服务')}</em>
+                        </div>
+                        <p>${agentEscape(mcpToolDescription(tool) || '暂无说明')}</p>
+                        <div class="mcp-tool-meta">
+                            <span>${agentEscape(tool.serverName || '-')}</span>
+                            <span>${agentEscape(tool.name || tool.fullName || '-')}</span>
+                        </div>
+                    </div>
+                `).join('')}
             </div>
-        `).join('') || `
+        ` : `
             <div class="mcp-empty-panel compact">
                 <strong>内置 MCP 模板</strong>
                 <span>模板已可选；保存连接并刷新后，这里会显示模型可调用的实际工具。</span>
@@ -1629,7 +1774,7 @@ async function loadMcpGovernance() {
     if (!panel) return;
     const [govRes, logsRes] = await Promise.all([
         apiFetch(`${API_BASE}/mcp/governance`),
-        apiFetch(`${API_BASE}/mcp/call-logs?limit=6`)
+        apiFetch(`${API_BASE}/mcp/call-logs?limit=60`)
     ]);
     const gov = await govRes.json().catch(() => ({}));
     const logs = await logsRes.json().catch(() => ({}));
@@ -1639,12 +1784,7 @@ async function loadMcpGovernance() {
     }
     panel.className = 'workspace-governance-panel mcp-governance-panel';
     const s = gov.summary || {};
-    const recentLogs = logs.data || [];
-    const recentLogMarkup = recentLogs.slice(0, 3).map(log => `
-        <span class="${log.status === 'error' ? 'is-error' : ''}">
-            ${agentEscape(log.server_name || 'MCP')} / ${agentEscape(log.tool_name || '-')} · ${Number(log.duration_ms || 0)}ms
-        </span>
-    `).join('') || '<span class="mcp-governance-empty">暂无调用记录</span>';
+    mcpCallLogsCache = logs.data || [];
     panel.innerHTML = `
         <div class="mcp-governance-title">
             <strong>MCP 治理</strong>
@@ -1655,9 +1795,6 @@ async function loadMcpGovernance() {
             <span><b>${Number(s.error || 0)}</b>异常</span>
             <span><b>${Number(s.unchecked || 0)}</b>未检查</span>
             <span><b>${Number(s.databaseServers || 0)}</b>数据库</span>
-        </div>
-        <div class="governance-list mcp-governance-logs">
-            ${recentLogMarkup}
         </div>
     `;
 }
@@ -1823,7 +1960,8 @@ window.deleteMcpServer = function(id) {
 
 window.loadMcpWorkbench = async function() {
     try {
-        await Promise.all([loadMcpServers(), loadMcpTools(), loadMcpGovernance()]);
+        await loadMcpGovernance();
+        await Promise.all([loadMcpServers(), loadMcpTools()]);
     } catch (e) {
         showToast(e.message, 'error');
     }

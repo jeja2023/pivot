@@ -15,7 +15,7 @@ const {
 
 const MAX_STEPS = 8;
 const DEFAULT_STEPS = 5;
-const ACTIVE_STATUSES = new Set(['queued', 'running']);
+const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required']);
 const MAX_GOAL_LENGTH = 2000;
 const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly']);
 const AGENT_MAX_CONCURRENT_RUNS = Math.max(Number.parseInt(process.env.AGENT_MAX_CONCURRENT_RUNS || '2', 10) || 2, 1);
@@ -518,6 +518,11 @@ function createChildRunFromExisting(run, user) {
 function rerunAgentRun(runId, user) {
     const run = getRunForUser(runId, user);
     if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status)) {
+        const err = new Error('当前任务仍在执行中，请停止或等待结束后再重新运行。');
+        err.status = 400;
+        throw err;
+    }
     return createChildRunFromExisting(run, user);
 }
 
@@ -541,6 +546,7 @@ function resumeAgentRun(runId, user) {
         run.error_message ? `上一轮错误：${run.error_message}` : '',
         failed.length ? `最近失败步骤：${JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
     ].filter(Boolean).join('\n');
+    const previousMetadata = getRunMetadata(run);
     return createAgentRun({
         user,
         goal: resumeGoal,
@@ -562,7 +568,12 @@ function resumeAgentRun(runId, user) {
         contextConfig: parseJsonObject(run.context_config) || {},
         resumeFromStep: lastStep,
         parentRunId: run.id,
-        metadata: { resumedFromRunId: run.id, failedSteps: failed.map(step => step.id) }
+        metadata: {
+            ...previousMetadata,
+            pendingApproval: null,
+            resumedFromRunId: run.id,
+            failedSteps: failed.map(step => step.id)
+        }
     });
 }
 
@@ -713,10 +724,16 @@ function isApprovalGranted(run, toolName) {
     return approved.includes(toolName) || metadata.approval === 'all_mcp_approved';
 }
 
-function maybePauseForApproval(run, tool, input) {
-    if (!tool || !tool.requiresApproval) return false;
-    if (normalizeApprovalPolicy(run.approval_policy) !== 'approve_all_mcp') return false;
+function shouldPauseForApproval(run, tool) {
+    if (!tool || tool.source !== 'mcp') return false;
     if (isApprovalGranted(run, tool.name)) return false;
+    const policy = normalizeApprovalPolicy(run.approval_policy);
+    if (policy === 'approve_all_mcp') return true;
+    return Boolean(tool.requiresApproval || tool.risk === 'high');
+}
+
+function maybePauseForApproval(run, tool, input) {
+    if (!shouldPauseForApproval(run, tool)) return false;
     const now = getBeijingTimestamp();
     setRunMetadata(run.id, {
         pendingApproval: {
@@ -1270,7 +1287,7 @@ function preflightAgentRun(user, body = {}) {
     if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
     if (toolPolicy === 'builtin_only' && /mcp|数据库|外部|接口|工具/i.test(goal)) warnings.push('目标可能需要 MCP，但当前设置为仅内置工具。');
     if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有 MCP 调用都会进入人工审批，长任务可能暂停等待。');
-    if (highRiskTools.length > 0 && approvalPolicy !== 'approve_all_mcp') warnings.push('存在高风险 MCP 工具，建议对敏感任务开启 MCP 审批。');
+    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险 MCP 工具会在执行前等待人工审批。');
     if (Number(knowledge.ready || 0) === 0 && /知识库|资料|文档|依据|引用/i.test(goal)) warnings.push('目标提到了资料或知识库，但当前没有启用且就绪的知识库文档。');
     if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
     if (runMode === 'dag') {
@@ -1777,7 +1794,8 @@ function exportAgentRun(runId, user, format = 'json') {
         exportedAt: getBeijingTimestamp(),
         run: detail.run,
         progress: detail.progress,
-        steps: detail.steps
+        steps: detail.steps,
+        dagNodes: detail.dagNodes || []
     };
     db.prepare('UPDATE agent_runs SET export_count = COALESCE(export_count, 0) + 1, updated_at = ? WHERE id = ?')
         .run(getBeijingTimestamp(), runId);
@@ -1809,7 +1827,22 @@ function exportAgentRun(runId, user, format = 'json') {
                 JSON.stringify({ input: step.input, output: step.output }, null, 2),
                 '```',
                 ''
-            ].join('\n'))
+            ].join('\n')),
+            ...(detail.dagNodes?.length ? [
+                '',
+                '## DAG 节点',
+                ...detail.dagNodes.map(node => [
+                    `### ${node.title || node.node_key}`,
+                    `- 工具：${node.tool_name || '-'}`,
+                    `- 状态：${node.status || '-'}`,
+                    node.error_message ? `- 错误：${node.error_message}` : '',
+                    '',
+                    '```json',
+                    JSON.stringify({ input: node.input, output: node.output }, null, 2),
+                    '```',
+                    ''
+                ].join('\n'))
+            ] : [])
         ];
         return { contentType: 'text/markdown; charset=utf-8', filename: `${runId}.md`, body: lines.join('\n') };
     }
@@ -1935,6 +1968,7 @@ module.exports = {
     runAgent,
     rollbackAgentArtifactVersion,
     saveAgentRunArtifact,
+    shouldPauseForApproval,
     softDeleteAgentRun
     ,
     markAgentNotificationRead,

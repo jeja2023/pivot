@@ -182,6 +182,7 @@ const {
     resumeAgentRun,
     runAgentScheduleNow,
     saveAgentRunArtifact,
+    shouldPauseForApproval,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 const {
@@ -937,6 +938,22 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     assert.equal(normalizeApprovalPolicy('approve_all_mcp'), 'approve_all_mcp');
     assert.equal(normalizeApprovalPolicy('bad'), 'safe_mcp_auto');
     assert.deepEqual(normalizeToolAllowlist('["rag.search","rag.search","models.list"]'), ['rag.search', 'models.list']);
+    assert.equal(shouldPauseForApproval(
+        { approval_policy: 'safe_mcp_auto', metadata: '{}' },
+        { name: 'mcp.high', source: 'mcp', risk: 'high', requiresApproval: true }
+    ), true);
+    assert.equal(shouldPauseForApproval(
+        { approval_policy: 'safe_mcp_auto', metadata: '{}' },
+        { name: 'mcp.db', source: 'mcp', risk: 'low', requiresApproval: false }
+    ), false);
+    assert.equal(shouldPauseForApproval(
+        { approval_policy: 'approve_all_mcp', metadata: '{}' },
+        { name: 'mcp.db', source: 'mcp', risk: 'low', requiresApproval: false }
+    ), true);
+    assert.equal(shouldPauseForApproval(
+        { approval_policy: 'approve_all_mcp', metadata: '{"approvedTools":["mcp.db"]}' },
+        { name: 'mcp.db', source: 'mcp', risk: 'low', requiresApproval: false }
+    ), false);
     const result = await executeBuiltInTool('models.list', {}, user);
     assert.equal(Array.isArray(result), true);
 });
@@ -1000,6 +1017,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(run.approval_policy, 'approve_all_mcp');
     assert.equal(run.retry_limit, 2);
     assert.equal(run.max_token_budget, 100000);
+    assert.throws(() => rerunAgentRun(run.id, user), /仍在执行/);
 
     const repairedTitleRun = createAgentRun({
         user,
@@ -1146,6 +1164,21 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     assert.equal(resumed.parent_run_id, run.id);
     assert.equal(resumed.resume_from_step >= 1, true);
     cancelAgentRun(resumed.id, user);
+
+    const dagRun = createAgentRun({
+        user,
+        goal: '使用 DAG 检查可用模型',
+        modelId,
+        maxSteps: 3,
+        runMode: 'dag',
+        toolPolicy: 'builtin_only',
+        dagSpec: { nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {} }] }
+    });
+    cancelAgentRun(dagRun.id, user);
+    const dagResumed = resumeAgentRun(dagRun.id, user);
+    const dagMetadata = JSON.parse(dagResumed.metadata || '{}');
+    assert.equal(dagMetadata.dagSpec.nodes[0].tool, 'models.list');
+    cancelAgentRun(dagResumed.id, user);
 });
 
 test('OpenAI embedding helpers normalize requests and responses', () => {

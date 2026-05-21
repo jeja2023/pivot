@@ -21,12 +21,12 @@
                     <div class="mcp-form">
                         <input type="hidden" id="mcp-id">
                         <select id="mcp-source-type" class="form-input">
+                            <option value="external" selected>外部 MCP Server</option>
+                            <option value="database">数据库 MCP Server</option>
                             <option value="reports">报表与数据文件 MCP</option>
                             <option value="visualization">可视化图表 MCP</option>
                             <option value="report">报告编排 MCP</option>
                             <option value="im">局域网消息通知 MCP</option>
-                            <option value="external" selected>外部 MCP Server</option>
-                            <option value="database">数据库 MCP Server</option>
                         </select>
                         <input id="mcp-name" class="form-input" placeholder="服务名称">
                         <div id="mcp-external-fields" class="mcp-field-group">
@@ -109,12 +109,12 @@
             <div class="mcp-edit-form">
                 <input type="hidden" id="mcp-edit-id">
                 <select id="mcp-edit-source-type" class="form-input" disabled>
+                    <option value="external">外部 MCP Server</option>
+                    <option value="database">数据库 MCP Server</option>
                     <option value="reports">报表与数据文件 MCP</option>
                     <option value="visualization">可视化图表 MCP</option>
                     <option value="report">报告编排 MCP</option>
                     <option value="im">局域网消息通知 MCP</option>
-                    <option value="external">外部 MCP Server</option>
-                    <option value="database">数据库 MCP Server</option>
                 </select>
                 <input id="mcp-edit-name" class="form-input" placeholder="服务名称">
                 <div id="mcp-edit-external-fields" class="mcp-field-group">

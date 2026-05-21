@@ -66,6 +66,27 @@ window.updateContextUsage = (meta = null) => {
     else if (meta.status === 'warn') pill.classList.add('is-warn');
 };
 
+window.loadSelectableModels = async function() {
+    const [modelRes, settingsRes] = await Promise.all([
+        fetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/settings`, { headers: authHeaders() })
+    ]);
+    if (!modelRes.ok) throw new Error('Model list failed to load');
+
+    const { data = [] } = await modelRes.json();
+    window._cachedModels = data;
+    const settings = settingsRes.ok ? await settingsRes.json() : {};
+    const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
+
+    const models = data.filter(model => {
+        if (!model.user_id) return true;
+        if (String(model.user_id) === String(currentUser?.id)) return true;
+        return currentUser?.username === 'admin' && model.owner_role === 'admin';
+    });
+
+    return { models, defaultModelId, settings };
+};
+
 window.refreshModelSelector = async function() {
     const hiddenInput = document.getElementById('model-selector');
     const triggerBtn = document.getElementById('model-selector-btn');
@@ -73,22 +94,7 @@ window.refreshModelSelector = async function() {
     if (!hiddenInput || !triggerBtn || !dropdownList) return;
 
     try {
-        const [modelRes, settingsRes] = await Promise.all([
-            fetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/settings`, { headers: authHeaders() })
-        ]);
-        if (!modelRes.ok) throw new Error('Model list failed to load');
-
-        const { data = [] } = await modelRes.json();
-        window._cachedModels = data;
-        const settings = settingsRes.ok ? await settingsRes.json() : {};
-        const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
-        
-        const models = data.filter(model => {
-            if (!model.user_id) return true;
-            if (String(model.user_id) === String(window.currentUser?.id)) return true;
-            return window.currentUser?.username === 'admin' && model.owner_role === 'admin';
-        });
+        const { models, defaultModelId } = await window.loadSelectableModels();
 
         if (models.length === 0) {
             triggerBtn.innerHTML = '<span>暂无可用模型</span>';

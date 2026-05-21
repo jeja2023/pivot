@@ -17,6 +17,14 @@ const MONITOR_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_T
 const runtimes = new Map();
 let monitorStarted = false;
 
+function getActiveEndpointModels() {
+    return db.prepare(`
+        SELECT id, name, url, monitor_url, max_concurrent, supports_vision
+        FROM models
+        WHERE COALESCE(status, 'active') = 'active'
+    `).all();
+}
+
 function normalizeEndpointKey(modelCfg) {
     try {
         const parsed = new URL(String(modelCfg?.url || '').trim());
@@ -83,6 +91,37 @@ function ensureRuntime(modelCfg) {
         supports_vision: modelCfg?.supports_vision || 0
     });
     return runtime;
+}
+
+function syncConfiguredRuntimes(models = getActiveEndpointModels()) {
+    const activeModelIdsByKey = new Map();
+
+    models.forEach(model => {
+        const key = normalizeEndpointKey(model);
+        if (!activeModelIdsByKey.has(key)) {
+            activeModelIdsByKey.set(key, new Set());
+        }
+        activeModelIdsByKey.get(key).add(String(model.id));
+        ensureRuntime(model);
+    });
+
+    for (const [key, runtime] of runtimes.entries()) {
+        const activeModelIds = activeModelIdsByKey.get(key);
+        if (!activeModelIds) {
+            runtimes.delete(key);
+            continue;
+        }
+
+        for (const modelId of runtime.models.keys()) {
+            if (!activeModelIds.has(modelId)) {
+                runtime.models.delete(modelId);
+            }
+        }
+
+        if (runtime.models.size === 0) {
+            runtimes.delete(key);
+        }
+    }
 }
 
 async function acquireModelSlot(modelCfg, options = {}) {
@@ -178,12 +217,7 @@ async function refreshEndpointMonitor(runtime) {
 }
 
 async function refreshAllEndpointMonitors() {
-    const models = db.prepare(`
-        SELECT id, name, url, monitor_url, max_concurrent, supports_vision
-        FROM models
-        WHERE COALESCE(status, 'active') = 'active'
-    `).all();
-    models.forEach(ensureRuntime);
+    syncConfiguredRuntimes(getActiveEndpointModels());
     const jobs = Array.from(runtimes.values()).map(refreshEndpointMonitor);
     await Promise.allSettled(jobs);
 }
@@ -201,6 +235,7 @@ async function startModelEndpointMonitor() {
 }
 
 function getModelEndpointRuntimeStatus() {
+    syncConfiguredRuntimes();
     return Array.from(runtimes.values()).map(runtime => {
         const status = runtime.semaphore.getStatus();
         const circuitOpenMs = Math.max(0, runtime.circuitOpenUntil - Date.now());
@@ -231,5 +266,6 @@ module.exports = {
     refreshAllEndpointMonitors,
     startModelEndpointMonitor,
     getModelEndpointRuntimeStatus,
+    syncConfiguredRuntimes,
     normalizeEndpointKey
 };

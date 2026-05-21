@@ -500,12 +500,16 @@ window.loadMonitorSummary = async function() {
                 const usedRate = Number(item.ratio || 0) * 100;
                 const gpuName = item.name || 'GPU';
                 const gpuDetails = [];
-                if (Number.isFinite(Number(item.utilization))) gpuDetails.push(`利用率 ${Number(item.utilization).toFixed(0)}%`);
+                const utilization = Number(item.utilization);
+                if (Number.isFinite(utilization)) {
+                    const utilizationRate = utilization > 1 ? utilization : utilization * 100;
+                    gpuDetails.push(`GPU利用率 ${utilizationRate.toFixed(0)}%`);
+                }
                 if (Number.isFinite(Number(item.temperature))) gpuDetails.push(`${Number(item.temperature).toFixed(0)}°C`);
                 return `<div class="monitor-row monitor-gpu-row">
                     <span class="monitor-gpu-name" title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
                     <strong class="monitor-gpu-usage">
-                        ${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} · ${usedRate.toFixed(0)}%`)}
+                        ${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} · 显存 ${usedRate.toFixed(0)}%`)}
                         ${gpuDetails.length ? `<small>${escapeHtml(gpuDetails.join(' · '))}</small>` : ''}
                     </strong>
                 </div>`;
