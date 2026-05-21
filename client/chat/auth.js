@@ -55,13 +55,18 @@ window.showApp = () => {
     }
     
     const isSuperAdmin = currentUser.username === 'admin';
+    const isAdminRole = currentUser.role === 'admin';
     const tag = document.getElementById('admin-tag');
     if (tag) {
-        tag.classList.toggle('hidden', !isSuperAdmin);
-        tag.title = '系统管理员';
+        tag.classList.toggle('hidden', !isAdminRole);
+        tag.classList.toggle('is-super-admin', isSuperAdmin);
+        tag.classList.toggle('is-role-admin', isAdminRole && !isSuperAdmin);
+        const label = isSuperAdmin ? '系统管理员' : '管理员';
+        tag.title = label;
+        tag.setAttribute('aria-label', label);
     }
 
-    if (currentUser.role === 'admin') {
+    if (isAdminRole) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
         const btn = document.getElementById('admin-panel-btn');
         if (btn) btn.classList.remove('hidden');

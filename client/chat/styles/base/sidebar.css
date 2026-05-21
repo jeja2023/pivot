@@ -374,11 +374,10 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 6px;
-    border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.14);
-    background: rgba(255, 255, 255, 0.72);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.025);
+    padding: 3px 2px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 .user-avatar-dot {
     width: 8px;
@@ -392,7 +391,7 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
 }
 .user-name-text { 
     font-size: 0.82rem;
@@ -428,20 +427,30 @@
 .footer-mini-btn.logout:hover { background: #fee2e2; color: var(--danger); border-color: var(--danger); }
 .footer-mini-btn svg { flex-shrink: 0; }
 .admin-badge {
-    width: 20px;
-    height: 20px;
+    width: 17px;
+    height: 17px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    border-radius: 50%;
-    background: rgba(16, 185, 129, 0.08);
-    border: 1px solid rgba(16, 185, 129, 0.22);
+    border: 0;
+    background: transparent;
     color: var(--primary);
     flex-shrink: 0;
 }
-.admin-badge svg {
+.admin-badge-icon {
+    display: none;
     flex: 0 0 auto;
+}
+.admin-badge.is-super-admin {
+    color: var(--primary);
+}
+.admin-badge.is-role-admin {
+    color: #64748b;
+}
+.admin-badge.is-super-admin .admin-badge-icon-super,
+.admin-badge.is-role-admin .admin-badge-icon-role {
+    display: block;
 }
 .model-name-cell {
     display: flex;
