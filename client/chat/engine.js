@@ -11,6 +11,13 @@ const escapeChatStatusHtml = (value) => String(value ?? '')
     .replace(/"/g, '&quot;');
 
 const STREAM_RENDER_INTERVAL_MS = 80;
+// 内容越长，每帧 marked.parse 成本越高；按累计长度阶梯式放大间隔，降低长回答时的重排开销
+const resolveStreamInterval = (contentLength) => {
+    if (window.Pivot && typeof window.Pivot.chooseStreamInterval === 'function') {
+        return window.Pivot.chooseStreamInterval(contentLength);
+    }
+    return STREAM_RENDER_INTERVAL_MS;
+};
 
 function createBrowserSseParser({ onData, onDone } = {}) {
     let buffer = '';
@@ -353,11 +360,12 @@ window.sendMessage = async function(isRegenerate = false) {
         const scheduleStreamRender = () => {
             if (renderPending) return;
             renderPending = true;
+            const interval = resolveStreamInterval((fullAiContent || '').length);
             renderTimer = setTimeout(() => {
                 renderPending = false;
                 renderTimer = null;
                 renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
-            }, STREAM_RENDER_INTERVAL_MS);
+            }, interval);
         };
         const flushStreamRender = () => {
             if (renderTimer) clearTimeout(renderTimer);
