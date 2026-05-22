@@ -255,6 +255,56 @@ function toProjectRelativePath(targetPath) {
     return path.relative(projectRoot, target).replace(/\\/g, '/');
 }
 
+// 常见密钥字段名称（统一小写比较）
+const SECRET_FIELD_NAMES = new Set([
+    'api_key', 'apikey', 'api-key',
+    'authorization', 'auth', 'token', 'access_token', 'refresh_token', 'id_token',
+    'secret', 'client_secret', 'password', 'passwd', 'pwd',
+    'cookie', 'session', 'set-cookie',
+    'private_key', 'privatekey'
+]);
+
+const SECRET_VALUE_PATTERNS = [
+    /sk-[a-zA-Z0-9_-]{16,}/g,
+    /(Bearer\s+)[a-zA-Z0-9_\-\.]{16,}/gi,
+    /enc:v1:[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
+    /eyJ[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{5,}/g
+];
+
+const SECRET_PLACEHOLDER = '[REDACTED]';
+
+function maskSecretString(text) {
+    let output = String(text || '');
+    for (const pattern of SECRET_VALUE_PATTERNS) {
+        output = output.replace(pattern, (match, prefix) => {
+            if (prefix) return `${prefix}${SECRET_PLACEHOLDER}`;
+            return SECRET_PLACEHOLDER;
+        });
+    }
+    return output;
+}
+
+// 递归脱敏对象 / 数组中的密钥字段；不会修改原对象
+function redactSecrets(value, depth = 0) {
+    if (depth > 6) return value;
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') return maskSecretString(value);
+    if (typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+        return value.map(item => redactSecrets(item, depth + 1));
+    }
+    const result = {};
+    for (const [key, val] of Object.entries(value)) {
+        const lowered = String(key).toLowerCase();
+        if (SECRET_FIELD_NAMES.has(lowered) || lowered.includes('secret') || lowered.includes('token') || lowered.endsWith('_key')) {
+            result[key] = val ? SECRET_PLACEHOLDER : val;
+        } else {
+            result[key] = redactSecrets(val, depth + 1);
+        }
+    }
+    return result;
+}
+
 module.exports = {
     encryptSecret,
     decryptSecret,
@@ -268,5 +318,7 @@ module.exports = {
     removeAttachmentFiles,
     resolveUploadUrlPath,
     toProjectRelativePath,
-    isPathInsideUploadRoot
+    isPathInsideUploadRoot,
+    redactSecrets,
+    maskSecretString
 };

@@ -151,8 +151,83 @@ const aiSemaphore = new ConcurrencySemaphore({
     queueTimeoutMs: parsePositiveInt(process.env.AI_QUEUE_TIMEOUT_MS, 300000)
 });
 
+class TimeoutError extends Error {
+    constructor(message, code = 'OPERATION_TIMEOUT') {
+        super(message);
+        this.name = 'TimeoutError';
+        this.code = code;
+    }
+}
+
+/**
+ * 为任意 Promise 加超时保护，超时后抛出 TimeoutError。
+ * 调用方需自行实现取消逻辑（例如关闭网络请求），本工具仅控制等待时间。
+ */
+function withTimeout(promiseFactory, timeoutMs, label = '操作') {
+    const ms = Math.max(1000, Number(timeoutMs) || 0);
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new TimeoutError(`${label}超时（${Math.round(ms / 1000)} 秒）`));
+        }, ms);
+        Promise.resolve()
+            .then(() => typeof promiseFactory === 'function' ? promiseFactory() : promiseFactory)
+            .then(value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch(err => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                reject(err);
+            });
+    });
+}
+
+/**
+ * 简单的"键限并发"调度器：相同 key 同时只允许一个任务执行；
+ * 总并发上限独立控制，超出会按 key 维度排队。
+ * 用于压缩记忆、智能体后台任务等"同会话不重复触发"的场景。
+ */
+class KeyedConcurrencyGuard {
+    constructor(options = {}) {
+        this.maxGlobal = Math.max(1, options.maxConcurrent || 4);
+        this.running = new Set();
+        this.pending = new Map();
+    }
+
+    isRunning(key) {
+        return this.running.has(String(key));
+    }
+
+    async run(key, task) {
+        const id = String(key);
+        if (this.running.has(id)) {
+            return { skipped: true, reason: 'duplicate' };
+        }
+        if (this.running.size >= this.maxGlobal) {
+            return { skipped: true, reason: 'too_many' };
+        }
+        this.running.add(id);
+        try {
+            const value = await task();
+            return { skipped: false, value };
+        } finally {
+            this.running.delete(id);
+        }
+    }
+}
+
 module.exports = {
     aiSemaphore,
     ConcurrencySemaphore,
-    ConcurrencyLimitError
+    ConcurrencyLimitError,
+    TimeoutError,
+    withTimeout,
+    KeyedConcurrencyGuard
 };

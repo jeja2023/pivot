@@ -5,10 +5,16 @@ const { getBeijingTimestamp } = require('./time');
 const { extractDocumentText, truncateExtractedText } = require('./document-text');
 const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('./image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('./security');
+const { withTimeout, KeyedConcurrencyGuard } = require('./services/concurrency');
 
 const THRESHOLD = parseInt(process.env.MEMORY_THRESHOLD, 10) || 12000;
 const SUMMARY_KEEP_COUNT = 6;
 const MIN_MESSAGES_TO_COMPRESS = 4;
+const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 60000);
+// 同会话同时只触发一次后台压缩，全局并发上限可在环境变量调整
+const memoryCompressionGuard = new KeyedConcurrencyGuard({
+    maxConcurrent: Math.max(1, parseInt(process.env.MEMORY_COMPRESSION_MAX_CONCURRENT, 10) || 2)
+});
 
 function estimateTokens(text) {
     if (!text) return 0;
@@ -156,7 +162,18 @@ async function getContext(sessionId, userId, modelCfg) {
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
     if (contextMeta.activeTokens > THRESHOLD && contextMeta.activeCount > SUMMARY_KEEP_COUNT + MIN_MESSAGES_TO_COMPRESS) {
-        compressMemory(sessionId, userId, messages, modelCfg).catch(err => {
+        // 同会话短期内不会重复触发，全局并发上限避免多个长会话同时压垮上游
+        memoryCompressionGuard.run(`mem:${sessionId}`, () =>
+            withTimeout(
+                () => compressMemory(sessionId, userId, messages, modelCfg),
+                MEMORY_COMPRESSION_TIMEOUT_MS,
+                '记忆压缩'
+            )
+        ).then(result => {
+            if (result?.skipped) {
+                logger.info({ sessionId, reason: result.reason }, '记忆压缩已跳过');
+            }
+        }).catch(err => {
             logger.error({ sessionId, err: err.message }, '异步记忆压缩失败');
         });
     }

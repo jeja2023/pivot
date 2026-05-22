@@ -3100,3 +3100,114 @@ test('chat title helpers sanitize generated titles and protect custom titles', (
         false
     );
 });
+
+// --- v0.0.43 新增：基础设施与安全收口测试 ---
+const { LruCache, TtlCache } = require('../server/cache');
+const {
+    withTimeout: withTimeoutHelper,
+    TimeoutError: WithTimeoutError,
+    KeyedConcurrencyGuard
+} = require('../server/services/concurrency');
+const { redactSecrets, maskSecretString } = require('../server/security');
+
+test('LruCache evicts least-recently-used entries past the capacity', () => {
+    const cache = new LruCache({ max: 3 });
+    cache.set('a', 1);
+    cache.set('b', 2);
+    cache.set('c', 3);
+    cache.get('a');
+    cache.set('d', 4);
+    assert.equal(cache.has('b'), false);
+    assert.equal(cache.get('a'), 1);
+    assert.equal(cache.get('d'), 4);
+});
+
+test('LruCache honours TTL and reports miss after expiration', async () => {
+    const cache = new LruCache({ max: 8, ttlMs: 30 });
+    cache.set('k', 'v');
+    assert.equal(cache.get('k'), 'v');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(cache.get('k'), undefined);
+});
+
+test('TtlCache lazily prunes expired entries', async () => {
+    const cache = new TtlCache(20);
+    cache.set('a', 1);
+    await new Promise(resolve => setTimeout(resolve, 35));
+    assert.equal(cache.get('a'), undefined);
+    cache.set('b', 2);
+    cache.prune();
+    assert.equal(cache.size, 1);
+});
+
+test('withTimeout rejects with TimeoutError when the task hangs', async () => {
+    await assert.rejects(
+        withTimeoutHelper(() => new Promise(() => {}), 1000, '测试任务'),
+        (err) => err instanceof WithTimeoutError && /测试任务/.test(err.message)
+    );
+});
+
+test('withTimeout resolves before the timer elapses', async () => {
+    const result = await withTimeoutHelper(() => Promise.resolve(42), 1000, '快任务');
+    assert.equal(result, 42);
+});
+
+test('KeyedConcurrencyGuard skips duplicate keys but releases on completion', async () => {
+    const guard = new KeyedConcurrencyGuard({ maxConcurrent: 2 });
+    let active = 0;
+    let peak = 0;
+    const task = async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        active -= 1;
+        return 'done';
+    };
+    const [a, b, c] = await Promise.all([
+        guard.run('s1', task),
+        guard.run('s1', task),
+        guard.run('s2', task)
+    ]);
+    assert.equal(a.skipped, false);
+    assert.equal(a.value, 'done');
+    assert.equal(b.skipped, true);
+    assert.equal(b.reason, 'duplicate');
+    assert.equal(c.skipped, false);
+    assert.equal(peak <= 2, true);
+});
+
+test('redactSecrets masks api keys and tokens in nested structures', () => {
+    const input = {
+        api_key: 'sk-abc123xyz789secrettoken',
+        nested: {
+            authorization: 'Bearer eyJraWQiOiJ0ZXN0IiwibmFtZSI6Im1pY2tleSJ9.payload.signature',
+            note: 'public field'
+        },
+        items: [
+            { secret_token: 'topsecret-payload-1234567890abcdef' },
+            { description: 'no secret here' }
+        ]
+    };
+    const redacted = redactSecrets(input);
+    assert.equal(redacted.api_key, '[REDACTED]');
+    assert.equal(redacted.nested.authorization, '[REDACTED]');
+    assert.equal(redacted.nested.note, 'public field');
+    assert.equal(redacted.items[0].secret_token, '[REDACTED]');
+    assert.equal(redacted.items[1].description, 'no secret here');
+});
+
+test('maskSecretString redacts sk-* and Bearer tokens inline', () => {
+    const text = 'curl -H "Authorization: Bearer eyJabcdefghij.kkkkkkkkkk.mmmmmmmmmm" https://api.example.com using sk-abcdefghijklmnop1234';
+    const masked = maskSecretString(text);
+    assert.equal(masked.includes('sk-abcdefghijklmnop1234'), false);
+    assert.equal(masked.includes('eyJabcdefghij.kkkkkkkkkk.mmmmmmmmmm'), false);
+    assert.equal(masked.includes('[REDACTED]'), true);
+});
+
+test('redactSecrets does not mutate the original object reference', () => {
+    const original = { api_key: 'secret', note: 'hi' };
+    const redacted = redactSecrets(original);
+    assert.notEqual(redacted, original);
+    assert.equal(original.api_key, 'secret');
+    assert.equal(redacted.api_key, '[REDACTED]');
+});

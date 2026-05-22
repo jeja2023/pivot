@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, validateMcpEndpointUrl } = require('../security');
+const { decryptSecret, validateMcpEndpointUrl, redactSecrets } = require('../security');
 const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServer,
@@ -20,11 +20,13 @@ const isSuperAdmin = (user) => user?.username === 'admin';
 const PREVIEW_LIMIT = 1800;
 
 function previewValue(value, limit = PREVIEW_LIMIT) {
+    // 先脱敏再序列化，避免 api_key / Bearer Token 等敏感字段落入审计日志
+    const safeValue = redactSecrets(value);
     let text = '';
     try {
-        text = typeof value === 'string' ? value : JSON.stringify(value);
+        text = typeof safeValue === 'string' ? safeValue : JSON.stringify(safeValue);
     } catch (e) {
-        text = String(value || '');
+        text = String(safeValue || '');
     }
     return String(text || '').slice(0, limit);
 }

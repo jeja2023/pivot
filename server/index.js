@@ -30,6 +30,7 @@ const { validateConfig } = require('./config');
 const { applyAppVersionTemplate, getAppVersion } = require('./version');
 const { loadChatHtmlTemplate } = require('./chat-template');
 const { MANUAL_PATH, renderManualHtml } = require('./manual-page');
+const { LruCache } = require('./cache');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
 const appVersion = getAppVersion();
@@ -82,13 +83,23 @@ const { recoverAgentRuns, startAgentScheduleRunner } = require('./services/agent
 // 启动后台维护任务
 startMaintenanceTasks();
 
-// 启动 GPU 监控 (非阻塞)
-startGpuMonitor().catch(() => {});
-startModelEndpointMonitor().catch(() => {});
+// 启动 GPU 监控 (非阻塞)，确保失败也能在日志中追踪
+startGpuMonitor().catch(err => {
+    logger.warn({ err: err && err.message ? err.message : err }, 'GPU 监控启动失败');
+});
+startModelEndpointMonitor().catch(err => {
+    logger.warn({ err: err && err.message ? err.message : err }, '模型端点监控启动失败');
+});
 setImmediate(() => {
-    recoverStaleKnowledgeDocumentIndexes();
-    recoverAgentRuns();
-    startAgentScheduleRunner();
+    try { recoverStaleKnowledgeDocumentIndexes(); } catch (err) {
+        logger.warn({ err: err && err.message ? err.message : err }, '知识库索引恢复失败');
+    }
+    try { recoverAgentRuns(); } catch (err) {
+        logger.warn({ err: err && err.message ? err.message : err }, '智能体任务恢复失败');
+    }
+    try { startAgentScheduleRunner(); } catch (err) {
+        logger.warn({ err: err && err.message ? err.message : err }, '智能体计划调度启动失败');
+    }
 });
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
@@ -121,16 +132,19 @@ async function getDirSizeAsync(dir) {
     return total;
 }
 
-const dirSizeCache = new Map();
+// 使用带 TTL + 容量上限的 LRU，避免长时间运行时 Map 无限增长
+const dirSizeCache = new LruCache({
+    max: 64,
+    ttlMs: appConfig.directorySizeCacheMs > 0 ? appConfig.directorySizeCacheMs : 0
+});
 async function getCachedDirSize(dir) {
-    const cacheMs = appConfig.directorySizeCacheMs;
     const key = path.resolve(dir);
-    const cached = dirSizeCache.get(key);
-    if (cacheMs > 0 && cached && Date.now() - cached.at < cacheMs) {
-        return cached.value;
+    if (appConfig.directorySizeCacheMs > 0) {
+        const cached = dirSizeCache.get(key);
+        if (cached !== undefined) return cached;
     }
     const value = await getDirSizeAsync(key);
-    dirSizeCache.set(key, { value, at: Date.now() });
+    if (appConfig.directorySizeCacheMs > 0) dirSizeCache.set(key, value);
     return value;
 }
 
