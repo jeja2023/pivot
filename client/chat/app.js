@@ -321,6 +321,16 @@ window.exportSession = async (id) => {
     }
 };
 
+// 打开打印友好的会话视图，新标签页用户可以在浏览器中"打印为 PDF"
+// 服务端使用 cookie 鉴权，新标签会自动携带身份信息，URL 中无需附带 token
+window.printSession = (id) => {
+    if (!id) return;
+    const printWindow = window.open(`${API_BASE}/sessions/${id}/print`, '_blank', 'noopener');
+    if (!printWindow) {
+        showToast('请允许浏览器弹出窗口以查看打印视图', 'warning');
+    }
+};
+
 // --- 会话操作弹窗 ---
 window.renameSession = (id, oldTitle) => {
     window.renamingSessionId = id;

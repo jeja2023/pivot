@@ -1,5 +1,32 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.45] - 2026-05-22
+### 功能扩展：RAG 调试可视化与会话 PDF 导出
+- **RAG 召回测试可视化增强**：`/api/rag/debug-query` 返回结果新增 `elapsedMs` 检索耗时；前端调试弹窗在原有命中列表基础上新增：
+  - 关键词高亮（自动转义后包裹 `<mark>`），便于快速识别召回原因；
+  - 每个候选的得分进度条，按相对最高分占比展示，方便对比相似度梯度；
+  - 按源文件聚合的命中汇总条（命中数 / 候选总数 / 峰值得分 / 平均得分），帮助快速判断哪个文件主导了召回。
+- **会话打印 / PDF 导出**：新增 `/api/sessions/:id/print` 打印友好 HTML 视图，使用 CSP nonce 注入脚本，遵循全局安全策略；浏览器内按 Ctrl/Cmd+P 即可"导出为 PDF"，无需服务端引入 puppeteer 等重型依赖。会话右键菜单的"导出为 Markdown"旁新增"打印 / 导出 PDF"入口。
+- **文档与版本同步**：版本升级至 `v0.0.45`，`package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG 已同步。
+- **验证状态**：`npm run check` 全部 100 文件通过，`node tests/security.test.js` 通过 `84/84`。
+
+## [v0.0.44] - 2026-05-22
+### 前端体验优化
+- **`window.Pivot` 全局工具命名空间**：新增 `client/chat/pivot-core.js`，集中提供 `throttle` / `debounce` / `rafThrottle` / `LruCache` / `formatBytes` / `formatNumber` / `clearChildren` / `chooseStreamInterval` 等工具，向前兼容现有 `window.*` 全局函数，新代码可统一从 `window.Pivot` 调用，逐步减少分散在各模块的重复实现。
+- **流式 Markdown 自适应节流**：聊天流式渲染从固定 80ms 间隔改为按累计内容长度阶梯式自适应（80 / 140 / 220 / 320ms），长回答中 `marked.parse` 的重排开销显著下降；短消息保持 80ms 视觉响应，长消息自动放缓刷新频率，避免高密度 token 推送时的卡顿。
+- **加载顺序调整**：`partials/scripts.html` 在 `safe-html.js` 后新增加载 `pivot-core.js`，确保后续业务脚本可直接读取 `window.Pivot`。
+- **验证状态**：`npm run check` 全部通过，`node tests/security.test.js` 维持 `84/84`。
+
+## [v0.0.43] - 2026-05-22
+### 基础设施与安全收口
+- **LRU / TtlCache 工具**：新增 `server/cache.js`，提供带容量上限和 TTL 的 `LruCache` 与懒清理的 `TtlCache`；服务端 `dirSizeCache` 改用 LRU，避免长时间运行的目录尺寸缓存无限增长，符合内网长期常驻部署的内存控制要求。
+- **后台启动错误日志**：GPU 监控、模型端点监控、知识库索引恢复、智能体任务恢复、智能体计划调度等启动失败的 `.catch(() => {})` 改为带 `logger.warn` 的告警，方便内网部署排查初始化失败原因，不再静默吞错。
+- **MCP 调用日志脱敏**：`server/security.js` 新增 `redactSecrets` / `maskSecretString`，自动脱敏 `api_key`、`authorization`、`Bearer`、`sk-*`、JWT 等敏感字段；`server/services/mcp-client.js` 的 `previewValue` 在写入审计表前先过脱敏，避免敏感参数被普通管理员或合规导出包看到。
+- **异步任务超时与并发治理**：新增 `server/services/concurrency.js` 的 `withTimeout`、`KeyedConcurrencyGuard`、`TimeoutError`；`compressMemory` 后台压缩接入超时（默认 60s，可通过 `MEMORY_COMPRESSION_TIMEOUT_MS` 调整）和会话级去重（同会话不重复触发），全局并发上限可通过 `MEMORY_COMPRESSION_MAX_CONCURRENT` 控制，避免长会话同时压垮上游模型。
+- **MCP 审批服务端二次校验**：移除 `agent-runtime` 中 `metadata.approval === 'all_mcp_approved'` 的快捷放行死分支，只承认通过 `approveAgentTool` 写入的 `approvedTools` 白名单，杜绝后续路由或迁移意外绕过审批策略。
+- **智能体运行时拆分**：从 1978 行的 `server/services/agent-runtime.js` 拆出独立模块 `server/services/agent-validators.js`，包含所有常量、`parseJsonObject`、`normalizeMaxSteps` / `normalizeApprovalPolicy` / `normalizeDagSpec` / `normalizeToolAllowlist` 等纯函数；`agent-runtime.js` 行数从 1978 降至 1834，对外导出表完全保持，路由层引用无需修改，便于后续继续拆 DAG / 调度器 / 产物子模块。
+- **回归测试加固**：`tests/security.test.js` 新增 9 项单测覆盖 `LruCache` 容量与 TTL 行为、`TtlCache` 懒清理、`withTimeout` 超时与正常返回、`KeyedConcurrencyGuard` 重复键跳过与并发上限、`redactSecrets` 嵌套对象与原对象不变性、`maskSecretString` 行内脱敏；当前 `npm test` 已通过 `84/84`。
+
 ## [v0.0.42] - 2026-05-22
 ### 上下文预算与知识库问答稳定性
 - **模型上下文预算保护**：新增统一的上下文预算服务，在请求自部署模型前按模型输入上限、输出预留和安全余量估算总上下文，避免系统提示词、历史会话、知识库 RAG 片段、MCP 结果和当前输入叠加超过 16K 窗口后才由上游返回 400。

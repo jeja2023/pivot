@@ -1,13 +1,34 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.41-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.45-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.41
+## 最新版本：0.0.45
+
+### v0.0.45 更新摘要
+
+- **RAG 召回测试可视化**：调试弹窗新增关键词高亮、得分进度条、按文件聚合的"命中 / 峰值 / 均值"汇总条；`/api/rag/debug-query` 接口返回检索耗时。
+- **会话 PDF 导出**：新增 `/api/sessions/:id/print` 打印友好视图（带 CSP nonce），用户在浏览器内按 Ctrl/Cmd+P 即可导出 PDF；会话菜单新增"打印 / 导出 PDF"入口，无需引入服务端重型依赖。
+- **验证**：`npm run check` 全部 100 文件通过，`node tests/security.test.js` 通过 `84/84`。
+
+### v0.0.44 更新摘要
+
+- **`window.Pivot` 全局工具命名空间**：新增 `client/chat/pivot-core.js`，集中提供节流、防抖、rafThrottle、LruCache、formatBytes / formatNumber、chooseStreamInterval 等小工具，向前兼容现有 `window.*` 全局函数，新代码可统一从 `window.Pivot` 调用。
+- **流式 Markdown 自适应节流**：聊天流式渲染按累计内容长度阶梯式调整刷新间隔（80 / 140 / 220 / 320ms），长回答中 `marked.parse` 的重排开销显著下降，无明显视觉延迟。
+- **验证**：`npm run check` 全部通过，`node tests/security.test.js` 维持 `84/84`。
+
+### v0.0.43 更新摘要
+
+- **LRU / TtlCache 工具**：新增 `server/cache.js`，提供带容量上限和 TTL 的 LRU 与懒清理 TtlCache；服务端 `dirSizeCache` 改用 LRU，避免内网长期常驻部署的目录尺寸缓存无限增长。
+- **MCP 调用日志脱敏**：新增 `redactSecrets` / `maskSecretString`，MCP 调用日志的 input/output 在写入审计表前自动屏蔽 `api_key`、`Bearer`、`sk-*`、JWT 等敏感字段，避免落入合规导出包。
+- **后台任务超时与并发治理**：新增 `withTimeout` / `KeyedConcurrencyGuard` / `TimeoutError`；`compressMemory` 接入超时（默认 60s）与会话级去重，全局并发上限可调；GPU 监控、模型端点监控、智能体任务恢复等启动失败改为带日志告警，不再静默吞错。
+- **MCP 审批服务端二次校验**：移除 `agent-runtime` 中的 `metadata.approval === 'all_mcp_approved'` 死分支，只承认通过 `approveAgentTool` 写入的工具白名单。
+- **智能体运行时拆分**：从 1978 行的 `agent-runtime.js` 拆出 `agent-validators.js`（常量与所有 normalize* 函数），主文件减少约 200 行，对外导出表完全保持。
+- **回归测试加固**：新增 9 项基础设施单测，`npm test` 通过 `84/84`。
 
 ### v0.0.41 更新摘要
 

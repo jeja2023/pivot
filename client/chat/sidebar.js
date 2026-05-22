@@ -565,6 +565,7 @@ window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     makeItem('编辑标签', '', () => editSessionTags(id, tags));
     makeItem(isArchived ? '恢复对话' : '归档对话', '', () => toggleArchiveSession(id, isArchived));
     makeItem('导出为 Markdown', '', () => exportSession(id));
+    makeItem('打印 / 导出 PDF', '', () => printSession(id));
     makeItem('删除', 'danger', () => deleteSession(id));
     document.body.appendChild(menu);
 

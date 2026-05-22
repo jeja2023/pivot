@@ -361,10 +361,10 @@ function createSessionsRouter({
         const session = stmts.getSessionById.get(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
         const messages = stmts.getMessages.all(req.params.id, req.user.id);
-        
+
         let content = `# ${session.title}\n\n`;
         content += `> 导出时间: ${getBeijingTimestamp()}\n\n`;
-        
+
         for (const msg of messages) {
             const role = msg.role === 'user' ? '👤 用户' : '🤖 助手';
             content += `### ${role}\n\n${msg.content}\n\n---\n\n`;
@@ -373,6 +373,80 @@ function createSessionsRouter({
         res.setHeader('Content-disposition', `attachment; filename="chat_${req.params.id.slice(0, 8)}.md"`);
         res.setHeader('Content-type', 'text/markdown; charset=utf-8');
         res.send(content);
+    }));
+
+    // 打印友好 HTML 视图：用户在浏览器中按 Ctrl/Cmd+P 即可"打印为 PDF"，无需服务端 puppeteer
+    router.get('/sessions/:id/print', authMiddleware, asyncHandler(async (req, res) => {
+        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+
+        const escapeHtml = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+
+        const title = escapeHtml(session.title || '会话记录');
+        const exportedAt = getBeijingTimestamp();
+        const messageHtml = messages.map(msg => {
+            const roleLabel = msg.role === 'user' ? '用户' : msg.role === 'assistant' ? '助手' : msg.role === 'system' ? '系统' : escapeHtml(msg.role || '消息');
+            const roleClass = msg.role === 'user' ? 'role-user' : msg.role === 'assistant' ? 'role-assistant' : 'role-system';
+            const time = escapeHtml(msg.created_at || '');
+            const content = escapeHtml(msg.content || '').replace(/\n/g, '<br>');
+            return `
+                <article class="print-msg ${roleClass}">
+                    <header class="print-msg-head"><span class="print-msg-role">${roleLabel}</span><time>${time}</time></header>
+                    <div class="print-msg-body">${content}</div>
+                </article>
+            `;
+        }).join('\n');
+
+        const nonce = res.locals.cspNonce || '';
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.send(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>${title} · Pivot 会话导出</title>
+<style nonce="${nonce}">
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 40px; font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; color: #1e293b; background: #f8fafc; line-height: 1.6; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .print-meta { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+  .print-actions { display: flex; gap: 10px; margin-bottom: 24px; }
+  .print-actions button { padding: 6px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-size: 13px; cursor: pointer; }
+  .print-actions button.primary { background: #10a37f; border-color: #10a37f; color: #fff; }
+  .print-msg { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin: 12px 0; page-break-inside: avoid; }
+  .print-msg-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #64748b; margin-bottom: 8px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; }
+  .print-msg-role { font-weight: 600; color: #1e293b; }
+  .print-msg-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .role-user .print-msg-role { color: #2563eb; }
+  .role-assistant .print-msg-role { color: #059669; }
+  .role-system { background: #fef3c7; }
+  .role-system .print-msg-role { color: #b45309; }
+  @media print {
+    body { background: #fff; padding: 0 12mm; }
+    .print-actions { display: none; }
+    .print-msg { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <div class="print-meta">导出时间：${escapeHtml(exportedAt)} · 共 ${messages.length} 条消息</div>
+  <div class="print-actions">
+    <button id="print-btn" class="primary" type="button">打印 / 导出为 PDF</button>
+    <button id="close-btn" type="button">关闭</button>
+  </div>
+  ${messageHtml}
+  <script nonce="${nonce}">
+    document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
+    document.getElementById('close-btn').addEventListener('click', function () { window.close(); });
+  </script>
+</body>
+</html>`);
     }));
 
     router.put('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {

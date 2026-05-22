@@ -4,7 +4,7 @@
 const API_BASE = '/api';
 const APP_NAME = '智枢';
 const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
-const APP_VERSION = (appVersionTag && appVersionTag !== '__APP_VERSION__') ? appVersionTag : 'v0.0.41';
+const APP_VERSION = (appVersionTag && appVersionTag !== '__APP_VERSION__') ? appVersionTag : 'v0.0.45';
 const APP_COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} ${APP_VERSION} 保留所有权利`;
 localStorage.removeItem('pivot_token');
 let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';

@@ -6,6 +6,7 @@ uploads/
 *.db
 .codex-sidebar-data/
 .codex-sidebar-server.*.log
+.claude/
 .DS_Store
 dist/
 build/

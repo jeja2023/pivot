@@ -308,26 +308,83 @@ const renderRagDebugResults = (data) => {
     if (!el) return;
     const matches = Array.isArray(data.matches) ? data.matches : [];
     el.classList.remove('hidden');
+
+    // 关键词高亮：把字符串里出现的 keywords 包成 <mark>，并保持先转义再替换的顺序
+    const keywords = (Array.isArray(data.keywords) ? data.keywords : [])
+        .map(k => String(k || '').trim())
+        .filter(k => k.length > 0)
+        .sort((a, b) => b.length - a.length)
+        .slice(0, 16);
+    const highlightChunk = (text) => {
+        const escaped = escapeRagHtml(text || '');
+        if (keywords.length === 0) return escaped;
+        try {
+            const pattern = keywords
+                .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                .filter(Boolean)
+                .join('|');
+            if (!pattern) return escaped;
+            return escaped.replace(new RegExp(`(${pattern})`, 'gi'), '<mark class="rag-debug-hit">$1</mark>');
+        } catch (e) {
+            return escaped;
+        }
+    };
+
+    // 按 source 聚合：方便查看哪个文件命中最多、平均分多少
+    const grouped = new Map();
+    matches.forEach(m => {
+        const key = String(m.source || '-');
+        const entry = grouped.get(key) || { source: key, count: 0, matched: 0, totalScore: 0, top: 0 };
+        entry.count += 1;
+        if (m.matched) entry.matched += 1;
+        const score = Number(m.score || 0);
+        entry.totalScore += score;
+        if (score > entry.top) entry.top = score;
+        grouped.set(key, entry);
+    });
+    const groupedList = Array.from(grouped.values()).sort((a, b) => b.top - a.top).slice(0, 8);
+
+    const maxScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0) || 1;
+    const elapsed = Number(data.elapsedMs || data.elapsed || 0);
+
     el.innerHTML = `
         <div class="rag-debug-meta">
             <span>关键词：${escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
             <span>候选：${Number(data.candidateCount || 0)}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
+            ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
         </div>
+        ${groupedList.length > 1 ? `
+            <div class="rag-debug-grouped" role="list">
+                ${groupedList.map(g => `
+                    <div class="rag-debug-grouped-item" role="listitem">
+                        <span class="rag-debug-grouped-source">${escapeRagHtml(g.source)}</span>
+                        <span class="rag-debug-grouped-stats">命中 ${g.matched}/${g.count}<span class="rag-debug-grouped-divider">·</span>峰值 ${g.top.toFixed(3)}<span class="rag-debug-grouped-divider">·</span>均值 ${(g.totalScore / g.count).toFixed(3)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
         <div class="rag-debug-list">
-            ${matches.map((m, index) => `
+            ${matches.map((m, index) => {
+                const score = Number(m.score || 0);
+                const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
+                return `
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
                         <strong>#${index + 1} ${escapeRagHtml(m.source || '-')}</strong>
-                        <span>${Number(m.score || 0).toFixed(3)}${m.matched ? ' 命中' : ''}</span>
+                        <span class="rag-debug-score" title="原始相似度">${score.toFixed(3)}${m.matched ? ' 命中' : ''}</span>
                     </div>
-                    <p>${escapeRagHtml(m.text || '')}</p>
+                    <div class="rag-debug-score-bar" aria-hidden="true">
+                        <div class="rag-debug-score-bar-fill" style="width:${percent.toFixed(1)}%"></div>
+                    </div>
+                    <p>${highlightChunk(m.text || '')}</p>
                     <div class="rag-feedback-actions">
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${Number(m.score || 0)}">有用</button>
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${Number(m.score || 0)}">无用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${score}">有用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${score}">无用</button>
                     </div>
                 </div>
-            `).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
+                `;
+            }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
         </div>
     `;
 };
@@ -743,6 +800,15 @@ style.textContent = `
     .rag-debug-item.matched { border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.06); }
     .rag-debug-item-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; font-size: 0.76rem; }
     .rag-debug-item p { margin: 0; color: var(--text-muted); font-size: 0.74rem; line-height: 1.45; }
+    .rag-debug-hit { background: rgba(250, 204, 21, 0.45); color: inherit; padding: 0 1px; border-radius: 2px; }
+    .rag-debug-score-bar { width: 100%; height: 4px; background: rgba(148, 163, 184, 0.18); border-radius: 999px; overflow: hidden; margin: 4px 0 6px; }
+    .rag-debug-score-bar-fill { height: 100%; background: linear-gradient(90deg, rgba(16, 185, 129, 0.85), rgba(59, 130, 246, 0.85)); border-radius: inherit; transition: width 120ms ease-out; }
+    .rag-debug-score { font-variant-numeric: tabular-nums; }
+    .rag-debug-grouped { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: rgba(148, 163, 184, 0.04); }
+    .rag-debug-grouped-item { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border); font-size: 0.7rem; color: var(--text-muted); }
+    .rag-debug-grouped-source { color: var(--text-primary); font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rag-debug-grouped-stats { font-variant-numeric: tabular-nums; }
+    .rag-debug-grouped-divider { margin: 0 4px; color: var(--text-muted); opacity: 0.6; }
     .rag-feedback-actions { display: flex; gap: 5px; margin-top: 7px; }
     .rag-feedback-actions button { padding: 1px 7px; font-size: 0.7rem; }
     .rag-debug-empty { padding: 10px; color: var(--text-muted); text-align: center; font-size: 0.76rem; }

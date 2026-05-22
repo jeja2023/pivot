@@ -175,12 +175,14 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
     const query = String(req.body?.query || '').trim();
     if (!query) return res.status(400).json({ error: '请输入检索问题' });
 
+    const startedAt = Date.now();
     const result = await debugRetrieveContext(req.user.id, query, {
         topK: req.body?.topK,
         candidateLimit: req.body?.candidateLimit,
         scoreThreshold: req.body?.scoreThreshold
     });
-    return res.json(result);
+    // 把检索耗时回填，给前端"检索可视化"展示用
+    return res.json({ ...result, elapsedMs: Date.now() - startedAt });
 }));
 
 ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (req, res) => {
