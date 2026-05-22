@@ -1331,8 +1331,8 @@
     .message-container { padding: 12px 10px; padding-bottom: 160px; }
     .message-content { max-width: calc(100% - 42px); font-size: 0.84rem; }
     .input-area { padding: 14px 10px 16px; }
-    .input-wrapper textarea { min-height: 56px; height: 56px; padding: 13px 178px 13px 16px; }
-    .input-actions { gap: 6px; }
+    .input-wrapper textarea { min-height: 56px; height: 56px; padding: 10px 12px; }
+    .input-actions { gap: 6px; padding: 4px 10px 10px; }
     .chat-tool-toggle { width: 34px; height: 34px; }
 }
 

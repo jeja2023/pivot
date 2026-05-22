@@ -38,6 +38,11 @@ const {
     estimateEmbeddingTokens,
     normalizeTokenUsage
 } = require('../services/token-accounting');
+const {
+    ContextLengthExceededError,
+    estimateMessagesTokens,
+    fitMessagesToContextBudget
+} = require('../services/context-budget');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -398,6 +403,44 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens, total_tokens: usage.totalTokens }
             });
         }
+
+        let upstreamMessages = messages;
+        try {
+            const budgetResult = fitMessagesToContextBudget(messages, modelCfg, {
+                maxOutputTokens: max_tokens ?? modelCfg.max_tokens ?? 2000
+            });
+            upstreamMessages = budgetResult.messages;
+            if (budgetResult.metadata.adjusted) {
+                logger.warn({
+                    userId,
+                    model: modelCfg.name,
+                    contextBudget: budgetResult.metadata
+                }, 'OpenAI-compatible request context trimmed before upstream call');
+            }
+        } catch (e) {
+            if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
+                logger.warn({
+                    userId,
+                    model: modelCfg.name,
+                    contextBudget: e.metadata
+                }, 'OpenAI-compatible request rejected because context length exceeded');
+                recordApiCallLog(req, modelCfg, messages, {
+                    status: 'error',
+                    errorMessage: e.message,
+                    inputTokens: e.metadata?.inputTokensBefore || estimateMessagesTokens(messages),
+                    stream: !!stream
+                });
+                return res.status(400).json({
+                    error: {
+                        message: e.message,
+                        type: 'invalid_request_error',
+                        code: 'context_length_exceeded',
+                        context_budget: e.metadata || {}
+                    }
+                });
+            }
+            throw e;
+        }
         
         // 2. 检查配额
         if (modelCfg.daily_token_limit > 0) {
@@ -449,7 +492,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
 
         const payload = {
             model: modelCfg.model_name,
-            messages: messages,
+            messages: upstreamMessages,
             stream: !!stream,
             temperature: temperature ?? modelCfg.temperature ?? 0.7,
             max_tokens: max_tokens ?? modelCfg.max_tokens ?? 2000
@@ -495,7 +538,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     const totalContent = accumulator.getContent();
                     const apiUsage = accumulator.getUsage();
                     const usage = normalizeTokenUsage({
-                        inputTokens: apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(messages)),
+                        inputTokens: apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
                         outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
                         totalTokens: apiUsage?.total_tokens
                     });
@@ -503,7 +546,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         updateApiKeyUsage(req, usage);
                     }
                     recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
-                    recordApiCallLog(req, modelCfg, messages, {
+                    recordApiCallLog(req, modelCfg, upstreamMessages, {
                         responseText: totalContent,
                         ...usage,
                         stream: true
@@ -526,7 +569,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             } else {
                 res.json(response.data);
                 const usage = normalizeTokenUsage({
-                    inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(messages)),
+                    inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
                     outputTokens: response.data?.usage?.completion_tokens || estimateTokens(JSON.stringify(response.data?.choices || [])),
                     totalTokens: response.data?.usage?.total_tokens
                 });
@@ -534,7 +577,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     updateApiKeyUsage(req, usage);
                 }
                 recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
-                recordApiCallLog(req, modelCfg, messages, {
+                recordApiCallLog(req, modelCfg, upstreamMessages, {
                     responseText: JSON.stringify(response.data?.choices || []),
                     ...usage,
                     stream: false
@@ -546,7 +589,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
             recordModelFailure(modelCfg, e);
-            recordApiCallLog(req, modelCfg, messages, {
+            recordApiCallLog(req, modelCfg, upstreamMessages, {
                 status: 'error',
                 errorMessage: errorMsg,
                 stream: !!stream

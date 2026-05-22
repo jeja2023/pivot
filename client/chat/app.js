@@ -12,10 +12,10 @@ window.resizeUserInput = () => {
     if (!userInput) return;
     userInput.style.height = 'auto';
     const sh = userInput.scrollHeight;
-    if (sh > 96) {
+    if (sh > 56) {
         userInput.style.height = `${Math.min(sh, 180)}px`;
     } else {
-        userInput.style.height = '96px';
+        userInput.style.height = '56px';
     }
 };
 userInput?.addEventListener('input', resizeUserInput);

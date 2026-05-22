@@ -14,20 +14,31 @@
     background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(148, 163, 184, 0.28);
     transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
     pointer-events: auto;
+    /* 使用 CSS Grid 布局，将附件、输入框和底部按钮区域分隔开，解决重叠问题 */
+    display: grid;
+    grid-template-areas:
+        "preview preview"
+        "textarea textarea"
+        "actions-left actions-right";
+    grid-template-columns: 1fr auto;
 }
 .input-wrapper:focus-within {
     border-color: rgba(16, 185, 129, 0.45);
     box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12), 0 0 0 4px rgba(16, 185, 129, 0.08);
 }
 .input-wrapper textarea {
+    grid-area: textarea;
     border: none;
     margin: 0;
-    padding: 12px 120px 42px 16px;
-    min-height: 96px;
+    padding: 14px 16px 8px;
+    min-height: 56px;
     max-height: 180px;
-    height: 96px;
+    height: 56px;
     resize: none;
-    border-radius: 18px; 
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
     font-size: 0.88rem;
     line-height: 1.5;
     background: transparent;
@@ -36,13 +47,21 @@
     box-sizing: border-box;
     transition: none;
 }
+.input-wrapper textarea:focus {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
 .input-wrapper textarea::placeholder { color: #94a3b8; }
 .input-wrapper textarea::-webkit-scrollbar { width: 8px; }
 .input-wrapper textarea::-webkit-scrollbar-track { background: transparent; }
 .input-wrapper textarea::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.28); border-radius: 999px; }
-.input-actions { position: absolute; bottom: 10px; z-index: 4; display: flex; gap: 5px; align-items: center; pointer-events: auto; }
-.input-actions.left { left: 10px; }
-.input-actions.right { right: 10px; }
+#attachment-preview {
+    grid-area: preview;
+}
+.input-actions { position: static; z-index: 4; display: flex; gap: 5px; align-items: center; pointer-events: auto; padding: 4px 14px 12px; }
+.input-actions.left { grid-area: actions-left; justify-content: flex-start; }
+.input-actions.right { grid-area: actions-right; justify-content: flex-end; }
 .input-actions.left input[type="checkbox"][id^="chat-"] {
     position: absolute;
     width: 1px;

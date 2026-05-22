@@ -387,6 +387,11 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.status === 'error') showToast(data.message || 'MCP 工具调用失败', 'warning');
                     return;
                 }
+                if (data.type === 'context_budget') {
+                    updateAssistantStatus(data.message || '本次请求内容较长，已自动裁剪上下文后继续生成。');
+                    if (data.status === 'trimmed') showToast(data.message || '已自动裁剪较早上下文后继续生成', 'info');
+                    return;
+                }
                 if (data.error) throw new Error(data.detail || data.error);
                 if (data.content) {
                     if (!firstTokenTime) firstTokenTime = Date.now();

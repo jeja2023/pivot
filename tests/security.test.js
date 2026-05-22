@@ -57,6 +57,12 @@ const {
     normalizeTokenUsage
 } = require('../server/services/token-accounting');
 const {
+    ContextLengthExceededError,
+    estimateMessagesTokens,
+    fitMessagesToContextBudget,
+    getModelContextBudget
+} = require('../server/services/context-budget');
+const {
     getLocalHostnames,
     isDockerInternalServiceHost,
     isLocalModelHost,
@@ -651,6 +657,35 @@ test('RAG config clamps unsafe retrieval parameters', () => {
         chunkSize: 240,
         chunkOverlap: 120
     });
+});
+
+test('context budget trims old history and generated knowledge context before upstream requests', () => {
+    const model = { max_input_tokens: 360, max_tokens: 80 };
+    const longHistory = '旧历史 '.repeat(120);
+    const longRag = '参考内部知识库 信息 '.repeat(120);
+    const messages = [
+        { role: 'system', content: '系统提示' },
+        { role: 'user', content: longHistory },
+        { role: 'assistant', content: longHistory },
+        { role: 'system', content: `【参考内部知识库信息如下】：\n[引用 1 | 来源: doc]: ${longRag}` },
+        { role: 'user', content: '请基于资料给出简短结论' }
+    ];
+
+    const result = fitMessagesToContextBudget(messages, model);
+    assert.ok(estimateMessagesTokens(result.messages) <= getModelContextBudget(model).inputBudget);
+    assert.equal(result.metadata.adjusted, true);
+    assert.ok(result.metadata.droppedMessages > 0 || result.metadata.trimmedRagContexts > 0);
+    assert.equal(result.messages.at(-1).content, '请基于资料给出简短结论');
+});
+
+test('context budget rejects a single current prompt that exceeds the model window', () => {
+    assert.throws(
+        () => fitMessagesToContextBudget([
+            { role: 'system', content: '系统提示' },
+            { role: 'user', content: '超长输入'.repeat(400) }
+        ], { max_input_tokens: 180, max_tokens: 64 }),
+        ContextLengthExceededError
+    );
 });
 
 test('RAG embedding modes normalize legacy values to HTTP mode', () => {

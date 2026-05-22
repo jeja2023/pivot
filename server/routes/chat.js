@@ -39,6 +39,12 @@ const {
     touchSession,
     updateLastAssistantStats
 } = require('../services/chat-messages');
+const {
+    ContextLengthExceededError,
+    buildContextLengthExceededPayload,
+    estimateMessagesTokens,
+    fitMessagesToContextBudget
+} = require('../services/context-budget');
 const { maybeGenerateTitle } = require('../services/chat-title');
 const { executeMcpTool, listCachedMcpTools } = require('../services/mcp-client');
 const { filterMcpToolsByCapability } = require('../services/capability-market');
@@ -421,6 +427,23 @@ function createChatRouter({
             return res.end();
         }
 
+        try {
+            fitMessagesToContextBudget([{ role: 'user', content: modelContent }], modelCfg);
+        } catch (e) {
+            if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
+                req.log.warn({
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    contentLength: modelContent.length,
+                    contextBudget: e.metadata
+                }, '聊天请求因当前输入超限被拦截');
+                writeSse(JSON.stringify(buildContextLengthExceededPayload(e)));
+                return res.end();
+            }
+            throw e;
+        }
+
         if (modelCfg.daily_token_limit && modelCfg.daily_token_limit > 0) {
             const usedToday = getModelDailyUsage(userId, modelCfg.id);
             if (usedToday >= modelCfg.daily_token_limit) {
@@ -582,6 +605,46 @@ function createChatRouter({
             }
         }
 
+        try {
+            const budgetResult = fitMessagesToContextBudget(visionHistory, modelCfg);
+            visionHistory = budgetResult.messages;
+            if (budgetResult.metadata.adjusted) {
+                req.log.warn({
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    contextBudget: budgetResult.metadata
+                }, '聊天上下文已按模型窗口自动裁剪');
+                writeSse(JSON.stringify({
+                    type: 'context_budget',
+                    status: 'trimmed',
+                    message: '本次请求内容较长，已自动减少较早历史或知识库片段后继续生成。',
+                    contextBudget: budgetResult.metadata
+                }));
+            } else {
+                req.log.info({
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    inputTokens: budgetResult.metadata.inputTokensAfter,
+                    inputBudget: budgetResult.metadata.budget.inputBudget
+                }, '聊天上下文预算检查通过');
+            }
+        } catch (e) {
+            releaseSemaphore();
+            if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
+                req.log.warn({
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    contextBudget: e.metadata
+                }, '聊天请求因上下文超限被拦截');
+                writeSse(JSON.stringify(buildContextLengthExceededPayload(e)));
+                return res.end();
+            }
+            throw e;
+        }
+
         let baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
 
         const modelName = modelCfg.model_name || 'default';
@@ -621,6 +684,12 @@ function createChatRouter({
             if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
                 requestData.max_input_tokens = modelCfg.max_input_tokens;
             }
+            req.log.info({
+                sessionId,
+                userId,
+                modelId: modelCfg.id,
+                estimatedInputTokens: estimateMessagesTokens(visionHistory)
+            }, '准备发送模型请求');
 
             if (isResponsesApi) {
                 req.log.info('正在建立连接 (Responses API, 流式)');
