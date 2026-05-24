@@ -408,6 +408,8 @@ function createSessionsRouter({
         }).join('\n');
         // JSON 序列化后再把 '<' 转义为 <，避免内容里出现 </script> 提前关闭脚本块；浏览器 JSON.parse 时会还原
         const printDataJson = JSON.stringify(messagesForPrint).replace(/</g, '\\u003c');
+        // 嵌入模式：作为 iframe 嵌入到主工作区时，去掉外层背景、缩小内边距、隐藏标题
+        const embedded = req.query.embed === '1';
 
         const nonce = res.locals.cspNonce || '';
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -421,8 +423,9 @@ function createSessionsRouter({
   * { box-sizing: border-box; }
   body { margin: 0; padding: 32px 40px; font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; color: #1e293b; background: #f8fafc; line-height: 1.6; }
   h1 { margin: 0 0 4px; font-size: 22px; }
-  .print-meta { font-size: 13px; color: #64748b; margin-bottom: 20px; }
-  .print-actions { display: flex; gap: 10px; margin-bottom: 24px; }
+  .print-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  .print-meta { font-size: 13px; color: #64748b; }
+  .print-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .print-actions button { padding: 6px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-size: 13px; cursor: pointer; }
   .print-actions button.primary { background: #10a37f; border-color: #10a37f; color: #fff; }
   .print-msg { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin: 12px 0; page-break-inside: avoid; }
@@ -450,6 +453,12 @@ function createSessionsRouter({
   .role-assistant .print-msg-role { color: #059669; }
   .role-system { background: #fef3c7; }
   .role-system .print-msg-role { color: #b45309; }
+  /* 嵌入模式：作为 iframe 嵌到主工作区时，去掉外层背景与标题，缩小内边距 */
+  body.is-embed { background: transparent; padding: 12px 18px; }
+  body.is-embed > h1 { display: none; }
+  body.is-embed > .print-topbar { margin-bottom: 12px; }
+  body.is-embed .print-meta { font-size: 12px; color: #94a3b8; }
+  body.is-embed .print-actions #close-btn { display: none; }
   @media print {
     body { background: #fff; padding: 0 12mm; }
     .print-actions { display: none; }
@@ -457,12 +466,14 @@ function createSessionsRouter({
   }
 </style>
 </head>
-<body>
+<body class="${embedded ? 'is-embed' : ''}">
   <h1>${title}</h1>
-  <div class="print-meta">导出时间：${escapeHtml(exportedAt)} · 共 ${messages.length} 条消息</div>
-  <div class="print-actions">
-    <button id="print-btn" class="primary" type="button">打印 / 导出为 PDF</button>
-    <button id="close-btn" type="button">关闭</button>
+  <div class="print-topbar">
+    <div class="print-meta">导出时间：${escapeHtml(exportedAt)} · 共 ${messages.length} 条消息</div>
+    <div class="print-actions">
+      <button id="print-btn" class="primary" type="button">打印 / 导出为 PDF</button>
+      <button id="close-btn" type="button">关闭</button>
+    </div>
   </div>
   ${messageHtml}
   <script id="pivot-print-data" type="application/json" nonce="${nonce}">${printDataJson}</script>

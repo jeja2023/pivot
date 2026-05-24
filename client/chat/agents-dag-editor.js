@@ -31,6 +31,11 @@
     const NODE_GAP_X = 60;
     const NODE_GAP_Y = 36;
     const PADDING = 24;
+    const raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (cb => setTimeout(cb, 16));
+    const caf = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
+    const cssEscape = window.CSS && typeof window.CSS.escape === 'function'
+        ? window.CSS.escape.bind(window.CSS)
+        : (value) => String(value ?? '').replace(/[^a-zA-Z0-9_\u00A0-\uFFFF-]/g, ch => `\\${ch}`);
 
     const escapeHtml = (window.PivotSafeHtml && window.PivotSafeHtml.escapeHtml)
         || ((value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
@@ -245,8 +250,8 @@
         minimap.svg.addEventListener('click', minimapClickHandler);
 
         const flushOut = () => {
-            if (pendingFlush) cancelAnimationFrame(pendingFlush);
-            pendingFlush = requestAnimationFrame(() => {
+            if (pendingFlush) caf(pendingFlush);
+            pendingFlush = raf(() => {
                 pendingFlush = null;
                 suppressTextareaSync = true;
                 writeJson(textarea, spec);
@@ -549,7 +554,7 @@
                 node._x = Math.max(0, pointer.x - dragging.offsetX);
                 node._y = Math.max(0, pointer.y - dragging.offsetY);
                 renderEdges();
-                const group = nodesLayer.querySelector(`[data-pivot-dag-id="${CSS.escape(dragging.id)}"]`);
+                const group = nodesLayer.querySelector(`[data-pivot-dag-id="${cssEscape(dragging.id)}"]`);
                 if (group) group.setAttribute('transform', `translate(${node._x}, ${node._y})`);
                 updateViewBox();
                 return;

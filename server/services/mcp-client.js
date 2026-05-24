@@ -181,7 +181,7 @@ function upsertToolCache(serverId, tools = []) {
     tx();
 }
 
-async function refreshMcpTools(server, user) {
+async function refreshMcpTools(server) {
     if (!isInternalMcpUrl(server.base_url)) {
         validateMcpEndpointUrl(server.base_url);
     }

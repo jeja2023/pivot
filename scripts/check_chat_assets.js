@@ -28,6 +28,8 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="mcp-workbench-modal"',
     'id="admin-container"',
     'id="manual-workbench-modal"',
+    'id="print-workbench-modal"',
+    'id="print-frame"',
     'id="rag-debug-modal"',
     'id="manual-link-btn"',
     'data-workspace-view="manual"',
@@ -95,6 +97,15 @@ imports.forEach(({ cssFile, importPath }) => {
         fail(`stylesheet import escapes styles directory: ${importPath}`);
     }
     if (!fs.existsSync(resolved)) fail(`missing stylesheet module: ${importPath}`);
+});
+
+const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.css'), 'utf8');
+[
+    '.chat-container[data-active-workspace="print"]',
+    '.print-workspace-body',
+    '.print-frame'
+].forEach(needle => {
+    if (!chatShellCss.includes(needle)) fail(`print workspace layout style is missing ${needle}`);
 });
 
 console.log(`Chat asset check passed (${partialFiles.length} partials, ${imports.length} style imports).`);

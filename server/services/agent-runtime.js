@@ -16,14 +16,9 @@ const {
     filterMcpToolsByCapability
 } = require('./capability-market');
 const {
-    MAX_STEPS,
     DEFAULT_STEPS,
     ACTIVE_STATUSES,
     MAX_GOAL_LENGTH,
-    SCHEDULE_FREQUENCIES,
-    TOOL_POLICIES,
-    RUN_MODES,
-    APPROVAL_POLICIES,
     parseJsonObject,
     normalizeMaxSteps,
     normalizePriority,

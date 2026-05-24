@@ -214,7 +214,6 @@ function buildAgentTimelineMarkup(steps) {
     const durations = steps.map(s => Math.max(Number(s.duration_ms || 0), 0));
     const totalDuration = durations.reduce((a, b) => a + b, 0);
     // 当所有 duration 都是 0（异步任务还没记录）时，按等宽切分
-    const totalForRatio = totalDuration > 0 ? totalDuration : steps.length;
     const segments = steps.map((step, idx) => {
         const dur = durations[idx];
         const ratio = totalDuration > 0 ? (dur / totalDuration) : (1 / steps.length);

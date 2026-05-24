@@ -10,6 +10,17 @@
 - **不改动后端**：可视化全部基于已有 `getRunDetailForUser` 返回的 `steps` 数据，零新增 API、零迁移。
 - **验证**：`npm run check` 全部 103 文件通过，`node tests/security.test.js` 维持 `100/100`。
 
+### 会话打印 / PDF 导出工作区收口
+- **主工作区展示**：会话“打印 / 导出 PDF”从新标签页改为主工作区 `print` 视图，通过同源 iframe 加载 `/api/sessions/:id/print?embed=1`，关闭行为与设置、MCP、智能体等工作区保持一致。
+- **预览区域修复**：新增 `client/chat/partials/workspaces/print.html`，`print-frame` 复用手册工作区的全宽全高布局，避免浏览器默认 iframe 尺寸导致内容区域被压缩。
+- **工具栏布局优化**：打印页嵌入模式隐藏内部标题和关闭按钮，导出时间与“打印 / 导出为 PDF”按钮同一行展示，按钮固定在右侧。
+- **资源守卫**：`scripts/check_chat_assets.js` 新增打印工作区结构和样式检查，防止后续缺少 `print-frame`、主工作区注册或撑满样式。
+
+### 工程收尾与贡献者清理
+- **长期 warning 清理**：修复 DAG 编辑器浏览器全局引用、侧栏打印入口全局引用，以及无用变量、无用导入和无用参数，`npm run lint` 已零警告通过。
+- **文档同步**：`使用手册.md` 将打印 / 导出 PDF 描述更新为主工作区预览，不再描述为打开新标签页。
+- **验证**：`npm run verify` 通过，包含资源检查、lint 和 `tests/security.test.js` `100/100`。
+
 ## [v0.0.52] - 2026-05-24
 ### 流式 function calling 实时演示面板
 - **后端事件推送**：`tryRunAgentStreaming` 在每次累加器更新时通过 `callModelStreamingWithTools` 的 `onDelta` 回调以 `agent.streaming` SSE 事件推送累加快照，含 `runId / step / content / partialToolCalls / finishReason`；步骤结束追加一次 `completed: true` 的最终快照。

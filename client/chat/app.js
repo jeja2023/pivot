@@ -107,7 +107,7 @@ window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
 
 window.showMainWorkspace = function(view = 'chat') {
-    const target = ['chat', 'agent', 'knowledge', 'mcp', 'manual', 'settings'].includes(view) ? view : 'chat';
+    const target = ['chat', 'agent', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {
@@ -116,6 +116,7 @@ window.showMainWorkspace = function(view = 'chat') {
         knowledge: 'knowledge-workbench-modal',
         mcp: 'mcp-workbench-modal',
         manual: 'manual-workbench-modal',
+        print: 'print-workbench-modal',
         settings: 'admin-container'
     };
     if (isFullWorkspace && chatContainer) {
@@ -149,6 +150,18 @@ window.ensureManualFrameLoaded = () => {
 
 window.openManualWorkbench = () => window.showMainWorkspace?.('manual');
 window.closeManualWorkbench = () => window.showMainWorkspace?.('chat');
+
+// 会话打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图
+window.openPrintWorkbench = (sessionId) => {
+    if (!sessionId) return;
+    const frame = document.getElementById('print-frame');
+    if (frame) {
+        const nextSrc = `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/print?embed=1`;
+        if (frame.getAttribute('src') !== nextSrc) frame.setAttribute('src', nextSrc);
+    }
+    window.showMainWorkspace?.('print');
+};
+window.closePrintWorkbench = () => window.showMainWorkspace?.('chat');
 
 // --- 全局确认弹窗 ---
 let confirmCallback = null;
@@ -321,14 +334,11 @@ window.exportSession = async (id) => {
     }
 };
 
-// 打开打印友好的会话视图，新标签页用户可以在浏览器中"打印为 PDF"
-// 服务端使用 cookie 鉴权，新标签会自动携带身份信息，URL 中无需附带 token
+// 打开打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图，不再弹新标签
+// 服务端使用 cookie 鉴权，iframe 同源加载会自动携带身份信息
 window.printSession = (id) => {
     if (!id) return;
-    const printWindow = window.open(`${API_BASE}/sessions/${id}/print`, '_blank', 'noopener');
-    if (!printWindow) {
-        showToast('请允许浏览器弹出窗口以查看打印视图', 'warning');
-    }
+    window.openPrintWorkbench?.(id);
 };
 
 // --- 会话操作弹窗 ---
@@ -416,6 +426,7 @@ bind('mcp-workbench-btn', () => window.openMcpWorkbench?.());
 bind('mcp-modal-close', () => window.closeMcpWorkbench?.());
 bind('manual-link-btn', () => window.openManualWorkbench?.());
 bind('manual-modal-close', () => window.closeManualWorkbench?.());
+bind('print-modal-close', () => window.closePrintWorkbench?.());
 bind('logout-btn', () => window.logout());
 
 document.addEventListener('click', async (event) => {
