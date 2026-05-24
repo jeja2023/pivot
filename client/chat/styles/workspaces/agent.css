@@ -1850,3 +1850,171 @@ body.dark-mode .agent-streaming-tool-args,
 .dark-mode .agent-streaming-tool-args {
     background: rgba(15, 23, 42, 0.65);
 }
+
+/* v0.0.53 任务历史可视化：时间轴与工具统计 */
+.agent-timeline {
+    margin: 0 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+}
+
+.agent-timeline-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+    gap: 12px;
+}
+
+.agent-timeline-legend {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-timeline-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.agent-timeline-legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: #94a3b8;
+}
+
+.agent-timeline-bar {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    height: 26px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(148, 163, 184, 0.18);
+    border: 1px solid var(--border);
+}
+
+.agent-timeline-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    color: #fff;
+    font-size: 0.7rem;
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    cursor: help;
+    transition: filter 0.15s ease;
+}
+
+.agent-timeline-seg:last-child {
+    border-right: 0;
+}
+
+.agent-timeline-seg:hover {
+    filter: brightness(1.08);
+}
+
+.agent-timeline-seg-label {
+    padding: 0 4px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* 不同 step 类型颜色 */
+.agent-timeline-type-plan,
+.agent-timeline-legend-swatch.agent-timeline-type-plan { background: #6366f1; }
+.agent-timeline-type-tool,
+.agent-timeline-legend-swatch.agent-timeline-type-tool { background: #10b981; }
+.agent-timeline-type-control,
+.agent-timeline-legend-swatch.agent-timeline-type-control { background: #f59e0b; }
+.agent-timeline-type-approval,
+.agent-timeline-legend-swatch.agent-timeline-type-approval { background: #8b5cf6; }
+.agent-timeline-seg.is-error,
+.agent-timeline-legend-swatch.is-error { background: #ef4444; }
+
+.agent-timeline-foot {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-align: right;
+}
+
+.agent-tool-stats {
+    margin: 0 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+}
+
+.agent-tool-stats-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+}
+
+.agent-tool-stats-head span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-tool-stats-list {
+    display: grid;
+    gap: 6px;
+}
+
+.agent-tool-stat-row {
+    display: grid;
+    grid-template-columns: minmax(80px, 160px) 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    font-size: 0.72rem;
+}
+
+.agent-tool-stat-row.has-error .agent-tool-stat-extra em {
+    color: #ef4444;
+    font-style: normal;
+    font-weight: 600;
+}
+
+.agent-tool-stat-name {
+    color: var(--text-primary);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-tool-stat-bar {
+    height: 6px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.agent-tool-stat-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.9), rgba(59, 130, 246, 0.9));
+    border-radius: inherit;
+}
+
+.agent-tool-stat-count {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-stat-extra {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}

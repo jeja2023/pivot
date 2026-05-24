@@ -1,5 +1,15 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.53] - 2026-05-24
+### 智能体任务历史可视化
+- **任务时间轴**：任务详情面板新增水平时间轴 `.agent-timeline`，每一步显示为色块，宽度按 `duration_ms` 比例分配，最小宽度 1.5% 保证窄段也可见；色块按 `step.type` 着色 —— 规划（蓝紫）、工具（绿）、控制（橙）、审批（紫），失败步骤一律红色覆盖；悬停展示 `step_index + 工具名 + 毫秒 + 失败标记`。
+- **图例**：时间轴上方展示 4 种 step 类型与失败状态的图例胶囊；色块全部使用同一套主题色，与暗色模式兼容。
+- **工具调用统计**：`buildAgentToolStatsMarkup` 按 `tool_name` 聚合 `type='tool'` 步骤，统计调用次数、总耗时、平均耗时、失败次数；按调用次数和总耗时排名，渲染为带"调用次数占比"进度条的列表；存在失败时该行标红 `has-error` 并强调"N 失败"。
+- **空数据兜底**：当任务还没有任何步骤，或所有 `duration_ms = 0`（异步刚启动）时仍能按等宽切分展示，不报错也不显示空白。
+- **样式与主题**：在 `styles/workspaces/agent.css` 末尾新增约 150 行样式，包含 `agent-timeline` / `agent-tool-stats` 两个模块及 4 套类型色板，兼容 light / dark 主题。
+- **不改动后端**：可视化全部基于已有 `getRunDetailForUser` 返回的 `steps` 数据，零新增 API、零迁移。
+- **验证**：`npm run check` 全部 103 文件通过，`node tests/security.test.js` 维持 `100/100`。
+
 ## [v0.0.52] - 2026-05-24
 ### 流式 function calling 实时演示面板
 - **后端事件推送**：`tryRunAgentStreaming` 在每次累加器更新时通过 `callModelStreamingWithTools` 的 `onDelta` 回调以 `agent.streaming` SSE 事件推送累加快照，含 `runId / step / content / partialToolCalls / finishReason`；步骤结束追加一次 `completed: true` 的最终快照。

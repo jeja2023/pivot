@@ -208,6 +208,77 @@ function agentStepMarkup(step) {
     `;
 }
 
+// v0.0.53 任务历史可视化：水平时间轴 + 工具调用频次榜
+function buildAgentTimelineMarkup(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return '';
+    const durations = steps.map(s => Math.max(Number(s.duration_ms || 0), 0));
+    const totalDuration = durations.reduce((a, b) => a + b, 0);
+    // 当所有 duration 都是 0（异步任务还没记录）时，按等宽切分
+    const totalForRatio = totalDuration > 0 ? totalDuration : steps.length;
+    const segments = steps.map((step, idx) => {
+        const dur = durations[idx];
+        const ratio = totalDuration > 0 ? (dur / totalDuration) : (1 / steps.length);
+        const width = Math.max(ratio * 100, 1.5); // 至少 1.5%，保证窄段也可见
+        const type = String(step.type || '').toLowerCase();
+        const status = String(step.status || '').toLowerCase();
+        const title = `${step.step_index}. ${(step.tool_name || step.type || '步骤')} · ${dur} ms${status === 'error' ? ' · 失败' : ''}`;
+        return `<div class="agent-timeline-seg agent-timeline-type-${agentEscape(type)} ${status === 'error' ? 'is-error' : ''}" style="flex: ${width.toFixed(2)} 0 0%" title="${agentEscape(title)}" aria-label="${agentEscape(title)}">
+            <span class="agent-timeline-seg-label">${step.step_index}</span>
+        </div>`;
+    }).join('');
+    const legend = [
+        { type: 'plan', label: '规划' },
+        { type: 'tool', label: '工具' },
+        { type: 'control', label: '控制' },
+        { type: 'approval', label: '审批' }
+    ].map(item => `<span class="agent-timeline-legend-item"><i class="agent-timeline-legend-swatch agent-timeline-type-${item.type}"></i>${item.label}</span>`).join('');
+    return `
+        <section class="agent-timeline">
+            <header class="agent-timeline-head">
+                <strong>任务时间轴</strong>
+                <span class="agent-timeline-legend">${legend}<span class="agent-timeline-legend-item is-error"><i class="agent-timeline-legend-swatch is-error"></i>失败步骤</span></span>
+            </header>
+            <div class="agent-timeline-bar" role="list">${segments}</div>
+            <footer class="agent-timeline-foot">${steps.length} 步 · 总耗时 ${totalDuration} ms</footer>
+        </section>
+    `;
+}
+
+function buildAgentToolStatsMarkup(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return '';
+    const toolSteps = steps.filter(s => String(s.type || '').toLowerCase() === 'tool' && s.tool_name);
+    if (toolSteps.length === 0) return '';
+    const stats = new Map();
+    toolSteps.forEach(step => {
+        const name = String(step.tool_name);
+        const entry = stats.get(name) || { name, count: 0, errors: 0, durationMs: 0 };
+        entry.count += 1;
+        entry.durationMs += Math.max(Number(step.duration_ms || 0), 0);
+        if (String(step.status || '').toLowerCase() === 'error') entry.errors += 1;
+        stats.set(name, entry);
+    });
+    const ranked = [...stats.values()].sort((a, b) => b.count - a.count || b.durationMs - a.durationMs);
+    const maxCount = ranked[0].count || 1;
+    const rows = ranked.map(entry => {
+        const widthPct = Math.max(4, (entry.count / maxCount) * 100);
+        const avg = entry.count > 0 ? Math.round(entry.durationMs / entry.count) : 0;
+        return `
+            <div class="agent-tool-stat-row ${entry.errors > 0 ? 'has-error' : ''}">
+                <span class="agent-tool-stat-name" title="${agentEscape(entry.name)}">${agentEscape(entry.name)}</span>
+                <div class="agent-tool-stat-bar"><div class="agent-tool-stat-bar-fill" style="width:${widthPct.toFixed(1)}%"></div></div>
+                <span class="agent-tool-stat-count">${entry.count} 次</span>
+                <span class="agent-tool-stat-extra">${entry.durationMs} ms · 均 ${avg} ms${entry.errors > 0 ? ` · <em>${entry.errors} 失败</em>` : ''}</span>
+            </div>
+        `;
+    }).join('');
+    return `
+        <section class="agent-tool-stats">
+            <header class="agent-tool-stats-head"><strong>工具调用统计</strong><span>${ranked.length} 种工具 · 共 ${toolSteps.length} 次调用</span></header>
+            <div class="agent-tool-stats-list">${rows}</div>
+        </section>
+    `;
+}
+
 function agentDagNodeMarkup(node) {
     const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
@@ -650,6 +721,8 @@ window.openAgentRun = async function(runId) {
                 ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
             </div>
         ` : ''}
+        ${buildAgentTimelineMarkup(steps)}
+        ${buildAgentToolStatsMarkup(steps)}
         <div class="agent-step-list">
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
         </div>

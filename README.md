@@ -1,13 +1,19 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.52-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.53-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.52
+## 最新版本：0.0.53
+
+### v0.0.53 更新摘要
+
+- **智能体任务历史可视化**：任务详情面板新增水平时间轴（每步按 `duration_ms` 比例分配色块，按 step 类型着色，失败步骤红色覆盖，悬停显示工具名/耗时/失败标记）与工具调用统计（按 `tool_name` 聚合次数/总耗时/平均耗时/失败次数，调用次数占比进度条排序）。
+- **零新增 API**：纯前端基于已有 `getRunDetailForUser` 返回的 `steps` 数据计算，不改后端。
+- **验证**：`npm run check` 全部 103 文件通过，`node tests/security.test.js` 维持 `100/100`。
 
 ### v0.0.52 更新摘要
 
@@ -549,4 +555,4 @@ node -e "require('./server/db'); console.log('db init ok')"
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.52（流式 function calling 实时演示面板；累计 v0.0.43–v0.0.52 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、DAG 可视化编辑器、流式 function calling 基础设施与 agent-runtime 接入、实时流式 SSE 推送）
+**当前版本**：v0.0.53（智能体任务历史可视化：时间轴 + 工具调用统计；累计 v0.0.43–v0.0.53 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、DAG 可视化编辑器、流式 function calling 基础设施与 agent-runtime 接入、实时流式 SSE 推送、任务时间轴与工具调用统计）
