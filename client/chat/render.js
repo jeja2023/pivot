@@ -526,6 +526,7 @@ function appendMessage(role, content, id = null, stats = null) {
     const container = document.getElementById('message-container');
     const div = document.createElement('div');
     div.className = `message ${role}`;
+    if (id) div.dataset.messageId = String(id);
     const displayContent = getDisplayContent(role, content);
     const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : renderMarkdown(displayContent);
     const createdAt = stats?.createdAt || stats?.created_at || stats?.created_at_text;
@@ -547,7 +548,7 @@ function appendMessage(role, content, id = null, stats = null) {
     
     div.innerHTML = `
         <div class="avatar">${role === 'user' ? ICONS.user : ICONS.ai}</div>
-        <div class="message-content">
+        <div class="message-content"${id ? ` data-message-id="${id}"` : ''}>
             <div class="text-body">${displayHtml}</div>
             ${role === 'assistant' ? `
             <div class="${footerClass}">
@@ -570,6 +571,59 @@ function appendMessage(role, content, id = null, stats = null) {
     window.scrollMessagesToBottom?.();
     return div.querySelector('.message-content');
 }
+
+function setMessageActionId(messageContent, id) {
+    const messageId = Number.parseInt(id, 10);
+    if (!messageContent || !Number.isSafeInteger(messageId)) return;
+
+    const message = messageContent.closest('.message');
+    const role = message?.classList.contains('assistant') ? 'assistant' : 'user';
+    const actions = messageContent.querySelector('.message-actions');
+    const copyButton = actions?.querySelector('[data-message-action="copy"]');
+    if (!actions || !copyButton) return;
+
+    message.dataset.messageId = String(messageId);
+    messageContent.dataset.messageId = String(messageId);
+    actions.querySelectorAll('[data-message-id]').forEach(button => {
+        button.dataset.messageId = String(messageId);
+    });
+
+    if (!actions.querySelector('[data-message-action="fork"]')) {
+        const forkButton = document.createElement('button');
+        forkButton.className = 'action-btn';
+        forkButton.type = 'button';
+        forkButton.dataset.messageAction = 'fork';
+        forkButton.dataset.messageId = String(messageId);
+        forkButton.title = '从这里分叉';
+        forkButton.innerHTML = ICONS.fork;
+        copyButton.insertAdjacentElement('afterend', forkButton);
+    }
+
+    if (role === 'assistant' && !actions.querySelector('[data-message-action="regenerate"]')) {
+        const regenerateButton = document.createElement('button');
+        regenerateButton.className = 'action-btn';
+        regenerateButton.type = 'button';
+        regenerateButton.dataset.messageAction = 'regenerate';
+        regenerateButton.dataset.messageId = String(messageId);
+        regenerateButton.title = '重新回答';
+        regenerateButton.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>';
+        const forkButton = actions.querySelector('[data-message-action="fork"]') || copyButton;
+        forkButton.insertAdjacentElement('afterend', regenerateButton);
+    }
+
+    if (!actions.querySelector('[data-message-action="delete"]')) {
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'action-btn';
+        deleteButton.type = 'button';
+        deleteButton.dataset.messageAction = 'delete';
+        deleteButton.dataset.messageId = String(messageId);
+        deleteButton.title = '删除';
+        deleteButton.innerHTML = ICONS.delete;
+        actions.appendChild(deleteButton);
+    }
+}
+
+window.setMessageActionId = setMessageActionId;
 
 function renderAttachmentPreviews() {
     const previewArea = document.getElementById('attachment-preview');

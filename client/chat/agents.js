@@ -962,7 +962,7 @@ function getAgentRunPayload(goalOverride = '') {
     const payload = {
         goal,
         modelId: document.getElementById('agent-model-select')?.value,
-        maxSteps: document.getElementById('agent-max-steps')?.value || 5,
+        maxSteps: document.getElementById('agent-max-steps')?.value || 10,
         runMode,
         toolPolicy: allowMcp ? 'all' : 'builtin_only',
         approvalPolicy: document.getElementById('agent-approval-policy')?.value || 'safe_mcp_auto',
@@ -1002,7 +1002,7 @@ function applyAgentTemplate(template) {
     const router = document.getElementById('agent-model-router');
     if (router) router.value = template.model_router || 'fixed';
     const steps = document.getElementById('agent-max-steps');
-    if (steps) steps.value = template.max_steps || 5;
+    if (steps) steps.value = template.max_steps || 10;
     const budget = document.getElementById('agent-token-budget');
     if (budget) budget.value = template.max_token_budget || '';
     const retry = document.getElementById('agent-retry-limit');

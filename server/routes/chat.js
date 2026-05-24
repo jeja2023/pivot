@@ -455,7 +455,12 @@ function createChatRouter({
 
         if (!regenerate) {
             try {
-                saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
+                const userMessageResult = saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
+                writeSse(JSON.stringify({
+                    type: 'message_saved',
+                    role: 'user',
+                    messageId: userMessageResult.lastInsertRowid
+                }));
             } catch (dbErr) {
                 req.log.error({ sessionId, err: dbErr.message }, '用户消息入库失败');
                 writeSse(JSON.stringify({ error: '消息保存失败，请稍后重试', code: 'DB_ERROR' }));
@@ -469,14 +474,15 @@ function createChatRouter({
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+            const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
             logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
 
             writeSse(JSON.stringify({
                 unsupportedCapability: 'vision_input',
-                content: assistantContent
+                content: assistantContent,
+                messageId: assistantMessageResult.lastInsertRowid
             }));
             writeSse('[DONE]');
             return res.end();
@@ -486,14 +492,15 @@ function createChatRouter({
         if (unsupportedCapability) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
-            saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+            const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
             
             writeSse(JSON.stringify({
                 unsupportedCapability: unsupportedCapability.code,
-                content: assistantContent
+                content: assistantContent,
+                messageId: assistantMessageResult.lastInsertRowid
             }));
             writeSse('[DONE]');
             return res.end();
@@ -764,12 +771,17 @@ function createChatRouter({
                     const assistantTokens = (apiUsage && apiUsage.completion_tokens) 
                         ? apiUsage.completion_tokens 
                         : estimateTokens(assistantContent);
-                    saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+                    const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
                     maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+                    writeSse(JSON.stringify({
+                        type: 'message_saved',
+                        role: 'assistant',
+                        messageId: assistantMessageResult.lastInsertRowid
+                    }));
                     writeSse('[DONE]');
                     res.end();
                     releaseSemaphore(); // 正常结束释放

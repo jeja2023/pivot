@@ -240,12 +240,14 @@ function listVisualizationTools() {
                 type: 'object',
                 properties: {
                     rows: { type: 'array', items: { type: 'object' } },
-                    chartType: { type: 'string', enum: ['bar', 'line', 'pie'] },
+                    chartType: { type: 'string', enum: ['bar', 'line', 'area', 'pie'] },
                     title: { type: 'string' },
                     xAxis: { type: 'string' },
                     yAxis: { type: 'string' },
                     groupBy: { type: 'string' },
                     aggregation: { type: 'string', enum: ['sum', 'count', 'avg', 'min', 'max'] },
+                    sortBy: { type: 'string', enum: ['label', 'value'] },
+                    sortOrder: { type: 'string', enum: ['asc', 'desc'] },
                     limit: { type: 'number', minimum: 1, maximum: 1000 }
                 },
                 required: ['rows', 'xAxis']
@@ -510,7 +512,16 @@ function queryReportTable(config, input = {}) {
 function toFiniteNumber(value) {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
     const text = String(value ?? '').replace(/,/g, '').trim();
-    const parsed = Number(text);
+    const percentFactor = text.endsWith('%') ? 0.01 : 1;
+    const normalized = text
+        .replace(/%$/, '')
+        .replace(/[¥￥$€£]/g, '')
+        .replace(/^\((.*)\)$/, '-$1');
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed)) return parsed * percentFactor;
+    const fallback = normalized.match(/-?\d+(?:\.\d+)?/);
+    const fallbackValue = fallback ? Number(fallback[0]) : NaN;
+    if (Number.isFinite(fallbackValue)) return fallbackValue * percentFactor;
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -523,6 +534,21 @@ function aggregateValues(values, aggregation) {
     return nums.reduce((sum, value) => sum + value, 0);
 }
 
+function normalizeChartType(value) {
+    const type = String(value || '').toLowerCase();
+    return ['bar', 'line', 'area', 'pie'].includes(type) ? type : 'bar';
+}
+
+function normalizeSortOption(value, fallback) {
+    const option = String(value || '').toLowerCase();
+    return ['label', 'value'].includes(option) ? option : fallback;
+}
+
+function normalizeSortOrder(value, fallback = 'desc') {
+    const order = String(value || '').toLowerCase();
+    return ['asc', 'desc'].includes(order) ? order : fallback;
+}
+
 function buildChartSpec(queryResult, input = {}) {
     const sourceRows = Array.isArray(queryResult?.allRows)
         ? queryResult.allRows
@@ -530,8 +556,10 @@ function buildChartSpec(queryResult, input = {}) {
     const xField = String(input.xAxis || input.x_axis || '').trim();
     const yField = String(input.yAxis || input.y_axis || '').trim();
     const groupField = String(input.groupBy || input.group_by || '').trim();
-    const chartType = ['bar', 'line', 'pie'].includes(input.chartType) ? input.chartType : 'bar';
+    const chartType = normalizeChartType(input.chartType);
     const aggregation = ['sum', 'count', 'avg', 'min', 'max'].includes(input.aggregation) ? input.aggregation : (yField ? 'sum' : 'count');
+    const sortBy = normalizeSortOption(input.sortBy || input.sort_by, chartType === 'line' || chartType === 'area' ? 'label' : 'value');
+    const sortOrder = normalizeSortOrder(input.sortOrder || input.sort_order, sortBy === 'label' ? 'asc' : 'desc');
     if (!xField) {
         const err = new Error('xAxis is required for viz.build_chart.');
         err.status = 400;
@@ -550,7 +578,7 @@ function buildChartSpec(queryResult, input = {}) {
         if (!bucketMap.has(key)) bucketMap.set(key, { label, group, values: [] });
         bucketMap.get(key).values.push(aggregation === 'count' ? 1 : row[yField]);
     });
-    const labels = Array.from(new Set(Array.from(bucketMap.values()).map(item => item.label))).slice(0, 80);
+    const labels = Array.from(new Set(Array.from(bucketMap.values()).map(item => item.label)));
     const groups = Array.from(new Set(Array.from(bucketMap.values()).map(item => item.group))).slice(0, 20);
     const series = groups.map(group => ({
         name: groupField ? group : (aggregation === 'count' ? '数量' : yField),
@@ -560,8 +588,20 @@ function buildChartSpec(queryResult, input = {}) {
         })
     }));
     const topLimit = Math.min(Math.max(Number(input.limit) || labels.length || 20, 1), 80);
-    const trimmedLabels = labels.slice(0, topLimit);
-    const trimmedSeries = series.map(item => ({ ...item, data: item.data.slice(0, topLimit) }));
+    const labelIndexes = labels.map((label, index) => {
+        const total = series.reduce((sum, item) => sum + (Number(item.data[index]) || 0), 0);
+        return { label, index, total };
+    }).sort((a, b) => {
+        const result = sortBy === 'label'
+            ? String(a.label).localeCompare(String(b.label), 'zh-Hans-CN', { numeric: true })
+            : a.total - b.total;
+        return sortOrder === 'asc' ? result : -result;
+    }).slice(0, topLimit);
+    const trimmedLabels = labelIndexes.map(item => item.label);
+    const trimmedSeries = series.map(item => ({
+        ...item,
+        data: labelIndexes.map(labelItem => item.data[labelItem.index])
+    }));
     return {
         type: 'pivot_chart',
         version: 1,
@@ -572,6 +612,7 @@ function buildChartSpec(queryResult, input = {}) {
         groupBy: groupField ? { field: groupField, label: groupField } : null,
         labels: trimmedLabels,
         series: trimmedSeries,
+        sort: { by: sortBy, order: sortOrder },
         source: {
             file: queryResult.file || null,
             sheet: queryResult.selectedSheet || '',

@@ -7,8 +7,8 @@
  * 重要：本文件不引入业务依赖（db、http、模型调用等），保持纯逻辑。
  */
 
-const MAX_STEPS = 8;
-const DEFAULT_STEPS = 5;
+const MAX_STEPS = 50;
+const DEFAULT_STEPS = 10;
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required']);
 const MAX_GOAL_LENGTH = 2000;
 const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly']);

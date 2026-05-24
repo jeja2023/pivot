@@ -292,8 +292,9 @@ window.sendMessage = async function(isRegenerate = false) {
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
 
+    let userMsgEl = null;
     if (!isRegenerate) {
-        appendMessage('user', displayContent, null, { createdAt: new Date() });
+        userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date() });
     }
     const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date() });
     const textBody = aiMsgEl.querySelector('.text-body');
@@ -400,7 +401,13 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.status === 'trimmed') showToast(data.message || '已自动裁剪较早上下文后继续生成', 'info');
                     return;
                 }
+                if (data.type === 'message_saved') {
+                    if (data.role === 'user') window.setMessageActionId?.(userMsgEl, data.messageId);
+                    if (data.role === 'assistant') window.setMessageActionId?.(aiMsgEl, data.messageId);
+                    return;
+                }
                 if (data.error) throw new Error(data.detail || data.error);
+                if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
                     if (!firstTokenTime) firstTokenTime = Date.now();
                     fullAiContent += data.content;
