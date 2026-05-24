@@ -3376,3 +3376,27 @@ test('buildAssistantToolMessage 与 buildToolResultMessage 输出标准消息结
     assert.deepEqual(plain, { role: 'assistant', content: '直接回答' });
 });
 
+// v0.0.52 agent.streaming 实时事件能按用户隔离投递
+test('agent.streaming SSE 事件按用户隔离并携带累加快照字段', () => {
+    const observer = createFakeSseResponse();
+    const other = createFakeSseResponse();
+    subscribeUserEvents({ id: 7001 }, observer, { heartbeatMs: 0 });
+    subscribeUserEvents({ id: 7002 }, other, { heartbeatMs: 0 });
+
+    const delivered = publishUserEvent(7001, 'agent.streaming', {
+        runId: 'run_streaming_test',
+        step: 2,
+        content: '正在思考',
+        partialToolCalls: [{ id: 'c1', name: 'rag.search', argumentsRaw: '{"q":"x"}' }],
+        finishReason: 'tool_calls'
+    });
+    assert.equal(delivered, 1);
+    const text = observer.chunks.join('');
+    assert.match(text, /event: agent\.streaming/);
+    assert.match(text, /run_streaming_test/);
+    assert.match(text, /rag\.search/);
+    assert.match(text, /tool_calls/);
+    // 不应泄漏到其他用户
+    assert.doesNotMatch(other.chunks.join(''), /run_streaming_test/);
+});
+

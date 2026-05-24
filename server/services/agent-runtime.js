@@ -728,11 +728,39 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
+            // 节流：100ms 或 ≥120 字符增量时推送一次 snapshot，避免 SSE 风暴
+            let lastEmittedAt = 0;
+            let lastEmittedLen = 0;
+            const emitDelta = (snapshot) => {
+                if (!snapshot) return;
+                const now = Date.now();
+                const contentLen = (snapshot.content || '').length;
+                const sizeDelta = Math.abs(contentLen - lastEmittedLen);
+                if (now - lastEmittedAt < 100 && sizeDelta < 120) return;
+                lastEmittedAt = now;
+                lastEmittedLen = contentLen;
+                publishUserEvent(user.id, 'agent.streaming', {
+                    runId,
+                    step,
+                    content: snapshot.content || '',
+                    partialToolCalls: snapshot.partialToolCalls || [],
+                    finishReason: snapshot.finishReason || null
+                });
+            };
             const result = await withTimeout(
-                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200 }),
+                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200, onDelta: emitDelta }),
                 Math.min(180000, Math.max(deadline - Date.now(), 1000)),
                 '流式模型规划'
             );
+            // 步骤结束推一次最终快照
+            publishUserEvent(user.id, 'agent.streaming', {
+                runId,
+                step,
+                content: result?.content || '',
+                partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
+                finishReason: result?.finishReason || null,
+                completed: true
+            });
             recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
             // 把累加器结果当作"plan"记录到 agent_steps，便于审计与回看
             insertStep(runId, step, {

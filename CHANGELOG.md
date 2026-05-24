@@ -1,5 +1,15 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.52] - 2026-05-24
+### 流式 function calling 实时演示面板
+- **后端事件推送**：`tryRunAgentStreaming` 在每次累加器更新时通过 `callModelStreamingWithTools` 的 `onDelta` 回调以 `agent.streaming` SSE 事件推送累加快照，含 `runId / step / content / partialToolCalls / finishReason`；步骤结束追加一次 `completed: true` 的最终快照。
+- **节流策略**：100ms 时间窗口或累计 ≥120 字符增量才推送一次，避免 SSE 风暴；高频 token 推送下 CPU 与网络消耗可控。
+- **前端订阅**：`client/chat/agents.js` 在已有 `EventSource` 通道上新增 `agent.streaming` 事件监听，只为当前打开的任务渲染实时面板，避免后台任务覆盖前台 UI。
+- **流式面板渲染**：任务详情顶部插入 `.agent-streaming-panel`，含蓝色脉冲指示器、当前 step 与 finish_reason、累加文本预览、每个 partial tool call 的名称与 arguments 字符数及前 240 字预览；任务终态 `stop` 等场景 5 秒后淡出，避免长期占据视野。
+- **暗色模式适配**：所有面板背景、边框和工具卡片均使用 `var(--text-primary)`、`var(--text-muted)` 等主题变量，并在 `.dark-mode` 下切换暗色透明背景。
+- **回归测试加固**：新增 1 项单测验证 `agent.streaming` 事件按用户隔离投递并携带 `runId / partialToolCalls / finishReason` 等字段；`npm test` 通过 `100/100`。
+- **验证**：`npm run check` 全部 103 文件通过；旧路径（默认 `AGENT_STREAMING_TOOLS=false`）保持零行为变更，新流式分支仅在显式启用后才会推送 `agent.streaming` 事件。
+
 ## [v0.0.51] - 2026-05-24
 ### DAG 编辑器：缩放 / 平移 / 小地图
 - **滚轮缩放**：以光标位置为锚点，缩放范围 0.3x–2.5x；缩放前后光标对应同一内容点，不会"跳动"。

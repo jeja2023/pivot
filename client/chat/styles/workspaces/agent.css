@@ -1742,3 +1742,111 @@ body.dark-mode .pivot-dag-minimap,
     background: rgba(15, 23, 42, 0.88);
     border-color: rgba(148, 163, 184, 0.4);
 }
+
+/* v0.0.52 流式 function calling 实时演示面板 */
+.agent-streaming-panel {
+    margin: 0 0 12px;
+    border: 1px solid rgba(59, 130, 246, 0.45);
+    background: rgba(59, 130, 246, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.78rem;
+    transition: opacity 0.6s ease;
+}
+
+.agent-streaming-panel.is-fading {
+    opacity: 0.35;
+}
+
+.agent-streaming-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+}
+
+.agent-streaming-head strong::before {
+    content: "● ";
+    color: #3b82f6;
+    animation: pivot-streaming-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pivot-streaming-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.agent-streaming-head span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-streaming-body {
+    display: grid;
+    gap: 8px;
+}
+
+.agent-streaming-content {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-height: 36px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+}
+
+body.dark-mode .agent-streaming-content,
+.dark-mode .agent-streaming-content {
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.agent-streaming-empty {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-streaming-tool {
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.55);
+    padding: 6px 10px;
+}
+
+body.dark-mode .agent-streaming-tool,
+.dark-mode .agent-streaming-tool {
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.agent-streaming-tool-head {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-size: 0.72rem;
+}
+
+.agent-streaming-tool-head strong {
+    color: var(--text-primary);
+}
+
+.agent-streaming-tool-args {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    background: rgba(15, 23, 42, 0.05);
+    padding: 5px 8px;
+    border-radius: 4px;
+    max-height: 80px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+body.dark-mode .agent-streaming-tool-args,
+.dark-mode .agent-streaming-tool-args {
+    background: rgba(15, 23, 42, 0.65);
+}

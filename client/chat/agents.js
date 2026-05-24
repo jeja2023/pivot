@@ -796,11 +796,67 @@ window.initAgentRealtime = function() {
     });
     agentRealtimeSource.addEventListener('agent.run', handleAgentRealtimeEvent);
     agentRealtimeSource.addEventListener('agent.notification', handleAgentRealtimeEvent);
+    agentRealtimeSource.addEventListener('agent.streaming', handleAgentStreamingEvent);
     agentRealtimeSource.onerror = () => {
         agentRealtimeConnected = false;
         updateAgentAutoRefresh();
     };
 };
+
+// v0.0.52 流式 function calling 实时演示：把累加器快照渲染到任务详情面板
+function handleAgentStreamingEvent(event) {
+    let payload;
+    try { payload = JSON.parse(event.data || '{}'); } catch (e) { return; }
+    if (!payload || !payload.runId) return;
+    // 只为当前打开的任务渲染，避免后台任务覆盖前台 UI
+    if (activeAgentRunId !== payload.runId) return;
+    renderAgentStreamingPanel(payload);
+}
+
+function renderAgentStreamingPanel(payload) {
+    const container = document.getElementById('agent-run-detail');
+    if (!container) return;
+    let panel = container.querySelector('.agent-streaming-panel');
+    if (!panel) {
+        panel = document.createElement('section');
+        panel.className = 'agent-streaming-panel';
+        container.insertBefore(panel, container.firstChild || null);
+    }
+    const step = Number(payload.step) || 0;
+    const finish = payload.finishReason ? agentEscape(payload.finishReason) : '—';
+    const completed = Boolean(payload.completed);
+    const content = String(payload.content || '');
+    const partial = Array.isArray(payload.partialToolCalls) ? payload.partialToolCalls : [];
+    const toolHtml = partial.length === 0
+        ? '<div class="agent-streaming-empty">尚未发现工具调用增量</div>'
+        : partial.map((call, idx) => {
+            const name = agentEscape(call.name || `工具#${idx + 1}`);
+            const argsLen = String(call.argumentsRaw || '').length;
+            const preview = agentEscape(String(call.argumentsRaw || '').slice(0, 240));
+            return `
+                <div class="agent-streaming-tool">
+                    <div class="agent-streaming-tool-head"><strong>${name}</strong><span>arguments ${argsLen} 字符</span></div>
+                    <pre class="agent-streaming-tool-args">${preview}${argsLen > 240 ? '…' : ''}</pre>
+                </div>
+            `;
+        }).join('');
+    panel.innerHTML = `
+        <header class="agent-streaming-head">
+            <strong>流式生成（实验）</strong>
+            <span>第 ${step} 步 · finish_reason: ${finish}${completed ? ' · 已完成' : ''}</span>
+        </header>
+        <div class="agent-streaming-body">
+            <div class="agent-streaming-content">${agentEscape(content) || '<em>等待第一个 token…</em>'}</div>
+            <div class="agent-streaming-tools">${toolHtml}</div>
+        </div>
+    `;
+    // 任务终态时延迟收起面板：5s 后淡出，避免长期占据视野
+    if (completed && payload.finishReason && payload.finishReason !== 'tool_calls') {
+        setTimeout(() => panel?.classList.add('is-fading'), 5000);
+    } else {
+        panel.classList.remove('is-fading');
+    }
+}
 
 window.closeAgentRealtime = function() {
     if (agentRealtimeRefreshTimer) clearTimeout(agentRealtimeRefreshTimer);
