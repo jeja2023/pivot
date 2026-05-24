@@ -11,6 +11,8 @@ const {
     recordModelFailure,
     recordModelSuccess
 } = require('./model-runtime');
+const { createSseEventParser } = require('../streaming');
+const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./streaming-tools');
 
 async function withAgentModelConcurrency(modelCfg, operation) {
     let globalAcquired = false;
@@ -53,6 +55,75 @@ async function callModelText(modelCfg, messages) {
     return callModelJson(modelCfg, messages);
 }
 
+/**
+ * 流式 function calling 调用：
+ *   - 启用 OpenAI tools 协议（messages + tools 数组）
+ *   - SSE 流式解析，工具调用增量进入累加器
+ *   - 返回 { content, toolCalls, finishReason, usage } 结构
+ *
+ * 设计目标：
+ *   - 不替换 callModelText / callModelJson，作为可选 API 暴露
+ *   - 失败回退由调用方决定（agent-runtime 仍可走旧的回合制 JSON）
+ *   - SSE 解析复用 server/streaming.js 的 createSseEventParser，避免重复实现
+ */
+async function callModelStreamingWithTools(modelCfg, messages, tools = [], options = {}) {
+    return withAgentModelConcurrency(modelCfg, async () => {
+        const accumulator = createToolCallAccumulator();
+        const payload = {
+            model: modelCfg.model_name || modelCfg.name,
+            messages,
+            stream: true,
+            temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
+            max_tokens: typeof options.maxTokens === 'number' ? options.maxTokens : 1200
+        };
+        const toolsPayload = buildOpenAiToolsPayload(tools);
+        if (toolsPayload.length > 0) {
+            payload.tools = toolsPayload;
+            if (options.toolChoice) payload.tool_choice = options.toolChoice;
+        }
+        const sseParser = createSseEventParser({
+            onData(payload) {
+                if (!payload) return;
+                let frame = null;
+                try {
+                    frame = JSON.parse(payload);
+                } catch (e) {
+                    return; // 非 JSON 帧忽略，避免被注释/心跳行污染
+                }
+                if (frame && typeof frame === 'object') accumulator.ingest(frame);
+                if (typeof options.onDelta === 'function') {
+                    try {
+                        options.onDelta(accumulator.snapshot());
+                    } catch (cbErr) {
+                        // 回调失败不影响主流程
+                    }
+                }
+            }
+        });
+        const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), payload, {
+            headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
+            responseType: 'stream',
+            timeout: 180000,
+            proxy: false
+        });
+        await new Promise((resolve, reject) => {
+            response.data.on('data', chunk => {
+                try {
+                    sseParser.write(chunk);
+                } catch (parseErr) {
+                    reject(parseErr);
+                }
+            });
+            response.data.on('end', () => {
+                try { sseParser.end(); } catch (e) {}
+                resolve();
+            });
+            response.data.on('error', reject);
+        });
+        return accumulator.finalize();
+    });
+}
+
 function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '') {
     const inputTokens = estimateTokens(JSON.stringify(messages || []));
     const outputTokens = estimateTokens(output || '');
@@ -80,6 +151,7 @@ function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent
 module.exports = {
     callModelJson,
     callModelText,
+    callModelStreamingWithTools,
     recordAgentModelUsage,
     withAgentModelConcurrency
 };

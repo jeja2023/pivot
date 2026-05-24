@@ -3253,3 +3253,99 @@ test('modelTotalPrice 累加输入输出单价并对缺失字段安全', () => {
     assert.equal(modelRouter.modelTotalPrice({ input_price_per_million: 'invalid' }), 0);
 });
 
+// --- v0.0.48 流式 function calling 累加器 ---
+const streamingTools = require('../server/services/streaming-tools');
+
+test('createToolCallAccumulator 累加单个工具的 arguments 字符串增量', () => {
+    const acc = streamingTools.createToolCallAccumulator();
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'search', arguments: '{"q":"' } }] } }] });
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'hello world' } }] } }] });
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"}' } }] } }] });
+    acc.ingest({ choices: [{ finish_reason: 'tool_calls' }], usage: { prompt_tokens: 12, completion_tokens: 8 } });
+    const result = acc.finalize();
+    assert.equal(result.hasToolCalls, true);
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].id, 'call_1');
+    assert.equal(result.toolCalls[0].name, 'search');
+    assert.deepEqual(result.toolCalls[0].arguments, { q: 'hello world' });
+    assert.equal(result.toolCalls[0].parseError, '');
+    assert.equal(result.finishReason, 'tool_calls');
+    assert.deepEqual(result.usage, { prompt_tokens: 12, completion_tokens: 8 });
+});
+
+test('累加器同时记录 content 文本与多个工具调用', () => {
+    const acc = streamingTools.createToolCallAccumulator();
+    acc.ingest({ choices: [{ delta: { content: '我先去查一下知识库。' } }] });
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c0', function: { name: 'rag.search', arguments: '{"q":"A"}' } }] } }] });
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 1, id: 'c1', function: { name: 'rag.summary', arguments: '{"docId":1}' } }] } }] });
+    acc.ingest({ choices: [{ finish_reason: 'tool_calls' }] });
+    const result = acc.finalize();
+    assert.equal(result.content, '我先去查一下知识库。');
+    assert.equal(result.toolCalls.length, 2);
+    assert.equal(result.toolCalls[0].name, 'rag.search');
+    assert.equal(result.toolCalls[1].name, 'rag.summary');
+    assert.deepEqual(result.toolCalls[1].arguments, { docId: 1 });
+});
+
+test('累加器对 arguments JSON 解析失败保留原始字符串与 parseError', () => {
+    const acc = streamingTools.createToolCallAccumulator();
+    acc.ingest({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'bad', function: { name: 'broken', arguments: '{invalid' } }] } }] });
+    acc.ingest({ choices: [{ finish_reason: 'tool_calls' }] });
+    const result = acc.finalize();
+    assert.equal(result.toolCalls[0].arguments, null);
+    assert.equal(result.toolCalls[0].argumentsRaw, '{invalid');
+    assert.ok(result.toolCalls[0].parseError.length > 0);
+});
+
+test('累加器在超过 TOOL_CALL_LIMIT 时记录错误并丢弃新增项', () => {
+    const acc = streamingTools.createToolCallAccumulator();
+    for (let i = 0; i < streamingTools.TOOL_CALL_LIMIT + 4; i += 1) {
+        acc.ingest({ choices: [{ delta: { tool_calls: [{ index: i, id: `c${i}`, function: { name: `t${i}`, arguments: '{}' } }] } }] });
+    }
+    const result = acc.finalize();
+    assert.equal(result.toolCalls.length, streamingTools.TOOL_CALL_LIMIT);
+    assert.ok(result.errors.length > 0);
+});
+
+test('legacy function_call delta 与 tool_calls 协议向后兼容', () => {
+    const acc = streamingTools.createToolCallAccumulator();
+    acc.ingest({ choices: [{ delta: { function_call: { name: 'legacy_tool', arguments: '{"x":1}' } } }] });
+    acc.ingest({ choices: [{ finish_reason: 'function_call' }] });
+    const result = acc.finalize();
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].name, 'legacy_tool');
+    assert.deepEqual(result.toolCalls[0].arguments, { x: 1 });
+});
+
+test('buildOpenAiToolsPayload 把工具列表转成 OpenAI tools 数组', () => {
+    const payload = streamingTools.buildOpenAiToolsPayload([
+        { name: 'rag.search', description: '搜索知识库', input_schema: { type: 'object', properties: { q: { type: 'string' } } } },
+        { name: '' } // 无名工具应该被过滤
+    ]);
+    assert.equal(payload.length, 1);
+    assert.equal(payload[0].type, 'function');
+    assert.equal(payload[0].function.name, 'rag.search');
+    assert.deepEqual(payload[0].function.parameters, { type: 'object', properties: { q: { type: 'string' } } });
+});
+
+test('buildAssistantToolMessage 与 buildToolResultMessage 输出标准消息结构', () => {
+    const result = {
+        hasToolCalls: true,
+        content: '',
+        toolCalls: [{ id: 'c1', name: 'rag.search', argumentsRaw: '{"q":"X"}' }]
+    };
+    const assistantMsg = streamingTools.buildAssistantToolMessage(result);
+    assert.equal(assistantMsg.role, 'assistant');
+    assert.equal(assistantMsg.tool_calls[0].id, 'c1');
+    assert.equal(assistantMsg.tool_calls[0].function.name, 'rag.search');
+
+    const toolMsg = streamingTools.buildToolResultMessage('c1', { ok: true });
+    assert.equal(toolMsg.role, 'tool');
+    assert.equal(toolMsg.tool_call_id, 'c1');
+    assert.equal(toolMsg.content, '{"ok":true}');
+
+    // 无 tool calls 时回退到普通 assistant content 消息
+    const plain = streamingTools.buildAssistantToolMessage({ hasToolCalls: false, content: '直接回答' });
+    assert.deepEqual(plain, { role: 'assistant', content: '直接回答' });
+});
+

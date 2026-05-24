@@ -1,5 +1,21 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.48] - 2026-05-24
+### 流式 function calling 基础设施
+- **新增 `server/services/streaming-tools.js`**：纯函数实现的 OpenAI streaming tool_calls 协议累加器。
+  - 维护多个 `tool_calls`（按 index 索引）的 name、id、arguments 字符串增量累加；同步累加 assistant `content` 文本与 `usage` 字段。
+  - `finalize()` 返回 `{ content, toolCalls, finishReason, usage, hasToolCalls, errors }`，每个 `toolCall` 同时包含 `argumentsRaw` 与已 `JSON.parse` 的 `arguments`；解析失败保留原始字符串和 `parseError`，调用方可降级处理。
+  - 提供安全上限 `TOOL_CALL_LIMIT = 16`，超出后丢弃并记录错误，防止异常增量耗尽内存。
+  - 兼容 legacy `function_call` delta 协议（旧版 OpenAI 接口仍可工作）。
+  - 辅助函数：`buildOpenAiToolsPayload`（工具列表 → OpenAI tools 数组）、`buildAssistantToolMessage`（累加结果 → assistant message + tool_calls）、`buildToolResultMessage`（工具输出 → role=tool 消息）。
+- **agent-model 新增 `callModelStreamingWithTools(modelCfg, messages, tools, options)`**：
+  - 复用 `withAgentModelConcurrency` 接入全局/端点并发保护和成功失败统计。
+  - 通过 `axios responseType: 'stream'` 拉取 SSE，由 `server/streaming.js` 的 `createSseEventParser` 解析逻辑帧后投喂累加器。
+  - `options.onDelta(snapshot)` 回调暴露增量状态，便于前端实时渲染（待 agent-runtime 接入流程后启用）。
+  - **不替换 `callModelText` / `callModelJson`**：作为可选 API 并存，agent-runtime 当前默认仍走回合制 JSON 协议，避免回归。后续可通过环境变量 `AGENT_STREAMING_TOOLS=true` 渐进切换。
+- **回归测试加固**：新增 7 项单测覆盖单工具增量累加、多工具与文本混合、`arguments` JSON 解析失败降级、`TOOL_CALL_LIMIT` 边界、`function_call` 旧协议兼容、`buildOpenAiToolsPayload` 过滤无名工具、`buildAssistantToolMessage` / `buildToolResultMessage` 输出结构。
+- **验证**：`npm run check` 全部 103 文件通过，`node tests/security.test.js` 通过 `96/96`（新增 7 项）。
+
 ## [v0.0.47] - 2026-05-24
 ### 智能体 DAG 可视化编辑器
 - **新增 `client/chat/agents-dag-editor.js`**：纯原生 SVG + 拖拽实现的 DAG 可视化编辑器（约 400 行，零依赖）。

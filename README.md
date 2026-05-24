@@ -1,13 +1,19 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.47-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.48-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.47
+## 最新版本：0.0.48
+
+### v0.0.48 更新摘要
+
+- **流式 function calling 基础设施**：新增 `server/services/streaming-tools.js` 纯函数累加器，按 OpenAI streaming tool_calls 协议累加多工具 `arguments` 与 assistant `content`；`finalize()` 返回结构化结果（含解析后的参数与 parseError 降级字段），兼容 legacy `function_call` delta。
+- **agent-model 新增 `callModelStreamingWithTools` API**：基于 `axios stream` + `createSseEventParser` 实现流式调用，复用现有全局/端点并发保护与失败统计；当前**不替换** `callModelText`，agent-runtime 主循环维持回合制 JSON，未来可通过环境变量渐进启用。
+- **验证**：新增 7 项 streaming-tools 单测，`npm test` 通过 `96/96`，`npm run check` 全部 103 文件通过。
 
 ### v0.0.47 更新摘要
 
