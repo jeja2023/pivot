@@ -7,8 +7,9 @@ WORKDIR /app
 # 首先复制 package.json
 COPY package*.json ./
 
-# 安装系统级图像处理引擎及编译工具
+# 安装系统级图像处理引擎、编译工具及时间数据包
 RUN apt-get update && apt-get install -y \
+    tzdata \
     pkg-config \
     libvips-dev \
     libglib2.0-dev \
@@ -17,7 +18,8 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置国内加速环境变量
+# 设置容器时区与国内加速环境变量
+ENV TZ=Asia/Shanghai
 ENV npm_config_registry=https://registry.npmmirror.com
 ENV PYTHON=python3
 ENV SHARP_LIBVIPS_BINARY_HOST=https://npmmirror.com/mirrors/sharp-libvips
