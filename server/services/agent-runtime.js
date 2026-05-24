@@ -6,10 +6,11 @@ const { getRunnableModelForUser } = require('./models');
 const { clampText, executeBuiltInTool, getBuiltInToolDefinitions } = require('./agent-tools');
 const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
-const { callModelText, recordAgentModelUsage } = require('./agent-model');
+const { callModelText, recordAgentModelUsage, callModelStreamingWithTools } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy } = require('./model-router');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
+const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability
@@ -696,6 +697,144 @@ function upsertDagNode(runId, node, patch = {}) {
     return info.lastInsertRowid;
 }
 
+// v0.0.49 流式 function calling 分支
+function isStreamingToolsEnabled() {
+    return String(process.env.AGENT_STREAMING_TOOLS || '').toLowerCase() === 'true';
+}
+
+// 把 agent 工具列表转成 OpenAI tools schema；保留命名与 input_schema
+function buildAgentToolSchemas(toolList) {
+    return (toolList || []).filter(tool => tool && tool.name).map(tool => ({
+        name: tool.name,
+        description: tool.description || tool.title || '',
+        input_schema: tool.input_schema || tool.parameters || { type: 'object', properties: {} }
+    }));
+}
+
+// 流式分支：把流式 tool_calls 协议转成 agent 步骤记录；失败时返回 { completed: false } 让外层回退
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }) {
+    try {
+        const tools = buildAgentToolSchemas(toolList);
+        const systemPrompt = `你是一个智能体。目标：${run.goal || ''}\n\n` +
+            `调用工具时务必通过 tool_calls 协议给出结构化参数；当无需继续调用工具且已可作答时直接输出最终答复。`;
+        const conversation = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: run.goal || '' }
+        ];
+        let lastStep = listSteps(runId).length;
+        const maxSteps = normalizeMaxSteps(run.max_steps);
+        for (let step = lastStep + 1; step <= lastStep + maxSteps; step += 1) {
+            assertRunWithinBudget();
+            assertRunNotCancelled(runId);
+            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            const stepStart = Date.now();
+            const result = await withTimeout(
+                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200 }),
+                Math.min(180000, Math.max(deadline - Date.now(), 1000)),
+                '流式模型规划'
+            );
+            recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
+            // 把累加器结果当作"plan"记录到 agent_steps，便于审计与回看
+            insertStep(runId, step, {
+                type: 'plan',
+                title: result?.hasToolCalls ? `流式规划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '无工具'}` : '流式规划：直接作答',
+                input: { goal: run.goal },
+                output: {
+                    content: result?.content || '',
+                    toolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, arguments: c.arguments || c.argumentsRaw })),
+                    finishReason: result?.finishReason || ''
+                },
+                durationMs: Date.now() - stepStart
+            });
+
+            if (!result?.hasToolCalls) {
+                const answer = result?.content || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
+                updateRun(runId, {
+                    status: 'completed',
+                    final_answer: answer,
+                    completed_at: getBeijingTimestamp(),
+                    last_heartbeat_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                });
+                createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
+                return { completed: true };
+            }
+
+            // 把 assistant tool_calls 写回会话，准备执行工具
+            conversation.push(buildAssistantToolMessage(result));
+
+            // 顺序执行 tool_calls；任何一个工具失败仍保留 tool 消息以便模型决定下一步
+            for (const call of result.toolCalls) {
+                assertRunWithinBudget();
+                assertRunNotCancelled(runId);
+                const selectedTool = toolList.find(t => t.name === call.name);
+                if (!selectedTool) {
+                    const message = `工具未授权或不存在：${call.name}`;
+                    conversation.push(buildToolResultMessage(call.id, { error: message }));
+                    insertStep(runId, listSteps(runId).length + 1, {
+                        type: 'tool',
+                        title: `跳过未知工具：${call.name || '-'}`,
+                        toolName: call.name || '',
+                        input: call.arguments || {},
+                        output: { error: message },
+                        errorMessage: message,
+                        status: 'error'
+                    });
+                    continue;
+                }
+                if (maybePauseForApproval(run, selectedTool, call.arguments || {})) {
+                    // 已被暂停等待审批；流式分支退出，等用户审批后会重新入队
+                    return { completed: true };
+                }
+                const callStart = Date.now();
+                try {
+                    const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
+                    const output = await withTimeout(
+                        executeToolByName(call.name, args, user, toolList),
+                        Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
+                        `工具调用 ${call.name}`
+                    );
+                    const compactOutput = clampText(output, 10000);
+                    observations.push({ step, tool: call.name, input: args, output: compactOutput });
+                    insertStep(runId, listSteps(runId).length + 1, {
+                        type: 'tool',
+                        title: `调用工具：${call.name}`,
+                        toolName: call.name,
+                        input: args,
+                        output: compactOutput,
+                        durationMs: Date.now() - callStart
+                    });
+                    conversation.push(buildToolResultMessage(call.id, compactOutput));
+                } catch (toolErr) {
+                    observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
+                    insertStep(runId, listSteps(runId).length + 1, {
+                        type: 'tool',
+                        title: `工具调用失败：${call.name}`,
+                        toolName: call.name,
+                        input: call.arguments || {},
+                        output: { error: toolErr.message },
+                        errorMessage: toolErr.message,
+                        status: 'error',
+                        durationMs: Date.now() - callStart
+                    });
+                    conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
+                }
+            }
+        }
+        // 步数耗尽仍未完成 → 让外层旧逻辑兜底（合成最终答案）
+        return { completed: false };
+    } catch (streamErr) {
+        // 流式失败时不让任务直接挂掉，记录后回退到旧分支
+        logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，回退到回合制 JSON 协议');
+        insertStep(runId, listSteps(runId).length + 1, {
+            type: 'control',
+            title: '流式工具调用失败，已回退',
+            output: { error: streamErr.message }
+        });
+        return { completed: false };
+    }
+}
+
 async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }) {
     const metadata = getRunMetadata(run);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
@@ -884,6 +1023,16 @@ async function runAgent(runId, user) {
         if (normalizeRunMode(run.run_mode) === 'dag') {
             await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget });
             return;
+        }
+
+        // 可选：流式 function calling 分支（v0.0.49）
+        // 默认环境变量未开启时走旧回合制 JSON 协议；启用后失败也会自动回退，保证任务能完成
+        if (isStreamingToolsEnabled()) {
+            const streamingResult = await tryRunAgentStreaming({
+                run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
+            });
+            if (streamingResult?.completed) return;
+            // 未完成（流式失败 / 超步数）则继续走旧回合制循环
         }
 
         for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {

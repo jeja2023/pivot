@@ -1,5 +1,18 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.49] - 2026-05-24
+### agent-runtime 接入流式 function calling
+- **新增 `tryRunAgentStreaming`**：在 `runAgent` 主循环里增加一条可选的流式分支，按 OpenAI tools 协议把工具调用从"回合制 JSON"升级为流式 `tool_calls` 协议。
+  - 系统 prompt 引导模型通过 `tool_calls` 给出结构化参数；累加器解析后逐个执行工具，把结果作为 `role=tool` 消息喂回模型，循环直到模型直接输出最终答复。
+  - 每轮规划与每次工具调用都会写入 `agent_steps`，含 `plan` 类型的累加器快照与 `tool` 类型的实际执行记录，审计与回看完全保留。
+  - 工具未授权 / 未在白名单时写入 `error` 步骤但继续把错误返回给模型，让模型自行决定下一步，不直接挂任务。
+  - 触发 MCP 审批暂停时，与旧分支行为一致：直接返回，等用户审批后会重新入队。
+- **环境变量开关**：默认 `AGENT_STREAMING_TOOLS=false`，所有现有任务行为零改动；置为 `true` 才启用流式分支。任何**流式失败（网络、累加器异常、超时）会自动回退**到旧回合制 JSON 协议，并在 `agent_steps` 留下 `control` 步骤记录，确保任务最终能完成。
+- **`run_mode = 'dag'` 永远走旧分支**：DAG 已经是图调度，不需要也不应该被流式工具替换。
+- **工具列表协议化**：新增 `buildAgentToolSchemas`，把内部 `toolList` 转成 OpenAI tools schema 格式（带 `description` 与 `input_schema`），复用 v0.0.48 的 `streaming-tools.js` 工具函数。
+- **.env.example 同步**：新增 `AGENT_STREAMING_TOOLS=false` 与说明注释。
+- **验证**：`npm run check` 全部 103 文件通过，`node tests/security.test.js` 维持 `96/96`；旧分支单测与 v0.0.48 新增的 streaming-tools 单测全部回归。
+
 ## [v0.0.48] - 2026-05-24
 ### 流式 function calling 基础设施
 - **新增 `server/services/streaming-tools.js`**：纯函数实现的 OpenAI streaming tool_calls 协议累加器。
