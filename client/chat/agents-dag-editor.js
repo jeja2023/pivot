@@ -159,6 +159,11 @@
         let connecting = null; // { fromId, ghost: <path> }
         let pendingFlush = null;
         let suppressTextareaSync = false;
+        // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
+        const viewState = { x: 0, y: 0, scale: 1 };
+        const SCALE_MIN = 0.3;
+        const SCALE_MAX = 2.5;
+        let panning = null; // { startX, startY, originX, originY }
 
         const root = makeSvgEl('svg', {
             class: 'pivot-dag-svg',
@@ -184,6 +189,61 @@
         root.appendChild(nodesLayer);
         canvas.replaceChildren(root);
 
+        // 小地图 overlay：固定在 canvas 右下角，独立 SVG，点击跳转视口
+        const minimap = (() => {
+            const wrap = document.createElement('div');
+            wrap.className = 'pivot-dag-minimap';
+            const mini = makeSvgEl('svg', { class: 'pivot-dag-minimap-svg', xmlns: SVG_NS });
+            const miniNodes = makeSvgEl('g', { class: 'pivot-dag-minimap-nodes' });
+            const viewport = makeSvgEl('rect', { class: 'pivot-dag-minimap-viewport', fill: 'rgba(59,130,246,0.18)', stroke: '#3b82f6', 'stroke-width': 1.5 });
+            mini.appendChild(miniNodes);
+            mini.appendChild(viewport);
+            wrap.appendChild(mini);
+            canvas.appendChild(wrap);
+            return { wrap, svg: mini, nodesLayer: miniNodes, viewport };
+        })();
+
+        const updateMinimap = () => {
+            if (!minimap) return;
+            const { width, height } = contentBounds();
+            minimap.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            minimap.nodesLayer.replaceChildren();
+            spec.nodes.forEach(node => {
+                const rect = makeSvgEl('rect', {
+                    x: node._x,
+                    y: node._y,
+                    width: NODE_WIDTH,
+                    height: NODE_HEIGHT,
+                    rx: 4,
+                    ry: 4,
+                    fill: selectedId === node.id ? '#3b82f6' : '#cbd5e1',
+                    opacity: '0.7'
+                });
+                minimap.nodesLayer.appendChild(rect);
+            });
+            // 视口框：viewState 对应内容坐标系下的矩形
+            const vbWidth = width / viewState.scale;
+            const vbHeight = height / viewState.scale;
+            minimap.viewport.setAttribute('x', viewState.x);
+            minimap.viewport.setAttribute('y', viewState.y);
+            minimap.viewport.setAttribute('width', vbWidth);
+            minimap.viewport.setAttribute('height', vbHeight);
+        };
+
+        // 点击小地图：把视口中心移到点击位置
+        const minimapClickHandler = (event) => {
+            const rect = minimap.svg.getBoundingClientRect();
+            const { width, height } = contentBounds();
+            const contentX = (event.clientX - rect.left) * width / rect.width;
+            const contentY = (event.clientY - rect.top) * height / rect.height;
+            const vbWidth = width / viewState.scale;
+            const vbHeight = height / viewState.scale;
+            viewState.x = Math.max(0, contentX - vbWidth / 2);
+            viewState.y = Math.max(0, contentY - vbHeight / 2);
+            updateViewBox();
+        };
+        minimap.svg.addEventListener('click', minimapClickHandler);
+
         const flushOut = () => {
             if (pendingFlush) cancelAnimationFrame(pendingFlush);
             pendingFlush = requestAnimationFrame(() => {
@@ -195,12 +255,29 @@
             });
         };
 
+        // 计算内容包围盒；保证空 DAG 也有合理底盘
+        const contentBounds = () => {
+            const w = Math.max(640, ...spec.nodes.map(n => n._x + NODE_WIDTH)) + PADDING;
+            const h = Math.max(280, ...spec.nodes.map(n => n._y + NODE_HEIGHT)) + PADDING;
+            return { width: w, height: h };
+        };
+
         const updateViewBox = () => {
-            const width = Math.max(640, ...spec.nodes.map(n => n._x + NODE_WIDTH)) + PADDING;
-            const height = Math.max(280, ...spec.nodes.map(n => n._y + NODE_HEIGHT)) + PADDING;
-            root.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            const { width, height } = contentBounds();
+            const vbWidth = width / viewState.scale;
+            const vbHeight = height / viewState.scale;
+            root.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${vbWidth} ${vbHeight}`);
             root.setAttribute('width', '100%');
             root.style.minHeight = `${Math.min(540, height + 16)}px`;
+            updateMinimap();
+        };
+
+        // 重置缩放/平移到完整内容可见
+        const fitToContent = () => {
+            viewState.x = 0;
+            viewState.y = 0;
+            viewState.scale = 1;
+            updateViewBox();
         };
 
         const renderInspector = () => {
@@ -434,6 +511,15 @@
             if (!nodeGroup) {
                 selectedId = null;
                 render();
+                // 空白处按下：开始平移
+                panning = {
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    originX: viewState.x,
+                    originY: viewState.y
+                };
+                root.classList.add('is-panning');
+                root.setPointerCapture?.(event.pointerId);
                 return;
             }
             const id = nodeGroup.dataset.pivotDagId;
@@ -466,6 +552,17 @@
                 const group = nodesLayer.querySelector(`[data-pivot-dag-id="${CSS.escape(dragging.id)}"]`);
                 if (group) group.setAttribute('transform', `translate(${node._x}, ${node._y})`);
                 updateViewBox();
+                return;
+            }
+            if (panning) {
+                // 把屏幕像素位移转回内容坐标位移：屏幕 px / (canvas px) * viewBox 宽 = 内容单位
+                const rect = root.getBoundingClientRect();
+                const { width, height } = contentBounds();
+                const dxContent = (event.clientX - panning.startClientX) * (width / viewState.scale) / rect.width;
+                const dyContent = (event.clientY - panning.startClientY) * (height / viewState.scale) / rect.height;
+                viewState.x = panning.originX - dxContent;
+                viewState.y = panning.originY - dyContent;
+                updateViewBox();
             }
         };
 
@@ -491,6 +588,30 @@
                 dragging = null;
                 flushOut();
             }
+            if (panning) {
+                panning = null;
+                root.classList.remove('is-panning');
+            }
+        };
+
+        // 滚轮缩放：以光标位置为锚点
+        const onWheel = (event) => {
+            event.preventDefault();
+            const factor = event.deltaY > 0 ? 0.9 : 1.1;
+            const nextScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, viewState.scale * factor));
+            if (nextScale === viewState.scale) return;
+            const anchor = pointFromEvent(event); // 缩放前光标所在内容坐标
+            viewState.scale = nextScale;
+            // 缩放后保持光标对应同一内容点：anchor 在新视口中仍位于相同屏幕位置
+            const rect = root.getBoundingClientRect();
+            const { width, height } = contentBounds();
+            const newVbWidth = width / viewState.scale;
+            const newVbHeight = height / viewState.scale;
+            const offsetX = (event.clientX - rect.left) / rect.width;
+            const offsetY = (event.clientY - rect.top) / rect.height;
+            viewState.x = anchor.x - offsetX * newVbWidth;
+            viewState.y = anchor.y - offsetY * newVbHeight;
+            updateViewBox();
         };
 
         const onDoubleClick = (event) => {
@@ -507,12 +628,14 @@
         root.addEventListener('pointerup', onPointerUp);
         root.addEventListener('pointercancel', onPointerUp);
         root.addEventListener('dblclick', onDoubleClick);
+        root.addEventListener('wheel', onWheel, { passive: false });
 
         // —— 工具栏 ——
         if (toolbar) {
             toolbar.replaceChildren();
             toolbar.appendChild(makeButton('+ 添加节点', '新增 DAG 节点', addNode));
             toolbar.appendChild(makeButton('自动布局', '按依赖层次重新排列', resetLayout));
+            toolbar.appendChild(makeButton('适配画布', '重置缩放和平移到默认视角', fitToContent));
             toolbar.appendChild(makeButton('从 JSON 同步', '把右侧 JSON 文本应用到画布', () => {
                 const parsed = readJson(textarea ? textarea.value : '');
                 if (!parsed) {
@@ -544,8 +667,15 @@
             root.removeEventListener('pointerup', onPointerUp);
             root.removeEventListener('pointercancel', onPointerUp);
             root.removeEventListener('dblclick', onDoubleClick);
+            root.removeEventListener('wheel', onWheel);
+            if (minimap?.svg && typeof minimapClickHandler === 'function') {
+                minimap.svg.removeEventListener('click', minimapClickHandler);
+            }
             if (textarea) textarea.removeEventListener('input', onTextareaInput);
             canvas.replaceChildren();
+            if (minimap?.wrap?.parentNode === canvas) {
+                // canvas.replaceChildren 已清空
+            }
             if (inspector) inspector.replaceChildren();
             if (toolbar) toolbar.replaceChildren();
             canvas._pivotDagDestroy = null;
