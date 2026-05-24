@@ -109,8 +109,16 @@
                                 </label>
                             </div>
                             <label class="agent-dag-config-field">
-                                <span>DAG 编排 JSON</span>
-                                <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
+                                <span>DAG 编排</span>
+                                <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
+                                    <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
+                                    <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
+                                    <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
+                                </div>
+                                <details class="pivot-dag-editor-json">
+                                    <summary>JSON 视图（高级）</summary>
+                                    <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
+                                </details>
                             </label>
                         </div>
                     </details>

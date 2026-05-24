@@ -1,5 +1,19 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.47] - 2026-05-24
+### 智能体 DAG 可视化编辑器
+- **新增 `client/chat/agents-dag-editor.js`**：纯原生 SVG + 拖拽实现的 DAG 可视化编辑器（约 400 行，零依赖）。
+  - 节点：可拖动、双击聚焦、`is-selected` 高亮；显示标题与所选工具。
+  - 边：贝塞尔曲线 + 箭头标记，依赖关系一目了然。
+  - 出端口（节点右侧小圆点）拖到目标节点的入端口即可创建依赖；ghost 路径实时跟随光标。
+  - 工具栏："+ 添加节点"、"自动布局"（按拓扑层次重排）、"从 JSON 同步"。
+  - 详情面板：选中节点后可编辑 ID（自动迁移依赖引用）、标题、工具下拉（从 `agentToolsCache` 填充）、条件、输入 JSON、依赖勾选；输入 JSON 无效时高亮但不破坏现有数据。
+- **与 `#agent-dag-spec` textarea 双向同步**：编辑器变化 → textarea 自动 stringify；用户手动改 textarea → 编辑器解析并重绘；JSON 视图改为 `<details>` 折叠形态，普通用户不会被原始 JSON 吓到，专家用户依然可以打开手改。
+- **agent.html 集成**：在原 textarea 位置外包一层 `pivot-dag-editor-wrap`，注入画布、工具栏、详情面板三块容器；`agents.js` 的 `loadAgentTools()` 完成后自动 `mountAgentDagEditor()` 将工具列表喂给编辑器。
+- **样式**：在 `styles/workspaces/agent.css` 末尾新增约 180 行编辑器样式，包含网格画布背景、节点/边/端口/选中态、详情面板栅格表单、依赖标签胶囊；保持原生主题变量，兼容暗色模式。
+- **CSP 兼容**：所有事件均通过 `addEventListener` 绑定，无内联 onclick；幂等挂载，`mountAgentDagEditor` 重复调用会先 destroy 旧实例。
+- **验证**：`npm run check` 全部 102 文件通过，`node tests/security.test.js` 维持 `89/89`。
+
 ## [v0.0.46] - 2026-05-24
 ### 智能体模型路由策略
 - **新增 `server/services/model-router.js`**：提供 5 种模型选择策略，让智能体任务根据输入特征自动从用户可见的模型池中选模。

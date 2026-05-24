@@ -1,13 +1,19 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.46-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.47-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.46
+## 最新版本：0.0.47
+
+### v0.0.47 更新摘要
+
+- **智能体 DAG 可视化编辑器**：新增 `client/chat/agents-dag-editor.js`（纯原生 SVG + 拖拽，零依赖），节点可拖动、出端口拖到入端口即创建依赖；工具栏提供"添加节点 / 自动布局 / 从 JSON 同步"；选中节点后弹出详情面板编辑标题、工具、条件、输入 JSON 与依赖；与原 `#agent-dag-spec` textarea 双向同步，JSON 视图改为折叠 details，普通用户不再面对原始 JSON。
+- **CSS 与集成**：`styles/workspaces/agent.css` 末尾追加约 180 行编辑器样式（网格画布背景、节点/边/端口/选中态、详情面板栅格表单、依赖胶囊），兼容暗色模式；`agents.js` 在 `loadAgentTools()` 后自动挂载编辑器。
+- **验证**：`npm run check` 全部 102 文件通过，`node tests/security.test.js` 维持 `89/89`。
 
 ### v0.0.46 更新摘要
 

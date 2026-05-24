@@ -417,6 +417,7 @@ async function loadAgentTools() {
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
     const visibleTools = (data.tools || []).filter(tool => currentUser?.username === 'admin' || !isAdminOnlyAgentTool(tool));
     agentToolsCache = visibleTools;
+    mountAgentDagEditor();
     list.innerHTML = `
         ${visibleTools.map(tool => `
             <label class="agent-tool-chip agent-tool-select ${isAdminOnlyAgentTool(tool) ? 'admin-tool' : ''}">
@@ -1969,3 +1970,28 @@ window.loadMcpWorkbench = async function() {
         showToast(e.message, 'error');
     }
 };
+
+// 智能体 DAG 可视化编辑器挂载（v0.0.47）
+// 与 #agent-dag-spec textarea 双向同步：编辑器内部变化 -> textarea；textarea 手动改 -> 编辑器重绘
+let dagEditorInstance = null;
+function mountAgentDagEditor() {
+    const canvas = document.getElementById('agent-dag-editor-canvas');
+    const textarea = document.getElementById('agent-dag-spec');
+    const toolbar = document.getElementById('agent-dag-editor-toolbar');
+    const inspector = document.getElementById('agent-dag-editor-inspector');
+    if (!canvas || !textarea || !window.PivotDagEditor) return;
+    if (dagEditorInstance) dagEditorInstance.destroy();
+    dagEditorInstance = window.PivotDagEditor.mount({
+        canvas,
+        textarea,
+        toolbar,
+        inspector,
+        getTools: () => agentToolsCache || [],
+        onChange: (result) => {
+            if (result && result.error === 'invalid_json') {
+                showToast('DAG 编排 JSON 格式不正确', 'error');
+            }
+        }
+    });
+}
+window.refreshAgentDagEditor = () => dagEditorInstance?.refresh();

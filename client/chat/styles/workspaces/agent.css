@@ -1493,3 +1493,211 @@ button.agent-ops-item {
 .agent-empty-hero {
     min-height: 320px;
 }
+
+/* v0.0.47 智能体 DAG 可视化编辑器 */
+.pivot-dag-editor-wrap {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    padding: 8px;
+    min-height: 360px;
+}
+
+.pivot-dag-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed var(--border);
+}
+
+.pivot-dag-toolbar-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+}
+
+.pivot-dag-editor-canvas {
+    background: repeating-linear-gradient(90deg, transparent 0 39px, rgba(148, 163, 184, 0.12) 39px 40px),
+                repeating-linear-gradient(0deg, transparent 0 39px, rgba(148, 163, 184, 0.12) 39px 40px),
+                #fff;
+    border-radius: 6px;
+    overflow: auto;
+    min-height: 280px;
+    max-height: 540px;
+}
+
+.pivot-dag-svg {
+    display: block;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+}
+
+.pivot-dag-node {
+    cursor: grab;
+}
+
+.pivot-dag-node:active {
+    cursor: grabbing;
+}
+
+.pivot-dag-node-body {
+    fill: #fff;
+    stroke: rgba(148, 163, 184, 0.6);
+    stroke-width: 1.5;
+    transition: fill 0.15s ease, stroke 0.15s ease;
+}
+
+.pivot-dag-node.is-selected .pivot-dag-node-body {
+    fill: rgba(59, 130, 246, 0.08);
+    stroke: #3b82f6;
+}
+
+.pivot-dag-node-title {
+    fill: #0f172a;
+    font-size: 13px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.pivot-dag-node-tool {
+    fill: #64748b;
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.pivot-dag-port {
+    fill: #fff;
+    stroke: #94a3b8;
+    stroke-width: 1.5;
+    cursor: crosshair;
+    transition: fill 0.15s ease;
+}
+
+.pivot-dag-port:hover {
+    fill: #3b82f6;
+    stroke: #2563eb;
+}
+
+.pivot-dag-edge {
+    fill: none;
+    stroke: #94a3b8;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+.pivot-dag-edge-ghost {
+    stroke-dasharray: 4 3;
+    opacity: 0.7;
+}
+
+.pivot-dag-editor-inspector {
+    border-top: 1px dashed var(--border);
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.78rem;
+}
+
+.pivot-dag-inspector-empty {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    padding: 6px 4px;
+}
+
+.pivot-dag-inspector-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+}
+
+.pivot-dag-inspector-row label,
+.pivot-dag-inspector-input {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pivot-dag-inspector-row label > span,
+.pivot-dag-inspector-input > span {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.pivot-dag-inspector-row input,
+.pivot-dag-inspector-row select,
+.pivot-dag-inspector-input textarea {
+    width: 100%;
+    height: 28px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: #0f172a;
+    font-size: 0.78rem;
+}
+
+.pivot-dag-inspector-input textarea {
+    min-height: 60px;
+    height: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;
+}
+
+.pivot-dag-inspector-input textarea.is-invalid {
+    border-color: #ef4444;
+}
+
+.pivot-dag-inspector-depends-head {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-bottom: 4px;
+}
+
+.pivot-dag-inspector-depends-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pivot-dag-depends-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: #fff;
+}
+
+.pivot-dag-depends-item input {
+    margin: 0;
+}
+
+.pivot-dag-inspector-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.pivot-dag-editor-json {
+    margin-top: 8px;
+}
+
+.pivot-dag-editor-json > summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    padding: 4px 0;
+}
+
+.pivot-dag-editor-json[open] > summary {
+    margin-bottom: 6px;
+}
