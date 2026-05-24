@@ -367,6 +367,8 @@ function runMigrations() {
     ensureColumn('agent_runs', 'context_config', 'TEXT');
     ensureColumn('agent_runs', 'resume_from_step', 'INTEGER DEFAULT 0');
     ensureColumn('agent_runs', 'metadata', 'TEXT');
+    ensureColumn('agent_runs', 'model_router', "TEXT DEFAULT 'fixed'");
+    ensureColumn('agent_runs', 'chosen_model_id', 'INTEGER');
     ensureColumn('agent_runs', 'started_at', 'DATETIME');
     ensureColumn('agent_runs', 'last_heartbeat_at', 'DATETIME');
     ensureColumn('agent_runs', 'locked_by', 'TEXT');
@@ -493,6 +495,7 @@ function runMigrations() {
     ensureColumn('agent_templates', 'retry_limit', 'INTEGER DEFAULT 1');
     ensureColumn('agent_templates', 'context_config', 'TEXT');
     ensureColumn('agent_templates', 'allowed_units', "TEXT DEFAULT ''");
+    ensureColumn('agent_templates', 'model_router', "TEXT DEFAULT 'fixed'");
     ensureColumn('agent_templates', 'deleted_at', 'DATETIME');
     ensureColumn('agent_schedules', 'template_id', 'INTEGER');
     ensureColumn('agent_schedules', 'model_id', 'INTEGER');

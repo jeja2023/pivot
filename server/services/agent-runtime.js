@@ -8,6 +8,8 @@ const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
+const { chooseModel, normalizeStrategy: normalizeRouterStrategy } = require('./model-router');
+const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability
@@ -832,8 +834,35 @@ async function runAgent(runId, user) {
                 throw err;
             }
         };
-        const modelCfg = getRunnableModelForUser(run.model_id, user);
-        if (!modelCfg) throw new Error('当前智能体任务没有可用模型。');
+        const initialModelCfg = getRunnableModelForUser(run.model_id, user);
+        if (!initialModelCfg) throw new Error('当前智能体任务没有可用模型。');
+        // 按 run.model_router 进行运行时模型路由；fixed 等同旧行为
+        let modelCfg = initialModelCfg;
+        const routerStrategy = normalizeRouterStrategy(run.model_router);
+        if (routerStrategy !== 'fixed') {
+            try {
+                const routed = chooseModel({
+                    user,
+                    strategy: routerStrategy,
+                    hintModelId: run.model_id,
+                    messages: [{ role: 'user', content: run.goal || '' }],
+                    endpointStatusGetter: getModelEndpointRuntimeStatus
+                });
+                if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
+                    modelCfg = routed.model;
+                    db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
+                        .run(modelCfg.id, getBeijingTimestamp(), runId);
+                    insertStep(runId, listSteps(runId).length + 1, {
+                        type: 'control',
+                        title: `模型路由：${routerStrategy}`,
+                        output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
+                    });
+                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由命中');
+                }
+            } catch (routerErr) {
+                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，回退到原模型');
+            }
+        }
 
         const observations = [];
         const toolList = formatToolList(user, {
@@ -1209,7 +1238,8 @@ function normalizeTemplatePayload(body = {}, user = {}) {
         maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
         retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
         contextConfig: serializeContextConfig(body.contextConfig || body.context_config),
-        allowedUnits: shared ? String(body.allowedUnits || body.allowed_units || '').trim().slice(0, 500) : ''
+        allowedUnits: shared ? String(body.allowedUnits || body.allowed_units || '').trim().slice(0, 500) : '',
+        modelRouter: normalizeRouterStrategy(body.modelRouter || body.model_router)
     };
 }
 
@@ -1231,12 +1261,13 @@ function createAgentTemplate(user, body = {}) {
         INSERT INTO agent_templates (
             user_id, scope, name, description, goal_template, run_mode, tool_policy, tool_allowlist,
             approval_policy, max_steps, max_token_budget, retry_limit, context_config, allowed_units,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_router, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         user.id, data.scope, data.name, data.description, data.goalTemplate, data.runMode,
         data.toolPolicy, data.toolAllowlist, data.approvalPolicy, data.maxSteps,
-        data.maxTokenBudget, data.retryLimit, data.contextConfig, data.allowedUnits, now, now
+        data.maxTokenBudget, data.retryLimit, data.contextConfig, data.allowedUnits,
+        data.modelRouter, now, now
     );
     return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(info.lastInsertRowid);
 }
@@ -1249,12 +1280,12 @@ function updateAgentTemplate(templateId, user, body = {}) {
         UPDATE agent_templates
         SET scope = ?, name = ?, description = ?, goal_template = ?, run_mode = ?, tool_policy = ?,
             tool_allowlist = ?, approval_policy = ?, max_steps = ?, max_token_budget = ?, retry_limit = ?,
-            context_config = ?, allowed_units = ?, updated_at = ?
+            context_config = ?, allowed_units = ?, model_router = ?, updated_at = ?
         WHERE id = ?
     `).run(
         data.scope, data.name, data.description, data.goalTemplate, data.runMode, data.toolPolicy,
         data.toolAllowlist, data.approvalPolicy, data.maxSteps, data.maxTokenBudget, data.retryLimit,
-        data.contextConfig, data.allowedUnits, getBeijingTimestamp(), templateId
+        data.contextConfig, data.allowedUnits, data.modelRouter, getBeijingTimestamp(), templateId
     );
     return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
 }
@@ -1727,7 +1758,8 @@ function createAgentRun({
     contextConfig = {},
     resumeFromStep = 0,
     metadata = {},
-    dagSpec = null
+    dagSpec = null,
+    modelRouter = 'fixed'
 }) {
     const cleanGoal = normalizeAgentGoal(goal);
     const modelCfg = getRunnableModelForUser(modelId, user);
@@ -1736,6 +1768,7 @@ function createAgentRun({
     const now = getBeijingTimestamp();
     const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
     const normalizedRunMode = normalizeRunMode(runMode);
+    const normalizedRouter = normalizeRouterStrategy(modelRouter);
     const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
     if (normalizedRunMode === 'dag') {
         runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
@@ -1745,9 +1778,9 @@ function createAgentRun({
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
             priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
             retry_limit, max_token_budget, template_id, schedule_id, context_config, resume_from_step,
-            metadata, created_at, updated_at
+            metadata, model_router, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         runId,
         user.id,
@@ -1772,6 +1805,7 @@ function createAgentRun({
         serializeContextConfig(contextConfig),
         normalizePositiveInt(resumeFromStep, 0, 0, 999),
         JSON.stringify(runMetadata),
+        normalizedRouter,
         now,
         now
     );

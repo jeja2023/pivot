@@ -1,5 +1,19 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.46] - 2026-05-24
+### 智能体模型路由策略
+- **新增 `server/services/model-router.js`**：提供 5 种模型选择策略，让智能体任务根据输入特征自动从用户可见的模型池中选模。
+  - `fixed`：保持旧行为，使用任务配置的固定模型。
+  - `auto-vision`：输入含图片时优先选 `supports_vision = 1` 的模型，否则按上下文匹配兜底。
+  - `auto-context`：选能容纳输入但 `max_input_tokens` 最小的模型，避免大窗口模型浪费配额。
+  - `auto-cost`：选 `input_price_per_million + output_price_per_million` 最低的可用模型。
+  - `auto-load`：按"端点活跃数 / 端点并发上限"比值最小的候选，缓解长任务排队。
+- **数据库扩展**：`agent_templates.model_router`、`agent_runs.model_router`、`agent_runs.chosen_model_id` 字段已加入 `schema.js` 和 `migrate.js`，旧库自动升级，默认值 `fixed` 保持兼容。
+- **运行时接入**：`server/services/agent-runtime.js` 的 `runAgent` 在启动时按 `run.model_router` 调用 `chooseModel`，命中替换时写入 `chosen_model_id` 并插入一条 `control` 类型步骤记录路由理由；路由失败或返回原模型时回退到原配置，不影响现有任务。
+- **接口与前端**：`/api/agents/model-routers` 公开 5 项策略元数据；智能体工作台"MCP 审批"旁新增"模型路由"下拉，模板加载/保存自动透传 `model_router`；`createAgentRun` 与 `agent_templates` CRUD 全链路兼容。
+- **回归测试**：新增 5 项单测覆盖 `normalizeStrategy` 合法值/兜底、`listStrategies` 完整性、`estimateMessageTokens` 中英文混合估算、`hasUsableInputWindow` 边界、`modelTotalPrice` 缺字段安全；`npm test` 通过 `89/89`。
+- **验证**：`npm run check` 全部 101 文件通过。
+
 ## [v0.0.45] - 2026-05-22
 ### 功能扩展：RAG 调试可视化与会话 PDF 导出
 - **RAG 召回测试可视化增强**：`/api/rag/debug-query` 返回结果新增 `elapsedMs` 检索耗时；前端调试弹窗在原有命中列表基础上新增：

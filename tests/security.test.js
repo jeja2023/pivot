@@ -3211,3 +3211,45 @@ test('redactSecrets does not mutate the original object reference', () => {
     assert.equal(original.api_key, 'secret');
     assert.equal(redacted.api_key, '[REDACTED]');
 });
+
+// --- v0.0.46 模型路由策略 ---
+const modelRouter = require('../server/services/model-router');
+
+test('normalizeStrategy 接受合法值并将未知值回退到 fixed', () => {
+    assert.equal(modelRouter.normalizeStrategy('auto-vision'), 'auto-vision');
+    assert.equal(modelRouter.normalizeStrategy('auto-cost'), 'auto-cost');
+    assert.equal(modelRouter.normalizeStrategy('auto-load'), 'auto-load');
+    assert.equal(modelRouter.normalizeStrategy('auto-context'), 'auto-context');
+    assert.equal(modelRouter.normalizeStrategy('fixed'), 'fixed');
+    assert.equal(modelRouter.normalizeStrategy('unknown'), 'fixed');
+    assert.equal(modelRouter.normalizeStrategy(''), 'fixed');
+    assert.equal(modelRouter.normalizeStrategy(null), 'fixed');
+});
+
+test('listStrategies 返回完整 5 项策略', () => {
+    const list = modelRouter.listStrategies();
+    const codes = list.map(item => item.code).sort();
+    assert.deepEqual(codes, ['auto-context', 'auto-cost', 'auto-load', 'auto-vision', 'fixed']);
+    assert.ok(list.every(item => item.label && item.description));
+});
+
+test('estimateMessageTokens 中英文混合按 2:0.5 估算', () => {
+    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '中文测试' }]), Math.ceil(4 * 2));
+    const englishTokens = modelRouter.estimateMessageTokens([{ role: 'user', content: 'hello world' }]);
+    assert.ok(englishTokens >= 5 && englishTokens <= 8);
+    assert.equal(modelRouter.estimateMessageTokens([]), 0);
+    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '' }]), 0);
+});
+
+test('hasUsableInputWindow 在窗口未配置时视为足够', () => {
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 0 }, 9999), true);
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 100 }, 50), true);
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 100 }, 150), false);
+});
+
+test('modelTotalPrice 累加输入输出单价并对缺失字段安全', () => {
+    assert.equal(modelRouter.modelTotalPrice({ input_price_per_million: 3, output_price_per_million: 12 }), 15);
+    assert.equal(modelRouter.modelTotalPrice({}), 0);
+    assert.equal(modelRouter.modelTotalPrice({ input_price_per_million: 'invalid' }), 0);
+});
+

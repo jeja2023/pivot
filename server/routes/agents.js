@@ -1,5 +1,6 @@
 const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
+const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
 const {
     cancelAgentRun,
     approveAgentTool,
@@ -41,6 +42,11 @@ function createAgentsRouter({ authMiddleware, logAction }) {
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: formatToolList(req.user) });
+    }));
+
+    // 公开支持的模型路由策略，供前端下拉填充
+    router.get('/agents/model-routers', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ strategies: listModelRouterStrategies() });
     }));
 
     router.get('/agents/runtime', authMiddleware, asyncHandler(async (req, res) => {
@@ -178,7 +184,8 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             templateId: req.body?.templateId,
             scheduleId: req.body?.scheduleId,
             contextConfig: req.body?.contextConfig,
-            dagSpec: req.body?.dagSpec
+            dagSpec: req.body?.dagSpec,
+            modelRouter: req.body?.modelRouter || req.body?.model_router
         });
         logAction(req, '创建智能体任务', `任务ID: ${run.id}，目标: ${String(req.body?.goal || '').slice(0, 120)}`);
         res.status(202).json({ success: true, run });

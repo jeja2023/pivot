@@ -837,6 +837,7 @@ function getAgentRunPayload(goalOverride = '') {
         runMode,
         toolPolicy: allowMcp ? 'all' : 'builtin_only',
         approvalPolicy: document.getElementById('agent-approval-policy')?.value || 'safe_mcp_auto',
+        modelRouter: document.getElementById('agent-model-router')?.value || 'fixed',
         maxTokenBudget: document.getElementById('agent-token-budget')?.value || 0,
         retryLimit: document.getElementById('agent-retry-limit')?.value || 1,
         toolAllowlist: getSelectedAgentToolAllowlist(),
@@ -869,6 +870,8 @@ function applyAgentTemplate(template) {
     if (allowMcp) allowMcp.checked = template.tool_policy !== 'builtin_only';
     const approval = document.getElementById('agent-approval-policy');
     if (approval) approval.value = template.approval_policy || 'safe_mcp_auto';
+    const router = document.getElementById('agent-model-router');
+    if (router) router.value = template.model_router || 'fixed';
     const steps = document.getElementById('agent-max-steps');
     if (steps) steps.value = template.max_steps || 5;
     const budget = document.getElementById('agent-token-budget');

@@ -1,13 +1,20 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.45-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.46-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、MCP 工具调用、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.45
+## 最新版本：0.0.46
+
+### v0.0.46 更新摘要
+
+- **智能体模型路由策略**：新增 `server/services/model-router.js`，提供 5 种策略 —— `fixed`（固定）、`auto-vision`（视觉优先）、`auto-context`（上下文匹配）、`auto-cost`（成本优先）、`auto-load`（负载均衡）；智能体任务启动时按 `model_router` 字段自动选模，命中时写入 `chosen_model_id` 并在步骤记录中标注路由理由，回退安全。
+- **DB 扩展与前端入口**：`agent_templates` 与 `agent_runs` 新增 `model_router` 字段（默认 `fixed`，对旧任务零影响）；智能体工作台"MCP 审批"旁新增"模型路由"下拉，模板加载/保存自动透传策略选择。
+- **接口**：新增 `/api/agents/model-routers` 公开策略元数据，供前端下拉填充。
+- **验证**：新增 5 项单测，`npm test` 通过 `89/89`，`npm run check` 全部 101 文件通过。
 
 ### v0.0.45 更新摘要
 
