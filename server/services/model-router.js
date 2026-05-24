@@ -19,7 +19,7 @@
 
 const { getUserRunnableModels, getRunnableModelForUser, messagesContainVisionInput, modelSupportsVision } = require('./models');
 
-const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load']);
+const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load', 'auto-escalate']);
 const DEFAULT_STRATEGY = 'fixed';
 
 function normalizeStrategy(value) {
@@ -33,7 +33,8 @@ function listStrategies() {
         { code: 'auto-vision', label: '视觉优先', description: '输入含图片时挑选支持视觉的模型，否则按上下文容量。' },
         { code: 'auto-context', label: '上下文匹配', description: '挑选能容纳输入但窗口最小的模型，节约大窗口配额。' },
         { code: 'auto-cost', label: '成本优先', description: '挑选输入+输出单价最低的可用模型。' },
-        { code: 'auto-load', label: '负载均衡', description: '挑选当前活跃占比最低的端点，降低排队等待。' }
+        { code: 'auto-load', label: '负载均衡', description: '挑选当前活跃占比最低的端点，降低排队等待。' },
+        { code: 'auto-escalate', label: '成本升级', description: '先用最便宜的模型出结果，置信不足时再升级到更强模型。' }
     ];
 }
 
@@ -160,6 +161,10 @@ function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatu
     } else if (normalized === 'auto-load') {
         chosen = pickAutoLoad(candidates, estimatedTokens, endpointStatusGetter);
         reason = chosen ? '按端点负载最低' : '';
+    } else if (normalized === 'auto-escalate') {
+        // 第一轮：与 auto-cost 等同，挑最便宜的能用模型；调用方负责后续判断置信度并调用 pickEscalationModel
+        chosen = pickAutoCost(candidates, estimatedTokens);
+        reason = chosen ? '先用成本最低模型尝试（auto-escalate 第一轮）' : '';
     }
 
     if (!chosen) {
@@ -172,6 +177,55 @@ function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatu
     return { model: chosen, strategy: normalized, reason, candidatesCount: candidates.length };
 }
 
+// 低置信判定（auto-escalate 用）：根据输出内容、长度、finishReason 评估是否需要升级
+// 这是启发式判断，不是绝对的；调用方可以叠加自己的业务规则
+const LOW_CONFIDENCE_PATTERNS = [
+    /不确定|无法判断|没有把握|缺少信息|信息不足|无法确认|很难判断|不清楚|抱歉.*?不能|抱歉.*?无法/,
+    /\bi\s+don'?t\s+know\b|\bnot\s+sure\b|\bunclear\b|\binsufficient\s+information\b/i
+];
+
+function assessConfidence({ output = '', finishReason = '', minOutputChars = 20 } = {}) {
+    const text = String(output || '').trim();
+    if (!text) return { confident: false, reason: 'empty_output' };
+    if (text.length < minOutputChars) return { confident: false, reason: 'too_short' };
+    if (finishReason && !['stop', 'tool_calls', 'function_call', 'end_turn'].includes(String(finishReason).toLowerCase())) {
+        return { confident: false, reason: `finish_reason:${finishReason}` };
+    }
+    if (LOW_CONFIDENCE_PATTERNS.some(pattern => pattern.test(text))) {
+        return { confident: false, reason: 'low_confidence_phrase' };
+    }
+    return { confident: true, reason: 'pass' };
+}
+
+/**
+ * auto-escalate 第二轮：从可用候选中挑一个比当前模型更强的（按"成本更高 OR 上下文更大"）
+ * 输入：用户、当前模型、估算 token；输出：升级目标模型或 null（没有更强候选）
+ */
+function pickEscalationModel({ user, currentModel, messages = [] }) {
+    if (!user || !currentModel) return null;
+    const candidates = getUserRunnableModels(user).filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
+    if (candidates.length === 0) return null;
+    const estimatedTokens = estimateMessageTokens(messages);
+    const currentPrice = modelTotalPrice(currentModel);
+    const currentMaxInput = Number(currentModel.max_input_tokens) || 0;
+    // 优先选"价格高于当前 + 能容纳输入"的候选；次选"上下文窗口更大"的
+    const stronger = candidates.filter(m => hasUsableInputWindow(m, estimatedTokens));
+    if (stronger.length === 0) return null;
+    stronger.sort((a, b) => {
+        const priceDiff = modelTotalPrice(b) - modelTotalPrice(a);
+        if (priceDiff !== 0) return priceDiff;
+        const aLimit = Number(a.max_input_tokens) || Number.MAX_SAFE_INTEGER;
+        const bLimit = Number(b.max_input_tokens) || Number.MAX_SAFE_INTEGER;
+        return bLimit - aLimit;
+    });
+    const candidate = stronger[0];
+    // 必须严格更强：价格更高或窗口更大
+    if (modelTotalPrice(candidate) <= currentPrice && (Number(candidate.max_input_tokens) || 0) <= currentMaxInput) {
+        return null;
+    }
+    return candidate;
+}
+
 module.exports = {
     STRATEGIES,
     DEFAULT_STRATEGY,
@@ -180,5 +234,7 @@ module.exports = {
     estimateMessageTokens,
     hasUsableInputWindow,
     modelTotalPrice,
-    chooseModel
+    chooseModel,
+    assessConfidence,
+    pickEscalationModel
 };

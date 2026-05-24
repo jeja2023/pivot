@@ -1,5 +1,16 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.50] - 2026-05-24
+### 模型路由 `auto-escalate` 成本升级策略
+- **新增第 6 个路由策略**：`auto-escalate` —— 第一轮按 `auto-cost` 选最便宜的可用模型尝试；任务合成最终答案后，根据置信度判断是否升级到更强模型再合成一次。
+- **`server/services/model-router.js`** 新增两个工具函数：
+  - `assessConfidence({ output, finishReason, minOutputChars })`：启发式判定输出是否低置信，覆盖空输出、过短输出、异常 finishReason、中英文低置信短语（"不确定"、"无法判断"、"i don't know"、"not sure" 等）。
+  - `pickEscalationModel({ user, currentModel, messages })`：从用户可见模型池中挑一个严格更强的候选（价格更高或上下文窗口更大），同时保证能容纳当前输入，找不到时返回 null。
+- **`agent-runtime` 接入**：`runAgent` 在最终 `synthesizeFinalAnswer` 完成后，若策略为 `auto-escalate` 且置信度判定不通过，自动调用 `pickEscalationModel` 选升级目标、写入 `chosen_model_id`、在 `agent_steps` 留下 `control` 类型步骤记录升级原因，然后用更强模型重新合成一次最终答案；升级失败保留首轮答案。
+- **前端入口**：`partials/workspaces/agent.html` 的"模型路由"下拉新增"成本升级（置信不足时升级）"选项；模板加载/保存与运行时透传与其他策略一致。
+- **回归测试加固**：新增 3 项单测覆盖 `auto-escalate` 在 `STRATEGIES`/`listStrategies` 中的注册、`assessConfidence` 多种低置信场景与正常输出场景；`npm test` 通过 `99/99`。
+- **验证**：`npm run check` 全部 103 文件通过。
+
 ## [v0.0.49] - 2026-05-24
 ### agent-runtime 接入流式 function calling
 - **新增 `tryRunAgentStreaming`**：在 `runAgent` 主循环里增加一条可选的流式分支，按 OpenAI tools 协议把工具调用从"回合制 JSON"升级为流式 `tool_calls` 协议。

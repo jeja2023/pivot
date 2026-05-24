@@ -3226,11 +3226,38 @@ test('normalizeStrategy 接受合法值并将未知值回退到 fixed', () => {
     assert.equal(modelRouter.normalizeStrategy(null), 'fixed');
 });
 
-test('listStrategies 返回完整 5 项策略', () => {
+test('listStrategies 返回完整 6 项策略（含 auto-escalate）', () => {
     const list = modelRouter.listStrategies();
     const codes = list.map(item => item.code).sort();
-    assert.deepEqual(codes, ['auto-context', 'auto-cost', 'auto-load', 'auto-vision', 'fixed']);
+    assert.deepEqual(codes, ['auto-context', 'auto-cost', 'auto-escalate', 'auto-load', 'auto-vision', 'fixed']);
     assert.ok(list.every(item => item.label && item.description));
+});
+
+test('normalizeStrategy 接受 auto-escalate', () => {
+    assert.equal(modelRouter.normalizeStrategy('auto-escalate'), 'auto-escalate');
+});
+
+test('assessConfidence 在低置信场景下返回 confident=false 与具体 reason', () => {
+    assert.equal(modelRouter.assessConfidence({ output: '' }).confident, false);
+    assert.equal(modelRouter.assessConfidence({ output: '太短' }).confident, false);
+    const lowConf = modelRouter.assessConfidence({ output: '抱歉，我无法判断这个问题的答案，需要更多信息。' });
+    assert.equal(lowConf.confident, false);
+    assert.equal(lowConf.reason, 'low_confidence_phrase');
+    const lengthFail = modelRouter.assessConfidence({ output: 'I dont know what this is about and not sure how to help here.' });
+    assert.equal(lengthFail.confident, false);
+    assert.equal(lengthFail.reason, 'low_confidence_phrase');
+    const finishFail = modelRouter.assessConfidence({ output: '这是一段足够长的、表述明确的回答，应当被视为有效输出，长度过关。', finishReason: 'length' });
+    assert.equal(finishFail.confident, false);
+    assert.match(finishFail.reason, /finish_reason/);
+});
+
+test('assessConfidence 在正常输出下返回 confident=true', () => {
+    const ok = modelRouter.assessConfidence({
+        output: '根据现有资料的分析，建议采用方案 A，因为它在成本和稳定性之间取得了平衡。',
+        finishReason: 'stop'
+    });
+    assert.equal(ok.confident, true);
+    assert.equal(ok.reason, 'pass');
 });
 
 test('estimateMessageTokens 中英文混合按 2:0.5 估算', () => {

@@ -8,7 +8,7 @@ const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
 const { callModelText, recordAgentModelUsage, callModelStreamingWithTools } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
-const { chooseModel, normalizeStrategy: normalizeRouterStrategy } = require('./model-router');
+const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('./model-router');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const {
@@ -1116,7 +1116,34 @@ async function runAgent(runId, user) {
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
-        const answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '结果总结');
+        let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '结果总结');
+        // v0.0.50 auto-escalate：低置信时升级到更强模型再合成一次
+        if (routerStrategy === 'auto-escalate') {
+            const confidence = assessConfidence({ output: answer });
+            if (!confidence.confident) {
+                try {
+                    const escalation = pickEscalationModel({
+                        user,
+                        currentModel: modelCfg,
+                        messages: [{ role: 'user', content: run.goal || '' }]
+                    });
+                    if (escalation) {
+                        insertStep(runId, listSteps(runId).length + 1, {
+                            type: 'control',
+                            title: '模型升级：auto-escalate',
+                            output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
+                        });
+                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度不足，升级到更强模型');
+                        modelCfg = escalation;
+                        db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
+                            .run(modelCfg.id, getBeijingTimestamp(), runId);
+                        answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '升级模型结果总结');
+                    }
+                } catch (escErr) {
+                    logger.warn({ runId, err: escErr.message }, 'auto-escalate 升级失败，保留首轮答案');
+                }
+            }
+        }
         assertRunNotCancelled(runId);
         updateRun(runId, {
             status: 'completed',
