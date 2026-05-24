@@ -389,18 +389,25 @@ function createSessionsRouter({
 
         const title = escapeHtml(session.title || '会话记录');
         const exportedAt = getBeijingTimestamp();
-        const messageHtml = messages.map(msg => {
+        // 消息正文走浏览器侧渲染（marked + DOMPurify），故这里只输出占位容器，
+        // 原始内容通过 <script type="application/json"> 数据岛传给前端，避免在 HTML 模板内做 markdown 渲染
+        const messagesForPrint = messages.map(msg => ({
+            role: String(msg.role || ''),
+            createdAt: String(msg.created_at || ''),
+            content: String(msg.content || '')
+        }));
+        const messageHtml = messagesForPrint.map((msg, idx) => {
             const roleLabel = msg.role === 'user' ? '用户' : msg.role === 'assistant' ? '助手' : msg.role === 'system' ? '系统' : escapeHtml(msg.role || '消息');
             const roleClass = msg.role === 'user' ? 'role-user' : msg.role === 'assistant' ? 'role-assistant' : 'role-system';
-            const time = escapeHtml(msg.created_at || '');
-            const content = escapeHtml(msg.content || '').replace(/\n/g, '<br>');
             return `
                 <article class="print-msg ${roleClass}">
-                    <header class="print-msg-head"><span class="print-msg-role">${roleLabel}</span><time>${time}</time></header>
-                    <div class="print-msg-body">${content}</div>
+                    <header class="print-msg-head"><span class="print-msg-role">${roleLabel}</span><time>${escapeHtml(msg.createdAt)}</time></header>
+                    <div class="print-msg-body" data-print-msg-body data-print-msg-index="${idx}">渲染中…</div>
                 </article>
             `;
         }).join('\n');
+        // JSON 序列化后再把 '<' 转义为 <，避免内容里出现 </script> 提前关闭脚本块；浏览器 JSON.parse 时会还原
+        const printDataJson = JSON.stringify(messagesForPrint).replace(/</g, '\\u003c');
 
         const nonce = res.locals.cspNonce || '';
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -421,7 +428,24 @@ function createSessionsRouter({
   .print-msg { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin: 12px 0; page-break-inside: avoid; }
   .print-msg-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #64748b; margin-bottom: 8px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; }
   .print-msg-role { font-weight: 600; color: #1e293b; }
-  .print-msg-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .print-msg-body { font-size: 14px; word-break: break-word; line-height: 1.65; }
+  .print-msg-body p { margin: 0 0 0.6em; }
+  .print-msg-body p:last-child { margin-bottom: 0; }
+  .print-msg-body ul, .print-msg-body ol { margin: 0.4em 0 0.6em; padding-left: 1.6em; }
+  .print-msg-body li { margin: 0.15em 0; }
+  .print-msg-body pre { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+  .print-msg-body code { background: #f1f5f9; border-radius: 3px; padding: 1px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+  .print-msg-body pre code { background: transparent; padding: 0; }
+  .print-msg-body blockquote { margin: 0.4em 0; padding: 4px 12px; border-left: 3px solid #cbd5e1; color: #475569; }
+  .print-msg-body table { border-collapse: collapse; margin: 0.5em 0; }
+  .print-msg-body th, .print-msg-body td { border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 13px; text-align: left; }
+  .print-msg-body th { background: #f1f5f9; }
+  .print-msg-body img { max-width: 100%; height: auto; }
+  .print-msg-body h1, .print-msg-body h2, .print-msg-body h3, .print-msg-body h4 { margin: 0.6em 0 0.3em; line-height: 1.3; }
+  .print-msg-body h1 { font-size: 1.35em; }
+  .print-msg-body h2 { font-size: 1.2em; }
+  .print-msg-body h3 { font-size: 1.05em; }
+  .print-msg-body h4 { font-size: 1em; }
   .role-user .print-msg-role { color: #2563eb; }
   .role-assistant .print-msg-role { color: #059669; }
   .role-system { background: #fef3c7; }
@@ -441,9 +465,50 @@ function createSessionsRouter({
     <button id="close-btn" type="button">关闭</button>
   </div>
   ${messageHtml}
+  <script id="pivot-print-data" type="application/json" nonce="${nonce}">${printDataJson}</script>
+  <script src="/common/vendor/marked.min.js" nonce="${nonce}"></script>
+  <script src="/common/vendor/purify.min.js" nonce="${nonce}"></script>
   <script nonce="${nonce}">
-    document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
-    document.getElementById('close-btn').addEventListener('click', function () { window.close(); });
+    (function () {
+      // 移除 AI 思考过程标签（<thought>…</thought> / <thinking>…</thinking>），导出版默认不保留
+      function stripThoughtBlocks(text) {
+        return String(text || '')
+          .replace(/<thought>[\\s\\S]*?<\\/thought>/gi, '')
+          .replace(/<thinking>[\\s\\S]*?<\\/thinking>/gi, '')
+          .replace(/^[ \\t]*\\n/gm, '');
+      }
+      function safeMarkdownToHtml(text) {
+        var cleaned = stripThoughtBlocks(text);
+        if (window.marked && typeof window.marked.parse === 'function') {
+          try {
+            var html = window.marked.parse(cleaned, { breaks: true, gfm: true });
+            if (window.DOMPurify) {
+              return window.DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'rel'] });
+            }
+            return html;
+          } catch (e) {
+            // marked 解析失败时退回到纯文本
+          }
+        }
+        // 兜底：转义后保留换行
+        return cleaned
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\\n/g, '<br>');
+      }
+      var dataEl = document.getElementById('pivot-print-data');
+      var data;
+      try { data = JSON.parse(dataEl.textContent || '[]'); } catch (e) { data = []; }
+      document.querySelectorAll('[data-print-msg-body]').forEach(function (el) {
+        var idx = Number(el.getAttribute('data-print-msg-index'));
+        var msg = data[idx];
+        if (!msg) { el.textContent = ''; return; }
+        el.innerHTML = safeMarkdownToHtml(msg.content || '');
+      });
+      document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
+      document.getElementById('close-btn').addEventListener('click', function () { window.close(); });
+    })();
   </script>
 </body>
 </html>`);
