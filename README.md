@@ -134,22 +134,14 @@
 - **模型费用统计**：模型配置增加输入/输出百万 Token 单价与币种，用量页和导出报表同步展示估算成本。
 - **安全与验证**：新增文本完整性检查并收紧前端 CSP；当前 `npm run verify` 已通过，安全测试通过 `64/64`。
 
-## 审查报告优化补充
+## 近期主要升级（v0.0.43 → v0.0.51）
 
-- **局域网多实例稳定性**：智能体任务队列改为数据库锁抢占，支持多实例协同、锁超时恢复和运行状态统计，适合内网服务器横向部署或服务重启恢复。
-- **服务端性能与监控**：根路径复用预加载 HTML 模板，减少同步磁盘读取；Prometheus 直方图恢复累计 bucket 输出，便于接入内网监控平台。
-- **代码维护性**：统一 logger 导出、复用消息查询 SQL、抽出智能体模型调用层，并用 `server/number.js` 收拢环境变量正整数解析逻辑。
-- **升级可追踪性**：新增 `schema_migrations` 迁移记录，`migrate.js` 保留历史兼容迁移并标注后续结构升级边界。
-
-## 功能扩展补充
-
-- **智能体实时事件推送**：`/api/events` 提供登录用户级 SSE 实时通道，智能体任务状态、步骤变化和通知会主动推送到前端工作台，减少内网页面长时间轮询。
-- **断线兜底**：浏览器不支持 EventSource 或实时连接断开时，前端会自动回到原有轮询刷新，保证旧环境和受限内网代理仍可使用。
-- **权限隔离**：实时事件按用户订阅和投递，任务与通知只会发送给所属用户。
-- **附件在线预览**：聊天消息中的附件卡片和后台附件库支持统一预览窗，图片、PDF、文本、Markdown、CSV、JSON 可直接查看，其他格式保留新标签打开。
-- **会话标签治理**：会话列表支持标签汇总、多标签筛选、标签重命名/删除和批量加标/移除/替换，默认保持原列表样式，进入批量模式后才显示选择控件，便于局域网团队按项目、部门、风险等级或审计事项整理历史会话。
-- **合规审计包**：管理员可导出 `pivot_compliance_audit.zip`，集中包含会话清单、审计日志、模型用量明细和模型费用统计，适合内网离线留存、抽查和交付审计。
-- **模型费用统计**：模型配置增加输入/输出百万 Token 单价与币种，用量页和导出报表会同步展示估算成本，方便在多模型、多部门场景下核算内网资源开销。
+- **智能体模型路由（v0.0.46 / v0.0.50）**：6 种策略 `fixed / auto-vision / auto-context / auto-cost / auto-load / auto-escalate`，可在智能体模板与单次任务里选择；`auto-escalate` 会先用最便宜模型尝试，启发式判定低置信后自动升级到更强模型重新合成。
+- **DAG 可视化编辑器（v0.0.47 / v0.0.51）**：原生 SVG + 拖拽，节点可拖动、出端口拖到入端口即创建依赖；工具栏提供添加节点 / 自动布局 / 适配画布 / 从 JSON 同步；详情面板编辑标题、工具、条件、输入参数与依赖；滚轮缩放、空白平移与右下角小地图便于浏览大型流程；JSON 视图折叠保留为专家模式入口。
+- **流式 function calling（v0.0.48 / v0.0.49）**：基础设施层新增 `streaming-tools.js` 累加器和 `callModelStreamingWithTools` API，按 OpenAI tools 协议增量解析多工具调用；agent-runtime 可通过 `AGENT_STREAMING_TOOLS=true` 启用流式分支，**默认关闭以兼容现有任务**，任何流式失败自动回退到旧回合制 JSON 协议，并在 agent_steps 留下 control 步骤记录。
+- **RAG 调试可视化与会话 PDF 导出（v0.0.45）**：召回测试弹窗新增关键词高亮、得分进度条、按源文件聚合的命中汇总、检索耗时；新增 `/api/sessions/:id/print` 打印友好视图，浏览器内 Ctrl/Cmd+P 即可导出 PDF。
+- **基础设施收口（v0.0.43）**：新增 `LruCache` / `TtlCache` 替换无上限 Map；统一 `redactSecrets` 在 MCP 调用日志、审计导出前自动屏蔽 `api_key`、`Bearer`、`sk-*`、JWT；后台启动失败 catch 改为带日志告警；`compressMemory` 接入超时与会话级去重；移除智能体审批 `all_mcp_approved` 短路死分支；`agent-runtime.js` 拆出 `agent-validators.js` 便于继续维护。
+- **前端体验（v0.0.44）**：新增 `window.Pivot` 全局工具命名空间（节流/防抖/LruCache/格式化）；聊天流式渲染按累计内容长度阶梯式自适应（80→320ms），长回答的 marked.parse 重排开销显著下降。
 
 ## 近期基础能力
 
@@ -157,12 +149,15 @@
 - 后台维护闭环增强：软删除附件、知识库源文件、知识库分块、FTS 索引和历史消息会在保留期后被物理清理，并配套执行 `PRAGMA optimize` 与增量 vacuum。
 - 第三方 API 网关补齐向量转发：持有 Pivot API Key 的客户端可通过 OpenAI-compatible `/v1/embeddings` 调用当前用户可用的 RAG 向量模型。
 - 知识库中文文件名修复：上传入口统一规范化文件名，保留正常中文并修复 latin1 mojibake，避免知识库列表中文档名称显示乱码。
-- 前端 CSP 治理推进：`client/chat` 清除内联事件，模型、提示词、附件、API Key、会话菜单和工作台操作均采用事件委托。
+- 前端 CSP 治理推进：`client/chat` 清除内联事件，模型、提示词、附件、API Key、会话菜单和工作台操作均采用事件委托；DAG 编辑器、会话打印视图等新增页面均通过 `res.locals.cspNonce` 注入脚本。
 - 会话列表采用游标分页，减少创建、置顶或更新会话时滚动列表出现重复或跳页。
 - PWA 更新机制收紧：Service Worker 只缓存稳定 vendor 资源，业务页面、脚本、API 与版本清单交回服务端和浏览器处理。
 - 用户删除聊天消息、会话、附件、知识库文档和智能体任务时采用软删除，保留审计日志、用量统计、用量明细和资产元数据。
 - 第三方 API Key 调用新增请求与响应留痕，仅内置 `admin` 超级管理员可在 API 接入管理页查看和检索。
 - 管理端数据表、Token 单位、模型配置布局、审计报表时间筛选和 API Key 输入/输出 Token 统计持续统一。
+- 通用缓存与超时基础设施（v0.0.43）：`server/cache.js` 的 `LruCache` / `TtlCache` 支持容量与 TTL 上限，`dirSizeCache` 等关键缓存已切换避免长期运行内存膨胀；`server/services/concurrency.js` 新增 `withTimeout` / `KeyedConcurrencyGuard` 用于后台异步任务保护，`compressMemory` 后台压缩接入超时与会话级去重。
+- 敏感信息脱敏（v0.0.43）：`server/security.js` 的 `redactSecrets` / `maskSecretString` 自动屏蔽 `api_key`、`Bearer`、`sk-*`、JWT 等敏感字段；MCP 调用日志的 input/output 写入审计前统一脱敏。
+- 前端 Pivot 命名空间（v0.0.44）：`client/chat/pivot-core.js` 集中提供节流、防抖、`rafThrottle`、LruCache、formatBytes / formatNumber、chooseStreamInterval 等小工具，新代码可统一从 `window.Pivot` 调用。
 
 ## 核心特性
 
@@ -174,17 +169,19 @@
 - **模型探测**：支持一键获取上游服务模型列表，减少手工配置成本。
 - **模型端点保护**：支持端点并发上限、健康检查 URL、排队与熔断保护；用户排队时会看到前方等待数、当前生成占用数和最长等待时间。
 - **Token 统计**：网页聊天、智能体、RAG embedding 和第三方 API 调用统一计入模型每日额度、后台报表和 Prometheus 指标。
+- **模型路由策略**：智能体支持 6 种路由策略（`fixed` / `auto-vision` / `auto-context` / `auto-cost` / `auto-load` / `auto-escalate`），可在任务启动或模板中选择；命中替换时会写入 `agent_runs.chosen_model_id` 并在步骤记录中标注路由理由，路由失败安全回退到原模型。
 
 ### 2. 智能体工作台
 
 - **目标拆解**：智能体可把复杂目标拆解为多步骤任务，按需调用知识库、会话检索、最近会话、模型列表、系统健康和 MCP 工具。
 - **运行模式**：支持标准、深度、审查和 DAG 编排模式，规划提示会根据模式调整检索深度、证据约束、风险表达和依赖图执行方式。
 - **工具范围控制**：支持仅内置工具、内置 + MCP、工具白名单、能力包启停和管理员工具隔离。
-- **MCP 审批**：高风险 MCP 调用可挂起等待用户批准或拒绝，数据库只读 MCP 可按策略安全执行。
+- **MCP 审批**：高风险 MCP 调用可挂起等待用户批准或拒绝，数据库只读 MCP 可按策略安全执行；服务端只承认通过 `approveAgentTool` 写入的 `approvedTools` 白名单，杜绝路由层意外绕过审批策略（v0.0.43 收口）。
 - **预算与重试**：支持 Token 预算、失败重试、任务运行超时、单次工具调用超时和运行心跳检测。
-- **任务审计**：任务详情保留目标、模型、步骤、工具输入输出、错误信息、Token 用量、耗时和最终结果。
-- **DAG 编排**：DAG 模式支持 JSON 定义节点依赖、条件表达式、并行工具调用和聚合节点，从线性步骤扩展到可治理流程。
-- **模板库**：可保存常用目标与运行参数，形成个人或共享模板。
+- **任务审计**：任务详情保留目标、模型、步骤、工具输入输出、错误信息、Token 用量、耗时和最终结果；MCP 调用日志的 input/output 写入审计前自动脱敏。
+- **DAG 编排**：DAG 模式支持 JSON 定义节点依赖、条件表达式、并行工具调用和聚合节点；v0.0.47 / v0.0.51 起提供可视化编辑器，节点可拖动、出端口拖到入端口创建依赖，工具栏支持自动布局、适配画布、从 JSON 同步，滚轮缩放（光标锚点 0.3x–2.5x）、空白平移和右下角小地图，JSON 视图折叠保留为专家模式。
+- **流式 function calling（可选）**：v0.0.48 / v0.0.49 在 `runAgent` 引入按 OpenAI tools 协议的流式分支，通过环境变量 `AGENT_STREAMING_TOOLS=true` 启用；任何流式失败自动回退到旧回合制 JSON 协议，DAG 任务永远走原图调度。
+- **模板库**：可保存常用目标与运行参数，形成个人或共享模板；模板字段已扩展 `model_router`，加载/保存自动透传路由策略选择。
 - **计划任务**：支持每日、每周和手动计划，服务端定时扫描到期计划并入队执行。
 - **通知中心**：任务完成、失败、停止、等待审批、计划入队和结果沉淀均会生成用户级通知。
 - **结果沉淀**：任务最终答案或错误摘要可保存为结果资产，并支持版本备注、差异对比和回滚。
@@ -243,7 +240,8 @@
 - **智能体接入**：智能体可按目标调用知识库检索、知识库文档列表和相关上下文。
 - **索引状态**：文档记录状态、分块数、已索引分块、进度百分比、错误信息和处理时间；服务重启后会恢复处理中任务。
 - **召回测试**：可临时调整相似度阈值、Top K 和候选数量，展示命中文档、分块、相似度分数和命中状态；测试期间按钮禁用并显示加载状态。
-- **反馈闭环**：召回结果可提交“有用/无用”反馈，便于分析低质量文档和低命中查询。
+- **召回可视化（v0.0.45）**：调试弹窗新增关键词高亮、按相对最高分占比的得分进度条、按源文件聚合的"命中数 / 峰值 / 均值"汇总条以及 `/api/rag/debug-query` 返回的检索耗时，便于普通用户和管理员快速排查检索质量。
+- **反馈闭环**：召回结果可提交"有用/无用"反馈，便于分析低质量文档和低命中查询。
 - **中文 ngram**：索引时生成中文 1-3 gram token，改善 `unicode61` 对中文短词、单字和词组召回不足的问题。
 - **候选预过滤**：`knowledge_chunks_fts` 通过触发器同步分片检索内容，减少向量相似度计算候选数量。
 - **结果缓存**：RAG 检索结果支持 TTL 缓存，同一用户重复问题可减少 embedding 调用和数据库排序开销。
@@ -254,7 +252,7 @@
 
 - **FTS5 全文搜索系统**：集成 SQLite FTS5 毫秒级检索引擎，支持海量历史消息的关键词搜索，并通过触发器同步索引。
 - **指令中心**：内置常用 Prompt 模板，支持 AI 角色和 System Prompt 一键切换。
-- **会话管理**：支持多轮会话、置顶、归档、多标签、搜索、导出 Markdown 和软删除审计。
+- **会话管理**：支持多轮会话、置顶、归档、多标签、搜索、导出 Markdown、打印 / 导出 PDF（v0.0.45 新增 `/api/sessions/:id/print` 视图，浏览器内 Ctrl/Cmd+P 即可生成 PDF）和软删除审计。
 - **重新回答**：支持一键丢弃错误输出，并结合最新上下文重新生成回答。
 - **多模态附件**：聊天会话支持上传图片、PDF、Word、Excel、TXT、Markdown、CSV 等文件，并尽量在上传阶段抽取可读文本。
 - **PWA 应用**：支持作为独立应用安装到桌面或移动端，稳定 vendor 资源可缓存，业务页面保持及时更新。
@@ -441,6 +439,13 @@ AGENT_MAX_CONCURRENT_RUNS=2
 AGENT_RUN_TIMEOUT_MS=900000
 AGENT_TOOL_TIMEOUT_MS=120000
 AGENT_STALE_RUNNING_MINUTES=30
+# 是否启用流式 function calling 分支（v0.0.49）；失败自动回退到旧回合制 JSON
+AGENT_STREAMING_TOOLS=false
+
+# 后台记忆压缩（v0.0.43）
+# 超时（毫秒）与全局并发上限，会话级去重默认开启
+MEMORY_COMPRESSION_TIMEOUT_MS=60000
+MEMORY_COMPRESSION_MAX_CONCURRENT=2
 
 # 数据库 MCP
 MCP_SQLITE_ROOTS=
@@ -519,14 +524,23 @@ node -e "require('./server/db'); console.log('db init ok')"
 ## 目录结构
 
 - `server/`：后端核心程序，包含 Express 路由、SQLite schema、服务层、模型适配、RAG、MCP、智能体运行时和安全中间件。
+  - `server/cache.js`：通用 `LruCache` / `TtlCache`（v0.0.43）。
+  - `server/security.js`：URL 防 SSRF、文件路径校验、`redactSecrets` 脱敏（v0.0.43）。
+  - `server/services/concurrency.js`：信号量、`withTimeout`、`KeyedConcurrencyGuard`（v0.0.43）。
+  - `server/services/model-router.js`：模型路由 6 策略、`assessConfidence`、`pickEscalationModel`（v0.0.46 / v0.0.50）。
+  - `server/services/streaming-tools.js`：OpenAI tools 流式累加器与辅助函数（v0.0.48）。
+  - `server/services/agent-runtime.js` + `agent-validators.js`：智能体运行时与拆分出的常量/规范化（v0.0.43 拆分）。
 - `client/`：前端静态资源，包含聊天页、管理端、工作台、PWA 和本地渲染资源。
+  - `client/chat/pivot-core.js`：`window.Pivot` 全局工具命名空间（v0.0.44）。
+  - `client/chat/agents-dag-editor.js`：智能体 DAG 可视化编辑器（v0.0.47 / v0.0.51 缩放与小地图）。
+  - `client/chat/safe-html.js`：HTML 转义与 DOMPurify 适配。
 - `data/`：SQLite 数据库及默认备份目录。
 - `uploads/`：用户附件隔离存储目录。
 - `scripts/`：语法检查、数据库备份、模型下载等辅助脚本。
-- `tests/`：安全、迁移、RAG、MCP、智能体和系统边界测试。
+- `tests/`：安全、迁移、RAG、MCP、智能体、模型路由、流式工具累加器和系统边界测试。
 
 ## 版本记录
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.41（普通用户使用手册、前端手册入口、Docker 手册可访问性、侧栏用户区紧凑优化）
+**当前版本**：v0.0.51（DAG 编辑器缩放、平移、小地图；累计 v0.0.43–v0.0.51 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、DAG 可视化编辑器、流式 function calling 基础设施与 agent-runtime 接入）
