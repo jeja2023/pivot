@@ -157,7 +157,13 @@ function createAgentsRouter({ authMiddleware, logAction }) {
     }));
 
     router.get('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listRuns(req.user, normalizeLimit(req.query.limit, 30, 100)) });
+        const result = listRuns(req.user, {
+            page: req.query.page,
+            limit: normalizeLimit(req.query.limit, 10, 100),
+            status: req.query.status,
+            query: req.query.query
+        });
+        res.json(result);
     }));
 
     router.get('/agents/runs/deleted/audit', authMiddleware, asyncHandler(async (req, res) => {

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const pdf = require('pdf-parse');
+const { extractDocumentText, truncateExtractedText } = require('../document-text');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -10,7 +10,13 @@ const { getRagConfig } = require('./rag-config');
 
 const uploadRoot = path.resolve(__dirname, '../../uploads');
 const knowledgeSourceRoot = path.join(uploadRoot, 'knowledge_docs');
-const allowedExtensions = new Set(['.txt', '.md', '.pdf']);
+const allowedExtensions = new Set([
+    '.txt', '.md', '.pdf',
+    '.doc', '.docx',
+    '.xls', '.xlsx',
+    '.csv', '.json',
+    '.html', '.htm'
+]);
 const maxConcurrentIndexes = Math.max(Number.parseInt(process.env.RAG_INDEX_MAX_CONCURRENT || '1', 10) || 1, 1);
 const activeIndexes = new Set();
 const pendingIndexes = new Map();
@@ -59,13 +65,8 @@ function persistUploadedKnowledgeFile(file, userId, docId) {
 }
 
 async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
-    const ext = getSafeKnowledgeExtension(originalName || filePath);
-    if (ext === '.pdf') {
-        const dataBuffer = fs.readFileSync(filePath);
-        const data = await pdf(dataBuffer);
-        return data.text;
-    }
-    return fs.readFileSync(filePath, 'utf8');
+    const text = await extractDocumentText(filePath, '', originalName || filePath);
+    return truncateExtractedText(text, 300000);
 }
 
 function createKnowledgeDocumentFromUpload({ userId, file }) {
@@ -156,7 +157,7 @@ function markKnowledgeDocumentError({ docId, userId, error }) {
         UPDATE knowledge_docs
         SET status = ?, progress = 0, error_message = ?, processed_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run('error', String(error?.message || error || 'RAG indexing failed').slice(0, 1000), now, now, docId, userId).changes > 0;
+    `).run('error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId).changes > 0;
 }
 
 async function processKnowledgeDocument({ docId, userId }) {
@@ -452,7 +453,7 @@ function getKnowledgeDocumentSummaryForUser(userId) {
         sourceSize: 0,
         retryableErrors,
         lastError,
-        config: getRagConfig(),
+        config: getRagConfig({}, userId),
         queue: {
             running: runningIndexCount,
             pending: pendingIndexes.size,

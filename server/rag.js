@@ -40,15 +40,15 @@ const debugQueryLimiter = rateLimit({
     limit: 20,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'RAG 调试请求过于频繁，请稍后再试' }
+    message: { error: '召回测试请求过于频繁，请稍后再试' }
 });
 const upload = multer({
     dest: 'uploads/docs/',
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         file.originalname = normalizeUploadedOriginalName(file.originalname);
-        if (/\.(txt|md|pdf)$/i.test(file.originalname || '')) return cb(null, true);
-        cb(new Error('仅支持 txt、md、pdf 文档'));
+        if (/\.(txt|md|pdf|doc|docx|xls|xlsx|csv|json|html|htm)$/i.test(file.originalname || '')) return cb(null, true);
+        cb(new Error('仅支持 txt、md、pdf、doc、docx、xls、xlsx、csv、json、html 文档'));
     }
 });
 

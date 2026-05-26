@@ -39,7 +39,10 @@ const {
     chunkText,
     cosineSimilarity,
     debugRetrieveContext,
+    indexDocumentChunks,
     normalizeEmbeddingVector,
+    requestEmbedding,
+    retrieveContext,
     resolveEmbeddingUrl
 } = require('../server/services/rag-index');
 const {
@@ -98,6 +101,7 @@ const {
     getKnowledgeDocumentDetail,
     getRagFeedbackSummary,
     processKnowledgeDocument,
+    readKnowledgeDocumentFromPath,
     recordRagFeedback,
     recoverStaleKnowledgeDocumentIndexes,
     scheduleFailedKnowledgeDocumentsForUser
@@ -136,6 +140,10 @@ const { createModelsRouter } = require('../server/routes/models');
 const { createSessionsRouter } = require('../server/routes/sessions');
 const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
+const {
+    filterMcpToolsForChatIntent,
+    filterMcpToolsForPlanner
+} = require('../server/routes/chat');
 const { createMcpRouter } = require('../server/routes/mcp');
 const {
     buildEmbeddingModelItem,
@@ -554,6 +562,51 @@ test('session detail only appends valid attachment tokens', async () => {
     }
 });
 
+test('session list can skip total count for cursor-first sidebar loading', async () => {
+    const suffix = Date.now();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`session_fast_${suffix}`, 'hash', 'Session Fast', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const sessionA = `session-fast-a-${suffix}`;
+    const sessionB = `session-fast-b-${suffix}`;
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours', '-1 minute'), datetime('now', '+8 hours', '-1 minute'))
+    `).run(sessionA, userId, 'Fast A');
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionB, userId, 'Fast B');
+
+    const router = createSessionsRouter({
+        authMiddleware: (req, _res, next) => {
+            req.user = { id: userId, username: `session_fast_${suffix}`, role: 'user', status: 'active' };
+            next();
+        },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/sessions' && layer.route.methods.get);
+    const handlers = route.route.stack.map(item => item.handle);
+    const req = { query: { limit: '1', includeTotal: 'false' }, headers: {} };
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+
+    try {
+        await runExpressHandlers(handlers, req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(Object.hasOwn(res.body, 'total'), false);
+        assert.equal(res.body.data.length, 1);
+        assert.equal(res.body.hasMore, true);
+        assert.equal(Boolean(res.body.nextCursor), true);
+    } finally {
+        db.prepare('DELETE FROM sessions WHERE id IN (?, ?)').run(sessionA, sessionB);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('ConcurrencySemaphore reports queue position for waiting requests', async () => {
     const semaphore = new ConcurrencySemaphore({
         maxConcurrent: 1,
@@ -950,6 +1003,112 @@ test('RAG embedding helpers support HTTP services', () => {
     assert.throws(() => normalizeEmbeddingVector({ ok: true }), /有效向量/);
 });
 
+test('RAG embedding requests surface friendly timeout errors', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    let seenTimeout = 0;
+    axios.post = async (_url, _payload, options = {}) => {
+        seenTimeout = options.timeout;
+        const error = new Error(`timeout of ${options.timeout}ms exceeded`);
+        error.code = 'ECONNABORTED';
+        throw error;
+    };
+
+    try {
+        let caught = null;
+        try {
+            await requestEmbedding('hello', {
+                url: 'https://embedding.example/v1',
+                model: 'embedding-test',
+                apiKey: ''
+            }, { timeoutMs: 45000 });
+        } catch (e) {
+            caught = e;
+        }
+        assert.equal(seenTimeout, 45000);
+        assert.equal(caught?.code, 'EMBEDDING_TIMEOUT');
+        assert.match(caught?.message || '', /检索配置/);
+    } finally {
+        axios.post = originalPost;
+    }
+});
+
+test('RAG document indexing uses extended embedding timeout and batched calls', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const keys = [
+        RAG_CONFIG_KEYS.embeddingMode,
+        RAG_CONFIG_KEYS.embeddingApiUrl,
+        RAG_CONFIG_KEYS.embeddingModel
+    ];
+    const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
+    const upsert = db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, datetime('now', '+8 hours'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_index_timeout_${suffix}`, 'hash', 'RAG Index Timeout', 'QA', 'user', 'active');
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userInfo.lastInsertRowid, `rag_index_timeout_${suffix}.txt`, 'processing', 0);
+    const seen = [];
+
+    axios.post = async (_url, payload, options = {}) => {
+        seen.push({ payload, timeout: options.timeout });
+        const rawInput = payload.input ?? payload.prompt;
+        const inputs = Array.isArray(rawInput) ? rawInput : [rawInput];
+        return {
+            data: {
+                data: inputs.map((_, index) => ({
+                    index,
+                    embedding: [1, index + 1]
+                }))
+            }
+        };
+    };
+
+    try {
+        upsert.run(RAG_CONFIG_KEYS.embeddingMode, 'http');
+        upsert.run(RAG_CONFIG_KEYS.embeddingApiUrl, 'https://embedding.example/v1');
+        upsert.run(RAG_CONFIG_KEYS.embeddingModel, 'batch-embedding');
+
+        const chunkCount = await indexDocumentChunks(
+            docInfo.lastInsertRowid,
+            'alpha beta gamma '.repeat(80),
+            { embeddingTimeoutMs: 65432 }
+        );
+
+        assert.equal(chunkCount > 1, true);
+        assert.equal(seen.every(call => call.timeout === 65432), true);
+        assert.equal(seen.some(call => Array.isArray(call.payload.input)), true);
+    } finally {
+        axios.post = originalPost;
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+        keys.forEach((key, index) => {
+            const row = previousRows[index];
+            if (row) {
+                db.prepare(`
+                    INSERT INTO app_settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by
+                `).run(row.key, row.value, row.updated_at, row.updated_by);
+            } else {
+                db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+            }
+        });
+    }
+});
+
 test('agent JSON parser extracts strict object from model text', () => {
     assert.deepEqual(parseJsonObject('{"action":"final","answer":"ok"}'), { action: 'final', answer: 'ok' });
     assert.deepEqual(parseJsonObject('```json\n{"tool":"models.list","input":{}}\n```'), { tool: 'models.list', input: {} });
@@ -1078,6 +1237,10 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     const detail = getRunDetailForUser(run.id, user);
     assert.equal(detail.progress.errorCount, 0);
     assert.equal(detail.progress.stepCount >= 1, true);
+    const listedRun = listRuns(user, { limit: 30 }).data.find(item => item.id === run.id);
+    assert.equal(listedRun.step_count, detail.steps.length);
+    assert.equal(listedRun.tool_count, detail.steps.filter(step => step.type === 'tool').length);
+    assert.equal(listedRun.error_count, detail.steps.filter(step => step.status === 'error').length);
 
     const rerun = rerunAgentRun(run.id, user);
     assert.equal(rerun.goal, run.goal);
@@ -1097,7 +1260,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(deleted.deleted_by_user, user.id);
     assert.equal(getRunForUser(run.id, user), undefined);
     assert.equal(getRunDetailForUser(run.id, user), null);
-    assert.equal(listRuns(user, 30).some(item => item.id === run.id), false);
+    assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === run.id), false);
     assert.throws(() => listDeletedRunsForAdmin(user, 20), /admin 超级管理员/);
     const adminAudit = listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
     assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
@@ -1431,6 +1594,36 @@ test('RAG document upload stores repaired Chinese filename', () => {
     }
 });
 
+test('RAG document reader supports office data and web text formats', async () => {
+    const XLSX = require('xlsx');
+    const suffix = Date.now().toString(36);
+    const tempDir = path.join(uploadRoot, 'rag-format-test');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const csvPath = path.join(tempDir, `${suffix}.csv`);
+    const jsonPath = path.join(tempDir, `${suffix}.json`);
+    const htmlPath = path.join(tempDir, `${suffix}.html`);
+    const xlsxPath = path.join(tempDir, `${suffix}.xlsx`);
+    fs.writeFileSync(csvPath, 'name,score\nalice,98\nbob,88');
+    fs.writeFileSync(jsonPath, JSON.stringify({ title: '知识库 JSON 测试', items: ['alpha', 'beta'] }, null, 2));
+    fs.writeFileSync(htmlPath, '<main><h1>知识库 HTML 测试</h1><p>正文内容</p></main>');
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ['部门', '人数'],
+        ['研发', 12],
+        ['运营', 5]
+    ]), 'Sheet1');
+    XLSX.writeFile(workbook, xlsxPath);
+
+    try {
+        assert.match(await readKnowledgeDocumentFromPath(csvPath, 'data.csv'), /alice/);
+        assert.match(await readKnowledgeDocumentFromPath(jsonPath, 'data.json'), /知识库 JSON 测试/);
+        assert.match(await readKnowledgeDocumentFromPath(htmlPath, 'page.html'), /知识库 HTML 测试/);
+        assert.match(await readKnowledgeDocumentFromPath(xlsxPath, 'book.xlsx'), /研发/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
 test('RAG document deletion is soft and remains auditable', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -1749,6 +1942,79 @@ test('RAG debug retrieval returns scored chunks without external embeddings', as
     } finally {
         db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(matched.lastInsertRowid, other.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('RAG retrieval merges fallback candidates and skips embedding calls when there are no candidates', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_merge_${suffix}`, 'hash', 'RAG Merge Test', 'QA', 'user', 'active');
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userInfo.lastInsertRowid, `rag_merge_${suffix}.txt`, 'ready', 1, 2);
+    const insertChunk = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `);
+    const ftsOnly = insertChunk.run(
+        docInfo.lastInsertRowid,
+        'alpha 权限配置流程',
+        buildRagSearchContent('alpha 权限配置流程'),
+        JSON.stringify([1, 0])
+    );
+    const recentFallback = insertChunk.run(
+        docInfo.lastInsertRowid,
+        '完全无关键词但语义相关',
+        buildRagSearchContent('完全无关键词但语义相关'),
+        JSON.stringify([0, 1])
+    );
+
+    try {
+        const result = await debugRetrieveContext(
+            userInfo.lastInsertRowid,
+            '权限配置',
+            { queryVector: [1, 0], topK: 2, candidateLimit: 5, scoreThreshold: 0 }
+        );
+        const ids = result.matches.map(item => item.chunkId);
+        assert.equal(ids.includes(ftsOnly.lastInsertRowid), true);
+        assert.equal(ids.includes(recentFallback.lastInsertRowid), true);
+
+        const empty = await retrieveContext(userInfo.lastInsertRowid + 1000000, '没有任何候选时不要请求向量');
+        assert.equal(empty, '');
+    } finally {
+        db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(ftsOnly.lastInsertRowid, recentFallback.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('RAG indexing rejects empty documents instead of marking them ready', async () => {
+    await assert.rejects(
+        indexDocumentChunks(999999, '   \n\n\t', { userId: 1 }),
+        /未解析出可索引文本/
+    );
+});
+
+test('RAG summary returns personal retrieval configuration', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_personal_${suffix}`, 'hash', 'RAG Personal Test', 'QA', 'user', 'active');
+    db.prepare(`
+        INSERT INTO user_settings (user_id, key, value, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.topK, '7');
+
+    try {
+        const summary = getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
+        assert.equal(summary.config.topK, 7);
+    } finally {
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
     }
 });
@@ -2572,6 +2838,35 @@ test('visualization and report MCP compose independently from data-source MCPs',
         assert.deepEqual(chart.labels, ['ops', 'rnd']);
         assert.deepEqual(chart.series[0].data, [40, 25]);
 
+        const areaRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${vizServerId}.viz.build_chart`,
+                input: {
+                    rows: [
+                        { month: '2026-02', channel: 'direct', growth: '12%' },
+                        { month: '2026-01', channel: 'direct', growth: '(5%)' },
+                        { month: '2026-01', channel: 'partner', growth: '￥8' }
+                    ],
+                    chartType: 'area',
+                    xAxis: 'month',
+                    yAxis: 'growth',
+                    groupBy: 'channel',
+                    aggregation: 'sum',
+                    sortBy: 'label',
+                    sortOrder: 'asc',
+                    title: '增长趋势'
+                }
+            },
+            user: adminUser
+        }, areaRes);
+        const area = areaRes.body.result.structuredContent;
+        assert.equal(area.chartType, 'area');
+        assert.deepEqual(area.labels, ['2026-01', '2026-02']);
+        assert.deepEqual(area.series.find(item => item.name === 'direct').data, [-0.05, 0.12]);
+        assert.deepEqual(area.series.find(item => item.name === 'partner').data, [8, 0]);
+        assert.deepEqual(area.sort, { by: 'label', order: 'asc' });
+
         const tableRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
         await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
             body: {
@@ -2602,7 +2897,7 @@ test('visualization and report MCP compose independently from data-source MCPs',
         const report = reportRes.body.result.structuredContent;
         assert.equal(report.type, 'pivot_report');
         assert.match(report.markdown, /# 经营分析报告/);
-        assert.match(report.markdown, /```pivot-chart/);
+        assert.match(report.markdown, /```pivot-echart/);
         assert.match(report.markdown, /\| ops \| 40 \|/);
     } finally {
         for (const id of serverIds) {
@@ -2612,6 +2907,240 @@ test('visualization and report MCP compose independently from data-source MCPs',
         }
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
     }
+});
+
+test('system MCP services can be enabled without user-supplied names', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_system_${suffix}`, 'hash', 'MCP System Test', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_system_${suffix}`, role: 'user', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const ensureRoute = router.stack.find(layer => layer.route?.path === '/mcp/system-services/:type/ensure' && layer.route?.methods?.post);
+    const statusRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/status' && layer.route?.methods?.patch);
+    const toolsRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools' && layer.route?.methods?.get);
+    const serverIds = [];
+    try {
+        const firstRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(ensureRoute.route.stack.map(layer => layer.handle), {
+            params: { type: 'visualization' },
+            body: {},
+            user
+        }, firstRes);
+        assert.equal(firstRes.statusCode, 201);
+        assert.equal(firstRes.body.server.server_type, 'visualization');
+        assert.equal(firstRes.body.server.name, '图表生成');
+        assert.equal(firstRes.body.tools.some(tool => tool.name === 'viz.build_chart'), true);
+        serverIds.push(firstRes.body.server.id);
+
+        const secondRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(ensureRoute.route.stack.map(layer => layer.handle), {
+            params: { type: 'visualization' },
+            body: {},
+            user
+        }, secondRes);
+        assert.equal(secondRes.statusCode, 200);
+        assert.equal(secondRes.body.server.id, firstRes.body.server.id);
+
+        const count = db.prepare(`
+            SELECT COUNT(*) AS total
+            FROM mcp_servers s
+            JOIN mcp_builtin_configs c ON c.mcp_server_id = s.id
+            WHERE s.user_id = ? AND s.status != 'deleted' AND c.service_type = 'visualization'
+        `).get(user.id).total;
+        assert.equal(count, 1);
+
+        const pauseRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(statusRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(firstRes.body.server.id) },
+            body: { status: 'paused' },
+            user
+        }, pauseRes);
+        assert.equal(pauseRes.body.server.status, 'paused');
+        const pausedToolsRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), { user }, pausedToolsRes);
+        assert.equal(pausedToolsRes.body.tools.some(tool => tool.serverId === firstRes.body.server.id), false);
+
+        const activeRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(statusRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(firstRes.body.server.id) },
+            body: { status: 'active' },
+            user
+        }, activeRes);
+        assert.equal(activeRes.body.server.status, 'active');
+    } finally {
+        serverIds.forEach(id => {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id);
+        });
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('system utility MCP services expose document data and format tools', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_util_${suffix}`, 'hash', 'MCP Utility Test', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_util_${suffix}`, role: 'user', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const ensureRoute = router.stack.find(layer => layer.route?.path === '/mcp/system-services/:type/ensure' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    const serverIds = {};
+    try {
+        for (const item of [
+            { type: 'documents', tool: 'doc.extract_outline' },
+            { type: 'data', tool: 'data.group_summary' },
+            { type: 'format', tool: 'format.extract_json' }
+        ]) {
+            const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+            await runExpressHandlers(ensureRoute.route.stack.map(layer => layer.handle), {
+                params: { type: item.type },
+                body: {},
+                user
+            }, res);
+            assert.equal(res.statusCode, 201);
+            assert.equal(res.body.server.server_type, item.type);
+            assert.equal(res.body.tools.some(tool => tool.name === item.tool), true);
+            serverIds[item.type] = res.body.server.id;
+        }
+
+        const outlineRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: `mcp.${serverIds.documents}.doc.extract_outline`, input: { text: '# Sales\n\n1. Summary\nBody' } },
+            user
+        }, outlineRes);
+        assert.equal(outlineRes.body.result.structuredContent.headings[0].title, 'Sales');
+
+        const groupRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: `mcp.${serverIds.data}.data.group_summary`,
+                input: {
+                    rows: [{ dept: 'ops', amount: 10 }, { dept: 'ops', amount: 15 }, { dept: 'rnd', amount: 5 }],
+                    groupBy: 'dept',
+                    valueField: 'amount',
+                    aggregation: 'sum'
+                }
+            },
+            user
+        }, groupRes);
+        assert.equal(groupRes.body.result.structuredContent.rows.find(row => row.dept === 'ops').value, 25);
+
+        const jsonRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: `mcp.${serverIds.format}.format.extract_json`, input: { text: 'payload: {"ok":true,"n":1}' } },
+            user
+        }, jsonRes);
+        assert.equal(jsonRes.body.result.structuredContent.value.ok, true);
+    } finally {
+        Object.values(serverIds).forEach(id => {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(id);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id);
+        });
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('system IM MCP uses default service identity with user configuration', async () => {
+    const suffix = Date.now().toString(36);
+    const received = [];
+    const webhook = http.createServer((req, res) => {
+        let raw = '';
+        req.on('data', chunk => { raw += chunk; });
+        req.on('end', () => {
+            received.push({ headers: req.headers, body: JSON.parse(raw || '{}') });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+        });
+    });
+    await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
+    const endpointUrl = `http://127.0.0.1:${webhook.address().port}/message`;
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_system_im_${suffix}`, 'hash', 'MCP System IM Test', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_system_im_${suffix}`, role: 'user', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/builtin-services' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    let serverId = null;
+    try {
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: 'IM 通知',
+                service_type: 'im',
+                endpointUrl,
+                authHeader: 'X-Token',
+                secret: 'system-secret',
+                allowedTargets: 'user:alice',
+                defaultTarget: 'user:alice'
+            },
+            user
+        }, createRes);
+        assert.equal(createRes.statusCode, 201);
+        assert.equal(createRes.body.server.server_type, 'im');
+        assert.equal(createRes.body.server.name, 'IM 通知');
+        serverId = createRes.body.server.id;
+
+        const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), { params: { id: String(serverId) }, user }, refreshRes);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'im.send_user_message'), true);
+
+        const callRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: `mcp.${serverId}.im.send_user_message`, input: { target: 'alice', message: 'hello' } },
+            user
+        }, callRes);
+        assert.equal(callRes.statusCode || 200, 200);
+        assert.equal(received[0].headers['x-token'], 'system-secret');
+        assert.equal(received[0].body.target, 'alice');
+    } finally {
+        if (serverId) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_builtin_configs WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        await new Promise(resolve => webhook.close(resolve));
+    }
+});
+
+test('chat MCP intent filter does not expose visualization tools for plain data queries', () => {
+    const tools = [
+        { fullName: 'mcp.db.db.run_readonly_query', name: 'db.run_readonly_query' },
+        { fullName: 'mcp.viz.viz.build_chart', name: 'viz.build_chart' },
+        { fullName: 'mcp.report.report.compose', name: 'report.compose' }
+    ];
+    const queryOnly = filterMcpToolsForChatIntent(tools, '查询 hcd_b 表中各部门的数据');
+    assert.deepEqual(queryOnly.map(tool => tool.name), ['db.run_readonly_query']);
+
+    const withChart = filterMcpToolsForChatIntent(tools, '查询 hcd_b 表中各部门的数据并生成柱状图');
+    assert.deepEqual(withChart.map(tool => tool.name), ['db.run_readonly_query', 'viz.build_chart']);
+
+    const withReport = filterMcpToolsForChatIntent(tools, '查询 hcd_b 表并生成月报');
+    assert.deepEqual(withReport.map(tool => tool.name), ['db.run_readonly_query', 'viz.build_chart', 'report.compose']);
+
+    const plannerChartTools = filterMcpToolsForPlanner(withChart, '查询 hcd_b 表中各部门的数据并生成柱状图');
+    assert.deepEqual(plannerChartTools.map(tool => tool.name), ['db.run_readonly_query']);
 });
 
 test('built-in IM MCP enforces target whitelist and sends LAN webhook payloads', async () => {

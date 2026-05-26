@@ -112,6 +112,7 @@ function createSessionsRouter({
         const tagMode = String(req.query.tagMode || 'any').toLowerCase() === 'all' ? 'all' : 'any';
         const archived = req.query.archived === 'true' ? 1 : 0;
         const cursor = decodeSessionCursor(req.query.cursor);
+        const includeTotal = req.query.includeTotal !== 'false' && req.query.total !== 'false';
         const offset = (page - 1) * limit;
 
         let query = `
@@ -165,25 +166,29 @@ function createSessionsRouter({
         const hasMore = rows.length > limit;
         const nextCursor = hasMore ? encodeSessionCursor(sessions[sessions.length - 1]) : null;
 
-        let countQuery = 'SELECT COUNT(*) as count FROM sessions s WHERE s.user_id = ? AND COALESCE(s.is_archived, 0) = ? AND s.deleted_at IS NULL';
-        let countParams = [req.user.id, archived];
-        if (keyword) {
-            countQuery += ` AND s.title LIKE ?`;
-            countParams.push(`%${keyword}%`);
+        let total = null;
+        if (includeTotal) {
+            let countQuery = 'SELECT COUNT(*) as count FROM sessions s WHERE s.user_id = ? AND COALESCE(s.is_archived, 0) = ? AND s.deleted_at IS NULL';
+            const countParams = [req.user.id, archived];
+            if (keyword) {
+                countQuery += ` AND s.title LIKE ?`;
+                countParams.push(`%${keyword}%`);
+            }
+            if (tagList.length > 0) {
+                const tagClause = tagList.map(() => `(',' || COALESCE(s.tags, '') || ',') LIKE ?`).join(tagMode === 'all' ? ' AND ' : ' OR ');
+                countQuery += ` AND (${tagClause})`;
+                countParams.push(...tagList.map(item => `%,${item},%`));
+            }
+            total = db.prepare(countQuery).get(...countParams).count;
         }
-        if (tagList.length > 0) {
-            const tagClause = tagList.map(() => `(',' || COALESCE(s.tags, '') || ',') LIKE ?`).join(tagMode === 'all' ? ' AND ' : ' OR ');
-            countQuery += ` AND (${tagClause})`;
-            countParams.push(...tagList.map(item => `%,${item},%`));
-        }
-        const total = db.prepare(countQuery).get(...countParams).count;
 
-        res.json({
+        const payload = {
             data: sessions,
-            total,
-            hasMore: cursor || page === 1 ? hasMore : (offset + sessions.length) < total,
+            hasMore: includeTotal && !cursor && page > 1 ? (offset + sessions.length) < total : hasMore,
             nextCursor
-        });
+        };
+        if (includeTotal) payload.total = total;
+        res.json(payload);
     }));
 
     router.post('/sessions', authMiddleware, asyncHandler(async (req, res) => {

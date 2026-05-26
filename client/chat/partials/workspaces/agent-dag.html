@@ -1,0 +1,27 @@
+<!-- 智能体工作流编排工作台 -->
+    <section id="agent-dag-workbench-modal" class="main-workspace-view agent-dag-workspace-view hidden">
+        <div class="agent-dag-modal">
+            <div class="agent-dag-modal-header">
+                <div>
+                    <h3>工作流编排</h3>
+                    <p>单独编辑智能体的任务工作流，适合复杂节点、依赖和调试。</p>
+                </div>
+                <div class="agent-dag-header-actions">
+                    <button id="agent-dag-save-draft-btn" class="btn-secondary" type="button">保存草稿</button>
+                    <button id="agent-dag-save-btn" class="btn-primary" type="button">保存工作流</button>
+                    <button id="agent-dag-back-btn" class="btn-secondary" type="button">返回智能体</button>
+                </div>
+            </div>
+            <div class="agent-dag-workbench">
+                <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
+                    <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
+                    <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
+                    <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
+                </div>
+                <details class="pivot-dag-editor-json">
+                    <summary>JSON 视图（高级）</summary>
+                    <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
+                </details>
+            </div>
+        </div>
+    </section>

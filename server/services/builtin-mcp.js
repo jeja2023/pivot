@@ -9,6 +9,9 @@ const BUILTIN_MCP_PREFIXES = {
     reports: 'pivot-reports://',
     visualization: 'pivot-visualization://',
     report: 'pivot-report://',
+    documents: 'pivot-documents://',
+    data: 'pivot-data://',
+    format: 'pivot-format://',
     im: 'pivot-im://'
 };
 const SUPPORTED_REPORT_EXTENSIONS = new Set(['csv', 'xlsx', 'xls', 'json', 'txt', 'md']);
@@ -75,10 +78,7 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
         }
         return { serviceType: type, config, secret: '' };
     }
-    if (type === 'visualization') {
-        return { serviceType: type, config: {}, secret: '' };
-    }
-    if (type === 'report') {
+    if (['visualization', 'report', 'documents', 'data', 'format'].includes(type)) {
         return { serviceType: type, config: {}, secret: '' };
     }
     if (type === 'im') {
@@ -94,7 +94,7 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
             secret: String(payload.secret ?? payload.token ?? payload.api_token ?? '').trim()
         };
     }
-    const err = new Error('Unsupported built-in MCP service type.');
+    const err = new Error('不支持的系统能力类型。');
     err.status = 400;
     throw err;
 }
@@ -102,8 +102,11 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
 function normalizeServiceType(value) {
     const type = String(value || '').trim().toLowerCase();
     if (['reports', 'files', 'data_files'].includes(type)) return 'reports';
-    if (['visualization', 'visualisation', 'viz', 'chart', 'charts'].includes(type)) return 'visualization';
+    if (['visualization', 'visualisation', 'viz', 'chart', 'charts', 'echarts'].includes(type)) return 'visualization';
     if (['report', 'reporting', 'composer', 'report_composer'].includes(type)) return 'report';
+    if (['documents', 'document', 'doc', 'docs', 'parser', 'document_parser'].includes(type)) return 'documents';
+    if (['data', 'processing', 'processor', 'data_processing', 'data_processor'].includes(type)) return 'data';
+    if (['format', 'formats', 'conversion', 'converter', 'format_converter'].includes(type)) return 'format';
     if (['im', 'message', 'messages', 'notification', 'notifications'].includes(type)) return 'im';
     return '';
 }
@@ -113,6 +116,9 @@ function getBuiltinServiceTypeFromUrl(baseUrl = '') {
     if (url.startsWith(BUILTIN_MCP_PREFIXES.reports)) return 'reports';
     if (url.startsWith(BUILTIN_MCP_PREFIXES.visualization)) return 'visualization';
     if (url.startsWith(BUILTIN_MCP_PREFIXES.report)) return 'report';
+    if (url.startsWith(BUILTIN_MCP_PREFIXES.documents)) return 'documents';
+    if (url.startsWith(BUILTIN_MCP_PREFIXES.data)) return 'data';
+    if (url.startsWith(BUILTIN_MCP_PREFIXES.format)) return 'format';
     if (url.startsWith(BUILTIN_MCP_PREFIXES.im)) return 'im';
     return '';
 }
@@ -123,6 +129,9 @@ function isInternalMcpUrl(baseUrl = '') {
         url.startsWith(BUILTIN_MCP_PREFIXES.reports) ||
         url.startsWith(BUILTIN_MCP_PREFIXES.visualization) ||
         url.startsWith(BUILTIN_MCP_PREFIXES.report) ||
+        url.startsWith(BUILTIN_MCP_PREFIXES.documents) ||
+        url.startsWith(BUILTIN_MCP_PREFIXES.data) ||
+        url.startsWith(BUILTIN_MCP_PREFIXES.format) ||
         url.startsWith(BUILTIN_MCP_PREFIXES.im);
 }
 
@@ -160,6 +169,9 @@ function listBuiltinMcpTools(server) {
     if (type === 'reports') return listReportTools();
     if (type === 'visualization') return listVisualizationTools();
     if (type === 'report') return listReportComposerTools();
+    if (type === 'documents') return listDocumentTools();
+    if (type === 'data') return listDataProcessingTools();
+    if (type === 'format') return listFormatConversionTools();
     if (type === 'im') return listImTools();
     throw new Error('Unsupported built-in MCP server.');
 }
@@ -169,6 +181,9 @@ async function executeBuiltinMcpTool(server, name, input = {}) {
     if (type === 'reports') return executeReportTool(server, name, input);
     if (type === 'visualization') return executeVisualizationTool(server, name, input);
     if (type === 'report') return executeReportComposerTool(server, name, input);
+    if (type === 'documents') return executeDocumentTool(server, name, input);
+    if (type === 'data') return executeDataProcessingTool(server, name, input);
+    if (type === 'format') return executeFormatConversionTool(server, name, input);
     if (type === 'im') return executeImTool(server, name, input);
     throw new Error('Unsupported built-in MCP server.');
 }
@@ -177,7 +192,7 @@ function listReportTools() {
     return [
         {
             name: 'reports.list_files',
-            description: 'List report/data files under configured LAN directories.',
+            description: '列出配置目录下可访问的报表/数据文件。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -188,7 +203,7 @@ function listReportTools() {
         },
         {
             name: 'reports.read_file_summary',
-            description: 'Read metadata, sheets and a bounded sample from one report/data file.',
+            description: '读取单个报表/数据文件的元数据、工作表和样本行。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -201,7 +216,7 @@ function listReportTools() {
         },
         {
             name: 'reports.query_table',
-            description: 'Query a CSV/XLS/XLSX table with simple column filters and row limits.',
+            description: '按列筛选并限制行数，查询 CSV/XLS/XLSX 表格。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -216,7 +231,7 @@ function listReportTools() {
         },
         {
             name: 'reports.compare_files',
-            description: 'Compare two report/data files by sheet names, headers and sampled rows.',
+            description: '对比两个报表/数据文件的工作表、表头和样本行。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -235,7 +250,7 @@ function listVisualizationTools() {
     return [
         {
             name: 'viz.build_chart',
-            description: 'Build a pivot_chart visualization from provided tabular rows. This tool does not read databases or files; pass rows from another MCP step.',
+            description: '基于传入的表格行生成可直接渲染的图表配置，不直接读取数据库或文件。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -255,7 +270,7 @@ function listVisualizationTools() {
         },
         {
             name: 'viz.build_table',
-            description: 'Build a markdown-ready table block from provided rows and optional columns. This tool does not read databases or files.',
+            description: '基于传入的表格行生成 Markdown 表格块，不直接读取数据库或文件。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -274,7 +289,7 @@ function listReportComposerTools() {
     return [
         {
             name: 'report.compose',
-            description: 'Compose a fixed-format report from independent summary, table, chart, metric and markdown sections. This tool does not fetch data or build charts.',
+            description: '将摘要、表格、图表、指标和 Markdown 片段组合为固定格式报告。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -288,7 +303,7 @@ function listReportComposerTools() {
         },
         {
             name: 'report.validate_template',
-            description: 'Validate a fixed report section template before running a multi-step workflow.',
+            description: '在执行多步骤编排前验证报告模板。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -300,16 +315,171 @@ function listReportComposerTools() {
     ];
 }
 
+function listDocumentTools() {
+    return [
+        {
+            name: 'doc.extract_outline',
+            description: 'Extract a lightweight outline from plain text or Markdown content.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string' },
+                    maxHeadings: { type: 'number', minimum: 1, maximum: 200 }
+                },
+                required: ['text']
+            }
+        },
+        {
+            name: 'doc.extract_key_values',
+            description: 'Extract key/value style lines from document text.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string' },
+                    maxItems: { type: 'number', minimum: 1, maximum: 500 }
+                },
+                required: ['text']
+            }
+        },
+        {
+            name: 'doc.chunk_text',
+            description: 'Split long text into paragraph-aware chunks for downstream analysis.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string' },
+                    maxChars: { type: 'number', minimum: 200, maximum: 8000 }
+                },
+                required: ['text']
+            }
+        }
+    ];
+}
+
+function listDataProcessingTools() {
+    return [
+        {
+            name: 'data.profile_rows',
+            description: 'Profile tabular rows, including field names, types, fill rates, and sample values.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    limit: { type: 'number', minimum: 1, maximum: 5000 }
+                },
+                required: ['rows']
+            }
+        },
+        {
+            name: 'data.filter_rows',
+            description: 'Filter rows using exact or contains matching.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    filters: { type: 'object' },
+                    matchMode: { type: 'string', enum: ['contains', 'exact'] },
+                    limit: { type: 'number', minimum: 1, maximum: 5000 }
+                },
+                required: ['rows']
+            }
+        },
+        {
+            name: 'data.group_summary',
+            description: 'Group rows and calculate count, sum, average, min, or max.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    groupBy: { type: 'string' },
+                    valueField: { type: 'string' },
+                    aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                    limit: { type: 'number', minimum: 1, maximum: 5000 }
+                },
+                required: ['rows', 'groupBy']
+            }
+        },
+        {
+            name: 'data.normalize_fields',
+            description: 'Rename fields and trim string values in tabular rows.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    renameMap: { type: 'object' },
+                    trimStrings: { type: 'boolean' },
+                    limit: { type: 'number', minimum: 1, maximum: 5000 }
+                },
+                required: ['rows']
+            }
+        }
+    ];
+}
+
+function listFormatConversionTools() {
+    return [
+        {
+            name: 'format.to_markdown_table',
+            description: 'Convert rows into a Markdown table block.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    columns: { type: 'array', items: { type: 'string' } },
+                    title: { type: 'string' },
+                    limit: { type: 'number', minimum: 1, maximum: 1000 }
+                },
+                required: ['rows']
+            }
+        },
+        {
+            name: 'format.to_json',
+            description: 'Serialize a value as compact or pretty JSON.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    value: {},
+                    pretty: { type: 'boolean' }
+                },
+                required: ['value']
+            }
+        },
+        {
+            name: 'format.extract_json',
+            description: 'Extract and parse the first JSON object or array from text.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string' }
+                },
+                required: ['text']
+            }
+        },
+        {
+            name: 'format.normalize_text',
+            description: 'Normalize whitespace and optionally convert text case.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string' },
+                    mode: { type: 'string', enum: ['plain', 'lower', 'upper'] }
+                },
+                required: ['text']
+            }
+        }
+    ];
+}
+
 function listImTools() {
     return [
         {
             name: 'im.list_allowed_targets',
-            description: 'List configured LAN IM targets the model is allowed to notify.',
+            description: '列出当前允许通知的 LAN IM 目标。',
             inputSchema: { type: 'object', properties: {} }
         },
         {
             name: 'im.send_user_message',
-            description: 'Send a plain text message to one allowed LAN IM user.',
+            description: '向一个允许的 LAN IM 用户发送纯文本消息。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -322,7 +492,7 @@ function listImTools() {
         },
         {
             name: 'im.send_group_message',
-            description: 'Send a plain text message to one allowed LAN IM group.',
+            description: '向一个允许的 LAN IM 群组发送纯文本消息。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -335,7 +505,7 @@ function listImTools() {
         },
         {
             name: 'im.send_markdown',
-            description: 'Send a markdown-formatted message to one allowed LAN IM target.',
+            description: '向一个允许的 LAN IM 目标发送 Markdown 消息。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -389,7 +559,7 @@ function resolveReportFile(config, fileRef) {
         if (!fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
         const ext = getExtension(target);
         if (!config.extensions.includes(ext)) {
-            const err = new Error(`File extension .${ext} is not allowed for this report MCP service.`);
+            const err = new Error(`当前报表文件能力不允许读取 .${ext} 文件。`);
             err.status = 400;
             throw err;
         }
@@ -511,18 +681,22 @@ function queryReportTable(config, input = {}) {
 
 function toFiniteNumber(value) {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-    const text = String(value ?? '').replace(/,/g, '').trim();
-    const percentFactor = text.endsWith('%') ? 0.01 : 1;
-    const normalized = text
-        .replace(/%$/, '')
-        .replace(/[¥￥$€£]/g, '')
-        .replace(/^\((.*)\)$/, '-$1');
+    const text = String(value ?? '').trim();
+    if (!text) return 0;
+    const percentLike = /%$/.test(text) || /%\)$/.test(text);
+    let normalized = text
+        .replace(/,/g, '')
+        .replace(/[\u00a5\uffe5\u0024\u20ac\u00a3]/g, '')
+        .replace(/\s+/g, '');
+    if (/^\((.*)\)$/.test(normalized)) {
+        normalized = '-' + RegExp.$1;
+    }
+    normalized = normalized.replace(/%/g, '');
     const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) return parsed * percentFactor;
+    if (Number.isFinite(parsed)) return parsed * (percentLike ? 0.01 : 1);
     const fallback = normalized.match(/-?\d+(?:\.\d+)?/);
-    const fallbackValue = fallback ? Number(fallback[0]) : NaN;
-    if (Number.isFinite(fallbackValue)) return fallbackValue * percentFactor;
-    return Number.isFinite(parsed) ? parsed : 0;
+    if (fallback) return Number(fallback[0]) * (percentLike ? 0.01 : 1);
+    return 0;
 }
 
 function aggregateValues(values, aggregation) {
@@ -547,6 +721,79 @@ function normalizeSortOption(value, fallback) {
 function normalizeSortOrder(value, fallback = 'desc') {
     const order = String(value || '').toLowerCase();
     return ['asc', 'desc'].includes(order) ? order : fallback;
+}
+
+function buildChartDefaultTitle({ xField, yField, aggregation, chartType, groupField }) {
+    const xLabel = String(xField || 'data').trim();
+    const yLabel = String(yField || 'value').trim();
+    if (chartType === 'line' || chartType === 'area') {
+        return xLabel + (groupField ? '分组' : '') + '趋势';
+    }
+    if (chartType === 'pie') {
+        return xLabel + (groupField ? '分组' : '') + '占比';
+    }
+    if (aggregation === 'count') {
+        return xLabel + (groupField ? '分组' : '') + '统计';
+    }
+    return xLabel + (groupField ? '分组' : '') + (yLabel ? ' ' + yLabel : '') + '统计';
+}
+
+function normalizeSeriesName({ groupField, group, aggregation, yField }) {
+    if (groupField) return group;
+    return aggregation === 'count' ? '数量' : (yField || '数值');
+}
+
+function buildEchartsOption({ chartType, title, labels, series, xAxis, yAxis }) {
+    const normalizedType = chartType === 'area' ? 'line' : chartType;
+    const commonSeries = series.map(item => ({
+        name: item.name,
+        type: normalizedType === 'pie' ? 'pie' : normalizedType,
+        data: normalizedType === 'pie'
+            ? labels.map((label, index) => ({ name: label, value: item.data[index] || 0 }))
+            : item.data,
+        smooth: normalizedType === 'line',
+        areaStyle: chartType === 'area' ? {} : undefined,
+        emphasis: { focus: 'series' }
+    }));
+    if (normalizedType === 'pie') {
+        return {
+            title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+            tooltip: { trigger: 'item' },
+            legend: { top: 50, left: 'center', type: 'scroll' },
+            series: commonSeries.map(item => ({
+                ...item,
+                radius: ['35%', '68%'],
+                center: ['50%', '58%']
+            }))
+        };
+    }
+    return {
+        title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+        color: ['#10a37f', '#2563eb', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'],
+        tooltip: { trigger: 'axis', confine: true },
+        legend: { top: 50, right: 18, type: 'scroll' },
+        grid: { left: 68, right: 32, top: 96, bottom: 64, containLabel: true },
+        xAxis: {
+            type: 'category',
+            name: xAxis?.label || '分类',
+            nameLocation: 'middle',
+            nameGap: 38,
+            nameTextStyle: { color: '#64748b', fontWeight: 600 },
+            axisLabel: { hideOverlap: true, margin: 12 },
+            data: labels
+        },
+        yAxis: {
+            type: 'value',
+            name: yAxis?.label || '数值',
+            nameLocation: 'middle',
+            nameRotate: 90,
+            nameGap: 56,
+            nameTextStyle: { color: '#64748b', fontWeight: 600 },
+            axisLabel: { margin: 10 },
+            splitLine: { lineStyle: { color: '#e2e8f0' } }
+        },
+        series: commonSeries
+    };
 }
 
 function buildChartSpec(queryResult, input = {}) {
@@ -581,7 +828,7 @@ function buildChartSpec(queryResult, input = {}) {
     const labels = Array.from(new Set(Array.from(bucketMap.values()).map(item => item.label)));
     const groups = Array.from(new Set(Array.from(bucketMap.values()).map(item => item.group))).slice(0, 20);
     const series = groups.map(group => ({
-        name: groupField ? group : (aggregation === 'count' ? '数量' : yField),
+        name: normalizeSeriesName({ groupField, group, aggregation, yField }),
         data: labels.map(label => {
             const item = bucketMap.get(`${label}\u0000${group}`);
             return item ? Number(aggregateValues(item.values, aggregation).toFixed(4)) : 0;
@@ -602,13 +849,17 @@ function buildChartSpec(queryResult, input = {}) {
         ...item,
         data: labelIndexes.map(labelItem => item.data[labelItem.index])
     }));
-    return {
+    const title = String(input.title || buildChartDefaultTitle({ xField, yField, aggregation, chartType, groupField })).slice(0, 120);
+    const xAxis = { field: xField, label: String(input.xAxisLabel || input.x_axis_label || xField || '分类').trim() };
+    const yAxis = { field: yField || '__count__', label: String(input.yAxisLabel || input.y_axis_label || (aggregation === 'count' ? '数量' : yField || '数值')).trim(), aggregation };
+    const chart = {
         type: 'pivot_chart',
         version: 1,
+        renderer: 'echarts',
         chartType,
-        title: String(input.title || `${xField} ${aggregation === 'count' ? '数量' : yField}`).slice(0, 120),
-        xAxis: { field: xField, label: xField },
-        yAxis: { field: yField || '__count__', label: aggregation === 'count' ? '数量' : yField, aggregation },
+        title,
+        xAxis,
+        yAxis,
         groupBy: groupField ? { field: groupField, label: groupField } : null,
         labels: trimmedLabels,
         series: trimmedSeries,
@@ -619,6 +870,15 @@ function buildChartSpec(queryResult, input = {}) {
             rows: sourceRows.length
         }
     };
+    chart.echartsOption = buildEchartsOption({
+        chartType,
+        title,
+        labels: trimmedLabels,
+        series: trimmedSeries,
+        xAxis,
+        yAxis
+    });
+    return chart;
 }
 
 function normalizeInputRows(rows, maxRows = 1000) {
@@ -683,14 +943,14 @@ async function executeVisualizationTool(_server, name, input = {}) {
 
 function chartBlockMarkdown(chart) {
     return [
-        '```pivot-chart',
+        '```pivot-echart',
         JSON.stringify(chart, null, 2),
         '```'
     ].join('\n');
 }
 
 function composeReportSection(section = {}, index = 0) {
-    const title = String(section.title || `第 ${index + 1} 部分`).trim();
+    const title = String(section.title || `第${index + 1}部分`).trim();
     const type = String(section.type || 'markdown').toLowerCase();
     const lines = [];
     if (title) lines.push(`## ${title}`);
@@ -821,6 +1081,241 @@ async function executeReportTool(server, name, input = {}) {
     throw new Error(`Unsupported reports MCP tool: ${name}`);
 }
 
+function textInput(input = {}) {
+    return String(input.text || input.content || '').slice(0, 200000);
+}
+
+function executeDocumentTool(_server, name, input = {}) {
+    const text = textInput(input);
+    if (!text.trim()) {
+        const err = new Error('Document text is required.');
+        err.status = 400;
+        throw err;
+    }
+    if (name === 'doc.extract_outline') {
+        const maxHeadings = Math.min(Math.max(Number(input.maxHeadings) || 50, 1), 200);
+        const headings = [];
+        text.split(/\r?\n/).forEach((line, index) => {
+            const trimmed = line.trim();
+            const markdown = trimmed.match(/^(#{1,6})\s+(.+)$/);
+            const numbered = trimmed.match(/^(\d+(?:\.\d+)*[.)、])\s*(.{2,160})$/);
+            if (markdown) {
+                headings.push({ level: markdown[1].length, title: markdown[2].trim(), line: index + 1 });
+            } else if (numbered) {
+                headings.push({ level: Math.min(numbered[1].split('.').length, 6), title: numbered[2].trim(), line: index + 1 });
+            }
+        });
+        return {
+            type: 'document_outline',
+            headings: headings.slice(0, maxHeadings),
+            headingCount: headings.length,
+            lineCount: text.split(/\r?\n/).length,
+            charCount: text.length
+        };
+    }
+    if (name === 'doc.extract_key_values') {
+        const maxItems = Math.min(Math.max(Number(input.maxItems) || 100, 1), 500);
+        const items = [];
+        text.split(/\r?\n/).forEach((line, index) => {
+            const match = line.trim().match(/^([^:：]{1,80})[:：]\s*(.{0,1000})$/);
+            if (!match) return;
+            items.push({ key: match[1].trim(), value: match[2].trim(), line: index + 1 });
+        });
+        return {
+            type: 'document_key_values',
+            items: items.slice(0, maxItems),
+            itemCount: items.length
+        };
+    }
+    if (name === 'doc.chunk_text') {
+        const maxChars = Math.min(Math.max(Number(input.maxChars) || 1200, 200), 8000);
+        const chunks = [];
+        let current = '';
+        for (const paragraph of text.split(/\n\s*\n/).map(item => item.trim()).filter(Boolean)) {
+            if (current && current.length + paragraph.length + 2 > maxChars) {
+                chunks.push(current);
+                current = '';
+            }
+            if (paragraph.length > maxChars) {
+                for (let i = 0; i < paragraph.length; i += maxChars) chunks.push(paragraph.slice(i, i + maxChars));
+            } else {
+                current = current ? `${current}\n\n${paragraph}` : paragraph;
+            }
+        }
+        if (current) chunks.push(current);
+        return {
+            type: 'document_chunks',
+            maxChars,
+            chunks: chunks.map((chunk, index) => ({ index, text: chunk, charCount: chunk.length })),
+            chunkCount: chunks.length
+        };
+    }
+    throw new Error(`Unsupported document MCP tool: ${name}`);
+}
+
+function inferValueKind(value) {
+    if (value === null || value === undefined || value === '') return 'empty';
+    if (typeof value === 'number') return Number.isFinite(value) ? 'number' : 'text';
+    if (typeof value === 'boolean') return 'boolean';
+    if (value instanceof Date) return 'date';
+    const raw = String(value).trim();
+    if (!raw) return 'empty';
+    if (/^-?\d+(\.\d+)?%?$/.test(raw) || /^\(\d+(\.\d+)?%?\)$/.test(raw)) return 'number';
+    if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(raw)) return 'date';
+    return 'text';
+}
+
+function executeDataProcessingTool(_server, name, input = {}) {
+    if (name === 'data.profile_rows') {
+        const rows = normalizeInputRows(input.rows, input.limit || 1000);
+        const fields = rows.reduce((cols, row) => {
+            Object.keys(row || {}).forEach(key => {
+                if (!cols.includes(key)) cols.push(key);
+            });
+            return cols;
+        }, []);
+        const profile = fields.map(field => {
+            const values = rows.map(row => row[field]).filter(value => value !== undefined && value !== null && String(value).trim() !== '');
+            const typeCounts = values.reduce((acc, value) => {
+                const kind = inferValueKind(value);
+                acc[kind] = (acc[kind] || 0) + 1;
+                return acc;
+            }, {});
+            const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'empty';
+            return {
+                field,
+                type: topType,
+                filled: values.length,
+                fillRate: rows.length ? values.length / rows.length : 0,
+                samples: Array.from(new Set(values.map(value => String(value)).filter(Boolean))).slice(0, 5)
+            };
+        });
+        return { type: 'data_profile', rowCount: rows.length, fields: profile };
+    }
+    if (name === 'data.filter_rows') {
+        const rows = normalizeInputRows(input.rows, input.limit || 1000);
+        const filters = input.filters && typeof input.filters === 'object' ? input.filters : {};
+        const exact = String(input.matchMode || input.match_mode || 'contains').toLowerCase() === 'exact';
+        const filtered = rows.filter(row => Object.entries(filters).every(([key, expected]) => {
+            const actual = String(row[key] ?? '').toLowerCase();
+            const needle = String(expected ?? '').toLowerCase();
+            return exact ? actual === needle : actual.includes(needle);
+        }));
+        return { type: 'data_filter', rowCount: filtered.length, rows: filtered };
+    }
+    if (name === 'data.group_summary') {
+        const rows = normalizeInputRows(input.rows, input.limit || 1000);
+        const groupBy = String(input.groupBy || input.group_by || '').trim();
+        if (!groupBy) {
+            const err = new Error('groupBy is required.');
+            err.status = 400;
+            throw err;
+        }
+        const valueField = String(input.valueField || input.value_field || '').trim();
+        const aggregation = String(input.aggregation || (valueField ? 'sum' : 'count')).toLowerCase();
+        const grouped = new Map();
+        rows.forEach(row => {
+            const key = String(row[groupBy] ?? '');
+            const bucket = grouped.get(key) || [];
+            bucket.push(row);
+            grouped.set(key, bucket);
+        });
+        const items = Array.from(grouped.entries()).map(([key, groupRows]) => {
+            const values = valueField ? groupRows.map(row => toFiniteNumber(row[valueField])).filter(Number.isFinite) : [];
+            let value = groupRows.length;
+            if (aggregation === 'sum') value = values.reduce((sum, item) => sum + item, 0);
+            if (aggregation === 'avg') value = values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0;
+            if (aggregation === 'min') value = values.length ? Math.min(...values) : 0;
+            if (aggregation === 'max') value = values.length ? Math.max(...values) : 0;
+            return { [groupBy]: key, value, count: groupRows.length };
+        });
+        return { type: 'data_group_summary', groupBy, valueField, aggregation, rows: items };
+    }
+    if (name === 'data.normalize_fields') {
+        const rows = normalizeInputRows(input.rows, input.limit || 1000);
+        const renameMap = input.renameMap && typeof input.renameMap === 'object' ? input.renameMap : {};
+        const trimStrings = input.trimStrings !== false;
+        const normalized = rows.map(row => Object.entries(row || {}).reduce((acc, [key, value]) => {
+            const nextKey = String(renameMap[key] || key);
+            acc[nextKey] = trimStrings && typeof value === 'string' ? value.trim() : value;
+            return acc;
+        }, {}));
+        return { type: 'data_normalized_rows', rowCount: normalized.length, rows: normalized };
+    }
+    throw new Error(`Unsupported data MCP tool: ${name}`);
+}
+
+function findJsonCandidate(text) {
+    const raw = String(text || '');
+    const starts = [];
+    ['{', '['].forEach(char => {
+        const index = raw.indexOf(char);
+        if (index >= 0) starts.push(index);
+    });
+    starts.sort((a, b) => a - b);
+    for (const start of starts) {
+        const open = raw[start];
+        const close = open === '{' ? '}' : ']';
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+        for (let index = start; index < raw.length; index += 1) {
+            const char = raw[index];
+            if (inString) {
+                escaped = char === '\\' && !escaped;
+                if (char === '"' && !escaped) inString = false;
+                if (char !== '\\') escaped = false;
+                continue;
+            }
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+            if (char === open) depth += 1;
+            if (char === close) depth -= 1;
+            if (depth === 0) {
+                const candidate = raw.slice(start, index + 1);
+                try {
+                    return { value: JSON.parse(candidate), json: candidate };
+                } catch (e) {
+                    break;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function executeFormatConversionTool(_server, name, input = {}) {
+    if (name === 'format.to_markdown_table') {
+        const table = buildTableBlock(input);
+        return { type: 'format_markdown_table', markdown: table.markdown, columns: table.columns, rowCount: table.rowCount };
+    }
+    if (name === 'format.to_json') {
+        return {
+            type: 'format_json',
+            json: JSON.stringify(input.value, null, input.pretty === false ? 0 : 2)
+        };
+    }
+    if (name === 'format.extract_json') {
+        const result = findJsonCandidate(input.text);
+        if (!result) {
+            const err = new Error('No JSON object or array was found in the text.');
+            err.status = 400;
+            throw err;
+        }
+        return { type: 'format_extracted_json', value: result.value, json: result.json };
+    }
+    if (name === 'format.normalize_text') {
+        const mode = String(input.mode || 'plain').toLowerCase();
+        let text = textInput(input).replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        if (mode === 'lower') text = text.toLowerCase();
+        if (mode === 'upper') text = text.toUpperCase();
+        return { type: 'format_normalized_text', text, charCount: text.length };
+    }
+    throw new Error(`Unsupported format MCP tool: ${name}`);
+}
+
 function validateImTarget(config, target, targetType) {
     const value = String(target || config.defaultTarget || '').trim();
     if (!value) {
@@ -830,7 +1325,7 @@ function validateImTarget(config, target, targetType) {
     }
     const lower = value.toLowerCase();
     if (!config.allowAtAll && ['*', 'all', '@all', 'everyone', '所有人', '全员'].includes(lower)) {
-        const err = new Error('Broadcast/all-member notifications are disabled for this IM MCP service.');
+        const err = new Error('当前 IM 通知能力未启用广播/全员通知。');
         err.status = 403;
         throw err;
     }
@@ -907,6 +1402,8 @@ async function executeImTool(server, name, input = {}) {
 
 module.exports = {
     BUILTIN_MCP_PREFIXES,
+    buildChartSpec,
+    buildTableBlock,
     executeBuiltinMcpTool,
     getBuiltinConfigForServer,
     getBuiltinServiceTypeFromUrl,

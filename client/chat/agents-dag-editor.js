@@ -54,6 +54,19 @@
         });
     }
 
+    function toolValue(tool) {
+        return tool?.name || tool?.fullName || '';
+    }
+
+    function findPreferredTool(tools, patterns) {
+        const list = Array.isArray(tools) ? tools : [];
+        return list.find(tool => {
+            const value = String(toolValue(tool)).toLowerCase();
+            const title = String(tool?.title || '').toLowerCase();
+            return patterns.some(pattern => value.includes(pattern) || title.includes(pattern));
+        }) || list[0] || null;
+    }
+
     // 按拓扑层次分层（Kahn 风格）；环边视作"已满足"避免死循环
     function autoLayout(nodes) {
         const remaining = new Map(nodes.map(n => [n.id, new Set(n.dependsOn || [])]));
@@ -164,6 +177,7 @@
         let connecting = null; // { fromId, ghost: <path> }
         let pendingFlush = null;
         let suppressTextareaSync = false;
+        let toolbarStatus = null;
         // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
         const viewState = { x: 0, y: 0, scale: 1 };
         const SCALE_MIN = 0.3;
@@ -273,7 +287,8 @@
             const vbHeight = height / viewState.scale;
             root.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${vbWidth} ${vbHeight}`);
             root.setAttribute('width', '100%');
-            root.style.minHeight = `${Math.min(540, height + 16)}px`;
+            root.setAttribute('height', '100%');
+            root.style.minHeight = '100%';
             updateMinimap();
         };
 
@@ -285,6 +300,74 @@
             updateViewBox();
         };
 
+        const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
+
+        const wouldCreateCycle = (dependencyId, targetId) => {
+            if (!dependencyId || !targetId || dependencyId === targetId) return true;
+            const byId = new Map(spec.nodes.map(n => [n.id, n]));
+            const visit = (id, seen = new Set()) => {
+                if (id === targetId) return true;
+                if (seen.has(id)) return false;
+                seen.add(id);
+                const node = byId.get(id);
+                return Boolean(node?.dependsOn?.some(dep => visit(dep, seen)));
+            };
+            return visit(dependencyId);
+        };
+
+        const validateWorkflow = () => {
+            const tools = currentTools();
+            const toolNames = new Set(tools.map(toolValue).filter(Boolean));
+            const errors = [];
+            const warnings = [];
+            const byId = new Map(spec.nodes.map(node => [node.id, node]));
+            const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
+            if (!spec.nodes.length) errors.push('至少需要 1 个节点');
+            spec.nodes.forEach(node => {
+                if (!node.tool) errors.push(`${node.title || node.id} 未选择工具`);
+                if (node.tool && toolNames.size && !toolNames.has(node.tool)) warnings.push(`${node.title || node.id} 使用的工具当前不可用`);
+                (node.dependsOn || []).forEach(dep => {
+                    if (!byId.has(dep)) errors.push(`${node.title || node.id} 依赖了不存在的节点 ${dep}`);
+                });
+            });
+            const visiting = new Set();
+            const visited = new Set();
+            const hasCycle = (id) => {
+                if (visiting.has(id)) return true;
+                if (visited.has(id)) return false;
+                visiting.add(id);
+                const node = byId.get(id);
+                const cyclic = Boolean(node?.dependsOn?.some(dep => byId.has(dep) && hasCycle(dep)));
+                visiting.delete(id);
+                visited.add(id);
+                return cyclic;
+            };
+            if (spec.nodes.some(node => hasCycle(node.id))) errors.push('存在循环依赖');
+            const dependencyTargets = new Set(spec.nodes.flatMap(node => node.dependsOn || []));
+            const startCount = spec.nodes.filter(node => !(node.dependsOn || []).length).length;
+            const endCount = spec.nodes.filter(node => !dependencyTargets.has(node.id)).length;
+            if (spec.nodes.length > 1 && startCount === 0) errors.push('缺少起始节点');
+            if (spec.nodes.length > 1 && endCount === 0) warnings.push('缺少结束节点');
+            return { errors, warnings, nodeCount: spec.nodes.length, edgeCount, startCount, endCount };
+        };
+
+        const renderToolbarStatus = () => {
+            if (!toolbarStatus) return;
+            const report = validateWorkflow();
+            const state = report.errors.length ? 'error' : report.warnings.length ? 'warn' : 'ok';
+            toolbarStatus.className = `pivot-dag-toolbar-status ${state}`;
+            const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
+            toolbarStatus.textContent = `${report.nodeCount} 节点 · ${report.edgeCount} 依赖 · ${message}`;
+            toolbarStatus.title = [...report.errors, ...report.warnings].join('\n') || '工作流校验通过';
+        };
+
+        const showValidationResult = () => {
+            const report = validateWorkflow();
+            const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
+            window.showToast?.(message, report.errors.length ? 'error' : report.warnings.length ? 'warning' : 'success');
+            renderToolbarStatus();
+        };
+
         const renderInspector = () => {
             if (!inspector) return;
             const node = spec.nodes.find(n => n.id === selectedId);
@@ -292,7 +375,7 @@
                 inspector.innerHTML = '<div class="pivot-dag-inspector-empty">选中节点后可在此编辑标题、工具与输入。</div>';
                 return;
             }
-            const tools = typeof getTools === 'function' ? (getTools() || []) : [];
+            const tools = currentTools();
             const otherIds = spec.nodes.filter(n => n.id !== node.id).map(n => n.id);
             const dependsChecks = otherIds.map(id => `
                 <label class="pivot-dag-depends-item">
@@ -301,9 +384,12 @@
                 </label>
             `).join('') || '<span class="pivot-dag-inspector-empty">暂无其他节点可依赖</span>';
             const toolOptions = ['<option value="">— 选择工具 —</option>']
-                .concat(tools.map(t => `<option value="${escapeHtml(t.name || t.fullName || '')}" ${node.tool === (t.name || t.fullName) ? 'selected' : ''}>${escapeHtml(t.title || t.name || t.fullName)}</option>`))
+                .concat(tools.map(t => `<option value="${escapeHtml(toolValue(t))}" ${node.tool === toolValue(t) ? 'selected' : ''}>${escapeHtml(t.title || toolValue(t))}</option>`))
                 .join('');
             inspector.innerHTML = `
+                <div class="pivot-dag-inspector-actions pivot-dag-inspector-actions-top">
+                    <button type="button" class="btn-secondary btn-red-outline" data-pivot-dag-delete="1">删除节点</button>
+                </div>
                 <div class="pivot-dag-inspector-row">
                     <label><span>节点 ID</span><input type="text" data-pivot-dag-field="id" value="${escapeHtml(node.id)}" maxlength="60"></label>
                     <label><span>标题</span><input type="text" data-pivot-dag-field="title" value="${escapeHtml(node.title)}" maxlength="120"></label>
@@ -326,9 +412,6 @@
                 <div class="pivot-dag-inspector-depends">
                     <div class="pivot-dag-inspector-depends-head">依赖节点</div>
                     <div class="pivot-dag-inspector-depends-list">${dependsChecks}</div>
-                </div>
-                <div class="pivot-dag-inspector-actions">
-                    <button type="button" class="btn-secondary btn-red-outline" data-pivot-dag-delete="1">删除节点</button>
                 </div>
             `;
             inspector.querySelectorAll('[data-pivot-dag-field]').forEach(input => {
@@ -379,7 +462,16 @@
             if (!node) return;
             const dep = checkbox.dataset.pivotDagDepend;
             const deps = new Set(node.dependsOn || []);
-            if (checkbox.checked) deps.add(dep); else deps.delete(dep);
+            if (checkbox.checked) {
+                if (wouldCreateCycle(dep, node.id)) {
+                    checkbox.checked = false;
+                    window.showToast?.('不能添加循环依赖', 'error');
+                    return;
+                }
+                deps.add(dep);
+            } else {
+                deps.delete(dep);
+            }
             node.dependsOn = [...deps];
             clampDependsOn(spec.nodes);
             render();
@@ -397,12 +489,31 @@
 
         const addNode = () => {
             const baseId = uniqueId(spec.nodes.map(n => n.id));
-            const tools = typeof getTools === 'function' ? (getTools() || []) : [];
+            const tools = currentTools();
             const node = {
                 id: baseId,
                 title: '新节点',
-                tool: (tools[0]?.name || tools[0]?.fullName || ''),
+                tool: toolValue(tools[0]),
                 input: {},
+                dependsOn: selectedId ? [selectedId] : [],
+                condition: 'success'
+            };
+            spec.nodes.push(node);
+            autoLayout(spec.nodes);
+            selectedId = node.id;
+            render();
+            flushOut();
+        };
+
+        const addPresetNode = (preset) => {
+            const tools = currentTools();
+            const preferred = findPreferredTool(tools, preset.patterns || []);
+            const baseId = uniqueId(spec.nodes.map(n => n.id), preset.base || 'node');
+            const node = {
+                id: baseId,
+                title: preset.title,
+                tool: toolValue(preferred),
+                input: { ...(preset.input || {}) },
                 dependsOn: selectedId ? [selectedId] : [],
                 condition: 'success'
             };
@@ -439,7 +550,7 @@
             nodesLayer.replaceChildren();
             spec.nodes.forEach(node => {
                 const group = makeSvgEl('g', {
-                    class: `pivot-dag-node ${selectedId === node.id ? 'is-selected' : ''}`,
+                    class: `pivot-dag-node ${selectedId === node.id ? 'is-selected' : ''} ${node.tool ? '' : 'has-warning'}`,
                     transform: `translate(${node._x}, ${node._y})`,
                     'data-pivot-dag-id': node.id
                 });
@@ -485,6 +596,7 @@
             renderEdges();
             renderNodes();
             renderInspector();
+            renderToolbarStatus();
         };
 
         // —— 交互：节点拖拽、端口连线、选中 ——
@@ -579,6 +691,13 @@
                 if (targetId && targetId !== connecting.fromId) {
                     const targetNode = spec.nodes.find(n => n.id === targetId);
                     if (targetNode && !targetNode.dependsOn.includes(connecting.fromId)) {
+                        if (wouldCreateCycle(connecting.fromId, targetId)) {
+                            window.showToast?.('不能添加循环依赖', 'error');
+                            connecting.ghost.remove();
+                            connecting = null;
+                            render();
+                            return;
+                        }
                         targetNode.dependsOn.push(connecting.fromId);
                         clampDependsOn(spec.nodes);
                         flushOut();
@@ -638,7 +757,32 @@
         // —— 工具栏 ——
         if (toolbar) {
             toolbar.replaceChildren();
-            toolbar.appendChild(makeButton('+ 添加节点', '新增 DAG 节点', addNode));
+            toolbar.appendChild(makeButton('+ 节点', '新增工作流节点', addNode));
+            toolbar.appendChild(makeButton('+ 检索', '添加知识检索节点', () => addPresetNode({
+                base: 'search',
+                title: '知识检索',
+                patterns: ['rag.search', 'knowledge', 'search'],
+                input: { query: '' }
+            })));
+            toolbar.appendChild(makeButton('+ 数据', '添加数据查询节点', () => addPresetNode({
+                base: 'data',
+                title: '数据查询',
+                patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
+                input: {}
+            })));
+            toolbar.appendChild(makeButton('+ 图表', '添加图表生成节点', () => addPresetNode({
+                base: 'chart',
+                title: '图表生成',
+                patterns: ['viz.build_chart', 'chart'],
+                input: {}
+            })));
+            toolbar.appendChild(makeButton('+ 报告', '添加报告编排节点', () => addPresetNode({
+                base: 'report',
+                title: '报告编排',
+                patterns: ['report.compose', 'report'],
+                input: {}
+            })));
+            toolbar.appendChild(makeButton('校验', '校验节点、依赖和工具可用性', showValidationResult));
             toolbar.appendChild(makeButton('自动布局', '按依赖层次重新排列', resetLayout));
             toolbar.appendChild(makeButton('适配画布', '重置缩放和平移到默认视角', fitToContent));
             toolbar.appendChild(makeButton('从 JSON 同步', '把右侧 JSON 文本应用到画布', () => {
@@ -651,6 +795,9 @@
                 selectedId = null;
                 render();
             }));
+            toolbarStatus = document.createElement('div');
+            toolbarStatus.className = 'pivot-dag-toolbar-status';
+            toolbar.appendChild(toolbarStatus);
         }
 
         // —— textarea 外部改动同步回画布 ——

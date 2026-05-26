@@ -15,7 +15,9 @@
                             <h3>新任务</h3>
                             <p>选择模型并设定目标，任务会在后台运行。</p>
                         </div>
-                        <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
+                        <div class="agent-panel-head-actions">
+                            <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
+                        </div>
                     </div>
                     <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
                     <div class="agent-quick-goals" aria-label="常用智能体目标">
@@ -43,87 +45,79 @@
                             <button id="agent-run-btn" class="btn-primary">运行</button>
                         </div>
                     </div>
-                    <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
-                    <details class="agent-collapse-section">
-                        <summary>
-                            <span>高级设置</span>
-                            <small>MCP、预算、上下文</small>
-                        </summary>
-                        <div class="agent-collapse-body">
-                            <div class="agent-policy-controls">
-                                <label class="agent-toggle-field" title="开启后，智能体可以调用已接入的 MCP 工具。关闭时仅使用内置只读能力。">
-                                    <input id="agent-allow-mcp" type="checkbox" checked>
-                                    <span>允许 MCP 工具</span>
-                                </label>
-                                <label>
-                                    <span>运行模式</span>
-                                    <select id="agent-run-mode" class="form-input">
-                                        <option value="standard">标准</option>
-                                        <option value="deep">深度</option>
-                                        <option value="audit">审查</option>
-                                        <option value="dag">DAG</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div class="agent-enterprise-controls">
-                                <label>
-                                    <span>MCP 审批</span>
-                                    <select id="agent-approval-policy" class="form-input">
-                                        <option value="safe_mcp_auto">只审批高风险</option>
-                                        <option value="approve_all_mcp">所有 MCP 均审批</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>模型路由</span>
-                                    <select id="agent-model-router" class="form-input" title="按策略自动从可见模型中选择，fixed 保持原行为">
-                                        <option value="fixed">固定模型</option>
-                                        <option value="auto-vision">视觉优先</option>
-                                        <option value="auto-context">上下文匹配</option>
-                                        <option value="auto-cost">成本优先</option>
-                                        <option value="auto-load">负载均衡</option>
-                                        <option value="auto-escalate">成本升级（置信不足时升级）</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>Token 预算</span>
-                                    <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="不限">
-                                </label>
-                                <label>
-                                    <span>失败重试</span>
-                                    <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
-                                </label>
-                            </div>
-                            <div class="agent-context-controls">
-                                <label>
-                                    <span>上下文来源</span>
-                                    <select id="agent-context-mode" class="form-input">
-                                        <option value="auto">自动选择</option>
-                                        <option value="recent">最近会话</option>
-                                        <option value="knowledge">知识库优先</option>
-                                        <option value="custom">自定义说明</option>
-                                        <option value="none">不扩展</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>补充说明</span>
-                                    <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
-                                </label>
-                            </div>
-                            <label class="agent-dag-config-field">
-                                <span>DAG 编排</span>
-                                <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
-                                    <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
-                                    <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
-                                    <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
-                                </div>
-                                <details class="pivot-dag-editor-json">
-                                    <summary>JSON 视图（高级）</summary>
-                                    <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
-                                </details>
+                    <div class="agent-inline-settings" aria-label="高级设置">
+                        <div class="agent-inline-settings-head">
+                            <strong>高级设置</strong>
+                        </div>
+                        <div class="agent-policy-controls">
+                            <label class="agent-toggle-field" title="开启后，智能体可以调用已接入的能力库工具。关闭时仅使用系统只读能力。">
+                                <input id="agent-allow-mcp" type="checkbox" checked>
+                                <span>允许能力库工具</span>
+                                <i class="agent-switch-track" aria-hidden="true"></i>
+                            </label>
+                            <label>
+                                <span>运行模式</span>
+                                <select id="agent-run-mode" class="form-input">
+                                    <option value="standard">标准</option>
+                                    <option value="deep">深度</option>
+                                    <option value="audit">审查</option>
+                                    <option value="dag">工作流编排</option>
+                                </select>
                             </label>
                         </div>
-                    </details>
-                    <details class="agent-collapse-section">
+                        <div class="agent-enterprise-controls">
+                            <label>
+                                <span>工具审批</span>
+                                <select id="agent-approval-policy" class="form-input">
+                                    <option value="safe_mcp_auto">只审批高风险</option>
+                                    <option value="approve_all_mcp">所有工具均审批</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>模型路由</span>
+                                <select id="agent-model-router" class="form-input" title="按策略自动从可见模型中选择，fixed 保持原行为">
+                                    <option value="fixed">固定模型</option>
+                                    <option value="auto-vision">视觉优先</option>
+                                    <option value="auto-context">上下文匹配</option>
+                                    <option value="auto-cost">成本优先</option>
+                                    <option value="auto-load">负载均衡</option>
+                                    <option value="auto-escalate">成本升级（置信不足时升级）</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>Token 预算</span>
+                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="不限">
+                            </label>
+                            <label>
+                                <span>失败重试</span>
+                                <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
+                            </label>
+                        </div>
+                        <div class="agent-context-controls">
+                            <label>
+                                <span>上下文来源</span>
+                                <select id="agent-context-mode" class="form-input">
+                                    <option value="auto">自动选择</option>
+                                    <option value="recent">最近会话</option>
+                                    <option value="knowledge">知识库优先</option>
+                                    <option value="custom">自定义说明</option>
+                                    <option value="none">不扩展</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>补充说明</span>
+                                <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
+                            </label>
+                        </div>
+                    </div>
+                    <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
+                    <div class="agent-config-launcher" aria-label="智能体配置面板">
+                        <button id="agent-open-dag-btn" class="btn-secondary" type="button">工作流编排</button>
+                        <button class="btn-secondary" type="button" data-agent-config-open="templates">模板与计划</button>
+                        <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
+                    </div>
+                    <div id="agent-config-section-store" class="agent-config-section-store">
+                    <details class="agent-collapse-section" data-agent-config-section="templates">
                         <summary>
                             <span>模板与计划</span>
                             <small>模板、定时、通知</small>
@@ -136,31 +130,37 @@
                                 </div>
                                 <div id="agent-template-list" class="agent-template-list"></div>
                             </div>
-                            <div class="agent-schedule-controls">
-                                <label>
-                                    <span>计划执行</span>
-                                    <select id="agent-schedule-frequency" class="form-input">
-                                        <option value="manual">立即运行</option>
-                                        <option value="daily">每天</option>
-                                        <option value="weekly">每周</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>时间</span>
-                                    <input id="agent-schedule-time" class="form-input" type="time" value="09:00">
-                                </label>
-                                <label>
-                                    <span>星期</span>
-                                    <select id="agent-schedule-weekday" class="form-input">
-                                        <option value="1">周一</option>
-                                        <option value="2">周二</option>
-                                        <option value="3">周三</option>
-                                        <option value="4">周四</option>
-                                        <option value="5">周五</option>
-                                        <option value="6">周六</option>
-                                        <option value="0">周日</option>
-                                    </select>
-                                </label>
+                            <div class="agent-schedule-panel">
+                                <div class="agent-tool-section-head compact">
+                                    <strong>计划设置</strong>
+                                    <span>创建一次性或周期任务</span>
+                                </div>
+                                <div class="agent-schedule-controls">
+                                    <label>
+                                        <span>执行方式</span>
+                                        <select id="agent-schedule-frequency" class="form-input">
+                                            <option value="manual">立即运行</option>
+                                            <option value="daily">每天</option>
+                                            <option value="weekly">每周</option>
+                                        </select>
+                                    </label>
+                                    <label>
+                                        <span>时间</span>
+                                        <input id="agent-schedule-time" class="form-input" type="time" value="09:00">
+                                    </label>
+                                    <label>
+                                        <span>星期</span>
+                                        <select id="agent-schedule-weekday" class="form-input">
+                                            <option value="1">周一</option>
+                                            <option value="2">周二</option>
+                                            <option value="3">周三</option>
+                                            <option value="4">周四</option>
+                                            <option value="5">周五</option>
+                                            <option value="6">周六</option>
+                                            <option value="0">周日</option>
+                                        </select>
+                                    </label>
+                                </div>
                             </div>
                             <div class="agent-ops-grid">
                                 <div>
@@ -180,7 +180,7 @@
                             </div>
                         </div>
                     </details>
-                    <details class="agent-collapse-section agent-collapse-results">
+                    <details class="agent-collapse-section agent-collapse-results" data-agent-config-section="results">
                         <summary>
                             <span>能力与结果</span>
                             <small>工具、状态、沉淀</small>
@@ -192,6 +192,10 @@
                                 <span>智能体会按目标选择工具</span>
                             </div>
                             <div id="agent-capability-list" class="agent-capability-list"></div>
+                            <div class="agent-tool-section-head compact agent-available-tools-head">
+                                <strong>可用工具</strong>
+                                <span>已启用的系统与个人工具</span>
+                            </div>
                             <div id="agent-tool-list" class="agent-tool-list"></div>
                             <div class="agent-tool-section-head compact">
                                 <strong>结果沉淀</strong>
@@ -200,6 +204,7 @@
                             <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
                         </div>
                     </details>
+                    </div>
                 </div>
                 <div class="agent-history-panel">
                     <div class="agent-history-head">
@@ -209,22 +214,42 @@
                         </div>
                         <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                     </div>
-                    <div id="agent-metrics" class="agent-runtime-status agent-metrics"></div>
-                    <div class="agent-history-filters">
-                        <select id="agent-filter-status" class="form-input">
-                            <option value="">全部状态</option>
-                            <option value="queued">排队中</option>
-                            <option value="running">运行中</option>
-                            <option value="approval_required">待审批</option>
-                            <option value="completed">已完成</option>
-                            <option value="error">失败</option>
-                            <option value="cancelled">已停止</option>
-                        </select>
-                        <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
+                    <div class="agent-history-toolbar">
+                        <div id="agent-metrics" class="agent-runtime-status agent-metrics"></div>
+                        <div class="agent-history-filters">
+                            <select id="agent-filter-status" class="form-input">
+                                <option value="">全部状态</option>
+                                <option value="queued">排队中</option>
+                                <option value="running">运行中</option>
+                                <option value="approval_required">待审批</option>
+                                <option value="completed">已完成</option>
+                                <option value="error">失败</option>
+                                <option value="cancelled">已停止</option>
+                            </select>
+                            <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
+                        </div>
                     </div>
                     <div id="agent-runs-list" class="agent-runs-list"></div>
-                    <div id="agent-run-detail" class="agent-run-detail"></div>
+                    <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
                 </div>
+            </div>
+        </div>
+        <div id="agent-config-modal" class="modal-overlay hidden" style="z-index: 1900;">
+            <div class="modal agent-config-modal">
+                <div class="agent-config-modal-head">
+                    <h3 id="agent-config-modal-title">高级设置</h3>
+                    <button id="agent-config-modal-close" class="btn-secondary" type="button">关闭</button>
+                </div>
+                <div id="agent-config-modal-body" class="agent-config-modal-body"></div>
+            </div>
+        </div>
+        <div id="agent-run-detail-modal" class="modal-overlay hidden" style="z-index: 1910;">
+            <div class="modal agent-run-detail-modal">
+                <div class="agent-config-modal-head">
+                    <h3 id="agent-run-detail-title">任务详情</h3>
+                    <button id="agent-run-detail-close" class="btn-secondary" type="button">关闭</button>
+                </div>
+                <div id="agent-run-detail" class="agent-run-detail"></div>
             </div>
         </div>
     </section>

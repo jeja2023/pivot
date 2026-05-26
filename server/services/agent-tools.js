@@ -4,6 +4,7 @@ const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
 const { getUserRunnableModels } = require('./models');
 const { parsePositiveInt } = require('../number');
+const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 
 const MAX_TEXT = 12000;
 const isSuperAdmin = (user) => user?.username === 'admin';
@@ -68,6 +69,34 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({
                 limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
             })
+        },
+        {
+            name: 'viz.build_chart',
+            title: '图表生成',
+            description: '基于输入表格行生成可直接渲染的图表配置。',
+            input_schema: asJsonSchema({
+                rows: { type: 'array', items: { type: 'object' } },
+                chartType: { type: 'string', enum: ['bar', 'line', 'area', 'pie'] },
+                title: { type: 'string' },
+                xAxis: { type: 'string' },
+                yAxis: { type: 'string' },
+                groupBy: { type: 'string' },
+                aggregation: { type: 'string', enum: ['sum', 'count', 'avg', 'min', 'max'] },
+                sortBy: { type: 'string', enum: ['label', 'value'] },
+                sortOrder: { type: 'string', enum: ['asc', 'desc'] },
+                limit: { type: 'integer', minimum: 1, maximum: 1000, default: 100 }
+            }, ['rows', 'xAxis'])
+        },
+        {
+            name: 'viz.build_table',
+            title: '表格展示',
+            description: '基于输入表格行生成可直接展示的 Markdown 表格。',
+            input_schema: asJsonSchema({
+                rows: { type: 'array', items: { type: 'object' } },
+                columns: { type: 'array', items: { type: 'string' } },
+                title: { type: 'string' },
+                limit: { type: 'integer', minimum: 1, maximum: 1000, default: 50 }
+            }, ['rows'])
         },
         {
             name: 'models.list',
@@ -168,6 +197,14 @@ async function executeBuiltInTool(name, input = {}, user) {
 
     if (name === 'models.list') {
         return getUserAccessibleModels(user);
+    }
+
+    if (name === 'viz.build_chart') {
+        return buildChartSpec({ rows: Array.isArray(input.rows) ? input.rows : [] }, input);
+    }
+
+    if (name === 'viz.build_table') {
+        return buildTableBlock(input);
     }
 
     if (name === 'system.health') {

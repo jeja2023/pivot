@@ -17,6 +17,7 @@ const nodeGlobals = {
 
 const browserGlobals = {
     Blob: 'readonly',
+    CSS: 'readonly',
     DOMPurify: 'readonly',
     FileReader: 'readonly',
     FormData: 'readonly',

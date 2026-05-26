@@ -83,26 +83,64 @@ function getRunForUser(runId, user, options = {}) {
     `).get(runId, user.id);
 }
 
-function listRuns(user, limit = 30) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 30, 1), 100);
-    return db.prepare(`
-        SELECT r.id, r.session_id, r.model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
-               r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
-               r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count,
-               r.max_token_budget, r.export_count, r.template_id, r.schedule_id, r.context_config, r.resume_from_step,
-               r.started_at, r.last_heartbeat_at, r.input_tokens, r.output_tokens, r.total_tokens,
-               r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
-               m.name AS model_name,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id) AS step_count,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.type = 'tool') AS tool_count,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.status = 'error') AS error_count
+function listRuns(user, options = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 10, 1), 100);
+    const safePage = Math.max(Number.parseInt(options.page, 10) || 1, 1);
+    const offset = (safePage - 1) * safeLimit;
+    const status = String(options.status || '').trim();
+    const query = String(options.query || '').trim();
+    const where = ['r.user_id = ?', 'r.deleted_at IS NULL'];
+    const params = [user.id];
+    if (status) {
+        where.push('r.status = ?');
+        params.push(status);
+    }
+    if (query) {
+        where.push('(r.title LIKE ? OR r.goal LIKE ? OR m.name LIKE ?)');
+        const pattern = `%${query}%`;
+        params.push(pattern, pattern, pattern);
+    }
+    const whereSql = where.join('\n          AND ');
+    const total = db.prepare(`
+        SELECT COUNT(*) AS count
         FROM agent_runs r
         LEFT JOIN models m ON m.id = r.model_id
-        WHERE r.user_id = ?
-          AND r.deleted_at IS NULL
-        ORDER BY r.created_at DESC
-        LIMIT ?
-    `).all(user.id, safeLimit);
+        WHERE ${whereSql}
+    `).get(...params)?.count || 0;
+    const data = db.prepare(`
+        WITH filtered_runs AS (
+            SELECT r.id, r.session_id, r.model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
+                   r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
+                   r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count,
+                   r.max_token_budget, r.export_count, r.template_id, r.schedule_id, r.context_config, r.resume_from_step,
+                   r.started_at, r.last_heartbeat_at, r.input_tokens, r.output_tokens, r.total_tokens,
+                   r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
+                   m.name AS model_name
+            FROM agent_runs r
+            LEFT JOIN models m ON m.id = r.model_id
+            WHERE ${whereSql}
+            ORDER BY r.created_at DESC
+            LIMIT ?
+            OFFSET ?
+        ),
+        step_stats AS (
+            SELECT s.run_id,
+                   COUNT(*) AS step_count,
+                   SUM(CASE WHEN s.type = 'tool' THEN 1 ELSE 0 END) AS tool_count,
+                   SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) AS error_count
+            FROM agent_steps s
+            JOIN filtered_runs fr ON fr.id = s.run_id
+            GROUP BY s.run_id
+        )
+        SELECT fr.*,
+               COALESCE(ss.step_count, 0) AS step_count,
+               COALESCE(ss.tool_count, 0) AS tool_count,
+               COALESCE(ss.error_count, 0) AS error_count
+        FROM filtered_runs fr
+        LEFT JOIN step_stats ss ON ss.run_id = fr.id
+        ORDER BY fr.created_at DESC
+    `).all(...params, safeLimit, offset);
+    return { data, total, page: safePage, limit: safeLimit };
 }
 
 function listDeletedRunsForAdmin(user, limit = 100) {
@@ -263,6 +301,7 @@ function getRunProgress(run, steps = []) {
         errorCount,
         stepCount: steps.length,
         totalDurationMs,
+        isLimitReached: active && Math.max(planCount, toolCount) >= maxSteps,
         percent: active ? Math.min(Math.round((Math.max(planCount, toolCount) / maxSteps) * 100), 95) : (run?.status === 'completed' ? 100 : 0)
     };
 }
@@ -599,7 +638,7 @@ function maybePauseForApproval(run, tool, input) {
     });
     updateRun(run.id, {
         status: 'approval_required',
-        error_message: `等待用户审批 MCP 工具：${tool.title || tool.name}`,
+        error_message: `等待用户审批能力库工具：${tool.title || tool.name}`,
         updated_at: now,
         last_heartbeat_at: now
     });
@@ -610,7 +649,7 @@ function maybePauseForApproval(run, tool, input) {
         input,
         output: { status: 'approval_required', tool: tool.name }
     });
-    createAgentNotification(run.user_id, run.id, 'approval', '智能体等待 MCP 审批', tool.title || tool.name);
+    createAgentNotification(run.user_id, run.id, 'approval', '智能体等待能力库审批', tool.title || tool.name);
     return true;
 }
 
@@ -862,7 +901,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const metadata = getRunMetadata(run);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
     if (!dagSpec.nodes.length) {
-        throw new Error('DAG 模式需要至少配置一个有效节点。');
+        throw new Error('工作流编排模式需要至少配置一个有效节点。');
     }
 
     dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
@@ -879,7 +918,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             return node.dependsOn.every(dep => ['completed', 'error', 'skipped'].includes(states.get(dep)?.status));
         });
         if (!readyNodes.length) {
-            throw new Error('DAG 编排存在循环依赖或无法满足的依赖。');
+            throw new Error('工作流编排存在循环依赖或无法满足的依赖。');
         }
 
         const runnable = [];
@@ -894,7 +933,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `跳过 DAG 节点：${node.title}`,
+                    title: `跳过工作流节点：${node.title}`,
                     toolName: node.tool,
                     input: node.input,
                     output: { status: 'skipped', dependsOn: node.dependsOn }
@@ -908,7 +947,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         await Promise.all(runnable.slice(0, 4).map(async node => {
             const selectedTool = toolList.find(tool => tool.name === node.tool);
             if (maybePauseForApproval(run, selectedTool, node.input || {})) {
-                const err = new Error('DAG 节点等待 MCP 工具审批。');
+                const err = new Error('工作流节点等待能力库工具审批。');
                 err.code = 'AGENT_APPROVAL_REQUIRED';
                 throw err;
             }
@@ -920,7 +959,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 const output = await withTimeout(
                     executeToolByName(node.tool, node.input || {}, user, toolList),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                    `DAG 工具调用 ${node.tool}`
+                    `工作流工具调用 ${node.tool}`
                 );
                 assertRunNotCancelled(run.id);
                 const compactOutput = clampText(output, 12000);
@@ -934,7 +973,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, output: compactOutput });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `DAG 节点完成：${node.title}`,
+                    title: `工作流节点完成：${node.title}`,
                     toolName: node.tool,
                     input: node.input,
                     output: compactOutput,
@@ -952,7 +991,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, error: e.message });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `DAG 节点失败：${node.title}`,
+                    title: `工作流节点失败：${node.title}`,
                     toolName: node.tool,
                     input: node.input,
                     output: { error: e.message },
@@ -970,7 +1009,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const answer = await withTimeout(
         synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
         Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-        'DAG 结果总结'
+        '工作流结果总结'
     );
     updateRun(run.id, {
         status: 'completed',
@@ -979,7 +1018,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
     });
-    createAgentNotification(user.id, run.id, 'completed', '智能体 DAG 任务已完成', getAgentRunTitle(run));
+    createAgentNotification(user.id, run.id, 'completed', '智能体工作流任务已完成', getAgentRunTitle(run));
 }
 
 async function runAgent(runId, user) {
@@ -1253,7 +1292,7 @@ function approveAgentTool(runId, user, approve = true) {
     if (!approve) {
         updateRun(runId, {
             status: 'cancelled',
-            error_message: `用户拒绝 MCP 工具审批：${pending.tool || '-'}`,
+            error_message: `用户拒绝能力库工具审批：${pending.tool || '-'}`,
             cancelled_at: now,
             completed_at: now,
             updated_at: now
@@ -1370,13 +1409,13 @@ function preflightAgentRun(user, body = {}) {
     if (!modelCfg) blockers.push('未选择可用模型。');
     if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
     if (toolPolicy === 'builtin_only' && /mcp|数据库|外部|接口|工具/i.test(goal)) warnings.push('目标可能需要 MCP，但当前设置为仅内置工具。');
-    if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有 MCP 调用都会进入人工审批，长任务可能暂停等待。');
-    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险 MCP 工具会在执行前等待人工审批。');
+    if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有能力库工具调用都会进入人工审批，长任务可能暂停等待。');
+    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险能力库工具会在执行前等待人工审批。');
     if (Number(knowledge.ready || 0) === 0 && /知识库|资料|文档|依据|引用/i.test(goal)) warnings.push('目标提到了资料或知识库，但当前没有启用且就绪的知识库文档。');
     if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
     if (runMode === 'dag') {
         const dag = normalizeDagSpec(body.dagSpec || body.dag_spec || {});
-        if (!dag.nodes.length) blockers.push('DAG 模式需要至少一个有效节点。');
+        if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
     if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('Token 预算偏低，可能导致任务提前停止。');
@@ -1916,7 +1955,7 @@ function exportAgentRun(runId, user, format = 'json') {
             ].join('\n')),
             ...(detail.dagNodes?.length ? [
                 '',
-                '## DAG 节点',
+                '## 工作流节点',
                 ...detail.dagNodes.map(node => [
                     `### ${node.title || node.node_key}`,
                     `- 工具：${node.tool_name || '-'}`,

@@ -301,7 +301,8 @@ window.loadSessions = async function(append = false) {
             limit: sidebarState.limit,
             keyword,
             tag,
-            archived: String(sidebarState.archived)
+            archived: String(sidebarState.archived),
+            includeTotal: 'false'
         });
         if (append && sidebarState.cursor) params.set('cursor', sidebarState.cursor);
         else params.set('page', sidebarState.page);

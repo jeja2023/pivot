@@ -107,12 +107,13 @@ window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
 
 window.showMainWorkspace = function(view = 'chat') {
-    const target = ['chat', 'agent', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
+    const target = ['chat', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {
         chat: 'chat-workspace-view',
         agent: 'agent-workbench-modal',
+        'agent-dag': 'agent-dag-workbench-modal',
         knowledge: 'knowledge-workbench-modal',
         mcp: 'mcp-workbench-modal',
         manual: 'manual-workbench-modal',
@@ -138,7 +139,7 @@ window.showMainWorkspace = function(view = 'chat') {
     document.body?.setAttribute('data-active-workspace', target);
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
     if (target === 'manual') window.ensureManualFrameLoaded?.();
-    if (target !== 'agent') window.updateAgentAutoRefresh?.();
+    if (target !== 'agent' && target !== 'agent-dag') window.updateAgentAutoRefresh?.();
     return target;
 };
 

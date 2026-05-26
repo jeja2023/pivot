@@ -17,6 +17,40 @@ const escapeSelectorText = (str) => {
         .replace(/"/g, '&quot;');
 };
 
+window.renderWorkspacePagination = function(containerOrId, options = {}) {
+    const container = typeof containerOrId === 'string' ? document.getElementById(containerOrId) : containerOrId;
+    if (!container) return;
+    const total = Math.max(Number(options.total || 0), 0);
+    const limit = Math.max(Number(options.limit || 10), 1);
+    const page = Math.max(Number(options.page || 1), 1);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const onPageChange = typeof options.onPageChange === 'function' ? options.onPageChange : null;
+    container.replaceChildren();
+    if (totalPages <= 1) return;
+
+    const createButton = (label, targetPage, disabled) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary';
+        button.disabled = disabled;
+        button.textContent = label;
+        button.addEventListener('click', () => {
+            if (!button.disabled && onPageChange) onPageChange(targetPage);
+        });
+        return button;
+    };
+
+    const summary = document.createElement('span');
+    summary.textContent = `第 ${page} / ${totalPages} 页（共 ${total} 条，每页 ${limit} 条）`;
+    container.append(
+        createButton('首页', 1, page <= 1),
+        createButton('上一页', page - 1, page <= 1),
+        summary,
+        createButton('下一页', page + 1, page >= totalPages),
+        createButton('末页', totalPages, page >= totalPages)
+    );
+};
+
 const describeSelectorModel = (model, simple = false) => {
     if (simple) {
         let suffix = '';

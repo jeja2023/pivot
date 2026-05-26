@@ -323,33 +323,75 @@
 }
 .message.user pre { background: rgba(255,255,255,0.2); }
 
-.pivot-chart-block {
+.pivot-echart-block {
     width: 100%;
     max-width: 760px;
     margin: 14px 0;
-    padding: 12px;
+    padding: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: #fff;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
 }
 
-.pivot-chart-title {
-    margin-bottom: 8px;
+.pivot-echart-title {
+    margin: 0;
+    padding: 12px 14px 8px;
     color: var(--text-main);
     font-size: 0.9rem;
     font-weight: 700;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.86), rgba(255, 255, 255, 0));
 }
 
-.pivot-chart-block canvas {
+.pivot-echart-canvas {
     display: block;
     width: 100%;
+    min-height: 360px;
+}
+
+.pivot-echart-canvas[hidden],
+.pivot-echart-block canvas[hidden] {
+    display: none;
+}
+
+.pivot-echart-block canvas {
+    display: block;
+    width: 100%;
+    padding: 8px 10px 10px;
     min-height: 260px;
 }
 
-.pivot-chart-block.is-error {
-    border-color: rgba(239, 68, 68, 0.28);
-    background: rgba(254, 242, 242, 0.7);
+.pivot-echart-block.is-error {
+    max-width: 560px;
+    padding: 0;
+    border-color: rgba(148, 163, 184, 0.36);
+    background: rgba(248, 250, 252, 0.86);
+    box-shadow: none;
+}
+
+.pivot-echart-block.is-error .pivot-echart-title {
+    margin-bottom: 6px;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.pivot-echart-error-text {
+    display: none;
+    max-height: 96px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    background: transparent;
+}
+
+.pivot-echart-block.is-error .pivot-echart-error-text {
+    display: block;
 }
 
 /* 思考过程展示 (Thinking Process) */

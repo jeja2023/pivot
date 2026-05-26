@@ -34,10 +34,14 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="manual-link-btn"',
     'data-workspace-view="manual"',
     'data-src="/manual?embed=1"',
+    'src="/common/vendor/echarts.min.js"',
     'src="/chat/app.js?v=__APP_VERSION__"'
 ].forEach(needle => {
     if (!html.includes(needle)) fail(`assembled chat template is missing ${needle}`);
 });
+
+const echartsVendorPath = path.join(rootDir, 'client', 'common', 'vendor', 'echarts.min.js');
+if (!fs.existsSync(echartsVendorPath)) fail('client/common/vendor/echarts.min.js is required for chart rendering');
 
 const manualPath = path.join(rootDir, '使用手册.md');
 if (!fs.existsSync(manualPath)) fail('使用手册.md is required for the /manual page and Docker deployment');

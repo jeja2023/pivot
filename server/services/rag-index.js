@@ -24,6 +24,48 @@ const { estimateEmbeddingTokens } = require('./token-accounting');
 const { recordSlowRagRetrieval } = require('./observability');
 
 const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
+const DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS = 30000;
+const DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS = 120000;
+const MAX_EMBEDDING_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+
+function normalizeTimeoutMs(value, fallback, min = 1000, max = MAX_EMBEDDING_REQUEST_TIMEOUT_MS) {
+    const parsed = Number.parseInt(value, 10);
+    const safeFallback = Math.min(Math.max(Number.parseInt(fallback, 10) || min, min), max);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) return safeFallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+
+function getEmbeddingRequestTimeoutMs(timeoutMs = null) {
+    return normalizeTimeoutMs(
+        timeoutMs ?? process.env.EMBEDDING_REQUEST_TIMEOUT_MS,
+        DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS
+    );
+}
+
+function getRagIndexEmbeddingTimeoutMs(timeoutMs = null) {
+    return normalizeTimeoutMs(
+        timeoutMs ?? process.env.RAG_INDEX_EMBEDDING_TIMEOUT_MS ?? process.env.EMBEDDING_REQUEST_TIMEOUT_MS,
+        DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS
+    );
+}
+
+function formatDurationMs(ms) {
+    if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000} 秒`;
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)} 秒`;
+    return `${ms}ms`;
+}
+
+function wrapEmbeddingRequestError(error, timeoutMs) {
+    const message = String(error?.message || '');
+    const code = String(error?.code || '');
+    if (code === 'ECONNABORTED' || /timeout|timed\s*out/i.test(message)) {
+        const wrapped = new Error(`向量服务请求超时（已等待 ${formatDurationMs(timeoutMs)}）。请检查检索配置中的向量服务地址、模型名称和服务负载后重试。`);
+        wrapped.code = 'EMBEDDING_TIMEOUT';
+        wrapped.cause = error;
+        return wrapped;
+    }
+    return error;
+}
 
 function normalizeVectorValues(vector) {
     if (!Array.isArray(vector) || vector.length === 0) {
@@ -99,21 +141,26 @@ function buildEmbeddingPayload(text, model, mode, url) {
     return { input: text, model };
 }
 
-async function requestEmbedding(text, httpConfig) {
+async function requestEmbedding(text, httpConfig, options = {}) {
     const { url, apiKey, model } = httpConfig;
     if (!url) {
         throw new Error('未配置 Embedding HTTP 服务地址');
     }
     const targetUrl = resolveEmbeddingUrl(url);
-    const res = await axios.post(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
-        headers: {
-            Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
-            'Content-Type': 'application/json'
-        },
-        timeout: 30000,
-        proxy: false
-    });
-    return normalizeEmbeddingVector(res.data);
+    const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
+    try {
+        const res = await axios.post(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            headers: {
+                Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+                'Content-Type': 'application/json'
+            },
+            timeout: timeoutMs,
+            proxy: false
+        });
+        return normalizeEmbeddingVector(res.data);
+    } catch (e) {
+        throw wrapEmbeddingRequestError(e, timeoutMs);
+    }
 }
 
 async function requestEmbeddings(inputs, httpConfig, options = {}) {
@@ -125,16 +172,21 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     }
     const targetUrl = resolveEmbeddingUrl(url);
     const endpoint = targetUrl.toLowerCase();
+    const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     const requestOne = async (input) => {
-        const res = await axios.post(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
-            headers: {
-                Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
-                'Content-Type': 'application/json'
-            },
-            timeout: options.timeoutMs || 30000,
-            proxy: false
-        });
-        return normalizeEmbeddingVector(res.data);
+        try {
+            const res = await axios.post(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+                headers: {
+                    Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+                    'Content-Type': 'application/json'
+                },
+                timeout: timeoutMs,
+                proxy: false
+            });
+            return normalizeEmbeddingVector(res.data);
+        } catch (e) {
+            throw wrapEmbeddingRequestError(e, timeoutMs);
+        }
     };
 
     if (safeInputs.length === 1 || endpoint.includes('/api/embeddings')) {
@@ -145,14 +197,19 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
         return vectors;
     }
 
-    const res = await axios.post(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
-        headers: {
-            Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
-            'Content-Type': 'application/json'
-        },
-        timeout: options.timeoutMs || 30000,
-        proxy: false
-    });
+    let res;
+    try {
+        res = await axios.post(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            headers: {
+                Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+                'Content-Type': 'application/json'
+            },
+            timeout: timeoutMs,
+            proxy: false
+        });
+    } catch (e) {
+        throw wrapEmbeddingRequestError(e, timeoutMs);
+    }
     const vectors = normalizeEmbeddingVectors(res.data);
     if (vectors.length !== safeInputs.length) {
         throw new Error(`Embedding 服务返回向量数量不匹配: expected ${safeInputs.length}, got ${vectors.length}`);
@@ -160,13 +217,15 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     return vectors;
 }
 
-async function generateEmbedding(text, mode = null, embeddingConfig = null, userId = null) {
+async function generateEmbedding(text, mode = null, embeddingConfig = null, userId = null, options = {}) {
     const config = getEmbeddingConfig(userId);
     const targetMode = normalizeEmbeddingMode(mode || config.mode);
 
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
-        const vector = await requestEmbedding(text, targetHttpConfig);
+        const vector = await requestEmbedding(text, targetHttpConfig, {
+            timeoutMs: options.timeoutMs
+        });
         recordEmbeddingUsage({
             userId,
             config,
@@ -175,6 +234,29 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
             source: 'rag_embedding'
         });
         return vector;
+    }
+
+    throw new Error(`不支持的 Embedding 模式: ${targetMode}`);
+}
+
+async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, userId = null, options = {}) {
+    const safeInputs = Array.isArray(inputs) ? inputs : [inputs];
+    const config = getEmbeddingConfig(userId);
+    const targetMode = normalizeEmbeddingMode(mode || config.mode);
+
+    if (targetMode === EMBEDDING_MODES.http) {
+        const targetHttpConfig = embeddingConfig || config.http || config.cloud;
+        const vectors = await requestEmbeddings(safeInputs, targetHttpConfig, {
+            timeoutMs: options.timeoutMs
+        });
+        recordEmbeddingUsage({
+            userId,
+            config,
+            httpConfig: targetHttpConfig,
+            inputs: safeInputs,
+            source: options.source || 'rag_embedding'
+        });
+        return vectors;
     }
 
     throw new Error(`不支持的 Embedding 模式: ${targetMode}`);
@@ -287,10 +369,16 @@ function selectRetrievalCandidates(userId, query, topK, candidateLimit) {
     const keywords = buildKeywordCandidates(query);
     let chunks = selectFtsCandidates(userId, keywords, candidateLimit);
     if (chunks.length < topK) {
-        chunks = selectLikeCandidates(userId, keywords, candidateLimit);
+        const existingIds = new Set(chunks.map(chunk => chunk.id));
+        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit)
+            .filter(chunk => !existingIds.has(chunk.id));
+        chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
     }
     if (chunks.length < topK) {
-        chunks = selectRecentCandidates(userId, candidateLimit);
+        const existingIds = new Set(chunks.map(chunk => chunk.id));
+        const recentChunks = selectRecentCandidates(userId, candidateLimit)
+            .filter(chunk => !existingIds.has(chunk.id));
+        chunks = chunks.concat(recentChunks).slice(0, candidateLimit);
     }
     return chunks;
 }
@@ -354,8 +442,19 @@ async function debugRetrieveContext(userId, query, {
     const safeTopK = config.topK;
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId);
     const candidates = selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit).slice(0, safeCandidateLimit);
+    if (candidates.length === 0) {
+        return {
+            query: normalizedQuery,
+            keywords,
+            threshold: config.scoreThreshold,
+            topK: safeTopK,
+            candidateCount: 0,
+            matches: [],
+            injectedContext: formatInjectedContext([])
+        };
+    }
+    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId);
     const scoredChunks = candidates.map(chunk => {
         try {
             if (!chunk.embedding) return null;
@@ -409,7 +508,6 @@ async function retrieveContext(userId, query, topK = null) {
     }
 
     try {
-        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId);
         const chunks = selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit);
 
         if (chunks.length === 0) {
@@ -418,6 +516,7 @@ async function retrieveContext(userId, query, topK = null) {
             return '';
         }
 
+        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId);
         const scoredChunks = scoreChunks(chunks, queryVector).sort((a, b) => b.score - a.score);
         const topChunks = scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, config.topK);
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
@@ -451,18 +550,23 @@ async function retrieveContext(userId, query, topK = null) {
     }
 }
 
-async function indexDocumentChunks(docId, text, { onProgress, userId = null } = {}) {
+async function indexDocumentChunks(docId, text, { onProgress, userId = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
     const chunks = chunkText(text, ragConfig.chunkSize, ragConfig.chunkOverlap);
+    const indexEmbeddingTimeoutMs = getRagIndexEmbeddingTimeoutMs(embeddingTimeoutMs);
     const batchSize = 5; // 限制并发数，防止 OOM 或 API 限流
     try {
+        if (chunks.length === 0) {
+            throw new Error('文档未解析出可索引文本，请检查文件内容后重新上传。');
+        }
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
-            const results = await Promise.all(batch.map(async (chunk) => {
-                const vector = await generateEmbedding(chunk, null, null, userId);
-                return { chunk, vector };
-            }));
+            const vectors = await generateEmbeddings(batch, null, null, userId, {
+                timeoutMs: indexEmbeddingTimeoutMs,
+                source: 'rag_ingest_embedding'
+            });
+            const results = batch.map((chunk, index) => ({ chunk, vector: vectors[index] }));
             
             const insert = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)');
             const transaction = db.transaction((items) => {
@@ -517,9 +621,12 @@ async function testEmbeddingConnection(config = {}) {
 module.exports = {
     getEmbeddingConfig,
     generateEmbedding,
+    generateEmbeddings,
     requestEmbedding,
     requestEmbeddings,
     testEmbeddingConnection,
+    getEmbeddingRequestTimeoutMs,
+    getRagIndexEmbeddingTimeoutMs,
     normalizeEmbeddingVector,
     normalizeEmbeddingVectors,
     resolveEmbeddingUrl,

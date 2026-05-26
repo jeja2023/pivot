@@ -136,8 +136,8 @@ async function readChatErrorMessage(response) {
 }
 
 function confirmChatMcpUse() {
-    const title = '允许调用 MCP 工具';
-    const message = 'MCP 可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
+    const title = '允许调用能力库工具';
+    const message = '能力库工具可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
     return new Promise(resolve => {
         if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
         window.showConfirm(title, message, () => resolve(true));
@@ -392,8 +392,8 @@ window.sendMessage = async function(isRegenerate = false) {
                     return;
                 }
                 if (data.type === 'mcp') {
-                    updateAssistantStatus(data.message || '正在处理 MCP 工具');
-                    if (data.status === 'error') showToast(data.message || 'MCP 工具调用失败', 'warning');
+                    updateAssistantStatus(data.message || '正在处理能力库工具');
+                    if (data.status === 'error') showToast(data.message || '能力库工具调用失败', 'warning');
                     return;
                 }
                 if (data.type === 'context_budget') {

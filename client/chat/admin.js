@@ -446,12 +446,12 @@ window.saveEmbeddingSettings = async () => {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'RAG 配置保存失败');
+        if (!res.ok) throw new Error(data.error || '检索配置保存失败');
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        showToast(currentUser?.username === 'admin' ? '系统 RAG 配置已保存' : '个人 RAG 配置已保存');
+        showToast(currentUser?.username === 'admin' ? '系统检索配置已保存' : '个人检索配置已保存');
         if (modal) modal.classList.add('hidden');
     } catch (e) {
-        showToast(e.message || 'RAG 配置保存失败', 'error');
+        showToast(e.message || '检索配置保存失败', 'error');
     } finally {
         if (saveBtn) saveBtn.disabled = false;
     }

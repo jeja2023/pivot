@@ -390,22 +390,12 @@ const renderRagDebugResults = (data) => {
 };
 
 function renderRagDocsPagination(total, page, limit) {
-    const container = document.getElementById('pagination-ragDocs');
-    if (!container) return;
-    const totalPages = Math.max(Math.ceil(Number(total || 0) / Number(limit || RAG_DOCS_PAGE_SIZE)), 1);
-    container.innerHTML = '';
-    if (totalPages <= 1) return;
-
-    const createButton = (label, targetPage, disabled) => `
-        <button type="button" class="btn-secondary rag-page-btn" data-rag-page="${targetPage}" ${disabled ? 'disabled' : ''}>${label}</button>
-    `;
-    container.innerHTML = `
-        ${createButton('首页', 1, page <= 1)}
-        ${createButton('上一页', page - 1, page <= 1)}
-        <span>第 ${page} / ${totalPages} 页（共 ${Number(total || 0)} 条，每页 ${limit} 条）</span>
-        ${createButton('下一页', page + 1, page >= totalPages)}
-        ${createButton('末页', totalPages, page >= totalPages)}
-    `;
+    window.renderWorkspacePagination?.('pagination-ragDocs', {
+        total,
+        page,
+        limit,
+        onPageChange: targetPage => window.loadKnowledgeDocs(targetPage)
+    });
 }
 
 window.loadKnowledgeDocs = async (page = ragDocsPage) => {
@@ -733,10 +723,6 @@ document.addEventListener('click', (event) => {
         return;
     }
 
-    const pageBtn = event.target.closest('.rag-page-btn');
-    if (pageBtn && !pageBtn.disabled) {
-        window.loadKnowledgeDocs(Number(pageBtn.dataset.ragPage || 1));
-    }
 });
 
 document.addEventListener('change', (event) => {

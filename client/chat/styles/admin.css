@@ -427,13 +427,13 @@
     min-height: 240px;
 }
 .settings-workspace-view .pagination {
-    margin-top: 16px;
-    padding-top: 16px;
+    margin-top: 10px;
+    padding-top: 10px;
     border-top-color: rgba(148, 163, 184, 0.16);
 }
 .settings-workspace-view .admin-tab-content > .table-container + .pagination {
-    margin-top: 16px;
-    padding-top: 16px;
+    margin-top: 10px;
+    padding-top: 10px;
 }
 .settings-list { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
 .account-security-tab {
@@ -1027,8 +1027,29 @@
 .btn-toggle-pw:hover { color: var(--primary); background: rgba(0,0,0,0.05); }
 
 /* 分页组件样式 */
-.pagination { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border); }
-.pagination span { font-size: 0.9rem; color: var(--text-muted); }
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.pagination button,
+.pagination .btn-secondary {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.pagination span {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
 
 .audit-log-tab {
     height: 100%;
@@ -1118,9 +1139,9 @@
 }
 .audit-log-tab .pagination {
     flex: 0 0 auto;
-    margin-top: 16px;
-    padding-top: 16px;
-    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    gap: 8px;
 }
 .audit-log-tab .pagination button {
     height: 30px;
@@ -1128,7 +1149,7 @@
     font-size: 0.78rem;
 }
 .audit-log-tab .pagination span {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
 }
 
 /* 日志表格宽度设置 */
@@ -1421,8 +1442,8 @@
     padding: 6px 7px;
 }
 .api-call-logs-panel .pagination {
-    margin-top: 18px;
-    padding-top: 14px;
+    margin-top: 10px;
+    padding-top: 10px;
 }
 .user-records-modal {
     width: min(1500px, calc(100vw - 48px));
@@ -1497,8 +1518,8 @@
     overflow: auto;
 }
 .user-records-panel .pagination {
-    margin-top: 14px;
-    padding-top: 12px;
+    margin-top: 10px;
+    padding-top: 10px;
 }
 .user-records-table {
     table-layout: fixed;

@@ -15,6 +15,14 @@ function normalizeStatus(value) {
     return PACKAGE_STATUSES.has(value) ? value : 'enabled';
 }
 
+function cleanCapabilityName(name) {
+    return String(name || '')
+        .replace(/^内置\s*/u, '')
+        .replace(/^系统内置\s*/u, '')
+        .replace(/\s*MCP$/iu, '')
+        .trim();
+}
+
 function upsertCapabilityPackage({ type, sourceRef, name, description = '', scope = 'user', userId = null, status = 'enabled', config = {} }) {
     if (!PACKAGE_TYPES.has(type) || !sourceRef || !name) return null;
     const key = sourceKey(type, sourceRef);
@@ -30,6 +38,8 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
             scope = excluded.scope,
             name = excluded.name,
             description = excluded.description,
+            status = CASE WHEN excluded.type IN ('mcp_server', 'database_connection') THEN excluded.status ELSE capability_packages.status END,
+            config = CASE WHEN excluded.type IN ('mcp_server', 'database_connection') THEN excluded.config ELSE capability_packages.config END,
             updated_at = excluded.updated_at
     `).run(
         key,
@@ -37,7 +47,7 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
         String(sourceRef),
         userId,
         scope,
-        String(name).slice(0, 120),
+        cleanCapabilityName(name).slice(0, 120),
         String(description || '').slice(0, 1000),
         normalizeStatus(status),
         JSON.stringify(config || {}),
