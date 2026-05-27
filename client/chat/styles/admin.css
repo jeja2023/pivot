@@ -713,6 +713,45 @@
 }
 .switch input:checked + .switch-slider { background: var(--primary); }
 .switch input:checked + .switch-slider:before { transform: translateX(20px); }
+.user-page-actions {
+    align-items: center;
+    flex-wrap: wrap;
+}
+.public-registration-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #f8fafc;
+    cursor: pointer;
+}
+.public-registration-label {
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.public-registration-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #047857;
+    background: rgba(5, 150, 105, 0.1);
+}
+.public-registration-badge.is-off {
+    color: #64748b;
+    background: rgba(100, 116, 139, 0.12);
+}
 
 .table-container {
     flex: 1;
@@ -1154,16 +1193,17 @@
 
 /* 日志表格宽度设置 */
 .audit-log-table .col-index { width: 58px; }
-.audit-log-table .col-time { width: 168px; }
-.audit-log-table .col-user { width: 116px; }
-.audit-log-table .col-ip { width: 132px; }
-.audit-log-table .col-action { width: 150px; }
+.audit-log-table .col-time { width: 160px; }
+.audit-log-table .col-user { width: 108px; }
+.audit-log-table .col-name { width: 118px; }
+.audit-log-table .col-ip { width: 124px; }
+.audit-log-table .col-action { width: 140px; }
 .audit-log-table .col-details { width: auto; }
 .audit-log-table th:nth-child(1),
 .audit-log-table td:nth-child(1) {
     text-align: center;
 }
-.audit-log-table td:nth-child(5) strong {
+.audit-log-table td:nth-child(6) strong {
     font-weight: 800;
 }
 

@@ -54,5 +54,6 @@ ensureSetting('rag_chunk_overlap', process.env.RAG_CHUNK_OVERLAP || '100');
 ensureSetting('rag_embedding_mode', 'http');
 ensureSetting('rag_embedding_api_url', process.env.EMBEDDING_API_URL || '');
 ensureSetting('rag_embedding_model', process.env.EMBEDDING_MODEL || 'nomic-embed-text');
+ensureSetting('allow_public_registration', process.env.ALLOW_PUBLIC_REGISTRATION === 'true' ? 'true' : 'false');
 
 module.exports = { db, dataDir, dbPath, stmts };

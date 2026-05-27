@@ -1,5 +1,44 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.57] - 2026-05-27
+### 用户注册与账号治理
+- **开放注册后台开关**：新增运行时开放注册设置，内置 `admin` 可在“系统设置 > 用户管理”右上角直接开启或关闭；设置写入 `app_settings.allow_public_registration`，`.env` 中的 `ALLOW_PUBLIC_REGISTRATION` 仅作为首次初始化默认值，后续切换无需重启应用。
+- **注册入口联动**：`/api/auth/config` 与登录页注册入口实时读取开放注册状态，关闭时隐藏注册入口并拦截 `/auth/register`，开启后自注册账号默认创建为普通用户。
+- **注册错误提示优化**：注册、管理员添加用户、重置密码和个人改密统一使用 `UserInputError` 返回 400；密码、用户名格式、用户名重复等可预期输入错误会直接展示给用户，不再落入生产环境“系统内部错误”。
+- **密码规则体验优化**：密码规则统一为“至少 8 位，并同时包含字母和数字”；注册页密码框内直接显示规则提示，前端会在提交前提示缺少长度、字母或数字的具体原因。
+- **用户管理交互优化**：用户列表加载支持页码回退，开放注册开关以紧凑行内控件显示在用户操作区；导入、保存、重置密码等失败时优先展示后端返回的明确原因。
+
+### 上下文压缩与聊天状态
+- **手动压缩入口补齐**：上下文用量圆环可点击触发当前会话压缩，压缩中显示忙碌态，完成后刷新当前会话和上下文用量。
+- **上下文接口增强**：会话上下文接口补齐实时 token 用量查询与手动压缩返回信息，前端可在消息保存、统计写入和压缩完成后主动刷新显示。
+- **模型调用超时治理**：记忆压缩与模型调用链路加入更明确的超时、取消和错误返回，减少上游模型慢响应导致的悬挂或延迟写入。
+
+### 运营与审计体验
+- **审计日志显示名补齐**：审计列表和导出内容新增显示名字段，管理员排查用户操作时不再只依赖用户名。
+- **用量与 API 账户展示优化**：用量明细、API Key 与第三方调用记录继续收紧列宽、显示名、Token 统计和空态提示，提升管理端表格可读性。
+- **前端文案与布局收口**：注册、账号安全、用户管理和上下文用量相关文案统一为更明确的用户侧表达，减少需要管理员猜测原因的错误提示。
+
+### 文档与版本同步
+- **版本升级**：应用版本升级至 `v0.0.57`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、Service Worker vendor 缓存版本、README 与 CHANGELOG。
+- **回归验证**：已运行聊天资源检查、语法检查、定向 ESLint、密码校验与开放注册设置读写验证，覆盖本轮注册、用户管理和前端资源组装路径。
+
+## [v0.0.56] - 2026-05-26
+### 聊天流式体验与消息同步
+- **用户消息显示修复**：流式回复保存完成后会同步回填用户消息与助手消息的持久化 ID，并刷新当前会话上下文用量；如果当前会话 DOM 中缺少刚发送或刚生成的消息，会自动重新加载当前会话，避免用户消息需要刷新页面才显示。
+- **代码块流式滚动修复**：生成过程中会同时保持聊天列表和最新代码块贴近底部；当用户主动向上滚动查看历史时不会强制抢回视口，代码块内容会跟随最新增量显示在可见位置。
+- **上下文用量实时刷新**：新增前端 `refreshCurrentContextUsage` 刷新入口，消息保存和统计写入后会重新拉取当前会话上下文元信息，避免输入框圆环长期停留在旧百分比。
+
+### 上下文压缩交互与策略
+- **手动压缩入口补齐**：输入框上下文圆环改为可点击按钮，压缩中显示忙碌态，完成后提示结果、刷新用量，并在当前会话重新加载压缩后的消息视图。
+- **上下文接口补齐**：新增 `GET /api/sessions/:id/context` 查询实时上下文用量，新增 `POST /api/sessions/:id/compact` 手动压缩当前会话；手动压缩会复用当前选择模型或默认模型，并记录“手动压缩上下文”审计动作。
+- **压缩超时治理**：记忆压缩默认超时从 60 秒放宽到 180 秒，超时后会取消上游模型请求并返回明确的 504 提示，避免接口已超时但模型稍后返回又继续写入摘要。
+- **自动压缩触发调整**：后台压缩不再等待“活跃消息超过 10 条”，默认在活跃上下文 token 超过 `MEMORY_THRESHOLD`（当前 12K）且存在可归档早期消息时触发；`MEMORY_MIN_MESSAGES_TO_COMPRESS` 默认降为 `1`，`MEMORY_SUMMARY_KEEP_COUNT` 可配置保留最近消息数量，更适合单条超长输入的场景。
+- **压缩链路兼容增强**：记忆压缩调用统一复用模型适配器生成 OpenAI-compatible URL 与鉴权头，压缩成功会返回摘要条数和摘要 token，失败会记录并向手动接口返回明确错误。
+
+### 文档与版本同步
+- **版本升级**：应用版本升级至 `v0.0.56`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、Service Worker vendor 缓存版本、README 与 CHANGELOG。
+- **回归验证**：`npm run check` 已覆盖本轮聊天资源、语法和文本文档完整性检查。
+
 ## [v0.0.55] - 2026-05-26
 ### 能力库与工具链稳定性
 - **能力库全链路复核**：补齐模型到能力工具调用的筛选与规划步骤，用户提出“查数据并生成图表”等复合任务时，会先暴露查询/取数能力，在查询成功后继续衔接图表生成能力，减少模型直接跳到图表或遗漏取数工具的情况。
@@ -192,7 +231,7 @@
 - **LRU / TtlCache 工具**：新增 `server/cache.js`，提供带容量上限和 TTL 的 `LruCache` 与懒清理的 `TtlCache`；服务端 `dirSizeCache` 改用 LRU，避免长时间运行的目录尺寸缓存无限增长，符合内网长期常驻部署的内存控制要求。
 - **后台启动错误日志**：GPU 监控、模型端点监控、知识库索引恢复、智能体任务恢复、智能体计划调度等启动失败的 `.catch(() => {})` 改为带 `logger.warn` 的告警，方便内网部署排查初始化失败原因，不再静默吞错。
 - **MCP 调用日志脱敏**：`server/security.js` 新增 `redactSecrets` / `maskSecretString`，自动脱敏 `api_key`、`authorization`、`Bearer`、`sk-*`、JWT 等敏感字段；`server/services/mcp-client.js` 的 `previewValue` 在写入审计表前先过脱敏，避免敏感参数被普通管理员或合规导出包看到。
-- **异步任务超时与并发治理**：新增 `server/services/concurrency.js` 的 `withTimeout`、`KeyedConcurrencyGuard`、`TimeoutError`；`compressMemory` 后台压缩接入超时（默认 60s，可通过 `MEMORY_COMPRESSION_TIMEOUT_MS` 调整）和会话级去重（同会话不重复触发），全局并发上限可通过 `MEMORY_COMPRESSION_MAX_CONCURRENT` 控制，避免长会话同时压垮上游模型。
+- **异步任务超时与并发治理**：新增 `server/services/concurrency.js` 的 `withTimeout`、`KeyedConcurrencyGuard`、`TimeoutError`；`compressMemory` 后台压缩接入超时（可通过 `MEMORY_COMPRESSION_TIMEOUT_MS` 调整）和会话级去重（同会话不重复触发），全局并发上限可通过 `MEMORY_COMPRESSION_MAX_CONCURRENT` 控制，避免长会话同时压垮上游模型。
 - **MCP 审批服务端二次校验**：移除 `agent-runtime` 中 `metadata.approval === 'all_mcp_approved'` 的快捷放行死分支，只承认通过 `approveAgentTool` 写入的 `approvedTools` 白名单，杜绝后续路由或迁移意外绕过审批策略。
 - **智能体运行时拆分**：从 1978 行的 `server/services/agent-runtime.js` 拆出独立模块 `server/services/agent-validators.js`，包含所有常量、`parseJsonObject`、`normalizeMaxSteps` / `normalizeApprovalPolicy` / `normalizeDagSpec` / `normalizeToolAllowlist` 等纯函数；`agent-runtime.js` 行数从 1978 降至 1834，对外导出表完全保持，路由层引用无需修改，便于后续继续拆 DAG / 调度器 / 产物子模块。
 - **回归测试加固**：`tests/security.test.js` 新增 9 项单测覆盖 `LruCache` 容量与 TTL 行为、`TtlCache` 懒清理、`withTimeout` 超时与正常返回、`KeyedConcurrencyGuard` 重复键跳过与并发上限、`redactSecrets` 嵌套对象与原对象不变性、`maskSecretString` 行内脱敏；当前 `npm test` 已通过 `84/84`。

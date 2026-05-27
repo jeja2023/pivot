@@ -6,11 +6,15 @@ const { extractDocumentText, truncateExtractedText } = require('./document-text'
 const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('./image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('./security');
 const { withTimeout, KeyedConcurrencyGuard } = require('./services/concurrency');
+const {
+    buildChatCompletionsUrl,
+    buildModelHeaders
+} = require('./services/model-adapter');
 
 const THRESHOLD = parseInt(process.env.MEMORY_THRESHOLD, 10) || 12000;
-const SUMMARY_KEEP_COUNT = 6;
-const MIN_MESSAGES_TO_COMPRESS = 4;
-const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 60000);
+const SUMMARY_KEEP_COUNT = Math.max(1, parseInt(process.env.MEMORY_SUMMARY_KEEP_COUNT, 10) || 6);
+const MIN_MESSAGES_TO_COMPRESS = Math.max(1, parseInt(process.env.MEMORY_MIN_MESSAGES_TO_COMPRESS, 10) || 1);
+const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 180000);
 // 同会话同时只触发一次后台压缩，全局并发上限可在环境变量调整
 const memoryCompressionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, parseInt(process.env.MEMORY_COMPRESSION_MAX_CONCURRENT, 10) || 2)
@@ -161,11 +165,11 @@ async function getContext(sessionId, userId, modelCfg) {
     const contextMeta = buildContextMeta(messages);
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
-    if (contextMeta.activeTokens > THRESHOLD && contextMeta.activeCount > SUMMARY_KEEP_COUNT + MIN_MESSAGES_TO_COMPRESS) {
+    if (contextMeta.activeTokens > THRESHOLD && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
         // 同会话短期内不会重复触发，全局并发上限避免多个长会话同时压垮上游
         memoryCompressionGuard.run(`mem:${sessionId}`, () =>
             withTimeout(
-                () => compressMemory(sessionId, userId, messages, modelCfg),
+                (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
                 MEMORY_COMPRESSION_TIMEOUT_MS,
                 '记忆压缩'
             )
@@ -192,16 +196,59 @@ async function getContext(sessionId, userId, modelCfg) {
     return history;
 }
 
-async function compressMemory(sessionId, userId, messages, modelCfg) {
+async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
+    const messages = db.prepare(`
+        SELECT * FROM messages
+        WHERE session_id = ? AND user_id = ?
+          AND deleted_at IS NULL
+        ORDER BY id ASC
+    `).all(sessionId, userId);
+    const before = buildContextMeta(messages);
+    if (!options.force && (before.activeTokens <= THRESHOLD || before.activeCount <= MIN_MESSAGES_TO_COMPRESS)) {
+        return {
+            skipped: true,
+            reason: 'threshold_not_reached',
+            before,
+            after: before
+        };
+    }
+
+    const guardedResult = await memoryCompressionGuard.run(`mem:${sessionId}`, () =>
+        withTimeout(
+            (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
+            MEMORY_COMPRESSION_TIMEOUT_MS,
+            '记忆压缩'
+        )
+    );
+    const result = guardedResult?.skipped ? guardedResult : (guardedResult?.value || guardedResult || {});
+    const afterMessages = db.prepare(`
+        SELECT * FROM messages
+        WHERE session_id = ? AND user_id = ?
+          AND deleted_at IS NULL
+        ORDER BY id ASC
+    `).all(sessionId, userId);
+    const after = buildContextMeta(afterMessages);
+    return {
+        ...(result || {}),
+        before,
+        after,
+        compressed: after.archivedCount > before.archivedCount || after.summaryCount > before.summaryCount
+    };
+}
+
+async function compressMemory(sessionId, userId, messages, modelCfg, options = {}) {
     const activeMessages = messages.filter(m => !Number(m.context_archived) && !Number(m.is_summary));
-    const toSummarize = activeMessages.slice(0, -SUMMARY_KEEP_COUNT);
-    if (toSummarize.length < MIN_MESSAGES_TO_COMPRESS) return;
+    const keepCount = Math.min(SUMMARY_KEEP_COUNT, Math.max(1, activeMessages.length - MIN_MESSAGES_TO_COMPRESS));
+    const toSummarize = activeMessages.slice(0, -keepCount);
+    if (toSummarize.length < MIN_MESSAGES_TO_COMPRESS) {
+        return { skipped: true, reason: 'not_enough_messages' };
+    }
 
     const summaryPrompt = '你是一个记忆压缩专家。请将以下对话内容提炼为一段极简的摘要（300字以内），保留所有关键事实、决定和背景信息。输出必须直接开始摘要内容：\n\n'
         + toSummarize.map(m => `${m.role}: ${m.content}`).join('\n');
 
     try {
-        const response = await axios.post(modelCfg.url, {
+        const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), {
             model: modelCfg.model_name,
             messages: [
                 { role: 'system', content: '你负责将冗长的对话历史压缩为关键记忆片段。' },
@@ -209,7 +256,10 @@ async function compressMemory(sessionId, userId, messages, modelCfg) {
             ],
             stream: false
         }, {
-            headers: { 'Authorization': modelCfg.api_key ? `Bearer ${modelCfg.api_key}` : undefined }
+            headers: buildModelHeaders(modelCfg, { acceptJson: true }),
+            signal: options.signal,
+            timeout: MEMORY_COMPRESSION_TIMEOUT_MS,
+            proxy: false
         });
 
         const summaryText = `【长期记忆摘要】： ${response.data.choices[0].message.content}`;
@@ -226,10 +276,12 @@ async function compressMemory(sessionId, userId, messages, modelCfg) {
             `).run(sessionId, userId, 'system', summaryText, estimateTokens(summaryText), 1, 0, modelCfg.id, now);
         });
         transaction();
+        return { compressed: true, summarizedCount: toSummarize.length, summaryTokens: estimateTokens(summaryText) };
     } catch (e) {
         const { logger } = require('./logger');
         logger.error({ err: e.message }, '记忆压缩失败');
+        throw e;
     }
 }
 
-module.exports = { estimateTokens, getContext, THRESHOLD, buildContextMeta };
+module.exports = { compactSessionMemory, estimateTokens, getContext, THRESHOLD, buildContextMeta };

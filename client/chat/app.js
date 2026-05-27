@@ -394,6 +394,7 @@ bind('clear-input-btn', () => {
         userInput.focus();
     }
 });
+bind('context-usage-pill', () => window.compactCurrentSessionContext?.());
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
 bind('session-active-filter', () => window.setArchiveFilter(false));
 bind('session-archive-filter', () => window.setArchiveFilter(true));
@@ -494,6 +495,7 @@ bind('user-template-btn', () => window.downloadUserTemplate());
 bind('user-import-btn', () => document.getElementById('user-import-input').click());
 bind('user-import-input', () => window.importUsers(), 'change');
 bind('user-export-btn', () => window.exportUsers());
+bind('public-registration-toggle', () => window.updatePublicRegistrationSetting?.(), 'change');
 
 // 审计与导出
 bind('logs-export-btn', () => window.exportLogs());

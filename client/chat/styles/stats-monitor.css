@@ -154,8 +154,9 @@
 }
 .detail-table .col-index { width: 58px; }
 .detail-table .col-time { width: 178px; }
-.detail-table .col-user { width: 140px; }
-.detail-table .col-model { width: 220px; }
+.detail-table .col-user { width: 112px; }
+.detail-table .col-name { width: 122px; }
+.detail-table .col-model { width: 198px; }
 .detail-table .col-role { width: 92px; }
 .detail-table .col-token { width: 120px; }
 .detail-table .col-total { width: 124px; }
@@ -168,11 +169,13 @@
 .detail-table th:nth-child(3),
 .detail-table td:nth-child(3),
 .detail-table th:nth-child(4),
-.detail-table td:nth-child(4) {
+.detail-table td:nth-child(4),
+.detail-table th:nth-child(5),
+.detail-table td:nth-child(5) {
     text-align: left;
 }
-.detail-table th:nth-child(n+5),
-.detail-table td:nth-child(n+5) {
+.detail-table th:nth-child(n+6),
+.detail-table td:nth-child(n+6) {
     text-align: center;
 }
 .detail-table td:nth-child(2) {

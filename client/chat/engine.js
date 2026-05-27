@@ -90,6 +90,43 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     `;
 }
 
+function isMessageContainerNearBottom(threshold = 160) {
+    const container = document.getElementById('message-container');
+    if (!container) return false;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+
+function keepMessageContainerPinnedToBottom(wasNearBottom) {
+    if (!wasNearBottom) return;
+    window.scrollMessagesToBottom?.();
+}
+
+function keepLatestCodeBlockPinned(root, wasNearBottom) {
+    if (!wasNearBottom || !root) return;
+    const codeBlocks = root.querySelectorAll('.code-block pre');
+    const latest = codeBlocks[codeBlocks.length - 1];
+    if (latest) latest.scrollTop = latest.scrollHeight;
+}
+
+function isMessageContentInDocument(messageContent) {
+    return Boolean(messageContent && document.body.contains(messageContent));
+}
+
+window.refreshCurrentContextUsage = async function(sessionId = currentSessionId) {
+    if (!sessionId || !window.updateContextUsage) return null;
+    try {
+        const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/context`);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+            window.updateContextUsage(data.contextMeta || null);
+            return data.contextMeta || null;
+        }
+    } catch (e) {
+        console.warn('刷新上下文用量失败', e);
+    }
+    return null;
+};
+
 function createUploadProgress(label) {
     const area = document.getElementById('attachment-preview');
     if (!area) return { update() {}, close() {} };
@@ -361,18 +398,24 @@ window.sendMessage = async function(isRegenerate = false) {
         const scheduleStreamRender = () => {
             if (renderPending) return;
             renderPending = true;
+            const wasNearBottom = isViewingRequestSession() && isMessageContainerNearBottom();
             const interval = resolveStreamInterval((fullAiContent || '').length);
             renderTimer = setTimeout(() => {
                 renderPending = false;
                 renderTimer = null;
                 renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+                keepLatestCodeBlockPinned(textBody, wasNearBottom);
+                keepMessageContainerPinnedToBottom(wasNearBottom);
             }, interval);
         };
         const flushStreamRender = () => {
+            const wasNearBottom = isViewingRequestSession() && isMessageContainerNearBottom(260);
             if (renderTimer) clearTimeout(renderTimer);
             renderPending = false;
             renderTimer = null;
             renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+            keepLatestCodeBlockPinned(textBody, wasNearBottom);
+            keepMessageContainerPinnedToBottom(wasNearBottom);
         };
         const sseParser = createBrowserSseParser({
             onData(payload) {
@@ -402,8 +445,14 @@ window.sendMessage = async function(isRegenerate = false) {
                     return;
                 }
                 if (data.type === 'message_saved') {
-                    if (data.role === 'user') window.setMessageActionId?.(userMsgEl, data.messageId);
-                    if (data.role === 'assistant') window.setMessageActionId?.(aiMsgEl, data.messageId);
+                    if (data.role === 'user') {
+                        window.setMessageActionId?.(userMsgEl, data.messageId);
+                        window.refreshCurrentContextUsage?.(requestSessionId);
+                    }
+                    if (data.role === 'assistant') {
+                        window.setMessageActionId?.(aiMsgEl, data.messageId);
+                        window.refreshCurrentContextUsage?.(requestSessionId);
+                    }
                     return;
                 }
                 if (data.error) throw new Error(data.detail || data.error);
@@ -441,8 +490,9 @@ window.sendMessage = async function(isRegenerate = false) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
         });
+        await window.refreshCurrentContextUsage?.(requestSessionId);
 
-        if (isViewingRequestSession() && !document.body.contains(aiMsgEl)) {
+        if (isViewingRequestSession() && (!isMessageContentInDocument(aiMsgEl) || (!isRegenerate && !isMessageContentInDocument(userMsgEl)))) {
             await selectSession(requestSessionId);
         } else if (!isViewingRequestSession()) {
             showToast('原会话的回答已生成完成，可切回查看。', 'info');

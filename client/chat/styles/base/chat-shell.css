@@ -79,6 +79,17 @@ body.is-main-workspace-full .chat-container {
 
 .context-usage-btn.is-warn .context-mini-ring { --ring-color: #f59e0b; }
 .context-usage-btn.is-critical .context-mini-ring { --ring-color: #ef4444; }
+.context-usage-btn.is-busy {
+    pointer-events: none;
+    opacity: 0.78;
+}
+.context-usage-btn.is-busy .context-mini-ring {
+    animation: context-ring-spin 0.9s linear infinite;
+}
+
+@keyframes context-ring-spin {
+    to { transform: rotate(360deg); }
+}
 .icon-btn {
     background: none; border: none; color: var(--text-muted); cursor: pointer;
     display: flex; align-items: center; justify-content: center;

@@ -162,7 +162,8 @@ window.changePassword = async () => {
     const confirmPassword = document.getElementById('pw-confirm').value;
     if (!oldPassword || !newPassword) return showToast('请输入完整密码信息', 'error');
     if (newPassword !== confirmPassword) return showToast('两次输入的新密码不一致', 'error');
-    if (newPassword.length < 8) return showToast('新密码长度至少需要8位', 'error');
+    const passwordError = window.getPasswordValidationMessage?.(newPassword, '新密码') || '';
+    if (passwordError) return showToast(passwordError, 'error');
     showConfirm('确认修改密码', '修改密码后，您需要重新登录，确定继续吗？', async () => {
         try {
             const res = await fetch(`${API_BASE}/settings/password`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ oldPassword, newPassword }) });

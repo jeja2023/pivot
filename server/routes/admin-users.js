@@ -12,6 +12,10 @@ const {
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
+const {
+    getPublicRegistrationSetting,
+    setPublicRegistrationSetting
+} = require('../services/registration-settings');
 
 function createAdminUsersRouter({
     authMiddleware,
@@ -40,7 +44,22 @@ function createAdminUsersRouter({
             ORDER BY id ASC LIMIT ? OFFSET ?
         `).all(limit, offset);
         const total = db.prepare(`SELECT COUNT(*) as count FROM users ${where}`).get().count;
-        res.json({ data: users, total, isSuperAdmin: isSuperAdmin(req.user) });
+        res.json({
+            data: users,
+            total,
+            isSuperAdmin: isSuperAdmin(req.user),
+            allowPublicRegistration: getPublicRegistrationSetting()
+        });
+    }));
+
+    router.put('/admin/users/registration', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有 admin 超级管理员可以修改开放注册设置' });
+        }
+        const enabled = req.body?.allowPublicRegistration === true;
+        const allowPublicRegistration = setPublicRegistrationSetting(enabled, req.user.id);
+        logAction(req, '修改开放注册设置', allowPublicRegistration ? '已开启开放注册' : '已关闭开放注册');
+        res.json({ success: true, allowPublicRegistration });
     }));
 
     router.post('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -48,9 +67,14 @@ function createAdminUsersRouter({
         if (role === 'admin' && !isSuperAdmin(req.user)) {
             return res.status(403).json({ error: '只有 admin 超级管理员可以创建管理员账号' });
         }
-        const user = register(username, password, nickname, unit, role);
-        logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
-        res.json({ success: true, user });
+        try {
+            const user = register(username, password, nickname, unit, role);
+            logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
+            res.json({ success: true, user });
+        } catch (e) {
+            if (e.status === 400) return res.status(400).json({ error: e.message });
+            throw e;
+        }
     }));
 
     router.put('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -87,7 +111,12 @@ function createAdminUsersRouter({
         if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能重置密码' });
         if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员密码不可由其他用户重置' });
         if (!isSuperAdmin(req.user) && targetUser.role === 'admin') return res.status(403).json({ error: '只有 admin 超级管理员可以重置管理员密码' });
-        validatePassword(password);
+        try {
+            validatePassword(password);
+        } catch (e) {
+            if (e.status === 400) return res.status(400).json({ error: e.message });
+            throw e;
+        }
         const hash = bcrypt.hashSync(password, 10);
         const resetPasswordTx = db.transaction(() => {
             const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetUserId);
@@ -117,7 +146,7 @@ function createAdminUsersRouter({
         
         const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
         const logs = db.prepare(`
-            SELECT al.*, u.username 
+            SELECT al.*, u.username, u.nickname 
             FROM audit_logs al 
             LEFT JOIN users u ON al.user_id = u.id 
             ${whereClause}
@@ -125,9 +154,9 @@ function createAdminUsersRouter({
             LIMIT 10000
         `).all(...params);
         
-        let csv = '\uFEFF序号,时间,用户,IP,操作,详情\n';
+        let csv = '\uFEFF序号,时间,用户,显示名,IP,操作,详情\n';
         logs.map(localizeAuditLogRow).forEach((l, i) => {
-            csv += [i + 1, l.timestamp, l.username || '系统', l.ip_address || '-', l.action, l.details || ''].map(escapeCsvCell).join(',') + '\n';
+            csv += [i + 1, l.timestamp, l.username || '系统', l.nickname || (l.username ? '' : '系统'), l.ip_address || '-', l.action, l.details || ''].map(escapeCsvCell).join(',') + '\n';
         });
         logAction(req, '导出审计日志', `导出 ${logs.length} 条日志${whereClause ? ' (已筛选)' : ''}`);
         res.setHeader('Content-Type', 'text/csv');
@@ -341,7 +370,7 @@ function createAdminUsersRouter({
         const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
         
         const logs = db.prepare(`
-            SELECT l.*, u.username
+            SELECT l.*, u.username, u.nickname
             FROM audit_logs l
             LEFT JOIN users u ON l.user_id = u.id
             ${whereClause}

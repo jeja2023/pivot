@@ -5,7 +5,9 @@ const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { buildFtsQuery } = require('../search');
-const { buildContextMeta } = require('../llm');
+const { buildContextMeta, compactSessionMemory } = require('../llm');
+const { getAccessibleModel } = require('../services/models');
+const { TimeoutError } = require('../services/concurrency');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -276,6 +278,48 @@ function createSessionsRouter({
         const rawMessages = stmts.getMessages.all(req.params.id, req.user.id);
         const messages = appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
         res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
+    }));
+
+    router.get('/sessions/:id/context', authMiddleware, asyncHandler(async (req, res) => {
+        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const rawMessages = stmts.getMessages.all(req.params.id, req.user.id);
+        res.json({ contextMeta: buildContextMeta(rawMessages) });
+    }));
+
+    router.post('/sessions/:id/compact', authMiddleware, asyncHandler(async (req, res) => {
+        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+
+        const modelId = req.body?.modelId ? parseInt(req.body.modelId, 10) : null;
+        const modelCfg = getAccessibleModel(modelId, req.user) || getAccessibleModel(null, req.user);
+        if (!modelCfg) return res.status(400).json({ error: '没有可用于压缩的模型配置' });
+        if (modelCfg.secret_error) return res.status(400).json({ error: `${modelCfg.secret_error}，请重新保存该模型的 API Key` });
+
+        let result;
+        try {
+            result = await compactSessionMemory(req.params.id, req.user.id, modelCfg, { force: true });
+        } catch (err) {
+            if (err instanceof TimeoutError || err.code === 'OPERATION_TIMEOUT') {
+                return res.status(504).json({
+                    error: `${err.message}。可调高 MEMORY_COMPRESSION_TIMEOUT_MS 或换用响应更快的模型后重试。`,
+                    code: 'MEMORY_COMPRESSION_TIMEOUT'
+                });
+            }
+            throw err;
+        }
+        const message = result.compressed
+            ? `已压缩 ${Number(result.summarizedCount || 0)} 条较早上下文`
+            : '当前会话暂时没有可压缩的早期上下文';
+        logAction(req, '手动压缩上下文', `会话ID: ${req.params.id}，结果: ${result.compressed ? 'compressed' : 'skipped'}`);
+        res.json({
+            success: true,
+            compressed: Boolean(result.compressed),
+            skipped: Boolean(result.skipped),
+            reason: result.reason || '',
+            message,
+            contextMeta: result.after || result.before || buildContextMeta(stmts.getMessages.all(req.params.id, req.user.id))
+        });
     }));
 
     router.post('/sessions/:id/fork', authMiddleware, asyncHandler(async (req, res) => {

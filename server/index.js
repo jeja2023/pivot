@@ -75,6 +75,7 @@ const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documen
 const {
     migrateModelSecrets
 } = require('./services/models');
+const { getPublicRegistrationSetting } = require('./services/registration-settings');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
@@ -111,7 +112,7 @@ const logAction = (req, action, details) => {
 };
 
 // 移除冗余的分页格式化函数，已由 http.js 提供
-const isPublicRegistrationEnabled = () => process.env.ALLOW_PUBLIC_REGISTRATION === 'true';
+const isPublicRegistrationEnabled = () => getPublicRegistrationSetting();
 async function getDirSizeAsync(dir) {
     if (!fs.existsSync(dir)) return 0;
     let total = 0;

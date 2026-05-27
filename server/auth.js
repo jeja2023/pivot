@@ -40,6 +40,28 @@ const REFRESH_COOKIE_OPTIONS = {
     maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
 };
 
+class UserInputError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'UserInputError';
+        this.status = 400;
+    }
+}
+
+const PASSWORD_RULE_DESCRIPTION = '至少 8 位，并同时包含字母和数字';
+
+function getPasswordValidationMessage(password) {
+    if (!password) {
+        return `请输入密码。密码要求：${PASSWORD_RULE_DESCRIPTION}。`;
+    }
+    const missing = [];
+    if (String(password).length < 8) missing.push('至少 8 位');
+    if (!/[A-Za-z]/.test(password)) missing.push('包含字母');
+    if (!/[0-9]/.test(password)) missing.push('包含数字');
+    if (missing.length === 0) return '';
+    return `密码不符合要求：请确保${missing.join('、')}。完整规则：${PASSWORD_RULE_DESCRIPTION}。`;
+}
+
 function hashApiKey(key) {
     return crypto.createHash('sha256').update(String(key || '')).digest('hex');
 }
@@ -72,12 +94,8 @@ function generateRefreshToken(userId) {
 }
 
 function validatePassword(password) {
-    if (!password || password.length < 8) {
-        throw new Error('密码长度至少需要 8 位');
-    }
-    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-        throw new Error('密码必须同时包含字母和数字');
-    }
+    const message = getPasswordValidationMessage(password);
+    if (message) throw new UserInputError(message);
 }
 
 function getCookie(req, name) {
@@ -134,7 +152,7 @@ function resolveAuthenticatedUser(req) {
 function register(username, password, nickname, unit, role = 'user') {
     const cleanUsername = String(username || '').trim();
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(cleanUsername)) {
-        throw new Error('用户名需为 3-32 位字母、数字、点、下划线或短横线');
+        throw new UserInputError('用户名需为 3-32 位字母、数字、点、下划线或短横线');
     }
     validatePassword(password);
     const hash = bcrypt.hashSync(password, 10);
@@ -145,7 +163,7 @@ function register(username, password, nickname, unit, role = 'user') {
         return { id: info.lastInsertRowid, username: cleanUsername, nickname, role: safeRole, status: 'active' };
     } catch (e) {
         if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-            throw new Error('用户名已存在');
+            throw new UserInputError('用户名已存在');
         }
         throw e;
     }
@@ -255,5 +273,8 @@ module.exports = {
     generateCsrfToken,
     csrfMiddleware,
     hashApiKey,
-    previewApiKey
+    previewApiKey,
+    UserInputError,
+    PASSWORD_RULE_DESCRIPTION,
+    getPasswordValidationMessage
 };

@@ -1,4 +1,5 @@
 const nodeGlobals = {
+    AbortController: 'readonly',
     Buffer: 'readonly',
     URL: 'readonly',
     __dirname: 'readonly',

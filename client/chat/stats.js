@@ -66,11 +66,14 @@ window.loadDetails = async function(page = 1) {
         const { data, total } = await res.json();
         document.getElementById('details-list-body').innerHTML = data.map((d, i) => {
             const roleLabel = formatUsageRoleLabel(d.role);
+            const username = d.username || '-';
+            const displayName = d.nickname || d.username || '-';
             return `
                 <tr>
                     <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
                     <td title="${escapeHtml(formatDateToCN(d.created_at))}">${escapeHtml(formatDateToCN(d.created_at))}</td>
-                    <td title="${escapeHtml(d.nickname || d.username)}">${escapeHtml(d.nickname || d.username)}</td>
+                    <td title="${escapeHtml(username)}">${escapeHtml(username)}</td>
+                    <td title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</td>
                     <td title="${escapeHtml(d.model_name || '未知')}">${escapeHtml(d.model_name || '未知')}</td>
                     <td class="text-center" title="${escapeHtml(roleLabel)}">${escapeHtml(roleLabel)}</td>
                     <td class="text-center" title="${Number(d.input_tokens || 0).toLocaleString()}">${formatTokenCount(d.input_tokens)}</td>
@@ -722,16 +725,21 @@ window.loadLogs = async function(page = 1) {
 
         const res = await fetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
         const { data, total } = await res.json();
-        document.getElementById('log-list-body').innerHTML = data.map((l, i) => `
-            <tr>
-                <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
-                <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
-                <td title="${escapeHtml(l.username || '系统')}">${escapeHtml(l.username || '系统')}</td>
-                <td>${escapeHtml(l.ip_address || '-')}</td>
-                <td title="${escapeHtml(l.action)}"><strong>${escapeHtml(l.action)}</strong></td>
-                <td title="${escapeHtml(l.details || '')}">${escapeHtml(l.details || '')}</td>
-            </tr>
-        `).join('');
+        document.getElementById('log-list-body').innerHTML = data.map((l, i) => {
+            const username = l.username || '系统';
+            const displayName = l.nickname || (l.username ? '-' : '系统');
+            return `
+                <tr>
+                    <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
+                    <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
+                    <td title="${escapeHtml(username)}">${escapeHtml(username)}</td>
+                    <td title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</td>
+                    <td>${escapeHtml(l.ip_address || '-')}</td>
+                    <td title="${escapeHtml(l.action)}"><strong>${escapeHtml(l.action)}</strong></td>
+                    <td title="${escapeHtml(l.details || '')}">${escapeHtml(l.details || '')}</td>
+                </tr>
+            `;
+        }).join('');
         renderPagination('logs', total, page);
     } catch (e) { showToast('加载日志失败', 'error'); }
 }

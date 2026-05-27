@@ -79,6 +79,7 @@ window.updateContextUsage = (meta = null) => {
     if (!meta) {
         ring.style.setProperty('--progress', '0');
         pill.dataset.tooltip = '上下文用量: -';
+        pill.title = '当前会话上下文用量，点击手动压缩';
         return;
     }
 
@@ -89,15 +90,47 @@ window.updateContextUsage = (meta = null) => {
     const limit = Number(meta.threshold || 0).toLocaleString();
 
     ring.style.setProperty('--progress', percent);
-    pill.dataset.tooltip = `上下文用量: ${percent}% (已用 ${active}, 总共 ${limit})`;
+    const tooltipParts = [`上下文用量: ${percent}% (已用 ${active}, 阈值 ${limit})`];
     
-    // 如果有归档或摘要，也加上去
     if (archived > 0 || summaryCount > 0) {
-        pill.dataset.tooltip += ` | 归档: ${archived}, 摘要: ${summaryCount}`;
+        tooltipParts.push(`归档: ${archived}, 摘要: ${summaryCount}`);
     }
+    tooltipParts.push('点击手动压缩');
+    pill.dataset.tooltip = tooltipParts.join(' | ');
+    pill.title = pill.dataset.tooltip;
 
     if (meta.status === 'critical') pill.classList.add('is-critical');
     else if (meta.status === 'warn') pill.classList.add('is-warn');
+};
+
+window.compactCurrentSessionContext = async function() {
+    const pill = document.getElementById('context-usage-pill');
+    if (!currentSessionId) return showToast('请先选择一个会话', 'warning');
+    if (pill?.classList.contains('is-busy')) return;
+    const modelId = document.getElementById('model-selector')?.value || null;
+    try {
+        pill?.classList.add('is-busy');
+        if (pill) {
+            pill.disabled = true;
+            pill.dataset.tooltip = '正在压缩上下文...';
+        }
+        const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(currentSessionId)}/compact`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modelId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '上下文压缩失败');
+        window.updateContextUsage(data.contextMeta || null);
+        showToast(data.message || (data.compressed ? '上下文已压缩' : '当前没有可压缩内容'), data.compressed ? 'success' : 'info');
+        if (data.compressed && currentSessionId) await window.selectSession?.(currentSessionId);
+    } catch (e) {
+        showToast(e.message || '上下文压缩失败', 'error');
+        await window.refreshCurrentContextUsage?.();
+    } finally {
+        pill?.classList.remove('is-busy');
+        if (pill) pill.disabled = false;
+    }
 };
 
 window.loadSelectableModels = async function() {

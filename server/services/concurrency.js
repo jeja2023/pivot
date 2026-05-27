@@ -167,13 +167,15 @@ function withTimeout(promiseFactory, timeoutMs, label = '操作') {
     const ms = Math.max(1000, Number(timeoutMs) || 0);
     return new Promise((resolve, reject) => {
         let settled = false;
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timer = setTimeout(() => {
             if (settled) return;
             settled = true;
+            if (controller) controller.abort();
             reject(new TimeoutError(`${label}超时（${Math.round(ms / 1000)} 秒）`));
         }, ms);
         Promise.resolve()
-            .then(() => typeof promiseFactory === 'function' ? promiseFactory() : promiseFactory)
+            .then(() => typeof promiseFactory === 'function' ? promiseFactory(controller?.signal) : promiseFactory)
             .then(value => {
                 if (settled) return;
                 settled = true;

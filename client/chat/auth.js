@@ -1,6 +1,22 @@
 // --- 认证逻辑 ---
 let isLogin = true;
 let allowPublicRegistration = false;
+window.allowPublicRegistration = false;
+window.setPublicRegistrationState = (enabled) => {
+    allowPublicRegistration = enabled === true;
+    window.allowPublicRegistration = allowPublicRegistration;
+    document.getElementById('auth-toggle')?.classList.toggle('hidden', !allowPublicRegistration);
+};
+window.PASSWORD_RULE_DESCRIPTION = '至少 8 位，并同时包含字母和数字';
+window.getPasswordValidationMessage = (password, label = '密码') => {
+    const value = String(password || '');
+    const missing = [];
+    if (!value) return `请输入${label}。${label}要求：${window.PASSWORD_RULE_DESCRIPTION}。`;
+    if (value.length < 8) missing.push('至少 8 位');
+    if (!/[A-Za-z]/.test(value)) missing.push('包含字母');
+    if (!/[0-9]/.test(value)) missing.push('包含数字');
+    return missing.length ? `${label}不符合要求：请确保${missing.join('、')}。完整规则：${window.PASSWORD_RULE_DESCRIPTION}。` : '';
+};
 
 window.toggleAuthPassword = (inputId, iconId) => {
     const input = document.getElementById(inputId);
@@ -19,14 +35,10 @@ async function loadAuthConfig() {
     try {
         const res = await fetch(API_BASE + '/auth/config');
         const data = await res.json();
-        allowPublicRegistration = data.allowPublicRegistration === true;
+        window.setPublicRegistrationState(data.allowPublicRegistration === true);
         window.publicUrl = data.publicUrl || '';
-        if (!allowPublicRegistration) {
-            document.getElementById('auth-toggle')?.classList.add('hidden');
-        }
     } catch (e) {
-        allowPublicRegistration = false;
-        document.getElementById('auth-toggle')?.classList.add('hidden');
+        window.setPublicRegistrationState(false);
     }
 }
 
@@ -85,6 +97,8 @@ document.getElementById('auth-toggle')?.addEventListener('click', () => {
     document.getElementById('auth-title').innerText = isLogin ? '智枢' : '智枢 - 注册账号';
     document.getElementById('auth-toggle').innerText = isLogin ? '没有账号？点击注册' : '已有账号？点击登录';
     document.getElementById('auth-submit').innerText = isLogin ? '进入系统' : '立即注册';
+    const passwordInput = document.getElementById('password');
+    if (passwordInput) passwordInput.placeholder = isLogin ? '密码' : '密码（至少8位，包含字母和数字）';
     document.querySelectorAll('.reg-only').forEach(el => el.classList.toggle('hidden', isLogin));
 });
 
@@ -108,6 +122,8 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     
     if (!isLogin) {
         if (password !== confirmPw) return showToast('两次输入的密码不一致', 'error');
+        const passwordError = window.getPasswordValidationMessage(password);
+        if (passwordError) return showToast(passwordError, 'error');
         if (!nickname) return showToast('请输入显示名称', 'error');
         if (!/^[\u4e00-\u9fa5]+$/.test(nickname)) return showToast('显示名称必须是中文姓名', 'error');
         if (!unit) return showToast('请输入工作单位', 'error');
@@ -394,7 +410,8 @@ window.updatePassword = async function() {
 
     if (!oldPassword || !newPassword || !confirmPassword) return showToast('请填写所有密码项');
     if (newPassword !== confirmPassword) return showToast('新密码两次输入不一致', 'error');
-    if (newPassword.length < 8) return showToast('新密码至少需要 8 位', 'error');
+    const passwordError = window.getPasswordValidationMessage?.(newPassword, '新密码') || '';
+    if (passwordError) return showToast(passwordError, 'error');
 
     try {
         const res = await apiFetch(`${API_BASE}/settings/password`, {

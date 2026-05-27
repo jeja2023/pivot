@@ -1,6 +1,20 @@
 // --- 用户管理模块 User Management ---
 const userActionCache = new Map();
 
+function setPublicRegistrationToggle(enabled) {
+    const toggle = document.getElementById('public-registration-toggle');
+    const status = document.getElementById('public-registration-status');
+    if (toggle) toggle.checked = enabled === true;
+    if (status) {
+        status.textContent = enabled ? '已开启' : '已关闭';
+        status.classList.toggle('is-off', enabled !== true);
+    }
+}
+
+function userPasswordError(password, label = '密码') {
+    return window.getPasswordValidationMessage?.(password, label) || '';
+}
+
 function renderUserActionButton(action, label, userOrId, className = 'btn-secondary') {
     const userId = typeof userOrId === 'object' ? userOrId.id : userOrId;
     if (typeof userOrId === 'object') userActionCache.set(String(userId), userOrId);
@@ -8,9 +22,22 @@ function renderUserActionButton(action, label, userOrId, className = 'btn-second
 }
 
 window.loadUsers = async function(page = 1) {
-    const res = await fetch(`${API_BASE}/admin/users?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
-    const { data, total, isSuperAdmin } = await res.json();
+    const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
+    pageState.users = requestedPage;
+    const params = new URLSearchParams({ page: String(requestedPage), limit: String(limit) });
+    const res = await fetch(`${API_BASE}/admin/users?${params.toString()}`, { headers: authHeaders() });
+    const { data = [], total = 0, isSuperAdmin, allowPublicRegistration } = await res.json();
+    const totalCount = Number(total) || 0;
+    const lastPage = Math.max(Math.ceil(totalCount / limit), 1);
+    if (requestedPage > lastPage && totalCount > 0) return window.loadUsers(lastPage);
+    if (!res.ok) {
+        renderTableMessage(document.getElementById('user-list-body'), 9, '用户加载失败');
+        renderPagination('users', 0, 1);
+        return;
+    }
     const canViewUserRecords = isSuperAdmin === true || currentUser?.username === 'admin';
+    setPublicRegistrationToggle(allowPublicRegistration === true);
     userActionCache.clear();
     document.getElementById('user-list-body').innerHTML = data.map(u => `
         <tr>
@@ -32,7 +59,7 @@ window.loadUsers = async function(page = 1) {
             </td>
         </tr>
     `).join('');
-    renderPagination('users', total, page);
+    renderPagination('users', totalCount, requestedPage);
 }
 
 document.getElementById('user-list-body')?.addEventListener('click', (event) => {
@@ -111,6 +138,10 @@ window.saveUser = async () => {
         role: document.getElementById('u-role').value,
         status: document.getElementById('u-status').value
     };
+    if (!id) {
+        const passwordError = userPasswordError(payload.password, '初始密码');
+        if (passwordError) return showToast(passwordError, 'error');
+    }
     const res = await fetch(API_BASE + (id ? `/admin/users/${id}` : '/admin/users'), {
         method: id ? 'PUT' : 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -126,12 +157,14 @@ window.saveUser = async () => {
 window.resetUserPassword = async (id) => {
     const password = await window.showInputPrompt({
         title: '重置密码',
-        message: '请输入新密码，至少 8 位，并包含字母和数字。',
+        message: `请输入新密码，${window.PASSWORD_RULE_DESCRIPTION || '至少 8 位，并同时包含字母和数字'}。`,
         type: 'password',
         placeholder: '新密码',
         autocomplete: 'new-password'
     });
     if (!password) return;
+    const passwordError = userPasswordError(password, '新密码');
+    if (passwordError) return showToast(passwordError, 'error');
     const res = await fetch(`${API_BASE}/admin/users/${id}/password`, {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -140,6 +173,32 @@ window.resetUserPassword = async (id) => {
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '重置失败', 'error');
     showToast('密码已重置');
+};
+
+window.updatePublicRegistrationSetting = async () => {
+    const toggle = document.getElementById('public-registration-toggle');
+    if (!toggle || currentUser?.username !== 'admin') return;
+    const previous = !toggle.checked;
+    toggle.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/admin/users/registration`, {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ allowPublicRegistration: toggle.checked })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '开放注册设置保存失败');
+        setPublicRegistrationToggle(data.allowPublicRegistration === true);
+        window.allowPublicRegistration = data.allowPublicRegistration === true;
+        window.setPublicRegistrationState?.(window.allowPublicRegistration);
+        document.getElementById('auth-toggle')?.classList.toggle('hidden', !window.allowPublicRegistration);
+        showToast(data.allowPublicRegistration ? '开放注册已开启' : '开放注册已关闭');
+    } catch (e) {
+        setPublicRegistrationToggle(previous);
+        showToast(e.message, 'error');
+    } finally {
+        toggle.disabled = false;
+    }
 };
 
 window.exportUsers = () => downloadFileByFetch(`${API_BASE}/admin/users/export`, 'users.csv');
@@ -263,8 +322,10 @@ window.importUsers = async () => {
         if (data.success) {
             showToast(`成功导入 ${data.count} 名用户`);
             loadUsers();
+        } else if (data.error) {
+            showToast(data.error, 'error');
         }
-    } catch (e) { showToast('导入失败', 'error'); }
+    } catch (e) { showToast(e.message || '导入失败', 'error'); }
     fileInput.value = '';
 };
 

@@ -1,13 +1,30 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.55-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.57-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、能力库调用（兼容 MCP）、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.55
+## 最新版本：0.0.57
+
+### v0.0.57 更新摘要
+
+- **开放注册后台开关**：内置 `admin` 可在“系统设置 > 用户管理”右上角直接开启或关闭开放注册；设置写入数据库并即时生效，`.env` 中的 `ALLOW_PUBLIC_REGISTRATION` 仅作为首次默认值。
+- **注册与密码提示优化**：注册、管理员添加用户、重置密码和个人改密统一返回 400 输入错误；密码规则明确为“至少 8 位，并同时包含字母和数字”，注册页密码框内直接展示规则，提交时提示缺少长度、字母或数字的具体原因。
+- **用户管理体验增强**：开放注册开关回到用户操作区紧凑展示，用户列表分页回退、导入失败、保存失败和重置密码失败会优先展示具体后端错误。
+- **上下文压缩与用量刷新**：上下文用量圆环可手动触发压缩，压缩状态、完成提示、会话重载和实时 token 用量刷新联动，模型调用超时和取消错误更明确。
+- **审计与运营表格优化**：审计日志列表和导出补齐显示名字段，用量明细、API Key 和第三方调用记录表格继续优化列宽、Token 展示和空态提示。
+- **文档与版本同步**：应用版本升级至 `v0.0.57`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、Service Worker vendor 缓存版本、README 与 CHANGELOG。
+
+### v0.0.56 更新摘要
+
+- **聊天消息同步修复**：流式回复保存完成后会同步回填用户消息与助手消息的持久化 ID，并刷新当前会话上下文用量；如果当前会话 DOM 中缺少刚发送或刚生成的消息，会自动重新加载当前会话，避免用户消息需要刷新页面才显示。
+- **流式代码块滚动修复**：回复生成过程中会同时保持聊天列表和最新代码块贴近底部；当用户主动向上滚动查看历史时不会强制抢回视口，代码块内容会跟随最新增量显示。
+- **上下文压缩交互补齐**：输入框上下文圆环改为可点击按钮，新增 `GET /api/sessions/:id/context` 查询实时用量和 `POST /api/sessions/:id/compact` 手动压缩接口，压缩中有忙碌态，完成后刷新用量并在当前会话重新加载压缩结果。
+- **自动压缩策略调整**：后台压缩不再等待“活跃消息超过 10 条”，默认在活跃上下文 token 超过 `MEMORY_THRESHOLD`（当前 12K）且存在可归档早期消息时触发；`MEMORY_MIN_MESSAGES_TO_COMPRESS` 默认降为 `1`，`MEMORY_SUMMARY_KEEP_COUNT` 可配置保留最近消息数量，更适合单条超长输入的场景。
+- **文档与版本同步**：应用版本升级至 `v0.0.56`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、Service Worker vendor 缓存版本、README 与 CHANGELOG。
 
 ### v0.0.55 更新摘要
 
@@ -91,7 +108,7 @@
 
 - **LRU / TtlCache 工具**：新增 `server/cache.js`，提供带容量上限和 TTL 的 LRU 与懒清理 TtlCache；服务端 `dirSizeCache` 改用 LRU，避免内网长期常驻部署的目录尺寸缓存无限增长。
 - **MCP 调用日志脱敏**：新增 `redactSecrets` / `maskSecretString`，MCP 调用日志的 input/output 在写入审计表前自动屏蔽 `api_key`、`Bearer`、`sk-*`、JWT 等敏感字段，避免落入合规导出包。
-- **后台任务超时与并发治理**：新增 `withTimeout` / `KeyedConcurrencyGuard` / `TimeoutError`；`compressMemory` 接入超时（默认 60s）与会话级去重，全局并发上限可调；GPU 监控、模型端点监控、智能体任务恢复等启动失败改为带日志告警，不再静默吞错。
+- **后台任务超时与并发治理**：新增 `withTimeout` / `KeyedConcurrencyGuard` / `TimeoutError`；`compressMemory` 接入超时与会话级去重，全局并发上限可调；GPU 监控、模型端点监控、智能体任务恢复等启动失败改为带日志告警，不再静默吞错。
 - **MCP 审批服务端二次校验**：移除 `agent-runtime` 中的 `metadata.approval === 'all_mcp_approved'` 死分支，只承认通过 `approveAgentTool` 写入的工具白名单。
 - **智能体运行时拆分**：从 1978 行的 `agent-runtime.js` 拆出 `agent-validators.js`（常量与所有 normalize* 函数），主文件减少约 200 行，对外导出表完全保持。
 - **回归测试加固**：新增 9 项基础设施单测，`npm test` 通过 `84/84`。
@@ -162,7 +179,9 @@
 - **模型费用统计**：模型配置增加输入/输出百万 Token 单价与币种，用量页和导出报表同步展示估算成本。
 - **安全与验证**：新增文本完整性检查并收紧前端 CSP；当前 `npm run verify` 已通过，安全测试通过 `64/64`。
 
-## 近期主要升级（v0.0.43 → v0.0.51）
+## 近期主要升级（v0.0.43 → v0.0.57）
+
+- **聊天与上下文治理（v0.0.56）**：修复流式回复后用户消息需要刷新才显示、代码块生成时停留在顶部、上下文圆环用量不刷新等问题；补齐手动压缩入口和上下文查询/压缩接口，自动压缩改为超过 `MEMORY_THRESHOLD` 后按 token 压力触发，不再等待活跃消息超过 10 条。
 
 - **智能体模型路由（v0.0.46 / v0.0.50）**：6 种策略 `fixed / auto-vision / auto-context / auto-cost / auto-load / auto-escalate`，可在智能体模板与单次任务里选择；`auto-escalate` 会先用最便宜模型尝试，启发式判定低置信后自动升级到更强模型重新合成。
 - **DAG 可视化编辑器（v0.0.47 / v0.0.51）**：原生 SVG + 拖拽，节点可拖动、出端口拖到入端口即创建依赖；工具栏提供添加节点 / 自动布局 / 适配画布 / 从 JSON 同步；详情面板编辑标题、工具、条件、输入参数与依赖；滚轮缩放、空白平移与右下角小地图便于浏览大型流程；JSON 视图折叠保留为专家模式入口。
@@ -415,6 +434,7 @@ cp .env.example .env
 ```
 
 `.env.example` 是配置模板，实际服务启动时读取 `.env`。生产部署修改 `.env` 后需要重启服务，新的登录有效期需要重新登录后才会体现在 Cookie 中。
+开放注册的 `.env` 值只作为首次初始化默认值；系统运行后请由内置 `admin` 在“系统设置 > 用户管理”页面切换，设置会写入数据库并即时生效。
 局域网部署时，通常可以保持 `PUBLIC_URL` 为空，`CORS_ORIGIN` 只填写实际会访问本系统的内网地址；如果是纯 HTTP 内网环境，`COOKIE_SECURE` 保持 `false` 即可。若模型服务、MCP 服务或反向代理使用内网主机名，把它们补到 `PIVOT_LOCAL_MODEL_HOSTS` 和 `MODEL_URL_ALLOWLIST` 里，避免被当成外网地址拦截。
 
 ### 3. 启动服务
@@ -449,6 +469,9 @@ JWT_SECRET=change-me
 ACCESS_TOKEN_EXPIRES_MINUTES=480
 REFRESH_TOKEN_EXPIRES_DAYS=30
 
+# 账号注册策略：首次初始化开放注册默认值，后续可在用户管理页面开关
+ALLOW_PUBLIC_REGISTRATION=false
+
 # 全局 AI 并发与排队
 MAX_CONCURRENT_AI_REQUESTS=1
 MAX_AI_QUEUE_SIZE=20
@@ -471,8 +494,12 @@ AGENT_STALE_RUNNING_MINUTES=30
 AGENT_STREAMING_TOOLS=false
 
 # 后台记忆压缩（v0.0.43）
+# 自动压缩触发阈值与保留策略（v0.0.56）
+MEMORY_THRESHOLD=12000
+MEMORY_MIN_MESSAGES_TO_COMPRESS=1
+MEMORY_SUMMARY_KEEP_COUNT=6
 # 超时（毫秒）与全局并发上限，会话级去重默认开启
-MEMORY_COMPRESSION_TIMEOUT_MS=60000
+MEMORY_COMPRESSION_TIMEOUT_MS=180000
 MEMORY_COMPRESSION_MAX_CONCURRENT=2
 
 # 数据库 MCP
@@ -573,4 +600,4 @@ node -e "require('./server/db'); console.log('db init ok')"
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.55（能力库工具调用链路、查询后图表生成、知识库检索稳定性、个人检索配置摘要和知识库文件格式支持同步升级；累计 v0.0.43–v0.0.55 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、工作流可视化编辑器、流式 function calling、实时流式 SSE、任务时间轴、工具统计、能力库治理和知识库格式扩展）
+**当前版本**：v0.0.57（开放注册运行时开关、注册/密码错误提示、用户管理交互、上下文压缩入口、审计显示名、用量与 API 账户表格体验同步升级；累计 v0.0.43–v0.0.57 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、工作流可视化编辑器、流式 function calling、实时流式 SSE、任务时间轴、工具统计、能力库治理、知识库格式扩展、长会话上下文治理和账号注册治理）

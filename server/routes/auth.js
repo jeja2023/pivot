@@ -33,9 +33,17 @@ function createAuthRouter({
             return res.status(403).json({ error: '当前已关闭公开注册，请联系管理员创建账号' });
         }
         const { username, password, nickname, unit } = req.body;
-        const user = register(username, password, nickname, unit);
-        logAction(req, '用户注册', `注册账号: ${username}`);
-        res.json(user);
+        try {
+            const user = register(username, password, nickname, unit);
+            logAction(req, '用户注册', `注册账号: ${username}`);
+            res.json(user);
+        } catch (e) {
+            if (e.status === 400) {
+                logAction(req, '用户注册失败', `注册账号: ${username || '-'}，原因: ${e.message}`);
+                return res.status(400).json({ error: e.message });
+            }
+            throw e;
+        }
     }));
 
     router.get('/auth/config', (req, res) => {
