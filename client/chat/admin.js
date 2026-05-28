@@ -108,6 +108,19 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
+const SETTINGS_TABS = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'users', 'logs', 'monitor', 'report']);
+
+function getDefaultSettingsTab() {
+    return currentUser?.role === 'admin' ? 'ops' : 'models';
+}
+
+function normalizeSettingsTab(tab) {
+    let target = SETTINGS_TABS.includes(tab) ? tab : getDefaultSettingsTab();
+    if (ADMIN_ONLY_SETTINGS_TABS.has(target) && currentUser?.role !== 'admin') target = 'models';
+    return target;
+}
+
 const adminFeatureScripts = [
     '/chat/models.js',
     '/chat/users.js',
@@ -152,7 +165,7 @@ window.ensureAdminFeatureScripts = async () => {
     }
 };
 
-window.openAdminPanel = async () => {
+window.openAdminPanel = async (options = {}) => {
     await window.ensureAdminFeatureScripts();
     const adminContainer = document.getElementById('admin-container');
     window.showMainWorkspace?.('settings');
@@ -175,22 +188,23 @@ window.openAdminPanel = async () => {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
     await loadSettings();
-    await window.switchTab(isAdmin ? 'ops' : 'models');
+    const targetTab = options.restore ? normalizeSettingsTab(window.getStoredSettingsTab?.()) : getDefaultSettingsTab();
+    await window.switchTab(targetTab);
 };
 
 window.closeModal = () => window.showMainWorkspace?.('chat');
 
 window.switchTab = async (tab) => {
     await window.ensureAdminFeatureScripts();
-    const adminTabs = new Set(['ops', 'users', 'logs', 'monitor', 'report']);
-    if (adminTabs.has(tab) && currentUser?.role !== 'admin') tab = 'models';
-    const tabs = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
+    tab = normalizeSettingsTab(tab);
+    const tabs = SETTINGS_TABS;
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
     
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
+    window.persistSettingsTab?.(tab);
     loadTabData(tab);
 };
 

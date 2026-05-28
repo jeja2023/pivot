@@ -3,6 +3,58 @@ let currentAbortController = null;
 let pendingAttachments = [];
 const MAX_PENDING_ATTACHMENTS = 5;
 window.MAX_PENDING_ATTACHMENTS = MAX_PENDING_ATTACHMENTS;
+window.pendingAttachments = pendingAttachments;
+
+function syncPendingAttachmentsGlobal() {
+    window.pendingAttachments = pendingAttachments;
+}
+
+function isChatImageAttachment(item = {}) {
+    const type = String(item.type || '').toLowerCase();
+    const nameOrUrl = String(item.name || item.url || '').split(/[?#]/)[0];
+    return type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(nameOrUrl);
+}
+
+function escapeAttachmentMarkdownLabel(value) {
+    return String(value || '附件').replace(/\s+/g, ' ').replace(/[\\[\]]/g, '\\$&').trim() || '附件';
+}
+
+function buildAttachmentMarkdown(name, url, isImage) {
+    const label = escapeAttachmentMarkdownLabel(name);
+    return isImage ? `![${label}](${url})` : `[附件: ${label}](${url})`;
+}
+
+function getUploadSessionIdFromUrl(url = '') {
+    const cleanUrl = String(url || '').split(/[?#]/)[0];
+    let decoded = cleanUrl;
+    try {
+        decoded = decodeURIComponent(cleanUrl);
+    } catch (e) {
+        return '';
+    }
+    const parts = decoded.split('/');
+    return parts[1] === 'uploads' ? parts[3] || '' : '';
+}
+
+function attachmentBelongsToSession(attachment, sessionId) {
+    const expected = String(sessionId || '');
+    if (!expected) return true;
+    const explicitSession = String(attachment?.sessionId || '');
+    if (explicitSession) return explicitSession === expected;
+    const urlSession = getUploadSessionIdFromUrl(attachment?.url);
+    return !urlSession || urlSession === expected;
+}
+
+function clearPendingAttachments(message = '') {
+    if (pendingAttachments.length === 0) return;
+    pendingAttachments = [];
+    syncPendingAttachmentsGlobal();
+    renderAttachmentPreviews?.();
+    if (message) showToast(message, 'info');
+}
+
+window.isChatImageAttachment = isChatImageAttachment;
+window.syncPendingAttachmentsGlobal = syncPendingAttachmentsGlobal;
 
 const escapeChatStatusHtml = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -245,13 +297,23 @@ window.createSession = async function(title) {
 
 window.selectSession = async function(id, title, options = {}) {
     window.showMainWorkspace?.('chat');
+    if (String(currentSessionId || '') !== String(id || '')) {
+        clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
+    }
     currentSessionId = id;
+    window.persistActiveChatSession?.(id);
     window.markActiveSessionInList?.(id);
     if (title) document.getElementById('current-title').innerText = title;
     
     const res = await apiFetch(API_BASE + `/sessions/${id}`);
     const data = await res.json();
-    if (!res.ok) return;
+    if (!res.ok) {
+        if (options.restore) {
+            currentSessionId = null;
+            window.persistActiveChatSession?.('');
+        }
+        return;
+    }
     
     const session = data.session;
     const messages = data.messages;
@@ -273,6 +335,7 @@ window.selectSession = async function(id, title, options = {}) {
 }
 
 window.sendMessage = async function(isRegenerate = false) {
+    const shouldRegenerate = isRegenerate === true;
     if (currentAbortController) {
         showToast('当前仍有回答正在生成，请等待完成或先停止生成。', 'warning');
         return;
@@ -290,7 +353,15 @@ window.sendMessage = async function(isRegenerate = false) {
         }
     }
     
-    if (!content && pendingAttachments.length === 0 && !isRegenerate) return;
+    if (!content && pendingAttachments.length === 0 && !shouldRegenerate) return;
+
+    if (pendingAttachments.length > 0) {
+        const sessionMismatches = pendingAttachments.some(item => !attachmentBelongsToSession(item, currentSessionId));
+        if (sessionMismatches) {
+            clearPendingAttachments('附件属于其他会话，请重新上传后发送');
+            return;
+        }
+    }
 
     if (pendingAttachments.length > 0) {
         const attachmentLinks = pendingAttachments.map(a => a.markdown).join('\n');
@@ -302,6 +373,7 @@ window.sendMessage = async function(isRegenerate = false) {
             .join('');
         if (docTexts) content += docTexts;
     }
+    const sentAttachments = pendingAttachments.map(item => ({ ...item }));
 
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     const mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
@@ -314,6 +386,7 @@ window.sendMessage = async function(isRegenerate = false) {
     document.getElementById('user-input').value = '';
     if (window.resizeUserInput) window.resizeUserInput();
     pendingAttachments = [];
+    syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();
 
     if (!currentSessionId) {
@@ -330,8 +403,8 @@ window.sendMessage = async function(isRegenerate = false) {
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
 
     let userMsgEl = null;
-    if (!isRegenerate) {
-        userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date() });
+    if (!shouldRegenerate) {
+        userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date(), attachments: sentAttachments });
     }
     const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date() });
     const textBody = aiMsgEl.querySelector('.text-body');
@@ -359,7 +432,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 content,
                 displayContent: stripInternalReferenceText(displayContent || content),
                 modelId,
-                regenerate: isRegenerate,
+                regenerate: shouldRegenerate,
                 ragEnabled,
                 mcpEnabled,
                 mcpConfirmed
@@ -439,6 +512,12 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.status === 'error') showToast(data.message || '能力库工具调用失败', 'warning');
                     return;
                 }
+                if (data.type === 'rag') {
+                    updateAssistantStatus(data.message || '正在检索知识库');
+                    if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
+                    if (data.status === 'empty') showToast(data.message || '知识库未命中', 'warning');
+                    return;
+                }
                 if (data.type === 'context_budget') {
                     updateAssistantStatus(data.message || '本次请求内容较长，已自动裁剪上下文后继续生成。');
                     if (data.status === 'trimmed') showToast(data.message || '已自动裁剪较早上下文后继续生成', 'info');
@@ -492,7 +571,7 @@ window.sendMessage = async function(isRegenerate = false) {
         });
         await window.refreshCurrentContextUsage?.(requestSessionId);
 
-        if (isViewingRequestSession() && (!isMessageContentInDocument(aiMsgEl) || (!isRegenerate && !isMessageContentInDocument(userMsgEl)))) {
+        if (isViewingRequestSession() && (!isMessageContentInDocument(aiMsgEl) || (!shouldRegenerate && !isMessageContentInDocument(userMsgEl)))) {
             await selectSession(requestSessionId);
         } else if (!isViewingRequestSession()) {
             showToast('原会话的回答已生成完成，可切回查看。', 'info');
@@ -543,13 +622,14 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
         document.getElementById('current-title').innerText = s.title;
         window.loadSessions();
     }
-    const uploadChatFile = async (file, password = '', onProgress = null) => {
+    const batchSessionId = String(currentSessionId || '');
+    const uploadChatFile = async (file, uploadSessionId, password = '', onProgress = null) => {
         const fd = new FormData();
         fd.append('file', file);
         if (password) fd.append('password', password);
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(currentSessionId)}`);
+            xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(uploadSessionId)}`);
             Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable && typeof onProgress === 'function') {
@@ -578,14 +658,21 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     try {
         let uploadedCount = 0;
         let skippedCount = 0;
+        let sessionSwitchedDuringUpload = false;
         showToast(files.length > 1 ? `正在上传 ${files.length} 个文件...` : '正在上传...', 'info');
         for (const file of files) {
+            const uploadSessionId = batchSessionId;
+            if (String(currentSessionId || '') !== uploadSessionId) {
+                skippedCount += 1;
+                sessionSwitchedDuringUpload = true;
+                continue;
+            }
             if (pendingAttachments.length >= maxAttachments) {
                 skippedCount += 1;
                 continue;
             }
-            const hasPendingImage = pendingAttachments.some(item => String(item.type || '').startsWith('image/'));
-            const selectedIsImage = String(file.type || '').startsWith('image/');
+            const selectedIsImage = isChatImageAttachment(file);
+            const hasPendingImage = pendingAttachments.some(item => isChatImageAttachment(item));
             if (selectedIsImage && hasPendingImage) {
                 skippedCount += 1;
                 continue;
@@ -594,7 +681,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
             let data;
             const progress = createUploadProgress(file.name);
             try {
-                data = await uploadChatFile(file, '', percent => progress.update(percent));
+                data = await uploadChatFile(file, uploadSessionId, '', percent => progress.update(percent));
             } catch (uploadErr) {
                 if (uploadErr.data?.passwordRequired) {
                     progress.close();
@@ -611,7 +698,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
                         continue;
                     }
                     const retryProgress = createUploadProgress(file.name);
-                    data = await uploadChatFile(file, password, percent => retryProgress.update(percent));
+                    data = await uploadChatFile(file, uploadSessionId, password, percent => retryProgress.update(percent));
                     retryProgress.close();
                 } else {
                     progress.close();
@@ -621,23 +708,49 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
             progress.close();
 
             if (data.url) {
-                pendingAttachments.push({ name: data.name, url: data.url, type: file.type, extractedText: data.extractedText, markdown: file.type.startsWith('image/') ? `![${data.name}](${data.url})` : `[附件: ${data.name}](${data.url})` });
+                if (String(currentSessionId || '') !== uploadSessionId || String(data.sessionId || uploadSessionId) !== uploadSessionId) {
+                    skippedCount += 1;
+                    sessionSwitchedDuringUpload = true;
+                    continue;
+                }
+                const attachmentType = data.type || (selectedIsImage ? 'image/jpeg' : file.type);
+                pendingAttachments.push({
+                    name: data.name,
+                    url: data.url,
+                    type: attachmentType,
+                    sessionId: data.sessionId || uploadSessionId,
+                    extractedText: data.extractedText,
+                    markdown: buildAttachmentMarkdown(data.name, data.url, isChatImageAttachment({ name: data.name, url: data.url, type: attachmentType }))
+                });
                 uploadedCount += 1;
                 (data.visionAttachments || []).forEach(item => {
                     if (pendingAttachments.length >= maxAttachments) return;
-                    if (pendingAttachments.some(entry => String(entry.type || '').startsWith('image/'))) return;
-                    pendingAttachments.push({ name: item.name, url: item.url, type: 'image/png', extractedText: '', markdown: item.markdown || `![${item.name}](${item.url})` });
+                    if (pendingAttachments.some(entry => isChatImageAttachment(entry))) return;
+                    pendingAttachments.push({
+                        name: item.name,
+                        url: item.url,
+                        type: item.type || 'image/png',
+                        sessionId: item.sessionId || data.sessionId || currentSessionId,
+                        extractedText: '',
+                        markdown: item.markdown || buildAttachmentMarkdown(item.name, item.url, true)
+                    });
                 });
+                syncPendingAttachmentsGlobal();
                 renderAttachmentPreviews();
             }
         }
+        if (sessionSwitchedDuringUpload) showToast('会话已切换，刚上传的附件不会加入当前输入框', 'info');
         if (uploadedCount > 0) showToast(skippedCount > 0 ? `已上传 ${uploadedCount} 个，跳过 ${skippedCount} 个` : '上传成功');
         else if (skippedCount > 0) showToast('没有可上传的文件：最多 5 个附件，且图片每次仅 1 张', 'error');
     } catch (e) { showToast(e.message || '上传失败', 'error'); }
     e.target.value = '';
 });
 
-window.removeAttachment = (index) => { pendingAttachments.splice(index, 1); renderAttachmentPreviews(); };
+window.removeAttachment = (index) => {
+    pendingAttachments.splice(index, 1);
+    syncPendingAttachmentsGlobal();
+    renderAttachmentPreviews();
+};
 
 window.saveMyDefaultModel = async (modelId = undefined, btn = null) => {
     const targetModelId = (modelId === undefined) ? document.getElementById('model-selector')?.value : modelId;

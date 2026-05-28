@@ -6,6 +6,7 @@ const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
+    encodeAttachmentUrl,
     escapeCsvCell,
     parseCsvLine
 } = require('../security');
@@ -275,14 +276,16 @@ function createAdminUsersRouter({
         const includeDeleted = req.query.includeDeleted === 'true';
         const deletedFilter = includeDeleted ? '' : 'AND a.deleted_at IS NULL';
         const attachments = db.prepare(`
-            SELECT a.*, s.title AS session_title,
-                   '/' || replace(a.file_path, '\\', '/') || CASE WHEN a.access_token IS NOT NULL AND a.access_token != '' THEN '?token=' || a.access_token ELSE '' END AS url
+            SELECT a.*, s.title AS session_title
             FROM attachments a
             LEFT JOIN sessions s ON s.id = a.session_id
             WHERE a.user_id = ? ${deletedFilter}
             ORDER BY a.created_at DESC
             LIMIT 1000
-        `).all(targetUserId);
+        `).all(targetUserId).map(item => ({
+            ...item,
+            url: encodeAttachmentUrl(item.file_path, item.access_token)
+        }));
         res.json({ data: attachments });
     }));
 

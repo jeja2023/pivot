@@ -197,14 +197,51 @@ function renderTrendChart(canvasId, data) {
     ctx.fillText(formatTokenCount(max), padLeft, 14);
 }
 
+function renderMonitorEndpointLists(endpoints = {}) {
+    const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
+    const listEls = Array.from(document.querySelectorAll('.js-monitor-endpoint-list'));
+    const legacyEl = document.getElementById('monitor-endpoint-list');
+    if (legacyEl && !listEls.includes(legacyEl)) listEls.push(legacyEl);
+    if (listEls.length === 0) return;
+
+    const html = runtimeEndpoints.length
+        ? runtimeEndpoints.map(item => {
+            const concurrencyStatus = item.concurrency || {};
+            const circuit = Number(item.circuitOpenMs || 0) > 0 ? ` · 熔断 ${formatMsDuration(item.circuitOpenMs)}` : '';
+            const failures = Number(item.consecutiveFailures || 0) > 0 ? ` · 失败 ${formatMetricNumber(item.consecutiveFailures)}` : '';
+            const modelNames = (item.models || []).map(model => model.name).filter(Boolean).slice(0, 3).join('、') || item.name || item.host;
+            const detail = `${describeEndpointMonitor(item.monitor)} · 并发 ${formatMetricNumber(concurrencyStatus.active)}/${formatMetricNumber(concurrencyStatus.max)} · 排队 ${formatMetricNumber(concurrencyStatus.queued)}${failures}${circuit}`;
+            const warningClass = item.monitor?.status === 'unreachable' || Number(item.circuitOpenMs || 0) > 0 ? ' is-warning' : '';
+            const locBadge = item.isLocal
+                ? '<span class="monitor-endpoint-badge is-local">本地</span>'
+                : '<span class="monitor-endpoint-badge is-remote">远端</span>';
+            return `<div class="monitor-endpoint${warningClass}">
+                <div class="monitor-row">
+                    <span title="${escapeHtml(item.host || item.key)}">${locBadge}${escapeHtml(modelNames)}</span>
+                    <strong>${escapeHtml(item.host || item.key)}</strong>
+                </div>
+                <div class="monitor-empty">${escapeHtml(detail)}</div>
+            </div>`;
+        }).join('')
+        : '<div class="monitor-empty">暂无模型端点运行数据</div>';
+
+    listEls.forEach(el => { el.innerHTML = html; });
+}
+
 window.loadOpsSummary = async function() {
     try {
-        const [summaryRes, trendRes] = await Promise.all([
+        const includeMonitor = currentUser?.role === 'admin';
+        const [summaryRes, trendRes, monitorRes] = await Promise.all([
             fetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/stats/trend`, { headers: authHeaders() })
+            fetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
+            includeMonitor ? apiFetch(`${API_BASE}/stats/monitor-summary`) : Promise.resolve(null)
         ]);
         const summary = await summaryRes.json();
         const trend = await trendRes.json();
+        if (monitorRes?.ok) {
+            const monitorSummary = await monitorRes.json();
+            renderMonitorEndpointLists(monitorSummary.modelEndpoints || {});
+        }
         const formatSize = (bytes) => {
             const v = Number(bytes) || 0;
             if (v > 1024**3) return `${(v / 1024**3).toFixed(1)} GB`;
@@ -552,7 +589,8 @@ window.loadMonitorSummary = async function() {
         if (ragStorageEl) {
             ragStorageEl.innerHTML = [
                 ['检索总数', `<strong>${formatMetricNumber(data.rag.retrievals)} 次</strong>`],
-                ['命中率', `<strong>${(data.rag.cacheHitRate * 100).toFixed(1)}%</strong>`],
+                ['命中率', `<strong>${(Number(data.rag.hitRate || 0) * 100).toFixed(1)}%</strong>`],
+                ['缓存命中率', `<strong>${(Number(data.rag.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
                 ['平均耗时', `<strong>${data.rag.avgRetrievalMs.toFixed(1)} ms</strong>`],
                 ['索引分片', `<strong>${formatMetricNumber(data.rag.chunksIndexed)}</strong>`],
                 ['数据库大小', `<strong>${formatBytes(data.storage.db)}</strong>`],
@@ -595,30 +633,7 @@ window.loadMonitorSummary = async function() {
             }).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
         }
 
-        const runtimeEndpoints = Array.isArray(endpoints.runtime) ? endpoints.runtime : [];
-        const endpointListEl = document.getElementById('monitor-endpoint-list');
-        if (endpointListEl) {
-            endpointListEl.innerHTML = runtimeEndpoints.length
-                ? runtimeEndpoints.map(item => {
-                    const concurrencyStatus = item.concurrency || {};
-                    const circuit = Number(item.circuitOpenMs || 0) > 0 ? ` · 熔断 ${formatMsDuration(item.circuitOpenMs)}` : '';
-                    const failures = Number(item.consecutiveFailures || 0) > 0 ? ` · 失败 ${formatMetricNumber(item.consecutiveFailures)}` : '';
-                    const modelNames = (item.models || []).map(model => model.name).filter(Boolean).slice(0, 3).join('、') || item.name || item.host;
-                    const detail = `${describeEndpointMonitor(item.monitor)} · 并发 ${formatMetricNumber(concurrencyStatus.active)}/${formatMetricNumber(concurrencyStatus.max)} · 排队 ${formatMetricNumber(concurrencyStatus.queued)}${failures}${circuit}`;
-                    const warningClass = item.monitor?.status === 'unreachable' || Number(item.circuitOpenMs || 0) > 0 ? ' is-warning' : '';
-                    const locBadge = item.isLocal 
-                        ? '<span style="font-size: 0.65rem; background: #f0fdf4; color: #059669; padding: 1px 5px; border-radius: 4px; margin-right: 6px; font-weight: 700; border: 1px solid rgba(5, 150, 105, 0.1);">本地</span>'
-                        : '<span style="font-size: 0.65rem; background: #fef2f2; color: #dc2626; padding: 1px 5px; border-radius: 4px; margin-right: 6px; font-weight: 700; border: 1px solid rgba(220, 38, 38, 0.1);">远端</span>';
-                    return `<div class="monitor-endpoint${warningClass}">
-                        <div class="monitor-row">
-                            <span title="${escapeHtml(item.host || item.key)}">${locBadge}${escapeHtml(modelNames)}</span>
-                            <strong>${escapeHtml(item.host || item.key)}</strong>
-                        </div>
-                        <div class="monitor-empty">${escapeHtml(detail)}</div>
-                    </div>`;
-                }).join('')
-                : '<div class="monitor-empty">暂无模型端点运行数据</div>';
-        }
+        renderMonitorEndpointLists(endpoints);
 
         const routes = data.http.routes || [];
         const routesHtml = routes.length

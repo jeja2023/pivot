@@ -503,7 +503,13 @@ async function retrieveContext(userId, query, topK = null) {
 
     const cachedResult = getFromCache(userId, normalizedQuery, config.topK);
     if (cachedResult !== null) {
-        recordRetrieval({ status: 'cache_hit', durationMs: Date.now() - startedAt, cacheHit: true });
+        const cachedMatches = cachedResult ? Math.max(1, (String(cachedResult).match(/\[引用\s+\d+/g) || []).length) : 0;
+        recordRetrieval({
+            status: 'cache_hit',
+            durationMs: Date.now() - startedAt,
+            cacheHit: true,
+            matches: cachedMatches
+        });
         return cachedResult;
     }
 

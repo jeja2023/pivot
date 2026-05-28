@@ -56,7 +56,14 @@ window.showApp = () => {
     if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    if (window.showMainWorkspace) window.showMainWorkspace('chat');
+    if (window.restoreMainWorkspaceAfterLogin) {
+        Promise.resolve(window.restoreMainWorkspaceAfterLogin()).catch(err => {
+            console.error('Workspace restore failed:', err);
+            window.showMainWorkspace?.('chat');
+        });
+    } else if (window.showMainWorkspace) {
+        window.showMainWorkspace('chat');
+    }
 
     // 更新用户信息显示
     const userDisplay = document.getElementById('user-info') || document.getElementById('current-username');

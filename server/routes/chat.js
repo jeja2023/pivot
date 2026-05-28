@@ -74,7 +74,8 @@ function getImageDataUrl(uploadUrl, userId, sessionId) {
 
 function buildVisionHistory(history, origin, userId, sessionId) {
     if (!origin) return history;
-    const imageMarkdown = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
+    const uploadUrlPattern = String.raw`\/uploads\/(?:[^()]|\([^)]*\))+`;
+    const imageMarkdown = new RegExp(String.raw`!\[([^\]]*)\]\((${uploadUrlPattern})\)`, 'g');
     return history.map(message => {
         if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.includes('/uploads/')) {
             return message;
@@ -126,6 +127,73 @@ function limitVisionImages(history) {
         }
         return { ...message, content };
     });
+}
+
+function buildRagContextMessage(ragContext) {
+    return [
+        'PIVOT_RAG_CONTEXT_BEGIN',
+        '【知识库检索结果】',
+        String(ragContext || '').trim(),
+        '',
+        '【回答要求】',
+        '1. 本轮必须优先依据以上知识库检索结果回答。',
+        '2. 如果知识库内容与通用知识、历史会话或模型记忆冲突，以知识库内容为准。',
+        '3. 如果知识库内容不足以回答，请明确说明“知识库中未找到足够依据”，不要自行编造。',
+        '4. 回答中尽量标注引用来源，例如“引用 1 / 来源: 文件名”。',
+        'PIVOT_RAG_CONTEXT_END'
+    ].join('\n');
+}
+
+function injectRagContextBeforeLatestUser(history, ragContext) {
+    if (!ragContext) return history;
+    const nextHistory = Array.isArray(history) ? history.slice() : [];
+    const ragMessage = { role: 'user', content: buildRagContextMessage(ragContext) };
+    for (let i = nextHistory.length - 1; i >= 0; i -= 1) {
+        if (nextHistory[i]?.role === 'user') {
+            nextHistory.splice(i, 0, ragMessage);
+            return nextHistory;
+        }
+    }
+    nextHistory.push(ragMessage);
+    return nextHistory;
+}
+
+function normalizeRegenerateFlag(value) {
+    return value === true || value === 'true';
+}
+
+function flattenMessageContentForQuery(content) {
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) {
+        return content.map(part => {
+            if (typeof part === 'string') return part;
+            if (!part || typeof part !== 'object') return '';
+            if (part.type === 'text' && typeof part.text === 'string') return part.text;
+            if (typeof part.text === 'string') return part.text;
+            if (typeof part.content === 'string') return part.content;
+            return '';
+        }).filter(Boolean).join('\n').trim();
+    }
+    if (content && typeof content === 'object') {
+        if (typeof content.text === 'string') return content.text.trim();
+        if (typeof content.content === 'string') return content.content.trim();
+    }
+    return '';
+}
+
+function resolveRagQueryContent(content, history = []) {
+    const currentContent = String(content || '').trim();
+    if (currentContent) return currentContent;
+    if (!Array.isArray(history)) return '';
+
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+        const message = history[i];
+        if (message?.role !== 'user') continue;
+        const query = flattenMessageContentForQuery(message.content);
+        if (!query || query.includes('PIVOT_RAG_CONTEXT_BEGIN')) continue;
+        return query;
+    }
+    return '';
 }
 
 function buildVisionUnsupportedMessage(modelCfg) {
@@ -481,7 +549,8 @@ function createChatRouter({
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
-        const { content, displayContent, regenerate } = req.body;
+        const { content, displayContent } = req.body;
+        const regenerate = normalizeRegenerateFlag(req.body.regenerate);
         const mcpEnabled = Boolean(req.body.mcpEnabled) && Boolean(req.body.mcpConfirmed);
         const ragEnabled = req.body.ragEnabled !== false;
         const sessionId = String(req.body.sessionId || '').trim();
@@ -689,10 +758,22 @@ function createChatRouter({
         }
 
         let history = await getContext(sessionId, userId, modelCfg);
+        const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
-            const ragContext = await retrieveContext(userId, modelContent);
+            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt) : null;
             if (ragContext) {
-                history.push({ role: 'system', content: ragContext });
+                history = injectRagContextBeforeLatestUser(history, ragContext);
+                writeSse(JSON.stringify({
+                    type: 'rag',
+                    status: 'hit',
+                    message: '知识库已命中，正在基于检索结果生成回答'
+                }));
+            } else {
+                writeSse(JSON.stringify({
+                    type: 'rag',
+                    status: 'empty',
+                    message: '知识库未检索到足够相关内容，将按普通对话继续'
+                }));
             }
         }
         let visionHistory = limitVisionImages(buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
@@ -723,7 +804,7 @@ function createChatRouter({
             const mcpContext = await maybeBuildMcpChatContext({
                 modelCfg,
                 history: visionHistory,
-                userPrompt: modelContent,
+                userPrompt: effectiveUserPrompt || modelContent,
                 tools: mcpTools,
                 user: req.user,
                 writeSse,
@@ -983,7 +1064,11 @@ function createChatRouter({
 }
 
 module.exports = {
+    buildRagContextMessage,
     createChatRouter,
     filterMcpToolsForChatIntent,
-    filterMcpToolsForPlanner
+    filterMcpToolsForPlanner,
+    injectRagContextBeforeLatestUser,
+    normalizeRegenerateFlag,
+    resolveRagQueryContent
 };

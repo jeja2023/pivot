@@ -333,6 +333,25 @@
 .monitor-endpoint:last-child { border-bottom: 0; padding-bottom: 0; }
 .monitor-endpoint.is-warning .monitor-row strong { color: #d97706; }
 .monitor-endpoint.is-warning .monitor-empty { color: #92400e; }
+.monitor-endpoint-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+.monitor-endpoint-badge.is-local {
+    color: #059669;
+    background: #f0fdf4;
+    border: 1px solid rgba(5, 150, 105, 0.1);
+}
+.monitor-endpoint-badge.is-remote {
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid rgba(220, 38, 38, 0.1);
+}
 
 /* 状态圆点样式 */
 .status-dot {
@@ -870,6 +889,18 @@
             "gpu resource"
             "health models"
             "rag observability";
+    }
+}
+@media (max-width: 768px) {
+    .settings-workspace-view #tab-content-monitor .monitor-panels {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "gpu"
+            "resource"
+            "health"
+            "models"
+            "rag"
+            "observability";
     }
 }
 @media (max-height: 900px) and (min-width: 1181px) {

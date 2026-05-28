@@ -234,6 +234,15 @@ customRenderer.link = (href, title, text) => {
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" title="${safeTitle}">${escapeCodeHtml(safeText)}</a>`;
 };
 
+customRenderer.image = (href, title, text) => {
+    if (typeof href === 'object' && href !== null) { text = href.text; title = href.title; href = href.href; }
+    const safeHref = escapeAttrValue(href || '');
+    const safeTitle = escapeAttrValue(title || '');
+    const safeText = escapeAttrValue(text || '图片附件');
+    const titleAttr = safeTitle ? ` title="${safeTitle}"` : '';
+    return `<img class="message-image" src="${safeHref}" alt="${safeText}" loading="lazy"${titleAttr}>`;
+};
+
 // 移除 customRenderer.table，让 marked 默认处理表格生成
 
 function stripInternalReferenceText(content) {
@@ -759,13 +768,86 @@ function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) 
     return renderMarkdown(content);
 }
 
+function hasAttachmentUrl(value = '') {
+    return /^\/uploads\//.test(String(value || '').trim());
+}
+
+function normalizeAttachmentSnapshot(items = []) {
+    if (!Array.isArray(items)) return [];
+    return items.map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const url = String(item.url || '').trim();
+        if (!hasAttachmentUrl(url)) return null;
+        const type = String(item.type || '');
+        return {
+            name: String(item.name || '附件'),
+            url,
+            type,
+            markdown: String(item.markdown || '')
+        };
+    }).filter(Boolean);
+}
+
+function renderMessageAttachmentTiles(attachments = []) {
+    return attachments.map(file => {
+        const safeName = escapeCodeHtml(file.name);
+        const safeAttrName = escapeAttrValue(file.name);
+        const safeUrl = escapeAttrValue(file.url);
+        const isImage = typeof window.isChatImageAttachment === 'function'
+            ? window.isChatImageAttachment(file)
+            : String(file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)(?:[?#].*)?$/i.test(file.url);
+        if (isImage) {
+            return `
+                <figure class="message-attachment image-attachment">
+                    <img class="message-image" src="${safeUrl}" alt="${safeAttrName}" loading="lazy">
+                    <figcaption>${safeName}</figcaption>
+                </figure>
+            `;
+        }
+        return `
+            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="doc-card-link" data-attachment-preview data-attachment-url="${safeUrl}" data-attachment-name="${safeAttrName}" data-attachment-type="${escapeAttrValue(file.type)}">
+                <div class="doc-card">
+                    <div class="doc-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                    <div class="doc-info"><div class="doc-name">${safeName}</div><div class="doc-action">点击下载/预览</div></div>
+                </div>
+            </a>
+        `;
+    }).join('');
+}
+
+function stripSnapshotAttachmentMarkdown(content, attachments = []) {
+    let output = String(content || '');
+    for (const attachment of attachments) {
+        const markdown = String(attachment.markdown || '').trim();
+        if (!markdown) continue;
+        output = output.replace(markdown, '');
+    }
+    return output.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function buildUserMessageHtml(content, stats = null) {
+    const attachments = normalizeAttachmentSnapshot(stats?.attachments || stats?.pendingAttachments || []);
+    if (attachments.length === 0) return renderMarkdown(content);
+
+    const textContent = stripSnapshotAttachmentMarkdown(getDisplayContent('user', content), attachments);
+    const textHtml = textContent ? renderMarkdown(textContent) : '';
+    const attachmentsHtml = renderMessageAttachmentTiles(attachments);
+    return `<div class="message-user-body">${textHtml}${attachmentsHtml}</div>`;
+}
+
+function attachMessageImageLoadPinning(root) {
+    root?.querySelectorAll?.('img.message-image').forEach(img => {
+        img.addEventListener('load', () => window.scrollMessagesToBottom?.(), { once: true });
+    });
+}
+
 function appendMessage(role, content, id = null, stats = null) {
     const container = document.getElementById('message-container');
     const div = document.createElement('div');
     div.className = `message ${role}`;
     if (id) div.dataset.messageId = String(id);
     const displayContent = getDisplayContent(role, content);
-    const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : renderMarkdown(displayContent);
+    const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : buildUserMessageHtml(displayContent, stats);
     const createdAt = stats?.createdAt || stats?.created_at || stats?.created_at_text;
     const messageTime = formatChatDateTime(createdAt);
     const messageTimeTitle = formatChatDateTime(createdAt);
@@ -803,6 +885,7 @@ function appendMessage(role, content, id = null, stats = null) {
         </div>
     `;
     container.appendChild(div);
+    attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
     if (role === 'assistant') renderPivotCharts(div);
     window.scrollMessagesToBottom?.();
@@ -867,11 +950,13 @@ function renderAttachmentPreviews() {
     if (pendingAttachments.length === 0) { previewArea.classList.add('hidden'); previewArea.innerHTML = ''; return; }
     const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
     if (pendingAttachments.length > maxAttachments) pendingAttachments.splice(maxAttachments);
+    if (typeof window.syncPendingAttachmentsGlobal === 'function') window.syncPendingAttachmentsGlobal();
     previewArea.classList.remove('hidden');
-    const hasImage = pendingAttachments.some(file => String(file.type || '').startsWith('image/'));
+    const hasImage = pendingAttachments.some(file => typeof window.isChatImageAttachment === 'function' ? window.isChatImageAttachment(file) : String(file.type || '').startsWith('image/'));
     const notice = hasImage ? '<div class="attachment-limit-note">当前模型每次仅解析 1 张图片</div>' : '';
     previewArea.innerHTML = notice + pendingAttachments.map((file, index) => {
-        if (file.type.startsWith('image/')) {
+        const isImage = typeof window.isChatImageAttachment === 'function' ? window.isChatImageAttachment(file) : String(file.type || '').startsWith('image/');
+        if (isImage) {
             return `<div class="preview-card"><img src="${escapeAttrValue(file.url)}"><button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件">&times;</button></div>`;
         }
         return `<div class="preview-card file-card"><div class="file-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="file-name">${escapeCodeHtml(file.name)}</div><button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件">&times;</button></div>`;

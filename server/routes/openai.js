@@ -171,19 +171,6 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         if (embeddingModel && !data.some(item => item.id === embeddingModel.id && item.capabilities?.includes('embeddings'))) {
             data.push(embeddingModel);
         }
-        data.push({
-            id: 'pivot-tools',
-            object: 'model',
-            created: 0,
-            owned_by: 'pivot',
-            display_name: 'Pivot Built-in Tools',
-            capabilities: ['tools'],
-            tools: getBuiltInToolDefinitions(req.user).map(tool => ({
-                name: tool.name,
-                description: tool.description,
-                input_schema: tool.input_schema
-            }))
-        });
         res.json({
             object: 'list',
             data

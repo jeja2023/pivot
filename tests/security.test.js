@@ -16,13 +16,14 @@ if (generatedTestDataDir) {
 
 const {
     assertSafeOutboundUrl,
+    encodeAttachmentUrl,
     encryptSecret,
     resolveUploadUrlPath,
     isSensitiveOutboundHost,
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
-const { estimateTokens } = require('../server/llm');
+const { buildContextMeta, estimateTokens, getContext } = require('../server/llm');
 const { normalizeUploadedOriginalName } = require('../server/upload');
 const { buildFtsQuery } = require('../server/search');
 const { createSseEventParser, createStreamAccumulator, extractStreamPayload } = require('../server/streaming');
@@ -67,6 +68,7 @@ const {
 } = require('../server/services/context-budget');
 const {
     getLocalHostnames,
+    getMonitorKnowledgeChunkCount,
     isDockerInternalServiceHost,
     isLocalModelHost,
     normalizeHostAlias
@@ -134,15 +136,27 @@ const {
     optimizeDatabase
 } = require('../server/services/maintenance');
 const { cleanupSoftDeletedStorage } = require('../server/services/storage-gc');
+const {
+    getHttpMetricsSnapshot,
+    getRagMetricsSnapshot,
+    recordHttpRequest,
+    recordRagRetrieval,
+    renderPrometheusMetrics
+} = require('../server/metrics');
 const { aiSemaphore } = require('../server/services/concurrency');
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
+const { createAttachmentsRouter } = require('../server/routes/attachments');
 const { createModelsRouter } = require('../server/routes/models');
 const { createSessionsRouter } = require('../server/routes/sessions');
 const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
 const {
+    buildRagContextMessage,
     filterMcpToolsForChatIntent,
-    filterMcpToolsForPlanner
+    filterMcpToolsForPlanner,
+    injectRagContextBeforeLatestUser,
+    normalizeRegenerateFlag,
+    resolveRagQueryContent
 } = require('../server/routes/chat');
 const { createMcpRouter } = require('../server/routes/mcp');
 const {
@@ -269,10 +283,23 @@ test.after(async () => {
     }
 });
 
-test('resolveUploadUrlPath accepts normal upload URLs', () => {
+test('resolveUploadUrlPath accepts normal and encoded upload URLs', () => {
     const target = resolveUploadUrlPath('/uploads/1/session/file.png?token=abc');
     assert.equal(target, path.resolve(uploadRoot, '1', 'session', 'file.png'));
     assert.equal(toProjectRelativePath(target), 'uploads/1/session/file.png');
+
+    const encoded = resolveUploadUrlPath('/uploads/1/session/file%20(1).jpg?token=abc');
+    assert.equal(encoded, path.resolve(uploadRoot, '1', 'session', 'file (1).jpg'));
+    assert.equal(toProjectRelativePath(encoded), 'uploads/1/session/file (1).jpg');
+});
+
+test('encodeAttachmentUrl encodes upload paths and rejects unsafe paths', () => {
+    assert.equal(
+        encodeAttachmentUrl('uploads/1/session/file (1).jpg', 'token +/=?'),
+        '/uploads/1/session/file%20%281%29.jpg?token=token%20%2B%2F%3D%3F'
+    );
+    assert.equal(encodeAttachmentUrl('server/index.js', 'token'), '');
+    assert.equal(encodeAttachmentUrl('uploads/1/../file.png', 'token'), '');
 });
 
 test('resolveUploadUrlPath rejects traversal and non-upload URLs', () => {
@@ -429,6 +456,75 @@ test('model adapter converts chat messages to Responses API input', () => {
     assert.equal(headers.Accept, 'application/json');
 });
 
+test('getContext compacts over-threshold history before returning model context', async () => {
+    const suffix = Date.now().toString(36);
+    const summaryRequests = [];
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            summaryRequests.push({ url: req.url, body });
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+                choices: [
+                    { message: { content: '保留早期决策 A，并继续使用近期上下文。' } }
+                ]
+            }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ctx_compact_${suffix}`, 'hash', 'Context Compact Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const sessionId = `ctx-compact-${suffix}`;
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionId, userId, 'Context Compact Test');
+
+    const insertMessage = db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, token_count, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `);
+    for (let i = 0; i < 8; i += 1) {
+        const content = `第${i}条重要上下文：${'关键事实'.repeat(900)}`;
+        insertMessage.run(sessionId, userId, i % 2 === 0 ? 'user' : 'assistant', content, estimateTokens(content));
+    }
+
+    try {
+        const port = server.address().port;
+        const history = await getContext(sessionId, userId, {
+            id: null,
+            url: `http://127.0.0.1:${port}`,
+            model_name: 'fake-summary-model',
+            api_key: ''
+        });
+        const rows = db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC').all(sessionId, userId);
+        const meta = buildContextMeta(rows);
+        const summaryIndex = history.findIndex(message => String(message.content || '').includes('长期记忆摘要'));
+        const recentIndex = history.findIndex(message => String(message.content || '').includes('第2条重要上下文'));
+
+        assert.equal(summaryRequests.length, 1);
+        assert.match(summaryRequests[0].url, /\/chat\/completions$/);
+        assert.equal(meta.archivedCount, 2);
+        assert.equal(meta.summaryCount, 1);
+        assert.ok(summaryIndex >= 0);
+        assert.ok(recentIndex > summaryIndex);
+        assert.match(history[summaryIndex].content, /保留早期决策 A/);
+        assert.equal(history.some(message => String(message.content || '').includes('第0条重要上下文')), false);
+        assert.equal(history.some(message => String(message.content || '').includes('第7条重要上下文')), true);
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('chat message service saves messages and updates session stats', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -490,8 +586,11 @@ test('session detail only appends valid attachment tokens', async () => {
     const userId = userInfo.lastInsertRowid;
     const sessionId = `session-attach-${suffix}`;
     const activePath = `uploads/${userId}/${sessionId}/active.png`;
+    const spacedPath = `uploads/${userId}/${sessionId}/space file (1).png`;
+    const encodedPath = `uploads/${userId}/${sessionId}/encoded file (2).png`;
     const deletedPath = `uploads/${userId}/${sessionId}/deleted.png`;
     const expiredPath = `uploads/${userId}/${sessionId}/expired.png`;
+    const encodedUrl = encodeAttachmentUrl(encodedPath);
     db.prepare(`
         INSERT INTO sessions (id, user_id, title, created_at, updated_at)
         VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
@@ -503,12 +602,20 @@ test('session detail only appends valid attachment tokens', async () => {
         sessionId,
         userId,
         'user',
-        `![a](/${activePath}) ![d](/${deletedPath}) ![e](/${expiredPath})`
+        `![a](/${activePath}) ![s](/${spacedPath}) ![enc](${encodedUrl}) ![d](/${deletedPath}) ![e](/${expiredPath})`
     );
     db.prepare(`
         INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'))
     `).run(userId, sessionId, 'active.png', activePath, 'image/png', 1, 'active-token');
+    db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'))
+    `).run(userId, sessionId, 'space file (1).png', spacedPath, 'image/png', 1, 'space-token');
+    db.prepare(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'))
+    `).run(userId, sessionId, 'encoded file (2).png', encodedPath, 'image/png', 1, 'encoded-token');
     db.prepare(`
         INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, deleted_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours', '+1 day'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))
@@ -552,12 +659,68 @@ test('session detail only appends valid attachment tokens', async () => {
         });
         const content = payload.messages[0].content;
         assert.match(content, /active\.png\?token=active-token/);
+        assert.match(content, /space%20file%20%281%29\.png\?token=space-token/);
+        assert.match(content, /encoded%20file%20%282%29\.png\?token=encoded-token/);
         assert.doesNotMatch(content, /deleted\.png\?token=deleted-token/);
         assert.doesNotMatch(content, /expired\.png\?token=expired-token/);
     } finally {
         db.prepare('DELETE FROM attachments WHERE user_id = ?').run(userId);
         db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
         db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('attachment upload requires a session owned by the current user', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`upload_owner_${suffix}`, 'hash', 'Upload Owner Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const ownedSessionId = `upload-owned-${suffix}`;
+    const tempFile = path.join(uploadRoot, `upload-temp-${suffix}.txt`);
+    fs.mkdirSync(uploadRoot, { recursive: true });
+    fs.writeFileSync(tempFile, 'hello upload');
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(ownedSessionId, userId, 'Upload Owner Test');
+
+    const router = createAttachmentsRouter({
+        authMiddleware: (req, _res, next) => {
+            req.user = { id: userId, username: `upload_owner_${suffix}`, role: 'user', status: 'active' };
+            next();
+        },
+        uploadLimiter: (_req, _res, next) => next(),
+        upload: {
+            single: () => (req, _res, next) => {
+                req.file = {
+                    path: tempFile,
+                    originalname: 'proof.txt',
+                    mimetype: 'text/plain',
+                    size: fs.statSync(tempFile).size
+                };
+                next();
+            }
+        },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/api/upload' && layer.route.methods.post);
+    const req = { query: { sessionId: `missing-${suffix}` }, body: {}, headers: {} };
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+
+    try {
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.statusCode, 404);
+        assert.equal(fs.existsSync(tempFile), false);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ?').get(userId).count, 0);
+    } finally {
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        db.prepare('DELETE FROM attachments WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(ownedSessionId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });
@@ -637,6 +800,8 @@ test('model vision capability helpers detect visual inputs and flags', () => {
     assert.equal(modelSupportsVision({ supports_vision: 1 }), true);
     assert.equal(modelSupportsVision({ supports_vision: 0 }), false);
     assert.equal(contentContainsVisionInput('![screenshot](/uploads/1/session/a.png)'), true);
+    assert.equal(contentContainsVisionInput('![screenshot](/uploads/1/session/a%20(1).jpg?token=abc)'), true);
+    assert.equal(contentContainsVisionInput('![screenshot](/uploads/1/session/a (1).jpg?token=abc)'), true);
     assert.equal(contentContainsVisionInput('plain text without image'), false);
     assert.equal(messagesContainVisionInput([
         { role: 'user', content: [{ type: 'text', text: 'look at image' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }] }
@@ -688,6 +853,79 @@ test('RAG helpers build safe FTS queries and deterministic chunks', () => {
     assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
 });
 
+test('RAG metrics report retrieval hit rate separately from cache hit rate', () => {
+    const before = getRagMetricsSnapshot();
+    recordRagRetrieval({ status: 'hit', matches: 2, durationMs: 10 });
+    recordRagRetrieval({ status: 'cache_hit', matches: 1, cacheHit: true, durationMs: 1 });
+    recordRagRetrieval({ status: 'cache_hit', matches: 0, cacheHit: true, durationMs: 1 });
+    recordRagRetrieval({ status: 'no_match', matches: 0, durationMs: 5 });
+    const after = getRagMetricsSnapshot();
+    const retrievals = after.retrievals - before.retrievals;
+    const hits = after.hits - before.hits;
+    const cacheHits = after.cacheHits - before.cacheHits;
+
+    assert.equal(retrievals, 4);
+    assert.equal(hits, 2);
+    assert.equal(cacheHits, 2);
+    assert.equal(hits / retrievals, 0.5);
+    assert.equal(cacheHits / retrievals, 0.5);
+});
+
+test('HTTP metrics expose accurate route averages and Prometheus histogram buckets', () => {
+    const route = `/metrics-test-${Date.now()}`;
+    recordHttpRequest('GET', route, '200', 0.01);
+    recordHttpRequest('GET', route, '200', 0.2);
+
+    const snapshot = getHttpMetricsSnapshot();
+    const routeRow = snapshot.routes.find(item => item.method === 'GET' && item.route === route && item.status === '200');
+    assert.ok(routeRow);
+    assert.equal(routeRow.requests, 2);
+    assert.equal(Math.round(routeRow.avgLatencyMs), 105);
+
+    const metrics = renderPrometheusMetrics();
+    const bucketValue = (le) => {
+        const escapedRoute = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedLe = String(le).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = metrics.match(new RegExp(`pivot_http_request_duration_seconds_bucket\\{method="GET",route="${escapedRoute}",status="200",le="${escapedLe}"\\} (\\d+)`));
+        assert.ok(match, `missing histogram bucket ${le}`);
+        return Number(match[1]);
+    };
+
+    assert.equal(bucketValue(0.1), 1);
+    assert.equal(bucketValue(0.25), 2);
+    assert.equal(bucketValue('+Inf'), 2);
+});
+
+test('monitor knowledge chunk count only includes currently usable indexed chunks', () => {
+    const before = getMonitorKnowledgeChunkCount();
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`monitor_rag_${suffix}`, 'hash', 'Monitor RAG Test', 'QA', 'user', 'active');
+    const insertDoc = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, indexed_chunks, deleted_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `);
+    const insertChunk = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)');
+    const readyDoc = insertDoc.run(userInfo.lastInsertRowid, `ready-${suffix}.txt`, 'ready', 1, 1, 1, null).lastInsertRowid;
+    const disabledDoc = insertDoc.run(userInfo.lastInsertRowid, `disabled-${suffix}.txt`, 'ready', 0, 1, 1, null).lastInsertRowid;
+    const processingDoc = insertDoc.run(userInfo.lastInsertRowid, `processing-${suffix}.txt`, 'processing', 1, 1, 1, null).lastInsertRowid;
+    const deletedDoc = insertDoc.run(userInfo.lastInsertRowid, `deleted-${suffix}.txt`, 'ready', 1, 1, 1, '2099-01-01 00:00:00').lastInsertRowid;
+    const docIds = [readyDoc, disabledDoc, processingDoc, deletedDoc];
+
+    try {
+        docIds.forEach((docId, index) => {
+            insertChunk.run(docId, `chunk ${index}`, `chunk ${index}`, '[1,0]');
+        });
+        assert.equal(getMonitorKnowledgeChunkCount() - before, 1);
+    } finally {
+        docIds.forEach(docId => db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId));
+        docIds.forEach(docId => db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId));
+        db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
 test('RAG config clamps unsafe retrieval parameters', () => {
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.scoreThreshold, 1.5), '1');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.scoreThreshold, -1), '0');
@@ -729,6 +967,55 @@ test('context budget trims old history and generated knowledge context before up
     assert.equal(result.metadata.adjusted, true);
     assert.ok(result.metadata.droppedMessages > 0 || result.metadata.trimmedRagContexts > 0);
     assert.equal(result.messages.at(-1).content, '请基于资料给出简短结论');
+});
+
+test('chat RAG context is injected before the latest user prompt with strict instructions', () => {
+    const history = [
+        { role: 'system', content: '系统提示' },
+        { role: 'user', content: '上一轮问题' },
+        { role: 'assistant', content: '上一轮回答' },
+        { role: 'user', content: '当前问题' }
+    ];
+    const ragContext = '【参考内部知识库信息如下】：\n[引用 1 | 来源: policy.md]: 内部答案';
+    const injected = injectRagContextBeforeLatestUser(history, ragContext);
+
+    assert.equal(injected.length, 5);
+    assert.equal(injected.at(-1).content, '当前问题');
+    assert.equal(injected.at(-2).role, 'user');
+    assert.match(injected.at(-2).content, /PIVOT_RAG_CONTEXT_BEGIN/);
+    assert.match(injected.at(-2).content, /必须优先依据以上知识库检索结果回答/);
+    assert.match(buildRagContextMessage(ragContext), /引用 1/);
+});
+
+test('chat regenerate flag only accepts explicit true values', () => {
+    assert.equal(normalizeRegenerateFlag(true), true);
+    assert.equal(normalizeRegenerateFlag('true'), true);
+    assert.equal(normalizeRegenerateFlag(false), false);
+    assert.equal(normalizeRegenerateFlag(undefined), false);
+    assert.equal(normalizeRegenerateFlag({ type: 'click' }), false);
+    assert.equal(normalizeRegenerateFlag('false'), false);
+});
+
+test('chat regenerate reuses latest user prompt for RAG retrieval when request content is empty', () => {
+    const history = [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'first question' },
+        { role: 'assistant', content: 'first answer' },
+        { role: 'user', content: [{ type: 'text', text: 'latest knowledge query' }] }
+    ];
+
+    assert.equal(resolveRagQueryContent('', history), 'latest knowledge query');
+    assert.equal(resolveRagQueryContent('fresh query', history), 'fresh query');
+});
+
+test('chat regenerate RAG query skips injected RAG context messages', () => {
+    const history = [
+        { role: 'user', content: 'original question' },
+        { role: 'assistant', content: 'original answer' },
+        { role: 'user', content: buildRagContextMessage('cached retrieval context') }
+    ];
+
+    assert.equal(resolveRagQueryContent('', history), 'original question');
 });
 
 test('context budget rejects a single current prompt that exceeds the model window', () => {
@@ -3358,6 +3645,51 @@ test('OpenAI embedding route authenticates before rate limiting', () => {
     const handlers = route.route.stack.map(item => item.handle);
     assert.equal(handlers[0].name, 'authMiddleware');
     assert.equal(handlers[1].name, 'embeddingLimiter');
+});
+
+test('OpenAI model discovery excludes built-in tools pseudo model', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`openai_models_${suffix}`, 'hash', 'OpenAI Models User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `openai_models_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Chat Model', 'https://model.example/v1/chat/completions', `chat-model-${suffix}`);
+    const router = createOpenAIRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = user;
+            next();
+        },
+        embeddingLimiter: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/models');
+    assert.ok(route);
+
+    try {
+        const req = {};
+        const res = {
+            statusCode: 200,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body) {
+                this.body = body;
+                return this;
+            }
+        };
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.statusCode, 200);
+        assert.ok(res.body?.data?.some(item => item.id === `chat-model-${suffix}`));
+        assert.equal(res.body.data.some(item => item.id === 'pivot-tools'), false);
+    } finally {
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
 });
 
 test('available models route includes configured embedding model', async () => {

@@ -612,6 +612,7 @@ window.toggleArchiveSession = async (id, currentArchived) => {
         showToast(!currentArchived ? '已归档' : '已恢复');
         if (currentSessionId === id && !sidebarState.archived) {
             currentSessionId = null;
+            window.persistActiveChatSession?.('');
             document.getElementById('current-title').innerText = '请选择或新建对话';
             document.getElementById('message-container').innerHTML = '';
         }

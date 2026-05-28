@@ -20,6 +20,36 @@ const memoryCompressionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, parseInt(process.env.MEMORY_COMPRESSION_MAX_CONCURRENT, 10) || 2)
 });
 
+function loadSessionMessages(sessionId, userId) {
+    return db.prepare(`
+        SELECT * FROM messages
+        WHERE session_id = ? AND user_id = ?
+          AND deleted_at IS NULL
+        ORDER BY id ASC
+    `).all(sessionId, userId);
+}
+
+function unwrapGuardedCompressionResult(guardedResult) {
+    return guardedResult?.skipped ? guardedResult : (guardedResult?.value || guardedResult || {});
+}
+
+async function runGuardedCompression(sessionId, userId, messages, modelCfg) {
+    const guardedResult = await memoryCompressionGuard.run(`mem:${sessionId}`, () =>
+        withTimeout(
+            (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
+            MEMORY_COMPRESSION_TIMEOUT_MS,
+            '记忆压缩'
+        )
+    );
+    return unwrapGuardedCompressionResult(guardedResult);
+}
+
+function orderMessagesForContext(messages = []) {
+    const summaryMessages = messages.filter(m => Number(m.is_summary) && !Number(m.context_archived));
+    const activeMessages = messages.filter(m => !Number(m.context_archived) && !Number(m.is_summary));
+    return [...summaryMessages, ...activeMessages];
+}
+
 function estimateTokens(text) {
     if (!text) return 0;
     const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
@@ -43,7 +73,7 @@ function resolveOwnedAttachmentPath(uploadUrl, userId, sessionId) {
 
 function buildContextMeta(messages = []) {
     const activeMessages = messages.filter(m => !Number(m.context_archived) && !Number(m.is_summary));
-    const summaryMessages = messages.filter(m => Number(m.is_summary));
+    const summaryMessages = messages.filter(m => Number(m.is_summary) && !Number(m.context_archived));
     const archivedCount = messages.filter(m => Number(m.context_archived)).length;
     const activeTokens = activeMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
     const summaryTokens = summaryMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
@@ -65,8 +95,9 @@ function buildContextMeta(messages = []) {
 
 async function hydrateMessageContent(message, userId, sessionId, totalImageCounter, logger) {
     const content = String(message.content || '');
-    const imgRegex = /!\[.*?\]\((\/uploads\/[^)\s]+)\)/g;
-    const fileRegex = /\[附件:\s*([^\]]+)\]\((\/uploads\/[^)\s]+)\)/g;
+    const uploadUrlPattern = String.raw`\/uploads\/(?:[^()]|\([^)]*\))+`;
+    const imgRegex = new RegExp(String.raw`!\[.*?\]\((${uploadUrlPattern})\)`, 'g');
+    const fileRegex = new RegExp(String.raw`\[附件:\s*([^\]]+)\]\((${uploadUrlPattern})\)`, 'g');
     let match;
     let finalContent = [];
     let lastIndex = 0;
@@ -154,36 +185,29 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
 
 async function getContext(sessionId, userId, modelCfg) {
     const session = db.prepare('SELECT system_prompt FROM sessions WHERE id = ? AND deleted_at IS NULL').get(sessionId);
-    const messages = db.prepare(`
-        SELECT * FROM messages
-        WHERE session_id = ? AND user_id = ?
-          AND deleted_at IS NULL
-        ORDER BY id ASC
-    `).all(sessionId, userId);
+    let messages = loadSessionMessages(sessionId, userId);
 
     const { logger } = require('./logger');
-    const contextMeta = buildContextMeta(messages);
+    let contextMeta = buildContextMeta(messages);
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
     if (contextMeta.activeTokens > THRESHOLD && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
-        // 同会话短期内不会重复触发，全局并发上限避免多个长会话同时压垮上游
-        memoryCompressionGuard.run(`mem:${sessionId}`, () =>
-            withTimeout(
-                (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
-                MEMORY_COMPRESSION_TIMEOUT_MS,
-                '记忆压缩'
-            )
-        ).then(result => {
+        try {
+            const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
             if (result?.skipped) {
                 logger.info({ sessionId, reason: result.reason }, '记忆压缩已跳过');
+            } else if (result?.compressed) {
+                messages = loadSessionMessages(sessionId, userId);
+                contextMeta = buildContextMeta(messages);
+                logger.info({ sessionId, contextMeta, summarizedCount: result.summarizedCount }, '记忆压缩完成，当前请求将使用压缩后上下文');
             }
-        }).catch(err => {
-            logger.error({ sessionId, err: err.message }, '异步记忆压缩失败');
-        });
+        } catch (err) {
+            logger.error({ sessionId, err: err.message }, '记忆压缩失败，当前请求将继续使用原始上下文');
+        }
     }
 
     const totalImageCounter = { count: 0 };
-    const contextMessages = messages.filter(m => Number(m.is_summary) || !Number(m.context_archived));
+    const contextMessages = orderMessagesForContext(messages);
     const history = await Promise.all(contextMessages.map(async m => ({
         role: m.role,
         content: await hydrateMessageContent(m, userId, sessionId, totalImageCounter, logger)
@@ -197,12 +221,7 @@ async function getContext(sessionId, userId, modelCfg) {
 }
 
 async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
-    const messages = db.prepare(`
-        SELECT * FROM messages
-        WHERE session_id = ? AND user_id = ?
-          AND deleted_at IS NULL
-        ORDER BY id ASC
-    `).all(sessionId, userId);
+    const messages = loadSessionMessages(sessionId, userId);
     const before = buildContextMeta(messages);
     if (!options.force && (before.activeTokens <= THRESHOLD || before.activeCount <= MIN_MESSAGES_TO_COMPRESS)) {
         return {
@@ -213,20 +232,8 @@ async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
         };
     }
 
-    const guardedResult = await memoryCompressionGuard.run(`mem:${sessionId}`, () =>
-        withTimeout(
-            (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
-            MEMORY_COMPRESSION_TIMEOUT_MS,
-            '记忆压缩'
-        )
-    );
-    const result = guardedResult?.skipped ? guardedResult : (guardedResult?.value || guardedResult || {});
-    const afterMessages = db.prepare(`
-        SELECT * FROM messages
-        WHERE session_id = ? AND user_id = ?
-          AND deleted_at IS NULL
-        ORDER BY id ASC
-    `).all(sessionId, userId);
+    const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
+    const afterMessages = loadSessionMessages(sessionId, userId);
     const after = buildContextMeta(afterMessages);
     return {
         ...(result || {}),

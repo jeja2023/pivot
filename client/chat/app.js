@@ -106,6 +106,68 @@ document.addEventListener('click', handleChatToolToggleEvent, true);
 window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
 
+const MAIN_WORKSPACE_STORAGE_KEY = 'pivot_active_workspace';
+const SETTINGS_TAB_STORAGE_KEY = 'pivot_settings_tab';
+const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'pivot_active_chat_session';
+const PRINT_WORKSPACE_SESSION_KEY = 'pivot_print_session';
+const RESTORABLE_WORKSPACES = new Set(['chat', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
+
+function getStoredSessionValue(key) {
+    try {
+        return sessionStorage.getItem(key) || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function setStoredSessionValue(key, value) {
+    try {
+        sessionStorage.setItem(key, value);
+    } catch (e) {
+        // 浏览器禁用 sessionStorage 时仅退回默认入口。
+    }
+}
+
+function removeStoredSessionValue(key) {
+    try {
+        sessionStorage.removeItem(key);
+    } catch (e) {
+        // 浏览器禁用 sessionStorage 时仅退回默认入口。
+    }
+}
+
+window.getStoredMainWorkspace = function() {
+    const view = getStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY);
+    return RESTORABLE_WORKSPACES.has(view) ? view : 'chat';
+};
+
+window.persistSettingsTab = function(tab) {
+    if (!tab) return;
+    setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
+};
+
+window.getStoredSettingsTab = function() {
+    return getStoredSessionValue(SETTINGS_TAB_STORAGE_KEY);
+};
+
+window.persistActiveChatSession = function(sessionId) {
+    if (!sessionId) return removeStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
+    setStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY, String(sessionId));
+};
+
+window.getStoredActiveChatSession = function() {
+    return getStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
+};
+
+window.persistPrintWorkspaceSession = function(sessionId) {
+    if (!sessionId) return removeStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
+    setStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY, String(sessionId));
+};
+
+window.getStoredPrintWorkspaceSession = function() {
+    return getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
+};
+
 window.showMainWorkspace = function(view = 'chat') {
     const target = ['chat', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
@@ -138,9 +200,29 @@ window.showMainWorkspace = function(view = 'chat') {
     chatContainer?.setAttribute('data-active-workspace', target);
     document.body?.setAttribute('data-active-workspace', target);
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
+    if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
     if (target === 'manual') window.ensureManualFrameLoaded?.();
     if (target !== 'agent' && target !== 'agent-dag') window.updateAgentAutoRefresh?.();
     return target;
+};
+
+window.restoreMainWorkspaceAfterLogin = async function() {
+    const view = window.getStoredMainWorkspace?.() || 'chat';
+    if (view === 'settings' && window.openAdminPanel) return window.openAdminPanel({ restore: true });
+    if (view === 'knowledge' && window.openKnowledgeWorkbench) return window.openKnowledgeWorkbench();
+    if (view === 'mcp' && window.openMcpWorkbench) return window.openMcpWorkbench();
+    if (view === 'agent-dag' && window.openAgentDagWorkbench) return window.openAgentDagWorkbench();
+    if (view === 'agent' && window.openAgentWorkbench) return window.openAgentWorkbench();
+    if (view === 'manual') return window.showMainWorkspace?.('manual');
+    if (view === 'print' && window.openPrintWorkbench) {
+        const sessionId = window.getStoredPrintWorkspaceSession?.() || window.getStoredActiveChatSession?.();
+        if (sessionId) return window.openPrintWorkbench(sessionId);
+    }
+    if (view === 'chat') {
+        const sessionId = window.getStoredActiveChatSession?.();
+        if (sessionId && window.selectSession) return window.selectSession(sessionId, undefined, { restore: true });
+    }
+    return window.showMainWorkspace?.('chat');
 };
 
 window.ensureManualFrameLoaded = () => {
@@ -155,6 +237,7 @@ window.closeManualWorkbench = () => window.showMainWorkspace?.('chat');
 // 会话打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图
 window.openPrintWorkbench = (sessionId) => {
     if (!sessionId) return;
+    window.persistPrintWorkspaceSession?.(sessionId);
     const frame = document.getElementById('print-frame');
     if (frame) {
         const nextSrc = `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/print?embed=1`;
@@ -247,12 +330,38 @@ document.getElementById('input-prompt-field')?.addEventListener('keydown', (even
     }
 });
 
-window.copyMsg = (btn) => {
-    const body = btn.closest('.message-content').querySelector('.text-body');
-    const temp = body.cloneNode(true);
-    temp.querySelectorAll('.code-toolbar, .thought-summary').forEach(el => el.remove());
-    navigator.clipboard.writeText(temp.innerText.trim());
-    showToast('内容已复制');
+async function writeTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const success = document.execCommand('copy');
+    textArea.remove();
+    if (!success) throw new Error('execCommand copy failed');
+}
+
+window.copyMsg = async (btn) => {
+    try {
+        const body = btn.closest('.message-content')?.querySelector('.text-body');
+        if (!body) throw new Error('Message body not found');
+        const temp = body.cloneNode(true);
+        temp.querySelectorAll('.code-toolbar, .thought-summary').forEach(el => el.remove());
+        const text = temp.innerText.trim();
+        if (!text) return showToast('没有可复制的内容', 'warning');
+        await writeTextToClipboard(text);
+        showToast('内容已复制');
+    } catch (e) {
+        console.error('Copy message failed:', e);
+        showToast('复制失败，请手动选择内容复制', 'error');
+    }
 };
 
 window.deleteMsg = (id, btn) => {
@@ -268,6 +377,7 @@ window.deleteSession = (id) => {
         if (res.ok) {
             if (currentSessionId === id) {
                 currentSessionId = null;
+                window.persistActiveChatSession?.('');
                 document.getElementById('current-title').innerText = '请选择或新建对话';
                 document.getElementById('message-container').innerHTML = '';
             }
@@ -377,7 +487,7 @@ bind('new-chat-btn', async () => {
     const s = await createSession('新对话');
     if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
-bind('send-btn', sendMessage);
+bind('send-btn', () => sendMessage());
 bind('stop-btn', () => { currentAbortController?.abort(); });
 bind('upload-btn', () => {
     const modelId = document.getElementById('model-selector').value;

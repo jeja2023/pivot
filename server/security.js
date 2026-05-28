@@ -231,6 +231,21 @@ function isPathInsideUploadRoot(targetPath) {
     return target === uploadRoot || target.startsWith(uploadRoot + path.sep);
 }
 
+function encodeUrlPathSegment(segment) {
+    return encodeURIComponent(String(segment)).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function encodeAttachmentUrl(filePath, token = '') {
+    const normalizedPath = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalizedPath.startsWith('uploads/') || normalizedPath.includes('\0')) return '';
+    const parts = normalizedPath.split('/');
+    if (parts.some(part => !part || part === '.' || part === '..')) return '';
+
+    const encodedPath = '/' + parts.map(encodeUrlPathSegment).join('/');
+    const cleanToken = String(token || '').trim();
+    return cleanToken ? `${encodedPath}?token=${encodeURIComponent(cleanToken)}` : encodedPath;
+}
+
 function resolveUploadUrlPath(uploadUrl) {
     const cleanUrl = String(uploadUrl || '').split(/[?#]/)[0];
     let decodedUrl;
@@ -316,6 +331,7 @@ module.exports = {
     escapeCsvCell,
     parseCsvLine,
     removeAttachmentFiles,
+    encodeAttachmentUrl,
     resolveUploadUrlPath,
     toProjectRelativePath,
     isPathInsideUploadRoot,

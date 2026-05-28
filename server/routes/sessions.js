@@ -8,6 +8,7 @@ const { buildFtsQuery } = require('../search');
 const { buildContextMeta, compactSessionMemory } = require('../llm');
 const { getAccessibleModel } = require('../services/models');
 const { TimeoutError } = require('../services/concurrency');
+const { encodeAttachmentUrl } = require('../security');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -83,16 +84,22 @@ function appendAttachmentTokens(messages, userId, sessionId) {
     `).all(userId, sessionId, getBeijingTimestamp());
     if (rows.length === 0) return messages;
 
-    const tokenByUrl = new Map(rows.map(row => [
-        '/' + String(row.file_path || '').replace(/\\/g, '/'),
-        row.access_token
-    ]));
+    const tokenEntries = rows.flatMap(row => {
+            const plainUrl = '/' + String(row.file_path || '').replace(/\\/g, '/');
+            const encodedUrl = encodeAttachmentUrl(row.file_path);
+            const tokenizedUrl = encodeAttachmentUrl(row.file_path, row.access_token);
+            if (!tokenizedUrl) return [];
+            return encodedUrl && encodedUrl !== plainUrl
+                ? [[plainUrl, tokenizedUrl], [encodedUrl, tokenizedUrl]]
+                : [[plainUrl, tokenizedUrl]];
+        });
+    const tokenByUrl = new Map(tokenEntries);
 
     return messages.map(message => {
         let content = String(message.content || '');
-        for (const [url, token] of tokenByUrl.entries()) {
+        for (const [url, tokenizedUrl] of tokenByUrl.entries()) {
             const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            content = content.replace(new RegExp(`${escapedUrl}(?![\\w/?=&%.-])`, 'g'), `${url}?token=${token}`);
+            content = content.replace(new RegExp(`${escapedUrl}(?![\\w/?=&%.-])`, 'g'), tokenizedUrl);
         }
         return { ...message, content };
     });
@@ -310,12 +317,17 @@ function createSessionsRouter({
         }
         const message = result.compressed
             ? `已压缩 ${Number(result.summarizedCount || 0)} 条较早上下文`
-            : '当前会话暂时没有可压缩的早期上下文';
+            : result.reason === 'duplicate'
+                ? '上下文压缩正在进行中，请稍后查看用量变化'
+                : result.reason === 'too_many'
+                    ? '当前压缩任务较多，请稍后重试'
+                    : '当前会话暂时没有可压缩的早期上下文';
         logAction(req, '手动压缩上下文', `会话ID: ${req.params.id}，结果: ${result.compressed ? 'compressed' : 'skipped'}`);
         res.json({
             success: true,
             compressed: Boolean(result.compressed),
             skipped: Boolean(result.skipped),
+            inProgress: result.reason === 'duplicate',
             reason: result.reason || '',
             message,
             contextMeta: result.after || result.before || buildContextMeta(stmts.getMessages.all(req.params.id, req.user.id))

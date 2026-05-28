@@ -34,7 +34,7 @@ function contentContainsVisionInput(content) {
             return contentContainsVisionInput(part.content);
         });
     }
-    return /!\[[^\]]*]\((?:\/uploads\/|data:image\/|https?:\/\/[^)\s]+\.(?:png|jpe?g|gif|webp|bmp)(?:[?#][^)\s]*)?)[^)\s]*\)/i.test(String(content || ''));
+    return /!\[[^\]]*]\((?:\/uploads\/(?:[^()]|\([^)]*\))+|data:image\/[^)]+|https?:\/\/[^)\s]+\.(?:png|jpe?g|gif|webp|bmp)(?:[?#][^)\s]*)?)\)/i.test(String(content || ''));
 }
 
 function messagesContainVisionInput(messages) {

@@ -7,9 +7,10 @@ const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedText } = require('../document-text');
-const { isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
+const { isImagePath, isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
 const { logger } = require('../logger');
 const { normalizeUploadedOriginalName } = require('../upload');
+const { encodeAttachmentUrl } = require('../security');
 
 function getSafeUploadPath(userId, sessionId, filename) {
     const uploadRoot = path.resolve(__dirname, '../../uploads');
@@ -22,6 +23,15 @@ function getSafeUploadPath(userId, sessionId, filename) {
         throw new Error('非法访问路径');
     }
     return { uploadRoot, target };
+}
+
+function removeTempUploadFile(file) {
+    if (!file?.path) return;
+    try {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    } catch (e) {
+        logger.warn({ err: e.message, path: file.path }, 'Remove temporary upload file failed');
+    }
 }
 
 function createAttachmentsRouter({
@@ -87,23 +97,36 @@ function createAttachmentsRouter({
         if (!req.file) return res.status(400).json({ error: '未选择文件' });
 
         const userId = req.user.id;
-        const sessionId = req.query.sessionId || 'global';
+        const sessionId = String(req.query.sessionId || '').trim();
+        if (!sessionId) {
+            removeTempUploadFile(req.file);
+            return res.status(400).json({ error: '缺少会话 ID，请先创建或选择会话' });
+        }
+
         const originalName = normalizeUploadedOriginalName(req.file.originalname);
         const mimeType = req.file.mimetype;
         const password = String(req.body?.password || '').trim() || undefined;
+
+        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
+        if (!session) {
+            removeTempUploadFile(req.file);
+            return res.status(404).json({ error: '会话不存在或无权上传附件' });
+        }
+
         const targetDir = path.join('uploads', userId.toString(), sessionId);
         if (!fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }
 
         const safeOriginalName = path.basename(originalName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
-        const imageOutput = isLikelyImageMime(mimeType);
+        const imageOutput = isLikelyImageMime(mimeType) || isImagePath(originalName);
         const outputOriginalName = imageOutput
             ? safeOriginalName.replace(/\.[^.]*$/, '') + '.jpg'
             : safeOriginalName;
         const finalFileName = Date.now() + '-' + crypto.randomUUID() + '-' + outputOriginalName;
         const finalPath = path.join(targetDir, finalFileName);
-        const publicUrl = `/uploads/${userId}/${sessionId}/${finalFileName}`;
+        const relativePath = path.join(targetDir, finalFileName).replace(/\\/g, '/');
+        const publicUrl = encodeAttachmentUrl(relativePath);
         const accessToken = crypto.randomBytes(24).toString('base64url');
         let extractedText = null;
         const visionAttachments = [];
@@ -140,14 +163,17 @@ function createAttachmentsRouter({
                             const pageFileName = `${Date.now()}-${crypto.randomUUID()}-${path.basename(safeOriginalName, path.extname(safeOriginalName))}-page-${page.page}.png`;
                             const pagePath = path.join(targetDir, pageFileName);
                             fs.writeFileSync(pagePath, page.data);
-                            const pageUrl = `/uploads/${userId}/${sessionId}/${pageFileName}?token=${pageToken}`;
+                            const pageRelativePath = pagePath.replace(/\\/g, '/');
+                            const pageUrl = encodeAttachmentUrl(pageRelativePath, pageToken);
                             db.prepare(`
                                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
-                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pagePath.replace(/\\/g, '/'), page.mimeType, page.data.length, pageToken, getBeijingTimestamp(), getBeijingTimestamp());
+                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pageRelativePath, page.mimeType, page.data.length, pageToken, getBeijingTimestamp(), getBeijingTimestamp());
                             visionAttachments.push({
                                 name: `${originalName} 第 ${page.page} 页`,
                                 url: pageUrl,
+                                type: page.mimeType,
+                                sessionId,
                                 markdown: `![${originalName} 第 ${page.page} 页](${pageUrl})`
                             });
                         }
@@ -160,10 +186,10 @@ function createAttachmentsRouter({
             db.prepare(`
                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
-            `).run(userId, sessionId, originalName, finalPath.replace(/\\/g, '/'), imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp(), getBeijingTimestamp());
+            `).run(userId, sessionId, originalName, relativePath, imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp(), getBeijingTimestamp());
 
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
-            res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, extractedText, visionAttachments });
+            res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, type: imageOutput ? 'image/jpeg' : mimeType, sessionId, extractedText, visionAttachments });
         } catch (e) {
             if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
@@ -206,9 +232,7 @@ function createAttachmentsRouter({
             LIMIT ? OFFSET ?
         `).all(...params, limit, offset).map(item => ({
             ...item,
-            url: item.file_path
-                ? '/' + String(item.file_path).replace(/\\/g, '/') + (item.access_token ? '?token=' + item.access_token : '')
-                : ''
+            url: encodeAttachmentUrl(item.file_path, item.access_token)
         }));
         const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
         res.json({ data, total, hasMore: offset + data.length < total, isSuperAdmin: isSuperAdmin(req.user) });

@@ -122,7 +122,7 @@ window.compactCurrentSessionContext = async function() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '上下文压缩失败');
         window.updateContextUsage(data.contextMeta || null);
-        showToast(data.message || (data.compressed ? '上下文已压缩' : '当前没有可压缩内容'), data.compressed ? 'success' : 'info');
+        showToast(data.message || (data.compressed ? '上下文已压缩' : '当前没有可压缩内容'), data.compressed ? 'success' : (data.inProgress ? 'warning' : 'info'));
         if (data.compressed && currentSessionId) await window.selectSession?.(currentSessionId);
     } catch (e) {
         showToast(e.message || '上下文压缩失败', 'error');

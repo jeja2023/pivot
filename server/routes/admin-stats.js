@@ -216,6 +216,18 @@ function usageCostSql(usageAlias = 'usage', modelAlias = 'm') {
     return `ROUND(((${balancedInputSql(usageAlias)}) * COALESCE(${modelAlias}.input_price_per_million, 0) + (${balancedOutputSql(usageAlias)}) * COALESCE(${modelAlias}.output_price_per_million, 0)) / 1000000.0, 6)`;
 }
 
+function getMonitorKnowledgeChunkCount() {
+    const row = db.prepare(`
+        SELECT COUNT(c.id) AS count
+        FROM knowledge_chunks c
+        JOIN knowledge_docs d ON d.id = c.doc_id
+        WHERE d.status = 'ready'
+          AND d.deleted_at IS NULL
+          AND COALESCE(d.is_enabled, 1) = 1
+    `).get();
+    return Number(row?.count || 0);
+}
+
 const isSuperAdmin = (user) => user?.username === 'admin';
 
 function createAdminStatsRouter({
@@ -230,7 +242,10 @@ function createAdminStatsRouter({
 
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const httpMetrics = getHttpMetricsSnapshot();
-        const ragMetrics = getRagMetricsSnapshot();
+        const ragMetrics = {
+            ...getRagMetricsSnapshot(),
+            chunksIndexed: getMonitorKnowledgeChunkCount()
+        };
         const observabilityEvents = listObservabilityEvents({ limit: 12 });
         const observabilityOpen = db.prepare(`
             SELECT type, COUNT(*) AS count
@@ -263,19 +278,7 @@ function createAdminStatsRouter({
         const uploadsDir = path.resolve(__dirname, '../../uploads');
         let uploadsSize = 0;
         try {
-            if (fs.existsSync(uploadsDir)) {
-                const getDirSizeSync = (dir) => {
-                    let total = 0;
-                    const items = fs.readdirSync(dir, { withFileTypes: true });
-                    for (const item of items) {
-                        const p = path.join(dir, item.name);
-                        if (item.isDirectory()) total += getDirSizeSync(p);
-                        else total += fs.statSync(p).size;
-                    }
-                    return total;
-                };
-                uploadsSize = getDirSizeSync(uploadsDir);
-            }
+            uploadsSize = await getCachedDirSize(uploadsDir);
         } catch(e) {}
 
         const todayTokens = db.prepare(`
@@ -737,6 +740,7 @@ function createAdminStatsRouter({
 
 module.exports = {
     createAdminStatsRouter,
+    getMonitorKnowledgeChunkCount,
     getLocalHostnames,
     isDockerInternalServiceHost,
     isLocalModelHost,

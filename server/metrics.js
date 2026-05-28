@@ -11,6 +11,7 @@ const startedAt = Date.now();
 const ragStats = {
     retrievals: 0,
     retrievalErrors: 0,
+    hits: 0,
     cacheHits: 0,
     cacheMisses: 0,
     emptyResults: 0,
@@ -75,6 +76,9 @@ function recordRagRetrieval({
     } else {
         ragStats.cacheMisses += 1;
     }
+    if (status === 'hit' || (status === 'cache_hit' && Number(matches) > 0)) {
+        ragStats.hits += 1;
+    }
     if (status === 'error') ragStats.retrievalErrors += 1;
     if (status === 'empty' || status === 'no_match') ragStats.emptyResults += 1;
     if (Number.isFinite(topScore)) {
@@ -120,8 +124,8 @@ function getHttpMetricsSnapshot() {
         });
     }
 
-    const p95Target = totals.requests * 0.95;
-    const p95Bucket = totals.buckets.findIndex(count => count >= p95Target);
+    const p95Target = Math.ceil(totals.requests * 0.95);
+    const p95Bucket = totals.requests > 0 ? totals.buckets.findIndex(count => count >= p95Target) : -1;
     const p95LatencyMs = p95Bucket >= 0 ? buckets[p95Bucket] * 1000 : 0;
 
     return {
@@ -140,8 +144,10 @@ function getRagMetricsSnapshot() {
     return {
         retrievals: ragStats.retrievals,
         retrievalErrors: ragStats.retrievalErrors,
+        hits: ragStats.hits,
         cacheHits: ragStats.cacheHits,
         cacheMisses: ragStats.cacheMisses,
+        hitRate: ragStats.retrievals > 0 ? ragStats.hits / ragStats.retrievals : 0,
         cacheHitRate: ragStats.retrievals > 0 ? ragStats.cacheHits / ragStats.retrievals : 0,
         emptyResults: ragStats.emptyResults,
         avgRetrievalMs: ragStats.retrievals > 0 ? ragStats.totalRetrievalMs / ragStats.retrievals : 0,
@@ -232,15 +238,13 @@ function renderPrometheusMetrics() {
     lines.push('# HELP pivot_http_request_duration_seconds HTTP request latency histogram.');
     lines.push('# TYPE pivot_http_request_duration_seconds histogram');
     for (const stat of routeStats.values()) {
-        let cumulative = 0;
         stat.buckets.forEach((count, index) => {
-            cumulative += count;
             lines.push(line('pivot_http_request_duration_seconds_bucket', {
                 method: stat.method,
                 route: stat.route,
                 status: stat.status,
                 le: buckets[index]
-            }, cumulative));
+            }, count));
         });
         lines.push(line('pivot_http_request_duration_seconds_bucket', {
             method: stat.method,
@@ -287,6 +291,12 @@ function renderPrometheusMetrics() {
     lines.push('# HELP pivot_rag_retrieval_errors_total Total failed RAG retrieval attempts.');
     lines.push('# TYPE pivot_rag_retrieval_errors_total counter');
     lines.push(line('pivot_rag_retrieval_errors_total', {}, rag.retrievalErrors));
+    lines.push('# HELP pivot_rag_hits_total Total RAG retrievals with usable matches.');
+    lines.push('# TYPE pivot_rag_hits_total counter');
+    lines.push(line('pivot_rag_hits_total', {}, rag.hits));
+    lines.push('# HELP pivot_rag_hit_ratio RAG retrieval usable match ratio.');
+    lines.push('# TYPE pivot_rag_hit_ratio gauge');
+    lines.push(line('pivot_rag_hit_ratio', {}, rag.hitRate.toFixed(6)));
     lines.push('# HELP pivot_rag_cache_hits_total Total RAG retrieval cache hits.');
     lines.push('# TYPE pivot_rag_cache_hits_total counter');
     lines.push(line('pivot_rag_cache_hits_total', {}, rag.cacheHits));
