@@ -402,6 +402,11 @@ function runMigrations() {
             retry_limit INTEGER DEFAULT 1,
             context_config TEXT,
             allowed_units TEXT DEFAULT '',
+            model_router TEXT DEFAULT 'fixed',
+            dag_spec TEXT,
+            dag_inputs TEXT,
+            workflow_id INTEGER,
+            workflow_version TEXT,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,
@@ -428,6 +433,31 @@ function runMigrations() {
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (template_id) REFERENCES agent_templates(id),
             FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_workflows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            current_version_id INTEGER,
+            published_version_id INTEGER,
+            published_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_workflow_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            dag_spec TEXT NOT NULL,
+            note TEXT,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(workflow_id, version),
+            FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id)
         );
         CREATE TABLE IF NOT EXISTS agent_artifacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -467,6 +497,7 @@ function runMigrations() {
             status TEXT DEFAULT 'pending',
             output TEXT,
             error_message TEXT,
+            attempt_count INTEGER DEFAULT 0,
             duration_ms INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             started_at DATETIME,
@@ -496,6 +527,10 @@ function runMigrations() {
     ensureColumn('agent_templates', 'context_config', 'TEXT');
     ensureColumn('agent_templates', 'allowed_units', "TEXT DEFAULT ''");
     ensureColumn('agent_templates', 'model_router', "TEXT DEFAULT 'fixed'");
+    ensureColumn('agent_templates', 'dag_spec', 'TEXT');
+    ensureColumn('agent_templates', 'dag_inputs', 'TEXT');
+    ensureColumn('agent_templates', 'workflow_id', 'INTEGER');
+    ensureColumn('agent_templates', 'workflow_version', 'TEXT');
     ensureColumn('agent_templates', 'deleted_at', 'DATETIME');
     ensureColumn('agent_schedules', 'template_id', 'INTEGER');
     ensureColumn('agent_schedules', 'model_id', 'INTEGER');
@@ -508,6 +543,14 @@ function runMigrations() {
     ensureColumn('agent_schedules', 'last_run_at', 'DATETIME');
     ensureColumn('agent_schedules', 'last_run_id', 'TEXT');
     ensureColumn('agent_schedules', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_workflows', 'description', 'TEXT');
+    ensureColumn('agent_workflows', 'current_version_id', 'INTEGER');
+    ensureColumn('agent_workflows', 'published_version_id', 'INTEGER');
+    ensureColumn('agent_workflows', 'published_at', 'DATETIME');
+    ensureColumn('agent_workflows', 'deleted_at', 'DATETIME');
+    ensureColumn('agent_workflow_versions', 'note', 'TEXT');
+    ensureColumn('agent_workflow_versions', 'created_by', 'INTEGER');
+    ensureColumn('agent_dag_nodes', 'attempt_count', 'INTEGER DEFAULT 0');
     ensureColumn('agent_artifacts', 'current_version_id', 'INTEGER');
     ensureColumn('agent_artifacts', 'note', 'TEXT');
     ensureColumn('agent_artifacts', 'updated_at', 'DATETIME');
@@ -567,6 +610,8 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);

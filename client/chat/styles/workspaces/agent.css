@@ -261,6 +261,30 @@
     background: #fbfdff;
 }
 
+.agent-dag-inputs-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 8px;
+}
+
+.agent-dag-inputs-field.is-hidden {
+    display: none;
+}
+
+.agent-dag-inputs-field span {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.agent-dag-inputs-field textarea {
+    min-height: 74px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+}
+
 .agent-config-launcher {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -323,6 +347,50 @@
     gap: 8px 10px;
     align-items: end;
     margin-bottom: 0;
+}
+
+.agent-workflow-run-status {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 8px 6px 10px;
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 251, 235, 0.78);
+}
+
+.agent-workflow-run-status.hidden {
+    display: none;
+}
+
+.agent-workflow-run-status.is-ready {
+    border-color: rgba(16, 185, 129, 0.24);
+    background: rgba(236, 253, 245, 0.8);
+}
+
+.agent-workflow-run-status.is-error {
+    border-color: rgba(239, 68, 68, 0.26);
+    background: rgba(254, 242, 242, 0.78);
+}
+
+.agent-workflow-run-status span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #334155;
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.agent-workflow-run-status .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    font-weight: 800;
 }
 
 .agent-config-modal {
@@ -691,6 +759,16 @@
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list,
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-artifact-list {
         max-height: none;
+    }
+
+    .agent-workflow-version-item {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .agent-workflow-version-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
     }
 }
 
@@ -2051,6 +2129,14 @@ button.agent-ops-item {
     border-color: rgba(239, 68, 68, 0.35);
 }
 
+.agent-dag-node-rerun {
+    margin: 6px 0 2px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
 .agent-dag-node-head,
 .agent-artifact-version {
     display: flex;
@@ -2165,7 +2251,7 @@ button.agent-ops-item {
 /* v0.0.47 智能体 DAG 可视化编辑器 */
 .pivot-dag-editor-wrap {
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr;
     gap: 8px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -2177,7 +2263,7 @@ button.agent-ops-item {
 .agent-config-modal-body .pivot-dag-editor-wrap {
     min-height: 68vh;
     height: min(72vh, 760px);
-    grid-template-rows: auto minmax(480px, 1fr) auto;
+    grid-template-rows: auto minmax(480px, 1fr);
 }
 
 .pivot-dag-editor-toolbar {
@@ -2314,34 +2400,288 @@ button.agent-ops-item {
     border-radius: 8px;
 }
 
+.agent-dag-library-bar {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) auto minmax(120px, 1fr);
+    grid-template-areas:
+        "fields actions status";
+    gap: 8px 12px;
+    align-items: start;
+    padding: 10px 14px 9px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.agent-dag-library-fields {
+    grid-area: fields;
+    display: grid;
+    grid-template-columns: minmax(260px, 420px) minmax(260px, 420px);
+    gap: 8px;
+    min-width: 0;
+    width: min(100%, 850px);
+}
+
+.agent-dag-library-bar label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agent-dag-library-bar label span,
+.agent-workflow-version-label {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.15;
+}
+
+.agent-dag-library-bar .form-input {
+    height: 31px;
+    min-width: 0;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    padding: 0 10px;
+}
+
+.agent-dag-library-actions {
+    grid-area: actions;
+    display: flex;
+    align-items: center;
+    align-self: start;
+    justify-content: flex-end;
+    gap: 7px;
+    flex-wrap: wrap;
+    max-width: 390px;
+    margin-top: calc(0.68rem * 1.15 + 4px);
+}
+
+.agent-dag-library-bar .btn-secondary,
+.agent-dag-library-bar .btn-primary,
+.agent-dag-library-bar .btn-danger-outline {
+    height: 30px;
+    min-width: 44px;
+    padding: 0 11px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.agent-workflow-version-label {
+    grid-area: status;
+    align-self: start;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    margin-top: calc(0.68rem * 1.15 + 10px);
+}
+
+.agent-workflow-version-label:empty {
+    display: none;
+}
+
+@media (max-width: 1280px) {
+    .agent-dag-library-bar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "fields actions"
+            "status status";
+    }
+
+    .agent-dag-library-fields {
+        grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+        width: 100%;
+    }
+}
+
+@media (max-width: 900px) {
+    .agent-dag-library-bar {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "fields"
+            "actions"
+            "status";
+        align-items: stretch;
+    }
+
+    .agent-dag-library-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-dag-library-actions {
+        justify-content: flex-start;
+        max-width: none;
+        margin-top: 0;
+    }
+
+    .agent-workflow-version-label {
+        white-space: normal;
+        margin-top: 0;
+    }
+}
+
+.agent-workflow-versions-modal {
+    max-width: min(760px, calc(100vw - 32px));
+}
+
+.agent-workflow-versions-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: min(520px, calc(100vh - 210px));
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.agent-workflow-version-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.agent-workflow-version-item.current {
+    border-color: rgba(16, 163, 127, 0.35);
+    background: rgba(16, 163, 127, 0.06);
+}
+
+.agent-workflow-version-item strong,
+.agent-workflow-version-item span,
+.agent-workflow-version-item small {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-version-item strong {
+    color: var(--text-main);
+    font-size: 0.84rem;
+}
+
+.agent-workflow-version-item span,
+.agent-workflow-version-item small {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-workflow-version-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-workflow-version-actions .btn-secondary,
+.agent-workflow-version-actions .btn-primary {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.agent-workflow-diff-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px;
+    border: 1px solid rgba(59, 130, 246, 0.24);
+    border-radius: 8px;
+    background: #eff6ff;
+}
+
+.agent-workflow-diff-panel header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: #1e3a8a;
+    font-size: 0.78rem;
+}
+
+.agent-workflow-diff-panel h4 {
+    margin: 4px 0 0;
+    color: #475569;
+    font-size: 0.72rem;
+}
+
+.agent-workflow-diff-row {
+    padding: 7px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 7px;
+    background: #fff;
+}
+
+.agent-workflow-diff-row.added {
+    border-color: rgba(16, 185, 129, 0.28);
+}
+
+.agent-workflow-diff-row.removed {
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.agent-workflow-diff-row.changed {
+    border-color: rgba(245, 158, 11, 0.32);
+}
+
+.agent-workflow-diff-row strong,
+.agent-workflow-diff-row span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-diff-row strong {
+    color: var(--text-main);
+    font-size: 0.76rem;
+}
+
+.agent-workflow-diff-row span,
+.agent-workflow-diff-row summary {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.agent-workflow-diff-row pre {
+    max-height: 220px;
+    overflow: auto;
+    margin: 6px 0 0;
+    padding: 8px;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.68rem;
+}
+
 .agent-dag-workbench {
     flex: 1;
+    position: relative;
     min-height: 0;
     padding: 12px 14px 14px;
-    display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
-    gap: 10px;
+    display: block;
+    overflow: hidden;
 }
 
 .agent-dag-workbench .pivot-dag-editor-wrap {
     min-height: 0;
     height: 100%;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
 }
 
 .agent-dag-workbench .pivot-dag-editor-canvas {
     min-height: 0;
     max-height: none;
-}
-
-.agent-dag-workbench .pivot-dag-editor-inspector {
-    max-height: 240px;
-    overflow: auto;
-    padding-right: 4px;
-}
-
-.agent-dag-workbench .pivot-dag-editor-json {
-    margin-top: 0;
 }
 
 .pivot-dag-svg {
@@ -2417,9 +2757,72 @@ button.agent-ops-item {
     opacity: 0.7;
 }
 
+.agent-dag-node-drawer {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    bottom: 14px;
+    z-index: 8;
+    width: min(430px, calc(100% - 28px));
+    pointer-events: none;
+}
+
+.agent-dag-node-drawer.hidden {
+    display: none;
+}
+
+.agent-dag-node-drawer-panel {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    pointer-events: auto;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+}
+
+.agent-dag-drawer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 12px 10px;
+    border-bottom: 1px solid var(--border);
+    background: #f8fafc;
+}
+
+.agent-dag-drawer-head h3 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.92rem;
+    line-height: 1.25;
+}
+
+.agent-dag-drawer-head span {
+    display: block;
+    max-width: 290px;
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-dag-drawer-head .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
 .pivot-dag-editor-inspector {
-    border-top: 1px dashed var(--border);
-    padding-top: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2464,8 +2867,87 @@ button.agent-ops-item {
     font-size: 0.78rem;
 }
 
+.pivot-dag-inspector-row select[data-pivot-dag-field="tool"] {
+    height: 32px;
+    font-weight: 700;
+}
+
+.pivot-dag-tool-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 5px;
+    padding: 7px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 7px;
+    background: #f8fafc;
+}
+
+.pivot-dag-tool-meta.is-empty {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    line-height: 1.35;
+}
+
+.pivot-dag-tool-meta-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.pivot-dag-tool-meta-head strong {
+    min-width: 0;
+    color: var(--text-main);
+    font-size: 0.74rem;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pivot-dag-tool-meta-head span {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+}
+
+.pivot-dag-tool-meta-head em {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(16, 163, 127, 0.1);
+    color: #047857;
+    font-size: 0.62rem;
+    font-style: normal;
+    font-weight: 800;
+    line-height: 1.5;
+}
+
+.pivot-dag-tool-meta p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.4;
+}
+
+.pivot-dag-tool-meta code {
+    width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 0.66rem;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
 .pivot-dag-inspector-input textarea {
-    min-height: 60px;
+    min-height: 112px;
     height: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     resize: vertical;
@@ -2473,6 +2955,90 @@ button.agent-ops-item {
 
 .pivot-dag-inspector-input textarea.is-invalid {
     border-color: #ef4444;
+}
+
+.pivot-dag-input-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.pivot-dag-input-tools > .btn-secondary {
+    align-self: flex-start;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
+.pivot-dag-schema-hint {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.pivot-dag-schema-hint span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.pivot-dag-schema-hint strong {
+    color: var(--text-secondary);
+    font-weight: 800;
+}
+
+.pivot-dag-schema-hint.is-empty {
+    font-size: 0.7rem;
+}
+
+.pivot-dag-token-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.pivot-dag-token-head {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.pivot-dag-token-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.pivot-dag-token-btn {
+    min-height: 24px;
+    max-width: 100%;
+    padding: 0 8px;
+    border: 1px solid rgba(16, 163, 127, 0.24);
+    border-radius: 999px;
+    background: rgba(16, 163, 127, 0.08);
+    color: #047857;
+    font-size: 0.68rem;
+    font-weight: 700;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pivot-dag-token-btn:hover,
+.pivot-dag-token-btn:focus-visible {
+    border-color: rgba(16, 163, 127, 0.45);
+    background: rgba(16, 163, 127, 0.14);
 }
 
 .pivot-dag-inspector-depends-head {
@@ -2508,19 +3074,79 @@ button.agent-ops-item {
     justify-content: flex-end;
 }
 
-.pivot-dag-editor-json {
-    margin-top: 8px;
+.agent-dag-json-modal-overlay {
+    backdrop-filter: blur(4px);
 }
 
-.pivot-dag-editor-json > summary {
-    cursor: pointer;
+.agent-dag-json-modal {
+    width: min(980px, calc(100vw - 44px));
+    height: min(760px, calc(100vh - 56px));
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 8px;
+}
+
+.agent-dag-json-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+}
+
+.agent-dag-json-head h3 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.95rem;
+}
+
+.agent-dag-json-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-dag-json-actions .btn-primary,
+.agent-dag-json-actions .btn-secondary {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+}
+
+.agent-dag-json-modal .agent-dag-spec {
+    flex: 1;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    resize: none;
+    padding: 14px 16px;
     font-size: 0.78rem;
-    color: var(--text-muted);
-    padding: 4px 0;
+    line-height: 1.55;
+    background: #0f172a;
+    color: #e2e8f0;
+    outline: none;
 }
 
-.pivot-dag-editor-json[open] > summary {
-    margin-bottom: 6px;
+@media (max-width: 900px) {
+    .agent-dag-node-drawer {
+        left: 14px;
+        width: auto;
+    }
+
+    .agent-dag-json-modal {
+        width: calc(100vw - 24px);
+        height: calc(100vh - 32px);
+    }
+
+    .agent-dag-json-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 }
 
 /* v0.0.51 DAG 缩放、平移与小地图 */

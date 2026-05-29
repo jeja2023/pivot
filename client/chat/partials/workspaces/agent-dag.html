@@ -12,16 +12,56 @@
                     <button id="agent-dag-back-btn" class="btn-secondary" type="button">返回智能体</button>
                 </div>
             </div>
+            <div class="agent-dag-library-bar">
+                <div class="agent-dag-library-fields">
+                    <label class="agent-dag-library-name">
+                        <span>工作流名称</span>
+                        <input id="agent-workflow-name" class="form-input" maxlength="100" placeholder="例如：日报生成流程">
+                    </label>
+                    <label class="agent-dag-library-select">
+                        <span>工作流库</span>
+                        <select id="agent-workflow-select" class="form-input">
+                            <option value="">新建工作流</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="agent-dag-library-actions" aria-label="工作流库操作">
+                    <button id="agent-workflow-load-btn" class="btn-secondary" type="button">加载</button>
+                    <button id="agent-workflow-versions-btn" class="btn-secondary" type="button">版本</button>
+                    <button id="agent-workflow-publish-btn" class="btn-primary" type="button">发布</button>
+                    <button id="agent-workflow-delete-btn" class="btn-danger-outline" type="button">删除</button>
+                </div>
+                <span id="agent-workflow-version-label" class="agent-workflow-version-label"></span>
+            </div>
             <div class="agent-dag-workbench">
                 <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
                     <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
                     <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
-                    <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
                 </div>
-                <details class="pivot-dag-editor-json">
-                    <summary>JSON 视图（高级）</summary>
+                <aside id="agent-dag-node-drawer" class="agent-dag-node-drawer hidden" aria-hidden="true">
+                    <div class="agent-dag-node-drawer-panel">
+                        <div class="agent-dag-drawer-head">
+                            <div>
+                                <h3 id="agent-dag-node-drawer-title">节点配置</h3>
+                                <span id="agent-dag-node-drawer-subtitle"></span>
+                            </div>
+                            <button id="agent-dag-node-drawer-close" class="btn-secondary" type="button">关闭</button>
+                        </div>
+                        <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
+                    </div>
+                </aside>
+            </div>
+            <div id="agent-dag-json-modal" class="modal-overlay hidden agent-dag-json-modal-overlay" style="z-index: 1920;">
+                <div class="modal agent-dag-json-modal">
+                    <div class="agent-dag-json-head">
+                        <h3>JSON 视图（高级）</h3>
+                        <div class="agent-dag-json-actions">
+                            <button id="agent-dag-json-apply-btn" class="btn-primary" type="button">同步到画布</button>
+                            <button id="agent-dag-json-close-btn" class="btn-secondary" type="button">关闭</button>
+                        </div>
+                    </div>
                     <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
-                </details>
+                </div>
             </div>
         </div>
     </section>

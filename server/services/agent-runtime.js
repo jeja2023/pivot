@@ -189,7 +189,7 @@ function listSteps(runId) {
 function listDagNodes(runId) {
     return db.prepare(`
         SELECT id, run_id, node_key, title, tool_name, input, depends_on, condition, status,
-               output, error_message, duration_ms, started_at, completed_at, created_at
+               output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
         FROM agent_dag_nodes
         WHERE run_id = ?
         ORDER BY id ASC
@@ -382,6 +382,7 @@ function cancelAgentRun(runId, user) {
 }
 
 function createChildRunFromExisting(run, user) {
+    const metadata = getRunMetadata(run);
     return createAgentRun({
         user,
         goal: run.goal,
@@ -402,7 +403,8 @@ function createChildRunFromExisting(run, user) {
         scheduleId: run.schedule_id,
         contextConfig: parseJsonObject(run.context_config) || {},
         parentRunId: run.id,
-        metadata: getRunMetadata(run)
+        metadata,
+        dagSpec: metadata.dagSpec
     });
 }
 
@@ -415,6 +417,99 @@ function rerunAgentRun(runId, user) {
         throw err;
     }
     return createChildRunFromExisting(run, user);
+}
+
+function buildDagResumeSpec(originalRun, startNodeId = '') {
+    const metadata = getRunMetadata(originalRun);
+    const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
+    if (!dagSpec.nodes.length) return null;
+    const dagNodes = listDagNodes(originalRun.id);
+    const failed = dagNodes.filter(node => node.status === 'error');
+    const startIds = startNodeId
+        ? [String(startNodeId)]
+        : failed.map(node => node.node_key);
+    const validStartIds = startIds.filter(id => dagSpec.nodes.some(node => node.id === id));
+    if (!validStartIds.length) return null;
+    const include = new Set(validStartIds);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        dagSpec.nodes.forEach(node => {
+            if (include.has(node.id)) return;
+            if ((node.dependsOn || []).some(dep => include.has(dep))) {
+                include.add(node.id);
+                changed = true;
+            }
+        });
+    }
+    const reusable = {};
+    dagNodes.forEach(node => {
+        if (include.has(node.node_key)) return;
+        if (node.status !== 'completed') return;
+        reusable[node.node_key] = {
+            status: node.status,
+            input: node.input,
+            output: node.output,
+            reusedFromRunId: originalRun.id
+        };
+    });
+    const nodes = dagSpec.nodes.filter(node => include.has(node.id)).map(node => ({
+        ...node,
+        dependsOn: (node.dependsOn || []).filter(dep => include.has(dep))
+    }));
+    return { dagSpec: { nodes }, reusable };
+}
+
+function rerunAgentDagFromNode(runId, user, nodeId = '') {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status)) {
+        const err = new Error('当前任务仍在执行中，请停止或等待结束后再重跑节点。');
+        err.status = 400;
+        throw err;
+    }
+    if (run.run_mode !== 'dag') {
+        const err = new Error('只有工作流编排任务支持节点重跑。');
+        err.status = 400;
+        throw err;
+    }
+    const resume = buildDagResumeSpec(run, nodeId);
+    if (!resume || !resume.dagSpec.nodes.length) {
+        const err = new Error('未找到可重跑的失败节点。');
+        err.status = 400;
+        throw err;
+    }
+    const metadata = getRunMetadata(run);
+    return createAgentRun({
+        user,
+        goal: run.goal,
+        modelId: run.model_id,
+        sessionId: run.session_id,
+        title: `节点重跑：${getAgentRunTitle(run)}`.slice(0, 80),
+        maxSteps: run.max_steps,
+        priority: run.priority,
+        runMode: 'dag',
+        toolPolicy: run.tool_policy,
+        approvalPolicy: run.approval_policy,
+        toolAllowlist: normalizeToolAllowlist(run.tool_allowlist),
+        timeoutMs: run.timeout_ms,
+        toolTimeoutMs: run.tool_timeout_ms,
+        retryLimit: run.retry_limit,
+        maxTokenBudget: run.max_token_budget,
+        templateId: run.template_id,
+        scheduleId: run.schedule_id,
+        contextConfig: parseJsonObject(run.context_config) || {},
+        parentRunId: run.id,
+        metadata: {
+            ...metadata,
+            dagSpec: resume.dagSpec,
+            reusedDagNodes: resume.reusable,
+            rerunFromRunId: run.id,
+            rerunFromNodeId: nodeId || '',
+            workflowVersionMode: metadata.workflowVersionMode || ''
+        },
+        dagSpec: resume.dagSpec
+    });
 }
 
 function resumeAgentRun(runId, user) {
@@ -681,6 +776,7 @@ function upsertDagNode(runId, node, patch = {}) {
         status: patch.status ?? 'pending',
         output: patch.output ?? null,
         errorMessage: patch.errorMessage ?? '',
+        attemptCount: patch.attemptCount ?? 0,
         durationMs: patch.durationMs ?? null,
         startedAt: patch.startedAt ?? null,
         completedAt: patch.completedAt ?? null
@@ -689,7 +785,7 @@ function upsertDagNode(runId, node, patch = {}) {
         db.prepare(`
             UPDATE agent_dag_nodes
             SET title = ?, tool_name = ?, input = ?, depends_on = ?, condition = ?, status = ?,
-                output = ?, error_message = ?, duration_ms = ?, started_at = ?, completed_at = ?
+                output = ?, error_message = ?, attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?
             WHERE id = ?
         `).run(
             row.title,
@@ -700,6 +796,7 @@ function upsertDagNode(runId, node, patch = {}) {
             row.status,
             row.output === null ? null : JSON.stringify(row.output),
             row.errorMessage,
+            row.attemptCount,
             row.durationMs,
             row.startedAt,
             row.completedAt,
@@ -710,8 +807,8 @@ function upsertDagNode(runId, node, patch = {}) {
     const info = db.prepare(`
         INSERT INTO agent_dag_nodes (
             run_id, node_key, title, tool_name, input, depends_on, condition, status,
-            output, error_message, duration_ms, started_at, completed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         runId,
         node.id,
@@ -723,6 +820,7 @@ function upsertDagNode(runId, node, patch = {}) {
         row.status,
         row.output === null ? null : JSON.stringify(row.output),
         row.errorMessage,
+        row.attemptCount,
         row.durationMs,
         row.startedAt,
         row.completedAt,
@@ -897,15 +995,170 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
     }
 }
 
+function getPathValue(value, path = []) {
+    let current = value;
+    for (const part of path) {
+        if (current === null || current === undefined) return undefined;
+        if (Array.isArray(current) && /^\d+$/.test(part)) {
+            current = current[Number(part)];
+        } else if (typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, part)) {
+            current = current[part];
+        } else {
+            return undefined;
+        }
+    }
+    return current;
+}
+
+function stringifyDagTemplateValue(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+        return JSON.stringify(value);
+    } catch (e) {
+        return String(value);
+    }
+}
+
+function resolveDagTemplateReference(expression, context) {
+    const expr = String(expression || '').trim();
+    if (!expr) return undefined;
+    if (expr === 'goal' || expr === 'run.goal') return context.goal;
+    const parts = expr.split('.').map(part => part.trim()).filter(Boolean);
+    if (!parts.length) return undefined;
+    if (parts[0] === 'inputs' || parts[0] === 'input') {
+        return getPathValue(context.inputs || {}, parts.slice(1));
+    }
+    if (parts[0] === 'run') {
+        if (parts[1] === 'goal') return context.goal;
+        if (parts[1] === 'inputs' || parts[1] === 'input') return getPathValue(context.inputs || {}, parts.slice(2));
+    }
+    if (parts[0] === 'nodes' || parts[0] === 'node') {
+        const nodeId = parts[1];
+        const field = parts[2] || 'output';
+        if (!nodeId) return undefined;
+        const state = context.states.get(nodeId) || {};
+        const node = context.nodeMap.get(nodeId) || {};
+        if (field === 'status') return state.status;
+        if (field === 'error') return state.error || '';
+        if (field === 'title') return node.title || nodeId;
+        if (field === 'tool') return node.tool || '';
+        if (field === 'input') return getPathValue(state.input ?? node.input ?? {}, parts.slice(3));
+        if (field === 'output') return getPathValue(state.output, parts.slice(3));
+    }
+    return undefined;
+}
+
+function resolveDagInputValue(value, context) {
+    if (typeof value === 'string') {
+        const exact = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
+        if (exact) {
+            const resolved = resolveDagTemplateReference(exact[1], context);
+            return resolved === undefined ? value : resolved;
+        }
+        return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
+            const resolved = resolveDagTemplateReference(expression, context);
+            return resolved === undefined ? match : stringifyDagTemplateValue(resolved);
+        });
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => resolveDagInputValue(item, context));
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveDagInputValue(item, context)]));
+    }
+    return value;
+}
+
+function resolveDagNodeInput(node, context) {
+    const resolved = resolveDagInputValue(node.input || {}, context);
+    return resolved && typeof resolved === 'object' && !Array.isArray(resolved) ? resolved : {};
+}
+
+function normalizeDagRunInputs(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [String(key).trim().slice(0, 80), item]));
+}
+
+function normalizeDagNodePolicy(node, run) {
+    const defaultTimeout = normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000);
+    return {
+        retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
+        timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000) || defaultTimeout,
+        onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
+            ? String(node.onError || node.on_error || 'skip_dependents')
+            : 'skip_dependents'
+    };
+}
+
+async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolList, deadline, policy }) {
+    const startedAt = Date.now();
+    const startedAtText = getBeijingTimestamp();
+    let lastError = null;
+    const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        assertRunNotCancelled(run.id);
+        try {
+            const output = await withTimeout(
+                executeToolByName(node.tool, resolvedInput, user, toolList),
+                Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
+                `工作流节点 ${node.title || node.id}`
+            );
+            return {
+                ok: true,
+                output,
+                attempt,
+                startedAt,
+                startedAtText,
+                durationMs: Date.now() - startedAt
+            };
+        } catch (e) {
+            lastError = e;
+            insertStep(run.id, listSteps(run.id).length + 1, {
+                type: 'dag',
+                title: `工作流节点尝试失败：${node.title || node.id}（${attempt}/${attempts}）`,
+                toolName: node.tool,
+                input: resolvedInput,
+                output: { error: e.message, attempt, attempts, retrying: attempt < attempts },
+                errorMessage: e.message,
+                status: attempt < attempts ? 'success' : 'error',
+                durationMs: Date.now() - startedAt
+            });
+            if (attempt >= attempts) break;
+        }
+    }
+    return {
+        ok: false,
+        error: lastError || new Error('工作流节点执行失败。'),
+        attempt: attempts,
+        startedAt,
+        startedAtText,
+        durationMs: Date.now() - startedAt
+    };
+}
+
 async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }) {
     const metadata = getRunMetadata(run);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
+    const dagInputs = normalizeDagRunInputs(metadata.dagInputs || metadata.inputs || {});
+    const reusedDagNodes = metadata.reusedDagNodes && typeof metadata.reusedDagNodes === 'object' ? metadata.reusedDagNodes : {};
     if (!dagSpec.nodes.length) {
         throw new Error('工作流编排模式需要至少配置一个有效节点。');
     }
 
     dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
+    const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
     const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
+    Object.entries(reusedDagNodes).forEach(([nodeId, state]) => {
+        states.set(nodeId, {
+            status: state?.status || 'completed',
+            input: state?.input || {},
+            output: state?.output,
+            compactOutput: clampText(state?.output, 12000),
+            reused: true
+        });
+    });
     const observations = [];
     let stepIndex = listSteps(run.id).length + 1;
 
@@ -922,6 +1175,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         }
 
         const runnable = [];
+        const stopErrors = [];
         readyNodes.forEach(node => {
             const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
             if (node.condition !== 'always' && depStates.some(status => status !== 'completed')) {
@@ -946,64 +1200,106 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
 
         await Promise.all(runnable.slice(0, 4).map(async node => {
             const selectedTool = toolList.find(tool => tool.name === node.tool);
-            if (maybePauseForApproval(run, selectedTool, node.input || {})) {
+            const resolvedInput = resolveDagNodeInput(node, {
+                goal: run.goal,
+                inputs: dagInputs,
+                states,
+                nodeMap
+            });
+            if (maybePauseForApproval(run, selectedTool, resolvedInput)) {
                 const err = new Error('工作流节点等待能力库工具审批。');
                 err.code = 'AGENT_APPROVAL_REQUIRED';
                 throw err;
             }
-            const startedAt = Date.now();
+            const policy = normalizeDagNodePolicy(node, run);
             const startedAtText = getBeijingTimestamp();
-            states.set(node.id, { status: 'running' });
-            upsertDagNode(run.id, node, { status: 'running', startedAt: startedAtText });
+            states.set(node.id, { status: 'running', input: resolvedInput });
+            upsertDagNode(run.id, node, { status: 'running', input: resolvedInput, startedAt: startedAtText });
             try {
-                const output = await withTimeout(
-                    executeToolByName(node.tool, node.input || {}, user, toolList),
-                    Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                    `工作流工具调用 ${node.tool}`
-                );
+                const result = await executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolList, deadline, policy });
                 assertRunNotCancelled(run.id);
+                if (!result.ok) {
+                    result.error.dagAttempt = result.attempt;
+                    result.error.dagDurationMs = result.durationMs;
+                    throw result.error;
+                }
+                const { output } = result;
                 const compactOutput = clampText(output, 12000);
-                states.set(node.id, { status: 'completed', output: compactOutput });
+                states.set(node.id, { status: 'completed', input: resolvedInput, output, compactOutput, attemptCount: result.attempt });
                 upsertDagNode(run.id, node, {
                     status: 'completed',
+                    input: resolvedInput,
                     output: compactOutput,
-                    durationMs: Date.now() - startedAt,
+                    attemptCount: result.attempt,
+                    durationMs: result.durationMs,
                     completedAt: getBeijingTimestamp()
                 });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, output: compactOutput });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, output: compactOutput, attempts: result.attempt });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
                     title: `工作流节点完成：${node.title}`,
                     toolName: node.tool,
-                    input: node.input,
+                    input: resolvedInput,
                     output: compactOutput,
-                    durationMs: Date.now() - startedAt
+                    durationMs: result.durationMs
                 });
             } catch (e) {
-                states.set(node.id, { status: 'error', error: e.message });
+                const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
+                const durationMs = Number(e.dagDurationMs || 0);
+                const status = policy.onError === 'continue' ? 'completed' : 'error';
+                states.set(node.id, {
+                    status,
+                    input: resolvedInput,
+                    error: e.message,
+                    output: policy.onError === 'continue' ? { error: e.message, continued: true } : undefined,
+                    attemptCount,
+                    onError: policy.onError
+                });
                 upsertDagNode(run.id, node, {
-                    status: 'error',
-                    output: { error: e.message },
+                    status,
+                    input: resolvedInput,
+                    output: { error: e.message, onError: policy.onError },
                     errorMessage: e.message,
-                    durationMs: Date.now() - startedAt,
+                    attemptCount,
+                    durationMs,
                     completedAt: getBeijingTimestamp()
                 });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: node.input, error: e.message });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `工作流节点失败：${node.title}`,
+                    title: policy.onError === 'continue' ? `工作流节点失败但继续：${node.title}` : `工作流节点失败：${node.title}`,
                     toolName: node.tool,
-                    input: node.input,
-                    output: { error: e.message },
+                    input: resolvedInput,
+                    output: { error: e.message, onError: policy.onError },
                     errorMessage: e.message,
-                    status: 'error',
-                    durationMs: Date.now() - startedAt
+                    status: policy.onError === 'continue' ? 'success' : 'error',
+                    durationMs
                 });
+                if (policy.onError === 'stop') stopErrors.push(e);
             } finally {
                 stepIndex += 1;
                 updateRun(run.id, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             }
         }));
+        if (stopErrors.length) throw stopErrors[0];
+    }
+
+    const failedNodes = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'error');
+    const skippedNodes = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'skipped');
+    if (failedNodes.length || skippedNodes.length) {
+        insertStep(run.id, stepIndex, {
+            type: 'control',
+            title: failedNodes.length ? '工作流完成但存在失败节点' : '工作流完成并跳过部分节点',
+            output: {
+                failedNodes: failedNodes.map(node => ({
+                    id: node.id,
+                    title: node.title,
+                    error: states.get(node.id)?.error || ''
+                })),
+                skippedNodes: skippedNodes.map(node => ({ id: node.id, title: node.title }))
+            },
+            status: failedNodes.length ? 'error' : 'success'
+        });
     }
 
     const answer = await withTimeout(
@@ -1014,11 +1310,18 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     updateRun(run.id, {
         status: 'completed',
         final_answer: answer,
+        error_message: failedNodes.length ? `工作流完成但有 ${failedNodes.length} 个节点失败。` : '',
         completed_at: getBeijingTimestamp(),
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
     });
-    createAgentNotification(user.id, run.id, 'completed', '智能体工作流任务已完成', getAgentRunTitle(run));
+    createAgentNotification(
+        user.id,
+        run.id,
+        failedNodes.length ? 'warning' : 'completed',
+        failedNodes.length ? '智能体工作流完成但存在失败节点' : '智能体工作流任务已完成',
+        getAgentRunTitle(run)
+    );
 }
 
 async function runAgent(runId, user) {
@@ -1220,6 +1523,10 @@ async function runAgent(runId, user) {
             updateRun(runId, { updated_at: getBeijingTimestamp() });
             return;
         }
+        if (e.code === 'AGENT_APPROVAL_REQUIRED') {
+            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            return;
+        }
         logger.error({ err: e.message, runId }, 'Agent run failed');
         const retryLimit = normalizePositiveInt(db.prepare('SELECT retry_limit FROM agent_runs WHERE id = ?').get(runId)?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(db.prepare('SELECT retry_count FROM agent_runs WHERE id = ?').get(runId)?.retry_count, 0, 0, 99);
@@ -1414,7 +1721,16 @@ function preflightAgentRun(user, body = {}) {
     if (Number(knowledge.ready || 0) === 0 && /知识库|资料|文档|依据|引用/i.test(goal)) warnings.push('目标提到了资料或知识库，但当前没有启用且就绪的知识库文档。');
     if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
     if (runMode === 'dag') {
-        const dag = normalizeDagSpec(body.dagSpec || body.dag_spec || {});
+        let dag = null;
+        const workflowId = body.workflowId || body.workflow_id;
+        if (workflowId) {
+            try {
+                dag = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current')?.dagSpec;
+            } catch (e) {
+                blockers.push(e.message || 'Workflow version is not available.');
+            }
+        }
+        dag = dag || normalizeDagSpec(body.dagSpec || body.dag_spec || {});
         if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
@@ -1454,6 +1770,326 @@ function assertTemplateAccess(template, user, write = false) {
     return allowedUnits.length === 0 || allowedUnits.includes(user.unit || '');
 }
 
+function normalizeWorkflowPayload(body = {}, fallback = {}) {
+    const name = String(body.name || fallback.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
+    const dagSpec = normalizeDagSpec(body.dagSpec || body.dag_spec || fallback.dagSpec || fallback.dag_spec || {});
+    if (!dagSpec.nodes.length) {
+        const err = new Error('工作流库保存需要至少一个有效节点。');
+        err.status = 400;
+        throw err;
+    }
+    return {
+        name,
+        description: String(body.description || fallback.description || '').trim().slice(0, 300),
+        note: String(body.note || '').trim().slice(0, 300),
+        dagSpec
+    };
+}
+
+function normalizeDagInputsPayload(value) {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        const parsed = parseJsonObject(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? normalizeDagRunInputs(parsed) : {};
+    }
+    return normalizeDagRunInputs(value);
+}
+
+function formatAgentWorkflow(row) {
+    if (!row) return null;
+    const dagSpec = parseJsonObject(row.current_dag_spec || row.dag_spec || '') || { nodes: [] };
+    return {
+        id: row.id,
+        user_id: row.user_id,
+        name: row.name,
+        description: row.description || '',
+        current_version_id: row.current_version_id || null,
+        current_version: Number(row.current_version || row.version || 0),
+        current_note: row.current_note || '',
+        published_version_id: row.published_version_id || null,
+        published_version: Number(row.published_version || 0),
+        published_at: row.published_at || '',
+        is_published: Boolean(row.published_version_id),
+        dag_spec: dagSpec,
+        node_count: Array.isArray(dagSpec.nodes) ? dagSpec.nodes.length : 0,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        version_created_at: row.version_created_at || ''
+    };
+}
+
+function getAgentWorkflowForUser(workflowId, user) {
+    const row = db.prepare(`
+        SELECT
+            w.*,
+            v.version AS current_version,
+            v.dag_spec AS current_dag_spec,
+            v.note AS current_note,
+            v.created_at AS version_created_at,
+            pv.version AS published_version
+        FROM agent_workflows w
+        LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
+        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
+        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
+    `).get(workflowId, user.id);
+    return formatAgentWorkflow(row);
+}
+
+function listAgentWorkflows(user) {
+    return db.prepare(`
+        SELECT
+            w.*,
+            v.version AS current_version,
+            v.dag_spec AS current_dag_spec,
+            v.note AS current_note,
+            v.created_at AS version_created_at,
+            pv.version AS published_version
+        FROM agent_workflows w
+        LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
+        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
+        WHERE w.user_id = ? AND w.deleted_at IS NULL
+        ORDER BY w.updated_at DESC, w.id DESC
+        LIMIT 100
+    `).all(user.id).map(formatAgentWorkflow);
+}
+
+function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
+    const normalizedWorkflowId = Number.parseInt(workflowId, 10);
+    if (!normalizedWorkflowId) return null;
+    const workflow = db.prepare(`
+        SELECT
+            w.*,
+            cv.version AS current_version,
+            pv.version AS published_version
+        FROM agent_workflows w
+        LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
+        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
+        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
+    `).get(normalizedWorkflowId, user.id);
+    if (!workflow) return null;
+    const requested = String(version || 'current').trim().toLowerCase();
+    let versionRow = null;
+    let mode = requested || 'current';
+    if (requested === 'published') {
+        if (!workflow.published_version_id) {
+            const err = new Error('工作流尚未发布，不能以发布版运行。');
+            err.status = 400;
+            throw err;
+        }
+        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?')
+            .get(workflow.published_version_id, workflow.id);
+    } else if (requested === 'current') {
+        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?')
+            .get(workflow.current_version_id, workflow.id);
+    } else {
+        const numericVersion = Number.parseInt(requested, 10);
+        if (!numericVersion) return null;
+        mode = 'version';
+        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE workflow_id = ? AND version = ?')
+            .get(workflow.id, numericVersion);
+    }
+    if (!versionRow) return null;
+    const dagSpec = normalizeDagSpec(parseJsonObject(versionRow.dag_spec) || {});
+    if (!dagSpec.nodes.length) {
+        const err = new Error('目标工作流版本没有有效节点。');
+        err.status = 400;
+        throw err;
+    }
+    return {
+        workflow: {
+            id: workflow.id,
+            name: workflow.name,
+            current_version: Number(workflow.current_version || 0),
+            published_version: Number(workflow.published_version || 0),
+            published_at: workflow.published_at || ''
+        },
+        version: Number(versionRow.version || 0),
+        version_id: versionRow.id,
+        mode,
+        dagSpec
+    };
+}
+
+function createAgentWorkflow(user, body = {}) {
+    const data = normalizeWorkflowPayload(body);
+    const now = getBeijingTimestamp();
+    const create = db.transaction(() => {
+        const workflowInfo = db.prepare(`
+            INSERT INTO agent_workflows (user_id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(user.id, data.name, data.description, now, now);
+        const workflowId = workflowInfo.lastInsertRowid;
+        const versionInfo = db.prepare(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(workflowId, 1, JSON.stringify(data.dagSpec), data.note, user.id, now);
+        db.prepare('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?')
+            .run(versionInfo.lastInsertRowid, workflowId);
+        return workflowId;
+    });
+    return getAgentWorkflowForUser(create(), user);
+}
+
+function updateAgentWorkflow(workflowId, user, body = {}) {
+    const current = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
+    if (!current) return null;
+    const data = normalizeWorkflowPayload(body, current);
+    const now = getBeijingTimestamp();
+    const update = db.transaction(() => {
+        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(current.id)?.next || 1);
+        const versionInfo = db.prepare(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now);
+        db.prepare(`
+            UPDATE agent_workflows
+            SET name = ?, description = ?, current_version_id = ?, updated_at = ?
+            WHERE id = ?
+        `).run(data.name, data.description, versionInfo.lastInsertRowid, now, current.id);
+        return current.id;
+    });
+    return getAgentWorkflowForUser(update(), user);
+}
+
+function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
+    const resolved = resolveAgentWorkflowVersion(workflowId, user, version || 'current');
+    if (!resolved) return null;
+    const now = getBeijingTimestamp();
+    db.prepare(`
+        UPDATE agent_workflows
+        SET published_version_id = ?, published_at = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(resolved.version_id, now, now, resolved.workflow.id, user.id);
+    return getAgentWorkflowForUser(resolved.workflow.id, user);
+}
+
+function listAgentWorkflowVersions(workflowId, user) {
+    const workflow = db.prepare('SELECT id FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
+    if (!workflow) return null;
+    return db.prepare(`
+        SELECT id, workflow_id, version, dag_spec, note, created_by, created_at
+        FROM agent_workflow_versions
+        WHERE workflow_id = ?
+        ORDER BY version DESC
+    `).all(workflow.id).map(row => ({
+        ...row,
+        dag_spec: parseJsonObject(row.dag_spec) || { nodes: [] }
+    }));
+}
+
+function restoreAgentWorkflowVersion(workflowId, user, version) {
+    const workflow = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
+    if (!workflow) return null;
+    const source = db.prepare(`
+        SELECT *
+        FROM agent_workflow_versions
+        WHERE workflow_id = ? AND version = ?
+    `).get(workflow.id, Number.parseInt(version, 10));
+    if (!source) return null;
+    const dagSpec = normalizeDagSpec(parseJsonObject(source.dag_spec) || {});
+    if (!dagSpec.nodes.length) {
+        const err = new Error('目标版本没有有效节点，无法回滚。');
+        err.status = 400;
+        throw err;
+    }
+    const now = getBeijingTimestamp();
+    const restore = db.transaction(() => {
+        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(workflow.id)?.next || 1);
+        const versionInfo = db.prepare(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(workflow.id, nextVersion, JSON.stringify(dagSpec), `从 v${source.version} 回滚`, user.id, now);
+        db.prepare('UPDATE agent_workflows SET current_version_id = ?, updated_at = ? WHERE id = ?')
+            .run(versionInfo.lastInsertRowid, now, workflow.id);
+        return workflow.id;
+    });
+    return getAgentWorkflowForUser(restore(), user);
+}
+
+function normalizeWorkflowNodesForDiff(spec = {}) {
+    const dag = normalizeDagSpec(spec || {});
+    return new Map(dag.nodes.map(node => [node.id, node]));
+}
+
+function sameJsonValue(left, right) {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'current') {
+    const workflow = db.prepare(`
+        SELECT w.*, cv.version AS current_version
+        FROM agent_workflows w
+        LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
+        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
+    `).get(workflowId, user.id);
+    if (!workflow) return null;
+    const normalizeVersion = value => {
+        if (String(value || '').trim() === 'current') return Number(workflow.current_version || 0);
+        return Number.parseInt(value, 10);
+    };
+    const from = normalizeVersion(fromVersion);
+    const to = normalizeVersion(toVersion);
+    if (!from || !to) return null;
+    const rows = db.prepare(`
+        SELECT version, dag_spec, note, created_at
+        FROM agent_workflow_versions
+        WHERE workflow_id = ? AND version IN (?, ?)
+    `).all(workflow.id, from, to);
+    const fromRow = rows.find(row => Number(row.version) === from);
+    const toRow = rows.find(row => Number(row.version) === to);
+    if (!fromRow || !toRow) return null;
+    const fromNodes = normalizeWorkflowNodesForDiff(parseJsonObject(fromRow.dag_spec) || {});
+    const toNodes = normalizeWorkflowNodesForDiff(parseJsonObject(toRow.dag_spec) || {});
+    const added = [];
+    const removed = [];
+    const changed = [];
+    toNodes.forEach((node, id) => {
+        const before = fromNodes.get(id);
+        if (!before) {
+            added.push({ id, title: node.title, tool: node.tool });
+            return;
+        }
+        const changes = [];
+        if (before.title !== node.title) changes.push('标题');
+        if (before.tool !== node.tool) changes.push('工具');
+        if (!sameJsonValue(before.input, node.input)) changes.push('输入');
+        if (!sameJsonValue(before.dependsOn, node.dependsOn)) changes.push('依赖');
+        if (before.condition !== node.condition) changes.push('条件');
+        if (changes.length) {
+            changed.push({
+                id,
+                before: { title: before.title, tool: before.tool, dependsOn: before.dependsOn, condition: before.condition, input: before.input },
+                after: { title: node.title, tool: node.tool, dependsOn: node.dependsOn, condition: node.condition, input: node.input },
+                changes
+            });
+        }
+    });
+    fromNodes.forEach((node, id) => {
+        if (!toNodes.has(id)) removed.push({ id, title: node.title, tool: node.tool });
+    });
+    return {
+        workflow: { id: workflow.id, name: workflow.name },
+        from: { version: fromRow.version, note: fromRow.note || '', created_at: fromRow.created_at },
+        to: { version: toRow.version, note: toRow.note || '', created_at: toRow.created_at },
+        summary: {
+            added: added.length,
+            removed: removed.length,
+            changed: changed.length
+        },
+        added,
+        removed,
+        changed
+    };
+}
+
+function deleteAgentWorkflow(workflowId, user) {
+    const workflow = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
+    if (!workflow) return null;
+    const now = getBeijingTimestamp();
+    db.prepare('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, workflow.id);
+    return workflow;
+}
+
 function normalizeTemplatePayload(body = {}, user = {}) {
     const name = String(body.name || '').trim().slice(0, 80);
     const goalTemplate = String(body.goalTemplate || body.goal_template || body.goal || '').trim();
@@ -1463,12 +2099,15 @@ function normalizeTemplatePayload(body = {}, user = {}) {
         throw err;
     }
     const shared = body.scope === 'shared' && user?.username === 'admin';
+    const runMode = normalizeRunMode(body.runMode || body.run_mode);
+    const dagSpec = runMode === 'dag' ? normalizeDagSpec(body.dagSpec || body.dag_spec || {}) : { nodes: [] };
+    const workflowId = body.workflowId || body.workflow_id || null;
     return {
         name,
         scope: shared ? 'shared' : 'personal',
         description: String(body.description || '').trim().slice(0, 300),
         goalTemplate: goalTemplate.slice(0, MAX_GOAL_LENGTH),
-        runMode: normalizeRunMode(body.runMode || body.run_mode),
+        runMode,
         toolPolicy: normalizeToolPolicy(body.toolPolicy || body.tool_policy),
         toolAllowlist: serializeToolAllowlist(body.toolAllowlist || body.tool_allowlist),
         approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy),
@@ -1477,7 +2116,11 @@ function normalizeTemplatePayload(body = {}, user = {}) {
         retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
         contextConfig: serializeContextConfig(body.contextConfig || body.context_config),
         allowedUnits: shared ? String(body.allowedUnits || body.allowed_units || '').trim().slice(0, 500) : '',
-        modelRouter: normalizeRouterStrategy(body.modelRouter || body.model_router)
+        modelRouter: normalizeRouterStrategy(body.modelRouter || body.model_router),
+        dagSpec: runMode === 'dag' && dagSpec.nodes.length ? JSON.stringify(dagSpec) : '',
+        dagInputs: runMode === 'dag' ? JSON.stringify(normalizeDagInputsPayload(body.dagInputs || body.dag_inputs || {})) : '',
+        workflowId: runMode === 'dag' && workflowId ? Number.parseInt(workflowId, 10) || null : null,
+        workflowVersion: runMode === 'dag' ? String(body.workflowVersion || body.workflow_version || '').trim().slice(0, 40) : ''
     };
 }
 
@@ -1499,13 +2142,13 @@ function createAgentTemplate(user, body = {}) {
         INSERT INTO agent_templates (
             user_id, scope, name, description, goal_template, run_mode, tool_policy, tool_allowlist,
             approval_policy, max_steps, max_token_budget, retry_limit, context_config, allowed_units,
-            model_router, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_router, dag_spec, dag_inputs, workflow_id, workflow_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         user.id, data.scope, data.name, data.description, data.goalTemplate, data.runMode,
         data.toolPolicy, data.toolAllowlist, data.approvalPolicy, data.maxSteps,
         data.maxTokenBudget, data.retryLimit, data.contextConfig, data.allowedUnits,
-        data.modelRouter, now, now
+        data.modelRouter, data.dagSpec, data.dagInputs, data.workflowId, data.workflowVersion, now, now
     );
     return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(info.lastInsertRowid);
 }
@@ -1518,12 +2161,14 @@ function updateAgentTemplate(templateId, user, body = {}) {
         UPDATE agent_templates
         SET scope = ?, name = ?, description = ?, goal_template = ?, run_mode = ?, tool_policy = ?,
             tool_allowlist = ?, approval_policy = ?, max_steps = ?, max_token_budget = ?, retry_limit = ?,
-            context_config = ?, allowed_units = ?, model_router = ?, updated_at = ?
+            context_config = ?, allowed_units = ?, model_router = ?, dag_spec = ?, dag_inputs = ?,
+            workflow_id = ?, workflow_version = ?, updated_at = ?
         WHERE id = ?
     `).run(
         data.scope, data.name, data.description, data.goalTemplate, data.runMode, data.toolPolicy,
         data.toolAllowlist, data.approvalPolicy, data.maxSteps, data.maxTokenBudget, data.retryLimit,
-        data.contextConfig, data.allowedUnits, data.modelRouter, getBeijingTimestamp(), templateId
+        data.contextConfig, data.allowedUnits, data.modelRouter, data.dagSpec, data.dagInputs,
+        data.workflowId, data.workflowVersion, getBeijingTimestamp(), templateId
     );
     return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
 }
@@ -1594,7 +2239,10 @@ function normalizeSchedulePayload(body = {}) {
             retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
             maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
             contextConfig: normalizeContextConfig(body.contextConfig || body.context_config),
-            dagSpec: normalizeDagSpec(body.dagSpec || body.dag_spec || {})
+            dagSpec: normalizeDagSpec(body.dagSpec || body.dag_spec || {}),
+            dagInputs: normalizeDagInputsPayload(body.dagInputs || body.dag_inputs || {}),
+            workflowId: body.workflowId || body.workflow_id || null,
+            workflowVersion: String(body.workflowVersion || body.workflow_version || '').trim() || null
         }
     };
 }
@@ -1615,6 +2263,9 @@ function createAgentSchedule(user, body = {}) {
     const data = normalizeSchedulePayload(body);
     const modelCfg = getRunnableModelForUser(data.modelId, user);
     if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
+    if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
+        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+    }
     const now = getBeijingTimestamp();
     const info = db.prepare(`
         INSERT INTO agent_schedules (
@@ -1636,6 +2287,9 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     const data = normalizeSchedulePayload(body);
     const modelCfg = getRunnableModelForUser(data.modelId, user);
     if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
+    if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
+        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+    }
     const now = getBeijingTimestamp();
     db.prepare(`
         UPDATE agent_schedules
@@ -1679,6 +2333,9 @@ function runAgentScheduleNow(scheduleId, user) {
         scheduleId: schedule.id,
         contextConfig: cfg.contextConfig,
         dagSpec: cfg.dagSpec,
+        dagInputs: cfg.dagInputs,
+        workflowId: cfg.workflowId,
+        workflowVersion: cfg.workflowVersion,
         priority: 1
     });
     db.prepare('UPDATE agent_schedules SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?')
@@ -1997,6 +2654,9 @@ function createAgentRun({
     resumeFromStep = 0,
     metadata = {},
     dagSpec = null,
+    dagInputs = null,
+    workflowId = null,
+    workflowVersion = null,
     modelRouter = 'fixed'
 }) {
     const cleanGoal = normalizeAgentGoal(goal);
@@ -2008,8 +2668,29 @@ function createAgentRun({
     const normalizedRunMode = normalizeRunMode(runMode);
     const normalizedRouter = normalizeRouterStrategy(modelRouter);
     const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+    const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});
+    if (Object.keys(normalizedDagInputs).length) {
+        runMetadata.dagInputs = normalizedDagInputs;
+    }
     if (normalizedRunMode === 'dag') {
-        runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
+        const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
+        const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
+        if (requestedWorkflowId && requestedWorkflowVersion) {
+            const resolvedWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
+            if (!resolvedWorkflow) {
+                const err = new Error('工作流不存在或目标版本不可用。');
+                err.status = 404;
+                throw err;
+            }
+            runMetadata.dagSpec = resolvedWorkflow.dagSpec;
+            runMetadata.workflowId = resolvedWorkflow.workflow.id;
+            runMetadata.workflowName = resolvedWorkflow.workflow.name;
+            runMetadata.workflowVersion = resolvedWorkflow.version;
+            runMetadata.workflowVersionMode = resolvedWorkflow.mode;
+            runMetadata.workflowVersionId = resolvedWorkflow.version_id;
+        } else {
+            runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
+        }
     }
     db.prepare(`
         INSERT INTO agent_runs (
@@ -2058,20 +2739,26 @@ module.exports = {
     createAgentArtifactVersion,
     createAgentSchedule,
     createAgentTemplate,
+    createAgentWorkflow,
     cancelAgentRun,
     computeNextScheduleRun,
     deleteAgentSchedule,
     deleteAgentTemplate,
+    deleteAgentWorkflow,
     approveAgentTool,
     diffAgentArtifactVersions,
+    diffAgentWorkflowVersions,
     exportAgentRun,
     formatToolList,
     getAgentArtifactForUser,
+    getAgentWorkflowForUser,
     listAgentArtifacts,
     listAgentArtifactVersions,
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
+    listAgentWorkflowVersions,
+    listAgentWorkflows,
     getAgentMetrics,
     preflightAgentRun,
     getAgentRuntimeStatus,
@@ -2088,8 +2775,11 @@ module.exports = {
     normalizeToolAllowlist,
     normalizeToolPolicy,
     parseJsonObject,
+    publishAgentWorkflowVersion,
     rerunAgentRun,
+    rerunAgentDagFromNode,
     resumeAgentRun,
+    restoreAgentWorkflowVersion,
     recoverAgentRuns,
     runAgentScheduleNow,
     runDueAgentSchedules,
@@ -2102,5 +2792,6 @@ module.exports = {
     markAgentNotificationRead,
     startAgentScheduleRunner,
     updateAgentSchedule,
-    updateAgentTemplate
+    updateAgentTemplate,
+    updateAgentWorkflow
 };

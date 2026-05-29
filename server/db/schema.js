@@ -334,6 +334,10 @@ function initSchema() {
             context_config TEXT,
             allowed_units TEXT DEFAULT '',
             model_router TEXT DEFAULT 'fixed',
+            dag_spec TEXT,
+            dag_inputs TEXT,
+            workflow_id INTEGER,
+            workflow_version TEXT,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,
@@ -361,6 +365,33 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (template_id) REFERENCES agent_templates(id),
             FOREIGN KEY (model_id) REFERENCES models(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            current_version_id INTEGER,
+            published_version_id INTEGER,
+            published_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflow_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            dag_spec TEXT NOT NULL,
+            note TEXT,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(workflow_id, version),
+            FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS agent_artifacts (
@@ -403,6 +434,7 @@ function initSchema() {
             status TEXT DEFAULT 'pending',
             output TEXT,
             error_message TEXT,
+            attempt_count INTEGER DEFAULT 0,
             duration_ms INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             started_at DATETIME,
@@ -545,6 +577,8 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);

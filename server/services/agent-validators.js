@@ -123,7 +123,12 @@ function normalizeDagSpec(value) {
             tool: String(node.tool || node.toolName || node.tool_name || '').trim(),
             input: node.input && typeof node.input === 'object' ? node.input : {},
             dependsOn,
-            condition: ['always', 'success'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success'
+            condition: ['always', 'success'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success',
+            retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
+            timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000),
+            onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
+                ? String(node.onError || node.on_error || 'skip_dependents')
+                : 'skip_dependents'
         };
     }).filter(node => node.tool);
     const validKeys = new Set(nodes.map(node => node.id));

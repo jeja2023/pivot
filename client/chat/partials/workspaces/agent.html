@@ -65,6 +65,10 @@
                                 </select>
                             </label>
                         </div>
+                        <div id="agent-workflow-run-status" class="agent-workflow-run-status hidden" aria-live="polite">
+                            <span id="agent-workflow-run-status-text">未配置工作流</span>
+                            <button id="agent-workflow-run-open-btn" class="btn-secondary" type="button">打开编排</button>
+                        </div>
                         <div class="agent-enterprise-controls">
                             <label>
                                 <span>工具审批</span>
@@ -109,6 +113,10 @@
                                 <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
                             </label>
                         </div>
+                        <label class="agent-dag-inputs-field is-hidden">
+                            <span>工作流运行输入 JSON</span>
+                            <textarea id="agent-dag-inputs" class="form-input" rows="3" spellcheck="false" placeholder='{"date":"2026-05-29","department":"销售"}'></textarea>
+                        </label>
                     </div>
                     <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
                     <div class="agent-config-launcher" aria-label="智能体配置面板">

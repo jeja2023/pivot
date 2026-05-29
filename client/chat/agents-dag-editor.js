@@ -7,7 +7,9 @@
  *       toolbar:   HTMLElement,    // 工具栏容器（[+节点] 等按钮注入到这里）
  *       inspector: HTMLElement,    // 节点详情面板
  *       getTools:  () => [{name, title}], // 可用工具列表
- *       onChange:  (spec) => void
+ *       onChange:  (spec) => void,
+ *       onOpenJson: () => void, // 打开高级 JSON 弹窗
+ *       onNodeSelectionChange: (node|null) => void // 控制节点属性抽屉
  *   })
  *
  * 数据格式与 server/services/agent-validators.js 中的 normalizeDagSpec 完全一致：
@@ -39,6 +41,8 @@
 
     const escapeHtml = (window.PivotSafeHtml && window.PivotSafeHtml.escapeHtml)
         || ((value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    const escapeAttr = (window.PivotSafeHtml && window.PivotSafeHtml.escapeAttr)
+        || ((value) => escapeHtml(value).replace(/"/g, '&quot;'));
 
     function uniqueId(existing, base = 'node') {
         let i = existing.length + 1;
@@ -56,6 +60,136 @@
 
     function toolValue(tool) {
         return tool?.name || tool?.fullName || '';
+    }
+
+    const TOOL_DISPLAY_OVERRIDES = {
+        'rag.search': ['知识库检索', '检索当前用户知识库，返回相关片段和来源。'],
+        'sessions.search': ['会话检索', '按关键词检索当前用户历史会话。'],
+        'sessions.recent': ['最近会话', '列出最近未删除会话。'],
+        'knowledge.list': ['知识库文档', '查看知识库文档及索引状态。'],
+        'models.list': ['可用模型', '列出当前用户可用模型。'],
+        'system.health': ['系统健康检查', '查看数据库、存储、内存和磁盘健康状态。'],
+        'system.modelRuntime': ['模型运行状态', '查看模型端点队列、熔断器和监控状态。'],
+        'db.list_tables': ['列出数据表', '列出当前数据库中可查询的表和视图。'],
+        'db.describe_table': ['查看表结构', '查看表字段、类型和可空性。'],
+        'db.run_readonly_query': ['只读 SQL 查询', '执行 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等只读查询。'],
+        'db.list_collections': ['列出集合', '列出 MongoDB 数据库集合。'],
+        'db.sample_collection': ['读取集合样本', '读取集合小样本，辅助理解字段结构。'],
+        'db.aggregate': ['Mongo 聚合查询', '执行只读统计分析聚合管道。'],
+        'reports.list_files': ['列出报表文件', '列出可访问的报表或数据文件。'],
+        'reports.read_file_summary': ['读取报表摘要', '读取报表文件元数据、工作表和样本行。'],
+        'reports.query_table': ['查询报表表格', '按列筛选 CSV/XLS/XLSX 表格行。'],
+        'reports.compare_files': ['对比报表文件', '对比两个报表文件的工作表、表头和样本行。'],
+        'report.compose': ['组合报告', '将摘要、表格、图表和 Markdown 片段组合成报告。'],
+        'report.validate_template': ['校验报告模板', '在执行编排前验证报告模板结构。'],
+        'viz.build_chart': ['生成图表', '基于表格行生成可渲染图表配置。'],
+        'viz.build_table': ['生成表格', '基于表格行生成 Markdown 表格。'],
+        'data.profile_rows': ['分析表格字段', '分析字段类型、填充率和样本值。'],
+        'data.filter_rows': ['筛选表格行', '按精确匹配或包含关系筛选行。'],
+        'data.group_summary': ['分组汇总', '按字段分组并计算数量、求和、均值、最小值或最大值。'],
+        'data.normalize_fields': ['规范字段', '重命名字段并清理字符串值。'],
+        'doc.extract_outline': ['提取文档大纲', '从文本或 Markdown 中提取轻量大纲。'],
+        'doc.extract_key_values': ['提取键值信息', '从文档文本中抽取键值样式信息。'],
+        'doc.chunk_text': ['拆分长文本', '按段落拆分长文本供后续分析。'],
+        'format.to_markdown_table': ['转 Markdown 表格', '将行数据转换为 Markdown 表格。'],
+        'format.to_json': ['转 JSON', '将值序列化为紧凑或美化 JSON。'],
+        'format.extract_json': ['提取 JSON', '从文本中提取并解析第一个 JSON 对象或数组。'],
+        'format.normalize_text': ['规范文本', '清理空白并可选转换大小写。'],
+        'im.list_allowed_targets': ['列出通知目标', '列出当前允许通知的 LAN IM 目标。'],
+        'im.send_user_message': ['发送用户消息', '向允许的 LAN IM 用户发送纯文本消息。'],
+        'im.send_group_message': ['发送群组消息', '向允许的 LAN IM 群组发送纯文本消息。'],
+        'im.send_markdown': ['发送 Markdown 消息', '向允许的 LAN IM 目标发送 Markdown 消息。']
+    };
+
+    const TOOL_GROUPS = [
+        { key: 'knowledge', label: '知识与会话', test: name => /^(rag|sessions|knowledge)\./.test(name) },
+        { key: 'database', label: '数据库', test: name => /(^|\.)(db)\./.test(name) },
+        { key: 'reports', label: '报表与文件', test: name => /^(reports|report)\./.test(name) },
+        { key: 'visual', label: '图表与展示', test: name => /^viz\./.test(name) },
+        { key: 'data', label: '数据处理', test: name => /^data\./.test(name) },
+        { key: 'document', label: '文档处理', test: name => /^doc\./.test(name) },
+        { key: 'format', label: '格式转换', test: name => /^format\./.test(name) },
+        { key: 'notify', label: '消息通知', test: name => /^im\./.test(name) },
+        { key: 'system', label: '系统诊断', test: name => /^(models|system)\./.test(name) },
+        { key: 'external', label: '外部能力', test: name => /^mcp\./.test(name) },
+        { key: 'other', label: '其他工具', test: () => true }
+    ];
+
+    function toolShortName(tool) {
+        const value = String(toolValue(tool) || '');
+        const match = value.match(/^mcp\.\d+\.(.+)$/);
+        return match ? match[1] : value;
+    }
+
+    function friendlyToolTitle(tool) {
+        const shortName = toolShortName(tool);
+        const override = TOOL_DISPLAY_OVERRIDES[shortName] || TOOL_DISPLAY_OVERRIDES[toolValue(tool)];
+        return override?.[0] || tool?.title || shortName || toolValue(tool) || '未命名工具';
+    }
+
+    function friendlyToolDescription(tool) {
+        const shortName = toolShortName(tool);
+        const override = TOOL_DISPLAY_OVERRIDES[shortName] || TOOL_DISPLAY_OVERRIDES[toolValue(tool)];
+        return override?.[1] || tool?.description || '暂无说明。';
+    }
+
+    function toolGroupLabel(tool) {
+        const shortName = toolShortName(tool);
+        const group = TOOL_GROUPS.find(item => item.test(shortName) || item.test(String(toolValue(tool) || '')));
+        return group?.label || '其他工具';
+    }
+
+    function renderToolOptions(tools, selectedValue) {
+        const buckets = new Map();
+        TOOL_GROUPS.forEach(group => buckets.set(group.label, []));
+        (Array.isArray(tools) ? tools : []).forEach(tool => {
+            const value = toolValue(tool);
+            if (!value) return;
+            const label = toolGroupLabel(tool);
+            if (!buckets.has(label)) buckets.set(label, []);
+            buckets.get(label).push(tool);
+        });
+        const groups = [...buckets.entries()]
+            .map(([label, items]) => [label, items.sort((a, b) => friendlyToolTitle(a).localeCompare(friendlyToolTitle(b), 'zh-Hans-CN'))])
+            .filter(([, items]) => items.length);
+        const optionGroups = groups.map(([label, items]) => `
+            <optgroup label="${escapeAttr(label)}">
+                ${items.map(tool => {
+        const value = toolValue(tool);
+        const title = friendlyToolTitle(tool);
+        const idSuffix = title === value ? '' : ` · ${toolShortName(tool)}`;
+        return `<option value="${escapeAttr(value)}" ${selectedValue === value ? 'selected' : ''} title="${escapeAttr(friendlyToolDescription(tool))}">${escapeHtml(title)}${escapeHtml(idSuffix)}</option>`;
+    }).join('')}
+            </optgroup>
+        `).join('');
+        return ['<option value="">— 选择工具 —</option>', optionGroups].join('');
+    }
+
+    function renderSelectedToolMeta(tool) {
+        if (!tool) {
+            return '<div class="pivot-dag-tool-meta is-empty">选择工具后显示用途、来源和内部标识。</div>';
+        }
+        const source = tool.source === 'builtin'
+            ? '系统内置'
+            : tool.serverName
+                ? `能力库 · ${tool.serverName}`
+                : '能力库';
+        const badges = [
+            toolGroupLabel(tool),
+            source,
+            tool.requiresApproval ? '需审批' : '',
+            tool.admin ? '管理员' : ''
+        ].filter(Boolean);
+        return `
+            <div class="pivot-dag-tool-meta">
+                <div class="pivot-dag-tool-meta-head">
+                    <strong>${escapeHtml(friendlyToolTitle(tool))}</strong>
+                    <span>${badges.map(item => `<em>${escapeHtml(item)}</em>`).join('')}</span>
+                </div>
+                <p>${escapeHtml(friendlyToolDescription(tool))}</p>
+                <code>${escapeHtml(toolValue(tool))}</code>
+            </div>
+        `;
     }
 
     function findPreferredTool(tools, patterns) {
@@ -105,7 +239,10 @@
             tool: String(n.tool || '').trim(),
             input: n.input && typeof n.input === 'object' ? n.input : {},
             dependsOn: Array.isArray(n.dependsOn) ? n.dependsOn.slice() : [],
-            condition: ['always', 'success'].includes(n.condition) ? n.condition : 'success'
+            condition: ['always', 'success'].includes(n.condition) ? n.condition : 'success',
+            retryLimit: Math.max(0, Math.min(Number.parseInt(n.retryLimit ?? n.retry_limit ?? 0, 10) || 0, 5)),
+            timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
+            onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents'
         })) : [];
         clampDependsOn(nodes);
         autoLayout(nodes);
@@ -115,8 +252,16 @@
     // 把内部带 _x/_y 的 spec 序列化为 normalizeDagSpec 接受的最小形态
     function serialize(spec) {
         return {
-            nodes: spec.nodes.map(({ id, title, tool, input, dependsOn, condition }) => ({
-                id, title, tool, input, dependsOn: [...(dependsOn || [])], condition
+            nodes: spec.nodes.map(({ id, title, tool, input, dependsOn, condition, retryLimit, timeoutMs, onError }) => ({
+                id,
+                title,
+                tool,
+                input,
+                dependsOn: [...(dependsOn || [])],
+                condition,
+                retryLimit: Number(retryLimit || 0),
+                timeoutMs: Number(timeoutMs || 0),
+                onError: onError || 'skip_dependents'
             }))
         };
     }
@@ -138,6 +283,48 @@
         if (!textarea) return;
         textarea.value = JSON.stringify(serialize(spec), null, 2);
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function getToolSchema(tool) {
+        const schema = tool?.input_schema || tool?.inputSchema || tool?.parameters || {};
+        return schema && typeof schema === 'object' ? schema : {};
+    }
+
+    function schemaExampleValue(schema = {}, key = '') {
+        if (Object.prototype.hasOwnProperty.call(schema, 'default')) return schema.default;
+        if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+        const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+        if (type === 'integer' || type === 'number') return schema.minimum || 0;
+        if (type === 'boolean') return false;
+        if (type === 'array') return [];
+        if (type === 'object') {
+            const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+            return Object.fromEntries(Object.entries(props).slice(0, 6).map(([name, child]) => [name, schemaExampleValue(child, name)]));
+        }
+        if (/query|keyword|prompt|text|title|name/i.test(key)) return '';
+        return '';
+    }
+
+    function buildToolInputTemplate(tool) {
+        const schema = getToolSchema(tool);
+        const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+        const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set();
+        const entries = Object.entries(props).filter(([name, child]) => required.has(name) || Object.prototype.hasOwnProperty.call(child || {}, 'default'));
+        const selected = entries.length ? entries : Object.entries(props).slice(0, 8);
+        return Object.fromEntries(selected.map(([name, child]) => [name, schemaExampleValue(child, name)]));
+    }
+
+    function renderToolSchemaHint(tool) {
+        const schema = getToolSchema(tool);
+        const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+        const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+        const rows = Object.entries(props).slice(0, 8).map(([name, item]) => {
+            const type = Array.isArray(item?.type) ? item.type.join('|') : (item?.type || 'value');
+            const mark = required.has(name) ? '必填' : '可选';
+            return `<span><strong>${escapeHtml(name)}</strong>${escapeHtml(type)} · ${mark}</span>`;
+        });
+        if (!rows.length) return '<div class="pivot-dag-schema-hint is-empty">当前工具不需要输入参数</div>';
+        return `<div class="pivot-dag-schema-hint">${rows.join('')}</div>`;
     }
 
     function createEdgePath(fromNode, toNode) {
@@ -166,7 +353,7 @@
         return btn;
     }
 
-    function mount({ canvas, textarea, toolbar, inspector, getTools, onChange }) {
+    function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange }) {
         if (!canvas) return null;
 
         // 幂等：如果已有实例先销毁
@@ -368,14 +555,41 @@
             renderToolbarStatus();
         };
 
+        const notifySelectionChange = (node) => {
+            if (typeof onNodeSelectionChange !== 'function') return;
+            onNodeSelectionChange(node ? {
+                id: node.id,
+                title: node.title,
+                tool: node.tool
+            } : null);
+        };
+
         const renderInspector = () => {
             if (!inspector) return;
             const node = spec.nodes.find(n => n.id === selectedId);
+            const active = document.activeElement;
+            const focusSnapshot = active && inspector.contains(active) ? {
+                field: active.dataset?.pivotDagField || '',
+                depend: active.dataset?.pivotDagDepend || '',
+                start: null,
+                end: null
+            } : null;
+            if (focusSnapshot) {
+                try {
+                    focusSnapshot.start = active.selectionStart;
+                    focusSnapshot.end = active.selectionEnd;
+                } catch (e) {
+                    // Some input types do not expose text selection.
+                }
+            }
             if (!node) {
                 inspector.innerHTML = '<div class="pivot-dag-inspector-empty">选中节点后可在此编辑标题、工具与输入。</div>';
+                notifySelectionChange(null);
                 return;
             }
+            notifySelectionChange(node);
             const tools = currentTools();
+            const selectedTool = tools.find(t => toolValue(t) === node.tool);
             const otherIds = spec.nodes.filter(n => n.id !== node.id).map(n => n.id);
             const dependsChecks = otherIds.map(id => `
                 <label class="pivot-dag-depends-item">
@@ -383,9 +597,18 @@
                     <span>${escapeHtml(id)}</span>
                 </label>
             `).join('') || '<span class="pivot-dag-inspector-empty">暂无其他节点可依赖</span>';
-            const toolOptions = ['<option value="">— 选择工具 —</option>']
-                .concat(tools.map(t => `<option value="${escapeHtml(toolValue(t))}" ${node.tool === toolValue(t) ? 'selected' : ''}>${escapeHtml(t.title || toolValue(t))}</option>`))
-                .join('');
+            const variableTokens = [
+                { label: '任务目标', token: '{{goal}}' },
+                ...(node.dependsOn || []).flatMap(dep => ([
+                    { label: `${dep} 输出`, token: `{{nodes.${dep}.output}}` },
+                    { label: `${dep} 状态`, token: `{{nodes.${dep}.status}}` },
+                    { label: `${dep} 错误`, token: `{{nodes.${dep}.error}}` }
+                ]))
+            ];
+            const variableButtons = variableTokens.map(item => `
+                <button type="button" class="pivot-dag-token-btn" data-pivot-dag-insert-token="${escapeHtml(item.token)}" title="${escapeHtml(item.token)}">${escapeHtml(item.label)}</button>
+            `).join('');
+            const toolOptions = renderToolOptions(tools, node.tool);
             inspector.innerHTML = `
                 <div class="pivot-dag-inspector-actions pivot-dag-inspector-actions-top">
                     <button type="button" class="btn-secondary btn-red-outline" data-pivot-dag-delete="1">删除节点</button>
@@ -397,6 +620,7 @@
                 <div class="pivot-dag-inspector-row">
                     <label><span>工具</span>
                         <select data-pivot-dag-field="tool">${toolOptions}</select>
+                        ${renderSelectedToolMeta(selectedTool)}
                     </label>
                     <label><span>条件</span>
                         <select data-pivot-dag-field="condition">
@@ -405,10 +629,29 @@
                         </select>
                     </label>
                 </div>
+                <div class="pivot-dag-inspector-row">
+                    <label><span>失败策略</span>
+                        <select data-pivot-dag-field="onError">
+                            <option value="skip_dependents" ${node.onError === 'skip_dependents' ? 'selected' : ''}>失败后跳过下游</option>
+                            <option value="continue" ${node.onError === 'continue' ? 'selected' : ''}>失败后继续下游</option>
+                            <option value="stop" ${node.onError === 'stop' ? 'selected' : ''}>失败后停止工作流</option>
+                        </select>
+                    </label>
+                    <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}"></label>
+                    <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认"></label>
+                </div>
                 <label class="pivot-dag-inspector-input">
                     <span>输入参数 (JSON)</span>
                     <textarea data-pivot-dag-field="input" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(node.input || {}, null, 2))}</textarea>
                 </label>
+                <div class="pivot-dag-input-tools">
+                    <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用工具参数模板</button>
+                    ${renderToolSchemaHint(selectedTool)}
+                    <div class="pivot-dag-token-group">
+                        <div class="pivot-dag-token-head">插入变量</div>
+                        <div class="pivot-dag-token-list">${variableButtons}</div>
+                    </div>
+                </div>
                 <div class="pivot-dag-inspector-depends">
                     <div class="pivot-dag-inspector-depends-head">依赖节点</div>
                     <div class="pivot-dag-inspector-depends-list">${dependsChecks}</div>
@@ -421,7 +664,53 @@
             inspector.querySelectorAll('[data-pivot-dag-depend]').forEach(checkbox => {
                 checkbox.addEventListener('change', (e) => handleDependsToggle(e.target));
             });
+            inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
+            inspector.querySelectorAll('[data-pivot-dag-insert-token]').forEach(btn => {
+                btn.addEventListener('click', () => insertInputToken(btn.dataset.pivotDagInsertToken || ''));
+            });
             inspector.querySelector('[data-pivot-dag-delete]')?.addEventListener('click', () => deleteNode(node.id));
+            if (focusSnapshot?.field) {
+                const next = inspector.querySelector(`[data-pivot-dag-field="${cssEscape(focusSnapshot.field)}"]`);
+                next?.focus?.({ preventScroll: true });
+                if (next && focusSnapshot.start !== null && typeof next.setSelectionRange === 'function') {
+                    try {
+                        next.setSelectionRange(focusSnapshot.start, focusSnapshot.end ?? focusSnapshot.start);
+                    } catch (e) {
+                        // Ignore controls that cannot restore a cursor range.
+                    }
+                }
+            } else if (focusSnapshot?.depend) {
+                inspector.querySelector(`[data-pivot-dag-depend="${cssEscape(focusSnapshot.depend)}"]`)?.focus?.({ preventScroll: true });
+            }
+        };
+
+        const applyToolInputTemplate = (nodeId) => {
+            const node = spec.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            const tool = currentTools().find(t => toolValue(t) === node.tool);
+            const template = buildToolInputTemplate(tool);
+            node.input = { ...template, ...(node.input || {}) };
+            render();
+            flushOut();
+            window.showToast?.('已套用工具参数模板', 'success');
+        };
+
+        const insertInputToken = (token) => {
+            if (!token) return;
+            const node = spec.nodes.find(n => n.id === selectedId);
+            const textarea = inspector?.querySelector('[data-pivot-dag-field="input"]');
+            if (!node || !textarea) return;
+            const start = textarea.selectionStart ?? textarea.value.length;
+            const end = textarea.selectionEnd ?? textarea.value.length;
+            const before = textarea.value.slice(0, start);
+            const quoteCount = (before.match(/(?<!\\)"/g) || []).length;
+            const insideString = quoteCount % 2 === 1;
+            const insertText = insideString ? token : JSON.stringify(token);
+            textarea.value = `${before}${insertText}${textarea.value.slice(end)}`;
+            textarea.selectionStart = start + insertText.length;
+            textarea.selectionEnd = start + insertText.length;
+            textarea.focus();
+            handleInspectorEdit(textarea);
         };
 
         const handleInspectorEdit = (input) => {
@@ -443,6 +732,12 @@
                 node.tool = String(input.value || '');
             } else if (field === 'condition') {
                 node.condition = ['always', 'success'].includes(input.value) ? input.value : 'success';
+            } else if (field === 'onError') {
+                node.onError = ['skip_dependents', 'continue', 'stop'].includes(input.value) ? input.value : 'skip_dependents';
+            } else if (field === 'retryLimit') {
+                node.retryLimit = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 5));
+            } else if (field === 'timeoutMs') {
+                node.timeoutMs = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 600000));
             } else if (field === 'input') {
                 try {
                     const parsed = JSON.parse(input.value || '{}');
@@ -496,7 +791,10 @@
                 tool: toolValue(tools[0]),
                 input: {},
                 dependsOn: selectedId ? [selectedId] : [],
-                condition: 'success'
+                condition: 'success',
+                retryLimit: 0,
+                timeoutMs: 0,
+                onError: 'skip_dependents'
             };
             spec.nodes.push(node);
             autoLayout(spec.nodes);
@@ -515,7 +813,10 @@
                 tool: toolValue(preferred),
                 input: { ...(preset.input || {}) },
                 dependsOn: selectedId ? [selectedId] : [],
-                condition: 'success'
+                condition: 'success',
+                retryLimit: 0,
+                timeoutMs: 0,
+                onError: 'skip_dependents'
             };
             spec.nodes.push(node);
             autoLayout(spec.nodes);
@@ -785,7 +1086,10 @@
             toolbar.appendChild(makeButton('校验', '校验节点、依赖和工具可用性', showValidationResult));
             toolbar.appendChild(makeButton('自动布局', '按依赖层次重新排列', resetLayout));
             toolbar.appendChild(makeButton('适配画布', '重置缩放和平移到默认视角', fitToContent));
-            toolbar.appendChild(makeButton('从 JSON 同步', '把右侧 JSON 文本应用到画布', () => {
+            toolbar.appendChild(makeButton('JSON 视图', '打开高级 JSON 编辑弹窗', () => {
+                if (typeof onOpenJson === 'function') onOpenJson();
+            }));
+            toolbar.appendChild(makeButton('从 JSON 同步', '把 JSON 文本应用到画布', () => {
                 const parsed = readJson(textarea ? textarea.value : '');
                 if (!parsed) {
                     if (typeof onChange === 'function') onChange({ error: 'invalid_json' });
@@ -842,6 +1146,21 @@
                 selectedId = null;
                 render();
                 flushOut();
+            },
+            clearSelection: () => {
+                selectedId = null;
+                render();
+            },
+            syncFromJson: () => {
+                const parsed = readJson(textarea ? textarea.value : '');
+                if (!parsed) {
+                    if (typeof onChange === 'function') onChange({ error: 'invalid_json' });
+                    return false;
+                }
+                spec = ensureDefaults(parsed);
+                selectedId = null;
+                render();
+                return true;
             },
             refresh: () => render()
         };
