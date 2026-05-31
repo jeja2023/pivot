@@ -1437,6 +1437,52 @@
 .stat-item { display: flex; align-items: center; gap: 5px; }
 .stat-model { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.updater-panel {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr);
+    gap: 14px;
+    align-items: stretch;
+}
+
+.updater-status-card,
+.updater-log-card {
+    min-height: 260px;
+}
+
+.updater-log {
+    margin: 0;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.04);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.settings-workspace-view .text-success {
+    color: #059669;
+}
+
+.settings-workspace-view .text-danger {
+    color: var(--danger);
+}
+
+.settings-workspace-view .text-muted {
+    color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+    .updater-panel {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* 管理面板关闭按钮 */
 .settings-dialog-close {
     position: absolute;

@@ -525,7 +525,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'updater', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
@@ -572,6 +572,8 @@ document.addEventListener('click', async (event) => {
 bind('ops-refresh-btn', () => window.loadOpsSummary());
 bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
+bind('updater-check-btn', () => window.checkPivotUpdate?.());
+bind('updater-start-btn', () => window.startPivotUpdate?.());
 bind('observability-webhook-save', () => window.saveObservabilityWebhook?.());
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());

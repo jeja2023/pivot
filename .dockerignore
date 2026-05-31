@@ -8,6 +8,8 @@ scratch/
 .gemini/
 Dockerfile
 docker-compose.yml
+updater-state.json
+source/
 *.log
 *.tar
 *.zip

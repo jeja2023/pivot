@@ -19,7 +19,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置容器时区与国内加速环境变量
+ARG PIVOT_BUILD_REVISION=
 ENV TZ=Asia/Shanghai
+ENV PIVOT_BUILD_REVISION=$PIVOT_BUILD_REVISION
 ENV npm_config_registry=https://registry.npmmirror.com
 ENV PYTHON=python3
 ENV SHARP_LIBVIPS_BINARY_HOST=https://npmmirror.com/mirrors/sharp-libvips

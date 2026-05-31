@@ -1,5 +1,23 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.66] - 2026-05-31
+### 在线更新开关
+- **显式总开关**：新增 `PIVOT_ONLINE_UPDATE_ENABLED`，默认关闭；只有设置为 `true` 且 updater URL/token 配置完整时，主应用才会允许检查、轮询和触发在线更新。
+- **Sidecar 按需启动**：`pivot-updater` 服务加入 Docker Compose `online-update` profile，默认部署不会启动拥有 Docker socket 权限的 updater 容器。
+- **界面状态补齐**：在线更新页新增功能开关状态展示，关闭时检查与更新按钮保持禁用，适配局域网、高安全内网和互联网部署的不同策略。
+### 文档与版本
+- **部署说明同步**：README 与 `.env.example` 补充在线更新开关和 compose profile 启用方式。
+- **版本升级**：应用版本升级至 `v0.0.66`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
+
+## [v0.0.65] - 2026-05-31
+### Docker 在线更新与定时轮询
+- **应用内在线更新**：新增 `pivot-updater` sidecar，由主应用通过受保护接口触发 GitHub/Git 源码拉取、本地 `docker build` 和 `docker compose up -d --no-deps --force-recreate pivot`，管理员无需登录服务器手动执行升级命令。
+- **自动检查远端更新**：主应用启动后会按 `PIVOT_UPDATE_CHECK_INTERVAL_MS` 定时请求 updater 检查远端仓库，默认 30 分钟一次，可设为 `0` 关闭；管理员在线更新页展示是否发现新版本、远端提交、上次检查和下次检查时间。
+- **版本与提交识别**：镜像构建时写入 `PIVOT_BUILD_REVISION`，检查更新时同时比较 `package.json` 版本号和 Git 提交，版本未变化但提交不同也能提示更新。
+### 文档与验证
+- **配置说明同步**：`.env.example` 与 README 补充 updater token、仓库、分支、构建镜像、compose 服务和自动检查间隔说明。
+- **版本升级**：应用版本升级至 `v0.0.65`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
+
 ## [v0.0.64] - 2026-05-31
 ### Markdown 消息渲染与横向滚动
 - **整段 Markdown 围栏自动去壳**：聊天渲染在遇到整条回复被外层 `markdown` / `text/plain` / `plain` 等代码围栏包住时，会先去掉外层壳再按 Markdown 渲染；流式输出过程中即使外层围栏尚未闭合，也会避免把整段正文临时显示成巨大代码块。
