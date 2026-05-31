@@ -1,12 +1,14 @@
 const { logger } = require('../logger');
 const { getAppVersion } = require('../version');
-const { getUpdaterPublicConfig, requestUpdater } = require('./updater-client');
+const { getUpdaterPublicConfig, normalizeUpdaterError, requestUpdater } = require('./updater-client');
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 const MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 let cache = {
     enabled: false,
+    switchEnabled: false,
+    configured: false,
     checking: false,
     updateAvailable: false,
     remoteChanged: false,
@@ -59,7 +61,6 @@ async function checkForUpdates({ manual = false } = {}) {
     cache = {
         ...cache,
         ...config,
-        enabled: config.enabled,
         checking: true,
         currentVersion: getAppVersion(),
         currentRevision: process.env.PIVOT_BUILD_REVISION || '',
@@ -106,17 +107,17 @@ async function checkForUpdates({ manual = false } = {}) {
                 currentRevision: cache.currentRevision,
                 latestRevision: cache.latestRevision,
                 manual
-            }, '检测到可用在线更新');
+            }, 'online update available');
         }
     } catch (e) {
         cache = {
             ...cache,
             checking: false,
             lastCheckedAt: new Date().toISOString(),
-            error: e.message || '自动检查更新失败'
+            error: normalizeUpdaterError(e) || 'Failed to check online updates'
         };
         setNextCheck(intervalMs);
-        logger.warn({ err: e.message, manual }, '在线更新检查失败');
+        logger.warn({ err: e.message, manual }, 'online update check failed');
     }
     return cache;
 }
@@ -134,7 +135,6 @@ function startUpdaterMonitor() {
     cache = {
         ...cache,
         ...config,
-        enabled: config.enabled,
         currentVersion: getAppVersion(),
         currentRevision: process.env.PIVOT_BUILD_REVISION || ''
     };

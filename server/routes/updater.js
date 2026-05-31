@@ -4,6 +4,7 @@ const { getAppVersion } = require('../version');
 const {
     createUpdateRunId,
     getUpdaterPublicConfig,
+    normalizeUpdaterError,
     requestUpdater
 } = require('../services/updater-client');
 const {
@@ -27,7 +28,11 @@ function createUpdaterRouter({ authMiddleware, adminMiddleware, logAction }) {
             try {
                 updater = await requestUpdater('/status');
             } catch (e) {
-                updater = { available: false, error: e.message };
+                updater = {
+                    available: false,
+                    error: normalizeUpdaterError(e),
+                    rawError: e.message
+                };
             }
         }
         res.json({

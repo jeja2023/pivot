@@ -1,5 +1,11 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.67] - 2026-05-31
+### 聊天元数据实时补齐
+- **失败消息元数据即时显示**：模型端点熔断、上游异常等 `assistant_error` 事件会立即刷新消息底部的耗时、Token 和速率，不再需要刷新页面后才显示完整元数据。
+- **错误事件 token 回传**：后端保存失败消息时同步返回 `tokenCount`，前端使用该值更新当前气泡 footer，并异步写回 `/api/chat/stats` 保持刷新前后一致。
+- **版本同步**：应用版本升级至 `v0.0.67`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
+
 ## [v0.0.66] - 2026-05-31
 ### 在线更新开关
 - **显式总开关**：新增 `PIVOT_ONLINE_UPDATE_ENABLED`，默认关闭；只有设置为 `true` 且 updater URL/token 配置完整时，主应用才会允许检查、轮询和触发在线更新。

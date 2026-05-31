@@ -177,6 +177,28 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     `;
 }
 
+function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, tokenCount = 0, tps = 0 } = {}) {
+    if (!statsEl) return;
+    const normalizedModelName = String(modelName || statsEl.dataset.modelName || '').trim();
+    if (normalizedModelName) statsEl.dataset.modelName = normalizedModelName;
+    const currentModelName = String(statsEl.dataset.modelName || '').trim();
+    const modelHtml = currentModelName
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}${escapeChatStatusHtml(currentModelName)}</span>`
+        : '';
+    const safeCostTime = Number.isFinite(Number(costTime)) ? Number(costTime) : 0;
+    const safeTokenCount = Number.isFinite(Number(tokenCount)) ? Math.max(0, Math.round(Number(tokenCount))) : 0;
+    const safeTps = Number.isFinite(Number(tps)) ? Number(tps) : 0;
+    statsEl.innerHTML = `
+        ${modelHtml}
+        <span class="stat-item">${ICONS.time}${safeCostTime.toFixed(1)}s</span>
+        <span class="stat-item">${ICONS.token}${safeTokenCount} Tokens</span>
+        <span class="stat-item">${ICONS.speed}${safeTps.toFixed(1)} t/s</span>
+    `;
+    const footerEl = statsEl.closest('.message-footer');
+    footerEl?.classList.remove('hidden');
+    footerEl?.classList.remove('hover-time-only');
+}
+
 function isMessageContainerNearBottom(threshold = 160) {
     const container = document.getElementById('message-container');
     if (!container) return false;
@@ -622,6 +644,14 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.role === 'assistant') {
                         window.setMessageActionId?.(aiMsgEl, data.messageId);
                         window.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
+                        if (data.tokenCount !== undefined || data.costTime !== undefined || data.tps !== undefined) {
+                            renderFinalAssistantStats(statsEl, {
+                                modelName: data.modelName || data.model_name || assistantModelName,
+                                costTime: data.costTime ?? ((Date.now() - startTime) / 1000),
+                                tokenCount: data.tokenCount ?? tokenCount,
+                                tps: data.tps ?? (firstTokenTime ? tokenCount / ((Date.now() - firstTokenTime) / 1000) : 0)
+                            });
+                        }
                         window.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     return;
@@ -632,9 +662,28 @@ window.sendMessage = async function(isRegenerate = false) {
                         fullAiContent = data.content;
                         if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
                     }
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const finalTokenCount = data.tokenCount ?? (data.content ? estimateStreamingTokenCount(data.content) : tokenCount);
+                    const finalTps = elapsed > 0 ? finalTokenCount / elapsed : 0;
+                    renderFinalAssistantStats(statsEl, {
+                        modelName: data.modelName || data.model_name || assistantModelName,
+                        costTime: elapsed,
+                        tokenCount: finalTokenCount,
+                        tps: finalTps
+                    });
+                    if (data.messageId) {
+                        apiFetch(API_BASE + '/chat/stats', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sessionId: requestSessionId, costTime: elapsed, tps: finalTps })
+                        }).catch(() => {});
+                    }
                     const err = new Error(data.detail || data.error);
                     err.persistedContent = data.content || '';
                     err.messageId = data.messageId || null;
+                    err.tokenCount = finalTokenCount;
+                    err.costTime = elapsed;
+                    err.tps = finalTps;
                     throw err;
                 }
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);

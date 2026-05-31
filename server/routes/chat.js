@@ -223,16 +223,17 @@ function buildPersistedChatErrorContent({ error, detail, statusCode, code } = {}
 function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detail, statusCode, code, log }) {
     if (!sessionId || !userId) return null;
     const content = buildPersistedChatErrorContent({ error, detail, statusCode, code });
+    const tokenCount = estimateTokens(content);
     try {
         const result = saveAssistantMessage({
             sessionId,
             userId,
             content,
-            tokenCount: estimateTokens(content),
+            tokenCount,
             modelId
         });
         touchSession(sessionId);
-        return { content, messageId: result.lastInsertRowid };
+        return { content, messageId: result.lastInsertRowid, tokenCount };
     } catch (err) {
         log?.error?.({ sessionId, err: err.message }, '保存模型错误消息失败');
         return null;
@@ -269,6 +270,7 @@ function writeChatErrorSse({
             payload.type = 'assistant_error';
             payload.content = saved.content;
             payload.messageId = saved.messageId;
+            payload.tokenCount = saved.tokenCount;
         }
     }
     writeSse(JSON.stringify(payload));
@@ -1172,7 +1174,8 @@ function createChatRouter({
                         type: 'message_saved',
                         role: 'assistant',
                         messageId: assistantMessageResult.lastInsertRowid,
-                        modelName: modelCfg.name || modelCfg.model_name || ''
+                        modelName: modelCfg.name || modelCfg.model_name || '',
+                        tokenCount: assistantTokens
                     }));
                     writeSse('[DONE]');
                     res.end();
