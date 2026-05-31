@@ -210,6 +210,37 @@
 .settings-page-head .form-input {
     height: 34px;
 }
+.settings-page-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.settings-memory-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px;
+}
+.settings-memory-inline label {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.settings-memory-inline .form-input {
+    width: 92px;
+    height: 34px;
+    margin-bottom: 0;
+    padding: 0 10px;
+    text-align: center;
+}
+.settings-memory-inline .btn-secondary {
+    height: 34px;
+    padding: 0 12px;
+}
 .settings-workspace-view .btn-primary,
 .settings-workspace-view .btn-secondary,
 .settings-workspace-view .btn-danger,

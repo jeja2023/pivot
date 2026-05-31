@@ -10,8 +10,13 @@ const {
     buildChatCompletionsUrl,
     buildModelHeaders
 } = require('./services/model-adapter');
+const {
+    DEFAULT_MEMORY_THRESHOLD,
+    MEMORY_CONFIG_KEYS,
+    normalizeMemoryThreshold
+} = require('./services/memory-config');
 
-const THRESHOLD = parseInt(process.env.MEMORY_THRESHOLD, 10) || 12000;
+const THRESHOLD = DEFAULT_MEMORY_THRESHOLD;
 const SUMMARY_KEEP_COUNT = Math.max(1, parseInt(process.env.MEMORY_SUMMARY_KEEP_COUNT, 10) || 6);
 const MIN_MESSAGES_TO_COMPRESS = Math.max(1, parseInt(process.env.MEMORY_MIN_MESSAGES_TO_COMPRESS, 10) || 1);
 const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 180000);
@@ -57,6 +62,15 @@ function estimateTokens(text) {
     return Math.ceil(chineseChars * 2 + otherChars * 0.5);
 }
 
+function getMemoryThreshold() {
+    try {
+        const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(MEMORY_CONFIG_KEYS.threshold);
+        return normalizeMemoryThreshold(row?.value, DEFAULT_MEMORY_THRESHOLD);
+    } catch (_err) {
+        return DEFAULT_MEMORY_THRESHOLD;
+    }
+}
+
 function resolveOwnedAttachmentPath(uploadUrl, userId, sessionId) {
     const targetPath = resolveUploadUrlPath(uploadUrl);
     if (!targetPath) return null;
@@ -77,10 +91,11 @@ function buildContextMeta(messages = []) {
     const archivedCount = messages.filter(m => Number(m.context_archived)).length;
     const activeTokens = activeMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
     const summaryTokens = summaryMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
-    const ratio = THRESHOLD > 0 ? activeTokens / THRESHOLD : 0;
+    const threshold = getMemoryThreshold();
+    const ratio = threshold > 0 ? activeTokens / threshold : 0;
 
     return {
-        threshold: THRESHOLD,
+        threshold,
         activeTokens,
         summaryTokens,
         totalTokens: activeTokens + summaryTokens,
@@ -191,7 +206,7 @@ async function getContext(sessionId, userId, modelCfg) {
     let contextMeta = buildContextMeta(messages);
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
-    if (contextMeta.activeTokens > THRESHOLD && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
+    if (contextMeta.activeTokens > contextMeta.threshold && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
         try {
             const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
             if (result?.skipped) {
@@ -223,7 +238,7 @@ async function getContext(sessionId, userId, modelCfg) {
 async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
     const messages = loadSessionMessages(sessionId, userId);
     const before = buildContextMeta(messages);
-    if (!options.force && (before.activeTokens <= THRESHOLD || before.activeCount <= MIN_MESSAGES_TO_COMPRESS)) {
+    if (!options.force && (before.activeTokens <= before.threshold || before.activeCount <= MIN_MESSAGES_TO_COMPRESS)) {
         return {
             skipped: true,
             reason: 'threshold_not_reached',
@@ -291,4 +306,4 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
     }
 }
 
-module.exports = { compactSessionMemory, estimateTokens, getContext, THRESHOLD, buildContextMeta };
+module.exports = { compactSessionMemory, estimateTokens, getContext, THRESHOLD, getMemoryThreshold, buildContextMeta };

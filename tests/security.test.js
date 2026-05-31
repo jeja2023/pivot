@@ -67,6 +67,12 @@ const {
     getModelContextBudget
 } = require('../server/services/context-budget');
 const {
+    MEMORY_CONFIG_KEYS,
+    getMemoryConfig,
+    normalizeMemoryThreshold,
+    toMemorySettingValue
+} = require('../server/services/memory-config');
+const {
     getLocalHostnames,
     getMonitorKnowledgeChunkCount,
     isDockerInternalServiceHost,
@@ -970,6 +976,14 @@ test('RAG config clamps unsafe retrieval parameters', () => {
     });
 });
 
+test('memory threshold config normalizes flexible token values', () => {
+    assert.equal(normalizeMemoryThreshold('12K'), 12000);
+    assert.equal(normalizeMemoryThreshold('1.5m'), 1500000);
+    assert.equal(normalizeMemoryThreshold('10', 12000), 256);
+    assert.equal(toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, '32K'), '32000');
+    assert.equal(getMemoryConfig({ memory_threshold: { value: '64K' } }).thresholdTokens, 64000);
+});
+
 test('context budget trims old history and generated knowledge context before upstream requests', () => {
     const model = { max_input_tokens: 360, max_tokens: 80 };
     const longHistory = '旧历史 '.repeat(120);
@@ -1283,6 +1297,50 @@ test('non-root admin saves embedding config as personal settings', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+    }
+});
+
+test('admin can update memory threshold without root system settings access', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`memory_admin_${suffix}`, 'hash', 'Memory Admin', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `memory_admin_${suffix}`, role: 'admin', unit: 'QA' };
+    const key = MEMORY_CONFIG_KEYS.threshold;
+    const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key);
+    const router = createSettingsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const memoryRoute = router.stack.find(layer => layer.route?.path === '/admin/settings/memory' && layer.route?.methods?.put);
+    const req = { body: { memory_threshold: '32K' }, user: adminUser };
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+
+    try {
+        await runExpressHandlers(memoryRoute.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.memoryConfig.thresholdTokens, 32000);
+        assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key).value, '32000');
+    } finally {
+        if (previousRow) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previousRow.key, previousRow.value, previousRow.updated_at, previousRow.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
     }
 });
 

@@ -292,11 +292,13 @@ async function loadSettings() {
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
         const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
         const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
+        const memoryThresholdInput = document.getElementById('setting-memory-threshold');
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? 0.4;
         if (topKInput) topKInput.value = data.ragConfig?.topK ?? 3;
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? 300;
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
+        if (memoryThresholdInput) memoryThresholdInput.value = formatTokenInputValue(data.memoryConfig?.thresholdTokens || 12000);
         updateEmbeddingSettingsForm(data.embeddingConfig);
     } catch (e) {
         showToast(e.message || '系统设置加载失败', 'error');
@@ -308,6 +310,34 @@ function getEmbeddingModelValue() {
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
+
+window.saveMemorySettings = async () => {
+    const input = document.getElementById('setting-memory-threshold');
+    const saveBtn = document.getElementById('memory-threshold-save-btn');
+    if (!input) return;
+    const threshold = parseTokenAmount(input.value);
+    if (!threshold || threshold < 256) {
+        showToast('上下文阈值不能低于 256 Token', 'error');
+        return;
+    }
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/admin/settings/memory`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ memory_threshold: threshold })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '上下文阈值保存失败');
+        input.value = formatTokenInputValue(data.memoryConfig?.thresholdTokens || threshold);
+        window.refreshCurrentContextUsage?.();
+        showToast('上下文压缩阈值已保存');
+    } catch (e) {
+        showToast(e.message || '上下文阈值保存失败', 'error');
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+    }
+};
 
 window.fetchEmbeddingModels = async () => {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');

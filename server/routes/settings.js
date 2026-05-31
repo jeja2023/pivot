@@ -13,9 +13,15 @@ const {
     getRagConfig,
     toRagSettingValue
 } = require('../services/rag-config');
+const {
+    MEMORY_CONFIG_KEYS,
+    getMemoryConfig,
+    toMemorySettingValue
+} = require('../services/memory-config');
 
 const allowedSettings = new Set([
     'default_model_id',
+    MEMORY_CONFIG_KEYS.threshold,
     RAG_CONFIG_KEYS.scoreThreshold,
     RAG_CONFIG_KEYS.topK,
     RAG_CONFIG_KEYS.candidateLimit,
@@ -76,6 +82,9 @@ const toSettingValue = (key, value) => {
     if (Object.values(RAG_CONFIG_KEYS).includes(key)) {
         return toRagSettingValue(key, value);
     }
+    if (Object.values(MEMORY_CONFIG_KEYS).includes(key)) {
+        return toMemorySettingValue(key, value);
+    }
     return String(value);
 };
 
@@ -131,6 +140,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
+            memoryConfig: getMemoryConfig(settings),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
@@ -227,6 +237,26 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ success: true, personalDefaultModelId: parsedModelId });
     }));
 
+    router.put('/admin/settings/memory', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const value = toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, req.body?.memory_threshold ?? req.body?.threshold);
+        db.prepare(`
+            INSERT INTO app_settings (key, value, updated_at, updated_by)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+        `).run(MEMORY_CONFIG_KEYS.threshold, value, getBeijingTimestamp(), req.user.id);
+
+        logAction(req, 'UPDATE_MEMORY_THRESHOLD', `${MEMORY_CONFIG_KEYS.threshold}=${value}`);
+        const settings = getSettings();
+        res.json({
+            success: true,
+            memoryConfig: getMemoryConfig(settings),
+            settings
+        });
+    }));
+
     router.put('/admin/settings', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) {
             return res.status(403).json({ error: '只有 admin 超级管理员可以修改系统全局设置。' });
@@ -271,6 +301,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             success: true,
             ragEnabled: true,
             ragConfig: getRagConfig(),
+            memoryConfig: getMemoryConfig(settings),
             embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
