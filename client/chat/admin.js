@@ -321,6 +321,8 @@ window.saveMemorySettings = async () => {
         return;
     }
     if (saveBtn) saveBtn.disabled = true;
+    const originalText = saveBtn?.innerText || '';
+    if (saveBtn) saveBtn.innerText = '保存中...';
     try {
         const res = await apiFetch(`${API_BASE}/admin/settings/memory`, {
             method: 'PUT',
@@ -335,9 +337,17 @@ window.saveMemorySettings = async () => {
     } catch (e) {
         showToast(e.message || '上下文阈值保存失败', 'error');
     } finally {
+        if (saveBtn) saveBtn.innerText = originalText || '保存';
         if (saveBtn) saveBtn.disabled = false;
     }
 };
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-memory-threshold-save]');
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    window.saveMemorySettings?.();
+});
 
 window.fetchEmbeddingModels = async () => {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
