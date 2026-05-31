@@ -37,10 +37,10 @@ function formatUpdateAvailability(monitor = {}) {
     if (monitor.error) return updaterBadge('检查失败', 'danger');
     if (monitor.updateAvailable) return updaterBadge('发现新版本', 'success');
     if (monitor.lastCheckedAt) return updaterBadge('已是最新');
-    return updaterBadge('等待自动检查');
+    return updaterBadge('等待检查');
 }
 
-function getUpdaterDiagnosis({ config = {}, updater = {}, monitor = {}, running = false } = {}) {
+function getUpdaterDiagnosis({ config = {}, sidecarConnected = false, updater = {}, monitor = {}, running = false } = {}) {
     if (!config.switchEnabled) {
         return {
             tone: 'muted',
@@ -61,7 +61,7 @@ function getUpdaterDiagnosis({ config = {}, updater = {}, monitor = {}, running 
             commands: ['PIVOT_UPDATER_URL=http://pivot-updater:3300', 'PIVOT_UPDATE_REPO=https://github.com/your-org/pivot.git']
         };
     }
-    if (updater.available === false) {
+    if (!sidecarConnected) {
         return {
             tone: 'danger',
             title: 'Updater sidecar 未连接',
@@ -71,6 +71,14 @@ function getUpdaterDiagnosis({ config = {}, updater = {}, monitor = {}, running 
                 'docker compose ps pivot-updater',
                 'docker logs pivot-updater --tail=100'
             ]
+        };
+    }
+    if (monitor.error) {
+        return {
+            tone: 'danger',
+            title: '自动检查失败',
+            message: monitor.error,
+            commands: ['docker logs pivot-updater --tail=100']
         };
     }
     if (running) {
@@ -89,14 +97,6 @@ function getUpdaterDiagnosis({ config = {}, updater = {}, monitor = {}, running 
             commands: []
         };
     }
-    if (monitor.error) {
-        return {
-            tone: 'danger',
-            title: '自动检查失败',
-            message: monitor.error,
-            commands: ['docker logs pivot-updater --tail=100']
-        };
-    }
     return {
         tone: 'success',
         title: '在线更新服务正常',
@@ -111,7 +111,7 @@ function renderUpdaterDiagnosis(diagnosis) {
     box.className = `updater-diagnosis is-${diagnosis.tone || 'muted'}`;
     const commands = (diagnosis.commands || []).map(cmd => `<code>${escapeHtml(cmd)}</code>`).join('');
     box.innerHTML = `
-        <div>
+        <div class="updater-diagnosis-main">
             <strong>${escapeHtml(diagnosis.title)}</strong>
             <p>${escapeHtml(diagnosis.message)}</p>
         </div>
@@ -134,18 +134,19 @@ function renderUpdaterStatus(data = updaterLastStatus) {
 
     const enabled = !!config.enabled;
     const running = !!updater.running || state.status === 'running';
+    const sidecarConnected = enabled && updater.available === true;
     if (checkBtn) checkBtn.disabled = !enabled || running;
-    if (startBtn) startBtn.disabled = !enabled || running || currentUser?.username !== 'admin';
+    if (startBtn) startBtn.disabled = !enabled || running || !sidecarConnected || currentUser?.username !== 'admin';
 
-    renderUpdaterDiagnosis(getUpdaterDiagnosis({ config, updater, monitor, running }));
+    renderUpdaterDiagnosis(getUpdaterDiagnosis({ config, sidecarConnected, updater, monitor, running }));
 
     statusEl.innerHTML = renderUpdaterRows([
         ['当前版本', escapeHtml(updaterLastStatus.currentVersion || APP_VERSION || '-')],
         ['功能开关', config.switchEnabled ? updaterBadge('已开启', 'success') : updaterBadge('已关闭')],
         ['配置状态', config.configured ? updaterBadge('已配置', 'success') : updaterBadge('未配置')],
-        ['Sidecar', enabled ? (updater.available === false ? updaterBadge('未连接', 'danger') : updaterBadge('已连接', 'success')) : updaterBadge('未启用')],
-        ['自动检查', formatUpdateAvailability(monitor)],
-        ['状态', escapeHtml(formatUpdaterStatus(state.status || (updater.available ? 'idle' : '')))]
+        ['Sidecar', enabled ? (sidecarConnected ? updaterBadge('已连接', 'success') : updaterBadge('未连接', 'danger')) : updaterBadge('未启用')],
+        ['自动检查', formatUpdateAvailability({ ...monitor, enabled: sidecarConnected })],
+        ['状态', escapeHtml(formatUpdaterStatus(state.status || (sidecarConnected ? 'idle' : '')))]
     ]);
 
     detailEl.innerHTML = renderUpdaterRows([
@@ -197,12 +198,14 @@ window.checkPivotUpdate = async function() {
         const res = await apiFetch(`${API_BASE}/admin/updater/check`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '检查更新失败');
+        const checkFailed = Boolean(data.error);
         updaterLastStatus = {
             ...(updaterLastStatus || {}),
             monitor: data.updateAvailable !== undefined ? data : updaterLastStatus?.monitor,
             updater: {
                 ...(updaterLastStatus?.updater || {}),
-                available: true,
+                available: checkFailed ? false : (updaterLastStatus?.updater?.available === true),
+                error: checkFailed ? data.error : '',
                 latestVersion: data.latestVersion,
                 revision: data.latestRevision || data.revision,
                 repository: data.repository,
@@ -211,6 +214,7 @@ window.checkPivotUpdate = async function() {
             }
         };
         renderUpdaterStatus(updaterLastStatus);
+        if (checkFailed) throw new Error(data.error);
         showToast(data.updateAvailable ? `发现新版本：${data.latestVersion || '-'}` : `已是最新版本：${data.latestVersion || APP_VERSION || '-'}`, 'success');
     } catch (e) {
         showToast(e.message || '检查更新失败', 'error');
@@ -232,6 +236,7 @@ window.startPivotUpdate = async function() {
                 ...(updaterLastStatus?.updater || {}),
                 available: true,
                 running: true,
+                error: '',
                 state: data.state || { status: 'running', step: '已提交更新任务', logs: [] }
             }
         });
