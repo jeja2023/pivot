@@ -1,10 +1,10 @@
 const { estimateTokens } = require('../llm');
 
-const DEFAULT_CONTEXT_WINDOW_TOKENS = 16384;
 const DEFAULT_RESERVED_OUTPUT_TOKENS = 2048;
 const MIN_RESERVED_OUTPUT_TOKENS = 512;
 const SAFETY_MARGIN_TOKENS = 256;
 const IMAGE_INPUT_TOKEN_ESTIMATE = 1024;
+const UNBOUNDED_CONTEXT_BUDGET = Number.MAX_SAFE_INTEGER;
 
 class ContextLengthExceededError extends Error {
     constructor(message, metadata = {}) {
@@ -22,13 +22,11 @@ function toPositiveInt(value, fallback = 0) {
 }
 
 function getModelContextBudget(modelCfg = {}, options = {}) {
-    const contextWindow = toPositiveInt(
-        options.contextWindowTokens
-            ?? modelCfg.context_window_tokens
-            ?? process.env.MODEL_CONTEXT_WINDOW_TOKENS
-            ?? process.env.CONTEXT_WINDOW_TOKENS,
-        DEFAULT_CONTEXT_WINDOW_TOKENS
-    );
+    const explicitContextWindow = options.contextWindowTokens
+        ?? modelCfg.context_window_tokens
+        ?? process.env.MODEL_CONTEXT_WINDOW_TOKENS
+        ?? process.env.CONTEXT_WINDOW_TOKENS;
+    const explicitContextWindowTokens = toPositiveInt(explicitContextWindow, 0);
     const configuredInputLimit = toPositiveInt(modelCfg.max_input_tokens, 0);
     const requestedOutput = toPositiveInt(
         options.maxOutputTokens
@@ -36,8 +34,23 @@ function getModelContextBudget(modelCfg = {}, options = {}) {
             ?? process.env.CONTEXT_RESERVED_OUTPUT_TOKENS,
         DEFAULT_RESERVED_OUTPUT_TOKENS
     );
+    const requestedReservedOutput = Math.max(requestedOutput, MIN_RESERVED_OUTPUT_TOKENS);
+
+    if (configuredInputLimit <= 0 && explicitContextWindowTokens <= 0) {
+        return {
+            contextWindow: 0,
+            configuredInputLimit,
+            reservedOutputTokens: requestedReservedOutput,
+            inputBudget: UNBOUNDED_CONTEXT_BUDGET,
+            unbounded: true
+        };
+    }
+
+    const contextWindow = explicitContextWindowTokens > 0
+        ? explicitContextWindowTokens
+        : configuredInputLimit + requestedReservedOutput + SAFETY_MARGIN_TOKENS;
     const reservedOutputTokens = Math.min(
-        Math.max(requestedOutput, MIN_RESERVED_OUTPUT_TOKENS),
+        requestedReservedOutput,
         Math.max(MIN_RESERVED_OUTPUT_TOKENS, Math.floor(contextWindow * 0.75))
     );
     const derivedInputBudget = Math.max(
@@ -52,7 +65,8 @@ function getModelContextBudget(modelCfg = {}, options = {}) {
         contextWindow,
         configuredInputLimit,
         reservedOutputTokens,
-        inputBudget
+        inputBudget,
+        unbounded: false
     };
 }
 

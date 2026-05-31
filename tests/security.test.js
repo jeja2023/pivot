@@ -158,6 +158,7 @@ const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
 const {
     buildRagContextMessage,
+    createChatRouter,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,
@@ -602,6 +603,102 @@ test('chat message service saves messages and updates session stats', () => {
     }
 });
 
+test('chat route persists assistant error messages when upstream model fails', async () => {
+    const express = require('express');
+    const suffix = Date.now().toString(36);
+    const upstream = http.createServer((req, res) => {
+        req.resume();
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: { message: 'upstream exploded' } }));
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`chat_error_${suffix}`, 'hash', 'Chat Error Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const sessionId = `chat-error-${suffix}`;
+    const upstreamPort = upstream.address().port;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, 'Failing Chat Model', `http://127.0.0.1:${upstreamPort}/v1/chat/completions`, `failing-chat-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionId, userId, 'Chat Error Test');
+
+    const app = express();
+    app.use(express.json());
+    app.use(createChatRouter({
+        authMiddleware: (req, _res, next) => {
+            req.user = { id: userId, username: `chat_error_${suffix}`, role: 'user', unit: 'QA' };
+            req.log = { info() {}, warn() {}, error() {} };
+            next();
+        },
+        chatLimiter: (_req, _res, next) => next(),
+        logAction() {}
+    }));
+    const server = http.createServer(app);
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+
+    const requestBody = JSON.stringify({
+        sessionId,
+        content: 'hello',
+        modelId
+    });
+
+    try {
+        const sseText = await new Promise((resolve, reject) => {
+            const req = http.request({
+                hostname: '127.0.0.1',
+                port: server.address().port,
+                path: '/chat',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(requestBody)
+                }
+            }, res => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', chunk => { text += chunk; });
+                res.on('end', () => resolve(text));
+            });
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+        });
+
+        const rows = db.prepare(`
+            SELECT id, role, content
+            FROM messages
+            WHERE session_id = ? AND user_id = ?
+            ORDER BY id ASC
+        `).all(sessionId, userId);
+        const assistant = rows.find(row => row.role === 'assistant');
+
+        assert.equal(rows.filter(row => row.role === 'user').length, 1);
+        assert.ok(assistant);
+        assert.match(assistant.content, /生成失败/);
+        assert.match(assistant.content, /模型响应异常/);
+        assert.match(assistant.content, /upstream exploded/);
+        assert.match(sseText, /assistant_error/);
+        assert.match(sseText, new RegExp(String(assistant.id)));
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        await new Promise(resolve => upstream.close(resolve));
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('session detail only appends valid attachment tokens', async () => {
     const { createSessionsRouter } = require('../server/routes/sessions');
     const suffix = Date.now().toString(36);
@@ -984,6 +1081,17 @@ test('memory threshold config normalizes flexible token values', () => {
     assert.equal(getMemoryConfig({ memory_threshold: { value: '64K' } }).thresholdTokens, 64000);
 });
 
+test('context budget does not impose a hardcoded default window for unconfigured models', () => {
+    const budget = getModelContextBudget({});
+    const longPrompt = 'unconfigured model prompt '.repeat(5000);
+
+    assert.equal(budget.contextWindow, 0);
+    assert.equal(budget.unbounded, true);
+    assert.doesNotThrow(() => fitMessagesToContextBudget([
+        { role: 'user', content: longPrompt }
+    ], {}));
+});
+
 test('context budget trims old history and generated knowledge context before upstream requests', () => {
     const model = { max_input_tokens: 360, max_tokens: 80 };
     const longHistory = '旧历史 '.repeat(120);
@@ -1001,6 +1109,18 @@ test('context budget trims old history and generated knowledge context before up
     assert.equal(result.metadata.adjusted, true);
     assert.ok(result.metadata.droppedMessages > 0 || result.metadata.trimmedRagContexts > 0);
     assert.equal(result.messages.at(-1).content, '请基于资料给出简短结论');
+});
+
+test('context budget honors configured large model input windows', () => {
+    const model = { max_input_tokens: 256000, max_tokens: 8192 };
+    const budget = getModelContextBudget(model);
+    const longAttachmentPrompt = `请阅读附件后总结：\n\n${'document text '.repeat(4000)}`;
+
+    assert.equal(budget.inputBudget, 256000);
+    assert.ok(budget.contextWindow >= 256000 + budget.reservedOutputTokens);
+    assert.doesNotThrow(() => fitMessagesToContextBudget([
+        { role: 'user', content: longAttachmentPrompt }
+    ], model));
 });
 
 test('chat RAG context is injected before the latest user prompt with strict instructions', () => {

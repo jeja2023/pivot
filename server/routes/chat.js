@@ -207,6 +207,111 @@ function compactText(value, maxLength = 12000) {
     return text.length > maxLength ? `${text.slice(0, maxLength)}\n...内容已截断...` : text;
 }
 
+function buildPersistedChatErrorContent({ error, detail, statusCode, code } = {}) {
+    const title = String(error || '模型响应异常').trim();
+    const detailText = compactText(String(detail || '').trim(), 4000);
+    const lines = [`生成失败：${title}`];
+
+    if (code) lines.push(`错误代码：${code}`);
+    if (statusCode) lines.push(`HTTP 状态：${statusCode}`);
+    if (detailText && detailText !== title) {
+        lines.push('', '错误详情：', detailText);
+    }
+    lines.push('', '这条错误已保存，刷新页面后仍可查看。');
+    return lines.join('\n');
+}
+
+function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detail, statusCode, code, log }) {
+    if (!sessionId || !userId) return null;
+    const content = buildPersistedChatErrorContent({ error, detail, statusCode, code });
+    try {
+        const result = saveAssistantMessage({
+            sessionId,
+            userId,
+            content,
+            tokenCount: estimateTokens(content),
+            modelId
+        });
+        touchSession(sessionId);
+        return { content, messageId: result.lastInsertRowid };
+    } catch (err) {
+        log?.error?.({ sessionId, err: err.message }, '保存模型错误消息失败');
+        return null;
+    }
+}
+
+function writeChatErrorSse({
+    writeSse,
+    sessionId,
+    userId,
+    modelId,
+    error,
+    detail,
+    statusCode,
+    code,
+    retryable,
+    persist,
+    log
+}) {
+    const payload = { error, detail, statusCode, code };
+    if (retryable !== undefined) payload.retryable = retryable;
+    if (persist) {
+        const saved = persistAssistantErrorMessage({
+            sessionId,
+            userId,
+            modelId,
+            error,
+            detail,
+            statusCode,
+            code,
+            log
+        });
+        if (saved) {
+            payload.type = 'assistant_error';
+            payload.content = saved.content;
+            payload.messageId = saved.messageId;
+        }
+    }
+    writeSse(JSON.stringify(payload));
+}
+
+function readStreamErrorDetail(stream, { maxLength = 4000, timeoutMs = 1000 } = {}) {
+    if (!stream || typeof stream.on !== 'function') return Promise.resolve('');
+    return new Promise(resolve => {
+        let settled = false;
+        let text = '';
+        const cleanup = () => {
+            stream.off?.('data', onData);
+            stream.off?.('end', onEnd);
+            stream.off?.('error', onError);
+            clearTimeout(timer);
+        };
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(text.trim());
+        };
+        const onData = chunk => {
+            text += chunk?.toString?.('utf8') || String(chunk || '');
+            if (text.length >= maxLength) {
+                text = `${text.slice(0, maxLength)}\n...内容已截断...`;
+                stream.destroy?.();
+                finish();
+            }
+        };
+        const onEnd = () => finish();
+        const onError = err => {
+            if (!text) text = err?.message || '';
+            finish();
+        };
+        const timer = setTimeout(finish, timeoutMs);
+        stream.on('data', onData);
+        stream.on('end', onEnd);
+        stream.on('error', onError);
+    });
+}
+
 function extractModelText(data) {
     const choiceContent = data?.choices?.[0]?.message?.content;
     if (typeof choiceContent === 'string') return choiceContent;
@@ -558,6 +663,7 @@ function createChatRouter({
         const userId = req.user.id;
         const modelContent = String(content || '').trim();
         const visibleContent = String(displayContent || modelContent).trim();
+        let userMessagePersisted = false;
 
         req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
@@ -647,6 +753,7 @@ function createChatRouter({
         if (!regenerate) {
             try {
                 const userMessageResult = saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
+                userMessagePersisted = true;
                 writeSse(JSON.stringify({
                     type: 'message_saved',
                     role: 'user',
@@ -725,11 +832,17 @@ function createChatRouter({
         } catch (e) {
             const message = e.message || '模型服务当前繁忙，请稍后重试。';
             logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
-            writeSse(JSON.stringify({
+            writeChatErrorSse({
+                writeSse,
+                sessionId,
+                userId,
+                modelId: modelCfg.id,
                 error: message,
                 code: e.code || 'AI_OVERLOADED',
-                retryable: true
-            }));
+                retryable: true,
+                persist: userMessagePersisted || regenerate,
+                log: req.log
+            });
             return res.end();
         }
 
@@ -749,11 +862,17 @@ function createChatRouter({
             releaseSemaphore();
             const message = e.message || '模型端点当前繁忙，请稍后重试。';
             logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
-            writeSse(JSON.stringify({
+            writeChatErrorSse({
+                writeSse,
+                sessionId,
+                userId,
+                modelId: modelCfg.id,
                 error: message,
                 code: e.code || 'AI_ENDPOINT_OVERLOADED',
-                retryable: true
-            }));
+                retryable: true,
+                persist: userMessagePersisted || regenerate,
+                log: req.log
+            });
             return res.end();
         }
 
@@ -794,7 +913,16 @@ function createChatRouter({
                 visionHistory.push(...rescuedHistory);
             } else {
                 releaseSemaphore();
-                writeSse(JSON.stringify({ error: '对话内容不能为空', code: 'EMPTY_MESSAGE' }));
+                writeChatErrorSse({
+                    writeSse,
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    error: '对话内容不能为空',
+                    code: 'EMPTY_MESSAGE',
+                    persist: userMessagePersisted || regenerate,
+                    log: req.log
+                });
                 return res.end();
             }
         }
@@ -849,7 +977,18 @@ function createChatRouter({
                     modelId: modelCfg.id,
                     contextBudget: e.metadata
                 }, '聊天请求因上下文超限被拦截');
-                writeSse(JSON.stringify(buildContextLengthExceededPayload(e)));
+                const payload = buildContextLengthExceededPayload(e);
+                writeChatErrorSse({
+                    writeSse,
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    error: payload.error,
+                    detail: payload.detail,
+                    code: payload.code,
+                    persist: userMessagePersisted || regenerate,
+                    log: req.log
+                });
                 return res.end();
             }
             throw e;
@@ -1008,7 +1147,16 @@ function createChatRouter({
                 }
 
                 if (!res.writableEnded) {
-                    writeSse(JSON.stringify({ error: '流传输中断', detail: err.message }));
+                    writeChatErrorSse({
+                        writeSse,
+                        sessionId,
+                        userId,
+                        modelId: modelCfg.id,
+                        error: '流传输中断',
+                        detail: err.message,
+                        persist: userMessagePersisted || regenerate,
+                        log: req.log
+                    });
                     res.end();
                 }
                 recordModelFailure(modelCfg, err);
@@ -1025,11 +1173,13 @@ function createChatRouter({
             recordModelFailure(modelCfg, e);
 
             req.log.error({ statusCode, err: e.message }, '模型响应错误');
+            let streamErrorDetail = '';
             if (errorData) {
                 if (typeof errorData.on === 'function') {
-                    errorData.on('data', d => {
-                        req.log.error({ streamError: d.toString() }, '模型流式报错详情');
-                    });
+                    streamErrorDetail = await readStreamErrorDetail(errorData);
+                    if (streamErrorDetail) {
+                        req.log.error({ streamError: streamErrorDetail }, '模型流式报错详情');
+                    }
                 } else {
                     req.log.error({ errorData }, '模型报错详情');
                 }
@@ -1040,7 +1190,7 @@ function createChatRouter({
                 if (typeof errorData === 'string') {
                     safeDetail = errorData;
                 } else if (typeof errorData.on === 'function') {
-                    safeDetail = '上游服务返回了流式错误，请检查 API 配置或余额';
+                    safeDetail = streamErrorDetail || '上游服务返回了流式错误，请检查 API 配置或余额';
                 } else {
                     try {
                         safeDetail = JSON.stringify(errorData);
@@ -1050,11 +1200,17 @@ function createChatRouter({
                 }
             }
 
-            writeSse(JSON.stringify({
+            writeChatErrorSse({
+                writeSse,
+                sessionId,
+                userId,
+                modelId: modelCfg.id,
                 error: '模型响应异常',
                 detail: safeDetail,
-                statusCode: statusCode
-            }));
+                statusCode: statusCode,
+                persist: userMessagePersisted || regenerate,
+                log: req.log
+            });
             res.end();
             releaseSemaphore(); // 捕获异常释放
         }
@@ -1064,6 +1220,7 @@ function createChatRouter({
 }
 
 module.exports = {
+    buildPersistedChatErrorContent,
     buildRagContextMessage,
     createChatRouter,
     filterMcpToolsForChatIntent,

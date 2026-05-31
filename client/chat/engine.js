@@ -534,7 +534,17 @@ window.sendMessage = async function(isRegenerate = false) {
                     }
                     return;
                 }
-                if (data.error) throw new Error(data.detail || data.error);
+                if (data.error) {
+                    if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
+                    if (data.content) {
+                        fullAiContent = data.content;
+                        if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+                    }
+                    const err = new Error(data.detail || data.error);
+                    err.persistedContent = data.content || '';
+                    err.messageId = data.messageId || null;
+                    throw err;
+                }
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
                     if (!firstTokenTime) firstTokenTime = Date.now();
@@ -587,7 +597,13 @@ window.sendMessage = async function(isRegenerate = false) {
             if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent);
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {
-            if (isRequestMessageVisible()) updateAssistantStatus(e.message, 'error');
+            if (e.messageId) window.setMessageActionId?.(aiMsgEl, e.messageId);
+            if (e.persistedContent) {
+                fullAiContent = e.persistedContent;
+                if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            } else if (isRequestMessageVisible()) {
+                updateAssistantStatus(e.message, 'error');
+            }
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }
