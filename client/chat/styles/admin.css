@@ -1435,6 +1435,7 @@
     padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(148, 163, 184, 0.12);
 }
 .stat-item { display: flex; align-items: center; gap: 5px; }
+.stat-model { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 管理面板关闭按钮 */
 .settings-dialog-close {

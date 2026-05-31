@@ -20,6 +20,16 @@ function extractStreamPayload(json) {
             delta = d.content;
             isThought = false;
         }
+    } else if (json.choices && json.choices[0].message) {
+        const messageContent = json.choices[0].message.content;
+        if (typeof messageContent === 'string') {
+            delta = messageContent;
+        } else if (Array.isArray(messageContent)) {
+            delta = messageContent
+                .map(part => part?.text || part?.content || '')
+                .filter(Boolean)
+                .join('\n');
+        }
     } else if (json.type === 'response.completed' && json.response?.output) {
         const out = json.response.output.find(o => o.type === 'message');
         if (out) {
@@ -33,6 +43,26 @@ function extractStreamPayload(json) {
         isThought,
         usage: json.usage || null
     };
+}
+
+function splitStreamTextForDisplay(text, { targetLength = 120, maxLength = 360 } = {}) {
+    const value = String(text || '');
+    if (!value) return [];
+    if (value.length <= maxLength || /<\/?thought>?/i.test(value)) return [value];
+
+    const chunks = [];
+    let current = '';
+    for (const char of Array.from(value)) {
+        current += char;
+        const softBreak = current.length >= targetLength && /[\s,.;:!?，。；：！？、）)\]\n]/u.test(char);
+        const hardBreak = current.length >= maxLength;
+        if (softBreak || hardBreak) {
+            chunks.push(current);
+            current = '';
+        }
+    }
+    if (current) chunks.push(current);
+    return chunks;
 }
 
 function createSseEventParser({ onData, onDone } = {}) {
@@ -149,4 +179,4 @@ function createStreamAccumulator({ includeThoughtTags = false, onContent } = {})
     };
 }
 
-module.exports = { createSseEventParser, createStreamAccumulator, extractStreamPayload };
+module.exports = { createSseEventParser, createStreamAccumulator, extractStreamPayload, splitStreamTextForDisplay };

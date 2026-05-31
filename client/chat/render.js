@@ -1,5 +1,5 @@
 // --- UI 渲染模块 Render (完整功能版) ---
-/* exported appendMessage, renderAttachmentPreviews, rememberThoughtStateBeforeRender, restoreThoughtStateAfterRender */
+/* exported appendMessage, renderAttachmentPreviews, rememberThoughtStateBeforeRender, restoreThoughtStateAfterRender, setMessageModelName */
 const ICONS = {
     user: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="white" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
     ai: `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
@@ -7,6 +7,7 @@ const ICONS = {
     delete: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
     fork: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h3a6 6 0 0 1 6 6v3"/><path d="M9 6h9"/></svg>`,
     time: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+    model: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>`,
     token: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
     speed: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
 };
@@ -17,6 +18,11 @@ const escapeCodeHtml = (value) => window.PivotSafeHtml
 const escapeAttrValue = (value) => window.PivotSafeHtml
     ? window.PivotSafeHtml.escapeAttr(value)
     : escapeCodeHtml(value).replace(/"/g, '&quot;');
+const PROSE_CODE_LANGUAGES = new Set([
+    'markdown', 'md', 'mdown', 'gfm', 'commonmark',
+    'text', 'txt', 'plain', 'plaintext', 'text/plain'
+]);
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function parseChatDateTime(value) {
     if (!value) return '';
@@ -196,14 +202,17 @@ customRenderer.code = (code, infostring, _escaped) => {
     }
     const languageLabel = language || 'code';
     let codeHtml;
-    if (language && typeof hljs !== 'undefined' && hljs.getLanguage(language)) {
+    const wrapProseCode = PROSE_CODE_LANGUAGES.has(normalizedLanguage);
+    if (wrapProseCode) {
+        codeHtml = escapeCodeHtml(code);
+    } else if (language && typeof hljs !== 'undefined' && hljs.getLanguage(language)) {
         try { codeHtml = hljs.highlight(code, { language }).value; } catch (e) { codeHtml = escapeCodeHtml(code); }
     } else if (typeof hljs !== 'undefined') {
         try { codeHtml = hljs.highlightAuto(code).value; } catch (e) { codeHtml = escapeCodeHtml(code); }
     } else { codeHtml = escapeCodeHtml(code); }
 
     return `
-        <div class="code-block">
+        <div class="code-block${wrapProseCode ? ' code-block-wrap' : ''}" data-code-language="${escapeAttrValue(normalizedLanguage || 'code')}">
             <div class="code-toolbar">
                 <span class="code-language">${escapeCodeHtml(languageLabel)}</span>
                 <button type="button" class="code-copy-btn" title="复制代码">
@@ -264,6 +273,27 @@ function normalizeMarkdown(content) {
             return normalizeText(part);
         }).join('');
     }).join('');
+}
+
+function unwrapSingleMarkdownFence(content) {
+    const original = String(content || '');
+    const text = original.trim();
+    const opening = text.match(/^(`{3,}|~{3,})[ \t]*([^\r\n]*)\r?\n?/);
+    if (!opening) return original;
+
+    const language = String(opening[2] || '').trim().split(/\s+/)[0].toLowerCase();
+    if (!PROSE_CODE_LANGUAGES.has(language)) return original;
+
+    const marker = opening[1][0];
+    const fenceLength = opening[1].length;
+    const body = text.slice(opening[0].length);
+    const closingFence = new RegExp(`\\r?\\n${escapeRegExp(marker)}{${fenceLength},}[ \\t]*$`);
+    const closing = closingFence.exec(body);
+    if (closing) return body.slice(0, closing.index).trim();
+
+    const anyClosingFence = new RegExp(`(^|\\r?\\n)${escapeRegExp(marker)}{${fenceLength},}[ \\t]*(\\r?\\n|$)`);
+    if (anyClosingFence.test(body)) return original;
+    return body.trim();
 }
 
 // --- 数学公式与思考块扩展配置 (KaTeX + Marked) ---
@@ -333,7 +363,7 @@ if (typeof marked !== 'undefined') {
 
 function renderMarkdown(content) {
     if (!content) return '';
-    const normalizedContent = normalizeMarkdown(content);
+    const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(content));
     let rawHtml = marked.parse(normalizedContent, { renderer: customRenderer, breaks: true, gfm: true });
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
@@ -841,6 +871,25 @@ function attachMessageImageLoadPinning(root) {
     });
 }
 
+function getMessageModelName(stats = {}) {
+    return String(stats?.modelName || stats?.model_name || stats?.model || '').trim();
+}
+
+function buildAssistantStatsHtml(stats = {}) {
+    const modelName = getMessageModelName(stats);
+    const items = [];
+    if (modelName) {
+        items.push(`<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeCodeHtml(modelName)}</span>`);
+    }
+    if (stats && stats.costTime !== undefined) {
+        items.push(`<span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>`);
+        items.push(`<span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>`);
+        items.push(`<span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>`);
+    }
+    if (!items.length) return '';
+    return `<div class="message-stats"${modelName ? ` data-model-name="${escapeAttrValue(modelName)}"` : ''}>${items.join('')}</div>`;
+}
+
 function appendMessage(role, content, id = null, stats = null) {
     const container = document.getElementById('message-container');
     const div = document.createElement('div');
@@ -852,13 +901,7 @@ function appendMessage(role, content, id = null, stats = null) {
     const messageTime = formatChatDateTime(createdAt);
     const messageTimeTitle = formatChatDateTime(createdAt);
     const messageTimeHtml = messageTime ? `<span class="message-meta" title="${escapeAttrValue(messageTimeTitle)}">${escapeCodeHtml(messageTime)}</span>` : '';
-    const statsHtml = (role === 'assistant' && stats && stats.costTime !== undefined) ? `
-        <div class="message-stats">
-            <span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>
-            <span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>
-            <span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>
-        </div>
-    ` : '';
+    const statsHtml = role === 'assistant' ? buildAssistantStatsHtml(stats || {}) : '';
     const footerClass = [
         'message-footer',
         (!messageTimeHtml && !statsHtml) ? 'hidden' : '',
@@ -890,6 +933,28 @@ function appendMessage(role, content, id = null, stats = null) {
     if (role === 'assistant') renderPivotCharts(div);
     window.scrollMessagesToBottom?.();
     return div.querySelector('.message-content');
+}
+
+function setMessageModelName(messageContent, modelName) {
+    const name = String(modelName || '').trim();
+    if (!messageContent || !name) return;
+    let statsEl = messageContent.querySelector('.message-stats');
+    if (!statsEl) {
+        const footerEl = messageContent.querySelector('.message-footer');
+        if (!footerEl) return;
+        footerEl.classList.remove('hidden');
+        footerEl.classList.remove('hover-time-only');
+        statsEl = document.createElement('div');
+        statsEl.className = 'message-stats';
+        footerEl.insertBefore(statsEl, footerEl.querySelector('.message-meta'));
+    }
+    statsEl.dataset.modelName = name;
+    if (statsEl.querySelector('.stat-model')) return;
+    const modelItem = document.createElement('span');
+    modelItem.className = 'stat-item stat-model';
+    modelItem.title = `模型：${name}`;
+    modelItem.innerHTML = `${ICONS.model}${escapeCodeHtml(name)}`;
+    statsEl.insertAdjacentElement('afterbegin', modelItem);
 }
 
 function setMessageActionId(messageContent, id) {

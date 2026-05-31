@@ -33,7 +33,13 @@ const stmts = {
     deleteUserRefreshTokens: db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?')
 };
 
-const messageSql = 'SELECT * FROM messages WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id ASC';
+const messageSql = `
+    SELECT m.*, COALESCE(md.name, md.model_name, '') AS model_name, md.model_name AS model_api_name
+    FROM messages m
+    LEFT JOIN models md ON md.id = m.model_id
+    WHERE m.session_id = ? AND m.user_id = ? AND m.deleted_at IS NULL
+    ORDER BY m.id ASC
+`;
 stmts.getMessages = db.prepare(messageSql);
 stmts.getMessagesForContext = stmts.getMessages;
 

@@ -1,7 +1,15 @@
 /* Markdown 渲染基础样式 */
 .text-body {
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.text-body > :first-child {
+    margin-top: 0;
+}
+.text-body > :last-child {
+    margin-bottom: 0;
 }
 .queue-detail,
 .error-detail {
@@ -119,11 +127,9 @@
     cursor: default;
     vertical-align: middle;
 }
-.message-content ul li {
+.message-content ul li:has(input[type="checkbox"]) {
     list-style-type: none;
     margin-left: -18px;
-}
-.message-content ul li:has(input[type="checkbox"]) {
     padding-left: 0;
 }
 
@@ -182,6 +188,7 @@
     background: rgba(15, 23, 42, 0.03); 
     padding: 12px; 
     border-radius: 8px; 
+    max-width: 100%;
     overflow-x: auto; 
     margin: 12px 0; 
 }
@@ -189,6 +196,8 @@
 /* 核心代码块容器 (marked 渲染器生成) */
 .code-block {
     margin: 16px 0;
+    width: 100%;
+    max-width: 100%;
     border-radius: 8px;
     overflow: hidden;
     background: #0b1220;
@@ -252,14 +261,29 @@
     padding: 14px 16px !important;
     background: #0b1220 !important;
     border-radius: 0 !important;
+    max-width: 100%;
     max-height: 500px;
     overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
 }
 .code-block pre code {
+    display: block;
+    min-width: max-content;
+    white-space: pre;
     font-family: "Fira Code", Consolas, monospace;
     font-size: 0.82rem;
     line-height: 1.6;
     color: #e2e8f0;
+}
+.code-block-wrap pre {
+    overflow-x: hidden;
+}
+.code-block-wrap pre code {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 /* 数学公式块样式 (KaTeX) */
@@ -278,6 +302,8 @@
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-gutter: stable;
     margin: 16px 0;
     border-radius: 8px;
     border: 1px solid var(--border);
@@ -287,7 +313,7 @@
 
 /* Markdown 表格样式 (现代网格风格) */
 .message-content table { 
-    width: 100%;
+    width: max-content;
     min-width: 100%;
     border-collapse: collapse; 
     margin: 0;

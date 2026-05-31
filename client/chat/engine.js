@@ -63,6 +63,10 @@ const escapeChatStatusHtml = (value) => String(value ?? '')
     .replace(/"/g, '&quot;');
 
 const STREAM_RENDER_INTERVAL_MS = 80;
+const STREAM_LOCAL_REPLAY_INTERVAL_MS = 24;
+const STREAM_LOCAL_REPLAY_MAX_WAIT_MS = 3200;
+const STREAM_LOCAL_REPLAY_TARGET_CHARS = 48;
+const STREAM_LOCAL_REPLAY_MAX_CHARS = 160;
 // 内容越长，每帧 marked.parse 成本越高；按累计长度阶梯式放大间隔，降低长回答时的重排开销
 const resolveStreamInterval = (contentLength) => {
     if (window.Pivot && typeof window.Pivot.chooseStreamInterval === 'function') {
@@ -70,6 +74,32 @@ const resolveStreamInterval = (contentLength) => {
     }
     return STREAM_RENDER_INTERVAL_MS;
 };
+
+function estimateStreamingTokenCount(content) {
+    const text = String(content || '');
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    return Math.ceil(chineseChars * 2 + (text.length - chineseChars) * 0.5);
+}
+
+function splitAssistantStreamDelta(delta) {
+    const text = String(delta || '');
+    if (!text) return [];
+    if (text.length <= STREAM_LOCAL_REPLAY_MAX_CHARS || /<\/?thought>?/i.test(text)) return [text];
+
+    const chunks = [];
+    let current = '';
+    for (const char of Array.from(text)) {
+        current += char;
+        const softBreak = current.length >= STREAM_LOCAL_REPLAY_TARGET_CHARS && /[\s,.;:!?，。；：！？、）)\]\n]/u.test(char);
+        const hardBreak = current.length >= STREAM_LOCAL_REPLAY_MAX_CHARS;
+        if (softBreak || hardBreak) {
+            chunks.push(current);
+            current = '';
+        }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+}
 
 function createBrowserSseParser({ onData, onDone } = {}) {
     let buffer = '';
@@ -135,7 +165,12 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
 
     const elapsed = (Date.now() - startTime) / 1000;
     const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
+    const modelName = String(statsEl?.dataset?.modelName || '').trim();
+    const modelHtml = modelName
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeChatStatusHtml(modelName)}</span>`
+        : '';
     statsEl.innerHTML = `
+        ${modelHtml}
         <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
         <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
         <span class="stat-item">${ICONS.speed}${tps} t/s</span>
@@ -328,7 +363,8 @@ window.selectSession = async function(id, title, options = {}) {
             createdAt: m.created_at,
             costTime: m.cost_time,
             tps: m.tokens_per_sec,
-            tokenCount: m.token_count
+            tokenCount: m.token_count,
+            modelName: m.model_name || m.model_api_name || ''
         }));
     window.scrollMessagesToBottom?.();
     if (options.refreshSidebar && window.loadSessions) window.loadSessions();
@@ -401,12 +437,13 @@ window.sendMessage = async function(isRegenerate = false) {
     const requestSessionId = String(currentSessionId);
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
+    const assistantModelName = model?.name || model?.model_name || '';
 
     let userMsgEl = null;
     if (!shouldRegenerate) {
         userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date(), attachments: sentAttachments });
     }
-    const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date() });
+    const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date(), modelName: assistantModelName });
     const textBody = aiMsgEl.querySelector('.text-body');
     const updateAssistantStatus = (message, type = 'queue') => {
         if (!textBody) return;
@@ -418,6 +455,9 @@ window.sendMessage = async function(isRegenerate = false) {
     let startTime = Date.now();
     let firstTokenTime = null;
     let hasShownQueueToast = false;
+    let renderTimer = null;
+    let localReplayTimer = null;
+    let pendingStreamChunks = [];
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -466,7 +506,6 @@ window.sendMessage = async function(isRegenerate = false) {
                 aiMsgEl.insertBefore(statsEl, aiMsgEl.querySelector('.message-actions'));
             }
         }
-        let renderTimer = null;
         let renderPending = false;
         const scheduleStreamRender = () => {
             if (renderPending) return;
@@ -490,6 +529,58 @@ window.sendMessage = async function(isRegenerate = false) {
             keepLatestCodeBlockPinned(textBody, wasNearBottom);
             keepMessageContainerPinnedToBottom(wasNearBottom);
         };
+        let hasRenderedFirstStreamContent = false;
+        const appendStreamContent = (content) => {
+            if (!content) return;
+            fullAiContent += content;
+            tokenCount = estimateStreamingTokenCount(fullAiContent);
+            if (!hasRenderedFirstStreamContent) {
+                hasRenderedFirstStreamContent = true;
+                flushStreamRender();
+                return;
+            }
+            scheduleStreamRender();
+        };
+        const runLocalReplayTick = () => {
+            localReplayTimer = null;
+            if (!pendingStreamChunks.length) return;
+            const burstSize = pendingStreamChunks.length > 120 ? 6
+                : pendingStreamChunks.length > 60 ? 4
+                    : pendingStreamChunks.length > 20 ? 2
+                        : 1;
+            for (let i = 0; i < burstSize && pendingStreamChunks.length; i += 1) {
+                appendStreamContent(pendingStreamChunks.shift());
+            }
+            if (pendingStreamChunks.length) {
+                localReplayTimer = setTimeout(runLocalReplayTick, STREAM_LOCAL_REPLAY_INTERVAL_MS);
+            }
+        };
+        const enqueueStreamContent = (content) => {
+            const chunks = splitAssistantStreamDelta(content);
+            if (!chunks.length) return;
+            pendingStreamChunks.push(...chunks);
+            if (!localReplayTimer) {
+                localReplayTimer = setTimeout(runLocalReplayTick, hasRenderedFirstStreamContent ? STREAM_LOCAL_REPLAY_INTERVAL_MS : 0);
+            }
+        };
+        const waitForLocalReplay = () => new Promise(resolve => {
+            const startedAt = Date.now();
+            const settle = () => {
+                if (!pendingStreamChunks.length && !localReplayTimer) {
+                    resolve();
+                    return;
+                }
+                if (Date.now() - startedAt >= STREAM_LOCAL_REPLAY_MAX_WAIT_MS) {
+                    if (localReplayTimer) clearTimeout(localReplayTimer);
+                    localReplayTimer = null;
+                    while (pendingStreamChunks.length) appendStreamContent(pendingStreamChunks.shift());
+                    resolve();
+                    return;
+                }
+                setTimeout(settle, 40);
+            };
+            settle();
+        });
         const sseParser = createBrowserSseParser({
             onData(payload) {
                 let data = null;
@@ -530,6 +621,7 @@ window.sendMessage = async function(isRegenerate = false) {
                     }
                     if (data.role === 'assistant') {
                         window.setMessageActionId?.(aiMsgEl, data.messageId);
+                        window.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
                         window.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     return;
@@ -548,10 +640,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
                     if (!firstTokenTime) firstTokenTime = Date.now();
-                    fullAiContent += data.content;
-                    const chineseChars = (fullAiContent.match(/[\u4e00-\u9fa5]/g) || []).length;
-                    tokenCount = Math.ceil(chineseChars * 2 + (fullAiContent.length - chineseChars) * 0.5);
-                    scheduleStreamRender();
+                    enqueueStreamContent(data.content);
                 }
             }
         });
@@ -569,6 +658,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 if (container.scrollHeight - container.scrollTop - container.clientHeight < 120) container.scrollTop = container.scrollHeight;
             }
         }
+        await waitForLocalReplay();
         flushStreamRender();
         if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 
@@ -592,7 +682,17 @@ window.sendMessage = async function(isRegenerate = false) {
             if (window.loadSessions) window.loadSessions();
         }, 1500);
     } catch (e) {
+        if (localReplayTimer) clearTimeout(localReplayTimer);
+        if (renderTimer) clearTimeout(renderTimer);
+        const remainingStreamContent = pendingStreamChunks.join('');
+        pendingStreamChunks = [];
+        localReplayTimer = null;
+        renderTimer = null;
         if (e.name === 'AbortError') {
+            if (remainingStreamContent) {
+                fullAiContent += remainingStreamContent;
+                tokenCount = estimateStreamingTokenCount(fullAiContent);
+            }
             fullAiContent += '\n\n[已由用户中断生成]';
             if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent);
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();

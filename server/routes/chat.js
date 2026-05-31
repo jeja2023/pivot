@@ -24,7 +24,7 @@ const {
 } = require('../services/model-runtime');
 const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('../image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('../security');
-const { createSseEventParser, createStreamAccumulator } = require('../streaming');
+const { createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../streaming');
 const {
     buildModelHeaders,
     buildResponsesUrl,
@@ -217,7 +217,6 @@ function buildPersistedChatErrorContent({ error, detail, statusCode, code } = {}
     if (detailText && detailText !== title) {
         lines.push('', '错误详情：', detailText);
     }
-    lines.push('', '这条错误已保存，刷新页面后仍可查看。');
     return lines.join('\n');
 }
 
@@ -329,6 +328,22 @@ function extractModelText(data) {
         }).filter(Boolean).join('\n');
     }
     return '';
+}
+
+const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
+
+function extractModelTextFromRawResponse(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text || text.startsWith('data:')) return { content: '', usage: null };
+    try {
+        const data = JSON.parse(text);
+        return {
+            content: extractModelText(data),
+            usage: data?.usage || null
+        };
+    } catch (_err) {
+        return { content: '', usage: null };
+    }
 }
 
 function parsePlannerJson(text) {
@@ -1088,10 +1103,15 @@ function createChatRouter({
                 req.log.info('连接成功');
             }
 
+            const writeContentSse = (content) => {
+                splitStreamTextForDisplay(content).forEach(chunk => {
+                    writeSse(JSON.stringify({ content: chunk }));
+                });
+            };
             const accumulator = createStreamAccumulator({
                 includeThoughtTags: true,
                 onContent(sendContent) {
-                    writeSse(JSON.stringify({ content: sendContent }));
+                    writeContentSse(sendContent);
                 }
             });
             const parser = createSseEventParser({
@@ -1101,15 +1121,44 @@ function createChatRouter({
                 onDone() {}
             });
 
-            response.data.on('data', chunk => parser.write(chunk));
+            let rawStreamText = '';
+            let rawStreamCaptureTruncated = false;
+            const captureRawStreamChunk = (chunk) => {
+                if (rawStreamCaptureTruncated || rawStreamText.length >= MAX_STREAM_FALLBACK_CAPTURE_CHARS) return;
+                const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
+                const remaining = MAX_STREAM_FALLBACK_CAPTURE_CHARS - rawStreamText.length;
+                if (text.length > remaining) {
+                    rawStreamText += text.slice(0, remaining);
+                    rawStreamCaptureTruncated = true;
+                    return;
+                }
+                rawStreamText += text;
+            };
+
+            response.data.on('data', chunk => {
+                captureRawStreamChunk(chunk);
+                parser.write(chunk);
+            });
 
             response.data.on('end', async () => {
                 try {
                     parser.end();
                     accumulator.finish();
 
-                    const assistantContent = accumulator.getContent();
-                    const apiUsage = accumulator.getUsage();
+                    let assistantContent = accumulator.getContent();
+                    let apiUsage = accumulator.getUsage();
+                    if (!assistantContent.trim()) {
+                        const fallback = extractModelTextFromRawResponse(rawStreamText);
+                        if (fallback.content) {
+                            assistantContent = fallback.content;
+                            apiUsage = fallback.usage || apiUsage;
+                            writeContentSse(assistantContent);
+                            req.log.warn({
+                                sessionId,
+                                rawStreamCaptureTruncated
+                            }, '上游未按 SSE 流式返回，已按完整 JSON 内容回放');
+                        }
+                    }
                     const assistantTokens = (apiUsage && apiUsage.completion_tokens) 
                         ? apiUsage.completion_tokens 
                         : estimateTokens(assistantContent);
@@ -1122,7 +1171,8 @@ function createChatRouter({
                     writeSse(JSON.stringify({
                         type: 'message_saved',
                         role: 'assistant',
-                        messageId: assistantMessageResult.lastInsertRowid
+                        messageId: assistantMessageResult.lastInsertRowid,
+                        modelName: modelCfg.name || modelCfg.model_name || ''
                     }));
                     writeSse('[DONE]');
                     res.end();

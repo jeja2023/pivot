@@ -26,7 +26,7 @@ const {
 const { buildContextMeta, estimateTokens, getContext } = require('../server/llm');
 const { normalizeUploadedOriginalName } = require('../server/upload');
 const { buildFtsQuery } = require('../server/search');
-const { createSseEventParser, createStreamAccumulator, extractStreamPayload } = require('../server/streaming');
+const { createSseEventParser, createStreamAccumulator, extractStreamPayload, splitStreamTextForDisplay } = require('../server/streaming');
 const {
     csrfMiddleware,
     CSRF_COOKIE_NAME,
@@ -226,7 +226,7 @@ const {
     validateDatabaseConnectionPayload
 } = require('../server/services/database-mcp');
 const { callModelText } = require('../server/services/agent-model');
-const { db } = require('../server/db');
+const { db, stmts } = require('../server/db');
 const { ensureBuiltInAdminAccount } = require('../server/db/seed');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
@@ -389,6 +389,22 @@ test('createSseEventParser parses chunked SSE payloads', () => {
     assert.equal(payloads.length, 1);
     const extracted = extractStreamPayload(JSON.parse(payloads[0]));
     assert.deepEqual(extracted, { delta: 'hello', isThought: false, usage: null });
+});
+
+test('stream payload extraction accepts full message payloads and splits large deltas', () => {
+    const extracted = extractStreamPayload({
+        choices: [{ message: { content: 'complete answer' } }],
+        usage: { completion_tokens: 3 }
+    });
+    assert.deepEqual(extracted, {
+        delta: 'complete answer',
+        isThought: false,
+        usage: { completion_tokens: 3 }
+    });
+
+    const chunks = splitStreamTextForDisplay('a'.repeat(420), { targetLength: 80, maxLength: 120 });
+    assert.ok(chunks.length > 1);
+    assert.equal(chunks.join(''), 'a'.repeat(420));
 });
 
 test('realtime SSE events are scoped to the subscribed user', () => {
@@ -603,6 +619,40 @@ test('chat message service saves messages and updates session stats', () => {
     }
 });
 
+test('session messages include assistant model display metadata', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`msg_model_${suffix}`, 'hash', 'Message Model Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const sessionId = `msg-model-${suffix}`;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, 'Readable Model Name', 'http://127.0.0.1:65530/v1/chat/completions', `api-model-${suffix}`);
+
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionId, userId, 'Message Model Test');
+    db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, model_id, created_at)
+        VALUES (?, ?, 'assistant', 'hello', ?, datetime('now', '+8 hours'))
+    `).run(sessionId, userId, Number(modelInfo.lastInsertRowid));
+
+    try {
+        const [message] = stmts.getMessages.all(sessionId, userId);
+        assert.equal(message.model_name, 'Readable Model Name');
+        assert.equal(message.model_api_name, `api-model-${suffix}`);
+    } finally {
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM models WHERE id = ?').run(Number(modelInfo.lastInsertRowid));
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('chat route persists assistant error messages when upstream model fails', async () => {
     const express = require('express');
     const suffix = Date.now().toString(36);
@@ -689,6 +739,103 @@ test('chat route persists assistant error messages when upstream model fails', a
         assert.match(assistant.content, /upstream exploded/);
         assert.match(sseText, /assistant_error/);
         assert.match(sseText, new RegExp(String(assistant.id)));
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        await new Promise(resolve => upstream.close(resolve));
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('chat route replays non-streaming upstream JSON as chat SSE content', async () => {
+    const express = require('express');
+    const suffix = Date.now().toString(36);
+    const upstream = http.createServer((req, res) => {
+        req.resume();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({
+            choices: [{ message: { content: 'fallback streamed answer' } }],
+            usage: { completion_tokens: 4 }
+        }));
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`chat_json_${suffix}`, 'hash', 'Chat JSON Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const sessionId = `chat-json-${suffix}`;
+    const upstreamPort = upstream.address().port;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, 'JSON Chat Model', `http://127.0.0.1:${upstreamPort}/v1/chat/completions`, `json-chat-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+
+    db.prepare(`
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(sessionId, userId, 'Chat JSON Test');
+
+    const app = express();
+    app.use(express.json());
+    app.use(createChatRouter({
+        authMiddleware: (req, _res, next) => {
+            req.user = { id: userId, username: `chat_json_${suffix}`, role: 'user', unit: 'QA' };
+            req.log = { info() {}, warn() {}, error() {} };
+            next();
+        },
+        chatLimiter: (_req, _res, next) => next(),
+        logAction() {}
+    }));
+    const server = http.createServer(app);
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+
+    const requestBody = JSON.stringify({
+        sessionId,
+        content: 'hello',
+        modelId
+    });
+
+    try {
+        const sseText = await new Promise((resolve, reject) => {
+            const req = http.request({
+                hostname: '127.0.0.1',
+                port: server.address().port,
+                path: '/chat',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(requestBody)
+                }
+            }, res => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', chunk => { text += chunk; });
+                res.on('end', () => resolve(text));
+            });
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+        });
+
+        const assistant = db.prepare(`
+            SELECT role, content, token_count
+            FROM messages
+            WHERE session_id = ? AND user_id = ? AND role = 'assistant'
+            ORDER BY id DESC
+        `).get(sessionId, userId);
+
+        assert.ok(assistant);
+        assert.equal(assistant.content, 'fallback streamed answer');
+        assert.equal(assistant.token_count, 4);
+        assert.match(sseText, /fallback streamed answer/);
+        assert.match(sseText, /message_saved/);
+        assert.match(sseText, /\[DONE\]/);
     } finally {
         await new Promise(resolve => server.close(resolve));
         await new Promise(resolve => upstream.close(resolve));

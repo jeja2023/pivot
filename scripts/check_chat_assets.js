@@ -1,6 +1,7 @@
 /* Chat asset structure guard */
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const { loadChatHtmlTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -111,5 +112,88 @@ const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.cs
 ].forEach(needle => {
     if (!chatShellCss.includes(needle)) fail(`print workspace layout style is missing ${needle}`);
 });
+
+function createMarkdownRenderSandbox() {
+    const sandbox = {
+        console,
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame(callback) {
+            if (typeof callback === 'function') callback();
+        },
+        navigator: { clipboard: null },
+        document: {
+            addEventListener() {},
+            getElementById() { return null; },
+            createElement() {
+                return {
+                    style: {},
+                    focus() {},
+                    select() {},
+                    remove() {}
+                };
+            },
+            body: {
+                appendChild() {}
+            },
+            execCommand() {
+                return false;
+            }
+        }
+    };
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    sandbox.self = sandbox;
+    sandbox.PivotSafeHtml = {
+        escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        },
+        escapeAttr(value) {
+            return this.escapeHtml(value).replace(/"/g, '&quot;');
+        },
+        sanitizeHtml(html) {
+            return html;
+        }
+    };
+
+    const context = vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'common', 'vendor', 'marked.min.js'), 'utf8'), context, {
+        filename: 'client/common/vendor/marked.min.js'
+    });
+    if (!sandbox.marked) fail('marked vendor did not expose a global renderer in the chat asset sandbox');
+
+    vm.runInContext(fs.readFileSync(path.join(chatDir, 'render.js'), 'utf8'), context, {
+        filename: 'client/chat/render.js'
+    });
+    if (typeof sandbox.renderMarkdown !== 'function') fail('client/chat/render.js did not expose renderMarkdown in the sandbox');
+    return sandbox;
+}
+
+const markdownSandbox = createMarkdownRenderSandbox();
+const closedMarkdownFence = markdownSandbox.renderMarkdown('```markdown\n### Heading\n\n- item\n```');
+if (closedMarkdownFence.includes('code-block') || !closedMarkdownFence.includes('<h3>Heading</h3>')) {
+    fail('single outer markdown fences should render as Markdown, not as a code block');
+}
+const openTextFence = markdownSandbox.renderMarkdown('```text/plain\n# Heading\n\nplain text');
+if (openTextFence.includes('code-block') || !openTextFence.includes('<h1>Heading</h1>')) {
+    fail('open prose fences should be unwrapped while streaming');
+}
+const realCodeFence = markdownSandbox.renderMarkdown('```js\nconst value = 1;\n```');
+if (!realCodeFence.includes('code-block') || !realCodeFence.includes('language-js')) {
+    fail('real code fences should remain code blocks');
+}
+const embeddedMarkdownFence = markdownSandbox.renderMarkdown('Example:\n\n```markdown\n# Kept as code\n```');
+if (!embeddedMarkdownFence.includes('code-block-wrap')) {
+    fail('embedded markdown examples should remain wrapped prose code blocks');
+}
+const fencedThenTail = markdownSandbox.renderMarkdown('```markdown\n# Kept as code\n```\n\nTail');
+if (!fencedThenTail.includes('code-block-wrap') || !fencedThenTail.includes('Tail')) {
+    fail('markdown fences followed by extra text should remain code examples');
+}
+const tableHtml = markdownSandbox.renderMarkdown('| A | B |\n| - | - |\n| 1 | 2 |');
+if (!tableHtml.includes('table-wrapper')) fail('rendered Markdown tables should use the local scroll wrapper');
 
 console.log(`Chat asset check passed (${partialFiles.length} partials, ${imports.length} style imports).`);
