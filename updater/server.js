@@ -16,12 +16,27 @@ const BUILD_CONTEXT = path.resolve(process.env.PIVOT_UPDATE_BUILD_CONTEXT || WOR
 const STATE_FILE = path.resolve(process.env.PIVOT_UPDATE_STATE_FILE || '/workspace/updater-state.json');
 const DOCKER_BIN = process.env.PIVOT_DOCKER_BIN || 'docker';
 const GIT_BIN = process.env.PIVOT_GIT_BIN || 'git';
+const LOG_TIME_ZONE = process.env.PIVOT_LOG_TIME_ZONE || 'Asia/Shanghai';
+const LOG_TIME_OFFSET = '+08:00';
+const timeFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: LOG_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+});
 
 let running = false;
 let state = loadState();
 
 function nowIso() {
-    return new Date().toISOString();
+    const date = new Date();
+    const parts = Object.fromEntries(timeFormatter.formatToParts(date).map(part => [part.type, part.value]));
+    const millis = String(date.getMilliseconds()).padStart(3, '0');
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${millis}${LOG_TIME_OFFSET}`;
 }
 
 function loadState() {
