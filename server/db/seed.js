@@ -14,6 +14,65 @@ function validateInitialPassword(password) {
     }
 }
 
+function buildInitialAdminCredential() {
+    const bcrypt = require('bcryptjs');
+    const crypto = require('crypto');
+    const configuredAdminPassword = String(process.env.DEFAULT_ADMIN_PASSWORD || '').trim();
+    if (configuredAdminPassword) validateInitialPassword(configuredAdminPassword);
+    const password = configuredAdminPassword || crypto.randomBytes(16).toString('base64url');
+    return {
+        configured: Boolean(configuredAdminPassword),
+        password,
+        passwordHash: bcrypt.hashSync(password, 10)
+    };
+}
+
+function writeInitialAdminCredentialFile(password) {
+    const credentialPath = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'initial-admin-password.txt');
+    fs.writeFileSync(credentialPath, `username=admin\npassword=${password}\ncreated_at=${getBeijingTimestamp()}\n`, { mode: 0o600 });
+    return credentialPath;
+}
+
+function logInitialAdminCredential(credential) {
+    if (credential.configured) {
+        logger.info({ username: 'admin' }, '系统初始化：已使用环境变量 DEFAULT_ADMIN_PASSWORD 创建管理员账号');
+        return;
+    }
+    const credentialPath = writeInitialAdminCredentialFile(credential.password);
+    logger.warn({ username: 'admin', credentialPath }, '系统初始化：已创建随机管理员密码，请读取该一次性文件后尽快修改密码并删除文件');
+}
+
+function createInitialAdminAccount() {
+    const credential = buildInitialAdminCredential();
+    db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp());
+    logInitialAdminCredential(credential);
+    recordMigration('initial_admin_created_v1', 'done');
+}
+
+function ensureBuiltInAdminAccount() {
+    const admin = db.prepare('SELECT id, role, status, deleted_at FROM users WHERE username = ?').get('admin');
+    if (!admin) {
+        createInitialAdminAccount();
+        return;
+    }
+
+    const needsRepair = admin.role !== 'admin' || admin.status === 'disabled' || admin.deleted_at;
+    if (!needsRepair) return;
+
+    db.prepare(`
+        UPDATE users
+        SET role = 'admin',
+            status = 'active',
+            deleted_at = NULL,
+            nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
+            unit = COALESCE(NULLIF(unit, ''), '智枢科技')
+        WHERE id = ?
+    `).run(admin.id);
+    recordMigration('initial_admin_repaired_v1', 'done');
+    logger.warn({ username: 'admin', userId: admin.id }, '系统初始化：已修复内置管理员账号角色或状态');
+}
+
 function runSeeds() {
     // 预置一些常用指令
     const promptCount = db.prepare('SELECT COUNT(*) as count FROM prompts').get().count;
@@ -31,23 +90,10 @@ function runSeeds() {
     // --- 自动填充默认管理员账号 (仅当用户表为空时) ---
     const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
     if (userCount === 0) {
-        const bcrypt = require('bcryptjs');
-        const crypto = require('crypto');
-        const configuredAdminPassword = String(process.env.DEFAULT_ADMIN_PASSWORD || '').trim();
-        if (configuredAdminPassword) validateInitialPassword(configuredAdminPassword);
-        const adminPassword = configuredAdminPassword || crypto.randomBytes(16).toString('base64url');
-        const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
-        db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-            .run('admin', adminPasswordHash, '系统管理员', '智枢科技', 'admin', getBeijingTimestamp());
-        if (configuredAdminPassword) {
-            logger.info({ username: 'admin' }, '系统初始化：已使用环境变量 DEFAULT_ADMIN_PASSWORD 创建管理员账号');
-        } else {
-            const credentialPath = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'initial-admin-password.txt');
-            fs.writeFileSync(credentialPath, `username=admin\npassword=${adminPassword}\ncreated_at=${getBeijingTimestamp()}\n`, { mode: 0o600 });
-            logger.warn({ username: 'admin', credentialPath }, '系统初始化：已创建随机管理员密码，请读取该一次性文件后尽快修改密码并删除文件');
-        }
-        recordMigration('initial_admin_created_v1', 'done');
+        createInitialAdminAccount();
+    } else {
+        ensureBuiltInAdminAccount();
     }
 }
 
-module.exports = { runSeeds };
+module.exports = { runSeeds, ensureBuiltInAdminAccount, validateInitialPassword };

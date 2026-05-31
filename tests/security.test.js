@@ -220,6 +220,7 @@ const {
 } = require('../server/services/database-mcp');
 const { callModelText } = require('../server/services/agent-model');
 const { db } = require('../server/db');
+const { ensureBuiltInAdminAccount } = require('../server/db/seed');
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
 
@@ -280,6 +281,25 @@ test.after(async () => {
     if (generatedTestDataDir && process.env.DATA_DIR) {
         db.close();
         fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+    }
+});
+
+test('seed repair restores built-in admin role and login status', () => {
+    const admin = db.prepare('SELECT id, role, status, deleted_at, nickname, unit FROM users WHERE username = ?').get('admin');
+    assert.ok(admin);
+    try {
+        db.prepare("UPDATE users SET role = 'user', status = 'disabled', deleted_at = ?, nickname = '', unit = '' WHERE username = ?")
+            .run('2026-01-01 00:00:00', 'admin');
+        ensureBuiltInAdminAccount();
+        const repaired = db.prepare('SELECT role, status, deleted_at, nickname, unit FROM users WHERE username = ?').get('admin');
+        assert.equal(repaired.role, 'admin');
+        assert.equal(repaired.status, 'active');
+        assert.equal(repaired.deleted_at, null);
+        assert.equal(repaired.nickname, '系统管理员');
+        assert.equal(repaired.unit, '智枢科技');
+    } finally {
+        db.prepare('UPDATE users SET role = ?, status = ?, deleted_at = ?, nickname = ?, unit = ? WHERE id = ?')
+            .run(admin.role, admin.status, admin.deleted_at, admin.nickname, admin.unit, admin.id);
     }
 });
 
@@ -4260,4 +4280,3 @@ test('agent.streaming SSE 事件按用户隔离并携带累加快照字段', () 
     // 不应泄漏到其他用户
     assert.doesNotMatch(other.chunks.join(''), /run_streaming_test/);
 });
-
