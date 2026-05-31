@@ -19,7 +19,7 @@ async function refreshAccessToken() {
     if (!isRefreshing) {
         isRefreshing = true;
         try {
-            const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST' });
+            const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST', credentials: 'same-origin' });
             if (!refreshRes.ok) throw new Error('Refresh failed');
             const refreshData = await refreshRes.json().catch(() => ({}));
             if (refreshData.csrfToken) {
@@ -55,7 +55,7 @@ async function authFetch(url, options = {}) {
 async function apiFetch(url, options = {}) {
     const originalRequest = async () => {
         const headers = authHeaders(options.headers || {});
-        return fetch(url, { ...options, headers });
+        return fetch(url, { credentials: 'same-origin', ...options, headers });
     };
 
     const res = await originalRequest();

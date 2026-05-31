@@ -1046,7 +1046,7 @@ function handleAgentRealtimeEvent(event) {
 
 window.initAgentRealtime = function() {
     if (agentRealtimeSource || !window.EventSource || !currentUser) return;
-    agentRealtimeSource = new EventSource(`${API_BASE}/events`);
+    agentRealtimeSource = new EventSource(`${API_BASE}/events`, { withCredentials: true });
     agentRealtimeSource.addEventListener('connected', () => {
         agentRealtimeConnected = true;
         updateAgentAutoRefresh();
@@ -2402,4 +2402,3 @@ function mountAgentDagEditor() {
     });
 }
 window.refreshAgentDagEditor = () => dagEditorInstance?.refresh();
-

@@ -142,6 +142,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     try {
         const res = await fetch(API_BASE + path, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
