@@ -46,7 +46,7 @@ const logger = pino({
         paths: redactFields,
         censor: '[REDACTED]'
     },
-    timestamp: pino.stdTimeFunctions.isoTime,
+    timestamp: () => `,"time":"${new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('Z', '+08:00')}"`,
     formatters: {
         level: (label) => ({ level: label.toUpperCase() })
     }
