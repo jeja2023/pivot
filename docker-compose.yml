@@ -1,11 +1,12 @@
 # Pivot AI 智能中枢 - 生产环境部署配置
 
-version: '3.8'
-
 services:
   pivot:
     # 镜像名称：需要与打包时生成的镜像标签保持一致
     image: pivot
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: pivot
 
     # 端口映射：宿主机端口 -> 容器端口
