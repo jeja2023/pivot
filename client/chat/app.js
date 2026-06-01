@@ -298,15 +298,34 @@ window.closePrintWorkbench = () => window.showMainWorkspace?.('chat');
 
 // --- 全局确认弹窗 ---
 let confirmCallback = null;
+let confirmResolve = null;
 window.showConfirm = (title, message, callback) => {
-    document.getElementById('confirm-title').innerText = title;
-    document.getElementById('confirm-message').innerText = message;
-    confirmCallback = callback;
-    document.getElementById('confirm-container').classList.remove('hidden');
+    const container = document.getElementById('confirm-container');
+    const titleEl = document.getElementById('confirm-title');
+    const messageEl = document.getElementById('confirm-message');
+    if (!container || !titleEl || !messageEl) return Promise.resolve(false);
+    if (confirmResolve) confirmResolve(false);
+    titleEl.innerText = title;
+    messageEl.innerText = message;
+    confirmCallback = typeof callback === 'function' ? callback : null;
+    container.classList.remove('hidden');
+    return new Promise(resolve => {
+        confirmResolve = resolve;
+    });
 };
-window.closeConfirmModal = () => { document.getElementById('confirm-container').classList.add('hidden'); confirmCallback = null; };
-document.getElementById('confirm-ok-btn')?.addEventListener('click', () => { if (confirmCallback) confirmCallback(); window.closeConfirmModal(); });
-document.getElementById('modal-confirm-cancel')?.addEventListener('click', window.closeConfirmModal);
+window.closeConfirmModal = (confirmed = false) => {
+    document.getElementById('confirm-container')?.classList.add('hidden');
+    const resolve = confirmResolve;
+    confirmCallback = null;
+    confirmResolve = null;
+    if (resolve) resolve(confirmed);
+};
+document.getElementById('confirm-ok-btn')?.addEventListener('click', () => {
+    const callback = confirmCallback;
+    if (callback) callback();
+    window.closeConfirmModal(true);
+});
+document.getElementById('modal-confirm-cancel')?.addEventListener('click', () => window.closeConfirmModal(false));
 
 // --- 消息操作 ---
 let inputPromptResolve = null;

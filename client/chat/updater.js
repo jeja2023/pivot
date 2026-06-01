@@ -232,7 +232,10 @@ window.checkPivotUpdate = async function() {
 
 window.startPivotUpdate = async function() {
     if (currentUser?.username !== 'admin') return showToast('只有 admin 超级管理员可以执行在线更新', 'error');
-    if (!confirm('即将拉取代码、构建镜像并重建 Pivot 容器。更新过程中服务会短暂中断，是否继续？')) return;
+    const confirmed = typeof window.showConfirm === 'function'
+        ? await window.showConfirm('开始在线更新', '即将拉取代码、构建镜像并重建 Pivot 容器。更新过程中服务会短暂中断，是否继续？')
+        : false;
+    if (!confirmed) return;
     try {
         showToast('已提交更新任务，正在后台执行...', 'info');
         const res = await apiFetch(`${API_BASE}/admin/updater/start`, { method: 'POST' });
