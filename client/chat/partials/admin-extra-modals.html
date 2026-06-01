@@ -1,3 +1,106 @@
+    <!-- 公告编辑弹窗 -->
+    <div id="announcement-modal" class="modal-overlay hidden" style="z-index: 5400;">
+        <div class="modal announcement-modal-panel">
+            <div class="announcement-modal-head">
+                <div>
+                    <h3 id="announcement-modal-title">新建公告</h3>
+                    <p>配置公告内容、投放范围和确认要求。</p>
+                </div>
+                <button id="announcement-modal-close" class="btn-secondary settings-dialog-close" type="button">关闭</button>
+            </div>
+            <form id="announcement-form" class="announcement-editor">
+                <input id="announcement-id" type="hidden">
+                <div class="form-item announcement-title-field">
+                    <label for="announcement-title">标题</label>
+                    <input id="announcement-title" class="form-input" type="text" maxlength="120" placeholder="例如：知识库索引维护通知">
+                </div>
+                <div class="form-item announcement-content-field">
+                    <label for="announcement-content">内容</label>
+                    <textarea id="announcement-content" class="form-input" rows="6" maxlength="12000" placeholder="填写用户需要看到的公告内容"></textarea>
+                </div>
+                <div class="form-item">
+                    <label for="announcement-type">类型</label>
+                    <select id="announcement-type" class="form-input">
+                        <option value="system">系统通知</option>
+                        <option value="security">安全提醒</option>
+                        <option value="knowledge">知识库更新</option>
+                        <option value="normal">普通公告</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label for="announcement-priority">优先级</label>
+                    <select id="announcement-priority" class="form-input">
+                        <option value="normal">普通</option>
+                        <option value="high">重要</option>
+                        <option value="critical">紧急</option>
+                        <option value="low">低</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label for="announcement-target-type">投放范围</label>
+                    <select id="announcement-target-type" class="form-input">
+                        <option value="all">全员</option>
+                        <option value="unit">按单位</option>
+                        <option value="role">按角色</option>
+                        <option value="users">指定用户</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label for="announcement-target-value">范围值</label>
+                    <input id="announcement-target-value" class="form-input" type="text" placeholder="多个值用逗号分隔">
+                </div>
+                <div class="form-item">
+                    <label for="announcement-starts-at">开始时间</label>
+                    <input id="announcement-starts-at" class="form-input" type="datetime-local">
+                </div>
+                <div class="form-item">
+                    <label for="announcement-ends-at">结束时间</label>
+                    <input id="announcement-ends-at" class="form-input" type="datetime-local">
+                </div>
+                <div class="form-item">
+                    <label for="announcement-status">状态</label>
+                    <select id="announcement-status" class="form-input">
+                        <option value="draft">草稿</option>
+                        <option value="published">发布</option>
+                        <option value="archived">归档</option>
+                    </select>
+                </div>
+                <label class="announcement-ack-row">
+                    <input id="announcement-require-ack" type="checkbox">
+                    <span>要求用户确认后继续使用</span>
+                </label>
+                <label class="announcement-login-row">
+                    <input id="announcement-show-login" type="checkbox">
+                    <span>登录页展示</span>
+                </label>
+                <div class="announcement-editor-actions announcement-full-row">
+                    <button id="announcement-save-btn" class="btn-primary" type="submit">保存公告</button>
+                    <button id="announcement-reset-btn" class="btn-secondary" type="button">清空</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 公告详情弹窗 -->
+    <div id="announcement-detail-modal" class="modal-overlay hidden" style="z-index: 5450;">
+        <div class="modal announcement-modal-panel announcement-detail-panel">
+            <div class="announcement-modal-head">
+                <div>
+                    <h3 id="announcement-detail-title">公告详情</h3>
+                    <p id="announcement-detail-summary">查看公告内容、投放范围和确认情况。</p>
+                </div>
+                <button id="announcement-detail-close" class="btn-secondary settings-dialog-close" type="button">关闭</button>
+            </div>
+            <div class="announcement-detail-body">
+                <div id="announcement-detail-meta" class="announcement-detail-meta"></div>
+                <div class="announcement-detail-content">
+                    <h4>公告内容</h4>
+                    <div id="announcement-detail-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 向量模型配置弹窗 -->
     <div id="rag-embedding-modal" class="modal-overlay hidden" style="z-index: 5500;">
         <div class="modal model-modal">

@@ -50,6 +50,7 @@ window.showAuth = () => {
     document.body?.setAttribute('data-active-workspace', 'auth');
     document.querySelector('.chat-container')?.setAttribute('data-active-workspace', 'chat');
     if (window.updateContextUsage) window.updateContextUsage(null);
+    window.loadLoginAnnouncements?.();
 };
 
 window.showApp = () => {
@@ -96,6 +97,7 @@ window.showApp = () => {
     if (window.loadSettings) window.loadSettings();
     if (window.refreshModelSelector) window.refreshModelSelector();
     if (window.initAgentRealtime) window.initAgentRealtime();
+    if (window.initAnnouncements) window.initAnnouncements();
 };
 
 document.getElementById('auth-toggle')?.addEventListener('click', () => {

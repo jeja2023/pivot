@@ -595,7 +595,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());

@@ -70,6 +70,7 @@ const { createOpenAIRouter } = require('./routes/openai');
 const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
+const { createAnnouncementsRouter } = require('./routes/announcements');
 const { ragRouter, retrieveContext } = require('./rag');
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const {
@@ -461,6 +462,14 @@ app.use('/api', createAdminUsersRouter({
 app.use('/api', createSettingsRouter({
     authMiddleware,
     adminMiddleware,
+    logAction
+}));
+
+app.use('/api', createAnnouncementsRouter({
+    authMiddleware,
+    adminMiddleware,
+    normalizePage,
+    normalizeLimit,
     logAction
 }));
 

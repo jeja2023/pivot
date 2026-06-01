@@ -110,8 +110,9 @@ function contentText(content) {
 }
 
 function isRagMessage(message) {
-    if (message?.role !== 'system') return false;
     const text = contentText(message.content);
+    if (text.includes('PIVOT_RAG_CONTEXT_BEGIN') || text.includes('PIVOT_RAG_CONTEXT_END')) return true;
+    if (message?.role !== 'system') return false;
     return text.includes('参考内部知识库')
         || text.includes('[引用 ')
         || text.includes('知识库信息');

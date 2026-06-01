@@ -685,6 +685,44 @@ function runMigrations() {
     `);
 
     db.exec(`
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            type TEXT DEFAULT 'system',
+            priority TEXT DEFAULT 'normal',
+            target_type TEXT DEFAULT 'all',
+            target_value TEXT DEFAULT '',
+            require_ack INTEGER DEFAULT 0,
+            show_on_login INTEGER DEFAULT 0,
+            starts_at DATETIME,
+            ends_at DATETIME,
+            status TEXT DEFAULT 'draft',
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS announcement_reads (
+            announcement_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            read_at DATETIME,
+            acknowledged_at DATETIME,
+            dismissed_at DATETIME,
+            PRIMARY KEY (announcement_id, user_id),
+            FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_announcements_status_window ON announcements(status, starts_at, ends_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_announcements_target ON announcements(target_type, target_value);
+        CREATE INDEX IF NOT EXISTS idx_announcement_reads_user ON announcement_reads(user_id, announcement_id);
+        CREATE INDEX IF NOT EXISTS idx_announcement_reads_announcement ON announcement_reads(announcement_id);
+    `);
+    ensureColumn('announcements', 'show_on_login', 'INTEGER DEFAULT 0');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_announcements_login ON announcements(show_on_login, status, starts_at, ends_at, deleted_at);');
+
+    db.exec(`
         CREATE TABLE IF NOT EXISTS capability_packages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             package_key TEXT UNIQUE NOT NULL,
@@ -821,6 +859,7 @@ function runMigrations() {
     recordSchemaMigration('20260516_agent_queue_locks_v1', 'Add database-backed agent queue lock fields and indexes.');
     recordSchemaMigration('20260516_branch_artifact_observability_capabilities_v1', 'Add conversation forks, artifact versions, DAG nodes, capability packages, and observability events.');
     recordSchemaMigration('20260517_mcp_call_logs_v1', 'Track MCP tool calls for audit and health governance.');
+    recordSchemaMigration('20260601_announcements_v1', 'Add system announcements and per-user read acknowledgement state.');
 }
 
 module.exports = { runMigrations, recordMigration, recordSchemaMigration, runSchemaMigration };

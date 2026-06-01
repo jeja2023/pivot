@@ -169,6 +169,7 @@ const { createModelsRouter } = require('../server/routes/models');
 const { createSessionsRouter } = require('../server/routes/sessions');
 const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
+const { createAnnouncementsRouter } = require('../server/routes/announcements');
 const {
     buildRagContextMessage,
     createChatRouter,
@@ -1053,6 +1054,167 @@ test('session list can skip total count for cursor-first sidebar loading', async
     }
 });
 
+test('announcement routes target active notices and persist user acknowledgement state', async () => {
+    const suffix = Date.now().toString(36);
+    const adminInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', ?, 'Ops', 'admin', 'active', ?)
+    `).run(`announce_admin_${suffix}`, '公告管理员', getBeijingTimestamp());
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', ?, 'Ops', 'user', 'active', ?)
+    `).run(`announce_user_${suffix}`, '公告用户', getBeijingTimestamp());
+    const otherInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', ?, 'Finance', 'user', 'active', ?)
+    `).run(`announce_other_${suffix}`, '非目标用户', getBeijingTimestamp());
+
+    const adminUser = { id: adminInfo.lastInsertRowid, username: `announce_admin_${suffix}`, role: 'admin', unit: 'Ops' };
+    const superAdmin = { id: 1, username: 'admin', role: 'admin', unit: '' };
+    const targetUser = { id: userInfo.lastInsertRowid, username: `announce_user_${suffix}`, role: 'user', unit: 'Ops' };
+    const otherUser = { id: otherInfo.lastInsertRowid, username: `announce_other_${suffix}`, role: 'user', unit: 'Finance' };
+    const logs = [];
+    const router = createAnnouncementsRouter({
+        authMiddleware: (req, _res, next) => {
+            req.user = req.testUser;
+            next();
+        },
+        adminMiddleware: (req, res, next) => {
+            if (req.user.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+            next();
+        },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 15, 1), 100),
+        logAction: (_req, action, details) => logs.push({ action, details })
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/admin/announcements' && layer.route?.methods?.post);
+    const publicRoute = router.stack.find(layer => layer.route?.path === '/announcements/public' && layer.route?.methods?.get);
+    const listRoute = router.stack.find(layer => layer.route?.path === '/announcements/active' && layer.route?.methods?.get);
+    const ackRoute = router.stack.find(layer => layer.route?.path === '/announcements/:id/ack' && layer.route?.methods?.post);
+    const dismissRoute = router.stack.find(layer => layer.route?.path === '/announcements/:id/dismiss' && layer.route?.methods?.post);
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/admin/announcements/:id' && layer.route?.methods?.delete);
+
+    const createRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
+        body: {
+            title: '公告投放测试',
+            content: '仅 Ops 单位可见',
+            type: 'security',
+            priority: 'critical',
+            targetType: 'unit',
+            targetValue: 'Ops',
+            requireAck: true,
+            status: 'published'
+        },
+        testUser: adminUser
+    }, createRes);
+    assert.equal(createRes.statusCode, 200);
+    assert.ok(createRes.body.id);
+
+    const targetRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(listRoute.route.stack.map(s => s.handle), { query: {}, testUser: targetUser }, targetRes);
+    assert.equal(targetRes.body.data.length, 1);
+    assert.equal(targetRes.body.data[0].title, '公告投放测试');
+    assert.equal(targetRes.body.requireAckCount, 1);
+
+    const otherRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(listRoute.route.stack.map(s => s.handle), { query: {}, testUser: otherUser }, otherRes);
+    assert.equal(otherRes.body.data.length, 0);
+
+    const dismissOnlyCreateRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
+        body: {
+            title: '可隐藏公告',
+            content: '用户可不再提示',
+            type: 'normal',
+            priority: 'normal',
+            targetType: 'unit',
+            targetValue: 'Ops',
+            status: 'published'
+        },
+        testUser: adminUser
+    }, dismissOnlyCreateRes);
+    assert.equal(dismissOnlyCreateRes.statusCode, 200);
+
+    const dismissRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(dismissRoute.route.stack.map(s => s.handle), {
+        params: { id: String(dismissOnlyCreateRes.body.id) },
+        testUser: targetUser
+    }, dismissRes);
+    assert.equal(dismissRes.statusCode, 200);
+    const dismissedState = db.prepare('SELECT read_at, dismissed_at FROM announcement_reads WHERE announcement_id = ? AND user_id = ?')
+        .get(dismissOnlyCreateRes.body.id, targetUser.id);
+    assert.ok(dismissedState.read_at);
+    assert.ok(dismissedState.dismissed_at);
+
+    const afterDismissRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(listRoute.route.stack.map(s => s.handle), { query: {}, testUser: targetUser }, afterDismissRes);
+    assert.equal(afterDismissRes.body.data.some(item => item.id === dismissOnlyCreateRes.body.id), false);
+    assert.equal(afterDismissRes.body.data.some(item => item.id === createRes.body.id), true);
+
+    const deniedLoginRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
+        body: {
+            title: '普通管理员登录页公告',
+            content: '不应公开',
+            targetType: 'all',
+            showOnLogin: true,
+            status: 'published'
+        },
+        testUser: adminUser
+    }, deniedLoginRes);
+    assert.equal(deniedLoginRes.statusCode, 403);
+
+    const publicCreateRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
+        body: {
+            title: '登录页公开公告',
+            content: '未登录用户可见',
+            targetType: 'all',
+            showOnLogin: true,
+            status: 'published'
+        },
+        testUser: superAdmin
+    }, publicCreateRes);
+    assert.equal(publicCreateRes.statusCode, 200);
+
+    const publicRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(publicRoute.route.stack.map(s => s.handle), { query: {} }, publicRes);
+    assert.ok(publicRes.body.data.some(item => item.id === publicCreateRes.body.id && item.showOnLogin === true));
+
+    const stateRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(ackRoute.route.stack.map(s => s.handle), {
+        params: { id: String(createRes.body.id) },
+        testUser: targetUser
+    }, stateRes);
+    await runExpressHandlers(dismissRoute.route.stack.map(s => s.handle), {
+        params: { id: String(createRes.body.id) },
+        testUser: targetUser
+    }, stateRes);
+    const readState = db.prepare('SELECT read_at, acknowledged_at, dismissed_at FROM announcement_reads WHERE announcement_id = ? AND user_id = ?')
+        .get(createRes.body.id, targetUser.id);
+    assert.ok(readState.read_at);
+    assert.ok(readState.acknowledged_at);
+    assert.ok(readState.dismissed_at);
+
+    await runExpressHandlers(deleteRoute.route.stack.map(s => s.handle), {
+        params: { id: String(createRes.body.id) },
+        testUser: adminUser
+    }, stateRes);
+    await runExpressHandlers(deleteRoute.route.stack.map(s => s.handle), {
+        params: { id: String(dismissOnlyCreateRes.body.id) },
+        testUser: adminUser
+    }, stateRes);
+    await runExpressHandlers(deleteRoute.route.stack.map(s => s.handle), {
+        params: { id: String(publicCreateRes.body.id) },
+        testUser: superAdmin
+    }, stateRes);
+    const deleted = db.prepare('SELECT deleted_at FROM announcements WHERE id = ?').get(createRes.body.id);
+    assert.ok(deleted.deleted_at);
+    assert.ok(logs.some(log => log.action === '创建公告'));
+    assert.ok(logs.some(log => log.action === '删除公告'));
+});
+
 test('ConcurrencySemaphore reports queue position for waiting requests', async () => {
     const semaphore = new ConcurrencySemaphore({
         maxConcurrent: 1,
@@ -1349,6 +1511,28 @@ test('context budget trims old history and generated knowledge context before up
     assert.equal(result.metadata.adjusted, true);
     assert.ok(result.metadata.droppedMessages > 0 || result.metadata.trimmedRagContexts > 0);
     assert.equal(result.messages.at(-1).content, '请基于资料给出简短结论');
+});
+
+test('context budget treats injected user-role RAG context as generated knowledge context', () => {
+    const model = { max_input_tokens: 700, max_tokens: 80 };
+    const longHistory = 'old conversation '.repeat(300);
+    const messages = [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: longHistory },
+        { role: 'assistant', content: longHistory },
+        { role: 'user', content: buildRagContextMessage('retrieved policy fact '.repeat(2000)) },
+        { role: 'user', content: 'current question' }
+    ];
+
+    const result = fitMessagesToContextBudget(messages, model);
+    const ragMessage = result.messages.find(message => String(message.content || '').includes('PIVOT_RAG_CONTEXT_BEGIN'));
+
+    assert.ok(estimateMessagesTokens(result.messages) <= getModelContextBudget(model).inputBudget);
+    assert.equal(result.metadata.adjusted, true);
+    assert.equal(result.metadata.trimmedRagContexts, 1);
+    assert.ok(result.metadata.droppedMessages > 0);
+    assert.equal(ragMessage?.role, 'user');
+    assert.match(ragMessage.content, /PIVOT_RAG_CONTEXT_BEGIN/);
 });
 
 test('context budget honors configured large model input windows', () => {
@@ -2863,11 +3047,14 @@ test('local model host detection includes request and configured host aliases', 
     }
 });
 
-test('docker internal service names are local only when container trust is enabled', () => {
+test('docker internal service names are local for trusted or detected container runtimes', () => {
     const previousTrust = process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
     const previousKubernetesHost = process.env.KUBERNETES_SERVICE_HOST;
+    const previousContainerFlag = process.env.PIVOT_RUNNING_IN_CONTAINER;
     try {
         process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'true';
+        delete process.env.PIVOT_RUNNING_IN_CONTAINER;
+        delete process.env.KUBERNETES_SERVICE_HOST;
         assert.equal(isDockerInternalServiceHost('llama-server'), true);
         assert.equal(isDockerInternalServiceHost('llama-server:8080'), true);
         assert.equal(isDockerInternalServiceHost('api.internal'), false);
@@ -2875,10 +3062,19 @@ test('docker internal service names are local only when container trust is enabl
         assert.equal(isLocalModelHost('llama-server', new Set()), true);
 
         process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS = 'false';
+        process.env.PIVOT_RUNNING_IN_CONTAINER = 'true';
         assert.equal(isDockerInternalServiceHost('llama-server'), false);
         assert.equal(isLocalModelHost('llama-server', new Set()), false);
 
         delete process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS;
+        process.env.PIVOT_RUNNING_IN_CONTAINER = 'true';
+        assert.equal(isDockerInternalServiceHost('llama-server'), true);
+        assert.equal(isLocalModelHost('llama-server', new Set()), true);
+
+        process.env.PIVOT_RUNNING_IN_CONTAINER = 'false';
+        assert.equal(isDockerInternalServiceHost('llama-server'), false);
+
+        delete process.env.PIVOT_RUNNING_IN_CONTAINER;
         process.env.KUBERNETES_SERVICE_HOST = '10.96.0.1';
         assert.equal(isDockerInternalServiceHost('llama-server'), false);
     } finally {
@@ -2891,6 +3087,11 @@ test('docker internal service names are local only when container trust is enabl
             delete process.env.KUBERNETES_SERVICE_HOST;
         } else {
             process.env.KUBERNETES_SERVICE_HOST = previousKubernetesHost;
+        }
+        if (previousContainerFlag === undefined) {
+            delete process.env.PIVOT_RUNNING_IN_CONTAINER;
+        } else {
+            process.env.PIVOT_RUNNING_IN_CONTAINER = previousContainerFlag;
         }
     }
 });

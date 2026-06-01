@@ -1,0 +1,41 @@
+<!-- 公告管理 -->
+                    <section id="tab-content-announcements" class="admin-tab-content admin-only announcements-tab hidden">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>公告管理</h3>
+                                <p>发布系统通知、安全提醒和知识库变更，可按全员、单位、角色或指定用户投放，并支持强制确认。</p>
+                            </div>
+                            <div class="settings-page-actions">
+                                <input id="announcement-search" class="form-input" type="search" placeholder="搜索标题或内容">
+                                <select id="announcement-status-filter" class="form-input">
+                                    <option value="">全部状态</option>
+                                    <option value="published">已发布</option>
+                                    <option value="draft">草稿</option>
+                                    <option value="archived">已归档</option>
+                                </select>
+                                <button id="announcement-new-btn" class="btn-primary" type="button">新建公告</button>
+                            </div>
+                        </div>
+                        <div class="announcement-list-card">
+                            <div class="table-container announcements-table-wrap">
+                                <table class="data-table compact-table announcements-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-center">序号</th>
+                                            <th>标题</th>
+                                            <th>类型</th>
+                                            <th>优先级</th>
+                                            <th>范围</th>
+                                            <th class="text-center">登录页</th>
+                                            <th>状态</th>
+                                            <th>确认</th>
+                                            <th>更新</th>
+                                            <th class="text-center">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="announcement-list-body"></tbody>
+                                </table>
+                            </div>
+                            <div id="pagination-announcements" class="pagination"></div>
+                        </div>
+                    </section>

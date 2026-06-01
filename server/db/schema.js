@@ -511,6 +511,37 @@ function initSchema() {
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            type TEXT DEFAULT 'system',
+            priority TEXT DEFAULT 'normal',
+            target_type TEXT DEFAULT 'all',
+            target_value TEXT DEFAULT '',
+            require_ack INTEGER DEFAULT 0,
+            show_on_login INTEGER DEFAULT 0,
+            starts_at DATETIME,
+            ends_at DATETIME,
+            status TEXT DEFAULT 'draft',
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS announcement_reads (
+            announcement_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            read_at DATETIME,
+            acknowledged_at DATETIME,
+            dismissed_at DATETIME,
+            PRIMARY KEY (announcement_id, user_id),
+            FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS mcp_servers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -637,6 +668,10 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_announcements_status_window ON announcements(status, starts_at, ends_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_announcements_target ON announcements(target_type, target_value);
+        CREATE INDEX IF NOT EXISTS idx_announcement_reads_user ON announcement_reads(user_id, announcement_id);
+        CREATE INDEX IF NOT EXISTS idx_announcement_reads_announcement ON announcement_reads(announcement_id);
         CREATE INDEX IF NOT EXISTS idx_capability_packages_user ON capability_packages(user_id, status, type);
         CREATE INDEX IF NOT EXISTS idx_observability_events_type_created ON observability_events(type, created_at);
         CREATE INDEX IF NOT EXISTS idx_observability_events_status_created ON observability_events(status, created_at);

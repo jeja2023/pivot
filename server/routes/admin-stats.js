@@ -1,5 +1,6 @@
 /* 管理员运营统计路由 Admin Stats Routes */
 const express = require('express');
+const dns = require('dns').promises;
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -89,8 +90,22 @@ function getRequestHostAliases(req) {
 }
 
 function isLikelyContainerRuntime() {
-    if (process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS === 'true') return true;
-    return false;
+    const trustDockerHosts = String(process.env.PIVOT_TRUST_DOCKER_INTERNAL_HOSTS || '').trim().toLowerCase();
+    if (trustDockerHosts === 'true') return true;
+    if (trustDockerHosts === 'false') return false;
+
+    const explicitContainer = String(process.env.PIVOT_RUNNING_IN_CONTAINER || '').trim().toLowerCase();
+    if (explicitContainer === 'true') return true;
+    if (explicitContainer === 'false') return false;
+    if (process.env.KUBERNETES_SERVICE_HOST) return false;
+
+    try {
+        if (fs.existsSync('/.dockerenv')) return true;
+        const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
+        return /docker|containerd|kubepods|libpod/i.test(cgroup);
+    } catch (_err) {
+        return false;
+    }
 }
 
 function isDockerInternalServiceHost(host) {
@@ -103,6 +118,37 @@ function isDockerInternalServiceHost(host) {
 function isLocalModelHost(host, localNames) {
     const normalized = normalizeHostAlias(host);
     return localNames.has(normalized) || isDockerInternalServiceHost(normalized);
+}
+
+function shouldResolveHostAlias(host) {
+    const normalized = normalizeHostAlias(host);
+    if (!normalized || net.isIP(normalized)) return false;
+    if (['localhost', 'loopback', 'host.docker.internal'].includes(normalized)) return false;
+    return normalized.includes('.');
+}
+
+async function addResolvedHostAliases(names) {
+    const hosts = Array.from(names).filter(shouldResolveHostAlias);
+    const results = await Promise.allSettled(hosts.map(host => dns.lookup(host, { all: true, verbatim: true })));
+    results.forEach(result => {
+        if (result.status !== 'fulfilled') return;
+        (result.value || []).forEach(record => {
+            if (record?.address) names.add(String(record.address).toLowerCase());
+        });
+    });
+    return names;
+}
+
+async function isLocalModelHostAsync(host, localNames) {
+    if (isLocalModelHost(host, localNames)) return true;
+    const normalized = normalizeHostAlias(host);
+    if (!shouldResolveHostAlias(normalized)) return false;
+    try {
+        const records = await dns.lookup(normalized, { all: true, verbatim: true });
+        return records.some(record => localNames.has(String(record.address || '').toLowerCase()));
+    } catch (_err) {
+        return false;
+    }
 }
 
 function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_URL || '' } = {}) {
@@ -137,14 +183,19 @@ function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_U
     return names;
 }
 
-function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
+async function getResolvedLocalHostnames(options = {}) {
+    const names = getLocalHostnames(options);
+    return addResolvedHostAliases(names);
+}
+
+async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
     const rows = db.prepare(`
         SELECT id, name, url, monitor_url, max_concurrent
         FROM models
         WHERE COALESCE(status, 'active') = 'active'
         ORDER BY id ASC
     `).all();
-    const localNames = getLocalHostnames({ requestHosts, publicUrl });
+    const localNames = await getResolvedLocalHostnames({ requestHosts, publicUrl });
     const summary = {
         total: rows.length,
         localCount: 0,
@@ -154,11 +205,11 @@ function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
         localModels: []
     };
 
-    rows.forEach(row => {
+    for (const row of rows) {
         try {
             const parsed = new URL(String(row.url || '').trim());
             const host = parsed.hostname.toLowerCase();
-            const isLocal = isLocalModelHost(host, localNames);
+            const isLocal = await isLocalModelHostAsync(host, localNames);
             const item = {
                 id: row.id,
                 name: row.name,
@@ -177,7 +228,7 @@ function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
         } catch (e) {
             summary.unknownCount += 1;
         }
-    });
+    }
 
     summary.hasRemoteModels = summary.remoteCount > 0;
     summary.hasLocalModels = summary.localCount > 0;
@@ -304,18 +355,18 @@ function createAdminStatsRouter({
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
         const requestHosts = getRequestHostAliases(req);
-        const modelEndpoints = summarizeModelEndpoints({ requestHosts, publicUrl });
-        const localNames = getLocalHostnames({ requestHosts, publicUrl });
+        const modelEndpoints = await summarizeModelEndpoints({ requestHosts, publicUrl });
+        const localNames = await getResolvedLocalHostnames({ requestHosts, publicUrl });
         const health = getSystemHealthSnapshot();
         const maintenance = getMaintenanceStatus();
         const diskHealth = (health.checks || []).find(item => item.name === 'disk') || {};
         
         // 标记运行时的模型端点是否为本地
         if (Array.isArray(modelEndpoints.runtime)) {
-            modelEndpoints.runtime.forEach(item => {
+            await Promise.all(modelEndpoints.runtime.map(async item => {
                 const host = normalizeHostAlias(item.host || item.key || '');
-                item.isLocal = isLocalModelHost(host, localNames);
-            });
+                item.isLocal = await isLocalModelHostAsync(host, localNames);
+            }));
         }
 
         res.json({
@@ -742,8 +793,10 @@ module.exports = {
     createAdminStatsRouter,
     getMonitorKnowledgeChunkCount,
     getLocalHostnames,
+    getResolvedLocalHostnames,
     isDockerInternalServiceHost,
     isLocalModelHost,
+    isLocalModelHostAsync,
     normalizeHostAlias,
     summarizeModelEndpoints
 };
