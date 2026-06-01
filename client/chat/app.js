@@ -203,8 +203,57 @@ window.showMainWorkspace = function(view = 'chat') {
     if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
     if (target === 'manual') window.ensureManualFrameLoaded?.();
     if (target !== 'agent' && target !== 'agent-dag') window.updateAgentAutoRefresh?.();
+    if (target === 'settings') window.scheduleSettingsWorkspaceScale?.();
     return target;
 };
+
+let settingsWorkspaceScaleObserver = null;
+let settingsWorkspaceScaleRaf = 0;
+
+window.scheduleSettingsWorkspaceScale = function() {
+    if (settingsWorkspaceScaleRaf) cancelAnimationFrame(settingsWorkspaceScaleRaf);
+    settingsWorkspaceScaleRaf = requestAnimationFrame(() => {
+        settingsWorkspaceScaleRaf = 0;
+        window.updateSettingsWorkspaceScale?.();
+    });
+};
+
+window.updateSettingsWorkspaceScale = function() {
+    const stage = document.getElementById('settings-scale-stage');
+    const canvas = document.getElementById('settings-scale-canvas');
+    const content = document.querySelector('.settings-workspace-view .admin-content');
+    if (!stage || !canvas || !content) return;
+    if (window.ResizeObserver && !settingsWorkspaceScaleObserver) {
+        settingsWorkspaceScaleObserver = new ResizeObserver(() => {
+            if (document.body?.dataset.activeWorkspace === 'settings') {
+                window.scheduleSettingsWorkspaceScale?.();
+            }
+        });
+        settingsWorkspaceScaleObserver.observe(canvas);
+    }
+    const baseWidth = 1540;
+    const contentStyle = window.getComputedStyle(content);
+    const horizontalPadding = (parseFloat(contentStyle.paddingLeft) || 0) + (parseFloat(contentStyle.paddingRight) || 0);
+    const verticalPadding = (parseFloat(contentStyle.paddingTop) || 0) + (parseFloat(contentStyle.paddingBottom) || 0);
+    const availableWidth = Math.max(1, content.clientWidth - horizontalPadding - 2);
+    const availableHeight = Math.max(1, content.clientHeight - verticalPadding - 2);
+    const layoutWidth = Math.max(baseWidth, availableWidth);
+    const scale = Math.min(1, availableWidth / baseWidth);
+    const stageWidth = Math.max(1, Math.ceil(layoutWidth * scale));
+    canvas.style.setProperty('--settings-canvas-width', `${layoutWidth}px`);
+    canvas.style.setProperty('--settings-scale', String(Number(scale.toFixed(4))));
+    stage.style.setProperty('--settings-stage-width', `${stageWidth}px`);
+    requestAnimationFrame(() => {
+        const scaledHeight = Math.max(availableHeight, Math.ceil(canvas.scrollHeight * scale));
+        stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
+    });
+};
+
+window.addEventListener('resize', () => {
+    if (document.body?.dataset.activeWorkspace === 'settings') {
+        window.scheduleSettingsWorkspaceScale?.();
+    }
+});
 
 window.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.getStoredMainWorkspace?.() || 'chat';

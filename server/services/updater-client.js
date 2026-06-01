@@ -2,6 +2,53 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 
+const UPDATER_LOG_TIME_ZONE = process.env.PIVOT_LOG_TIME_ZONE || 'Asia/Shanghai';
+const UPDATER_LOG_TIME_OFFSET = '+08:00';
+const updaterLogTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: UPDATER_LOG_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+});
+
+function formatUpdaterTimestamp(value) {
+    if (!value) return value;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const parts = Object.fromEntries(updaterLogTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
+    const millis = String(date.getMilliseconds()).padStart(3, '0');
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${millis}${UPDATER_LOG_TIME_OFFSET}`;
+}
+
+function normalizeUpdaterLogLine(line) {
+    return String(line || '').replace(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+Z)\]/, (_match, timestamp) => {
+        return `[${formatUpdaterTimestamp(timestamp)}]`;
+    });
+}
+
+function normalizeUpdaterStateTimestamps(state) {
+    if (!state || typeof state !== 'object') return state;
+    const next = { ...state };
+    ['updatedAt', 'startedAt', 'finishedAt'].forEach(key => {
+        if (next[key]) next[key] = formatUpdaterTimestamp(next[key]);
+    });
+    if (Array.isArray(next.logs)) {
+        next.logs = next.logs.map(normalizeUpdaterLogLine);
+    }
+    return next;
+}
+
+function normalizeUpdaterResponse(data) {
+    if (!data || typeof data !== 'object') return data;
+    const next = { ...data };
+    if (next.state) next.state = normalizeUpdaterStateTimestamps(next.state);
+    return next;
+}
+
 function normalizeUpdaterError(error) {
     const message = error?.message || String(error || '');
     if (/ENOTFOUND\s+pivot-updater/i.test(message) || /getaddrinfo\s+ENOTFOUND/i.test(message)) {
@@ -102,7 +149,7 @@ async function requestUpdater(pathname, { method = 'GET', body } = {}) {
         err.details = data;
         throw err;
     }
-    return data;
+    return normalizeUpdaterResponse(data);
 }
 
 function createUpdateRunId() {
@@ -111,8 +158,12 @@ function createUpdateRunId() {
 
 module.exports = {
     createUpdateRunId,
+    formatUpdaterTimestamp,
     getUpdaterConfig,
     getUpdaterPublicConfig,
     normalizeUpdaterError,
+    normalizeUpdaterLogLine,
+    normalizeUpdaterResponse,
+    normalizeUpdaterStateTimestamps,
     requestUpdater
 };

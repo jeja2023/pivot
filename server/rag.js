@@ -32,6 +32,17 @@ const {
     debugRetrieveContext
 } = require('./services/rag-index');
 const { getEmbeddingConfig } = require('./services/rag-config');
+const {
+    deleteRelation,
+    getEntityGraph,
+    getGraphSummary,
+    listEntities,
+    listRelations,
+    mergeEntities,
+    rebuildGraphForDocument,
+    updateEntity,
+    updateRelation
+} = require('./services/knowledge-graph');
 const { normalizeAuditAction } = require('./audit-actions');
 
 const ragRouter = express.Router();
@@ -92,6 +103,87 @@ ragRouter.get('/summary', authMiddleware, (req, res) => {
 ragRouter.get('/quality-report', authMiddleware, (req, res) => {
     res.json(getKnowledgeQualityReport(req.user.id));
 });
+
+ragRouter.get('/graph/summary', authMiddleware, (req, res) => {
+    res.json(getGraphSummary(req.user.id));
+});
+
+ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
+    res.json(listEntities({
+        userId: req.user.id,
+        query: req.query.query,
+        type: req.query.type,
+        limit: req.query.limit,
+        offset: req.query.offset
+    }));
+});
+
+ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
+    res.json(listRelations({
+        userId: req.user.id,
+        entityId: req.query.entityId,
+        relationType: req.query.relationType,
+        limit: req.query.limit,
+        offset: req.query.offset
+    }));
+});
+
+ragRouter.get('/graph/entities/:id', authMiddleware, (req, res) => {
+    const graph = getEntityGraph({
+        userId: req.user.id,
+        entityId: req.params.id,
+        depth: req.query.depth,
+        limit: req.query.limit
+    });
+    if (!graph) return res.status(404).json({ error: '实体不存在' });
+    return res.json(graph);
+});
+
+ragRouter.put('/graph/entities/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const entity = updateEntity({ userId: req.user.id, entityId: req.params.id, patch: req.body || {} });
+    if (!entity) return res.status(404).json({ error: '实体不存在' });
+    auditRagAction(req, '知识图谱实体更新', { entityId: req.params.id, name: entity.name });
+    return res.json({ success: true, entity });
+}));
+
+ragRouter.post('/graph/entities/merge', authMiddleware, asyncHandler(async (req, res) => {
+    const graph = mergeEntities({
+        userId: req.user.id,
+        sourceEntityId: req.body?.sourceEntityId,
+        targetEntityId: req.body?.targetEntityId
+    });
+    if (!graph) return res.status(400).json({ error: '实体合并参数无效' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱实体合并', {
+        sourceEntityId: req.body?.sourceEntityId,
+        targetEntityId: req.body?.targetEntityId
+    });
+    return res.json({ success: true, graph });
+}));
+
+ragRouter.put('/graph/relations/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const relation = updateRelation({ userId: req.user.id, relationId: req.params.id, patch: req.body || {} });
+    if (!relation) return res.status(404).json({ error: '关系不存在' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱关系更新', { relationId: req.params.id });
+    return res.json({ success: true, relation });
+}));
+
+ragRouter.delete('/graph/relations/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const deleted = deleteRelation({ userId: req.user.id, relationId: req.params.id });
+    if (!deleted) return res.status(404).json({ error: '关系不存在' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱关系删除', { relationId: req.params.id });
+    return res.json({ success: true });
+}));
+
+ragRouter.post('/graph/docs/:id/rebuild', authMiddleware, asyncHandler(async (req, res) => {
+    const result = rebuildGraphForDocument({ userId: req.user.id, docId: req.params.id });
+    if (!result) return res.status(404).json({ error: '文档不存在' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱文档重建', result);
+    return res.json({ success: true, ...result });
+}));
 
 ragRouter.get('/docs/:id', authMiddleware, (req, res) => {
     const detail = getKnowledgeDocumentDetail({

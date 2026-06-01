@@ -14,6 +14,10 @@ const {
     buildRagSearchContent,
     buildRagSearchTerms
 } = require('./rag-tokenizer');
+const {
+    getGraphContextForQuery,
+    safeIndexKnowledgeGraphForChunks
+} = require('./knowledge-graph');
 const { EMBEDDING_MODES, getEmbeddingConfig, getRagConfig, normalizeEmbeddingMode } = require('./rag-config');
 const {
     getOrCreateEmbeddingUsageModel,
@@ -383,6 +387,30 @@ function selectRetrievalCandidates(userId, query, topK, candidateLimit) {
     return chunks;
 }
 
+function selectChunksByIds(userId, chunkIds, limit) {
+    const ids = [...new Set((chunkIds || []).map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0))];
+    if (ids.length === 0) return [];
+    const placeholders = ids.slice(0, limit).map(() => '?').join(',');
+    return db.prepare(`
+        SELECT c.id, c.content, c.embedding, d.name
+        FROM knowledge_chunks c
+        JOIN knowledge_docs d ON c.doc_id = d.id
+        WHERE c.id IN (${placeholders})
+          AND d.user_id = ?
+          AND d.status = 'ready'
+          AND d.deleted_at IS NULL
+          AND COALESCE(d.is_enabled, 1) = 1
+        LIMIT ?
+    `).all(...ids.slice(0, limit), userId, limit);
+}
+
+function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit) {
+    const existingIds = new Set(candidates.map(chunk => chunk.id));
+    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit)
+        .filter(chunk => !existingIds.has(chunk.id));
+    return candidates.concat(graphChunks).slice(0, candidateLimit);
+}
+
 function scoreChunks(chunks, queryVector) {
     return chunks.map(chunk => {
         try {
@@ -442,7 +470,13 @@ async function debugRetrieveContext(userId, query, {
     const safeTopK = config.topK;
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const candidates = selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit).slice(0, safeCandidateLimit);
+    const graphContext = getGraphContextForQuery(userId, normalizedQuery);
+    const candidates = mergeRetrievalCandidates(
+        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit).slice(0, safeCandidateLimit),
+        graphContext.chunkIds,
+        userId,
+        safeCandidateLimit
+    );
     if (candidates.length === 0) {
         return {
             query: normalizedQuery,
@@ -451,6 +485,7 @@ async function debugRetrieveContext(userId, query, {
             topK: safeTopK,
             candidateCount: 0,
             matches: [],
+            graph: graphContext,
             injectedContext: formatInjectedContext([])
         };
     }
@@ -480,9 +515,10 @@ async function debugRetrieveContext(userId, query, {
         topK: safeTopK,
         candidateCount: candidates.length,
         matches,
+        graph: graphContext,
         injectedContext: formatInjectedContext(
             scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, safeTopK)
-        )
+        ) + (graphContext.context || '')
     };
 }
 
@@ -514,12 +550,30 @@ async function retrieveContext(userId, query, topK = null) {
     }
 
     try {
-        const chunks = selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit);
+        const graphContext = getGraphContextForQuery(userId, normalizedQuery);
+        const chunks = mergeRetrievalCandidates(
+            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit),
+            graphContext.chunkIds,
+            userId,
+            config.candidateLimit
+        );
 
-        if (chunks.length === 0) {
+        if (chunks.length === 0 && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '');
             recordRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
+        }
+
+        if (chunks.length === 0 && graphContext.context) {
+            setToCache(userId, normalizedQuery, config.topK, graphContext.context);
+            recordRetrieval({
+                status: 'graph_hit',
+                durationMs: Date.now() - startedAt,
+                candidates: 0,
+                matches: 0,
+                graphMatches: graphContext.relations.length
+            });
+            return graphContext.context;
         }
 
         const queryVector = await generateEmbedding(normalizedQuery, null, null, userId);
@@ -527,7 +581,7 @@ async function retrieveContext(userId, query, topK = null) {
         const topChunks = scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, config.topK);
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
 
-        if (topChunks.length === 0) {
+        if (topChunks.length === 0 && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '');
             recordRetrieval({
                 status: 'no_match',
@@ -539,13 +593,14 @@ async function retrieveContext(userId, query, topK = null) {
             return '';
         }
 
-        const injectedContext = formatInjectedContext(topChunks);
+        const injectedContext = formatInjectedContext(topChunks) + (graphContext.context || '');
         setToCache(userId, normalizedQuery, config.topK, injectedContext);
         recordRetrieval({
             status: 'hit',
             durationMs: Date.now() - startedAt,
             candidates: chunks.length,
             matches: topChunks.length,
+            graphMatches: graphContext.relations.length,
             topScore
         });
         return injectedContext;
@@ -575,12 +630,15 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, emb
             const results = batch.map((chunk, index) => ({ chunk, vector: vectors[index] }));
             
             const insert = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)');
+            const insertedChunks = [];
             const transaction = db.transaction((items) => {
                 for (const item of items) {
-                    insert.run(docId, item.chunk, buildRagSearchContent(item.chunk), JSON.stringify(item.vector));
+                    const result = insert.run(docId, item.chunk, buildRagSearchContent(item.chunk), JSON.stringify(item.vector));
+                    insertedChunks.push({ chunkId: result.lastInsertRowid, content: item.chunk });
                 }
             });
             transaction(results);
+            safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             if (typeof onProgress === 'function') {
                 onProgress({
                     indexed: Math.min(i + batch.length, chunks.length),

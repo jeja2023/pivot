@@ -381,7 +381,7 @@
 
 .rag-debug-modal {
     width: min(1040px, calc(100vw - 36px));
-    min-height: 520px;
+    min-height: min(520px, 100%);
     max-height: min(850px, calc(100vh - 36px));
     display: flex;
     flex-direction: column;
@@ -879,30 +879,6 @@
     transition: width 0.5s ease;
 }
 #tab-content-monitor .table-container { max-height: 380px; }
-@media (max-width: 1180px) {
-    .settings-workspace-view #tab-content-monitor .monitor-grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-    .settings-workspace-view #tab-content-monitor .monitor-panels {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-areas:
-            "gpu resource"
-            "health models"
-            "rag observability";
-    }
-}
-@media (max-width: 768px) {
-    .settings-workspace-view #tab-content-monitor .monitor-panels {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-            "gpu"
-            "resource"
-            "health"
-            "models"
-            "rag"
-            "observability";
-    }
-}
 @media (max-height: 900px) and (min-width: 1181px) {
     .settings-workspace-view .admin-content.is-monitor-tab-active {
         padding: 14px;

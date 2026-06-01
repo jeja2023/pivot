@@ -162,6 +162,60 @@ function initSchema() {
             FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            type TEXT DEFAULT 'concept',
+            description TEXT DEFAULT '',
+            aliases TEXT DEFAULT '[]',
+            confidence REAL DEFAULT 0.7,
+            source_doc_id INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            UNIQUE(user_id, normalized_name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_doc_id) REFERENCES knowledge_docs(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_entity_mentions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            entity_id INTEGER NOT NULL,
+            doc_id INTEGER,
+            chunk_id INTEGER,
+            snippet TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(entity_id, chunk_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE,
+            FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_entity_id INTEGER NOT NULL,
+            target_entity_id INTEGER NOT NULL,
+            relation_type TEXT DEFAULT 'related_to',
+            description TEXT DEFAULT '',
+            confidence REAL DEFAULT 0.6,
+            source_doc_id INTEGER,
+            source_chunk_id INTEGER,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(user_id, source_entity_id, target_entity_id, relation_type, source_chunk_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,

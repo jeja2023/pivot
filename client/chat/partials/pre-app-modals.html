@@ -98,118 +98,120 @@
                 <p class="model-modal-desc">配置 OpenAI 兼容格式的大模型接口</p>
             </div>
             <div class="model-form">
-                <input type="hidden" id="m-id">
-                <div class="form-item">
-                    <label>接口地址 (Endpoint)</label>
-                    <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
-                </div>
-                <div class="form-item">
-                    <label>API Key (可选)</label>
-                    <div style="position: relative;">
-                        <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
-                            style="padding-right: 45px;">
-                        <button type="button" class="btn-toggle-pw" data-static-action="toggle-model-key" title="显示/隐藏明文">
-                            <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                <circle cx="12" cy="12" r="3" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="form-item">
-                    <label>模型展示名称</label>
-                    <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
-                </div>
-                <div class="form-item">
-                    <label>模型标识 (Model ID)</label>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
-                            style="flex: 1;">
-                        <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从 API 获取模型列表"
-                            style="padding: 0 12px; height: 38px;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path
-                                    d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15">
-                                </path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div id="m-model-select-container" class="hidden" style="margin-top: 8px;">
-                        <select id="m-model-select" class="form-input"
-                            style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
-                    </div>
-                </div>
-                <div class="model-scope-units-row model-full-row">
-                    <div class="form-item super-admin-only hidden" id="m-scope-wrap">
-                        <label>保存范围</label>
-                        <select id="m-scope" class="form-input">
-                            <option value="personal">个人模型</option>
-                            <option value="global">全局模型</option>
-                        </select>
-                    </div>
-                    <div class="form-item" id="m-units-wrap">
-                        <label>可见部门</label>
-                        <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
-                    </div>
-                </div>
-                <div class="model-form-row">
+                <div class="model-form-scroll">
+                    <input type="hidden" id="m-id">
                     <div class="form-item">
-                        <label>每日额度 (Token)</label>
-                        <input type="text" id="m-daily-limit" class="form-input"
-                            placeholder="0 表示不限，可填 8K / 1M">
+                        <label>接口地址 (Endpoint)</label>
+                        <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
                     </div>
                     <div class="form-item">
-                        <label>Temperature (温度)</label>
-                        <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
-                            placeholder="留空使用默认">
-                    </div>
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label>输入 Token 上限</label>
-                        <input type="text" id="m-max-input-tokens" class="form-input"
-                            placeholder="留空使用默认，可填 128K">
-                    </div>
-                    <div class="form-item">
-                        <label>输出 Token 上限</label>
-                        <input type="text" id="m-max-tokens" class="form-input"
-                            placeholder="留空使用默认，可填 8K">
-                    </div>
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label>远端健康检查 URL</label>
-                        <input type="text" id="m-monitor-url" class="form-input"
-                            placeholder="例如: http://10.0.0.8:8000/health">
-                    </div>
-                    <div class="form-item">
-                        <label>端点并发上限</label>
-                        <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
-                            placeholder="0 使用系统默认">
-                    </div>
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item model-capability-row">
-                        <div>
-                            <label>思考模型</label>
-                            <small>开启后，该模型会在列表与选择器中标记为支持推理/思考输出。</small>
+                        <label>API Key (可选)</label>
+                        <div style="position: relative;">
+                            <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
+                                style="padding-right: 45px;">
+                            <button type="button" class="btn-toggle-pw" data-static-action="toggle-model-key" title="显示/隐藏明文">
+                                <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                    <circle cx="12" cy="12" r="3" />
+                                </svg>
+                            </button>
                         </div>
-                        <label class="switch" title="思考模型">
-                            <input type="checkbox" id="m-supports-reasoning">
-                            <span class="switch-slider"></span>
-                        </label>
                     </div>
-                    <div class="form-item model-capability-row">
-                        <div>
-                            <label>视觉输入（图片/扫描件）</label>
-                            <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                    <div class="form-item">
+                        <label>模型展示名称</label>
+                        <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
+                    </div>
+                    <div class="form-item">
+                        <label>模型标识 (Model ID)</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
+                                style="flex: 1;">
+                            <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从 API 获取模型列表"
+                                style="padding: 0 12px; height: 38px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path
+                                        d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15">
+                                    </path>
+                                </svg>
+                            </button>
                         </div>
-                        <label class="switch" title="视觉输入（图片/扫描件）">
-                            <input type="checkbox" id="m-supports-vision">
-                            <span class="switch-slider"></span>
-                        </label>
+                        <div id="m-model-select-container" class="hidden" style="margin-top: 8px;">
+                            <select id="m-model-select" class="form-input"
+                                style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
+                        </div>
+                    </div>
+                    <div class="model-scope-units-row model-full-row">
+                        <div class="form-item super-admin-only hidden" id="m-scope-wrap">
+                            <label>保存范围</label>
+                            <select id="m-scope" class="form-input">
+                                <option value="personal">个人模型</option>
+                                <option value="global">全局模型</option>
+                            </select>
+                        </div>
+                        <div class="form-item" id="m-units-wrap">
+                            <label>可见部门</label>
+                            <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
+                        </div>
+                    </div>
+                    <div class="model-form-row">
+                        <div class="form-item">
+                            <label>每日额度 (Token)</label>
+                            <input type="text" id="m-daily-limit" class="form-input"
+                                placeholder="0 表示不限，可填 8K / 1M">
+                        </div>
+                        <div class="form-item">
+                            <label>Temperature (温度)</label>
+                            <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
+                                placeholder="留空使用默认">
+                        </div>
+                    </div>
+                    <div class="model-form-row">
+                        <div class="form-item">
+                            <label>输入 Token 上限</label>
+                            <input type="text" id="m-max-input-tokens" class="form-input"
+                                placeholder="留空使用默认，可填 128K">
+                        </div>
+                        <div class="form-item">
+                            <label>输出 Token 上限</label>
+                            <input type="text" id="m-max-tokens" class="form-input"
+                                placeholder="留空使用默认，可填 8K">
+                        </div>
+                    </div>
+                    <div class="model-form-row">
+                        <div class="form-item">
+                            <label>远端健康检查 URL</label>
+                            <input type="text" id="m-monitor-url" class="form-input"
+                                placeholder="例如: http://10.0.0.8:8000/health">
+                        </div>
+                        <div class="form-item">
+                            <label>端点并发上限</label>
+                            <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
+                                placeholder="0 使用系统默认">
+                        </div>
+                    </div>
+                    <div class="model-form-row">
+                        <div class="form-item model-capability-row">
+                            <div>
+                                <label>思考模型</label>
+                                <small>开启后，该模型会在列表与选择器中标记为支持推理/思考输出。</small>
+                            </div>
+                            <label class="switch" title="思考模型">
+                                <input type="checkbox" id="m-supports-reasoning">
+                                <span class="switch-slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-item model-capability-row">
+                            <div>
+                                <label>视觉输入（图片/扫描件）</label>
+                                <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
+                            </div>
+                            <label class="switch" title="视觉输入（图片/扫描件）">
+                                <input type="checkbox" id="m-supports-vision">
+                                <span class="switch-slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="model-modal-actions">

@@ -178,6 +178,66 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_enabled ON knowledge_docs(user_id, is_enabled, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_deleted ON knowledge_docs(deleted_at);
     `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            type TEXT DEFAULT 'concept',
+            description TEXT DEFAULT '',
+            aliases TEXT DEFAULT '[]',
+            confidence REAL DEFAULT 0.7,
+            source_doc_id INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            UNIQUE(user_id, normalized_name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_doc_id) REFERENCES knowledge_docs(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS knowledge_entity_mentions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            entity_id INTEGER NOT NULL,
+            doc_id INTEGER,
+            chunk_id INTEGER,
+            snippet TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(entity_id, chunk_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE,
+            FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS knowledge_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_entity_id INTEGER NOT NULL,
+            target_entity_id INTEGER NOT NULL,
+            relation_type TEXT DEFAULT 'related_to',
+            description TEXT DEFAULT '',
+            confidence REAL DEFAULT 0.6,
+            source_doc_id INTEGER,
+            source_chunk_id INTEGER,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(user_id, source_entity_id, target_entity_id, relation_type, source_chunk_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_entities_user_type ON knowledge_entities(user_id, type, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_entities_user_name ON knowledge_entities(user_id, normalized_name);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_mentions_entity ON knowledge_entity_mentions(entity_id, doc_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_mentions_chunk ON knowledge_entity_mentions(chunk_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_relations_user_source ON knowledge_relations(user_id, source_entity_id, status);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_relations_user_target ON knowledge_relations(user_id, target_entity_id, status);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_relations_chunk ON knowledge_relations(source_chunk_id);
+    `);
 
     ensureColumn('prompts', 'user_id', 'INTEGER');
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");

@@ -4,20 +4,6 @@
         grid-template-columns: 1fr;
     }
 
-    .settings-workspace-view .admin-layout {
-        flex-direction: column;
-    }
-
-    .settings-workspace-view .admin-sidebar {
-        width: 100%;
-        flex: 0 0 auto;
-        max-height: 220px;
-    }
-
-    .settings-workspace-view .admin-content {
-        min-height: 420px;
-    }
-
     .agent-history-panel {
         grid-template-columns: 1fr;
         grid-template-rows: auto auto minmax(0, 1fr);

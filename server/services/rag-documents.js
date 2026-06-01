@@ -7,6 +7,7 @@ const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
+const { clearKnowledgeGraphForDocument } = require('./knowledge-graph');
 
 const uploadRoot = path.resolve(__dirname, '../../uploads');
 const knowledgeSourceRoot = path.join(uploadRoot, 'knowledge_docs');
@@ -178,6 +179,7 @@ async function processKnowledgeDocument({ docId, userId }) {
 
     markKnowledgeDocumentProcessing({ docId: normalizedDocId, userId });
     clearRagCacheForUser(userId);
+    clearKnowledgeGraphForDocument(normalizedDocId);
     db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(normalizedDocId);
 
     try {

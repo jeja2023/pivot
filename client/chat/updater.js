@@ -1,6 +1,14 @@
 let updaterPollTimer = null;
 let updaterLastStatus = null;
 
+function normalizeUpdaterLogTimestamp(line) {
+    return String(line || '').replace(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+Z)\]/, (_match, timestamp) => {
+        const formatted = formatDateToCN(timestamp);
+        if (!formatted) return `[${timestamp}]`;
+        return `[${formatted.replace(' ', 'T')}+08:00]`;
+    });
+}
+
 function updaterBadge(text, type = 'muted') {
     const className = {
         success: 'text-success',
@@ -160,7 +168,7 @@ function renderUpdaterStatus(data = updaterLastStatus) {
         ['更新时间', escapeHtml(formatDateToCN(state.updatedAt || updaterLastStatus.updatedAt || ''))]
     ]);
 
-    const logs = (state.logs || []).slice(-120);
+    const logs = (state.logs || []).slice(-120).map(normalizeUpdaterLogTimestamp);
     logEl.textContent = logs.length ? logs.join('\n') : (updater.error || monitor.error || '暂无日志');
 }
 

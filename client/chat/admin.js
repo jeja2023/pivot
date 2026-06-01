@@ -206,7 +206,9 @@ window.switchTab = async (tab) => {
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
     window.persistSettingsTab?.(tab);
+    window.scheduleSettingsWorkspaceScale?.();
     loadTabData(tab);
+    setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
 };
 
 async function loadTabData(tab, page = 1) {

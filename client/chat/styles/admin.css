@@ -148,13 +148,39 @@
     flex: 1;
     min-width: 0;
     padding: 24px;
-    overflow-y: auto;
+    overflow: auto;
     background: #fff;
     border: 1px solid rgba(148, 163, 184, 0.12);
     border-radius: 12px;
     display: flex;
     flex-direction: column;
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+}
+.settings-scale-canvas {
+    --settings-canvas-width: 1540px;
+    --settings-scale: 1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--settings-canvas-width);
+    min-height: 100%;
+    transform: scale(var(--settings-scale));
+    transform-origin: top left;
+    display: flex;
+    flex-direction: column;
+}
+.settings-scale-stage {
+    --settings-stage-width: 100%;
+    --settings-stage-height: 100%;
+    flex: 0 0 auto;
+    position: relative;
+    width: var(--settings-stage-width);
+    height: var(--settings-stage-height);
+    min-height: 0;
+    overflow: visible;
+}
+.settings-workspace-view .table-container {
+    overflow-x: hidden;
 }
 .admin-content h3 {
     margin: 0 0 14px;
@@ -541,11 +567,6 @@
 }
 .account-security-tips li + li {
     margin-top: 6px;
-}
-@media (max-width: 1080px) {
-    .account-security-wrap {
-        grid-template-columns: 1fr;
-    }
 }
 .api-access-wrap {
     max-width: none;
@@ -945,39 +966,66 @@
 
 /* 添加模型弹窗样式 */
 .model-modal { 
-    width: 500px; padding: 0; overflow: hidden; 
+    width: min(500px, 100%);
+    max-height: 100%;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--border); box-shadow: var(--shadow-lg);
     background: #ffffff;
 }
 .model-config-modal {
-    width: min(760px, calc(100vw - 40px));
-    max-height: calc(100vh - 40px);
-    display: flex;
-    flex-direction: column;
+    width: min(900px, 100%);
+    max-height: min(860px, 100%);
 }
 .model-modal-header { 
+    flex: 0 0 auto;
     padding: 18px 24px 14px; background: #f8fafc; 
     border-bottom: 1px solid var(--border); text-align: left; 
 }
 .model-modal-header h3 { margin: 0; font-size: 1.1rem; color: var(--text-main); line-height: 1.2; }
 .model-modal-desc { margin: 4px 0 0; font-size: 0.78rem; color: var(--text-muted); line-height: 1.35; }
 
-.model-form { padding: 18px 24px 18px; display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.model-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 18px 24px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+    text-align: left;
+}
 .model-config-modal .model-modal-header {
     padding: 16px 24px 12px;
 }
 .model-config-modal .model-form {
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+}
+.model-config-modal .model-form-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px 12px;
     padding: 16px 24px 16px;
     overflow-y: auto;
+    scrollbar-gutter: stable;
 }
-.model-config-modal .model-form > input[type="hidden"] {
+.model-config-modal .model-form-scroll > input[type="hidden"] {
     display: none;
 }
 .model-config-modal .model-form-row {
     display: contents;
+}
+.model-config-modal .model-cost-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
 }
 .model-config-modal .form-item {
     min-width: 0;
@@ -1081,12 +1129,63 @@
 .model-form .form-input:focus { border-color: var(--primary); background: #f0fdf4; }
 
 .model-modal-actions { 
+    flex: 0 0 auto;
     display: flex; gap: 10px; margin-top: 8px; 
 }
 .model-config-modal .model-modal-actions {
-    margin-top: 2px;
+    margin-top: 0;
+    padding: 12px 24px 14px;
+    border-top: 1px solid var(--border);
+    background: #fff;
+    box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.035);
 }
 .model-modal-actions button { flex: 1; height: 38px; font-weight: 600; font-size: 0.82rem; }
+
+@media (max-width: 760px) {
+    .model-modal-header {
+        padding: 14px 16px 11px;
+    }
+    .model-form {
+        padding: 14px 16px 16px;
+    }
+    .model-config-modal .model-form-scroll,
+    .model-config-modal .model-scope-units-row,
+    .model-config-modal .model-cost-row,
+    .model-form-row {
+        grid-template-columns: 1fr;
+    }
+    .model-config-modal .model-form-scroll {
+        padding: 14px 16px 14px;
+    }
+    .model-config-modal .model-modal-actions {
+        padding: 10px 16px 12px;
+    }
+    .model-modal-actions {
+        flex-wrap: wrap;
+    }
+    .model-modal-actions button {
+        min-width: 130px;
+    }
+}
+
+@media (max-height: 760px) {
+    .model-config-modal .model-modal-header {
+        padding: 12px 20px 9px;
+    }
+    .model-config-modal .model-form-scroll {
+        gap: 8px 10px;
+        padding: 12px 20px;
+    }
+    .model-config-modal .model-modal-actions {
+        padding: 9px 20px 10px;
+    }
+    .model-capability-row {
+        padding: 8px 10px;
+    }
+    .model-capability-row small {
+        line-height: 1.25;
+    }
+}
 
 .btn-toggle-pw {
     position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
@@ -1194,13 +1293,13 @@
 }
 @media (max-width: 1240px) {
     .audit-log-tab .filter-actions {
-        margin-left: 0;
+        margin-left: auto;
     }
 }
 .audit-log-tab .table-container {
     flex: 0 0 auto;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
 }
 .audit-log-tab .data-table th,
 .audit-log-tab .data-table td {
@@ -1272,8 +1371,8 @@
 }
 #attachment-preview-modal.hidden { display: none; }
 .attachment-preview-shell {
-    width: min(1040px, calc(100vw - 44px));
-    height: min(800px, calc(100vh - 60px));
+    width: min(1040px, 100%);
+    height: min(800px, 100%);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1585,7 +1684,7 @@
     color: var(--text-muted);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 0px) {
     .updater-panel {
         grid-template-columns: repeat(2, minmax(260px, 1fr));
     }
@@ -1595,7 +1694,7 @@
     }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 0px) {
     .updater-panel {
         grid-template-columns: 1fr;
     }
@@ -1794,6 +1893,29 @@
     margin-left: 6px;
     color: var(--danger);
     font-size: 0.72rem;
+}
+
+#monitor-routes-modal .modal {
+    width: min(1000px, 100%) !important;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    text-align: left;
+}
+#monitor-routes-modal .table-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important;
+    overflow: auto;
+}
+
+#key-modal .modal,
+#input-prompt-container .modal,
+#rename-container .modal,
+#tags-container .modal {
+    max-width: 100%;
+    max-height: 100%;
 }
 
 /* 统计与监控卡片样式 */

@@ -23,6 +23,7 @@ const {
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
+const { getBeijingTimestamp } = require('../server/time');
 const { buildContextMeta, estimateTokens, getContext } = require('../server/llm');
 const { normalizeUploadedOriginalName } = require('../server/upload');
 const { buildFtsQuery } = require('../server/search');
@@ -122,6 +123,18 @@ const {
     RAG_CONFIG_KEYS,
     toRagSettingValue
 } = require('../server/services/rag-config');
+const {
+    deleteRelation,
+    extractKnowledgeGraph,
+    getEntityGraph,
+    getGraphContextForQuery,
+    getGraphSummary,
+    indexKnowledgeGraphForChunks,
+    listEntities,
+    listRelations,
+    mergeEntities,
+    updateEntity
+} = require('../server/services/knowledge-graph');
 const {
     getAuditActionFilterValues,
     localizeAuditDetails,
@@ -1121,6 +1134,86 @@ test('RAG helpers build safe FTS queries and deterministic chunks', () => {
     assert.deepEqual(chunkText('abcdef', 4, 2), ['abcd', 'cdef', 'ef']);
     assert.equal(cosineSimilarity([1, 0], [1, 0]), 1);
     assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
+});
+
+test('knowledge graph extracts entities and typed relations from RAG chunks', () => {
+    const graph = extractKnowledgeGraph('运维中心负责Pivot平台，Pivot平台依赖知识库系统，知识库系统包含RAG流程。');
+    const names = graph.entities.map(entity => entity.name);
+    assert.ok(names.includes('运维中心'));
+    assert.ok(names.includes('Pivot平台'));
+    assert.ok(names.includes('知识库系统'));
+    assert.ok(graph.relations.some(row => row.sourceName === '运维中心' && row.relationType === 'responsible_for' && row.targetName === 'Pivot平台'));
+    assert.ok(graph.relations.some(row => row.sourceName === 'Pivot平台' && row.relationType === 'depends_on' && row.targetName === '知识库系统'));
+});
+
+test('knowledge graph indexes, enriches retrieval context, and supports curation actions', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(`kg_${suffix}`, 'hash', 'KG Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const now = getBeijingTimestamp();
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, `kg_${suffix}.md`, 'ready', 1, 1, 100, now, now);
+    const docId = docInfo.lastInsertRowid;
+    const text = '运维中心负责Pivot平台，Pivot平台依赖知识库系统。';
+    const chunkInfo = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docId, text, buildRagSearchContent(text), JSON.stringify([1, 0]));
+
+    try {
+        const indexed = indexKnowledgeGraphForChunks({
+            userId,
+            docId,
+            chunks: [{ chunkId: chunkInfo.lastInsertRowid, content: text }]
+        });
+        assert.ok(indexed.entities >= 3);
+        assert.ok(indexed.relations >= 2);
+
+        const summary = getGraphSummary(userId);
+        assert.ok(summary.entities >= 3);
+        assert.ok(summary.relations >= 2);
+
+        const entities = listEntities({ userId, query: 'Pivot平台' });
+        const pivot = entities.data.find(entity => entity.name === 'Pivot平台');
+        assert.ok(pivot);
+
+        const graph = getEntityGraph({ userId, entityId: pivot.id });
+        assert.ok(graph.relations.some(row => row.relation_type === 'responsible_for' || row.relation_type === 'depends_on'));
+
+        const context = getGraphContextForQuery(userId, 'Pivot平台由谁负责');
+        assert.match(context.context, /运维中心/);
+        assert.match(context.context, /参考知识图谱/);
+
+        const updated = updateEntity({
+            userId,
+            entityId: pivot.id,
+            patch: { name: 'Pivot平台', type: 'system', description: '核心业务平台' }
+        });
+        assert.equal(updated.type, 'system');
+        assert.equal(updated.description, '核心业务平台');
+
+        const relations = listRelations({ userId, entityId: pivot.id });
+        assert.ok(relations.data.length > 0);
+        assert.equal(deleteRelation({ userId, relationId: relations.data[0].id }), true);
+
+        const pivotAlias = listEntities({ userId, query: 'Pivot' }).data.find(entity => entity.name === 'Pivot');
+        if (pivotAlias) {
+            const merged = mergeEntities({ userId, sourceEntityId: pivotAlias.id, targetEntityId: pivot.id });
+            assert.ok(merged.center.id === pivot.id);
+        }
+    } finally {
+        db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entity_mentions WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entities WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
 });
 
 test('RAG metrics report retrieval hit rate separately from cache hit rate', () => {
