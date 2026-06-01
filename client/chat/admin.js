@@ -108,8 +108,8 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
-const SETTINGS_TABS = ['users', 'models', 'logs', 'monitor', 'updater', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'users', 'logs', 'monitor', 'updater', 'report']);
+const SETTINGS_TABS = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'attachments', 'ops', 'account'];
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'users', 'logs', 'monitor', 'report']);
 
 function getDefaultSettingsTab() {
     return currentUser?.role === 'admin' ? 'ops' : 'models';
@@ -125,7 +125,6 @@ const adminFeatureScripts = [
     '/chat/models.js',
     '/chat/users.js',
     '/chat/stats.js',
-    '/chat/updater.js',
     '/chat/extra.js'
 ];
 
@@ -220,7 +219,6 @@ async function loadTabData(tab, page = 1) {
     }
     if (tab === 'logs' && window.loadLogs) loadLogs(page);
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
-    if (tab === 'updater' && window.loadUpdaterStatus) window.loadUpdaterStatus();
     if (tab === 'stats' && window.loadStats) loadStats();
     if (tab === 'report' && window.loadReport) loadReport();
     if (tab === 'prompts' && window.loadPrompts) loadPrompts();

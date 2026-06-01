@@ -1,5 +1,21 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.69] - 2026-06-01
+### 在线更新程序移除
+- **功能入口彻底清除**：移除系统设置中的“在线更新”导航、页面片段、按钮绑定、前端脚本和专用样式，避免页面继续暴露已废弃的更新入口。
+- **后端链路下线**：删除 updater 相关 API 路由、客户端封装、自动轮询监控服务和启动挂载逻辑，主应用不再读取或调用 updater sidecar。
+- **部署面收口**：移除 `updater/` sidecar 程序、Dockerfile、独立 package、Compose `pivot-updater` 服务、`online-update` profile、Docker socket 挂载和 updater 环境变量示例。
+- **文档与检查同步**：README、CHANGELOG、`.env.example`、聊天资源检查和语法检查目录均同步移除在线更新相关说明与强制校验项，并完成全局残留扫描。
+
+### 设置页与代码质量
+- **设置页滚动条修复**：系统设置缩放画布不再把旧页面高度带到新 tab；重新测量前清理舞台高度，并对 2px 内测量误差做容差处理，减少短页面误出现垂直滚动条。
+- **浏览器全局调用规范化**：知识图谱关系编辑中的 `prompt` 改为 `window.prompt`，与项目其它前端调用保持一致并修复 ESLint `no-undef`。
+- **浏览器全局变量显式化**：设置页缩放脚本中的 `requestAnimationFrame`、`cancelAnimationFrame` 和 `ResizeObserver` 调用统一显式挂到 `window`，减少 lint 噪音。
+
+### 版本与验证
+- **版本升级**：应用版本升级至 `v0.0.69`，同步记录在线更新程序移除、设置页滚动修复和 lint 清理。
+- **验证通过**：`npm run check`、`npm run lint` 已通过；`updater`、`在线更新`、`PIVOT_UPDATE`、`PIVOT_ONLINE`、`pivot-updater`、`online-update` 残留扫描为零。
+
 ## [v0.0.68] - 2026-06-01
 ### 知识图谱与 Graph-RAG
 - **知识图谱三阶段落地**：新增实体、实体提及、关系三类图谱数据表与索引服务，支持从知识库分块中抽取系统、部门、流程、文档等实体和关系，并在文档重建时自动清理旧图谱数据后重新构建。
@@ -9,11 +25,9 @@
 - **全屏图谱体验优化**：知识图谱页面改为真正全屏承载，样式、字体、字号、搜索框、下拉框、按钮、统计标签和面板密度对齐知识库页面，适配未来大量节点的企业级查看场景。
 - **刷新状态保持**：在知识图谱页面刷新浏览器后会继续停留在知识图谱页面，并尽量恢复当前文档上下文；关闭知识图谱或知识库时会清理恢复状态，避免误回到旧页面。
 
-### 更新时间与版本治理
-- **东八区日志时间**：在线更新器日志改为按 `Asia/Shanghai` 输出，时间戳带 `+08:00` 偏移，避免执行日志显示为 UTC 时间。
-- **历史执行日志归一化**：主应用读取 updater sidecar 状态时会把旧版 `[...Z]` UTC 执行日志转换为东八区显示，前端也增加兜底转换，避免 sidecar 尚未重建或 `updater-state.json` 保留历史日志时继续显示 UTC。
+### 版本治理
 - **单一版本锚点**：继续以 `CHANGELOG.md` 顶部最新版本标题作为运行时版本来源，并新增版本同步脚本，可自动把最新版本同步到 `package.json`、`package-lock.json` 和 README 展示版本。
-- **版本升级**：应用版本升级至 `v0.0.68`，同步记录本轮 Graph-RAG、知识图谱工作台、全屏样式、刷新保持、东八区日志、设置页适配和版本锚点自动同步能力。
+- **版本升级**：应用版本升级至 `v0.0.68`，同步记录本轮 Graph-RAG、知识图谱工作台、全屏样式、刷新保持、设置页适配和版本锚点自动同步能力。
 
 ### 管理界面与弹窗适配
 - **设置页比例缩放**：系统设置工作区新增固定宽度画布与视口比例缩放，宽屏保留完整信息密度，窄屏自动缩放并保持内部滚动，避免监控、审计、用量和 API 账号页在主工作区内被挤乱。
@@ -30,24 +44,6 @@
 - **失败消息元数据即时显示**：模型端点熔断、上游异常等 `assistant_error` 事件会立即刷新消息底部的耗时、Token 和速率，不再需要刷新页面后才显示完整元数据。
 - **错误事件 token 回传**：后端保存失败消息时同步返回 `tokenCount`，前端使用该值更新当前气泡 footer，并异步写回 `/api/chat/stats` 保持刷新前后一致。
 - **版本同步**：应用版本升级至 `v0.0.67`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
-
-## [v0.0.66] - 2026-05-31
-### 在线更新开关
-- **显式总开关**：新增 `PIVOT_ONLINE_UPDATE_ENABLED`，默认关闭；只有设置为 `true` 且 updater URL/token 配置完整时，主应用才会允许检查、轮询和触发在线更新。
-- **Sidecar 按需启动**：`pivot-updater` 服务加入 Docker Compose `online-update` profile，默认部署不会启动拥有 Docker socket 权限的 updater 容器。
-- **界面状态补齐**：在线更新页新增功能开关状态展示，关闭时检查与更新按钮保持禁用，适配局域网、高安全内网和互联网部署的不同策略。
-### 文档与版本
-- **部署说明同步**：README 与 `.env.example` 补充在线更新开关和 compose profile 启用方式。
-- **版本升级**：应用版本升级至 `v0.0.66`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
-
-## [v0.0.65] - 2026-05-31
-### Docker 在线更新与定时轮询
-- **应用内在线更新**：新增 `pivot-updater` sidecar，由主应用通过受保护接口触发 GitHub/Git 源码拉取、本地 `docker build` 和 `docker compose up -d --no-deps --force-recreate pivot`，管理员无需登录服务器手动执行升级命令。
-- **自动检查远端更新**：主应用启动后会按 `PIVOT_UPDATE_CHECK_INTERVAL_MS` 定时请求 updater 检查远端仓库，默认 30 分钟一次，可设为 `0` 关闭；管理员在线更新页展示是否发现新版本、远端提交、上次检查和下次检查时间。
-- **版本与提交识别**：镜像构建时写入 `PIVOT_BUILD_REVISION`，检查更新时同时比较 `package.json` 版本号和 Git 提交，版本未变化但提交不同也能提示更新。
-### 文档与验证
-- **配置说明同步**：`.env.example` 与 README 补充 updater token、仓库、分支、构建镜像、compose 服务和自动检查间隔说明。
-- **版本升级**：应用版本升级至 `v0.0.65`，同步更新 `package.json`、`package-lock.json`、前端版本兜底值、README 与 CHANGELOG。
 
 ## [v0.0.64] - 2026-05-31
 ### Markdown 消息渲染与横向滚动

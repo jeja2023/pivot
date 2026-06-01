@@ -1,13 +1,20 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.68-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.69-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话与智能体工作平台。系统集成多模型接入、知识库检索、能力库调用（兼容 MCP）、智能体任务、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 用户使用手册](使用手册.md)。部署后也可在前端左下角点击“手册”，在应用内打开同一份手册内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.68
+## 最新版本：0.0.69
+
+### v0.0.69 更新摘要
+
+- **在线更新程序移除**：删除系统设置中的在线更新入口、前端脚本、后端 updater API/监控服务、`updater/` sidecar、Compose `online-update` profile 与 Docker socket 挂载。
+- **设置页滚动条修复**：修复系统设置缩放画布记住旧 tab 高度的问题，短页面不再因为历史高度或 1-2px 测量误差误出现垂直滚动条。
+- **代码质量收敛**：知识图谱关系编辑改用 `window.prompt`，设置页缩放脚本显式使用 `window` 浏览器全局对象；`npm run check` 与 `npm run lint` 均已通过。
+- **文档与版本同步**：README、CHANGELOG、`.env.example`、`package.json`、`package-lock.json` 和检查脚本同步记录本轮清理与版本升级。
 
 ### v0.0.68 更新摘要
 
@@ -15,25 +22,12 @@
 - **图谱工作台升级**：知识库新增知识图谱入口，支持实体搜索、类型筛选、局部关系图、关系列表、实体编辑、实体合并、关系编辑删除和单文档图谱重建。
 - **全屏与刷新保持**：知识图谱页面改为真正全屏承载，样式、字体、字号、搜索框、下拉框和按钮对齐知识库页面；刷新后继续停留在知识图谱页面。
 - **管理界面适配**：系统设置工作区新增比例缩放画布，模型配置弹窗改为内容区滚动与底部操作栏固定，审计、监控、附件预览等管理弹窗补齐视口边界和滚动兜底。
-- **东八区日志与版本锚点**：在线更新器日志按 `Asia/Shanghai` 输出，历史 UTC 执行日志会在展示前归一化为东八区；版本号以 `CHANGELOG.md` 顶部最新版本为锚点，可通过 `npm run version:sync` 同步到包文件和 README。
 
 ### v0.0.67 更新摘要
 
 - **聊天元数据实时补齐**：模型端点熔断、上游异常等失败消息会立即显示耗时、Token 和速率，不再需要刷新页面后才显示完整元数据。
 - **失败消息统计一致**：后端在错误消息保存事件中回传 `tokenCount`，前端同步刷新 footer 并写回统计，保证刷新前后一致。
 - **文档与版本同步**：应用版本升级至 `v0.0.67`，同步更新 README、CHANGELOG、`package.json`、`package-lock.json` 和前端版本兜底值。
-
-### v0.0.66 更新摘要
-
-- **在线更新显式开关**：新增 `PIVOT_ONLINE_UPDATE_ENABLED`，默认关闭；只有设置为 `true` 且 updater URL/token 配置完整时，才允许检查、轮询和触发在线更新。
-- **Updater 按需启动**：`pivot-updater` 加入 Docker Compose `online-update` profile，默认部署不会启动挂载 Docker socket 的 sidecar，更适合局域网和高安全内网环境。
-- **文档与版本同步**：应用版本升级至 `v0.0.66`，同步更新 README、CHANGELOG、`.env.example`、`package.json`、`package-lock.json` 和前端版本兜底值。
-
-### v0.0.65 更新摘要
-
-- **Docker 在线更新**：新增 `pivot-updater` sidecar，支持从 GitHub/Git 仓库拉取源码、本地构建镜像，并通过应用内“系统设置 / 在线更新”触发主容器重建。
-- **定时轮询新版本**：主应用会按 `PIVOT_UPDATE_CHECK_INTERVAL_MS` 定时请求 updater 检查远端版本/提交，管理员页面可直接看到是否发现新版本、上次检查和下次检查时间。
-- **文档与版本同步**：应用版本升级至 `v0.0.65`，同步更新 Docker 在线更新配置说明、README、CHANGELOG、`package.json`、`package-lock.json` 和前端版本兜底值。
 
 ### v0.0.64 更新摘要
 
@@ -263,13 +257,13 @@
 - **模型费用统计**：模型配置增加输入/输出百万 Token 单价与币种，用量页和导出报表同步展示估算成本。
 - **安全与验证**：新增文本完整性检查并收紧前端 CSP；当前 `npm run verify` 已通过，安全测试通过 `64/64`。
 
-## 近期主要升级（v0.0.43 → v0.0.68）
+## 近期主要升级（v0.0.43 → v0.0.69）
 
+- **在线更新程序移除（v0.0.69）**：彻底移除系统设置在线更新页、updater 后端接口、自动轮询服务、sidecar 程序、Compose profile、Docker socket 挂载和相关环境变量说明，部署面更收敛。
+- **设置页滚动与 lint 修复（v0.0.69）**：设置页缩放画布重新测量前清理旧高度并加入像素容差，减少短页面误出现滚动条；前端浏览器全局调用统一显式挂到 `window`，`npm run lint` 已通过。
 - **知识图谱与 Graph-RAG（v0.0.68）**：知识库新增实体、提及、关系图谱索引，召回链路融合图谱邻居关系；知识图谱工作台支持全屏查看、实体搜索筛选、关系治理、实体合并、文档图谱重建，并在刷新后保持图谱页面。
 - **管理界面与弹窗适配（v0.0.68）**：设置页在主工作区内使用比例缩放画布保持宽屏管理布局，模型配置弹窗固定底部操作栏并让内容区独立滚动，附件预览、监控热点接口、审计表格和会话搜索结果补齐小窗口滚动边界。
 - **聊天元数据实时补齐（v0.0.67）**：失败消息收到 `assistant_error` 后立即刷新耗时、Token 和速率，并把统计写回后端，避免刷新前后显示不一致。
-- **在线更新可开关（v0.0.66）**：新增 `PIVOT_ONLINE_UPDATE_ENABLED` 总开关，默认关闭；`pivot-updater` sidecar 改为通过 Docker Compose `online-update` profile 按需启动，避免普通局域网部署默认暴露 Docker socket 能力。
-- **Docker 在线更新与自动检查（v0.0.65）**：新增 `pivot-updater` sidecar，可从 GitHub/Git 仓库拉取源码并在服务器本地构建镜像；主应用定时轮询远端版本/提交，管理员可在“在线更新”页看到新版本提示并点击更新。
 - **Markdown 与流式输出体验修复（v0.0.64）**：聊天消息会自动去掉整段 `markdown` / `text/plain` 外层围栏，修复普通列表 bullet、代码块/表格局部滚动和 prose 内容换行；后端兼容非标准流式 JSON，前端对单次大块增量做平滑拆分，减少回答一次性跳出的情况。
 - **上下文压缩阈值可配置（v0.0.63）**：上下文压缩阈值改为管理员可在模型配置页调整的运行时设置，支持 `12K`、`1M` 等 Token 表达，`.env` 中的 `MEMORY_THRESHOLD` 仅作为首次初始化默认值；设置入口收紧到“添加模型”按钮旁边，减少模型管理页空间占用。
 - **管理员自愈与 Windows 兼容运行（v0.0.62）**：新增内置 `admin` 账号在系统启动与数据预置时的多维度自愈修复机制，自动检查其角色、启用与软删除状态并在异常时触发全自动修复还原；将 `better-sqlite3` 核心依赖升级到 `^11.3.0`，原生适配 Windows 与 Node.js v24.x 运行，直接拉取预编译包免除本地 node-gyp 编译失败障碍；补齐账号自愈专项安全回归测试。
@@ -509,41 +503,6 @@ docker logs pivot --tail=200
 
 如果字段没有出现，通常说明容器仍在运行旧镜像、没有重建容器，或 `/app/data` 挂载目录权限导致 SQLite 迁移失败。
 
-### 4. 可选：应用内在线更新
-
-如果部署服务器可以访问 GitHub/Git 仓库，也可以启用 `pivot-updater` sidecar：管理员在“系统设置 / 在线更新”中点击检查和开始更新后，updater 会拉取源码、在服务器本地执行 `docker build`，然后用 `docker compose up -d --no-deps --force-recreate pivot` 重建主容器。底层仍会短暂重启 Pivot 服务，但不需要人工登录服务器执行命令。
-
-首次启用需在 `.env` 中配置：
-
-```bash
-PIVOT_UPDATER_TOKEN=请填写32位以上高强度随机字符串
-PIVOT_ONLINE_UPDATE_ENABLED=true
-PIVOT_UPDATER_URL=http://pivot-updater:3300
-PIVOT_HOST_PROJECT_DIR=/opt/pivot
-PIVOT_UPDATE_REPO=https://github.com/your-org/pivot.git
-PIVOT_UPDATE_BRANCH=main
-PIVOT_UPDATE_CHECK_INTERVAL_MS=1800000
-PIVOT_UPDATE_IMAGE=pivot
-PIVOT_UPDATE_SERVICE=pivot
-```
-
-然后在部署目录启动或重建 compose。`pivot-updater` 默认不会启动，只有显式启用 `online-update` profile 时才会运行；如果更新过在线更新器本身的代码或时间显示逻辑，需要使用 `--build` 重建 sidecar：
-
-```bash
-docker compose --profile online-update up -d --build pivot-updater
-docker compose up -d
-```
-
-启用后主应用默认每 30 分钟自动检查一次远端仓库；检查依据是 `package.json` 版本号，版本相同但 Git 提交不同也会提示“发现新版本”。如需调整频率，可修改 `PIVOT_UPDATE_CHECK_INTERVAL_MS`；设为 `0` 表示关闭自动检查，仍可在页面手动点击“检查更新”。不需要在线更新的局域网或高安全部署，保持 `PIVOT_ONLINE_UPDATE_ENABLED=false`，并不要启用 `online-update` profile。如果之前启用过在线更新，关闭后建议执行 `docker compose --profile online-update stop pivot-updater` 停掉 sidecar。
-
-安全边界：
-
-- 只有 `admin` 超级管理员能点击“开始更新”，普通管理员只能查看状态和检查版本。
-- 主应用不直接挂载 Docker socket；Docker/Git 操作由 `pivot-updater` 容器完成。
-- `pivot-updater` 需要挂载 `/var/run/docker.sock`，等同于拥有宿主 Docker 管理权限。请只在可信内网部署，并使用强随机 `PIVOT_UPDATER_TOKEN`。
-- 私有仓库建议使用只读部署令牌或部署密钥，不要把个人高权限 token 写入仓库。
-- 更新前请确认 `data/` 与 `uploads/` 已按 compose 持久化挂载；数据库迁移会在新容器启动时自动执行。
-
 ## 快速启动
 
 ### 1. 安装依赖
@@ -734,4 +693,4 @@ node -e "require('./server/db'); console.log('db init ok')"
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.68（知识库已扩展为 Graph-RAG 与知识图谱工作台，支持图谱增强召回、全屏图谱治理、实体合并、关系校正、刷新保持和东八区更新日志；管理界面同步补齐设置页缩放、模型配置弹窗、附件预览、监控与审计表格的视口适配；累计 v0.0.43–v0.0.68 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、工作流可视化编辑器、流式 function calling、实时流式 SSE、任务时间轴、工具统计、能力库治理、知识库格式扩展、长会话上下文治理、账号注册治理、附件上传治理、知识库会话遵循增强、刷新状态恢复、智能体工作流编排升级、管理员账户自愈、上下文阈值后台配置、聊天渲染体验修复、应用内在线更新、管理界面适配和知识图谱增强检索）
+**当前版本**：v0.0.69（在线更新程序已彻底移除，系统设置页滚动条误触发问题已修复，前端 lint 已收敛；知识库已扩展为 Graph-RAG 与知识图谱工作台，支持图谱增强召回、全屏图谱治理、实体合并、关系校正和刷新保持；累计 v0.0.43–v0.0.69 涵盖基础设施收口、前端 Pivot 命名空间、流式 Markdown 节流、RAG 调试可视化、会话 PDF 导出、模型路由 6 策略、工作流可视化编辑器、流式 function calling、实时流式 SSE、任务时间轴、工具统计、能力库治理、知识库格式扩展、长会话上下文治理、账号注册治理、附件上传治理、知识库会话遵循增强、刷新状态恢复、智能体工作流编排升级、管理员账户自愈、上下文阈值后台配置、聊天渲染体验修复、管理界面适配和知识图谱增强检索）

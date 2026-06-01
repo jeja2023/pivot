@@ -713,9 +713,9 @@ window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
 window.editKnowledgeGraphRelation = async (relationId) => {
     const relation = ragGraphState.relations.find(item => Number(item.id) === Number(relationId));
     if (!relation) return;
-    const relationType = prompt('关系类型', relation.relation_type || 'related_to');
+    const relationType = window.prompt('关系类型', relation.relation_type || 'related_to');
     if (!relationType) return;
-    const description = prompt('关系描述', relation.description || '') ?? relation.description;
+    const description = window.prompt('关系描述', relation.description || '') ?? relation.description;
     const res = await fetch(`${API_BASE}/rag/graph/relations/${relationId}`, {
         method: 'PUT',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },

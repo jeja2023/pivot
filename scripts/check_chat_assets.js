@@ -28,8 +28,6 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="knowledge-workbench-modal"',
     'id="mcp-workbench-modal"',
     'id="admin-container"',
-    'id="tab-updater"',
-    'id="tab-content-updater"',
     'id="manual-workbench-modal"',
     'id="print-workbench-modal"',
     'id="print-frame"',
@@ -42,11 +40,6 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
 ].forEach(needle => {
     if (!html.includes(needle)) fail(`assembled chat template is missing ${needle}`);
 });
-
-const updaterScriptPath = path.join(chatDir, 'updater.js');
-if (!fs.existsSync(updaterScriptPath)) fail('client/chat/updater.js is required for the online updater panel');
-const adminScriptText = fs.readFileSync(path.join(chatDir, 'admin.js'), 'utf8');
-if (!adminScriptText.includes("'/chat/updater.js'")) fail('admin feature lazy-load list must include /chat/updater.js');
 
 const echartsVendorPath = path.join(rootDir, 'client', 'common', 'vendor', 'echarts.min.js');
 if (!fs.existsSync(echartsVendorPath)) fail('client/common/vendor/echarts.min.js is required for chart rendering');

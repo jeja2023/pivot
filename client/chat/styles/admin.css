@@ -163,7 +163,6 @@
     top: 0;
     left: 0;
     width: var(--settings-canvas-width);
-    min-height: 100%;
     transform: scale(var(--settings-scale));
     transform-origin: top left;
     display: flex;
@@ -1536,138 +1535,6 @@
 .stat-item { display: flex; align-items: center; gap: 5px; }
 .stat-model { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.updater-panel {
-    display: grid;
-    grid-template-columns: minmax(220px, 0.78fr) minmax(280px, 1fr) minmax(300px, 1.06fr);
-    gap: 14px;
-    align-items: stretch;
-    max-width: 1220px;
-    width: 100%;
-    min-width: 0;
-}
-
-.updater-status-card,
-.updater-log-card {
-    min-height: 260px;
-    min-width: 0;
-}
-
-.settings-workspace-view #tab-content-updater {
-    max-width: 100%;
-    overflow-x: hidden;
-}
-
-.settings-workspace-view .updater-row {
-    gap: 14px;
-    align-items: flex-start;
-    max-width: 100%;
-    min-width: 0;
-}
-
-.settings-workspace-view .updater-row span {
-    flex: 0 0 88px;
-    width: 88px;
-    white-space: nowrap;
-}
-
-.settings-workspace-view .updater-row strong {
-    flex: 1 1 auto;
-    flex-shrink: 1;
-    min-width: 0;
-    max-width: 100%;
-    text-align: right;
-    white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    line-height: 1.45;
-}
-
-.updater-diagnosis {
-    display: flex;
-    justify-content: space-between;
-    align-items: stretch;
-    gap: 16px;
-    padding: 14px 16px;
-    margin-bottom: 14px;
-    max-width: 1220px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.03);
-    overflow: hidden;
-}
-
-.updater-diagnosis-main {
-    min-width: 0;
-    flex: 1 1 auto;
-}
-
-.updater-diagnosis strong {
-    display: block;
-    margin-bottom: 4px;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-}
-
-.updater-diagnosis p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.84rem;
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-}
-
-.updater-diagnosis.is-success {
-    border-color: rgba(5, 150, 105, 0.28);
-    background: rgba(5, 150, 105, 0.08);
-}
-
-.updater-diagnosis.is-danger {
-    border-color: rgba(239, 68, 68, 0.28);
-    background: rgba(239, 68, 68, 0.07);
-}
-
-.updater-diagnosis.is-warning {
-    border-color: rgba(245, 158, 11, 0.3);
-    background: rgba(245, 158, 11, 0.09);
-}
-
-.updater-commands {
-    display: grid;
-    gap: 6px;
-    flex: 0 1 420px;
-    min-width: 260px;
-    max-width: 42%;
-}
-
-.updater-commands code {
-    display: block;
-    padding: 6px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: rgba(15, 23, 42, 0.06);
-    color: var(--text-primary);
-    font-size: 0.75rem;
-    white-space: normal;
-    overflow-wrap: anywhere;
-}
-
-.updater-log {
-    margin: 0;
-    min-height: 220px;
-    max-height: 420px;
-    overflow: auto;
-    padding: 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.04);
-    color: var(--text-primary);
-    font-size: 0.78rem;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-}
-
 .settings-workspace-view .text-success {
     color: #059669;
 }
@@ -1682,35 +1549,6 @@
 
 .settings-workspace-view .text-muted {
     color: var(--text-muted);
-}
-
-@media (max-width: 0px) {
-    .updater-panel {
-        grid-template-columns: repeat(2, minmax(260px, 1fr));
-    }
-
-    .updater-log-card {
-        grid-column: 1 / -1;
-    }
-}
-
-@media (max-width: 0px) {
-    .updater-panel {
-        grid-template-columns: 1fr;
-    }
-
-    .updater-diagnosis {
-        flex-direction: column;
-    }
-
-    .updater-commands {
-        min-width: 0;
-        max-width: none;
-    }
-
-    .updater-log-card {
-        grid-column: auto;
-    }
 }
 
 /* 管理面板关闭按钮 */

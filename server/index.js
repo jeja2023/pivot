@@ -66,7 +66,6 @@ const { createSessionsRouter } = require('./routes/sessions');
 const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
 const { createSettingsRouter } = require('./routes/settings');
-const { createUpdaterRouter } = require('./routes/updater');
 const { createOpenAIRouter } = require('./routes/openai');
 const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
@@ -81,11 +80,9 @@ const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
 const { getSystemHealthSnapshot } = require('./services/system-health');
-const { startUpdaterMonitor } = require('./services/updater-monitor');
 const { recoverAgentRuns, startAgentScheduleRunner } = require('./services/agent-runtime');
 // 启动后台维护任务
 startMaintenanceTasks();
-startUpdaterMonitor();
 
 // 启动 GPU 监控 (非阻塞)，确保失败也能在日志中追踪
 startGpuMonitor().catch(err => {
@@ -462,12 +459,6 @@ app.use('/api', createAdminUsersRouter({
 }));
 
 app.use('/api', createSettingsRouter({
-    authMiddleware,
-    adminMiddleware,
-    logAction
-}));
-
-app.use('/api', createUpdaterRouter({
     authMiddleware,
     adminMiddleware,
     logAction

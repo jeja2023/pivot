@@ -211,8 +211,8 @@ let settingsWorkspaceScaleObserver = null;
 let settingsWorkspaceScaleRaf = 0;
 
 window.scheduleSettingsWorkspaceScale = function() {
-    if (settingsWorkspaceScaleRaf) cancelAnimationFrame(settingsWorkspaceScaleRaf);
-    settingsWorkspaceScaleRaf = requestAnimationFrame(() => {
+    if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
+    settingsWorkspaceScaleRaf = window.requestAnimationFrame(() => {
         settingsWorkspaceScaleRaf = 0;
         window.updateSettingsWorkspaceScale?.();
     });
@@ -224,7 +224,7 @@ window.updateSettingsWorkspaceScale = function() {
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (!stage || !canvas || !content) return;
     if (window.ResizeObserver && !settingsWorkspaceScaleObserver) {
-        settingsWorkspaceScaleObserver = new ResizeObserver(() => {
+        settingsWorkspaceScaleObserver = new window.ResizeObserver(() => {
             if (document.body?.dataset.activeWorkspace === 'settings') {
                 window.scheduleSettingsWorkspaceScale?.();
             }
@@ -240,11 +240,13 @@ window.updateSettingsWorkspaceScale = function() {
     const layoutWidth = Math.max(baseWidth, availableWidth);
     const scale = Math.min(1, availableWidth / baseWidth);
     const stageWidth = Math.max(1, Math.ceil(layoutWidth * scale));
+    stage.style.removeProperty('--settings-stage-height');
     canvas.style.setProperty('--settings-canvas-width', `${layoutWidth}px`);
     canvas.style.setProperty('--settings-scale', String(Number(scale.toFixed(4))));
     stage.style.setProperty('--settings-stage-width', `${stageWidth}px`);
-    requestAnimationFrame(() => {
-        const scaledHeight = Math.max(availableHeight, Math.ceil(canvas.scrollHeight * scale));
+    window.requestAnimationFrame(() => {
+        const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
+        const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
         stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
     });
 };
@@ -593,7 +595,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'updater', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'prompts', 'attachments', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
@@ -640,8 +642,6 @@ document.addEventListener('click', async (event) => {
 bind('ops-refresh-btn', () => window.loadOpsSummary());
 bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
-bind('updater-check-btn', () => window.checkPivotUpdate?.());
-bind('updater-start-btn', () => window.startPivotUpdate?.());
 bind('observability-webhook-save', () => window.saveObservabilityWebhook?.());
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
 bind('prompt-add-btn', () => window.openPromptModal());

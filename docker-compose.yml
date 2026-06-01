@@ -21,7 +21,6 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      PIVOT_UPDATER_URL: http://pivot-updater:3300
 
     # 数据持久化：保证数据库和上传文件在容器重建后仍然保留
     volumes:
@@ -36,35 +35,6 @@ services:
     restart: always
 
     # 日志管理：限制单文件大小和保留数量，避免占满磁盘
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  pivot-updater:
-    profiles:
-      - online-update
-    build:
-      context: ./updater
-    container_name: pivot-updater
-    env_file:
-      - .env
-    environment:
-      PIVOT_UPDATER_PORT: 3300
-      PIVOT_UPDATE_WORKDIR: ${PIVOT_HOST_PROJECT_DIR:-/workspace}/source
-      PIVOT_UPDATE_BUILD_CONTEXT: ${PIVOT_HOST_PROJECT_DIR:-/workspace}/source
-      PIVOT_UPDATE_COMPOSE_FILE: ${PIVOT_HOST_PROJECT_DIR:-/workspace}/docker-compose.yml
-      PIVOT_UPDATE_IMAGE: pivot
-      PIVOT_UPDATE_SERVICE: pivot
-      PIVOT_UPDATE_STATE_FILE: ${PIVOT_HOST_PROJECT_DIR:-/workspace}/updater-state.json
-      PIVOT_LOG_TIME_ZONE: Asia/Shanghai
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./:${PIVOT_HOST_PROJECT_DIR:-/workspace}
-    networks:
-      - ai-bridge
-    restart: always
     logging:
       driver: "json-file"
       options:
