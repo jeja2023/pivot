@@ -131,6 +131,34 @@ function appendStreamedChartsToAssistantContent(content = '', chartSpecs = []) {
     return [baseContent, ...blocks].filter(Boolean).join('\n\n');
 }
 
+function createChartSseCapture(writeRaw) {
+    const streamedChartSpecs = [];
+    const streamedChartSpecKeys = new Set();
+
+    const writeSse = (payload) => {
+        let data = null;
+        try {
+            data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+        } catch (_err) {
+            data = null;
+        }
+
+        if (data && data.type === 'chart') {
+            const key = serializeChartSpec(data.data);
+            if (key && !streamedChartSpecKeys.has(key)) {
+                streamedChartSpecKeys.add(key);
+                streamedChartSpecs.push(data.data);
+            }
+            return false;
+        }
+
+        if (typeof writeRaw === 'function') writeRaw(payload);
+        return true;
+    };
+
+    return { streamedChartSpecs, writeSse };
+}
+
 function applyChatLanguageInstruction(history = []) {
     const messages = Array.isArray(history) ? history.slice() : [];
     const first = messages[0];
@@ -188,29 +216,14 @@ function createChatRouter({
         res.socket?.setKeepAlive?.(true);
         res.flushHeaders?.();
 
-        const streamedChartSpecs = [];
-        const streamedChartSpecKeys = new Set();
-        const rememberStreamedChart = (payload) => {
-            let data = null;
-            try {
-                data = typeof payload === 'string' ? JSON.parse(payload) : payload;
-            } catch (_err) {
-                return true;
-            }
-            if (!data || data.type !== 'chart' || !data.data) return true;
-            const key = serializeChartSpec(data.data);
-            if (!key) return true;
-            if (streamedChartSpecKeys.has(key)) return false;
-            streamedChartSpecKeys.add(key);
-            streamedChartSpecs.push(data.data);
-            return true;
-        };
-
-        const writeSse = (payload) => {
-            if (res.writableEnded) return;
-            if (!rememberStreamedChart(payload)) return;
+        const chartSseCapture = createChartSseCapture((payload) => {
             res.write(`data: ${payload}\n\n`);
             res.flush?.();
+        });
+        const streamedChartSpecs = chartSseCapture.streamedChartSpecs;
+        const writeSse = (payload) => {
+            if (res.writableEnded) return;
+            chartSseCapture.writeSse(payload);
         };
 
         const writeQueueNotice = (scope, info = {}) => {
@@ -698,7 +711,8 @@ function createChatRouter({
                         role: 'assistant',
                         messageId: assistantMessageResult.lastInsertRowid,
                         modelName: modelCfg.name || modelCfg.model_name || '',
-                        tokenCount: assistantTokens
+                        tokenCount: assistantTokens,
+                        content: assistantContent
                     }));
                     writeSse('[DONE]');
                     res.end();
@@ -801,6 +815,7 @@ module.exports = {
     buildFallbackDataQueryInput,
     buildPersistedChatErrorContent,
     buildRagContextMessage,
+    createChartSseCapture,
     createChatRouter,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,

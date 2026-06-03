@@ -179,6 +179,7 @@ const {
     applyChatLanguageInstruction,
     buildFallbackDataQueryInput,
     buildRagContextMessage,
+    createChartSseCapture,
     createChatRouter,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
@@ -567,6 +568,30 @@ test('chat renderer accepts loose ECharts-style chart specs', () => {
     assert.match(html, /pivot-echart-block/);
 });
 
+test('chat renderer defers pivot chart blocks while streaming', () => {
+    const sandbox = createChatRenderSandbox();
+    const chart = {
+        type: 'pivot_chart',
+        chartType: 'bar',
+        title: 'group_id count',
+        labels: ['0', '3'],
+        series: [{ name: 'count', data: [2, 1] }]
+    };
+    const markdown = [
+        'chart below',
+        '```pivot-echart',
+        JSON.stringify(chart, null, 2),
+        '```'
+    ].join('\n');
+
+    const streamingHtml = sandbox.renderAiMessage(markdown, true);
+    assert.doesNotMatch(streamingHtml, /pivot-echart-block/);
+    assert.doesNotMatch(streamingHtml, /data-pivot-echart/);
+
+    const finalHtml = sandbox.renderAiMessage(markdown, false);
+    assert.match(finalHtml, /pivot-echart-block/);
+});
+
 test('chat route embeds streamed chart specs into persisted assistant content', () => {
     const chart = {
         type: 'pivot_chart',
@@ -589,6 +614,28 @@ test('chat route embeds streamed chart specs into persisted assistant content', 
         '```'
     ].join('\n');
     assert.equal(appendStreamedChartsToAssistantContent(alreadyHasChart, [chart]), alreadyHasChart);
+});
+
+test('chat chart SSE capture stores chart events without forwarding them', () => {
+    const chart = {
+        type: 'pivot_chart',
+        chartType: 'bar',
+        title: 'group_id count',
+        labels: ['0', '3'],
+        series: [{ name: 'count', data: [2, 1] }]
+    };
+    const forwarded = [];
+    const { streamedChartSpecs, writeSse } = createChartSseCapture(payload => forwarded.push(payload));
+
+    assert.equal(writeSse(JSON.stringify({ type: 'chart', data: chart })), false);
+    assert.equal(writeSse(JSON.stringify({ type: 'chart', data: chart })), false);
+    assert.deepEqual(forwarded, []);
+    assert.equal(streamedChartSpecs.length, 1);
+    assert.deepEqual(streamedChartSpecs[0], chart);
+
+    const notice = JSON.stringify({ type: 'mcp', status: 'done' });
+    assert.equal(writeSse(notice), true);
+    assert.deepEqual(forwarded, [notice]);
 });
 
 test('buildFtsQuery escapes user input into phrase terms', () => {

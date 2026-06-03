@@ -155,7 +155,7 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
 
     if (hasOpenThought && existingThoughtContent) {
-        existingThoughtContent.innerHTML = renderMarkdown(content.replace(/^<thought>/, ''));
+        existingThoughtContent.innerHTML = renderMarkdown(content.replace(/^<thought>/, ''), { deferPivotCharts: true });
         if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
             const inner = existingThoughtContent.closest('.thought-content-inner');
             inner.scrollTop = inner.scrollHeight;
@@ -165,7 +165,6 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
         textBody.innerHTML = renderAiMessage(content, true, thoughtState.openStates);
         restoreThoughtStateAfterRender(textBody, thoughtState);
     }
-    window.renderPivotCharts?.(textBody);
 
     const elapsed = (Date.now() - startTime) / 1000;
     const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
@@ -505,21 +504,6 @@ window.sendMessage = async function(isRegenerate = false) {
         const cls = type === 'error' ? 'error-detail' : 'queue-detail';
         textBody.innerHTML = `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`;
     };
-    const injectChartBlock = (msgEl, spec) => {
-        if (!msgEl || !spec) return;
-        const chartBlock = document.createElement('div');
-        chartBlock.className = 'pivot-echart-block';
-        chartBlock.setAttribute('data-pivot-echart', JSON.stringify(spec));
-        chartBlock.innerHTML = '<div class="pivot-echart-title">图表</div><div class="pivot-echart-canvas"></div><canvas height="300"></canvas><pre class="pivot-echart-error-text"></pre>';
-        // 插入到 text-body 之后、footer 之前，避免被流式文本渲染覆盖
-        const footer = msgEl.querySelector('.message-footer');
-        if (footer) {
-            msgEl.insertBefore(chartBlock, footer);
-        } else {
-            msgEl.appendChild(chartBlock);
-        }
-        window.renderPivotCharts?.(msgEl);
-    };
     let fullAiContent = '';
     let tokenCount = 0;
     let startTime = Date.now();
@@ -528,15 +512,6 @@ window.sendMessage = async function(isRegenerate = false) {
     let renderTimer = null;
     let localReplayTimer = null;
     let pendingStreamChunks = [];
-    let pendingCharts = [];
-    const pendingChartKeys = new Set();
-    const getChartSpecKey = (spec) => {
-        try {
-            return JSON.stringify(spec);
-        } catch (e) {
-            return '';
-        }
-    };
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -660,6 +635,22 @@ window.sendMessage = async function(isRegenerate = false) {
             };
             settle();
         });
+        let hasRenderedPersistedAssistantContent = false;
+        const renderPersistedAssistantContent = (content) => {
+            if (typeof content !== 'string' || !content) return;
+            if (localReplayTimer) clearTimeout(localReplayTimer);
+            if (renderTimer) clearTimeout(renderTimer);
+            pendingStreamChunks = [];
+            localReplayTimer = null;
+            renderTimer = null;
+            fullAiContent = content;
+            tokenCount = estimateStreamingTokenCount(fullAiContent);
+            hasRenderedPersistedAssistantContent = true;
+            if (textBody && isRequestMessageVisible()) {
+                textBody.innerHTML = renderAiMessage(fullAiContent, false);
+                window.renderPivotCharts?.(textBody);
+            }
+        };
         const sseParser = createBrowserSseParser({
             onData(payload) {
                 let data = null;
@@ -683,13 +674,6 @@ window.sendMessage = async function(isRegenerate = false) {
                     return;
                 }
                 if (data.type === 'chart') {
-                    if (data.data && aiMsgEl) {
-                        const chartKey = getChartSpecKey(data.data);
-                        if (chartKey && pendingChartKeys.has(chartKey)) return;
-                        if (chartKey) pendingChartKeys.add(chartKey);
-                        pendingCharts.push(data.data);
-                        // 不立即注入 DOM——等第一个文字内容到达时再渲染，避免"还在思考图表就先出来了"
-                    }
                     return;
                 }
                 if (data.type === 'rag') {
@@ -711,6 +695,7 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.role === 'assistant') {
                         window.setMessageActionId?.(aiMsgEl, data.messageId);
                         window.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
+                        renderPersistedAssistantContent(data.content);
                         if (data.tokenCount !== undefined || data.costTime !== undefined || data.tps !== undefined) {
                             renderFinalAssistantStats(statsEl, {
                                 modelName: data.modelName || data.model_name || assistantModelName,
@@ -757,8 +742,6 @@ window.sendMessage = async function(isRegenerate = false) {
                 if (data.content) {
                     if (!firstTokenTime) {
                         firstTokenTime = Date.now();
-                        // 第一个文字内容到达时，将之前收集的图表块注入 DOM
-                        pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
                     }
                     enqueueStreamContent(data.content);
                 }
@@ -779,11 +762,7 @@ window.sendMessage = async function(isRegenerate = false) {
             }
         }
         await waitForLocalReplay();
-        flushStreamRender();
-        // 渲染 SSE 直发的图表块（已注入在 textBody 之外，不会被流式文本渲染覆盖）
-        if (pendingCharts.length && aiMsgEl) {
-            window.renderPivotCharts?.(aiMsgEl);
-        }
+        if (!hasRenderedPersistedAssistantContent) flushStreamRender();
         if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 
         const finalElapsed = (Date.now() - startTime) / 1000;
@@ -818,8 +797,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
             }
             fullAiContent += '\n\n[已由用户中断生成]';
-            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent);
-            pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
+            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, true);
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {
             if (e.messageId) window.setMessageActionId?.(aiMsgEl, e.messageId);
@@ -829,7 +807,6 @@ window.sendMessage = async function(isRegenerate = false) {
             } else if (isRequestMessageVisible()) {
                 updateAssistantStatus(e.message, 'error');
             }
-            pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }

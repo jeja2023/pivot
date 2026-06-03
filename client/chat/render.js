@@ -197,7 +197,9 @@ customRenderer.code = (code, infostring, _escaped) => {
     const language = String(infostring || '').trim().split(/\s+/)[0];
     const normalizedLanguage = language.toLowerCase();
     const chartLanguages = new Set(['pivot-echart', 'pivot-chart', 'chart', 'charts']);
-    if (normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code))) {
+    const isRenderableChart = normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code));
+    if (isRenderableChart) {
+        if (window._deferPivotCharts) return '';
         return `<div class="pivot-echart-block" data-pivot-echart="${escapeAttrValue(code)}"><div class="pivot-echart-title">图表</div><div class="pivot-echart-canvas"></div><canvas height="300"></canvas><pre class="pivot-echart-error-text"></pre></div>`;
     }
     const languageLabel = language || 'code';
@@ -361,8 +363,11 @@ if (typeof marked !== 'undefined') {
     marked.use({ extensions: [inlineMath, blockMath, thoughtBlock] });
 }
 
-function renderMarkdown(content) {
+function renderMarkdown(content, options = {}) {
     if (!content) return '';
+    const hasDeferOption = options && Object.prototype.hasOwnProperty.call(options, 'deferPivotCharts');
+    const previousDefer = window._deferPivotCharts;
+    if (hasDeferOption) window._deferPivotCharts = Boolean(options.deferPivotCharts);
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(content));
     let rawHtml = marked.parse(normalizedContent, { renderer: customRenderer, breaks: true, gfm: true });
 
@@ -370,17 +375,22 @@ function renderMarkdown(content) {
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
 
     if (window.PivotSafeHtml) {
-        return window.PivotSafeHtml.sanitizeHtml(rawHtml, {
+        const sanitizedHtml = window.PivotSafeHtml.sanitizeHtml(rawHtml, {
             ADD_TAGS: [
                 'details', 'summary', 'thought', 
                 'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot', 'mspace', 'mtext', 'mstyle', 'merror'
             ], 
             ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel'] 
         });
+        if (hasDeferOption) window._deferPivotCharts = previousDefer;
+        return sanitizedHtml;
     }
     if (window.DOMPurify) {
-        return DOMPurify.sanitize(rawHtml);
+        const sanitizedHtml = DOMPurify.sanitize(rawHtml);
+        if (hasDeferOption) window._deferPivotCharts = previousDefer;
+        return sanitizedHtml;
     }
+    if (hasDeferOption) window._deferPivotCharts = previousDefer;
     return rawHtml;
 }
 
@@ -920,7 +930,7 @@ function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) 
     // 使用全局变量传递状态给 marked 渲染器
     window._tempThoughtCounter = 0;
     window._tempThoughtStates = thoughtOpenStates;
-    return renderMarkdown(content);
+    return renderMarkdown(content, { deferPivotCharts: Boolean(_isStreaming) });
 }
 
 function hasAttachmentUrl(value = '') {
