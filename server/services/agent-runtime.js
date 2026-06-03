@@ -37,6 +37,7 @@ const {
     normalizeDagInputsPayload,
     normalizeDagRunInputs,
     publishAgentWorkflowVersion,
+    restoreAgentWorkflow,
     resolveAgentWorkflowVersion,
     restoreAgentWorkflowVersion,
     updateAgentWorkflow
@@ -98,6 +99,7 @@ const AGENT_DEFAULT_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_RUN_
 const AGENT_TOOL_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_TOOL_TIMEOUT_MS || '120000', 10) || 120000, 30000);
 const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_STALE_RUNNING_MINUTES || '30', 10) || 30, 5);
 const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
+const AGENT_DAG_NODE_CONCURRENCY = Math.max(Number.parseInt(process.env.AGENT_DAG_NODE_CONCURRENCY || '4', 10) || 4, 1);
 const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
 let agentQueue = null;
 
@@ -226,7 +228,7 @@ function createAgentNotification(userId, runId, type, title, body = '') {
     const run = runId
         ? db.prepare('SELECT title, goal FROM agent_runs WHERE id = ?').get(runId)
         : null;
-    const fallbackTitle = run ? getAgentRunTitle(run) : '闁哄懘缂氶崗妯绘媴閹剧儵鍋撳杈╁弨';
+    const fallbackTitle = run ? getAgentRunTitle(run) : '智能体通知';
     const safeTitle = looksLikeCorruptTitle(title) ? fallbackTitle : String(title || '').trim();
     const safeBody = looksLikeCorruptTitle(body) ? fallbackTitle : String(body || '').trim();
     const info = db.prepare(`
@@ -388,7 +390,7 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
         goal: run.goal,
         modelId: run.model_id,
         sessionId: run.session_id,
-        title: `闁煎搫鍊婚崑锝夋煂瀹ュ牏鐛撻柨?{getAgentRunTitle(run)}`.slice(0, 80),
+        title: `重跑节点：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
         runMode: 'dag',
@@ -430,10 +432,10 @@ function resumeAgentRun(runId, user) {
         run.goal,
         '',
         'Continue this task from the previous run context.',
-        `濞戞挸锕ｇ粩瀛樻姜椤旀儳笑闁诡兛绶ょ槐?{run.status}`,
-        run.final_answer ? `濞戞挸锕ｇ粩瀛樻姜椤斿墽娉㈤悹浣哄皑缁?{clampText(run.final_answer, 1200)}` : '',
-        run.error_message ? `濞戞挸锕ｇ粩瀛樻姜椤曗偓閺佸﹦鎷犻銈囩獥${run.error_message}` : '',
-        failed.length ? `闁哄牃鍋撻弶鈺傚灥閵囨垹鎷归妷锔诲妱濡ょ姰鍊х槐?{JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
+        `Previous status: ${run.status}`,
+        run.final_answer ? `Previous answer: ${clampText(run.final_answer, 1200)}` : '',
+        run.error_message ? `Previous error: ${run.error_message}` : '',
+        failed.length ? `Recent failed steps: ${JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
     ].filter(Boolean).join('\n');
     const previousMetadata = getRunMetadata(run);
     return createAgentRun({
@@ -441,7 +443,7 @@ function resumeAgentRun(runId, user) {
         goal: resumeGoal,
         modelId: run.model_id,
         sessionId: run.session_id,
-        title: `缂備綀鍛暰闁?{getAgentRunTitle(run)}`.slice(0, 80),
+        title: `断点续跑：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
         runMode: run.run_mode,
@@ -483,7 +485,7 @@ function softDeleteAgentRun(runId, user, reason = '') {
     });
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'control',
-        title: '闁活潿鍔嶉崺娑氱矓婵犳碍鐝熷ù鐘侯嚙婵喓鎷嬮弶璺ㄧЭ',
+        title: '任务记录已移除',
         output: {
             status: 'deleted',
             deletedAt: now,
@@ -531,30 +533,32 @@ function insertStep(runId, stepIndex, data = {}) {
 function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
-    if (context.mode === 'recent') contextLines.push('Use recent conversation context.');
-    if (context.mode === 'knowledge') contextLines.push('Use knowledge-base context.');
-    if (context.mode === 'none') contextLines.push('Do not include extra session context.');
-    if (context.notes) contextLines.push(`闁活潿鍔嶉崺娑氭偘閵夈儱甯犲☉鎾筹梗缁楀懘寮崶椋庣獥${context.notes}`);
+    if (context.mode === 'recent') contextLines.push('使用最近的对话上下文。');
+    if (context.mode === 'knowledge') contextLines.push('使用知识库上下文。');
+    if (context.mode === 'none') contextLines.push('不包含额外的会话上下文。');
+    if (context.notes) contextLines.push(`附加说明：${context.notes}`);
+    const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
     return [
         {
             role: 'system',
             content: [
-                'You are a Pivot agent. Plan carefully, call tools when useful, and return concise results.',
-                'Respond with JSON only when choosing an action; use Markdown only in final answers.',
-                'Schema: {"thought":"short reasoning","action":"tool|final","tool":"tool.name","input":{},"answer":"final answer"}',
-                `Run mode: ${normalizeRunMode(runMode)}. Standard is steady; deep allows extra retrieval; audit must emphasize evidence, limits, and risks.`,
-                'If action is tool, choose exactly one available tool and provide JSON input. If action is final, provide answer.',
-                'Use observations as evidence and avoid inventing tool results.',
-                contextLines.length ? `Context guidance: ${contextLines.join(' ')}` : 'No additional context guidance.',
-                'Available tools:',
+                '你是 Pivot Agent。请仔细规划，在需要时调用工具，并返回简洁的结果。',
+                '选择操作时只返回 JSON；仅在最终答案中使用 Markdown。',
+                '【重要语言规则】你的思考（thought）、推理和最终答案必须使用中文。禁止使用英文提纲或英文推理过程。',
+                'Schema: {"thought":"简短推理（中文）","action":"tool|final","tool":"tool.name","input":{},"answer":"最终答案（中文）"}',
+                `运行模式：${runModeLabel}。`,
+                '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
+                '以观察结果为依据，不要编造工具返回结果。',
+                contextLines.length ? `上下文指导：${contextLines.join(' ')}` : '无额外上下文指导。',
+                '可用工具：',
                 JSON.stringify(toolList, null, 2)
             ].join('\n')
         },
         {
             role: 'user',
             content: [
-                `闁烩晩鍠楅悥锝夋晬?{goal}`,
-                'Observations:',
+                `目标：${goal}`,
+                '观察记录：',
                 observations.length ? JSON.stringify(observations, null, 2) : '[]'
             ].join('\n\n')
         }
@@ -565,7 +569,7 @@ async function executeToolByName(name, input, user, toolList = []) {
     const safeName = String(name || '').trim();
     const tool = toolList.find(item => item.name === safeName);
     if (!tool) {
-        const err = new Error(`鐎规悶鍎遍崣鍧楀嫉椤忓懎鎴块柡澶婂暞閸ㄣ劍绋夊鍛闁汇埄鐓夌槐?{safeName || '-'}`);
+        const err = new Error(`工具不可用或无权访问：${safeName || '-'}`);
         err.status = 403;
         throw err;
     }
@@ -576,8 +580,8 @@ async function executeToolByName(name, input, user, toolList = []) {
 }
 
 function isApprovalGranted(run, toolName) {
-    // 閻庡厜鍓濇竟鎺旂磼閹惧浜柛娆樹簼婢规瑧鎷嬮妶澶嗗亾濮樺磭绠?approveAgentTool 闁告劖鐟ラ崣鍡涙儍?approvedTools 闁谎嗘閹洟宕￠弴顏嗙
-    // 濞戞挸绉撮崯鈧柡鈧娑樼槷 metadata.approval 閺夆晜鐟х悮?闁稿繈鍔岄惇顒勫绩閹规劦鏀?闁活収鍙€閻箖鏁嶅畝鍕級闁稿繐绉撮幃妤冪磼椤擄紕鐔呴柣銏ｉ哺婢ц法浠﹂弴鐔割槯閻炴凹鍋嗙划顐ｆ交閸ャ儮鍋?
+    // approveAgentTool persists approved tools in metadata.approvedTools.
+    // Keep this check scoped so pendingApproval cleanup remains in the approval flow.
     const metadata = getRunMetadata(run);
     const approved = Array.isArray(metadata.approvedTools) ? metadata.approvedTools : [];
     return approved.includes(toolName);
@@ -604,13 +608,13 @@ function maybePauseForApproval(run, tool, input) {
     });
     updateRun(run.id, {
         status: 'approval_required',
-        error_message: `缂佹稑顦欢鐔兼偨閵婏箑鐓曢悗鍏夊墲婢规帡鎳楅挊澶婎潝閹煎瓨鎸告导鎰板礂閸戙倗绐?{tool.title || tool.name}`,
+        error_message: `工具需要审批：${tool.title || tool.name}`,
         updated_at: now,
         last_heartbeat_at: now
     });
     insertStep(run.id, listSteps(run.id).length + 1, {
         type: 'approval',
-        title: `缂佹稑顦欢鐔衡偓鍏夊墲婢规帡鏁?{tool.title || tool.name}`,
+        title: `等待工具审批：${tool.title || tool.name}`,
         toolName: tool.name,
         input,
         output: { status: 'approval_required', tool: tool.name }
@@ -623,16 +627,16 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     const messages = [
         {
             role: 'system',
-            content: 'Summarize the agent observations into a clear final answer. Mention limitations and useful next steps when appropriate.'
+            content: '你是 Pivot Agent。请将 Agent 的观察记录总结为清晰的最终答案。如适用，请说明局限性和有用的后续步骤。输出请使用中文。'
         },
         {
             role: 'user',
-            content: `闁烩晩鍠楅悥锝夋晬?{goal}\n\n闁圭瑳鍡╂斀閻犱焦婢樼紞宥夋晬濮濇樆${JSON.stringify(observations, null, 2)}`
+            content: `任务目标：${goal}\n\n执行观察：${JSON.stringify(observations, null, 2)}`
         }
     ];
     const content = await callModelText(modelCfg, messages, { user });
     if (user) recordAgentModelUsage(user, modelCfg, messages, content, 'agent_summary', runId);
-    return content || 'No final answer was generated.';
+    return content || '未能生成最终答案。';
 }
 
 function upsertDagNode(runId, node, patch = {}) {
@@ -700,17 +704,21 @@ function upsertDagNode(runId, node, patch = {}) {
     return info.lastInsertRowid;
 }
 
-// v0.0.49 婵炵繝绀佺槐?function calling 闁告帒妫欓弫?
+// v0.0.49 supports streaming function calling for agent runs.
 function isStreamingToolsEnabled() {
     return String(process.env.AGENT_STREAMING_TOOLS || '').toLowerCase() === 'true';
 }
 
-// 闁?agent 鐎规悶鍎遍崣鍧楀礆濡ゅ嫨鈧啯娼浣哥亣 OpenAI tools schema闁挎稒绋愮换姘舵偩濞嗗繑鍤掗柛姘С缁?input_schema
-// 婵炵繝绀佺槐锟犲礆閸℃ɑ鏆滈柨娑欑婵＄霉娴ｅ摜纭€ tool_calls 闁告绻楅鍛姜椤掍礁鐏?agent 婵縿鍎甸鍐媼閺夎法绉块柨娑欑☉閵囨垹鎷归妷锔筋槯閺夆晜鏌ㄥú?{ completed: false } 閻犱讲鏅涢ˇ鑽や沪閸屾碍绀€闂侇偀鍋?
+// Streaming mode converts agent tools into OpenAI tools schema for direct tool_calls.
+// If the stream does not finish the run, return { completed: false } for JSON planner fallback.
 async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }) {
     try {
         const tools = buildAgentToolSchemas(toolList);
-        const systemPrompt = `You are an agent. Goal: ${run.goal || ''}\n\nUse tool_calls when useful; otherwise provide a final answer. Return structured tool input JSON.`;
+        const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
+
+需要时使用 tool_calls 调用工具；否则提供最终答案。返回结构化的工具输入 JSON。
+
+【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。`;
 
         const conversation = [
             { role: 'system', content: systemPrompt },
@@ -723,7 +731,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
-            // 闁煎搫鍊圭粊锕傛晬?00ms 闁?闁?20 閻庢稒顨堥浣规櫠閻愬搫娅ら柡鍐煐鐢綊鏌呮担椋庮伇婵?snapshot闁挎稑鐭傛导鈺呭礂?SSE 濡炲瀛╁В?
+            // Throttle streaming updates: emit at most every 100ms unless content grows enough.
             let lastEmittedAt = 0;
             let lastEmittedLen = 0;
             const emitDelta = (snapshot) => {
@@ -747,7 +755,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 Math.min(180000, Math.max(deadline - Date.now(), 1000)),
                 'streaming tool planning'
             );
-            // 婵縿鍎甸鍐磼閹惧瓨灏嗛柟鎭掑妺缁旀潙鈻庨埄鍐╀粯缂備礁鐗嗛幓鈺呮偂?
+            // Emit a final streaming snapshot so the UI can mark this step complete.
             publishUserEvent(user.id, 'agent.streaming', {
                 runId,
                 step,
@@ -782,20 +790,20 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 return { completed: true };
             }
 
-            // 闁?assistant tool_calls 闁告劖鐟ュú鏍ㄥ濮樺磭妯堥柨娑樿嫰閸ｎ垱寰勯崶銊モ挃閻炴稑鑻导鎰板礂?
+            // Persist the assistant tool-call message before appending tool results.
             conversation.push(buildAssistantToolMessage(result));
 
-            // 濡炪倕鎼花顓㈠箥瑜戦、?tool_calls闁挎稒绋愰幑銏℃媴閺囨氨顏卞☉鎿冧簻娴兼劙宕楀畡鑸杭閻犳劑鍎扮划娑欑┍濠靛牊娈?tool 婵炴垵鐗婃导鍛閵夈倗鈹掓俊顖椻偓宕団偓鐑藉礃閸愯尙鏆板☉鎾愁儎缁旀潙顫?
+            // Execute each requested tool call and append its result back to the conversation.
             for (const call of result.toolCalls) {
                 assertRunWithinBudget();
                 assertRunNotCancelled(runId);
                 const selectedTool = toolList.find(t => t.name === call.name);
                 if (!selectedTool) {
-                    const message = `鐎规悶鍎遍崣鍧楀嫉椤忓懎鎴块柡澶婂暞閸ㄣ劍绋夊鍛憼闁革富鐓夌槐?{call.name}`;
+                    const message = `工具不可用或无权访问：${call.name || '-'}`;
                     conversation.push(buildToolResultMessage(call.id, { error: message }));
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `閻犲搫鐤囩换鍐嫉椤忓棛鍙€鐎规悶鍎遍崣鍧楁晬?{call.name || '-'}`,
+                        title: `工具不可用：${call.name || '-'}`,
                         toolName: call.name || '',
                         input: call.arguments || {},
                         output: { error: message },
@@ -805,7 +813,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     continue;
                 }
                 if (maybePauseForApproval(run, selectedTool, call.arguments || {})) {
-                    // 鐎规瓕灏～锕傚汲閸屾矮绮荤紒娑橆槸缁剁喓鈧厜鍓濇竟鎺楁晬濞戞瑧銈︾€殿喖绻愰崹搴ㄥ绩椤栫偐鍋撻埀顒勫礄閻氬绀夌紒娑橆槺閺併倝骞嬪畡閭﹀悁闁圭數鎳撻幃妤佸濮樿泛娅㈤柡鍌涙緲閸欏棝姊?
+                    // Leave the run in approval_required; the resume path continues after approval.
                     return { completed: true };
                 }
                 const callStart = Date.now();
@@ -814,13 +822,13 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     const output = await withTimeout(
                         executeToolByName(call.name, args, user, toolList),
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                        `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆?${call.name}`
+                        `执行工具：${call.name}`
                     );
                     const compactOutput = clampText(output, 10000);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput });
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `閻犲鍟伴弫銈咁啅閵夈儱寰旈柨?{call.name}`,
+                        title: `工具执行完成：${call.name}`,
                         toolName: call.name,
                         input: args,
                         output: compactOutput,
@@ -831,7 +839,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆忓鎯扮簿鐟欙箓鏁?{call.name}`,
+                        title: `工具执行失败：${call.name}`,
                         toolName: call.name,
                         input: call.arguments || {},
                         output: { error: toolErr.message },
@@ -843,10 +851,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 }
             }
         }
-        // 婵縿鍎查弳鐔兼嚀濡も偓閺佹牗绂掑鍡樺紦閻庣懓鏈崹?闁?閻犱讲鏅涢ˇ鑽や沪閸屾稒锛嬮梺顐ｆ缁额偊宕楀鍐亢闁挎稑鐗嗛幃搴ㄥ箣閹邦厽浠樼紓浣哥墢閻＄喎顩奸崼顒傜
+        // No final answer was produced in streaming mode, so fall back to the JSON planner.
         return { completed: false };
     } catch (streamErr) {
-        // 婵炵繝绀佺槐鈩冨緞鏉堫偉袝闁哄啯婀圭粭澶屾媼閳衡偓閹广垽宕濋敍鍕函闁规亽鍎茬€垫洟骞掓径娑氱閻犱焦婢樼紞宥夊触鎼粹剝绀€闂侇偀鍋撻柛鎺斿濡偊宕氶崱妯绘殰
+        // Streaming failed unexpectedly; record a control step and continue with JSON planning.
         logger.warn({ runId, err: streamErr.message }, 'Streaming tool call failed; falling back to JSON planner');
         insertStep(runId, listSteps(runId).length + 1, {
             type: 'control',
@@ -868,7 +876,7 @@ async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolLi
             const output = await withTimeout(
                 executeToolByName(node.tool, resolvedInput, user, toolList),
                 Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
-                `鐎规悶鍎扮紞鏂棵规担钘壩濋柣?${node.title || node.id}`
+                `执行 DAG 节点：${node.title || node.id}`
             );
             return {
                 ok: true,
@@ -952,7 +960,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `閻犲搫鐤囩换鍐啅閵夈倗绋婃繛缈犳祰婵☆參鎮欓惂鍝ョ獥${node.title}`,
+                    title: `跳过 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: node.input,
                     output: { status: 'skipped', dependsOn: node.dependsOn }
@@ -963,7 +971,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             }
         });
 
-        await Promise.all(runnable.slice(0, 4).map(async node => {
+        await Promise.all(runnable.slice(0, AGENT_DAG_NODE_CONCURRENCY).map(async node => {
             const selectedTool = toolList.find(tool => tool.name === node.tool);
             const resolvedInput = resolveDagNodeInput(node, {
                 goal: run.goal,
@@ -1002,7 +1010,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, output: compactOutput, attempts: result.attempt });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閻ｎ剟骞嬮幇鍓佺獥${node.title}`,
+                    title: `完成 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: compactOutput,
@@ -1032,7 +1040,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: policy.onError === 'continue' ? `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閵囨垹鎷归妷銈囩ɑ缂備綀鍛暰闁?{node.title}` : `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閵囨垹鎷归妷顖滅獥${node.title}`,
+                    title: policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: { error: e.message, onError: policy.onError },
@@ -1105,7 +1113,7 @@ async function runAgent(runId, user) {
         };
         const initialModelCfg = getRunnableModelForUser(run.model_id, user);
         if (!initialModelCfg) throw new Error('No accessible model is available for this agent run.');
-        // 闁?run.model_router 閺夆晜绋栭、鎴炴交閹邦垼鏀介柡鍐煐鑶╅柛銊ヮ儓閻箖鎮介幉瀣耿fixed 缂佹稑顦幃鎾诲籍瑜戦、鎴炵▔?
+        // run.model_router controls whether the initial model is fixed, routed up front, or escalated later.
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
         if (routerStrategy !== 'fixed') {
@@ -1123,7 +1131,7 @@ async function runAgent(runId, user) {
                         .run(modelCfg.id, getBeijingTimestamp(), runId);
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'control',
-                        title: `婵☆垪鈧磭鈧鎹勯婊勬殸闁?{routerStrategy}`,
+                        title: `模型路由选择：${routerStrategy}`,
                         output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
                     });
                     logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, 'Agent model router selected a model');
@@ -1155,14 +1163,14 @@ async function runAgent(runId, user) {
             return;
         }
 
-        // 闁告瑯鍨堕埀顒€顧€缁辨澘霉娴ｅ摜纭€ function calling 闁告帒妫欓弫顕€鏁嶉崸?.0.49闁?
-        // 濮掓稒顭堥濠氭偝椤栨凹鏆旈柛娆愶耿閸ｆ椽寮甸鍕；闁告凹鍨卞鍌滄導閻楀牊锛嬮柛銉у仜閹酣宕?JSON 闁告绻楅鍛存晬濞戞ɑ鍎欓柣顫妼閹寰勬潏顐バ曞☉鏃傚枍缁变即鎳涢鍕楅柛銉у仱閳ь兘鍋撻柨娑樺缁绘氨鎷犳担閿嬪床闁告枀銈呭幋閻庣懓鏈崹?
+        // Prefer streaming function calling when enabled so the model can issue tool_calls directly.
+        // If streaming does not complete, the JSON planner below continues from collected observations.
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
             });
             if (streamingResult?.completed) return;
-            // 闁哄牜浜滈悾顒勫箣閹板墎绀勬繛缈犵缁扁剝寰勬潏顐バ?/ 閻℃帒鎳忛鐐哄极鐢喚绀嗛柛鎺撶懅閹撮绱掗陇娉查柡鍐勫啯绀€闁告艾鐗嗛崺妤€顕ラ鍡楃畾
+            // Streaming emitted partial work but did not finish; continue with the JSON planner path.
         }
 
         for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
@@ -1170,7 +1178,7 @@ async function runAgent(runId, user) {
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {});
-            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '婵☆垪鈧磭鈧鎲撮崟顐㈢亰');
+            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划');
             recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
@@ -1205,7 +1213,7 @@ async function runAgent(runId, user) {
                 const output = await withTimeout(
                     executeToolByName(plan.tool, plan.input || {}, user, toolList),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                    `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆?${plan.tool}`
+                    `执行工具：${plan.tool}`
                 );
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
@@ -1218,7 +1226,7 @@ async function runAgent(runId, user) {
                 });
                 insertStep(runId, step, {
                     type: 'tool',
-                    title: `閻犲鍟伴弫銈咁啅閵夈儱寰旈柨?{plan.tool}`,
+                    title: `工具执行完成：${plan.tool}`,
                     toolName: plan.tool,
                     input: plan.input || {},
                     output: compactOutput,
@@ -1233,7 +1241,7 @@ async function runAgent(runId, user) {
                 });
                 insertStep(runId, step, {
                     type: 'tool',
-                    title: `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆忓鎯扮簿鐟欙箓鏁?{plan.tool}`,
+                    title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
                     input: plan.input || {},
                     output: { error: toolErr.message },
@@ -1247,7 +1255,7 @@ async function runAgent(runId, user) {
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
         let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
-        // v0.0.50 auto-escalate闁挎稒鐭紞鍡欑磾椤旇绻嗛柡鍐硾瀹曞瞼鐥閸╁矂寮撮弶鎴濈箒婵☆垪鈧磭鈧兘宕樺鍛€ら柟瀛樺姃缁旀潙鈻?
+        // v0.0.50 auto-escalate retries the final summary with a stronger model when confidence is low.
         if (routerStrategy === 'auto-escalate') {
             const confidence = assessConfidence({ output: answer });
             if (!confidence.confident) {
@@ -1260,7 +1268,7 @@ async function runAgent(runId, user) {
                     if (escalation) {
                         insertStep(runId, listSteps(runId).length + 1, {
                             type: 'control',
-                            title: '婵☆垪鈧磭鈧兘宕￠崶鈺呯崜闁挎稒鐡玼to-escalate',
+                            title: '模型自动升级：auto-escalate',
                             output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
                         });
                         logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, 'Agent confidence low; escalating model');
@@ -1304,7 +1312,7 @@ async function runAgent(runId, user) {
             });
             insertStep(runId, listSteps(runId).length + 1, {
                 type: 'control',
-                title: `闁煎浜滄慨鈺呮煂瀹ュ牏妲?${retryCount + 1}/${retryLimit}`,
+                title: `任务失败重试：${retryCount + 1}/${retryLimit}`,
                 output: { error: e.message }
             });
             enqueueAgentRun(runId, user);
@@ -1364,7 +1372,7 @@ function approveAgentTool(runId, user, approve = true) {
     if (!approve) {
         updateRun(runId, {
             status: 'cancelled',
-            error_message: `闁活潿鍔嶉崺娑㈠箯閹烘梻鍗滈柤瀹犳婵繑鎯旈幘鍏呯矗闁稿繐鍢查鎼佸箥閻у摜绐?{pending.tool || '-'}`,
+            error_message: `用户拒绝工具审批：${pending.tool || '-'}`,
             cancelled_at: now,
             completed_at: now,
             updated_at: now
@@ -1396,6 +1404,7 @@ function approveAgentTool(runId, user, approve = true) {
 function getAgentRuntimeStatus(user = null) {
     return buildAgentRuntimeStatus({
         maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
+        dagNodeConcurrency: AGENT_DAG_NODE_CONCURRENCY,
         queueStatus: getAgentQueue().getStatus(),
         user
     });
@@ -1411,6 +1420,24 @@ configureAgentArtifacts({
     getAgentRunTitle,
     getRunDetailForUser: getRunDetailForUserHelper
 });
+
+function inferDagRunGoal({ goal, title, workflowId, runMetadata = {}, dagSpec = null, user = {} }) {
+    const explicitGoal = String(goal || '').trim();
+    if (explicitGoal) return explicitGoal;
+    const metadataWorkflowName = String(runMetadata.workflowName || runMetadata.workflow_name || '').trim();
+    if (metadataWorkflowName) return `执行工作流：${metadataWorkflowName}`;
+    const requestedWorkflowId = Number.parseInt(workflowId || runMetadata.workflowId || runMetadata.workflow_id, 10);
+    if (requestedWorkflowId && user?.id) {
+        const workflow = db.prepare('SELECT name FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
+            .get(requestedWorkflowId, user.id);
+        if (workflow?.name) return `执行工作流：${workflow.name}`;
+    }
+    const cleanTitle = String(title || '').trim();
+    if (cleanTitle) return cleanTitle;
+    const normalizedDag = normalizeDagSpec(dagSpec || runMetadata.dagSpec || runMetadata.dag || {});
+    if (normalizedDag.nodes.length) return `执行当前工作流（${normalizedDag.nodes.length} 个节点）`;
+    return '';
+}
 
 function createAgentRun({
     user,
@@ -1440,15 +1467,17 @@ function createAgentRun({
     workflowVersion = null,
     modelRouter = 'fixed'
 }) {
-    const cleanGoal = normalizeAgentGoal(goal);
-    const modelCfg = getRunnableModelForUser(modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
-    const runId = createRunId();
-    const now = getBeijingTimestamp();
     const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
     const normalizedRunMode = normalizeRunMode(runMode);
     const normalizedRouter = normalizeRouterStrategy(modelRouter);
     const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+    const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
+        ? inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
+        : goal);
+    const modelCfg = getRunnableModelForUser(modelId, user);
+    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
+    const runId = createRunId();
+    const now = getBeijingTimestamp();
     const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});
     if (Object.keys(normalizedDagInputs).length) {
         runMetadata.dagInputs = normalizedDagInputs;
@@ -1553,6 +1582,7 @@ module.exports = {
     rerunAgentRun,
     rerunAgentDagFromNode,
     resumeAgentRun,
+    restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     recoverAgentRuns,
     runAgentScheduleNow,

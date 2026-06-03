@@ -73,6 +73,7 @@
         'db.list_tables': ['列出数据表', '列出当前数据库中可查询的表和视图。'],
         'db.describe_table': ['查看表结构', '查看表字段、类型和可空性。'],
         'db.run_readonly_query': ['只读 SQL 查询', '执行 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等只读查询。'],
+        'db.group_count': ['分组统计', '按指定表字段分组并统计数量，用于快速生成分布图。'],
         'db.list_collections': ['列出集合', '列出 MongoDB 数据库集合。'],
         'db.sample_collection': ['读取集合样本', '读取集合小样本，辅助理解字段结构。'],
         'db.aggregate': ['Mongo 聚合查询', '执行只读统计分析聚合管道。'],
@@ -202,6 +203,44 @@
     }
 
     // 按拓扑层次分层（Kahn 风格）；环边视作"已满足"避免死循环
+    function mcpServerIdFromTool(tool) {
+        const match = String(toolValue(tool) || '').match(/^mcp\.(\d+)\./);
+        return match ? match[1] : '';
+    }
+
+    function tableNameFromRow(row) {
+        return String(row?.table_name || row?.TABLE_NAME || row?.name || row?.Name || '').trim();
+    }
+
+    function columnNameFromRow(row) {
+        return String(row?.column_name || row?.COLUMN_NAME || row?.name || row?.Field || '').trim();
+    }
+
+    function safeAlias(value, fallback = 'value') {
+        const alias = String(value || '').trim().replace(/[^\w]/g, '_').replace(/^_+/, '') || fallback;
+        return /^[A-Za-z_]/.test(alias) ? alias.slice(0, 64) : `${fallback}_${alias}`.slice(0, 64);
+    }
+
+    function quoteWizardSqlIdentifier(value) {
+        return String(value || '').split('.').map(part => {
+            const clean = part.trim();
+            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return clean;
+            return `\`${clean.replace(/`/g, '``')}\``;
+        }).join('.');
+    }
+
+    function buildWizardGroupCountSql({ table, groupBy, groupAlias, countAlias, limit }) {
+        const groupIdentifier = quoteWizardSqlIdentifier(groupBy);
+        const tableIdentifier = quoteWizardSqlIdentifier(table);
+        return [
+            `SELECT ${groupIdentifier} AS ${quoteWizardSqlIdentifier(groupAlias)}, COUNT(*) AS ${quoteWizardSqlIdentifier(countAlias)}`,
+            `FROM ${tableIdentifier}`,
+            `GROUP BY ${groupIdentifier}`,
+            `ORDER BY ${quoteWizardSqlIdentifier(countAlias)} DESC, ${quoteWizardSqlIdentifier(groupAlias)} ASC`,
+            `LIMIT ${Math.max(1, Math.min(Number(limit) || 50, 1000))}`
+        ].join('\n');
+    }
+
     function autoLayout(nodes) {
         const remaining = new Map(nodes.map(n => [n.id, new Set(n.dependsOn || [])]));
         const layers = [];
@@ -242,17 +281,22 @@
             condition: ['always', 'success'].includes(n.condition) ? n.condition : 'success',
             retryLimit: Math.max(0, Math.min(Number.parseInt(n.retryLimit ?? n.retry_limit ?? 0, 10) || 0, 5)),
             timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
-            onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents'
+            onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
+            // 保留已有坐标，避免 autoLayout 丢失用户手动调整的位置
+            _x: Number.isFinite(Number(n._x)) ? Number(n._x) : undefined,
+            _y: Number.isFinite(Number(n._y)) ? Number(n._y) : undefined
         })) : [];
         clampDependsOn(nodes);
-        autoLayout(nodes);
+        // 只有在新节点缺少坐标时才自动布局
+        const hasMissingCoords = nodes.some(n => n._x === undefined || n._y === undefined);
+        if (hasMissingCoords) autoLayout(nodes);
         return { nodes };
     }
 
     // 把内部带 _x/_y 的 spec 序列化为 normalizeDagSpec 接受的最小形态
     function serialize(spec) {
         return {
-            nodes: spec.nodes.map(({ id, title, tool, input, dependsOn, condition, retryLimit, timeoutMs, onError }) => ({
+            nodes: spec.nodes.map(({ id, title, tool, input, dependsOn, condition, retryLimit, timeoutMs, onError, _x, _y }) => ({
                 id,
                 title,
                 tool,
@@ -261,7 +305,10 @@
                 condition,
                 retryLimit: Number(retryLimit || 0),
                 timeoutMs: Number(timeoutMs || 0),
-                onError: onError || 'skip_dependents'
+                onError: onError || 'skip_dependents',
+                // 保留坐标以便再次加载时恢复用户手动调整的布局
+                _x: Number.isFinite(_x) ? _x : undefined,
+                _y: Number.isFinite(_y) ? _y : undefined
             }))
         };
     }
@@ -343,14 +390,44 @@
         return el;
     }
 
-    function makeButton(label, title, onClick) {
+    function makeButton(label, title, onClick, options = {}) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn-secondary pivot-dag-toolbar-btn';
-        btn.textContent = label;
+        const baseClass = options.variant === 'primary' ? 'btn-primary' : 'btn-secondary';
+        btn.className = `${baseClass} pivot-dag-toolbar-btn${options.tone ? ` is-${options.tone}` : ''}`;
+        if (options.icon) {
+            const icon = document.createElement('span');
+            icon.className = 'pivot-dag-toolbar-btn-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = options.icon;
+            const text = document.createElement('span');
+            text.className = 'pivot-dag-toolbar-btn-text';
+            text.textContent = label;
+            btn.appendChild(icon);
+            btn.appendChild(text);
+        } else {
+            btn.textContent = label;
+        }
         if (title) btn.title = title;
         btn.addEventListener('click', onClick);
         return btn;
+    }
+
+    function makeToolbarLabel(text) {
+        const label = document.createElement('span');
+        label.className = 'pivot-dag-toolbar-label';
+        label.textContent = text;
+        return label;
+    }
+
+    function makeToolbarGroup(label, buttons, className = '') {
+        const group = document.createElement('div');
+        group.className = `pivot-dag-toolbar-group${className ? ` ${className}` : ''}`;
+        group.setAttribute('role', 'group');
+        group.setAttribute('aria-label', label);
+        group.appendChild(makeToolbarLabel(label));
+        buttons.forEach(button => group.appendChild(button));
+        return group;
     }
 
     function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange }) {
@@ -489,6 +566,244 @@
 
         const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
 
+        const databaseWizardConnections = () => {
+            const entries = new Map();
+            currentTools().forEach(tool => {
+                const shortName = toolShortName(tool);
+                if (!shortName.startsWith('db.')) return;
+                const serverId = mcpServerIdFromTool(tool);
+                if (!serverId) return;
+                const entry = entries.get(serverId) || {
+                    serverId,
+                    serverName: tool.serverName || `数据库 ${serverId}`,
+                    tools: {}
+                };
+                entry.tools[shortName] = tool;
+                entries.set(serverId, entry);
+            });
+            return [...entries.values()]
+                .filter(entry => entry.tools['db.group_count'] || entry.tools['db.run_readonly_query'])
+                .sort((a, b) => a.serverName.localeCompare(b.serverName, 'zh-Hans-CN'));
+        };
+
+        const callWizardTool = async (tool, input = {}) => {
+            if (!tool) throw new Error('工具不可用。');
+            const res = await apiFetch(`${API_BASE}/mcp/tools/call`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: toolValue(tool), input })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '工具调用失败。');
+            return data.result?.structuredContent ?? data.result;
+        };
+
+        const openStatsChartWizard = () => {
+            const connections = databaseWizardConnections();
+            const chartTool = currentTools().find(tool => toolValue(tool) === 'viz.build_chart')
+                || findPreferredTool(currentTools(), ['viz.build_chart', 'chart']);
+            if (!connections.length) {
+                window.showToast?.('请先在能力库启用数据库连接，并刷新工具。', 'error');
+                return;
+            }
+            if (!chartTool) {
+                window.showToast?.('请先启用图表生成工具。', 'error');
+                return;
+            }
+            let modal = document.getElementById('pivot-dag-stats-wizard');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'pivot-dag-stats-wizard';
+                modal.className = 'modal-overlay hidden pivot-dag-stats-wizard-overlay';
+                document.body.appendChild(modal);
+            }
+            modal.innerHTML = `
+                <div class="modal rag-detail-modal pivot-dag-stats-wizard">
+                    <div class="rag-detail-header pivot-dag-stats-head">
+                        <div>
+                            <h3>统计图向导</h3>
+                            <p class="model-modal-desc">选择数据表和字段，生成可继续编辑的查询与图表节点。</p>
+                        </div>
+                        <button type="button" class="btn-danger-outline" data-stats-close="1">关闭</button>
+                    </div>
+                    <div class="agent-workflow-create-form pivot-dag-stats-form">
+                        <div class="pivot-dag-stats-grid">
+                        <label class="agent-workflow-create-field"><span>数据库</span>
+                            <select class="form-input" data-stats-field="database">
+                                ${connections.map(entry => `<option value="${escapeAttr(entry.serverId)}">${escapeHtml(entry.serverName)}</option>`).join('')}
+                            </select>
+                        </label>
+                        <label class="agent-workflow-create-field"><span>Schema</span><input class="form-input" data-stats-field="schema" placeholder="可选"></label>
+                        <label class="agent-workflow-create-field"><span>数据表</span><input class="form-input" list="pivot-stats-table-options" data-stats-field="table" placeholder="选择或输入表名"></label>
+                        <label class="agent-workflow-create-field"><span>分组字段</span><input class="form-input" list="pivot-stats-column-options" data-stats-field="groupBy" placeholder="选择或输入字段"></label>
+                        <label class="agent-workflow-create-field"><span>图表类型</span>
+                            <select class="form-input" data-stats-field="chartType">
+                                <option value="bar">柱状图</option>
+                                <option value="line">折线图</option>
+                                <option value="pie">饼图</option>
+                            </select>
+                        </label>
+                        <label class="agent-workflow-create-field"><span>返回数量</span><input class="form-input" type="number" min="1" max="1000" value="50" data-stats-field="limit"></label>
+                        <label class="agent-workflow-create-field pivot-dag-stats-title"><span>图表标题</span><input class="form-input" data-stats-field="title" placeholder="自动生成"></label>
+                        </div>
+                        <datalist id="pivot-stats-table-options"></datalist>
+                        <datalist id="pivot-stats-column-options"></datalist>
+                        <div class="pivot-dag-stats-status" data-stats-status></div>
+                        <div class="agent-workflow-create-actions pivot-dag-stats-actions">
+                            <button type="button" class="btn-secondary" data-stats-load-fields="1">读取字段</button>
+                            <button type="button" class="btn-primary" data-stats-create="1">生成节点</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const status = modal.querySelector('[data-stats-status]');
+            const setStatus = (text, type = '') => {
+                status.textContent = text || '';
+                status.className = `pivot-dag-stats-status ${type}`;
+            };
+            const selectedEntry = () => connections.find(entry => entry.serverId === modal.querySelector('[data-stats-field="database"]')?.value) || connections[0];
+            const loadTables = async () => {
+                const entry = selectedEntry();
+                if (!entry?.tools['db.list_tables']) {
+                    setStatus('当前连接未提供表列表工具，可直接输入表名。', 'warn');
+                    return;
+                }
+                setStatus('正在读取数据表...');
+                try {
+                    const schema = modal.querySelector('[data-stats-field="schema"]')?.value.trim();
+                    const result = await callWizardTool(entry.tools['db.list_tables'], schema ? { schema } : {});
+                    const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
+                    const tables = [...new Set(rows.map(tableNameFromRow).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+                    modal.querySelector('#pivot-stats-table-options').innerHTML = tables.map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
+                    setStatus(tables.length ? `已读取 ${tables.length} 个数据表。` : '没有读取到数据表，可手动输入。', tables.length ? '' : 'warn');
+                } catch (e) {
+                    setStatus(e.message || '读取数据表失败，可手动输入表名。', 'error');
+                }
+            };
+            const loadColumns = async () => {
+                const entry = selectedEntry();
+                const table = modal.querySelector('[data-stats-field="table"]')?.value.trim();
+                if (!table) {
+                    setStatus('请先选择或输入数据表。', 'error');
+                    return;
+                }
+                if (!entry?.tools['db.describe_table']) {
+                    setStatus('当前连接未提供字段读取工具，可直接输入字段名。', 'warn');
+                    return;
+                }
+                setStatus('正在读取字段...');
+                try {
+                    const schema = modal.querySelector('[data-stats-field="schema"]')?.value.trim();
+                    const result = await callWizardTool(entry.tools['db.describe_table'], { table, ...(schema ? { schema } : {}) });
+                    const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
+                    const columns = [...new Set(rows.map(columnNameFromRow).filter(Boolean))];
+                    modal.querySelector('#pivot-stats-column-options').innerHTML = columns.map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
+                    setStatus(columns.length ? `已读取 ${columns.length} 个字段。` : '没有读取到字段，可手动输入。', columns.length ? '' : 'warn');
+                } catch (e) {
+                    setStatus(e.message || '读取字段失败，可手动输入字段名。', 'error');
+                }
+            };
+            const createNodes = () => {
+                const entry = selectedEntry();
+                const table = modal.querySelector('[data-stats-field="table"]')?.value.trim();
+                const groupBy = modal.querySelector('[data-stats-field="groupBy"]')?.value.trim();
+                const schema = modal.querySelector('[data-stats-field="schema"]')?.value.trim();
+                const limit = Math.max(1, Math.min(Number(modal.querySelector('[data-stats-field="limit"]')?.value) || 50, 1000));
+                const chartType = modal.querySelector('[data-stats-field="chartType"]')?.value || 'bar';
+                if (!table || !groupBy) {
+                    setStatus('请填写数据表和分组字段。', 'error');
+                    return;
+                }
+                const groupAlias = safeAlias(groupBy, 'group_value');
+                const countAlias = 'account_count';
+                const title = modal.querySelector('[data-stats-field="title"]')?.value.trim()
+                    || `${table} ${groupBy} 分布`;
+                const queryTool = entry.tools['db.group_count'] || entry.tools['db.run_readonly_query'];
+                const queryInput = entry.tools['db.group_count']
+                    ? { table, groupBy, groupAlias, countAlias, limit, sortOrder: 'desc', ...(schema ? { schema } : {}) }
+                    : {
+                        sql: buildWizardGroupCountSql({ table: schema ? `${schema}.${table}` : table, groupBy, groupAlias, countAlias, limit }),
+                        limit
+                    };
+                const nextSpec = {
+                    nodes: [
+                        {
+                            id: 'group_count',
+                            title: '分组统计',
+                            tool: toolValue(queryTool),
+                            input: queryInput,
+                            dependsOn: [],
+                            condition: 'success',
+                            retryLimit: 0,
+                            timeoutMs: 0,
+                            onError: 'skip_dependents'
+                        },
+                        {
+                            id: 'group_chart',
+                            title: '生成统计图',
+                            tool: toolValue(chartTool),
+                            input: {
+                                rows: '{{nodes.group_count.output.rows}}',
+                                chartType,
+                                title,
+                                xAxis: groupAlias,
+                                yAxis: countAlias,
+                                xAxisLabel: groupBy,
+                                yAxisLabel: '数量',
+                                sortBy: 'value',
+                                sortOrder: 'desc',
+                                limit
+                            },
+                            dependsOn: ['group_count'],
+                            condition: 'success',
+                            retryLimit: 0,
+                            timeoutMs: 0,
+                            onError: 'skip_dependents'
+                        }
+                    ]
+                };
+                const apply = () => {
+                    spec = ensureDefaults(nextSpec);
+                    selectedId = 'group_count';
+                    const workflowName = document.getElementById('agent-workflow-name');
+                    if (workflowName && !workflowName.value.trim()) workflowName.value = title;
+                    render();
+                    fitToContent();
+                    flushOut();
+                    modal.classList.add('hidden');
+                    window.showToast?.('已生成统计图模板节点，可继续自定义编排。', 'success');
+                };
+                // 检查当前画布是否有未保存的更改
+                const hasUnsavedChanges = (() => {
+                    if (!textarea) return false;
+                    const saved = readJson(textarea.value);
+                    if (!saved) return false;
+                    return JSON.stringify(serialize(spec)) !== JSON.stringify(serialize(ensureDefaults(saved)));
+                })();
+                if (spec.nodes.length && typeof window.showConfirm === 'function') {
+                    const message = hasUnsavedChanges
+                        ? '当前画布有未保存的更改，替换将被丢弃。确定用统计图模板生成的节点替换当前画布吗？'
+                        : '确定用统计图模板生成的节点替换当前画布吗？';
+                    window.showConfirm('替换当前画布', message, apply);
+                } else {
+                    apply();
+                }
+            };
+            modal.querySelector('[data-stats-close]')?.addEventListener('click', () => modal.classList.add('hidden'));
+            if (modal.dataset.boundStatsWizardOverlay !== '1') {
+                modal.dataset.boundStatsWizardOverlay = '1';
+                modal.addEventListener('click', event => {
+                    if (event.target === modal) modal.classList.add('hidden');
+                });
+            }
+            modal.querySelector('[data-stats-field="database"]')?.addEventListener('change', loadTables);
+            modal.querySelector('[data-stats-field="table"]')?.addEventListener('change', loadColumns);
+            modal.querySelector('[data-stats-load-fields]')?.addEventListener('click', loadColumns);
+            modal.querySelector('[data-stats-create]')?.addEventListener('click', createNodes);
+            modal.classList.remove('hidden');
+            loadTables();
+        };
+
         const wouldCreateCycle = (dependencyId, targetId) => {
             if (!dependencyId || !targetId || dependencyId === targetId) return true;
             const byId = new Map(spec.nodes.map(n => [n.id, n]));
@@ -544,8 +859,12 @@
             const state = report.errors.length ? 'error' : report.warnings.length ? 'warn' : 'ok';
             toolbarStatus.className = `pivot-dag-toolbar-status ${state}`;
             const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
-            toolbarStatus.textContent = `${report.nodeCount} 节点 · ${report.edgeCount} 依赖 · ${message}`;
-            toolbarStatus.title = [...report.errors, ...report.warnings].join('\n') || '工作流校验通过';
+            const parallelNote = report.nodeCount > 1 ? ` · 运行时最多并发执行` : '';
+            toolbarStatus.textContent = `${report.nodeCount} 节点 · ${report.edgeCount} 依赖 · ${message}${parallelNote}`;
+            toolbarStatus.title = [
+                ...report.errors, ...report.warnings,
+                '提示：互不依赖的节点会并行执行，可在环境变量 AGENT_DAG_NODE_CONCURRENCY 调整并发数（默认 4）。'
+            ].join('\n') || '工作流校验通过';
         };
 
         const showValidationResult = () => {
@@ -601,6 +920,9 @@
                 { label: '任务目标', token: '{{goal}}' },
                 ...(node.dependsOn || []).flatMap(dep => ([
                     { label: `${dep} 输出`, token: `{{nodes.${dep}.output}}` },
+                    { label: `${dep} 结构化结果`, token: `{{nodes.${dep}.output.structuredContent}}` },
+                    { label: `${dep} 数据行`, token: `{{nodes.${dep}.output.rows}}` },
+                    { label: `${dep} 结构化数据行`, token: `{{nodes.${dep}.output.structuredContent.rows}}` },
                     { label: `${dep} 状态`, token: `{{nodes.${dep}.status}}` },
                     { label: `${dep} 错误`, token: `{{nodes.${dep}.error}}` }
                 ]))
@@ -637,8 +959,8 @@
                             <option value="stop" ${node.onError === 'stop' ? 'selected' : ''}>失败后停止工作流</option>
                         </select>
                     </label>
-                    <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}"></label>
-                    <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认"></label>
+                    <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
+                    <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
                 </div>
                 <label class="pivot-dag-inspector-input">
                     <span>输入参数 (JSON)</span>
@@ -785,10 +1107,17 @@
         const addNode = () => {
             const baseId = uniqueId(spec.nodes.map(n => n.id));
             const tools = currentTools();
+            // 智能推断默认工具：统计当前画布上使用最多的工具
+            const toolCounts = new Map();
+            spec.nodes.forEach(n => { if (n.tool) toolCounts.set(n.tool, (toolCounts.get(n.tool) || 0) + 1); });
+            const mostUsedTool = [...toolCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+            const defaultTool = mostUsedTool && mostUsedTool[1] >= 2 && tools.some(t => toolValue(t) === mostUsedTool[0])
+                ? mostUsedTool[0]
+                : '';
             const node = {
                 id: baseId,
                 title: '新节点',
-                tool: toolValue(tools[0]),
+                tool: defaultTool,
                 input: {},
                 dependsOn: selectedId ? [selectedId] : [],
                 condition: 'success',
@@ -1048,6 +1377,28 @@
             inspector?.querySelector('input[data-pivot-dag-field="title"]')?.focus();
         };
 
+        // 键盘快捷键：Delete/Escape
+        const onKeyDown = (event) => {
+            // 仅在画布或节点有焦点时响应，避免与文本输入冲突
+            const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+            const editingInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
+            if (editingInput) return;
+            if (event.key === 'Delete' || event.key === 'Backspace') {
+                if (selectedId) {
+                    event.preventDefault();
+                    deleteNode(selectedId);
+                }
+            } else if (event.key === 'Escape') {
+                if (selectedId) {
+                    event.preventDefault();
+                    selectedId = null;
+                    render();
+                    if (typeof onNodeSelectionChange === 'function') onNodeSelectionChange(null);
+                }
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+
         root.addEventListener('pointerdown', onPointerDown);
         root.addEventListener('pointermove', onPointerMove);
         root.addEventListener('pointerup', onPointerUp);
@@ -1058,47 +1409,54 @@
         // —— 工具栏 ——
         if (toolbar) {
             toolbar.replaceChildren();
-            toolbar.appendChild(makeButton('+ 节点', '新增工作流节点', addNode));
-            toolbar.appendChild(makeButton('+ 检索', '添加知识检索节点', () => addPresetNode({
-                base: 'search',
-                title: '知识检索',
-                patterns: ['rag.search', 'knowledge', 'search'],
-                input: { query: '' }
-            })));
-            toolbar.appendChild(makeButton('+ 数据', '添加数据查询节点', () => addPresetNode({
-                base: 'data',
-                title: '数据查询',
-                patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
-                input: {}
-            })));
-            toolbar.appendChild(makeButton('+ 图表', '添加图表生成节点', () => addPresetNode({
-                base: 'chart',
-                title: '图表生成',
-                patterns: ['viz.build_chart', 'chart'],
-                input: {}
-            })));
-            toolbar.appendChild(makeButton('+ 报告', '添加报告编排节点', () => addPresetNode({
-                base: 'report',
-                title: '报告编排',
-                patterns: ['report.compose', 'report'],
-                input: {}
-            })));
-            toolbar.appendChild(makeButton('校验', '校验节点、依赖和工具可用性', showValidationResult));
-            toolbar.appendChild(makeButton('自动布局', '按依赖层次重新排列', resetLayout));
-            toolbar.appendChild(makeButton('适配画布', '重置缩放和平移到默认视角', fitToContent));
-            toolbar.appendChild(makeButton('JSON 视图', '打开高级 JSON 编辑弹窗', () => {
-                if (typeof onOpenJson === 'function') onOpenJson();
-            }));
-            toolbar.appendChild(makeButton('从 JSON 同步', '把 JSON 文本应用到画布', () => {
-                const parsed = readJson(textarea ? textarea.value : '');
-                if (!parsed) {
-                    if (typeof onChange === 'function') onChange({ error: 'invalid_json' });
-                    return;
-                }
-                spec = ensureDefaults(parsed);
-                selectedId = null;
-                render();
-            }));
+            toolbar.appendChild(makeToolbarGroup('节点', [
+                makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', addNode, { variant: 'primary', icon: '+' }),
+                makeButton('检索', '添加知识检索节点', () => addPresetNode({
+                    base: 'search',
+                    title: '知识检索',
+                    patterns: ['rag.search', 'knowledge', 'search'],
+                    input: { query: '' }
+                }), { icon: '+' }),
+                makeButton('数据', '添加数据查询节点', () => addPresetNode({
+                    base: 'data',
+                    title: '数据查询',
+                    patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
+                    input: {}
+                }), { icon: '+' }),
+                makeButton('图表', '添加图表生成节点', () => addPresetNode({
+                    base: 'chart',
+                    title: '图表生成',
+                    patterns: ['viz.build_chart', 'chart'],
+                    input: {}
+                }), { icon: '+' }),
+                makeButton('报告', '添加报告编排节点', () => addPresetNode({
+                    base: 'report',
+                    title: '报告编排',
+                    patterns: ['report.compose', 'report'],
+                    input: {}
+                }), { icon: '+' })
+            ], 'is-node-group'));
+            toolbar.appendChild(makeToolbarGroup('模板', [
+                makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', openStatsChartWizard, { tone: 'template' })
+            ], 'is-template-group'));
+            toolbar.appendChild(makeToolbarGroup('操作', [
+                makeButton('校验', '校验节点、依赖和工具可用性', showValidationResult),
+                makeButton('自动布局', '按依赖层次重新排列', resetLayout),
+                makeButton('适配画布', '重置缩放和平移到默认视角', fitToContent),
+                makeButton('JSON 视图', '打开高级 JSON 编辑弹窗', () => {
+                    if (typeof onOpenJson === 'function') onOpenJson();
+                }),
+                makeButton('从 JSON 同步', '把 JSON 文本应用到画布', () => {
+                    const parsed = readJson(textarea ? textarea.value : '');
+                    if (!parsed) {
+                        if (typeof onChange === 'function') onChange({ error: 'invalid_json' });
+                        return;
+                    }
+                    spec = ensureDefaults(parsed);
+                    selectedId = null;
+                    render();
+                })
+            ], 'is-action-group'));
             toolbarStatus = document.createElement('div');
             toolbarStatus.className = 'pivot-dag-toolbar-status';
             toolbar.appendChild(toolbarStatus);
@@ -1118,6 +1476,7 @@
         render();
 
         const destroy = () => {
+            document.removeEventListener('keydown', onKeyDown);
             root.removeEventListener('pointerdown', onPointerDown);
             root.removeEventListener('pointermove', onPointerMove);
             root.removeEventListener('pointerup', onPointerUp);
@@ -1162,7 +1521,9 @@
                 render();
                 return true;
             },
-            refresh: () => render()
+            refresh: () => render(),
+            // 暴露校验方法用于保存/发布前门禁
+            validate: () => validateWorkflow()
         };
     }
 

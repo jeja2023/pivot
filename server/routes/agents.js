@@ -37,6 +37,7 @@ const {
     rerunAgentRun,
     rerunAgentDagFromNode,
     resumeAgentRun,
+    restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     rollbackAgentArtifactVersion,
     runAgentScheduleNow,
@@ -143,7 +144,15 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         const workflow = deleteAgentWorkflow(req.params.id, req.user);
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权删除。' });
         logAction(req, '删除智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
-        res.json({ success: true });
+        res.json({ success: true, workflow: { id: workflow.id, name: workflow.name } });
+    }));
+
+    // 恢复已删除工作流
+    router.patch('/agents/workflows/:id/restore', authMiddleware, asyncHandler(async (req, res) => {
+        const workflow = restoreAgentWorkflow(req.params.id, req.user);
+        if (!workflow) return res.status(404).json({ error: '工作流不存在、未删除或已超过 30 天恢复期限。' });
+        logAction(req, '恢复智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
+        res.json({ success: true, workflow });
     }));
 
     router.get('/agents/schedules', authMiddleware, asyncHandler(async (req, res) => {

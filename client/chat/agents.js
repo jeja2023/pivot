@@ -15,11 +15,15 @@ let agentRunsPage = 1;
 let agentRunsTotal = 0;
 let agentWorkflowsCache = [];
 let activeAgentWorkflowId = '';
+let agentWorkflowDraftDescription = '';
 const AGENT_RUNS_PAGE_SIZE = 10;
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
 const AGENT_WORKFLOW_SAVED_KEY = 'pivot.agent.workflow.saved';
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
+const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr
+    ? window.PivotSafeHtml.escapeAttr(value)
+    : agentEscape(value).replace(/"/g, '&quot;');
 
 function agentLooksLikeCorruptTitle(value) {
     const text = String(value || '').trim();
@@ -93,7 +97,7 @@ function agentRunTooltip(run) {
 }
 
 function agentRunModeLabel(mode) {
-    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式', dag: '工作流编排' };
+    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式', dag: '工作流' };
     return map[mode] || '标准模式';
 }
 
@@ -229,6 +233,97 @@ function agentStepMarkup(step) {
     `;
 }
 
+function unwrapAgentStructuredPayload(value) {
+    const payload = agentParsePayload(value);
+    if (!payload || typeof payload !== 'object') return null;
+    if (payload.structuredContent && typeof payload.structuredContent === 'object') return payload.structuredContent;
+    if (Array.isArray(payload.content)) {
+        const text = payload.content
+            .map(item => item?.text || item?.content || '')
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+        const nested = agentParsePayload(text);
+        if (nested && typeof nested === 'object') {
+            return nested.structuredContent && typeof nested.structuredContent === 'object'
+                ? nested.structuredContent
+                : nested;
+        }
+    }
+    return payload;
+}
+
+function isAgentPivotChartSpec(value) {
+    return Boolean(value && typeof value === 'object'
+        && value.type === 'pivot_chart'
+        && Array.isArray(value.labels)
+        && Array.isArray(value.series));
+}
+
+function renderAgentPivotChartBlock(spec) {
+    return `
+        <div class="pivot-echart-block" data-pivot-echart="${agentEscapeAttr(JSON.stringify(spec))}">
+            <div class="pivot-echart-title">图表</div>
+            <div class="pivot-echart-canvas"></div>
+            <canvas height="300"></canvas>
+            <pre class="pivot-echart-error-text"></pre>
+        </div>
+    `;
+}
+
+function renderAgentStructuredOutput(value, label = '') {
+    const payload = unwrapAgentStructuredPayload(value);
+    if (!payload) return '';
+    let body = '';
+    if (isAgentPivotChartSpec(payload)) {
+        body = renderAgentPivotChartBlock(payload);
+    } else if (payload && typeof payload === 'object') {
+        const type = String(payload.type || '');
+        const markdown = String(payload.markdown || '').trim();
+        if (markdown && ['pivot_table', 'pivot_report', 'format_markdown_table'].includes(type)) {
+            body = renderMarkdown(markdown);
+        }
+    }
+    if (!body) return '';
+    return `
+        <div class="agent-structured-output">
+            ${label ? `<div class="agent-structured-output-title">${agentEscape(label)}</div>` : ''}
+            <div class="agent-structured-output-body">${body}</div>
+        </div>
+    `;
+}
+
+function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = '') {
+    if (/```(?:pivot-echart|pivot-chart|chart|charts)\b/i.test(String(finalAnswer || ''))) return '';
+    const items = [];
+    const seen = new Set();
+    const push = (payload, label) => {
+        const structured = unwrapAgentStructuredPayload(payload);
+        if (!structured) return;
+        const markup = renderAgentStructuredOutput(structured, label);
+        if (!markup) return;
+        const key = JSON.stringify(structured).slice(0, 2000);
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push(markup);
+    };
+    dagNodes.forEach(node => push(node.output, node.title || node.node_key || agentToolTitle(node.tool_name)));
+    if (!items.length) {
+        steps.forEach(step => push(step.output, step.title || agentToolTitle(step.tool_name || step.type)));
+    }
+    if (!items.length) return '';
+    const visibleItems = items.slice(0, 4);
+    return `
+        <section class="agent-visual-results">
+            <div class="agent-tool-section-head compact">
+                <strong>可视化结果</strong>
+                <span>${visibleItems.length} 个结果</span>
+            </div>
+            ${visibleItems.join('')}
+        </section>
+    `;
+}
+
 // 任务历史可视化：水平时间轴 + 工具调用频次榜
 function buildAgentTimelineMarkup(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return '';
@@ -326,6 +421,100 @@ function agentDagNodeMarkup(node) {
             ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">重跑此节点</button>` : ''}
             ${input ? `<details><summary>节点输入</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
             ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
+        </div>
+    `;
+}
+
+// DAG运行结果可视化：渲染迷你状态图
+function renderAgentDagRunGraph(dagNodes) {
+    if (!dagNodes.length) return '';
+    const NODE_W = 130, NODE_H = 40, GAP_X = 50, GAP_Y = 30, PAD = 20;
+    // 状态 -> 颜色映射
+    const statusColor = (status) => {
+        const s = String(status || 'pending').toLowerCase();
+        if (s === 'completed') return { fill: '#10b981', stroke: '#059669' };
+        if (s === 'error') return { fill: '#ef4444', stroke: '#dc2626' };
+        if (s === 'running') return { fill: '#3b82f6', stroke: '#2563eb' };
+        if (s === 'skipped') return { fill: '#f59e0b', stroke: '#d97706' };
+        return { fill: '#94a3b8', stroke: '#64748b' }; // pending
+    };
+    // 收集所有 depends_on 引用
+    const allIds = new Set(dagNodes.map(n => n.node_key));
+    const depMap = new Map();
+    dagNodes.forEach(n => {
+        depMap.set(n.node_key, (n.depends_on || []).filter(d => allIds.has(d)));
+    });
+    // 拓扑分层布局
+    const layers = [];
+    const placed = new Set();
+    while (placed.size < dagNodes.length) {
+        const layer = [];
+        dagNodes.forEach(n => {
+            if (placed.has(n.node_key)) return;
+            if ((depMap.get(n.node_key) || []).every(d => placed.has(d))) layer.push(n);
+        });
+        if (!layer.length) { dagNodes.filter(n => !placed.has(n.node_key)).forEach(n => layer.push(n)); }
+        layer.forEach(n => placed.add(n.node_key));
+        layers.push(layer);
+    }
+    // 计算坐标
+    const positions = new Map();
+    layers.forEach((layer, li) => {
+        layer.forEach((node, si) => {
+            positions.set(node.node_key, {
+                x: PAD + li * (NODE_W + GAP_X),
+                y: PAD + si * (NODE_H + GAP_Y)
+            });
+        });
+    });
+    const totalW = PAD + layers.length * (NODE_W + GAP_X) - GAP_X + PAD;
+    const lastLayerHeight = Math.max(...layers.map(l => l.length), 1) * (NODE_H + GAP_Y) - GAP_Y;
+    const totalH = PAD + lastLayerHeight + PAD;
+    // 渲染边
+    const edges = [];
+    dagNodes.forEach(n => {
+        const to = positions.get(n.node_key);
+        (depMap.get(n.node_key) || []).forEach(fromId => {
+            const from = positions.get(fromId);
+            if (from && to) {
+                const sx = from.x + NODE_W, sy = from.y + NODE_H / 2;
+                const tx = to.x, ty = to.y + NODE_H / 2;
+                const cx = sx + (tx - sx) / 2;
+                edges.push(`<path d="M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}" stroke="#94a3b8" stroke-width="1.5" fill="none" marker-end="url(#dag-run-arrow)"/>`);
+            }
+        });
+    });
+    // 渲染节点
+    const nodes = dagNodes.map(n => {
+        const pos = positions.get(n.node_key);
+        const c = statusColor(n.status);
+        const label = (n.title || n.node_key || '').slice(0, 12);
+        return `
+            <g transform="translate(${pos.x},${pos.y})">
+                <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5" opacity="0.9"/>
+                <text x="${NODE_W/2}" y="${NODE_H/2 + 4}" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">${agentEscape(label)}</text>
+                <text x="${NODE_W/2}" y="${NODE_H - 6}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="8">${agentEscape(n.status || 'pending')}</text>
+            </g>
+        `;
+    });
+    return `
+        <div class="agent-dag-run-graph">
+            <svg viewBox="0 0 ${totalW} ${totalH}" preserveAspectRatio="xMinYMin meet" style="width:100%;max-height:260px;border:1px solid var(--border);border-radius:8px;background:#f8fafc;">
+                <defs>
+                    <marker id="dag-run-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                        <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+                    </marker>
+                </defs>
+                ${edges.join('')}
+                ${nodes.join('')}
+            </svg>
+            <div class="agent-dag-run-legend">
+                <span class="dag-legend-completed">■ 完成</span>
+                <span class="dag-legend-running">■ 运行中</span>
+                <span class="dag-legend-error">■ 错误</span>
+                <span class="dag-legend-skipped">■ 跳过</span>
+                <span class="dag-legend-pending">■ 待执行</span>
+            </div>
         </div>
     `;
 }
@@ -871,6 +1060,7 @@ window.openAgentRun = async function(runId) {
     const tokenUsage = formatAgentTokenUsage(run);
     const progressPercent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
     const progressLabel = agentProgressLabel(run, progress);
+    const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer);
     const title = document.getElementById('agent-run-detail-title');
     if (title) title.textContent = agentDisplayTitle(run);
     detail.innerHTML = `
@@ -894,12 +1084,14 @@ window.openAgentRun = async function(runId) {
         </div>
         ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
+        ${visualOutputs}
         ${dagNodes.length ? `
             <div class="agent-dag-list">
                 <div class="agent-tool-section-head compact">
                     <strong>工作流节点</strong>
                     <span>${dagNodes.length} 个节点</span>
                 </div>
+                ${renderAgentDagRunGraph(dagNodes)}
                 ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
             </div>
         ` : ''}
@@ -919,6 +1111,7 @@ window.openAgentRun = async function(runId) {
     });
     detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.saveAgentArtifact(run.id));
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
+    window.renderPivotCharts?.(detail);
 };
 
 function ensureAgentAuditModal() {
@@ -1145,8 +1338,15 @@ function getAgentWorkflowText() {
 }
 
 function parseAgentWorkflowText(raw = getAgentWorkflowText()) {
-    if (!raw) return { nodes: [] };
-    return JSON.parse(raw);
+    if (raw == null || raw === '') return { nodes: [] };
+    if (typeof raw === 'string') {
+        const text = raw.trim();
+        if (!text) return { nodes: [] };
+        return JSON.parse(text);
+    }
+    if (Array.isArray(raw)) return { nodes: raw };
+    if (typeof raw === 'object') return raw;
+    throw new Error('Invalid workflow JSON payload.');
 }
 
 function summarizeAgentDagSpec(raw = getAgentWorkflowText()) {
@@ -1175,23 +1375,26 @@ function summarizeAgentDagSpec(raw = getAgentWorkflowText()) {
 function updateAgentWorkflowRunUi() {
     const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
     const isDagMode = runMode === 'dag';
-    document.querySelector('.agent-dag-inputs-field')?.classList.toggle('is-hidden', !isDagMode);
+    document.getElementById('agent-run-workflow-field')?.classList.toggle('hidden', !isDagMode);
     const status = document.getElementById('agent-workflow-run-status');
     const text = document.getElementById('agent-workflow-run-status-text');
     if (!status) return;
     status.classList.toggle('hidden', !isDagMode);
-    if (!isDagMode) return;
-    const summary = summarizeAgentDagSpec();
-    const ready = summary.valid && summary.executableNodeCount > 0;
+    if (!isDagMode) { refreshAgentDagInputsPanel(); return; }
+    const selected = selectedAgentWorkflow();
+    const summary = selected ? summarizeAgentDagSpec(selected.dag_spec || { nodes: [] }) : summarizeAgentDagSpec();
+    const ready = Boolean(selected) && summary.valid && summary.executableNodeCount > 0;
     status.classList.toggle('is-ready', ready);
     status.classList.toggle('is-error', !ready);
+    // 同步刷新运行时输入面板
+    refreshAgentDagInputsPanel();
     if (!text) return;
-    if (!summary.valid) {
+    if (!selected) {
+        text.textContent = '请选择要运行的工作流';
+    } else if (!summary.valid) {
         text.textContent = '工作流 JSON 需要修正';
     } else if (summary.executableNodeCount > 0) {
-        const selected = selectedAgentWorkflow();
-        const source = selected?.name || '当前画布';
-        text.textContent = `${source} · ${summary.executableNodeCount} 个可运行节点`;
+        text.textContent = `${selected.name || '工作流'} · ${summary.executableNodeCount} 个可运行节点`;
     } else {
         text.textContent = '未配置可运行工作流';
     }
@@ -1244,20 +1447,36 @@ function closeAgentDagNodeDrawer() {
 
 function renderAgentWorkflowLibrary() {
     const select = document.getElementById('agent-workflow-select');
+    const runSelect = document.getElementById('agent-run-workflow-select');
     const nameInput = document.getElementById('agent-workflow-name');
     const versionLabel = document.getElementById('agent-workflow-version-label');
-    if (!select) return;
-    const current = activeAgentWorkflowId || select.value || '';
-    select.innerHTML = [
-        '<option value="">新建工作流</option>',
+    const current = activeAgentWorkflowId || '';
+    const editorOptions = [
+        '<option value="">选择已有工作流</option>',
         ...agentWorkflowsCache.map(item => {
             const version = item.current_version ? ` v${item.current_version}` : '';
             return `<option value="${agentEscape(item.id)}">${agentEscape(item.name)}${agentEscape(version)}</option>`;
         })
     ].join('');
-    select.value = agentWorkflowsCache.some(item => String(item.id) === String(current)) ? String(current) : '';
-    activeAgentWorkflowId = select.value;
-    const selected = agentWorkflowsCache.find(item => String(item.id) === String(select.value));
+    const runOptions = [
+        '<option value="">选择要运行的工作流</option>',
+        ...agentWorkflowsCache.map(item => {
+            const version = item.current_version ? ` v${item.current_version}` : '';
+            const nodes = Number(item.node_count || 0) ? ` · ${Number(item.node_count || 0)} 节点` : '';
+            return `<option value="${agentEscape(item.id)}">${agentEscape(item.name)}${agentEscape(version)}${agentEscape(nodes)}</option>`;
+        })
+    ].join('');
+    const nextValue = agentWorkflowsCache.some(item => String(item.id) === String(current)) ? String(current) : '';
+    if (select) {
+        select.innerHTML = editorOptions;
+        select.value = nextValue;
+    }
+    if (runSelect) {
+        runSelect.innerHTML = runOptions;
+        runSelect.value = nextValue;
+    }
+    activeAgentWorkflowId = nextValue;
+    const selected = agentWorkflowsCache.find(item => String(item.id) === String(nextValue));
     if (selected && nameInput && !nameInput.value.trim()) nameInput.value = selected.name || '';
     if (versionLabel) {
         if (selected) {
@@ -1284,10 +1503,152 @@ async function loadAgentWorkflows() {
     }
 }
 
+function clearAgentWorkflowLocalSnapshots() {
+    try {
+        localStorage.removeItem(AGENT_WORKFLOW_DRAFT_KEY);
+        localStorage.removeItem(AGENT_WORKFLOW_SAVED_KEY);
+    } catch (e) {
+        // ignore storage cleanup failures
+    }
+}
+
+function currentAgentWorkflowDescription() {
+    return String(agentWorkflowDraftDescription || '').trim().slice(0, 300);
+}
+
+function newAgentWorkflow(options = {}) {
+    const {
+        showToast: shouldShowToast = true,
+        clearSnapshots = true,
+        remount = true,
+        name = '',
+        description = ''
+    } = options;
+    activeAgentWorkflowId = '';
+    const select = document.getElementById('agent-workflow-select');
+    if (select) select.value = '';
+    const nameInput = document.getElementById('agent-workflow-name');
+    if (nameInput) nameInput.value = String(name || '').trim().slice(0, 100);
+    agentWorkflowDraftDescription = String(description || '').trim().slice(0, 300);
+    if (Object.prototype.hasOwnProperty.call(options, 'goal')) {
+        const goalInput = document.getElementById('agent-goal-input');
+        if (goalInput) goalInput.value = String(options.goal || '').trim().slice(0, 2000);
+    }
+    const runMode = document.getElementById('agent-run-mode');
+    if (runMode) runMode.value = 'dag';
+    if (clearSnapshots) clearAgentWorkflowLocalSnapshots();
+    closeAgentDagNodeDrawer();
+    writeAgentWorkflowText({ nodes: [] });
+    renderAgentWorkflowLibrary();
+    if (remount) {
+        mountAgentDagEditor();
+        window.refreshAgentDagEditor?.();
+    }
+    updateAgentWorkflowRunUi();
+    if (shouldShowToast) showToast(`已新建工作流：${currentAgentWorkflowName()}`, 'success');
+}
+
+function closeAgentWorkflowCreateModal() {
+    document.getElementById('agent-workflow-create-modal')?.classList.add('hidden');
+}
+
+function ensureAgentWorkflowCreateModal() {
+    let modal = document.getElementById('agent-workflow-create-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'agent-workflow-create-modal';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.innerHTML = `
+        <div class="modal rag-detail-modal agent-workflow-create-modal">
+            <div class="rag-detail-header">
+                <div>
+                    <h3>新建工作流</h3>
+                    <p class="model-modal-desc">填写基础信息后进入空白编排画布。</p>
+                </div>
+                <button type="button" id="agent-workflow-create-close-btn" class="btn-danger-outline">关闭</button>
+            </div>
+            <form id="agent-workflow-create-form" class="agent-workflow-create-form">
+                <label class="agent-workflow-create-field">
+                    <span>工作流名称</span>
+                    <input id="agent-workflow-create-name" class="form-input" maxlength="100" placeholder="例如：日报生成流程" required>
+                </label>
+                <label class="agent-workflow-create-field">
+                    <span>工作流说明</span>
+                    <textarea id="agent-workflow-create-description" class="form-input" maxlength="300" rows="3" placeholder="说明用途、输入约定或交付格式"></textarea>
+                </label>
+                <label class="agent-workflow-create-field">
+                    <span>默认执行目标</span>
+                    <textarea id="agent-workflow-create-goal" class="form-input" maxlength="2000" rows="3" placeholder="可选，会同步到智能体任务目标"></textarea>
+                </label>
+                <div id="agent-workflow-create-status" class="agent-workflow-create-status" aria-live="polite"></div>
+                <div class="agent-workflow-create-actions">
+                    <button type="button" class="btn-secondary" id="agent-workflow-create-cancel-btn">取消</button>
+                    <button type="submit" class="btn-primary">创建空白工作流</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => closeAgentWorkflowCreateModal();
+    modal.addEventListener('click', event => {
+        if (
+            event.target === modal
+            || event.target.closest('#agent-workflow-create-close-btn')
+            || event.target.closest('#agent-workflow-create-cancel-btn')
+        ) {
+            close();
+        }
+    });
+    modal.addEventListener('keydown', event => {
+        if (event.key === 'Escape') close();
+    });
+    modal.querySelector('#agent-workflow-create-form')?.addEventListener('submit', event => {
+        event.preventDefault();
+        const nameInput = modal.querySelector('#agent-workflow-create-name');
+        const status = modal.querySelector('#agent-workflow-create-status');
+        const name = String(nameInput?.value || '').trim();
+        if (!name) {
+            if (status) status.textContent = '请填写工作流名称';
+            nameInput?.focus();
+            return;
+        }
+        const description = String(modal.querySelector('#agent-workflow-create-description')?.value || '').trim();
+        const goal = String(modal.querySelector('#agent-workflow-create-goal')?.value || '').trim();
+        newAgentWorkflow({ name, description, goal });
+        close();
+    });
+    return modal;
+}
+
+function openAgentWorkflowCreateModal() {
+    const modal = ensureAgentWorkflowCreateModal();
+    const nameInput = modal.querySelector('#agent-workflow-create-name');
+    const descriptionInput = modal.querySelector('#agent-workflow-create-description');
+    const goalInput = modal.querySelector('#agent-workflow-create-goal');
+    const status = modal.querySelector('#agent-workflow-create-status');
+    if (nameInput) nameInput.value = '';
+    if (descriptionInput) descriptionInput.value = '';
+    if (goalInput) goalInput.value = document.getElementById('agent-goal-input')?.value.trim() || '';
+    if (status) status.textContent = '';
+    modal.classList.remove('hidden');
+    requestAnimationFrame(() => nameInput?.focus());
+}
+
 function currentAgentWorkflowName() {
     const input = document.getElementById('agent-workflow-name');
     const goal = document.getElementById('agent-goal-input')?.value.trim().slice(0, 40);
     return String(input?.value || goal || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
+}
+
+function inferAgentWorkflowRunGoal() {
+    const explicitGoal = document.getElementById('agent-goal-input')?.value.trim();
+    if (explicitGoal) return explicitGoal;
+    const selected = selectedAgentWorkflow();
+    const workflowName = String(selected?.name || document.getElementById('agent-workflow-name')?.value || '').trim();
+    if (workflowName) return `执行工作流：${workflowName}`.slice(0, 2000);
+    const summary = summarizeAgentDagSpec();
+    if (summary.valid && summary.executableNodeCount > 0) return `执行当前工作流（${summary.executableNodeCount} 个节点）`;
+    return '';
 }
 
 async function saveAgentWorkflowToLibrary(options = {}) {
@@ -1296,8 +1657,20 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     try {
         parsed = parseAgentWorkflowText();
     } catch (e) {
-        showToast('工作流编排 JSON 格式不正确', 'error');
+        showToast('工作流 JSON 格式不正确', 'error');
         return null;
+    }
+    // 保存前主动校验，发现错误时弹出确认门禁
+    const validation = dagEditorInstance?.validate?.();
+    if (validation && validation.errors.length) {
+        const msg = [
+            `工作流存在 ${validation.errors.length} 个问题：`,
+            ...validation.errors.map((e, i) => `${i + 1}. ${e}`),
+            '',
+            '确定仍要保存吗？'
+        ].join('\n');
+        const confirmed = await (window.showConfirm?.('工作流校验未通过', msg) || Promise.resolve(window.confirm(msg)));
+        if (!confirmed) return null;
     }
     const workflowId = activeAgentWorkflowId || document.getElementById('agent-workflow-select')?.value || '';
     const method = workflowId ? 'PUT' : 'POST';
@@ -1309,6 +1682,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             name: currentAgentWorkflowName(),
+            description: currentAgentWorkflowDescription(),
             dagSpec: parsed,
             note: method === 'POST' ? '创建工作流' : '保存新版本'
         })
@@ -1319,6 +1693,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         return null;
     }
     activeAgentWorkflowId = String(data.workflow.id);
+    agentWorkflowDraftDescription = data.workflow.description || currentAgentWorkflowDescription();
     const nameInput = document.getElementById('agent-workflow-name');
     if (nameInput) nameInput.value = data.workflow.name || currentAgentWorkflowName();
     await loadAgentWorkflows();
@@ -1331,6 +1706,9 @@ function loadSelectedAgentWorkflow() {
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
     if (!workflow) return showToast('请选择要加载的工作流', 'warning');
     activeAgentWorkflowId = String(workflow.id);
+    const runSelect = document.getElementById('agent-run-workflow-select');
+    if (runSelect) runSelect.value = activeAgentWorkflowId;
+    agentWorkflowDraftDescription = workflow.description || '';
     const nameInput = document.getElementById('agent-workflow-name');
     if (nameInput) nameInput.value = workflow.name || '';
     writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
@@ -1343,6 +1721,26 @@ function loadSelectedAgentWorkflow() {
     showToast(`已加载工作流：${workflow.name}`, 'success');
 }
 
+function applyAgentRunWorkflowSelection(workflowId, options = {}) {
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId || ''));
+    activeAgentWorkflowId = workflow ? String(workflow.id) : '';
+    const runSelect = document.getElementById('agent-run-workflow-select');
+    if (runSelect) runSelect.value = activeAgentWorkflowId;
+    const editorSelect = document.getElementById('agent-workflow-select');
+    if (editorSelect) editorSelect.value = activeAgentWorkflowId;
+    if (workflow) {
+        agentWorkflowDraftDescription = workflow.description || '';
+        const nameInput = document.getElementById('agent-workflow-name');
+        if (nameInput && !nameInput.value.trim()) nameInput.value = workflow.name || '';
+        writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+    } else {
+        closeAgentDagNodeDrawer();
+        writeAgentWorkflowText({ nodes: [] });
+    }
+    updateAgentWorkflowRunUi();
+    if (workflow && options.showToast) showToast(`已选择工作流：${workflow.name}`, 'success');
+}
+
 function deleteSelectedAgentWorkflow() {
     const select = document.getElementById('agent-workflow-select');
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
@@ -1351,11 +1749,29 @@ function deleteSelectedAgentWorkflow() {
         const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除工作流失败', 'error');
-        if (String(activeAgentWorkflowId) === String(workflow.id)) activeAgentWorkflowId = '';
+        // 保存删除信息以便撤销
+        const deletedInfo = { id: workflow.id, name: workflow.name };
+        const wasActive = String(activeAgentWorkflowId) === String(workflow.id);
+        if (wasActive) activeAgentWorkflowId = '';
+        agentWorkflowDraftDescription = '';
         const nameInput = document.getElementById('agent-workflow-name');
         if (nameInput) nameInput.value = '';
         await loadAgentWorkflows();
-        showToast('工作流已删除', 'success');
+        // 显示含恢复操作的提示
+        showToast(`工作流「${deletedInfo.name}」已删除，30 天内可恢复`, 'success');
+        const versionLabel = document.getElementById('agent-workflow-version-label');
+        if (versionLabel) {
+            versionLabel.innerHTML = `<button type="button" class="btn-secondary agent-undo-delete-btn" title="恢复已删除的工作流" style="font-size:0.72rem;padding:2px 8px;">↩ 撤销删除</button>`;
+            versionLabel.querySelector('.agent-undo-delete-btn')?.addEventListener('click', async () => {
+                const restoreRes = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(deletedInfo.id)}/restore`, { method: 'PATCH' });
+                const restoreData = await restoreRes.json().catch(() => ({}));
+                if (!restoreRes.ok) return showToast(restoreData.error || '恢复失败', 'error');
+                if (wasActive) activeAgentWorkflowId = String(restoreData.workflow.id);
+                if (nameInput) nameInput.value = restoreData.workflow.name || deletedInfo.name;
+                await loadAgentWorkflows();
+                showToast(`工作流「${restoreData.workflow.name || deletedInfo.name}」已恢复`, 'success');
+            });
+        }
     });
 }
 
@@ -1407,8 +1823,9 @@ function ensureAgentWorkflowVersionsModal() {
 }
 
 function selectedAgentWorkflow() {
+    const runSelect = document.getElementById('agent-run-workflow-select');
     const select = document.getElementById('agent-workflow-select');
-    return agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
+    return agentWorkflowsCache.find(item => String(item.id) === String(runSelect?.value || select?.value || activeAgentWorkflowId));
 }
 
 function currentWorkflowMatchesSelected(workflow) {
@@ -1562,7 +1979,7 @@ function persistAgentWorkflow(key, label) {
     try {
         parsed = parseAgentWorkflowText(raw);
     } catch (e) {
-        showToast('工作流编排 JSON 格式不正确', 'error');
+        showToast('工作流 JSON 格式不正确', 'error');
         return false;
     }
     try {
@@ -1575,24 +1992,6 @@ function persistAgentWorkflow(key, label) {
         return false;
     }
     return true;
-}
-
-function restoreAgentWorkflowSnapshot() {
-    const textarea = document.getElementById('agent-dag-spec');
-    if (!textarea || textarea.value.trim()) return;
-    const readSnapshot = (key) => {
-        try {
-            return JSON.parse(localStorage.getItem(key) || 'null');
-        } catch (e) {
-            return null;
-        }
-    };
-    const saved = readSnapshot(AGENT_WORKFLOW_SAVED_KEY);
-    const draft = readSnapshot(AGENT_WORKFLOW_DRAFT_KEY);
-    const savedAt = saved?.savedAt ? Date.parse(saved.savedAt) : 0;
-    const draftAt = draft?.savedAt ? Date.parse(draft.savedAt) : 0;
-    const snapshot = draftAt > savedAt ? draft : saved;
-    if (snapshot?.spec) writeAgentWorkflowText(snapshot.spec);
 }
 
 window.saveAgentWorkflowDraft = function() {
@@ -1615,9 +2014,10 @@ window.saveAgentWorkflow = async function() {
 };
 
 function getAgentRunPayload(goalOverride = '') {
-    const goal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
     const allowMcp = document.getElementById('agent-allow-mcp')?.checked !== false;
     const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
+    const typedGoal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
+    const goal = runMode === 'dag' ? (typedGoal || inferAgentWorkflowRunGoal()) : typedGoal;
     const payload = {
         goal,
         modelId: document.getElementById('agent-model-select')?.value,
@@ -1633,26 +2033,25 @@ function getAgentRunPayload(goalOverride = '') {
         sessionId: window.currentSessionId || null
     };
     if (runMode === 'dag') {
-        const rawDag = document.getElementById('agent-dag-spec')?.value.trim();
-        const dagSummary = summarizeAgentDagSpec(rawDag);
+        const selectedWorkflow = selectedAgentWorkflow();
+        if (!selectedWorkflow) {
+            showToast('请选择要运行的工作流', 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        payload.workflowId = selectedWorkflow.id;
+        payload.workflowVersion = 'current';
+        const dagSummary = summarizeAgentDagSpec(selectedWorkflow.dag_spec || { nodes: [] });
         if (!dagSummary.valid) {
-            showToast('工作流编排 JSON 格式不正确', 'error');
+            showToast('工作流配置格式不正确', 'error');
             payload._invalid = true;
         } else if (dagSummary.executableNodeCount <= 0) {
-            showToast('工作流编排至少需要 1 个已选择工具的节点', 'error');
+            showToast('工作流至少需要 1 个已选择工具的节点', 'error');
             payload._invalid = true;
-        } else {
-            payload.dagSpec = dagSummary.spec;
         }
-        const rawInputs = document.getElementById('agent-dag-inputs')?.value.trim();
-        if (rawInputs) {
-            try {
-                const parsedInputs = JSON.parse(rawInputs);
-                payload.dagInputs = parsedInputs && typeof parsedInputs === 'object' && !Array.isArray(parsedInputs) ? parsedInputs : {};
-            } catch (e) {
-                showToast('工作流运行输入 JSON 格式不正确', 'error');
-                payload._invalid = true;
-            }
+        const visualInputs = collectAgentDagInputs();
+        if (Object.keys(visualInputs).length) {
+            payload.dagInputs = visualInputs;
         }
     }
     return payload;
@@ -1693,11 +2092,8 @@ function applyAgentTemplate(template) {
             activeAgentWorkflowId = template.workflow_id ? String(template.workflow_id) : '';
             const workflowSelect = document.getElementById('agent-workflow-select');
             if (workflowSelect) workflowSelect.value = activeAgentWorkflowId;
-        }
-        const dagInputs = document.getElementById('agent-dag-inputs');
-        const parsedInputs = agentParsePayload(template.dag_inputs || '');
-        if (dagInputs && parsedInputs && typeof parsedInputs === 'object') {
-            dagInputs.value = JSON.stringify(parsedInputs, null, 2);
+            const runWorkflowSelect = document.getElementById('agent-run-workflow-select');
+            if (runWorkflowSelect) runWorkflowSelect.value = activeAgentWorkflowId;
         }
     }
     updateAgentWorkflowRunUi();
@@ -2112,6 +2508,7 @@ window.loadAgentWorkbench = async function() {
             loadAgentRuntimeStatus(),
             loadAgentMetrics(),
             loadAgentTemplates(),
+            loadAgentWorkflows(),
             loadAgentSchedules(),
             loadAgentNotifications(),
             loadAgentArtifacts()
@@ -2138,11 +2535,22 @@ window.openAgentWorkbench = async function() {
 window.openAgentDagWorkbench = async function() {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');
-    restoreAgentWorkflowSnapshot();
+    const requestedWorkflowId = activeAgentWorkflowId || document.getElementById('agent-run-workflow-select')?.value || '';
     await Promise.all([
         agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
         loadAgentWorkflows()
     ]);
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(requestedWorkflowId));
+    if (workflow) {
+        activeAgentWorkflowId = String(workflow.id);
+        agentWorkflowDraftDescription = workflow.description || '';
+        const nameInput = document.getElementById('agent-workflow-name');
+        if (nameInput) nameInput.value = workflow.name || '';
+        writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+        renderAgentWorkflowLibrary();
+    } else {
+        newAgentWorkflow({ showToast: false, clearSnapshots: false, remount: false });
+    }
     mountAgentDagEditor();
     window.refreshAgentDagEditor?.();
     window.bindAgentDagWorkbench?.();
@@ -2218,10 +2626,22 @@ window.bindAgentEnterpriseControls = function() {
         runMode.dataset.boundAgentRunMode = '1';
         runMode.addEventListener('change', updateAgentWorkflowRunUi);
     }
+    const runWorkflowSelect = document.getElementById('agent-run-workflow-select');
+    if (runWorkflowSelect && runWorkflowSelect.dataset.boundAgentRunWorkflow !== '1') {
+        runWorkflowSelect.dataset.boundAgentRunWorkflow = '1';
+        runWorkflowSelect.addEventListener('change', () => {
+            applyAgentRunWorkflowSelection(runWorkflowSelect.value, { showToast: false });
+        });
+    }
     const workflowOpenBtn = document.getElementById('agent-workflow-run-open-btn');
     if (workflowOpenBtn && workflowOpenBtn.dataset.boundAgentWorkflowRunOpen !== '1') {
         workflowOpenBtn.dataset.boundAgentWorkflowRunOpen = '1';
         workflowOpenBtn.addEventListener('click', () => window.openAgentDagWorkbench?.());
+    }
+    const runInputsRefreshBtn = document.getElementById('agent-run-dag-inputs-refresh-btn');
+    if (runInputsRefreshBtn && runInputsRefreshBtn.dataset.boundInputsRefresh !== '1') {
+        runInputsRefreshBtn.dataset.boundInputsRefresh = '1';
+        runInputsRefreshBtn.addEventListener('click', refreshAgentDagInputsPanel);
     }
     updateAgentWorkflowRunUi();
 };
@@ -2306,6 +2726,11 @@ window.bindAgentConfigModal = function() {
 };
 
 window.bindAgentDagWorkbench = function() {
+    const newBtn = document.getElementById('agent-workflow-new-btn');
+    if (newBtn && newBtn.dataset.boundAgentWorkflowNew !== '1') {
+        newBtn.dataset.boundAgentWorkflowNew = '1';
+        newBtn.addEventListener('click', openAgentWorkflowCreateModal);
+    }
     const draftBtn = document.getElementById('agent-dag-save-draft-btn');
     if (draftBtn && draftBtn.dataset.boundAgentDagDraft !== '1') {
         draftBtn.dataset.boundAgentDagDraft = '1';
@@ -2326,7 +2751,12 @@ window.bindAgentDagWorkbench = function() {
         workflowSelect.dataset.boundAgentWorkflowSelect = '1';
         workflowSelect.addEventListener('change', () => {
             activeAgentWorkflowId = workflowSelect.value || '';
+            if (!activeAgentWorkflowId) {
+                newAgentWorkflow({ showToast: false, clearSnapshots: false });
+                return;
+            }
             const selected = agentWorkflowsCache.find(item => String(item.id) === String(activeAgentWorkflowId));
+            agentWorkflowDraftDescription = selected?.description || '';
             const nameInput = document.getElementById('agent-workflow-name');
             if (nameInput) nameInput.value = selected?.name || '';
             renderAgentWorkflowLibrary();
@@ -2375,6 +2805,12 @@ window.bindAgentDagWorkbench = function() {
             if (event.target === jsonModal) closeAgentDagJsonModal();
         });
     }
+    // 运行时输入面板刷新按钮
+    const inputsRefreshBtn = document.getElementById('agent-dag-inputs-refresh-btn');
+    if (inputsRefreshBtn && inputsRefreshBtn.dataset.boundInputsRefresh !== '1') {
+        inputsRefreshBtn.dataset.boundInputsRefresh = '1';
+        inputsRefreshBtn.addEventListener('click', refreshAgentDagInputsPanel);
+    }
 };
 
 // 智能体 DAG 可视化编辑器挂载（v0.0.47）
@@ -2398,11 +2834,79 @@ function mountAgentDagEditor() {
         onNodeSelectionChange: updateAgentDagNodeDrawer,
         onChange: (result) => {
             if (result && result.error === 'invalid_json') {
-                showToast('工作流编排 JSON 格式不正确', 'error');
+                showToast('工作流 JSON 格式不正确', 'error');
             } else {
                 updateAgentWorkflowRunUi();
+                // 同步刷新运行时输入面板
+                refreshAgentDagInputsPanel();
             }
         }
     });
 }
 window.refreshAgentDagEditor = () => dagEditorInstance?.refresh();
+
+// 运行时输入参数面板：自动扫描工作流中引用的 {{inputs.*}} 变量并生成输入表单
+function refreshAgentDagInputsPanel() {
+    const targets = [
+        {
+            panel: document.getElementById('agent-run-dag-inputs-panel'),
+            list: document.getElementById('agent-run-dag-inputs-list')
+        },
+        {
+            panel: document.getElementById('agent-dag-inputs-panel'),
+            list: document.getElementById('agent-dag-inputs-list')
+        }
+    ].filter(item => item.panel && item.list);
+    if (!targets.length) return;
+    const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
+    if (runMode !== 'dag') {
+        targets.forEach(({ panel }) => panel.classList.add('hidden'));
+        return;
+    }
+    let dagText = '';
+    const selected = selectedAgentWorkflow();
+    if (selected) {
+        try { dagText = JSON.stringify(selected.dag_spec || { nodes: [] }); } catch (e) { dagText = ''; }
+    } else {
+        try { dagText = document.getElementById('agent-dag-spec')?.value || ''; } catch (e) { /* ignore */ }
+    }
+    const refs = new Set();
+    const regex = /\{\{\s*inputs\.([\w.-]+)\s*\}\}/g;
+    let match;
+    while ((match = regex.exec(dagText)) !== null) {
+        const key = String(match[1] || '').trim();
+        if (key) refs.add(key);
+    }
+    if (!refs.size) {
+        targets.forEach(({ panel }) => panel.classList.add('hidden'));
+        return;
+    }
+    targets.forEach(({ panel, list }) => {
+        panel.classList.remove('hidden');
+        // 保留已有值，避免刷新时丢失用户输入
+        const existing = {};
+        list.querySelectorAll('.agent-dag-input-item input').forEach(input => {
+            existing[input.dataset.dagInputKey || input.name] = input.value;
+        });
+        list.innerHTML = [...refs].map(key => `
+            <label class="agent-dag-input-item">
+                <span>${agentEscape(key)}</span>
+                <input class="form-input" type="text" data-dag-input-key="${agentEscape(key)}" value="${agentEscape(existing[key] || '')}" placeholder="输入 ${agentEscape(key)} 的值">
+            </label>
+        `).join('');
+    });
+}
+
+// 从运行时输入面板收集 dagInputs
+function collectAgentDagInputs() {
+    const result = {};
+    document.querySelectorAll('#agent-run-dag-inputs-list [data-dag-input-key], #agent-dag-inputs-list [data-dag-input-key]').forEach(input => {
+        const key = String(input.dataset.dagInputKey || '').trim();
+        const value = String(input.value || '').trim();
+        if (key) result[key] = value;
+    });
+    return result;
+}
+
+window.refreshAgentDagInputs = refreshAgentDagInputsPanel;
+window.collectAgentDagInputs = collectAgentDagInputs;

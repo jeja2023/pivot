@@ -330,6 +330,19 @@ function deleteAgentWorkflow(workflowId, user) {
     return workflow;
 }
 
+// 恢复已删除工作流（软撤销）
+function restoreAgentWorkflow(workflowId, user) {
+    const workflow = db.prepare(`
+        SELECT * FROM agent_workflows
+        WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
+          AND deleted_at > datetime('now', '+8 hours', '-30 days')
+    `).get(workflowId, user.id);
+    if (!workflow) return null;
+    const now = getBeijingTimestamp();
+    db.prepare('UPDATE agent_workflows SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(now, workflow.id);
+    return getAgentWorkflowForUser(workflow.id, user);
+}
+
 module.exports = {
     createAgentWorkflow,
     deleteAgentWorkflow,
@@ -341,6 +354,7 @@ module.exports = {
     normalizeDagRunInputs,
     publishAgentWorkflowVersion,
     resolveAgentWorkflowVersion,
+    restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     updateAgentWorkflow
 };

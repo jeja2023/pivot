@@ -1,10 +1,10 @@
-<!-- 智能体工作流编排工作台 -->
+<!-- 智能体工作流工作台 -->
     <section id="agent-dag-workbench-modal" class="main-workspace-view agent-dag-workspace-view hidden">
         <div class="agent-dag-modal">
             <div class="agent-dag-modal-header">
                 <div>
-                    <h3>工作流编排</h3>
-                    <p>单独编辑智能体的任务工作流，适合复杂节点、依赖和调试。</p>
+                    <h3>工作流</h3>
+                    <p>自定义节点、工具输入与依赖关系，也可从模板生成可编辑工作流。</p>
                 </div>
                 <div class="agent-dag-header-actions">
                     <button id="agent-dag-save-draft-btn" class="btn-secondary" type="button">保存草稿</button>
@@ -21,11 +21,12 @@
                     <label class="agent-dag-library-select">
                         <span>工作流库</span>
                         <select id="agent-workflow-select" class="form-input">
-                            <option value="">新建工作流</option>
+                            <option value="">选择已有工作流</option>
                         </select>
                     </label>
                 </div>
                 <div class="agent-dag-library-actions" aria-label="工作流库操作">
+                    <button id="agent-workflow-new-btn" class="btn-secondary" type="button">新建工作流</button>
                     <button id="agent-workflow-load-btn" class="btn-secondary" type="button">加载</button>
                     <button id="agent-workflow-versions-btn" class="btn-secondary" type="button">版本</button>
                     <button id="agent-workflow-publish-btn" class="btn-primary" type="button">发布</button>
@@ -37,6 +38,17 @@
                 <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
                     <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
                     <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
+                </div>
+                <!-- 运行时输入面板：自动解析工作流中引用的 {{inputs.*}} 变量 -->
+                <div class="agent-dag-inputs-panel hidden" id="agent-dag-inputs-panel">
+                    <div class="agent-dag-inputs-head">
+                        <h4>运行输入参数</h4>
+                        <span class="agent-dag-inputs-hint">工作流中引用了以下输入变量，请在运行前填写实际值。</span>
+                    </div>
+                    <div class="agent-dag-inputs-list" id="agent-dag-inputs-list"></div>
+                    <div class="agent-dag-inputs-actions">
+                        <button type="button" id="agent-dag-inputs-refresh-btn" class="btn-secondary">重新扫描变量</button>
+                    </div>
                 </div>
                 <aside id="agent-dag-node-drawer" class="agent-dag-node-drawer hidden" aria-hidden="true">
                     <div class="agent-dag-node-drawer-panel">

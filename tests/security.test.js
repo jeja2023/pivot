@@ -175,8 +175,12 @@ const { createSettingsRouter } = require('../server/routes/settings');
 const { createPromptsRouter } = require('../server/routes/prompts');
 const { createAnnouncementsRouter } = require('../server/routes/announcements');
 const {
+    appendStreamedChartsToAssistantContent,
+    applyChatLanguageInstruction,
+    buildFallbackDataQueryInput,
     buildRagContextMessage,
     createChatRouter,
+    detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,
@@ -232,6 +236,7 @@ const {
     shouldPauseForApproval,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
+const { resolveDagNodeInput } = require('../server/services/agent-dag-utils');
 const { formatToolList } = require('../server/services/agent-tool-catalog');
 const {
     getRunDetailForUser,
@@ -443,6 +448,147 @@ test('safe HTML fallback escapes input when DOMPurify is unavailable', () => {
         sandbox.window.PivotSafeHtml.sanitizeHtml('<img src=x onerror=alert(1)>'),
         '&lt;img src=x onerror=alert(1)&gt;'
     );
+});
+
+function createChatRenderSandbox() {
+    const rootDir = path.resolve(__dirname, '..');
+    const sandbox = {
+        console,
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame(callback) {
+            if (typeof callback === 'function') callback();
+            return 1;
+        },
+        cancelAnimationFrame() {},
+        navigator: {
+            clipboard: {
+                async writeText() {}
+            }
+        },
+        document: {
+            createElement() {
+                return {
+                    style: {},
+                    classList: { add() {}, remove() {} },
+                    setAttribute() {},
+                    appendChild() {},
+                    remove() {},
+                    querySelector() { return null; },
+                    querySelectorAll() { return []; },
+                    addEventListener() {},
+                    removeEventListener() {},
+                    innerHTML: '',
+                    textContent: ''
+                };
+            },
+            body: {
+                appendChild() {}
+            },
+            addEventListener() {},
+            removeEventListener() {},
+            execCommand() {
+                return false;
+            }
+        },
+        addEventListener() {},
+        removeEventListener() {}
+    };
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    sandbox.self = sandbox;
+    sandbox.PivotSafeHtml = {
+        escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        },
+        escapeAttr(value) {
+            return this.escapeHtml(value).replace(/"/g, '&quot;');
+        },
+        sanitizeHtml(html) {
+            return html;
+        }
+    };
+
+    const context = vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'common', 'vendor', 'marked.min.js'), 'utf8'), context, {
+        filename: 'client/common/vendor/marked.min.js'
+    });
+    vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'chat', 'render.js'), 'utf8'), context, {
+        filename: 'client/chat/render.js'
+    });
+    return sandbox;
+}
+
+test('chat renderer accepts loose ECharts-style chart specs', () => {
+    const sandbox = createChatRenderSandbox();
+    const looseChartSpec = {
+        type: 'bar',
+        title: 'table_account 表中 group_id 分布统计',
+        xAxis: {
+            type: 'category',
+            name: 'group_id'
+        },
+        yAxis: {
+            type: 'value',
+            name: '数量'
+        },
+        series: [
+            {
+                name: '账户数量',
+                type: 'bar',
+                data: []
+            }
+        ],
+        tooltip: {
+            trigger: 'axis'
+        },
+        dataQuery: {
+            database: 'hcdb',
+            table: 'table_account'
+        }
+    };
+    const normalized = sandbox.normalizePivotChartSpec(JSON.stringify(looseChartSpec));
+    assert.ok(normalized);
+    assert.equal(normalized.chartType, 'bar');
+    assert.equal(normalized.title, 'table_account 表中 group_id 分布统计');
+    assert.equal(normalized.xAxis.label, 'group_id');
+    assert.equal(normalized.yAxis.label, '数量');
+    assert.equal(normalized.series.length, 1);
+    assert.equal(normalized.series[0].name, '账户数量');
+    assert.equal(normalized.series[0].data.length, 0);
+    assert.equal(normalized.source.format, 'loose_chart');
+    assert.equal(normalized.source.dataQuery.database, 'hcdb');
+    assert.equal(normalized.source.dataQuery.table, 'table_account');
+
+    const html = sandbox.renderMarkdown(`\`\`\`chart\n${JSON.stringify(looseChartSpec, null, 2)}\n\`\`\``);
+    assert.match(html, /pivot-echart-block/);
+});
+
+test('chat route embeds streamed chart specs into persisted assistant content', () => {
+    const chart = {
+        type: 'pivot_chart',
+        chartType: 'bar',
+        title: 'group_id count',
+        labels: ['0', '3'],
+        series: [{ name: 'count', data: [2, 1] }]
+    };
+
+    const content = appendStreamedChartsToAssistantContent('analysis text', [chart, chart]);
+    assert.match(content, /analysis text/);
+    assert.match(content, /```pivot-echart/);
+    assert.match(content, /"type": "pivot_chart"/);
+    assert.equal((content.match(/```pivot-echart/g) || []).length, 1);
+
+    const alreadyHasChart = [
+        'analysis text',
+        '```pivot-echart',
+        '{}',
+        '```'
+    ].join('\n');
+    assert.equal(appendStreamedChartsToAssistantContent(alreadyHasChart, [chart]), alreadyHasChart);
 });
 
 test('buildFtsQuery escapes user input into phrase terms', () => {
@@ -1624,6 +1770,22 @@ test('chat RAG context is injected before the latest user prompt with strict ins
     assert.match(buildRagContextMessage(ragContext), /引用 1/);
 });
 
+test('chat language instruction asks visible reasoning to stay in Chinese', () => {
+    const withoutSystem = applyChatLanguageInstruction([{ role: 'user', content: '介绍一下' }]);
+    assert.equal(withoutSystem[0].role, 'system');
+    assert.match(withoutSystem[0].content, /【重要语言规则】/);
+    assert.match(withoutSystem[0].content, /必须全程使用中文/);
+    assert.match(withoutSystem[0].content, /reasoning_content/);
+
+    const withSystem = applyChatLanguageInstruction([
+        { role: 'system', content: '你是助手。' },
+        { role: 'user', content: '介绍一下' }
+    ]);
+    assert.equal(withSystem.length, 2);
+    assert.match(withSystem[0].content, /你是助手/);
+    assert.match(withSystem[0].content, /禁止使用英文提纲或英文推理/);
+});
+
 test('chat regenerate flag only accepts explicit true values', () => {
     assert.equal(normalizeRegenerateFlag(true), true);
     assert.equal(normalizeRegenerateFlag('true'), true);
@@ -2345,6 +2507,33 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     const dagMetadata = JSON.parse(dagResumed.metadata || '{}');
     assert.equal(dagMetadata.dagSpec.nodes[0].tool, 'models.list');
     cancelAgentRun(dagResumed.id, user);
+});
+
+test('DAG templates read MCP structured rows through output.rows shorthand', () => {
+    const rows = [{ group_id: 0, account_count: 2 }, { group_id: 1, account_count: 1 }];
+    const context = {
+        goal: '生成分组图表',
+        inputs: {},
+        nodeMap: new Map([['group_count', { id: 'group_count', title: '分组统计', tool: 'db.group_count' }]]),
+        states: new Map([[
+            'group_count',
+            {
+                status: 'completed',
+                output: {
+                    content: [{ type: 'text', text: JSON.stringify({ rows }) }],
+                    structuredContent: { rows, limit: 50 }
+                }
+            }
+        ]])
+    };
+    const resolved = resolveDagNodeInput({
+        input: {
+            rows: '{{nodes.group_count.output.rows}}',
+            explicitRows: '{{nodes.group_count.output.structuredContent.rows}}'
+        }
+    }, context);
+    assert.deepEqual(resolved.rows, rows);
+    assert.deepEqual(resolved.explicitRows, rows);
 });
 
 test('OpenAI embedding helpers normalize requests and responses', () => {
@@ -3614,8 +3803,8 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
     const sqlitePath = path.join(process.env.DATA_DIR, `mcp-sqlite-${suffix}.db`);
     const source = new Sqlite(sqlitePath);
     source.exec(`
-        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-        INSERT INTO widgets (name) VALUES ('alpha'), ('beta');
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL);
+        INSERT INTO widgets (name, kind) VALUES ('alpha', 'red'), ('beta', 'blue'), ('gamma', 'red');
     `);
     source.close();
 
@@ -3659,6 +3848,7 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
         await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), refreshReq, refreshRes);
         assert.equal(refreshRes.statusCode, 200);
         assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.run_readonly_query'), true);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.group_count'), true);
 
         const queryReq = {
             body: {
@@ -3671,6 +3861,23 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
         await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), queryReq, queryRes);
         assert.equal(queryRes.statusCode, 200);
         assert.deepEqual(queryRes.body.result.structuredContent.rows.map(row => row.name), ['alpha', 'beta']);
+
+        const groupReq = {
+            body: {
+                name: `mcp.${serverId}.db.group_count`,
+                input: { table: 'widgets', groupBy: 'kind', groupAlias: 'kind', countAlias: 'total' }
+            },
+            user: adminUser
+        };
+        const groupRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), groupReq, groupRes);
+        assert.equal(groupRes.statusCode, 200);
+        assert.equal(groupRes.body.result.structuredContent.limit, 5);
+        assert.match(groupRes.body.result.structuredContent.sql, /COUNT\(\*\) AS "total"/);
+        assert.deepEqual(groupRes.body.result.structuredContent.rows, [
+            { kind: 'red', total: 2 },
+            { kind: 'blue', total: 1 }
+        ]);
 
         const writeReq = {
             body: {
@@ -4126,6 +4333,22 @@ test('chat MCP intent filter does not expose visualization tools for plain data 
 
     const plannerChartTools = filterMcpToolsForPlanner(withChart, '查询 hcd_b 表中各部门的数据并生成柱状图');
     assert.deepEqual(plannerChartTools.map(tool => tool.name), ['db.run_readonly_query']);
+});
+
+test('chat MCP fallback builds group_count input for table distribution charts', () => {
+    const prompt = '查询 hcdb 数据库中的数据表 table_account 中 group_id 的名称及对应的数量，并生成柱状图图表';
+    assert.equal(detectStrongDataQueryIntent(prompt), true);
+
+    const groupCountInput = buildFallbackDataQueryInput(prompt, { name: 'db.group_count' });
+    assert.equal(groupCountInput.table, 'table_account');
+    assert.equal(groupCountInput.groupBy, 'group_id');
+    assert.equal(groupCountInput.groupAlias, 'group_id');
+    assert.equal(groupCountInput.countAlias, 'count');
+    assert.equal(groupCountInput.limit, 80);
+
+    const queryInput = buildFallbackDataQueryInput(prompt, { name: 'db.run_readonly_query' });
+    assert.equal(queryInput.sql, 'SELECT group_id, COUNT(*) AS count FROM table_account GROUP BY group_id ORDER BY count DESC');
+    assert.equal(queryInput.limit, 80);
 });
 
 test('built-in IM MCP enforces target whitelist and sends LAN webhook payloads', async () => {

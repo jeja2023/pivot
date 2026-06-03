@@ -1,5 +1,164 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.82] - 2026-06-03
+### 普通对话图表时序修正、持久化修复与规划器回退
+
+本版本补齐普通对话图表的”实时渲染 → 消息落库 → 刷新恢复”闭环，修复图表在模型思考期间过早出现的问题，并新增规划器确定性回退——当 LLM 规划器无法可靠决策时，正则提取表名/字段构造 SQL 直接执行。
+
+#### 图表时序修正：图表随文字同步出现
+
+- **延迟注入**：SSE `chart` 事件到达时不再立即调用 `injectChartBlock` 注入 DOM，只存入 `pendingCharts`。待第一个文字 `content` 事件到达（`firstTokenTime` 首次赋值时）才批量注入图表块，确保图表与模型回复文字同步出现，不再出现”还在思考图表就先出来了”的体验。
+- **错误/中断路径兜底**：在 `AbortError` 和通用错误路径中，调用 `pendingCharts.forEach(spec => injectChartBlock(...))` 确保图表块在异常退出时也被注入 DOM 并渲染。
+- **修复渲染参数错误**：`injectChartBlock` 中将 `renderPivotCharts(chartBlock)` 修正为 `renderPivotCharts(msgEl)`——`renderPivotCharts` 使用 `querySelectorAll` 只查后代元素，不能将目标元素自身作为 root。
+
+#### 图表持久化与刷新恢复
+
+- **SSE 图表写入持久化正文**：`server/routes/chat.js` 新增 `rememberStreamedChart()` 拦截 `writeSse`——捕获本轮流式响应中发给前端的 `type: “chart”` 图表 spec，去重后存入 `streamedChartSpecs[]`。保存 assistant 消息前通过 `appendStreamedChartsToAssistantContent()` 将图表序列化为 `pivot-echart` fenced code block 追加到消息正文末尾。刷新页面后，历史消息通过现有 Markdown 渲染链路重新生成 `.pivot-echart-block`，不再依赖首次流式 DOM 注入。
+- **同轮图表事件去重**：后端 `rememberStreamedChart` 对相同 chart spec 建立去重集合，重复图表事件不再写入 SSE，也不会重复合并进消息正文。
+- **前端重复事件兜底**：`client/chat/engine.js` 新增 `pendingChartKeys`，即使后端或网络重放重复 chart 事件，当前助手消息也只注入一次图表 DOM。
+- **兼容已有可渲染图表块**：`contentIncludesRenderableChart()` 检测模型正文是否已包含 `pivot-echart`/`pivot-chart` 代码块，若已存在则不再追加本轮 SSE 图表，避免刷新后正文出现重复图表。
+
+#### 规划器确定性回退：规划器失败时直接构造 SQL
+
+- **`detectStrongDataQueryIntent()`**：不依赖 LLM 判断，通过正则检测用户是否明确要求查询数据库（匹配表名/数据库+表名/SQL 关键词/分组统计关键词）。
+- **`extractTableName()` / `extractGroupByField()`**：从用户自然语言中正则提取表名和分组字段（支持”查询 table_account 表”、”按 group_id 分组”等多种中文表达）。
+- **`buildFallbackDataQueryInput()`**：用提取到的表名+分组字段构造 `SELECT ... GROUP BY ... LIMIT 50` 或 `db.group_count` 参数，兼容 `run_readonly_query` 和 `group_count` 两种工具。
+- **规划器失败时自动回退**：在 `maybeBuildMcpChatContext` 中，当 LLM 规划器返回 `action: none` 或 JSON 解析失败后，先调用 `detectStrongDataQueryIntent` 判断——若用户明确要查数据，直接用 `buildFallbackDataQueryInput` 构造 SQL 执行，绕过不可靠的规划器。回退失败则降级到 `buildMcpToolsHint` 提示。
+
+#### 图表 SSE 去重：消除自动图表链路的重复发射
+
+- **`server/services/chat-mcp-context.js`**：去掉 `maybeBuildChartAfterDataTool()` 中的额外 `emitChartSse()` 调用，统一由 `extractMcpResultText()` 负责发出图表事件，防止自动图表链路天然发送两次（一次在直接执行 viz 时，一次在 auto-chart 后）。
+
+#### 回归测试与验证
+
+- **新增回归用例**：`tests/security.test.js` 增加”chat route embeds streamed chart specs into persisted assistant content”、”chat renderer accepts loose ECharts-style chart specs”和”chat MCP fallback builds group_count input”测试。
+- **验证通过**：`npm run check` 通过（129 个 JS 文件）；`node tests/security.test.js` 安全回归 **144/144** 全部通过。
+
+## [v0.0.81] - 2026-06-03
+### 普通对话图表链路确定性修复与中文思考强化
+
+本轮针对普通对话中"模型返回代码而非真正图表"的核心问题，重构图表结果从工具到前端的传递链路，同时强化所有模型交互路径的中文思考约束。
+
+#### 图表传送链路：SSE 双通道架构
+
+**问题分析**：能力工具 `viz.build_chart` 和自动图表生成都能正常产出结构化 `pivot_chart`，但结果会先转成 `pivot-echart` 代码块文本嵌入 system context，再交给主模型"原样保留"。该步骤不可靠——模型经常将其改写为 Python matplotlib / JavaScript ECharts 示例代码，导致前端无法渲染真实图表。MCP 调用日志确认 `viz.build_chart` 成功返回图表数据，但后续助手消息中 `pivot-echart` 块为 0，反而出现 Python 代码块 12 条、ECharts 3 条。
+
+**核心修复——SSE 直通前端**：
+- **`server/services/chat-mcp-context.js`**：新增 `emitChartSse()` 函数，图表结构化数据通过 SSE `{"type":"chart","data":...}` 事件直接发送给前端，**完全绕过模型文本生成**。`extractMcpResultText()` 现返回简短文字引用（"已生成图表：xxx，前端已直接渲染"）替代原来的 `pivot-echart` 代码块；`maybeBuildChartAfterDataTool()` 自动图表同步走 SSE 直达通道。
+- **`client/chat/engine.js`**：新增 `chart` SSE 事件处理分支 + `injectChartBlock()` 辅助函数——收到图表数据后立即创建 `.pivot-echart-block` DOM 元素并注入当前助手消息（位于 `.text-body` 之外，不会被流式文本渲染覆盖），随后调用 `renderPivotCharts` 初始化 ECharts。成功/错误/中断三条路径均确保图表块被渲染。
+- **修复渲染参数错误**：`renderPivotCharts(root)` 使用 `root.querySelectorAll` 查找后代元素，不可将图表块自身作为 root 传入，修正为传入父容器。
+
+#### 图表意图检测与工具调度优化
+
+- **`server/services/chat-mcp-context.js` — 意图检测扩展**：`getMcpToolIntent()` 正则新增 `统计分析|数据对比|数据汇总|数据概览|分布情况|数据分布|占比|排名|排行|展示.*数据|数据.*展示|呈现.*数据|查询.*统计|洞察`，覆盖"帮我分析销售数据"等隐式图表请求。
+- **规划器提示词强化**：新增关键指令——"如果用户询问数据、统计、分析相关的问题，且存在可用的数据库或数据查询工具，请优先选择合适的数据查询工具，不要返回 action=none。主模型无法自行查询数据库，会回退到编造数据或生成无效代码。"
+- **规划器跳过时注入工具提示**：新增 `buildMcpToolsHint()` 函数，当规划器返回 `action=none` 或工具过滤后为空时，不再返回空字符串，而是注入可用工具列表和禁止自编代码的提示给主模型，防止其回退到代码生成。
+
+#### 中文思考约束全覆盖
+
+- **`server/routes/chat.js`**：`CHAT_LANGUAGE_SYSTEM_PROMPT` 重构为结构化规则——`【重要语言规则】`（4 条中文约束）+ `【重要工具规则】`（4 条工具行为约束），明确禁止生成 Python/JS 图表代码，要求保留 `pivot-echart`/`pivot-table` 块。
+- **`server/services/agent-runtime.js` — 流式 Agent**：`tryRunAgentStreaming()` 系统提示词补上 `【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。`——此前流式路径完全没有中文思考约束。
+- **`server/services/agent-runtime.js` — 规划器**：`buildPlannerMessages()` 新增显式 `【重要语言规则】` 声明，Schema 标签从 `"最终答案"` 升级为 `"最终答案（中文）"`。
+
+#### 测试同步
+
+- **`tests/security.test.js`**：`chat language instruction` 测试断言更新，匹配新的 `【重要语言规则】` 和 `禁止使用英文提纲或英文推理` 措辞。
+
+### 回归验证
+- **验证通过**：`npm run check` 通过（129 个 JS 文件）；`node tests/security.test.js` 安全回归 **141/141** 全部通过。
+
+## [v0.0.80] - 2026-06-03
+### 智能体工作流与数据库统计闭环
+
+本版本汇总本轮智能体工作流、DAG 运行、数据库 MCP 统计工具、Agent 中文提示词和文档版本同步相关修复优化。
+
+#### 工作流运行与编排体验
+- **工作流运行入口独立化**：DAG 模式从“工作流编排”统一收口为“工作流”，运行面板新增工作流选择器和“打开工作流”入口，运行时必须选择已保存工作流，避免直接提交空画布或临时 JSON。
+- **新建工作流弹窗**：新增工作流名称、说明和默认执行目标表单，创建后自动进入 DAG 模式并初始化空白画布；保存时同步 `description`，工作流库和运行选择保持同一个活动工作流。
+- **运行目标自动推断**：DAG 运行未填写目标时，优先使用工作流名称生成“执行工作流：xxx”，再回退到当前画布节点数，减少因目标为空导致的任务创建失败。
+- **已保存工作流校验修复**：运行面板现在同时兼容字符串 JSON 和已解析的 `dag_spec` 对象，不再把已保存工作流误判为“工作流 JSON 需要修正”。
+- **运行输入可视化**：运行面板和工作流画布都会扫描 `{{inputs.*}}` 引用并生成输入表单，提交时自动合并为 `dagInputs`，替代手写 JSON textarea。
+- **画布编辑增强**：工具栏改为“节点 / 模板 / 操作”分组，新增统计图模板向导；节点坐标持久化、智能默认工具、字段 tooltip、Delete/Backspace/Escape 快捷键和保存前校验门禁保持可用。
+- **DAG 结果可视化**：运行详情新增迷你拓扑状态图，按完成、运行中、错误、跳过、待执行区分节点状态，并展示依赖边和图例。
+- **软删除恢复**：工作流删除后展示“撤销删除”，后端新增 `PATCH /api/agents/workflows/:id/restore`，30 天内可按用户权限恢复。
+
+#### 数据库 MCP 与模板数据流
+- **新增 `db.group_count` 工具**：数据库 MCP 增加安全只读分组统计能力，支持 SQLite、PostgreSQL、MySQL 和 SQL Server，按表名、分组字段、别名、排序和 limit 自动生成统计 SQL，适合普通用户快速生成分布图。
+- **统计图模板向导**：DAG 编辑器可读取数据库表和字段，自动生成“分组统计 -> 生成统计图”两节点工作流；优先使用 `db.group_count`，缺失时回退到只读 SQL 查询。
+- **结构化结果引用修复**：DAG 模板引用 `{{nodes.xxx.output.rows}}` 时会自动回退读取 `structuredContent.rows`，图表节点可以直接消费 MCP 结构化数据行。
+
+#### 智能体与普通对话图表链路优化
+- **图表结果保真**：智能体工作流图表节点可直接消费 `structuredContent.rows`，普通对话在查询数据后会优先补调用 `viz.build_chart`，并要求最终回答原样保留 `pivot-echart` 结构化图表块，减少图表结果退化为 Python/ECharts 代码或纯文本的情况。
+
+#### Agent 运行时与文案
+- **Agent 提示词中文化**：核心规划提示、上下文指导、流式工具调用提示和最终答案合成提示全部汉化，要求模型以中文进行简短推理和最终输出。
+- **普通聊天思考过程中文约束**：普通聊天请求会注入中文语言约束，要求最终答案以及可见的 `reasoning_content`、`<think>`、`<thought>` 思考内容默认使用中文，减少推理面板出现英文提纲。
+- **运行日志中文修复**：修复任务通知、重跑节点、断点续跑、审批、工具执行、DAG 节点状态和模型路由等步骤标题中的乱码文案。
+- **DAG 节点并发可配**：互不依赖节点并行数改为 `AGENT_DAG_NODE_CONCURRENCY`（默认 4），运行时状态 API 暴露该值，README 与 `.env.example` 同步补充配置说明。
+
+#### 测试与文档
+- **安全回归补充**：`tests/security.test.js` 新增 `db.group_count` 工具暴露和执行验证，覆盖 `output.rows` 到 `structuredContent.rows` 的模板引用兼容，并补充普通聊天可见思考中文约束测试。
+- **版本同步修正**：应用版本升级至 `v0.0.80`，同步更新 `package.json`、`package-lock.json`、README 顶部版本、近期升级摘要、当前版本说明和配置文档。
+
+### 回归验证
+- **验证通过**：`npm run check` 通过；`npm run lint` 通过；`node --test-name-pattern "chat language instruction asks visible reasoning" tests/security.test.js` 定向安全回归通过；`node --test-name-pattern "DAG templates read MCP structured rows|database MCP preset exposes SQLite readonly tools" tests/security.test.js` 定向安全回归通过。
+- **完整安全回归备注**：已执行 `node tests/security.test.js`，新增的 `output.rows` 兼容与 `db.group_count` 用例通过；完整套件在当前 Windows 环境的上传/RAG 文件清理阶段因 `EPERM: unlink` 文件锁触发 5 个既有用例失败（135/140），需释放文件句柄或清理测试残留后复跑完整套件。
+
+## [v0.0.79] - 2026-06-03
+### Agent 提示词中文化
+
+将 Agent 运行时核心系统提示词从英文迁移为中文，确保大模型思考过程与最终输出一致使用中文。
+
+#### 修改范围（agent-runtime.js）
+
+- **核心 Agent 系统提示词（`buildAgentMessages`）**：身份声明、行为规则、JSON Schema、运行模式说明、上下文指导、工具列表标签全部汉化；Schema 的 `thought` 字段标注为 `简短推理（中文）`，强制模型用中文思考。
+- **运行模式标签**：`standard`/`deep`/`audit`/`dag` 四种模式改为中文说明（标准模式—稳扎稳打 / 深度模式—允许额外检索 / 审计模式—必须强调证据、限制和风险 / DAG 模式—按工作流图执行），帮助模型理解当前模式的行为预期。
+- **上下文模式**：`recent`/`knowledge`/`none` 对应的英文提示改为"使用最近的对话上下文 / 使用知识库上下文 / 不包含额外的会话上下文"。
+- **流式 Agent 系统提示词（`tryRunAgentStreaming`）**：身份声明、目标标签、工具调用指导全部汉化。
+- **最终答案合成提示词（`synthesizeFinalAnswer`）**：系统提示汉化并追加 `输出请使用中文。`；兜底文案 `No final answer was generated.` 改为 `未能生成最终答案。`。
+
+### 回归验证
+- **验证通过**：`npm run check` 通过；`npm run lint` 通过；`node tests/security.test.js` 安全回归通过。
+
+## [v0.0.78] - 2026-06-03
+### 智能体工作流编排 UX 优化
+
+经过用户体验评审后，针对工作流编排（DAG）功能的 10 项重点优化：
+
+#### 画布编辑器（agents-dag-editor.js）
+- **智能工具选择**：新增节点时统计画布上已使用工具的频次，同工具使用 ≥2 次时自动设为默认值，否则留空让用户主动选择，避免盲目预填列表第一项。
+- **节点坐标持久化**：序列化时保留用户手动调整的 `_x`/`_y` 坐标，重新加载时已有坐标的节点不再被自动布局覆盖，仅对新节点触发拓扑排列。
+- **节点属性提示**：重试次数和超时（ms）字段增加 title tooltip，说明"0 表示不重试 / 使用全局默认超时"。
+- **键盘快捷键**：画布聚焦时 `Delete`/`Backspace` 删除选中节点，`Escape` 取消选中并关闭节点抽屉；仅在非文本编辑态响应，不与表单输入冲突。
+- **校验方法暴露**：`mount()` 返回新增 `validate()` 方法，供外部在保存/发布前调用。
+
+#### 工作流库（agents.js）
+- **保存前校验门禁**：`saveAgentWorkflowToLibrary` 保存前自动调用画布校验，如存在循环依赖、未选工具、依赖缺失等问题，弹出确认弹窗，用户可强制保存或取消修正。
+- **删除软撤销**：工作流删除后版本标签位置显示"↩ 撤销删除"按钮，调用新增的 `PATCH /api/agents/workflows/:id/restore` 接口，30 天内可一键恢复。
+- **模板替换提醒**：统计图向导在替换当前画布前，检测画布与已保存内容的差异，如有未保存更改则在确认弹窗中明确提示"当前画布有未保存的更改"。
+
+#### 运行时输入面板（agent-dag.html + agents.js + agent.css）
+- **可视化变量编辑**：新增运行时输入面板，自动扫描 DAG JSON 中所有 `{{inputs.*}}` 引用，动态生成对应表单字段；用户填写后值优先于 JSON textarea 合并到 `dagInputs` 提交。
+- 面板随画布变更自动刷新，带"重新扫描变量"按钮，`runMode` 切换为标准模式时自动隐藏。
+
+#### DAG 运行结果可视化（agents.js + agent.css）
+- **迷你状态图**：运行详情中节点列表上方渲染 SVG 拓扑图，节点按状态着色（绿色完成、蓝色运行中、红色错误、黄色跳过、灰色待执行），边上绘制依赖箭头，底部附图例。
+- 拓扑分层基于节点 `depends_on` 的 Kahn 风格布局，与编辑器画布视觉一致。
+
+#### 运行时（agent-runtime.js + agent-workflows.js + routes/agents.js）
+- **DAG 节点并发可配**：硬编码的并发数 4 改为环境变量 `AGENT_DAG_NODE_CONCURRENCY`（默认 4），运行时状态 API 暴露该值；编辑器工具栏 tooltip 补充提示。
+- **软删除恢复 API**：新增 `restoreAgentWorkflow` 服务函数，按 workflow_id + 用户校验，仅恢复 30 天内删除的工作流；新增 `PATCH /api/agents/workflows/:id/restore` 路由。
+
+### 回归验证
+- **验证通过**：`npm run check` 通过；`npm run lint` 通过；`node tests/security.test.js` 安全回归通过。
+
+## [v0.0.77] - 2026-06-03
+### 缺陷修复
+- **工作流图表工具重复显示去重**：智能体工作流编排的「选择工具」下拉中，「图表与展示」分类下 `生成图表 · viz.build_chart`、`生成表格 · viz.build_table` 出现重复项。根因是可视化工具同时注册为**内置智能体工具**（`agent-tools.js`，对所有用户始终可用）与「图表生成」**内置 MCP 能力**（`builtin-mcp.js`，用户添加后才出现），而工具目录在 `agent-tool-catalog.js` 的 `formatToolList` 合并内置工具与缓存 MCP 工具时未去重。现按裸工具名去重——缓存 MCP 工具与内置工具同名时只保留内置工具；外部第三方 MCP 工具因带 `mcp.<id>.` 服务前缀不受影响，工具执行链路保持不变。
+
+### 回归验证
+- **验证通过**：`npm run check`（129 个 JS 文件语法 + 前端资源校验）通过；`npm run lint` 通过；完整 `node tests/security.test.js` 安全回归 `139/139` 通过。
+
 ## [v0.0.76] - 2026-06-03
 ### 安全加固
 - **普通用户私网出口默认收紧**：个人 MCP 外部端点、内置 IM Webhook 与数据库 MCP 连接默认禁止普通用户配置 loopback、link-local、局域网或内部主机地址；管理员仍可在显式允许私网出口的部署策略下接入内网资源。`MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN` 改为默认开启，仅当明确设置为 `false` 时才允许普通用户配置私网数据库。

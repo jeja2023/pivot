@@ -342,6 +342,28 @@ function isChatToolEnabled(id, storageKey) {
     return localStorage.getItem(storageKey) === 'true';
 }
 
+function shouldAutoEnableMcpForPrompt(value = '') {
+    const text = String(value || '').toLowerCase();
+    if (!text.trim()) return false;
+    const hasDataSource = /数据库|数据表|表中|表里|table[_a-z0-9]*|select\s|from\s+\w+|group\s+by|order\s+by|db\.|sql/i.test(text);
+    const hasDataAction = /查询|统计|分组|汇总|数量|计数|分布|排行|排名|count|sum|avg|group|字段|列|column/i.test(text);
+    const hasVisualAction = /图表|柱状图|折线图|饼图|面积图|可视化|画图|绘图|chart|plot|graph/i.test(text);
+    return hasDataSource && (hasDataAction || hasVisualAction);
+}
+
+function activateChatMcpToggle() {
+    const button = document.getElementById('chat-mcp-enabled');
+    window.setChatToolToggleState?.(button, true);
+    try {
+        localStorage.setItem('pivot_chat_mcp_enabled', 'true');
+    } catch (e) {
+        // 忽略浏览器存储限制，本轮请求仍会携带启用状态。
+    }
+}
+
+window.shouldAutoEnableMcpForPrompt = shouldAutoEnableMcpForPrompt;
+window.activateChatMcpToggle = activateChatMcpToggle;
+
 window.createSession = async function(title) {
     const res = await apiFetch(API_BASE + '/sessions', {
         method: 'POST',
@@ -438,10 +460,17 @@ window.sendMessage = async function(isRegenerate = false) {
     const sentAttachments = pendingAttachments.map(item => ({ ...item }));
 
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
-    const mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
+    let mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
-    if (mcpEnabled) {
+    if (!mcpEnabled && shouldAutoEnableMcpForPrompt(content)) {
         mcpConfirmed = await ensureChatMcpConsent();
+        if (!mcpConfirmed) return;
+        mcpEnabled = true;
+        activateChatMcpToggle();
+        showToast?.('已为本轮启用能力库工具', 'info');
+    }
+    if (mcpEnabled) {
+        mcpConfirmed = mcpConfirmed || await ensureChatMcpConsent();
         if (!mcpConfirmed) return;
     }
 
@@ -476,6 +505,21 @@ window.sendMessage = async function(isRegenerate = false) {
         const cls = type === 'error' ? 'error-detail' : 'queue-detail';
         textBody.innerHTML = `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`;
     };
+    const injectChartBlock = (msgEl, spec) => {
+        if (!msgEl || !spec) return;
+        const chartBlock = document.createElement('div');
+        chartBlock.className = 'pivot-echart-block';
+        chartBlock.setAttribute('data-pivot-echart', JSON.stringify(spec));
+        chartBlock.innerHTML = '<div class="pivot-echart-title">图表</div><div class="pivot-echart-canvas"></div><canvas height="300"></canvas><pre class="pivot-echart-error-text"></pre>';
+        // 插入到 text-body 之后、footer 之前，避免被流式文本渲染覆盖
+        const footer = msgEl.querySelector('.message-footer');
+        if (footer) {
+            msgEl.insertBefore(chartBlock, footer);
+        } else {
+            msgEl.appendChild(chartBlock);
+        }
+        window.renderPivotCharts?.(msgEl);
+    };
     let fullAiContent = '';
     let tokenCount = 0;
     let startTime = Date.now();
@@ -484,6 +528,15 @@ window.sendMessage = async function(isRegenerate = false) {
     let renderTimer = null;
     let localReplayTimer = null;
     let pendingStreamChunks = [];
+    let pendingCharts = [];
+    const pendingChartKeys = new Set();
+    const getChartSpecKey = (spec) => {
+        try {
+            return JSON.stringify(spec);
+        } catch (e) {
+            return '';
+        }
+    };
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -629,6 +682,16 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.status === 'error') showToast(data.message || '能力库工具调用失败', 'warning');
                     return;
                 }
+                if (data.type === 'chart') {
+                    if (data.data && aiMsgEl) {
+                        const chartKey = getChartSpecKey(data.data);
+                        if (chartKey && pendingChartKeys.has(chartKey)) return;
+                        if (chartKey) pendingChartKeys.add(chartKey);
+                        pendingCharts.push(data.data);
+                        // 不立即注入 DOM——等第一个文字内容到达时再渲染，避免"还在思考图表就先出来了"
+                    }
+                    return;
+                }
                 if (data.type === 'rag') {
                     updateAssistantStatus(data.message || '正在检索知识库');
                     if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
@@ -692,7 +755,11 @@ window.sendMessage = async function(isRegenerate = false) {
                 }
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
-                    if (!firstTokenTime) firstTokenTime = Date.now();
+                    if (!firstTokenTime) {
+                        firstTokenTime = Date.now();
+                        // 第一个文字内容到达时，将之前收集的图表块注入 DOM
+                        pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
+                    }
                     enqueueStreamContent(data.content);
                 }
             }
@@ -713,6 +780,10 @@ window.sendMessage = async function(isRegenerate = false) {
         }
         await waitForLocalReplay();
         flushStreamRender();
+        // 渲染 SSE 直发的图表块（已注入在 textBody 之外，不会被流式文本渲染覆盖）
+        if (pendingCharts.length && aiMsgEl) {
+            window.renderPivotCharts?.(aiMsgEl);
+        }
         if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 
         const finalElapsed = (Date.now() - startTime) / 1000;
@@ -748,6 +819,7 @@ window.sendMessage = async function(isRegenerate = false) {
             }
             fullAiContent += '\n\n[已由用户中断生成]';
             if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent);
+            pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {
             if (e.messageId) window.setMessageActionId?.(aiMsgEl, e.messageId);
@@ -757,6 +829,7 @@ window.sendMessage = async function(isRegenerate = false) {
             } else if (isRequestMessageVisible()) {
                 updateAssistantStatus(e.message, 'error');
             }
+            pendingCharts.forEach(spec => injectChartBlock(aiMsgEl, spec));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }

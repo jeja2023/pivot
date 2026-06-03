@@ -50,7 +50,12 @@ function resolveDagTemplateReference(expression, context) {
         if (field === 'title') return node.title || nodeId;
         if (field === 'tool') return node.tool || '';
         if (field === 'input') return getPathValue(state.input ?? node.input ?? {}, parts.slice(3));
-        if (field === 'output') return getPathValue(state.output, parts.slice(3));
+        if (field === 'output') {
+            const path = parts.slice(3);
+            const direct = getPathValue(state.output, path);
+            if (direct !== undefined || !path.length) return direct;
+            return getPathValue(state.output?.structuredContent, path);
+        }
     }
     return undefined;
 }

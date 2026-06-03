@@ -167,6 +167,23 @@ const SQL_TOOL_DEFINITIONS = [
                 limit: { type: 'integer', minimum: 1, maximum: 1000, description: '最大返回行数，默认 100。' }
             }
         }
+    },
+    {
+        name: 'db.group_count',
+        description: '按指定表字段分组并统计数量，适合普通用户生成分布图，系统会自动生成安全只读 SQL。',
+        inputSchema: {
+            type: 'object',
+            required: ['table', 'groupBy'],
+            properties: {
+                table: { type: 'string', description: '要统计的数据表。' },
+                groupBy: { type: 'string', description: '用于分组统计的字段。' },
+                schema: { type: 'string', description: '可选，数据库 schema 名称。' },
+                groupAlias: { type: 'string', default: 'group_value', description: '分组字段输出别名。' },
+                countAlias: { type: 'string', default: 'count', description: '数量字段别名。' },
+                limit: { type: 'integer', minimum: 1, maximum: 1000, default: 100, description: '最多返回的分组数量。' },
+                sortOrder: { type: 'string', enum: ['asc', 'desc'], default: 'desc', description: '按数量排序方向。' }
+            }
+        }
     }
 ];
 
@@ -304,6 +321,70 @@ function quoteIdentifier(identifier, quote = '"') {
     const value = String(identifier || '').trim();
     if (!value) throw new Error('Identifier is required.');
     return `${quote}${value.replace(new RegExp(quote, 'g'), quote + quote)}${quote}`;
+}
+
+function quoteSqlIdentifierPart(identifier, dialect) {
+    const value = String(identifier || '').trim();
+    if (!value) throw new Error('Identifier is required.');
+    if (dialect === 'mysql') return `\`${value.replace(/`/g, '``')}\``;
+    if (dialect === 'sqlserver') return `[${value.replace(/]/g, ']]')}]`;
+    return quoteIdentifier(value, '"');
+}
+
+function quoteSqlIdentifier(identifier, dialect) {
+    return String(identifier || '')
+        .split('.')
+        .map(part => quoteSqlIdentifierPart(part, dialect))
+        .join('.');
+}
+
+function buildQualifiedTableName({ schema = '', table = '', dialect = 'postgres' }) {
+    const cleanTable = String(table || '').trim();
+    const cleanSchema = String(schema || '').trim();
+    if (!cleanTable) throw new Error('table is required.');
+    if (!cleanSchema || dialect === 'sqlite') return quoteSqlIdentifier(cleanTable, dialect);
+    return `${quoteSqlIdentifier(cleanSchema, dialect)}.${quoteSqlIdentifier(cleanTable, dialect)}`;
+}
+
+function normalizeSqlAlias(value, fallback) {
+    const alias = String(value || fallback || '').trim();
+    if (!alias) throw new Error('Alias is required.');
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(alias)) {
+        const err = new Error('Alias must start with a letter or underscore and contain only letters, numbers, and underscores.');
+        err.status = 400;
+        throw err;
+    }
+    return alias;
+}
+
+function defaultSqlAlias(value, fallback) {
+    const alias = String(value || '').trim().replace(/[^\w]/g, '_').replace(/^_+/, '').slice(0, 64);
+    return /^[A-Za-z_]/.test(alias) ? alias : fallback;
+}
+
+function buildGroupCountSql(input = {}, dialect = 'postgres', fallbackSchema = '') {
+    const table = String(input.table || '').trim();
+    const groupBy = String(input.groupBy || input.group_by || '').trim();
+    if (!table) throw new Error('table is required.');
+    if (!groupBy) throw new Error('groupBy is required.');
+    const limit = clampLimit(input.limit, 100);
+    const schema = String(input.schema || fallbackSchema || '').trim();
+    const countAlias = normalizeSqlAlias(input.countAlias || input.count_alias, 'count');
+    const groupAlias = normalizeSqlAlias(input.groupAlias || input.group_alias, defaultSqlAlias(groupBy, 'group_value'));
+    const order = String(input.sortOrder || input.sort_order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const tableName = buildQualifiedTableName({ schema, table, dialect });
+    const groupIdentifier = quoteSqlIdentifier(groupBy, dialect);
+    const groupAliasIdentifier = quoteSqlIdentifier(groupAlias, dialect);
+    const countAliasIdentifier = quoteSqlIdentifier(countAlias, dialect);
+    const selectPrefix = dialect === 'sqlserver' ? `SELECT TOP (${limit})` : 'SELECT';
+    const limitClause = dialect === 'sqlserver' ? '' : `\nLIMIT ${limit}`;
+    const sql = [
+        `${selectPrefix} ${groupIdentifier} AS ${groupAliasIdentifier}, COUNT(*) AS ${countAliasIdentifier}`,
+        `FROM ${tableName}`,
+        `GROUP BY ${groupIdentifier}`,
+        `ORDER BY ${countAliasIdentifier} ${order}, ${groupAliasIdentifier} ASC${limitClause}`
+    ].join('\n');
+    return { sql, limit, groupAlias, countAlias, table, groupBy, schema };
 }
 
 function applySqlLimit(sql, limit, dialect) {
@@ -476,6 +557,10 @@ async function executeSqlTool(connection, name, input = {}) {
                 const sql = applySqlLimit(assertReadonlySql(input.sql), limit, 'sqlite');
                 return { rows: client.prepare(sql).all(), limit };
             }
+            if (name === 'db.group_count') {
+                const query = buildGroupCountSql({ ...input, limit }, 'sqlite', schema);
+                return { ...query, rows: client.prepare(query.sql).all() };
+            }
             throw new Error(`Unsupported database MCP tool: ${name}`);
         });
     }
@@ -505,6 +590,11 @@ async function executeSqlTool(connection, name, input = {}) {
                 const result = await client.query(applySqlLimit(assertReadonlySql(input.sql), limit, 'postgres'));
                 return { rows: result.rows, limit };
             }
+            if (name === 'db.group_count') {
+                const query = buildGroupCountSql({ ...input, limit }, 'postgres', schema);
+                const result = await client.query(query.sql);
+                return { ...query, rows: result.rows };
+            }
             throw new Error(`Unsupported database MCP tool: ${name}`);
         });
     }
@@ -532,6 +622,11 @@ async function executeSqlTool(connection, name, input = {}) {
             if (name === 'db.run_readonly_query') {
                 const [rows] = await client.query(applySqlLimit(assertReadonlySql(input.sql), limit, 'mysql'));
                 return { rows, limit };
+            }
+            if (name === 'db.group_count') {
+                const query = buildGroupCountSql({ ...input, limit }, 'mysql', schema);
+                const [rows] = await client.query(query.sql);
+                return { ...query, rows };
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
         });
@@ -565,6 +660,11 @@ async function executeSqlTool(connection, name, input = {}) {
             if (name === 'db.run_readonly_query') {
                 const result = await pool.request().query(applySqlLimit(assertReadonlySql(input.sql), limit, 'sqlserver'));
                 return { rows: result.recordset, limit };
+            }
+            if (name === 'db.group_count') {
+                const query = buildGroupCountSql({ ...input, limit }, 'sqlserver', schema);
+                const result = await pool.request().query(query.sql);
+                return { ...query, rows: result.recordset };
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
         });

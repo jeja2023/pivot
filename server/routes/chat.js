@@ -67,12 +67,85 @@ const {
 const { listCachedMcpTools } = require('../services/mcp-client');
 const { filterMcpToolsByCapability } = require('../services/capability-market');
 const {
+    buildFallbackDataQueryInput,
+    detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
     maybeBuildMcpChatContext
 } = require('../services/chat-mcp-context');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
+const CHAT_LANGUAGE_SYSTEM_PROMPT = [
+    '【重要语言规则】你必须全程使用中文，包括：',
+    '1. 最终回答必须使用中文。',
+    '2. 所有可见的思考、推理、reasoning_content、<think> 或 <thought> 内容也必须使用中文，禁止使用英文提纲或英文推理。',
+    '3. 即使用户问题中包含英文，思考和回答仍然默认使用中文。',
+    '4. 仅当用户明确要求使用其他语言时，才可在该次回复中切换语言。',
+    '',
+    '【重要工具规则】',
+    '1. 如果用户要求查询数据、统计分析或生成图表，不要生成 Python（matplotlib/pandas/plotly）、JavaScript（echarts/Chart.js）或其他编程语言的代码来画图。',
+    '2. 如果你可以访问能力库工具（数据库查询、图表生成等），请引导用户开启并使用这些内置工具来获取数据和生成真正的交互式图表。',
+    '3. 如果你收到了 ```pivot-echart 代码块，请在最终回答中原样保留该代码块——前端会自动将其渲染为交互式可视化图表，不要将其转换为纯文本或其他格式。',
+    '4. 如果你收到了 ```pivot-table 代码块，请在最终回答中原样保留。'
+].join('\n');
+
+function serializeChartSpec(chartSpec) {
+    try {
+        const serialized = JSON.stringify(chartSpec);
+        return serialized && serialized !== 'null' ? serialized : '';
+    } catch (_err) {
+        return '';
+    }
+}
+
+function chartSpecToMarkdown(chartSpec) {
+    const serialized = serializeChartSpec(chartSpec);
+    if (!serialized) return '';
+    return [
+        '```pivot-echart',
+        JSON.stringify(chartSpec, null, 2),
+        '```'
+    ].join('\n');
+}
+
+function contentIncludesRenderableChart(content = '') {
+    return /```(?:pivot-echart|pivot-chart)\b/i.test(String(content || ''));
+}
+
+function appendStreamedChartsToAssistantContent(content = '', chartSpecs = []) {
+    const baseContent = String(content || '').trimEnd();
+    if (!Array.isArray(chartSpecs) || chartSpecs.length === 0 || contentIncludesRenderableChart(baseContent)) {
+        return String(content || '');
+    }
+
+    const seen = new Set();
+    const blocks = [];
+    chartSpecs.forEach(chartSpec => {
+        const key = serializeChartSpec(chartSpec);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        const block = chartSpecToMarkdown(chartSpec);
+        if (block) blocks.push(block);
+    });
+    if (!blocks.length) return String(content || '');
+    return [baseContent, ...blocks].filter(Boolean).join('\n\n');
+}
+
+function applyChatLanguageInstruction(history = []) {
+    const messages = Array.isArray(history) ? history.slice() : [];
+    const first = messages[0];
+    if (first?.role === 'system' && typeof first.content === 'string') {
+        if (first.content.includes('【重要语言规则】') || first.content.includes('reasoning_content')) return messages;
+        return [
+            { ...first, content: `${first.content.trim()}\n\n${CHAT_LANGUAGE_SYSTEM_PROMPT}`.trim() },
+            ...messages.slice(1)
+        ];
+    }
+    return [
+        { role: 'system', content: CHAT_LANGUAGE_SYSTEM_PROMPT },
+        ...messages
+    ];
+}
 
 function createChatRouter({
     authMiddleware,
@@ -115,8 +188,27 @@ function createChatRouter({
         res.socket?.setKeepAlive?.(true);
         res.flushHeaders?.();
 
+        const streamedChartSpecs = [];
+        const streamedChartSpecKeys = new Set();
+        const rememberStreamedChart = (payload) => {
+            let data = null;
+            try {
+                data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+            } catch (_err) {
+                return true;
+            }
+            if (!data || data.type !== 'chart' || !data.data) return true;
+            const key = serializeChartSpec(data.data);
+            if (!key) return true;
+            if (streamedChartSpecKeys.has(key)) return false;
+            streamedChartSpecKeys.add(key);
+            streamedChartSpecs.push(data.data);
+            return true;
+        };
+
         const writeSse = (payload) => {
             if (res.writableEnded) return;
+            if (!rememberStreamedChart(payload)) return;
             res.write(`data: ${payload}\n\n`);
             res.flush?.();
         };
@@ -333,6 +425,7 @@ function createChatRouter({
             }
         }
         let visionHistory = limitVisionImages(await buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
+        visionHistory = applyChatLanguageInstruction(visionHistory);
         
         if (visionHistory.length === 0) {
             req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
@@ -588,9 +681,12 @@ function createChatRouter({
                             }, '上游未按 SSE 流式返回，已按完整 JSON 内容回放');
                         }
                     }
-                    const assistantTokens = (apiUsage && apiUsage.completion_tokens) 
-                        ? apiUsage.completion_tokens 
-                        : estimateTokens(assistantContent);
+                    assistantContent = appendStreamedChartsToAssistantContent(assistantContent, streamedChartSpecs);
+                    const assistantTokens = streamedChartSpecs.length > 0
+                        ? estimateTokens(assistantContent)
+                        : (apiUsage && apiUsage.completion_tokens)
+                            ? apiUsage.completion_tokens
+                            : estimateTokens(assistantContent);
                     const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
                     maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
@@ -700,9 +796,13 @@ function createChatRouter({
 }
 
 module.exports = {
+    appendStreamedChartsToAssistantContent,
+    applyChatLanguageInstruction,
+    buildFallbackDataQueryInput,
     buildPersistedChatErrorContent,
     buildRagContextMessage,
     createChatRouter,
+    detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,

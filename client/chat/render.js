@@ -394,6 +394,8 @@ function normalizePivotChartSpec(raw) {
     if (!spec || typeof spec !== 'object') return null;
     if (spec.type !== 'pivot_chart' && spec.data && typeof spec.data === 'object') {
         spec = coerceSimpleChartSpec(spec);
+    } else if (spec.type !== 'pivot_chart') {
+        spec = coerceLooseChartSpec(spec);
     }
     if (!spec || spec.type !== 'pivot_chart' || !Array.isArray(spec.labels) || !Array.isArray(spec.series)) return null;
     return {
@@ -408,6 +410,123 @@ function normalizePivotChartSpec(raw) {
         yAxis: spec.yAxis || null,
         echartsOption: spec.echartsOption || spec.option || null,
         source: spec.source || {}
+    };
+}
+
+function normalizeLooseChartType(input, seriesList = []) {
+    const primaryType = String(input?.chartType || input?.type || seriesList[0]?.type || '').trim().toLowerCase();
+    if (primaryType === 'line' && seriesList[0]?.areaStyle) return 'area';
+    return ['bar', 'line', 'area', 'pie'].includes(primaryType) ? primaryType : '';
+}
+
+function coerceLooseAxisSpec(axis, fallbackType = '') {
+    const primaryAxis = Array.isArray(axis) ? axis[0] : axis;
+    if (!primaryAxis || typeof primaryAxis !== 'object') {
+        return fallbackType ? { type: fallbackType } : null;
+    }
+    const label = String(primaryAxis.label || primaryAxis.name || primaryAxis.title || '').trim();
+    const field = String(primaryAxis.field || primaryAxis.key || primaryAxis.dimension || '').trim();
+    const type = String(primaryAxis.type || fallbackType || '').trim();
+    return {
+        ...primaryAxis,
+        ...(label ? { label } : {}),
+        ...(field ? { field } : {}),
+        ...(type ? { type } : {})
+    };
+}
+
+function extractLooseAxisLabels(axis) {
+    if (!axis || !Array.isArray(axis.data)) return [];
+    return axis.data.map(label => String(label ?? '')).slice(0, 80);
+}
+
+function normalizeLooseSeriesData(data = []) {
+    if (!Array.isArray(data)) return [];
+    return data.map((point) => {
+        if (point && typeof point === 'object' && !Array.isArray(point)) {
+            return Number(point.value) || 0;
+        }
+        return Number(point) || 0;
+    }).slice(0, 80);
+}
+
+function extractLooseSeriesLabels(seriesList = []) {
+    for (const item of seriesList) {
+        if (!Array.isArray(item?.data)) continue;
+        const labels = item.data.map((point) => {
+            if (point && typeof point === 'object' && !Array.isArray(point) && point.name != null) {
+                return String(point.name);
+            }
+            return '';
+        }).slice(0, 80);
+        if (labels.some(Boolean)) return labels;
+    }
+    return [];
+}
+
+function extractLooseChartTitle(title, fallback = '') {
+    if (title && typeof title === 'object' && !Array.isArray(title)) {
+        return String(title.text || title.subtext || fallback || '图表');
+    }
+    return String(title || fallback || '图表');
+}
+
+function coerceLooseChartSpec(input) {
+    const seriesList = Array.isArray(input?.series) ? input.series.filter(Boolean).slice(0, 20) : [];
+    const chartType = normalizeLooseChartType(input, seriesList);
+    if (!chartType) return null;
+
+    const xAxis = coerceLooseAxisSpec(input.xAxis, chartType === 'pie' ? '' : 'category');
+    const yAxis = coerceLooseAxisSpec(input.yAxis, chartType === 'pie' ? '' : 'value');
+
+    if (chartType === 'pie') {
+        const pieSeries = seriesList[0] || {};
+        const points = Array.isArray(pieSeries.data) ? pieSeries.data : [];
+        return {
+            type: 'pivot_chart',
+            chartType,
+            title: extractLooseChartTitle(input.title, pieSeries.name),
+            labels: points.map((point, index) => (
+                point && typeof point === 'object' && !Array.isArray(point)
+                    ? String(point.name ?? index + 1)
+                    : String(index + 1)
+            )).slice(0, 80),
+            series: [{
+                name: String(pieSeries.name || '系列'),
+                data: normalizeLooseSeriesData(points)
+            }],
+            xAxis,
+            yAxis,
+            source: {
+                format: 'loose_chart',
+                dataQuery: input?.dataQuery || null
+            }
+        };
+    }
+
+    const normalizedSeries = (seriesList.length ? seriesList : [{}]).map(item => ({
+        name: String(item?.name || '系列'),
+        data: normalizeLooseSeriesData(item?.data)
+    }));
+    let labels = extractLooseAxisLabels(xAxis);
+    if (!labels.length) labels = extractLooseSeriesLabels(seriesList);
+    if (!labels.length) {
+        const pointCount = normalizedSeries.reduce((max, item) => Math.max(max, item.data.length), 0);
+        labels = Array.from({ length: pointCount }, (_, index) => String(index + 1));
+    }
+
+    return {
+        type: 'pivot_chart',
+        chartType,
+        title: extractLooseChartTitle(input.title),
+        labels,
+        series: normalizedSeries,
+        xAxis,
+        yAxis,
+        source: {
+            format: 'loose_chart',
+            dataQuery: input?.dataQuery || null
+        }
     };
 }
 
@@ -551,13 +670,19 @@ function renderEcharts(block, spec) {
     mount.hidden = false;
     mount.style.height = '340px';
     mount.innerHTML = '';
-    const chart = window.echarts.init(mount, null, { renderer: 'canvas' });
-    chart.setOption(buildEchartsOptionFromPivotSpec(spec), true);
-    const onResize = () => chart.resize();
-    window.addEventListener('resize', onResize, { passive: true });
-    block._pivotEchart = chart;
-    block._pivotEchartResize = onResize;
-    return true;
+    try {
+        const chart = window.echarts.init(mount, null, { renderer: 'canvas' });
+        chart.setOption(buildEchartsOptionFromPivotSpec(spec), true);
+        const onResize = () => chart.resize();
+        window.addEventListener('resize', onResize, { passive: true });
+        block._pivotEchart = chart;
+        block._pivotEchartResize = onResize;
+        return true;
+    } catch (_error) {
+        mount.hidden = true;
+        mount.innerHTML = '';
+        return false;
+    }
 }
 
 function drawPivotChart(canvas, spec) {
