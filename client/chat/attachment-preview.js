@@ -37,7 +37,7 @@ function renderAttachmentPreviewLoading(content, label = '\u6b63\u5728\u52a0\u8f
 
 async function renderAttachmentTextPreview(content, url) {
     renderAttachmentPreviewLoading(content);
-    const response = await fetch(url, {
+    const response = await apiFetch(url, {
         headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
     if (!response.ok) throw new Error(`Preview failed (${response.status})`);

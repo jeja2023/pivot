@@ -4,7 +4,13 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
-const { assertSafeOutboundUrl, encryptSecret, decryptSecret, validateModelUrl } = require('../security');
+const {
+    assertSafeOutboundUrl,
+    createSafeHttpAgentsForUser,
+    encryptSecret,
+    decryptSecret,
+    validateModelUrl
+} = require('../security');
 const {
     normalizeTags,
     normalizeBooleanFlag,
@@ -151,6 +157,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let modelsUrl = buildModelsListUrl(url);
 
         try {
+            const agents = createSafeHttpAgentsForUser(req.user);
             const response = await axios.get(modelsUrl, {
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
@@ -158,7 +165,8 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                     'User-Agent': 'Pivot-AI-Client/1.0'
                 },
                 timeout: 10000,
-                proxy: false
+                proxy: false,
+                ...agents
             });
             const rawModels = response.data.data || [];
             const modelIds = rawModels.map(m => m.id);
@@ -220,6 +228,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             const testUrl = chatUrl.replace('/chat/completions', '/models');
             req.log.debug({ testId, testUrl }, '探测模型路径');
             await assertSafeOutboundUrl(testUrl, req.user);
+            const agents = createSafeHttpAgentsForUser(req.user);
             await axios.get(testUrl, {
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
@@ -227,7 +236,8 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                     'User-Agent': 'Pivot-AI-Client/1.0'
                 },
                 timeout: 10000,
-                proxy: false
+                proxy: false,
+                ...agents
             });
             req.log.info(`模型测试成功: ${testLabel} (ID: ${testId})`);
             logAction(req, '测试模型', `模型连接成功: ${model_name || url}`);

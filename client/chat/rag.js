@@ -1,44 +1,64 @@
 /* 知识库 (RAG) 前端逻辑 Knowledge Base (RAG) Frontend Logic */
 
-const formatRagDateToCN = (dateStr) => {
-    if (!dateStr) return '-';
-    const text = String(dateStr).trim();
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
-    const date = new Date(text);
-    if (Number.isNaN(date.getTime())) return text;
-    return date.toLocaleString('zh-CN', {
-        timeZone: 'Asia/Shanghai',
-        hour12: false,
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-    }).replace(/\//g, '-');
-};
-
-const RAG_ICONS = {
-    status: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>',
-    enable: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>',
-    progress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
-    chunks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>',
-    time: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>'
-};
-
-const escapeRagHtml = (str) => {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-};
-
-const formatRagSize = (bytes) => {
-    const value = Number(bytes || 0);
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-    if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-    return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
-};
+const {
+    RAG_ICONS,
+    escapeRagHtml,
+    formatRagDateToCN,
+    formatRagSize
+} = window.Pivot?.ragFormat || {};
+const {
+    escapeAttr: escapeRagAttr = (value) => String(value ?? '')
+} = window.Pivot?.html || window.PivotSafeHtml || {};
+const {
+    buildGraphCanvasMarkup,
+    buildGraphEditorModalShellHtml,
+    buildGraphEntitiesHtml,
+    buildGraphEntityEditorHtml,
+    buildGraphNodeTooltip,
+    buildGraphModalShellHtml,
+    buildGraphRelationOptionsHtml,
+    buildGraphRelationTooltip,
+    buildGraphRelationEditorHtml,
+    buildGraphRelationsHtml,
+    buildGraphTypeFilterOptionsHtml,
+    buildGraphTypeOptionsHtml,
+    buildGraphSummaryHtml,
+    getGraphNodeName,
+    graphRelationLabel: graphRelationLabelText = (value) => String(value ?? ''),
+    graphTypeLabel: graphTypeLabelText = (value) => String(value ?? '')
+} = window.Pivot?.ragGraphRender || {};
+const {
+    clampGraphZoom = (scale, minZoom, maxZoom) => Math.min(maxZoom, Math.max(minZoom, scale))
+} = window.Pivot?.ragGraphLayout || {};
+const {
+    ensureGraphMapView: ensureGraphMapViewState = (graphState) => {
+        if (!graphState.mapView) {
+            graphState.mapView = {
+                x: 0,
+                y: 0,
+                scale: 1,
+                isPanning: false,
+                pointerId: null,
+                startX: 0,
+                startY: 0,
+                originX: 0,
+                originY: 0,
+                moved: false,
+                suppressNextNodeClick: false
+            };
+        }
+        return graphState.mapView;
+    },
+    hideGraphNodeTooltip: hideGraphNodeTooltipUi = () => {},
+    moveGraphMapPan: moveGraphMapPanUi = () => false,
+    positionGraphNodeTooltip: positionGraphNodeTooltipUi = () => {},
+    resetGraphMapView: resetGraphMapViewUi = () => {},
+    showGraphNodeTooltip: showGraphNodeTooltipUi = () => {},
+    startGraphMapPan: startGraphMapPanUi = () => false,
+    stopGraphMapPan: stopGraphMapPanUi = () => false,
+    zoomGraphMap: zoomGraphMapUi = () => {},
+    zoomGraphMapByAction: zoomGraphMapByActionUi = () => {}
+} = window.Pivot?.ragGraphUi || {};
 
 const getRagStatusLabel = (status) => {
     if (status === 'ready') return '就绪';
@@ -214,7 +234,7 @@ const showRagDetailModal = (data) => {
         meta.innerHTML = items.map(item => `
             <div class="rag-meta-card ${item.class || ''}">
                 <div class="rag-meta-label">${item.icon}<span>${escapeRagHtml(item.label)}</span></div>
-                <div class="rag-meta-value" title="${escapeAttrValue(item.value)}">${escapeRagHtml(item.value)}</div>
+                <div class="rag-meta-value" title="${escapeRagAttr(item.value)}">${escapeRagHtml(item.value)}</div>
             </div>
         `).join('');
     }
@@ -240,7 +260,7 @@ window.showKnowledgeDocAudit = async () => {
         return;
     }
     try {
-        const res = await fetch(`${API_BASE}/rag/admin/docs/audit?limit=100`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/rag/admin/docs/audit?limit=100`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '删除审计加载失败');
         const modal = ensureRagAuditModal();
@@ -394,11 +414,35 @@ const renderRagDebugResults = (data) => {
 
 let ragGraphState = {
     selectedEntityId: null,
+    selectedEntity: null,
     entities: [],
-    relations: []
+    relations: [],
+    mapView: {
+        x: 0,
+        y: 0,
+        scale: 1,
+        isPanning: false,
+        pointerId: null,
+        startX: 0,
+        startY: 0,
+        originX: 0,
+        originY: 0,
+        moved: false,
+        suppressNextNodeClick: false
+    }
 };
 const RAG_GRAPH_ACTIVE_STORAGE_KEY = 'pivot_knowledge_graph_active';
 const RAG_GRAPH_DOC_STORAGE_KEY = 'pivot_knowledge_graph_doc';
+const RAG_GRAPH_MIN_ZOOM = 0.55;
+const RAG_GRAPH_MAX_ZOOM = 2.2;
+const RAG_GRAPH_ZOOM_STEP = 0.16;
+const GRAPH_UI_OPTIONS = {
+    clampZoom: clampGraphZoom,
+    escapeHtml: escapeRagHtml,
+    maxZoom: RAG_GRAPH_MAX_ZOOM,
+    minZoom: RAG_GRAPH_MIN_ZOOM,
+    zoomStep: RAG_GRAPH_ZOOM_STEP
+};
 
 const setKnowledgeGraphRestoreState = (active, docId = '') => {
     try {
@@ -425,20 +469,47 @@ const getKnowledgeGraphRestoreDocId = () => {
     }
 };
 
+const closeKnowledgeGraphEditorModal = () => {
+    document.getElementById('rag-graph-editor-modal')?.classList.add('hidden');
+};
+
 const closeKnowledgeGraphModal = () => {
+    closeKnowledgeGraphEditorModal();
+    hideGraphNodeTooltip();
     document.getElementById('rag-graph-modal')?.classList.add('hidden');
     setKnowledgeGraphRestoreState(false);
 };
 
-const graphTypeLabel = (type) => ({
-    department: '部门',
-    system: '系统',
-    process: '流程',
-    policy: '制度',
-    project: '项目',
-    role: '角色',
-    concept: '概念'
-}[type] || type || '概念');
+const graphTypeLabel = (type) => graphTypeLabelText(type);
+const graphRelationLabel = (type) => graphRelationLabelText(type);
+const graphTypeOptionsHtml = (selectedType = 'concept') => buildGraphTypeOptionsHtml(selectedType, {
+    escapeAttr: escapeRagAttr,
+    escapeHtml: escapeRagHtml
+});
+const graphRelationOptionsHtml = (selectedType = 'related_to') => buildGraphRelationOptionsHtml(selectedType, {
+    escapeAttr: escapeRagAttr,
+    escapeHtml: escapeRagHtml
+});
+const graphTypeFilterOptionsHtml = () => buildGraphTypeFilterOptionsHtml({
+    emptyLabel: '全部类型',
+    escapeAttr: escapeRagAttr,
+    escapeHtml: escapeRagHtml
+});
+
+const getGraphMapView = () => ensureGraphMapViewState(ragGraphState);
+const resetGraphMapView = () => resetGraphMapViewUi(ragGraphState, GRAPH_UI_OPTIONS);
+const zoomGraphMap = (nextScale, clientX = null, clientY = null) => zoomGraphMapUi(nextScale, ragGraphState, {
+    ...GRAPH_UI_OPTIONS,
+    clientX,
+    clientY
+});
+const zoomGraphMapByAction = (action) => zoomGraphMapByActionUi(action, ragGraphState, GRAPH_UI_OPTIONS);
+const showGraphNodeTooltip = (node, eventOrRect) => showGraphNodeTooltipUi(node, eventOrRect, GRAPH_UI_OPTIONS);
+const hideGraphNodeTooltip = () => hideGraphNodeTooltipUi();
+const positionGraphNodeTooltip = (eventOrRect) => positionGraphNodeTooltipUi(eventOrRect);
+const startGraphMapPan = (event) => startGraphMapPanUi(event, ragGraphState, GRAPH_UI_OPTIONS);
+const moveGraphMapPan = (event) => moveGraphMapPanUi(event, ragGraphState, GRAPH_UI_OPTIONS);
+const stopGraphMapPan = (event) => stopGraphMapPanUi(event, ragGraphState, GRAPH_UI_OPTIONS);
 
 const ensureRagGraphModal = () => {
     let modal = document.getElementById('rag-graph-modal');
@@ -446,56 +517,23 @@ const ensureRagGraphModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-graph-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
-        <div class="modal rag-graph-modal">
-            <div class="rag-detail-header">
-                <div>
-                    <h3>知识图谱</h3>
-                    <p class="model-modal-desc">查看实体、关系、来源文档，并进行人工修正与实体合并。</p>
-                </div>
-                <button type="button" id="rag-graph-close-btn" class="btn-danger-outline">关闭</button>
-            </div>
-            <div id="rag-graph-summary" class="rag-graph-summary"></div>
-            <div class="rag-graph-toolbar">
-                <input id="rag-graph-search" class="form-input" placeholder="搜索实体 / 系统 / 部门 / 流程">
-                <select id="rag-graph-type" class="form-input">
-                    <option value="">全部类型</option>
-                    <option value="department">部门</option>
-                    <option value="system">系统</option>
-                    <option value="process">流程</option>
-                    <option value="policy">制度</option>
-                    <option value="project">项目</option>
-                    <option value="role">角色</option>
-                    <option value="concept">概念</option>
-                </select>
-                <button id="rag-graph-search-btn" class="btn-secondary">搜索</button>
-            </div>
-            <div class="rag-graph-layout">
-                <section class="rag-graph-panel">
-                    <div class="rag-graph-panel-head">
-                        <strong>实体</strong>
-                        <span id="rag-graph-entity-count">0</span>
-                    </div>
-                    <div id="rag-graph-entities" class="rag-graph-entity-list"></div>
-                </section>
-                <section class="rag-graph-panel rag-graph-canvas-panel">
-                    <div class="rag-graph-panel-head">
-                        <strong>局部关系图</strong>
-                        <button id="rag-graph-rebuild-doc-btn" class="btn-secondary hidden">重建本文档图谱</button>
-                    </div>
-                    <div id="rag-graph-canvas" class="rag-graph-canvas"></div>
-                </section>
-                <section class="rag-graph-panel">
-                    <div class="rag-graph-panel-head">
-                        <strong>关系</strong>
-                        <span id="rag-graph-relation-count">0</span>
-                    </div>
-                    <div id="rag-graph-relations" class="rag-graph-relation-list"></div>
-                </section>
-            </div>
-            <div id="rag-graph-editor" class="rag-graph-editor hidden"></div>
-        </div>
-    `;
+    modal.innerHTML = buildGraphModalShellHtml({
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        messages: {
+            canvasTitle: '关系地图',
+            closeLabel: '关闭',
+            description: '查看实体关系、来源文档，并校准图谱节点与关系。',
+            editEntityLabel: '校准实体',
+            entitiesTitle: '实体节点',
+            rebuildDocLabel: '重建本文档图谱',
+            relationsTitle: '关系明细',
+            searchLabel: '搜索',
+            searchPlaceholder: '搜索实体、系统、部门、流程',
+            title: '知识图谱'
+        },
+        typeFilterOptionsHtml: graphTypeFilterOptionsHtml()
+    });
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-graph-close-btn')) {
@@ -505,16 +543,40 @@ const ensureRagGraphModal = () => {
     return modal;
 };
 
+const ensureRagGraphEditorModal = () => {
+    let modal = document.getElementById('rag-graph-editor-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'rag-graph-editor-modal';
+    modal.className = 'modal-overlay hidden rag-graph-editor-modal-overlay';
+    modal.innerHTML = buildGraphEditorModalShellHtml({
+        escapeHtml: escapeRagHtml,
+        messages: {
+            closeLabel: '关闭',
+            title: '实体校准'
+        }
+    });
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal || event.target.closest('#rag-graph-editor-close-btn')) {
+            closeKnowledgeGraphEditorModal();
+        }
+    });
+    return modal;
+};
+
 const renderGraphSummary = (summary = {}) => {
     const el = document.getElementById('rag-graph-summary');
     if (!el) return;
-    const topTypes = Array.isArray(summary.topTypes) ? summary.topTypes : [];
-    el.innerHTML = `
-        <span><b>${Number(summary.entities || 0)}</b>实体</span>
-        <span><b>${Number(summary.relations || 0)}</b>关系</span>
-        <span><b>${Number(summary.mentions || 0)}</b>提及</span>
-        ${topTypes.slice(0, 5).map(item => `<span>${escapeRagHtml(graphTypeLabel(item.type))}<b>${Number(item.count || 0)}</b></span>`).join('')}
-    `;
+    el.innerHTML = buildGraphSummaryHtml(summary, {
+        escapeHtml: escapeRagHtml,
+        graphTypeLabel,
+        labels: {
+            entities: '实体',
+            relations: '关系',
+            mentions: '提及'
+        }
+    });
 };
 
 const renderGraphEntities = (payload = {}) => {
@@ -524,46 +586,54 @@ const renderGraphEntities = (payload = {}) => {
     ragGraphState.entities = entities;
     if (count) count.textContent = String(Number(payload.total || entities.length));
     if (!list) return;
-    list.innerHTML = entities.map(entity => `
-        <button class="rag-graph-entity ${Number(entity.id) === Number(ragGraphState.selectedEntityId) ? 'active' : ''}" data-entity-id="${entity.id}">
-            <span>
-                <strong>${escapeRagHtml(entity.name)}</strong>
-                <small>${escapeRagHtml(graphTypeLabel(entity.type))} · 提及 ${Number(entity.mention_count || 0)} · 关系 ${Number(entity.relation_count || 0)}</small>
-            </span>
-            <em>${Number(entity.confidence || 0).toFixed(2)}</em>
-        </button>
-    `).join('') || '<div class="rag-debug-empty">暂无实体</div>';
+    list.innerHTML = buildGraphEntitiesHtml(entities, {
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        graphTypeLabel,
+        selectedEntityId: ragGraphState.selectedEntityId,
+        messages: {
+            emptyHtml: '<div class="rag-debug-empty">暂无实体</div>',
+            describeEntityMeta: (entity, getTypeLabel, escapeHtml) => (
+                `<b>${escapeHtml(getTypeLabel(entity.type))}</b> · 提及 ${Number(entity.mention_count || 0)} · 关系 ${Number(entity.relation_count || 0)}`
+            ),
+            formatConfidence: (entity) => `可信度 ${Number(entity.confidence || 0).toFixed(2)}`
+        }
+    });
 };
 
 const renderGraphCanvas = (graph = {}) => {
     const el = document.getElementById('rag-graph-canvas');
     if (!el) return;
-    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-    const relations = Array.isArray(graph.relations) ? graph.relations : [];
-    if (!nodes.length) {
-        el.innerHTML = '<div class="rag-debug-empty">选择一个实体查看局部关系图</div>';
+    hideGraphNodeTooltip();
+    const editEntityBtn = document.getElementById('rag-graph-edit-entity-btn');
+    const { hasNodes, html } = buildGraphCanvasMarkup(graph, {
+        centerId: Number(graph.center?.id || ragGraphState.selectedEntityId),
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        buildGraphNodeTooltip,
+        getGraphNodeName,
+        graphRelationLabel,
+        graphTypeLabel,
+        messages: {
+            describeFooterCounts: (nodeCount, edgeCount) => `显示 ${nodeCount} 个节点 / ${edgeCount} 条关系`,
+            describeFooterStatusCollapsed: (hiddenCount) => `已收起 ${hiddenCount} 条远端关系`,
+            describeNodeMeta: ({ isCenter, relationCount }) => (isCenter ? '中心实体' : `${relationCount} 条关系`),
+            emptyHtml: '<div class="rag-debug-empty">选择一个实体查看关系地图</div>',
+            footerStatusExpanded: '当前实体关系已全部展示',
+            mapAriaLabel: '关系地图视图控制',
+            resetTitle: '复位',
+            zoomInTitle: '放大',
+            zoomOutTitle: '缩小'
+        }
+    });
+    if (!hasNodes) {
+        editEntityBtn?.classList.add('hidden');
+        el.innerHTML = html;
         return;
     }
-    const centerId = Number(graph.center?.id || ragGraphState.selectedEntityId);
-    el.innerHTML = `
-        <div class="rag-graph-node-cloud">
-            ${nodes.map(node => `
-                <button class="rag-graph-node ${Number(node.id) === centerId ? 'center' : ''}" data-entity-id="${node.id}">
-                    <strong>${escapeRagHtml(node.name)}</strong>
-                    <small>${escapeRagHtml(graphTypeLabel(node.type))}</small>
-                </button>
-            `).join('')}
-        </div>
-        <div class="rag-graph-edge-list">
-            ${relations.slice(0, 20).map(row => `
-                <div class="rag-graph-edge">
-                    <span>${escapeRagHtml(row.source_name)}</span>
-                    <b>${escapeRagHtml(row.relation_type)}</b>
-                    <span>${escapeRagHtml(row.target_name)}</span>
-                </div>
-            `).join('') || '<div class="rag-debug-empty">暂无直接关系</div>'}
-        </div>
-    `;
+    editEntityBtn?.classList.toggle('hidden', !ragGraphState.selectedEntity);
+    el.innerHTML = html;
+    resetGraphMapView();
 };
 
 const renderGraphRelations = (payload = {}) => {
@@ -573,24 +643,23 @@ const renderGraphRelations = (payload = {}) => {
     ragGraphState.relations = relations;
     if (count) count.textContent = String(Number(payload.total || relations.length));
     if (!list) return;
-    list.innerHTML = relations.map(row => `
-        <article class="rag-graph-relation" data-relation-id="${row.id}">
-            <header>
-                <strong>${escapeRagHtml(row.source_name)} → ${escapeRagHtml(row.target_name)}</strong>
-                <span>${Number(row.confidence || 0).toFixed(2)}</span>
-            </header>
-            <p>${escapeRagHtml(row.relation_type)} · ${escapeRagHtml(row.doc_name || '知识图谱')}</p>
-            ${row.description ? `<small>${escapeRagHtml(row.description)}</small>` : ''}
-            <div class="rag-graph-actions">
-                <button class="btn-secondary rag-graph-edit-relation-btn" data-relation-id="${row.id}">编辑</button>
-                <button class="btn-danger rag-graph-delete-relation-btn" data-relation-id="${row.id}">删除</button>
-            </div>
-        </article>
-    `).join('') || '<div class="rag-debug-empty">暂无关系</div>';
+    list.innerHTML = buildGraphRelationsHtml(relations, {
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        buildGraphRelationTooltip,
+        graphRelationLabel,
+        messages: {
+            deleteLabel: '删除',
+            describeSource: (row) => `来源：${row.doc_name || '知识图谱'}`,
+            editLabel: '编辑',
+            emptyHtml: '<div class="rag-debug-empty">暂无关系</div>',
+            formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`
+        }
+    });
 };
 
 const loadGraphSummary = async () => {
-    const res = await fetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '图谱概览加载失败');
     renderGraphSummary(data);
@@ -603,7 +672,7 @@ const loadGraphEntities = async () => {
     const params = new URLSearchParams({ limit: '80' });
     if (query) params.set('query', query);
     if (type) params.set('type', type);
-    const res = await fetch(`${API_BASE}/rag/graph/entities?${params}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/rag/graph/entities?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '实体加载失败');
     renderGraphEntities(data);
@@ -613,7 +682,7 @@ const loadGraphEntities = async () => {
 const loadGraphRelations = async (entityId = ragGraphState.selectedEntityId) => {
     const params = new URLSearchParams({ limit: '100' });
     if (entityId) params.set('entityId', entityId);
-    const res = await fetch(`${API_BASE}/rag/graph/relations?${params}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/rag/graph/relations?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系加载失败');
     renderGraphRelations(data);
@@ -623,6 +692,8 @@ const loadGraphRelations = async (entityId = ragGraphState.selectedEntityId) => 
 window.openKnowledgeGraph = async (docId = null) => {
     const modal = ensureRagGraphModal();
     modal.dataset.docId = docId || '';
+    ragGraphState.selectedEntityId = null;
+    ragGraphState.selectedEntity = null;
     setKnowledgeGraphRestoreState(true, docId || '');
     document.getElementById('rag-graph-rebuild-doc-btn')?.classList.toggle('hidden', !docId);
     modal.classList.remove('hidden');
@@ -632,6 +703,8 @@ window.openKnowledgeGraph = async (docId = null) => {
         const firstEntity = entities.data?.[0];
         if (firstEntity) await window.selectKnowledgeGraphEntity(firstEntity.id);
         else {
+            ragGraphState.selectedEntityId = null;
+            ragGraphState.selectedEntity = null;
             renderGraphCanvas({});
             renderGraphRelations({ data: [], total: 0 });
         }
@@ -645,34 +718,50 @@ window.selectKnowledgeGraphEntity = async (entityId) => {
     renderGraphEntities({ data: ragGraphState.entities, total: ragGraphState.entities.length });
     try {
         const [graphRes] = await Promise.all([
-            fetch(`${API_BASE}/rag/graph/entities/${entityId}?limit=120`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?limit=120`, { headers: authHeaders() }),
             loadGraphRelations(entityId)
         ]);
         const graph = await graphRes.json().catch(() => ({}));
         if (!graphRes.ok || graph.error) throw new Error(graph.error || '实体关系加载失败');
+        ragGraphState.selectedEntity = graph.center || null;
         renderGraphCanvas(graph);
-        window.showKnowledgeGraphEntityEditor(graph.center);
     } catch (e) {
+        ragGraphState.selectedEntity = null;
+        document.getElementById('rag-graph-edit-entity-btn')?.classList.add('hidden');
         showToast(e.message || '实体关系加载失败', 'error');
     }
 };
 
 window.showKnowledgeGraphEntityEditor = (entity) => {
-    const editor = document.getElementById('rag-graph-editor');
-    if (!editor || !entity) return;
-    editor.classList.remove('hidden');
-    editor.innerHTML = `
-        <div class="rag-graph-editor-grid">
-            <label>实体名称<input id="rag-graph-edit-name" class="form-input" value="${escapeAttrValue(entity.name || '')}"></label>
-            <label>类型<input id="rag-graph-edit-type" class="form-input" value="${escapeAttrValue(entity.type || 'concept')}"></label>
-            <label>合并到实体 ID<input id="rag-graph-merge-target" class="form-input" placeholder="目标实体 ID"></label>
-            <label class="rag-graph-editor-wide">描述<input id="rag-graph-edit-description" class="form-input" value="${escapeAttrValue(entity.description || '')}"></label>
-        </div>
-        <div class="rag-graph-editor-actions">
-            <button id="rag-graph-save-entity-btn" class="btn-secondary" data-entity-id="${entity.id}">保存实体</button>
-            <button id="rag-graph-merge-entity-btn" class="btn-secondary" data-source-entity-id="${entity.id}">合并实体</button>
-        </div>
-    `;
+    if (!entity) return;
+    const modal = ensureRagGraphEditorModal();
+    const title = modal.querySelector('#rag-graph-editor-title');
+    const subtitle = modal.querySelector('#rag-graph-editor-subtitle');
+    const body = modal.querySelector('#rag-graph-editor-body');
+    if (!body) return;
+    if (title) title.textContent = '实体校准';
+    if (subtitle) subtitle.textContent = `#${Number(entity.id)} · ${graphTypeLabel(entity.type)}`;
+    const mergeCandidates = ragGraphState.entities
+        .filter(item => Number(item.id) !== Number(entity.id))
+        .slice(0, 80);
+    body.innerHTML = buildGraphEntityEditorHtml(entity, {
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        graphTypeLabel,
+        mergeCandidates,
+        typeOptionsHtml: graphTypeOptionsHtml(entity.type || 'concept'),
+        messages: {
+            cancelLabel: '取消',
+            descriptionLabel: '描述',
+            mergeLabel: '合并实体',
+            mergeTargetLabel: '合并到实体 ID',
+            mergeTargetPlaceholder: '选择或输入目标 ID',
+            nameLabel: '实体名称',
+            saveLabel: '保存实体',
+            typeLabel: '实体类型'
+        }
+    });
+    modal.classList.remove('hidden');
 };
 
 window.saveKnowledgeGraphEntity = async (entityId) => {
@@ -681,7 +770,7 @@ window.saveKnowledgeGraphEntity = async (entityId) => {
         type: document.getElementById('rag-graph-edit-type')?.value,
         description: document.getElementById('rag-graph-edit-description')?.value
     };
-    const res = await fetch(`${API_BASE}/rag/graph/entities/${entityId}`, {
+    const res = await apiFetch(`${API_BASE}/rag/graph/entities/${entityId}`, {
         method: 'PUT',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -691,6 +780,7 @@ window.saveKnowledgeGraphEntity = async (entityId) => {
     showToast('实体已保存');
     await loadGraphEntities();
     await window.selectKnowledgeGraphEntity(entityId);
+    closeKnowledgeGraphEditorModal();
 };
 
 window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
@@ -698,7 +788,7 @@ window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
     if (!targetEntityId || Number(targetEntityId) === Number(sourceEntityId)) return showToast('请输入有效的目标实体 ID', 'error');
     const confirmed = await ragConfirm('合并知识图谱实体', `确定将实体 ${sourceEntityId} 合并到 ${targetEntityId} 吗？`);
     if (!confirmed) return;
-    const res = await fetch(`${API_BASE}/rag/graph/entities/merge`, {
+    const res = await apiFetch(`${API_BASE}/rag/graph/entities/merge`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceEntityId, targetEntityId })
@@ -708,15 +798,46 @@ window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
     showToast('实体已合并');
     await loadGraphEntities();
     await window.selectKnowledgeGraphEntity(targetEntityId);
+    closeKnowledgeGraphEditorModal();
 };
 
 window.editKnowledgeGraphRelation = async (relationId) => {
     const relation = ragGraphState.relations.find(item => Number(item.id) === Number(relationId));
     if (!relation) return;
-    const relationType = window.prompt('关系类型', relation.relation_type || 'related_to');
-    if (!relationType) return;
-    const description = window.prompt('关系描述', relation.description || '') ?? relation.description;
-    const res = await fetch(`${API_BASE}/rag/graph/relations/${relationId}`, {
+    window.showKnowledgeGraphRelationEditor(relation);
+};
+
+window.showKnowledgeGraphRelationEditor = (relation) => {
+    if (!relation) return;
+    const modal = ensureRagGraphEditorModal();
+    const title = modal.querySelector('#rag-graph-editor-title');
+    const subtitle = modal.querySelector('#rag-graph-editor-subtitle');
+    const body = modal.querySelector('#rag-graph-editor-body');
+    if (!body) return;
+    if (title) title.textContent = '关系校准';
+    if (subtitle) subtitle.textContent = `#${Number(relation.id)} · 可信度 ${Number(relation.confidence || 0).toFixed(2)}`;
+    body.innerHTML = buildGraphRelationEditorHtml(relation, {
+        escapeAttr: escapeRagAttr,
+        escapeHtml: escapeRagHtml,
+        messages: {
+            cancelLabel: '取消',
+            descriptionLabel: '关系描述',
+            saveLabel: '保存关系',
+            sourceLabel: '起点',
+            targetLabel: '终点',
+            typeLabel: '关系类型'
+        },
+        relationOptionsHtml: graphRelationOptionsHtml(relation.relation_type || 'related_to')
+    });
+    modal.classList.remove('hidden');
+};
+
+window.saveKnowledgeGraphRelation = async (relationId) => {
+    const relation = ragGraphState.relations.find(item => Number(item.id) === Number(relationId));
+    if (!relation) return;
+    const relationType = document.getElementById('rag-graph-edit-relation-type')?.value || relation.relation_type || 'related_to';
+    const description = document.getElementById('rag-graph-edit-relation-description')?.value ?? relation.description;
+    const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}`, {
         method: 'PUT',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ relationType, description, confidence: relation.confidence })
@@ -725,12 +846,13 @@ window.editKnowledgeGraphRelation = async (relationId) => {
     if (!res.ok || data.error) throw new Error(data.error || '关系保存失败');
     showToast('关系已保存');
     await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    closeKnowledgeGraphEditorModal();
 };
 
 window.deleteKnowledgeGraphRelation = async (relationId) => {
     const confirmed = await ragConfirm('删除知识图谱关系', '确定删除该关系吗？');
     if (!confirmed) return;
-    const res = await fetch(`${API_BASE}/rag/graph/relations/${relationId}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系删除失败');
     showToast('关系已删除');
@@ -740,7 +862,7 @@ window.deleteKnowledgeGraphRelation = async (relationId) => {
 window.rebuildKnowledgeGraphForDoc = async () => {
     const docId = document.getElementById('rag-graph-modal')?.dataset?.docId;
     if (!docId) return;
-    const res = await fetch(`${API_BASE}/rag/graph/docs/${docId}/rebuild`, { method: 'POST', headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/rag/graph/docs/${docId}/rebuild`, { method: 'POST', headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '图谱重建失败');
     showToast(`图谱已重建：实体 ${data.entities || 0}，关系 ${data.relations || 0}`);
@@ -760,10 +882,10 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     try {
         ragDocsPage = Math.max(Number(page) || 1, 1);
         const [res, summaryRes, qualityRes, graphSummaryRes] = await Promise.all([
-            fetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/rag/summary`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
+            apiFetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/summary`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
         ]);
         const payload = await res.json();
         const docs = Array.isArray(payload) ? payload : (payload.data || []);
@@ -847,7 +969,7 @@ window.batchReindexKnowledgeDocs = async () => {
     const docIds = getSelectedRagDocIds();
     if (docIds.length === 0) return showToast('请选择文档', 'error');
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/batch-reindex`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/batch-reindex`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ docIds })
@@ -867,7 +989,7 @@ window.batchDeleteKnowledgeDocs = async () => {
     const confirmed = await ragConfirm('批量删除知识库文档', `确定删除选中的 ${docIds.length} 个知识库文档吗？大模型将不再参考这些文档。`);
     if (!confirmed) return;
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/batch-delete`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/batch-delete`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ docIds })
@@ -883,7 +1005,7 @@ window.batchDeleteKnowledgeDocs = async () => {
 
 window.toggleKnowledgeDocEnabled = async (id, enabled) => {
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/${id}/enabled`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${id}/enabled`, {
             method: 'PUT',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
@@ -899,7 +1021,7 @@ window.toggleKnowledgeDocEnabled = async (id, enabled) => {
 
 window.showKnowledgeDocDetail = async (id) => {
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/${id}?limit=50`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/rag/docs/${id}?limit=50`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '详情加载失败');
         showRagDetailModal(data);
@@ -910,7 +1032,7 @@ window.showKnowledgeDocDetail = async (id) => {
 
 window.sendRagFeedback = async (button) => {
     try {
-        const res = await fetch(`${API_BASE}/rag/feedback`, {
+        const res = await apiFetch(`${API_BASE}/rag/feedback`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -956,7 +1078,7 @@ window.debugRagQuery = async () => {
                 </div>
             `;
         }
-        const res = await fetch(`${API_BASE}/rag/debug-query`, {
+        const res = await apiFetch(`${API_BASE}/rag/debug-query`, {
             method: 'POST',
             headers: {
                 ...authHeaders(),
@@ -988,7 +1110,7 @@ window.debugRagQuery = async () => {
 
 window.retryFailedKnowledgeDocs = async () => {
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/retry-failed`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/retry-failed`, {
             method: 'POST',
             headers: authHeaders()
         });
@@ -1013,7 +1135,7 @@ window.uploadKnowledgeDoc = async () => {
     fileInput.value = ''; // 重置 input
 
     try {
-        const res = await fetch(`${API_BASE}/rag/upload`, {
+        const res = await apiFetch(`${API_BASE}/rag/upload`, {
             method: 'POST',
             headers: authHeaders(),
             body: formData
@@ -1030,7 +1152,7 @@ window.uploadKnowledgeDoc = async () => {
 
 window.reindexKnowledgeDoc = async (id) => {
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/${id}/reindex`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${id}/reindex`, {
             method: 'POST',
             headers: authHeaders()
         });
@@ -1089,6 +1211,8 @@ document.addEventListener('click', (event) => {
             const firstEntity = payload.data?.[0];
             if (firstEntity) window.selectKnowledgeGraphEntity(firstEntity.id);
             else {
+                ragGraphState.selectedEntityId = null;
+                ragGraphState.selectedEntity = null;
                 renderGraphCanvas({});
                 renderGraphRelations({ data: [], total: 0 });
             }
@@ -1096,9 +1220,25 @@ document.addEventListener('click', (event) => {
         return;
     }
 
+    const graphZoomBtn = event.target.closest('[data-graph-zoom-action]');
+    if (graphZoomBtn) {
+        zoomGraphMapByAction(graphZoomBtn.dataset.graphZoomAction);
+        return;
+    }
+
     const graphEntityBtn = event.target.closest('.rag-graph-entity, .rag-graph-node');
     if (graphEntityBtn) {
+        const mapView = getGraphMapView();
+        if (mapView.suppressNextNodeClick) {
+            mapView.suppressNextNodeClick = false;
+            return;
+        }
         window.selectKnowledgeGraphEntity(graphEntityBtn.dataset.entityId);
+        return;
+    }
+
+    if (event.target.closest('#rag-graph-edit-entity-btn')) {
+        window.showKnowledgeGraphEntityEditor(ragGraphState.selectedEntity);
         return;
     }
 
@@ -1116,7 +1256,18 @@ document.addEventListener('click', (event) => {
 
     const editRelationBtn = event.target.closest('.rag-graph-edit-relation-btn');
     if (editRelationBtn) {
-        window.editKnowledgeGraphRelation(editRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系保存失败', 'error'));
+        window.editKnowledgeGraphRelation(editRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系编辑失败', 'error'));
+        return;
+    }
+
+    const saveRelationBtn = event.target.closest('#rag-graph-save-relation-btn');
+    if (saveRelationBtn) {
+        window.saveKnowledgeGraphRelation(saveRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系保存失败', 'error'));
+        return;
+    }
+
+    if (event.target.closest('#rag-graph-cancel-editor-btn')) {
+        closeKnowledgeGraphEditorModal();
         return;
     }
 
@@ -1158,6 +1309,64 @@ document.addEventListener('click', (event) => {
 
 });
 
+document.addEventListener('pointerdown', (event) => {
+    startGraphMapPan(event);
+});
+
+document.addEventListener('pointermove', (event) => {
+    moveGraphMapPan(event);
+});
+
+document.addEventListener('pointerup', stopGraphMapPan);
+document.addEventListener('pointercancel', stopGraphMapPan);
+
+document.addEventListener('wheel', (event) => {
+    const map = event.target.closest?.('.rag-graph-map');
+    if (!map || event.target.closest?.('.rag-graph-map-controls')) return;
+    const view = getGraphMapView();
+    hideGraphNodeTooltip();
+    event.preventDefault();
+    zoomGraphMap(view.scale + (event.deltaY > 0 ? -RAG_GRAPH_ZOOM_STEP : RAG_GRAPH_ZOOM_STEP), event.clientX, event.clientY);
+}, { passive: false });
+
+document.addEventListener('mouseover', (event) => {
+    const node = event.target.closest?.('.rag-graph-map-node');
+    if (node && !node.contains(event.relatedTarget)) {
+        showGraphNodeTooltip(node, event);
+        return;
+    }
+    const relation = event.target.closest?.('.rag-graph-relation');
+    if (!relation || relation.contains(event.relatedTarget)) return;
+    showGraphNodeTooltip(relation, event);
+});
+
+document.addEventListener('mousemove', (event) => {
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-relation');
+    if (!node) return;
+    positionGraphNodeTooltip(event);
+});
+
+document.addEventListener('mouseout', (event) => {
+    const node = event.target.closest?.('.rag-graph-map-node');
+    if (node && !node.contains(event.relatedTarget)) {
+        hideGraphNodeTooltip();
+        return;
+    }
+    const relation = event.target.closest?.('.rag-graph-relation');
+    if (!relation || relation.contains(event.relatedTarget)) return;
+    hideGraphNodeTooltip();
+});
+
+document.addEventListener('focusin', (event) => {
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-relation');
+    if (!node) return;
+    showGraphNodeTooltip(node, node.getBoundingClientRect());
+});
+
+document.addEventListener('focusout', (event) => {
+    if (event.target.closest?.('.rag-graph-map-node, .rag-graph-relation')) hideGraphNodeTooltip();
+});
+
 document.addEventListener('change', (event) => {
     if (event.target?.id === 'rag-select-all') {
         document.querySelectorAll('.rag-doc-check').forEach(input => { input.checked = event.target.checked; });
@@ -1186,7 +1395,7 @@ window.deleteKnowledgeDoc = async (id) => {
     if (!confirmed) return;
     
     try {
-        const res = await fetch(`${API_BASE}/rag/docs/${id}`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${id}`, {
             method: 'DELETE',
             headers: authHeaders()
         });
@@ -1241,8 +1450,12 @@ style.textContent = `
     #rag-graph-modal.rag-detail-modal-overlay {
         align-items: stretch;
         justify-content: stretch;
+        padding: 0;
         background: var(--surface);
         backdrop-filter: none;
+    }
+    #rag-graph-modal.rag-detail-modal-overlay.hidden {
+        display: none;
     }
     .rag-detail-modal {
         width: min(980px, calc(100vw - 36px));
@@ -1402,15 +1615,25 @@ style.textContent = `
         border-radius: 8px;
         box-shadow: none;
     }
+    .rag-graph-topbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        flex: 0 0 auto;
+        padding: 10px 18px 12px;
+        background: #f8fafc;
+    }
     .rag-graph-summary {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
+        align-items: center;
         color: var(--text-muted);
         font-size: 0.72rem;
-        flex: 0 0 auto;
-        padding: 12px 18px 8px;
-        background: #f8fafc;
+        flex: 0 1 auto;
+        min-width: 0;
+        padding: 0;
     }
     .rag-graph-summary span {
         display: inline-flex;
@@ -1429,9 +1652,10 @@ style.textContent = `
         grid-template-columns: minmax(240px, 1fr) 190px auto;
         gap: 8px;
         align-items: center;
-        flex: 0 0 auto;
-        padding: 0 18px 12px;
-        background: #f8fafc;
+        flex: 1 1 560px;
+        min-width: min(560px, 100%);
+        padding: 0;
+        background: transparent;
     }
     .rag-graph-toolbar .form-input {
         margin: 0;
@@ -1483,6 +1707,24 @@ style.textContent = `
     .rag-graph-panel-head span {
         color: var(--text-muted);
         font-variant-numeric: tabular-nums;
+    }
+    .rag-graph-panel-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        min-width: 0;
+    }
+    .rag-graph-panel-actions button {
+        height: 28px;
+        min-height: 28px;
+        padding: 0 10px;
+        font-size: 0.72rem;
+        border-radius: 7px;
+        white-space: nowrap;
+    }
+    .rag-graph-panel-actions button.hidden {
+        display: none;
     }
     .rag-graph-entity-list,
     .rag-graph-relation-list,
@@ -1609,6 +1851,67 @@ style.textContent = `
         font-size: 0.7rem;
         border-radius: 6px;
     }
+    .rag-graph-editor-modal-overlay {
+        z-index: 5520;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(15, 23, 42, 0.28);
+        backdrop-filter: blur(6px);
+    }
+    .rag-graph-editor-modal-overlay.hidden {
+        display: none;
+    }
+    .rag-graph-editor-modal {
+        width: min(780px, calc(100vw - 40px));
+        max-height: min(720px, calc(100vh - 40px));
+        padding: 0;
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+    }
+    .rag-graph-editor-modal-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 16px 18px 14px;
+        border-bottom: 1px solid var(--border);
+        background: #fff;
+    }
+    .rag-graph-editor-modal-head h3 {
+        margin: 0 0 4px;
+        color: var(--text-main);
+        font-size: 1rem;
+        line-height: 1.25;
+    }
+    .rag-graph-editor-modal-head .model-modal-desc {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.76rem;
+        line-height: 1.4;
+    }
+    .rag-graph-editor-modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding: 16px 18px 18px;
+        background: #fff;
+    }
+    #rag-graph-editor-close-btn {
+        flex: 0 0 auto;
+        min-width: 64px;
+        height: 32px;
+        padding: 0 12px;
+        font-size: 0.78rem;
+        border-radius: 8px;
+        box-shadow: none;
+    }
     .rag-graph-editor {
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -1646,6 +1949,405 @@ style.textContent = `
         border-radius: 8px;
     }
     .rag-graph-editor-wide { grid-column: 1 / -1; }
+    .rag-graph-layout {
+        grid-template-columns: minmax(240px, 0.72fr) minmax(500px, 1.62fr) minmax(300px, 0.94fr);
+        gap: 12px;
+    }
+    .rag-graph-canvas-panel {
+        min-width: 0;
+    }
+    .rag-graph-canvas {
+        position: relative;
+        overflow: hidden;
+        padding: 0;
+        background:
+            linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+            linear-gradient(180deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+            #fbfdff;
+        background-size: 32px 32px;
+    }
+    .rag-graph-map {
+        position: relative;
+        width: 100%;
+        height: calc(100% - 42px);
+        min-height: 360px;
+        overflow: hidden;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+    }
+    .rag-graph-map.is-panning {
+        cursor: grabbing;
+    }
+    .rag-graph-map-stage {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        transform-origin: 0 0;
+        will-change: transform;
+        transition: transform 120ms ease;
+    }
+    .rag-graph-map.is-panning .rag-graph-map-stage {
+        transition: none;
+    }
+    .rag-graph-map-controls {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 8;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(8px);
+        cursor: default;
+    }
+    .rag-graph-map-controls button {
+        width: 28px;
+        height: 28px;
+        min-height: 28px;
+        padding: 0;
+        border-radius: 7px;
+        font-size: 0.78rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+    .rag-graph-map-controls button[data-graph-zoom-action="reset"] {
+        width: 38px;
+        font-size: 0.68rem;
+    }
+    .rag-graph-map-controls button:disabled {
+        opacity: 0.46;
+        cursor: not-allowed;
+    }
+    #rag-graph-zoom-value {
+        width: 42px;
+        color: #475569;
+        font-size: 0.68rem;
+        font-weight: 900;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+    .rag-graph-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    .rag-graph-svg marker path {
+        fill: #64748b;
+    }
+    .rag-graph-link {
+        fill: none;
+        stroke: #64748b;
+        stroke-width: 0.55;
+        opacity: 0.72;
+        vector-effect: non-scaling-stroke;
+    }
+    .rag-graph-link.is-owner { stroke: #059669; }
+    .rag-graph-link.is-belong { stroke: #2563eb; }
+    .rag-graph-link.is-depend { stroke: #7c3aed; }
+    .rag-graph-link.is-contain { stroke: #0f766e; }
+    .rag-graph-link.is-affect { stroke: #dc2626; }
+    .rag-graph-edge-label {
+        position: absolute;
+        z-index: 3;
+        transform: translate(-50%, -50%);
+        max-width: 86px;
+        padding: 3px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(100, 116, 139, 0.24);
+        background: rgba(255, 255, 255, 0.88);
+        color: #334155;
+        font-size: 0.66rem;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06);
+        pointer-events: none;
+    }
+    .rag-graph-edge-label.is-owner { color: #047857; border-color: rgba(5, 150, 105, 0.26); }
+    .rag-graph-edge-label.is-belong { color: #1d4ed8; border-color: rgba(37, 99, 235, 0.24); }
+    .rag-graph-edge-label.is-depend { color: #6d28d9; border-color: rgba(124, 58, 237, 0.24); }
+    .rag-graph-edge-label.is-contain { color: #0f766e; border-color: rgba(15, 118, 110, 0.24); }
+    .rag-graph-edge-label.is-affect { color: #b91c1c; border-color: rgba(220, 38, 38, 0.24); }
+    .rag-graph-map-node {
+        position: absolute;
+        z-index: 4;
+        width: 138px;
+        min-height: 64px;
+        margin: 0;
+        transform: translate(-50%, -50%);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 3px;
+        padding: 9px 11px;
+        border-radius: 8px;
+        border-color: rgba(148, 163, 184, 0.32);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 10px 26px rgba(15, 23, 42, 0.09);
+    }
+    .rag-graph-map-node:hover {
+        border-color: rgba(16, 185, 129, 0.45);
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+    }
+    .rag-graph-map-node.center {
+        width: 162px;
+        min-height: 76px;
+        border-color: rgba(16, 185, 129, 0.68);
+        background: #ecfdf5;
+        box-shadow: 0 18px 34px rgba(16, 185, 129, 0.16);
+    }
+    .rag-graph-map-node span {
+        max-width: 100%;
+        color: #047857;
+        font-size: 0.64rem;
+        font-weight: 900;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .rag-graph-map-node strong {
+        width: 100%;
+        color: #0f172a;
+        font-size: 0.82rem;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .rag-graph-map-node small {
+        width: 100%;
+        color: #64748b;
+        font-size: 0.68rem;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .rag-graph-node-tooltip {
+        position: fixed;
+        z-index: 5510;
+        display: grid;
+        gap: 4px;
+        max-width: min(340px, calc(100vw - 24px));
+        padding: 9px 11px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.95);
+        color: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+        pointer-events: none;
+        font-size: 0.73rem;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        white-space: normal;
+    }
+    .rag-graph-node-tooltip.hidden {
+        display: none;
+    }
+    .rag-graph-node-tooltip strong {
+        color: #fff;
+        font-size: 0.78rem;
+        line-height: 1.35;
+    }
+    .rag-graph-node-tooltip span {
+        color: rgba(226, 232, 240, 0.9);
+    }
+    .rag-graph-map-footer {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 10px;
+        z-index: 5;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 7px 10px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #64748b;
+        font-size: 0.7rem;
+        font-weight: 700;
+        backdrop-filter: blur(8px);
+    }
+    .rag-graph-summary span {
+        background: #fff;
+    }
+    .rag-graph-summary span small {
+        color: var(--text-muted);
+        font-size: 0.7rem;
+        font-weight: 800;
+    }
+    .rag-graph-summary-main b {
+        font-size: 0.86rem;
+    }
+    .rag-graph-entity {
+        border-radius: 8px;
+        box-sizing: border-box;
+        min-width: 0;
+        overflow: hidden;
+        transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+    }
+    .rag-graph-entity > span {
+        min-width: 0;
+        flex: 1 1 calc(100% - 90px);
+    }
+    .rag-graph-entity-list,
+    .rag-graph-relation-list {
+        overflow-x: hidden;
+    }
+    .rag-graph-entity.active {
+        border-color: rgba(16, 185, 129, 0.55);
+        background: #ecfdf5;
+        box-shadow: inset 3px 0 0 rgba(16, 185, 129, 0.78);
+    }
+    .rag-graph-entity small b {
+        color: #047857;
+        font-weight: 900;
+    }
+    .rag-graph-entity em {
+        flex: 0 0 82px;
+        width: 82px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.1);
+        color: #475569;
+        font-size: 0.66rem;
+        font-weight: 800;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: clip;
+    }
+    .rag-graph-relation {
+        box-sizing: border-box;
+        min-width: 0;
+        padding: 6px 8px;
+        margin-bottom: 5px;
+        border-radius: 7px;
+        background: #fff;
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.03);
+    }
+    .rag-graph-relation.is-owner { border-left: 2px solid #059669; }
+    .rag-graph-relation.is-belong { border-left: 2px solid #2563eb; }
+    .rag-graph-relation.is-depend { border-left: 2px solid #7c3aed; }
+    .rag-graph-relation.is-contain { border-left: 2px solid #0f766e; }
+    .rag-graph-relation.is-affect { border-left: 2px solid #dc2626; }
+    .rag-graph-relation header {
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        line-height: 1.2;
+    }
+    .rag-graph-relation header strong {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+    .rag-graph-relation header strong span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rag-graph-relation header strong b {
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: rgba(16, 185, 129, 0.08);
+        color: #047857;
+        font-size: 0.64rem;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .rag-graph-relation-foot {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+    }
+    .rag-graph-relation-foot p {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.68rem;
+        line-height: 1.2;
+    }
+    .rag-graph-relation-foot p span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rag-graph-relation-foot p span:first-child {
+        flex: 0 0 auto;
+        max-width: 108px;
+    }
+    .rag-graph-relation .rag-graph-actions {
+        margin: 0;
+        gap: 4px;
+    }
+    .rag-graph-relation .rag-graph-actions button {
+        height: 22px;
+        min-height: 22px;
+        padding: 0 7px;
+        font-size: 0.66rem;
+        border-radius: 6px;
+    }
+    .rag-graph-confidence {
+        flex: 0 0 auto;
+        color: #64748b;
+        font-size: 0.64rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+    .rag-graph-editor {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .rag-graph-editor-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--text-main);
+        font-size: 0.82rem;
+    }
+    .rag-graph-editor-head span {
+        color: var(--text-muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+    }
+    .rag-graph-editor-grid textarea.form-input {
+        min-height: 54px;
+        height: auto;
+        padding: 8px 10px;
+        resize: vertical;
+        line-height: 1.35;
+    }
+    .rag-graph-editor-grid input[readonly] {
+        color: var(--text-muted);
+        background: #f8fafc;
+    }
     @media (max-width: 1200px) {
         .rag-graph-layout {
             grid-template-columns: minmax(240px, 0.9fr) minmax(420px, 1.3fr) minmax(280px, 1fr);
@@ -1656,6 +2358,12 @@ style.textContent = `
         .rag-detail-header { align-items: stretch; flex-direction: column; }
         .rag-detail-header h3 { max-width: 100%; white-space: normal; }
         .rag-graph-modal { width: 100vw; height: 100vh; padding: 14px; border-radius: 0; }
+        .rag-graph-editor-modal { width: calc(100vw - 20px); max-height: calc(100vh - 20px); border-radius: 8px; }
+        .rag-graph-editor-modal-head { padding: 14px; }
+        .rag-graph-editor-modal-body { padding: 14px; }
+        .rag-graph-topbar { align-items: stretch; padding: 10px 14px 12px; }
+        .rag-graph-summary,
+        .rag-graph-toolbar { width: 100%; }
         .rag-graph-toolbar,
         .rag-graph-layout,
         .rag-graph-editor-grid { grid-template-columns: 1fr; }

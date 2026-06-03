@@ -1,10 +1,13 @@
 /* Security Utilities */
 const crypto = require('crypto');
-const dns = require('dns').promises;
+const dns = require('dns');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const net = require('net');
 const path = require('path');
 const { logger } = require('./logger');
+const dnsPromises = dns.promises;
 
 const encryptedPrefix = 'enc:v1:';
 const uploadRoot = path.resolve(__dirname, '../uploads');
@@ -78,26 +81,135 @@ function isSensitiveOutboundHost(hostname) {
     return false;
 }
 
-async function assertSafeOutboundUrl(rawUrl, user) {
-    const parsed = validateModelUrl(rawUrl, user);
-    if (process.env.ALLOW_SENSITIVE_OUTBOUND_URLS === 'true') return parsed;
+function isLoopbackHost(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (host === 'localhost' || host === '::1') return true;
+    if (net.isIP(host) === 4) {
+        const parts = host.split('.').map(Number);
+        return parts[0] === 127;
+    }
+    return false;
+}
 
-    if (isSensitiveOutboundHost(parsed.hostname)) {
-        throw new Error('Outbound URL points to a sensitive local, link-local, or metadata target.');
+// 校验主机名（含 DNS 解析后的 IP）不指向 loopback / link-local / 云元数据等敏感目标。
+// 不拦截普通局域网（RFC1918）地址，便于本机/内网模型与 MCP 服务接入。
+function buildUnsafeOutboundError() {
+    return new Error('Outbound URL points to a sensitive local, link-local, or metadata target.');
+}
+
+function assertSafeResolvedAddress(hostname, address, options = {}) {
+    const blockPrivate = options.blockPrivate === true;
+    const allowExplicitLoopback = options.allowExplicitLoopback === true &&
+        isLoopbackHost(hostname) &&
+        isLoopbackHost(address);
+
+    if (
+        (isSensitiveOutboundHost(address) && !allowExplicitLoopback) ||
+        (blockPrivate && isPrivateHost(address) && !allowExplicitLoopback)
+    ) {
+        throw buildUnsafeOutboundError();
+    }
+}
+
+function createSafeLookup(options = {}) {
+    return (hostname, lookupOptions, callback) => {
+        let cb = callback;
+        let opts = lookupOptions;
+        if (typeof lookupOptions === 'function') {
+            cb = lookupOptions;
+            opts = {};
+        }
+
+        dns.lookup(hostname, opts || {}, (err, address, family) => {
+            if (err) return cb(err);
+            try {
+                if (Array.isArray(address)) {
+                    address.forEach(item => assertSafeResolvedAddress(hostname, item.address, options));
+                    return cb(null, address);
+                }
+                assertSafeResolvedAddress(hostname, address, options);
+                return cb(null, address, family);
+            } catch (safeErr) {
+                return cb(safeErr);
+            }
+        });
+    };
+}
+
+function createSafeHttpAgents(options = {}) {
+    const lookup = createSafeLookup(options);
+    return {
+        httpAgent: new http.Agent({ keepAlive: true, lookup }),
+        httpsAgent: new https.Agent({ keepAlive: true, lookup })
+    };
+}
+
+async function assertSafeOutboundHost(hostname, options = {}) {
+    if (process.env.ALLOW_SENSITIVE_OUTBOUND_URLS === 'true') return;
+    const blockPrivate = options.blockPrivate === true;
+    const allowExplicitLoopback = options.allowExplicitLoopback === true && isLoopbackHost(hostname);
+
+    if (
+        (isSensitiveOutboundHost(hostname) && !allowExplicitLoopback) ||
+        (blockPrivate && isPrivateHost(hostname) && !allowExplicitLoopback)
+    ) {
+        throw buildUnsafeOutboundError();
     }
 
-    if (net.isIP(parsed.hostname)) return parsed;
+    if (net.isIP(hostname)) return;
 
     let records = [];
     try {
-        records = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+        records = await dnsPromises.lookup(hostname, { all: true, verbatim: true });
     } catch (e) {
-        return parsed;
+        return;
     }
 
-    if (records.some(record => isSensitiveOutboundHost(record.address))) {
+    try {
+        records.forEach(record => assertSafeResolvedAddress(hostname, record.address, {
+            blockPrivate,
+            allowExplicitLoopback
+        }));
+    } catch (e) {
         throw new Error('Outbound URL resolves to a sensitive local, link-local, or metadata target.');
     }
+}
+
+function getSafeOutboundOptionsForUser(user, {
+    allowPrivateEnv = 'ALLOW_PRIVATE_MODEL_URLS',
+    allowExplicitLoopbackForAdmin = false
+} = {}) {
+    const allowPrivateForAdmin = process.env[allowPrivateEnv] !== 'false' && user?.role === 'admin';
+    return {
+        blockPrivate: !allowPrivateForAdmin,
+        allowExplicitLoopback: allowExplicitLoopbackForAdmin && allowPrivateForAdmin
+    };
+}
+
+function createSafeHttpAgentsForUser(user, options = {}) {
+    return createSafeHttpAgents(getSafeOutboundOptionsForUser(user, options));
+}
+
+async function assertSafeOutboundUrl(rawUrl, user) {
+    const parsed = validateModelUrl(rawUrl, user);
+    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && user?.role === 'admin';
+    await assertSafeOutboundHost(parsed.hostname, { blockPrivate: !allowPrivateForAdmin });
+    return parsed;
+}
+
+// MCP / IM webhook 出站守卫：复用协议与凭据校验，并在调用时（含 DNS 解析）拦截
+// 敏感目标，关闭 DNS rebinding 与云元数据 SSRF；普通用户不能访问内网目标。
+async function assertSafeMcpOutboundUrl(rawUrl, user = null) {
+    const parsed = validateMcpEndpointUrl(rawUrl);
+    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MCP_URLS !== 'false' && user?.role === 'admin';
+    const allowExplicitLoopback = allowPrivateForAdmin && isLoopbackHost(parsed.hostname);
+    if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
+        throw new Error('Non-admin users cannot configure private or local MCP endpoints.');
+    }
+    await assertSafeOutboundHost(parsed.hostname, {
+        blockPrivate: !allowPrivateForAdmin,
+        allowExplicitLoopback
+    });
     return parsed;
 }
 
@@ -326,7 +438,14 @@ module.exports = {
     validateModelUrl,
     validateMcpEndpointUrl,
     assertSafeOutboundUrl,
+    assertSafeMcpOutboundUrl,
+    assertSafeOutboundHost,
+    createSafeHttpAgents,
+    createSafeHttpAgentsForUser,
+    createSafeLookup,
+    getSafeOutboundOptionsForUser,
     isPrivateHost,
+    isLoopbackHost,
     isSensitiveOutboundHost,
     escapeCsvCell,
     parseCsvLine,

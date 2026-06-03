@@ -2,7 +2,7 @@ const axios = require('axios');
 const { db } = require('../db/connection');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-const { assertSafeOutboundUrl } = require('../security');
+const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
 
 const EVENT_TYPES = new Set(['sql', 'model', 'rag', 'agent', 'system']);
 const EVENT_STATUSES = new Set(['open', 'ack', 'resolved']);
@@ -40,7 +40,9 @@ async function sendWebhookAlert(event) {
     const url = getSetting('observability_webhook_url') || process.env.PIVOT_ALERT_WEBHOOK_URL || '';
     if (!url) return;
     try {
-        await assertSafeOutboundUrl(url, { username: 'admin', role: 'admin' });
+        const guardUser = { username: 'admin', role: 'admin' };
+        await assertSafeOutboundUrl(url, guardUser);
+        const agents = createSafeHttpAgentsForUser(guardUser);
         await axios.post(url, {
             source: 'pivot',
             type: event.type,
@@ -53,6 +55,7 @@ async function sendWebhookAlert(event) {
         }, {
             timeout: WEBHOOK_TIMEOUT_MS,
             proxy: false,
+            ...agents,
             headers: { 'Content-Type': 'application/json', 'User-Agent': 'Pivot-Alert/1.0' }
         });
         db.prepare('UPDATE observability_events SET alerted_at = ? WHERE id = ?')

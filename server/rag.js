@@ -220,7 +220,7 @@ ragRouter.post('/docs/batch-delete', authMiddleware, asyncHandler(async (req, re
 }));
 
 ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, res) => {
-    const result = batchReindexKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds });
+    const result = batchReindexKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds, user: req.user });
     auditRagAction(req, '知识库文档批量重建索引', result);
     req.log?.info(result, 'RAG 文档批量重建索引');
     return res.json({ success: true, ...result });
@@ -232,7 +232,7 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), asyncHandler(as
     req.file.originalname = normalizeUploadedOriginalName(req.file.originalname);
 
     const { docId } = createKnowledgeDocumentFromUpload({ userId: req.user.id, file: req.file });
-    scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id });
+    scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id, user: req.user });
     auditRagAction(req, '知识库文档上传', { docId, name: req.file.originalname });
     req.log?.info({ docId, name: req.file.originalname }, 'RAG 文档上传');
     res.json({ success: true, docId, message: '后台处理中' });
@@ -245,7 +245,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
         return res.status(409).json({ error: '原始文件不存在，无法重新索引，请重新上传文档' });
     }
 
-    const result = scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id });
+    const result = scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user });
     if (!result.started && result.reason === 'already_processing') {
         return res.status(409).json({ error: '文档正在处理中，请稍后再试' });
     }
@@ -256,7 +256,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
 }));
 
 ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, res) => {
-    const result = scheduleFailedKnowledgeDocumentsForUser({ userId: req.user.id, limit: 50 });
+    const result = scheduleFailedKnowledgeDocumentsForUser({ userId: req.user.id, limit: 50, user: req.user });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识库失败文档重试', result);
     req.log?.info(result, 'RAG 失败文档批量重试');
@@ -271,7 +271,8 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
     const result = await debugRetrieveContext(req.user.id, query, {
         topK: req.body?.topK,
         candidateLimit: req.body?.candidateLimit,
-        scoreThreshold: req.body?.scoreThreshold
+        scoreThreshold: req.body?.scoreThreshold,
+        user: req.user
     });
     // 把检索耗时回填，给前端"检索可视化"展示用
     return res.json({ ...result, elapsedMs: Date.now() - startedAt });
@@ -286,7 +287,7 @@ ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (r
         apiKey: (req.body?.apiKey && req.body.apiKey.trim()) ? req.body.apiKey.trim() : savedConfig.apiKey
     };
     
-    const result = await testEmbeddingConnection(config);
+    const result = await testEmbeddingConnection(config, req.user);
     auditRagAction(req, '向量模型连接测试', {
         mode: config.mode, 
         apiUrl: config.apiUrl,

@@ -1,3 +1,10 @@
+const {
+    assertSafeOutboundHost,
+    createSafeHttpAgents,
+    getSafeOutboundOptionsForUser,
+    validateModelUrl
+} = require('../security');
+
 function isLocalDevUrl(url) {
     const text = String(url || '').toLowerCase();
     return text.includes('localhost') || text.includes('127.0.0.1');
@@ -37,6 +44,29 @@ function buildModelHeaders(modelCfg, options = {}) {
     return headers;
 }
 
+function getModelRuntimeGuardUser(modelCfg, user = null) {
+    if (!modelCfg?.user_id) return { role: 'admin' };
+    return user || {};
+}
+
+function getModelRuntimeGuardOptions(modelCfg, user = null) {
+    const guardUser = getModelRuntimeGuardUser(modelCfg, user);
+    return getSafeOutboundOptionsForUser(guardUser, {
+        allowPrivateEnv: 'ALLOW_PRIVATE_MODEL_URLS',
+        allowExplicitLoopbackForAdmin: true
+    });
+}
+
+async function assertSafeModelRuntimeUrl(modelCfg, url, user = null) {
+    const parsed = validateModelUrl(url || modelCfg?.url, { role: 'admin' });
+    await assertSafeOutboundHost(parsed.hostname, getModelRuntimeGuardOptions(modelCfg, user));
+    return parsed;
+}
+
+function createSafeModelHttpAgents(modelCfg, user = null) {
+    return createSafeHttpAgents(getModelRuntimeGuardOptions(modelCfg, user));
+}
+
 function convertChatMessagesToResponsesInput(messages = []) {
     return messages.map(message => {
         let role = message.role;
@@ -69,6 +99,8 @@ module.exports = {
     buildChatCompletionsUrl,
     buildModelHeaders,
     buildResponsesUrl,
+    assertSafeModelRuntimeUrl,
+    createSafeModelHttpAgents,
     convertChatMessagesToResponsesInput,
     isLocalDevUrl,
     normalizeModelBaseUrl,

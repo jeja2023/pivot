@@ -134,7 +134,7 @@ async function startGpuMonitor() {
             state.error = 'GPU 状态刷新异常: ' + err.message;
             logger.warn({ err: err.message }, 'GPU 监控刷新失败');
         });
-    }, MONITOR_INTERVAL);
+    }, MONITOR_INTERVAL).unref();
 }
 
 function getGpuMonitorStatus() {

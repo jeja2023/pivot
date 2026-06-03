@@ -1,6 +1,6 @@
 // --- 扩展功能模块 Extra Features ---
 window.loadPrompts = async function() {
-    const res = await fetch(`${API_BASE}/prompts`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/prompts`, { headers: authHeaders() });
     const data = await res.json();
     const grid = document.getElementById('prompt-grid');
     if (!grid) return;
@@ -33,7 +33,7 @@ window.applyPrompt = async (content) => {
     if (!currentSessionId) return showToast('请先选择一个对话', 'error');
     showConfirm('切换 AI 角色', '确定要将该角色指令应用到当前对话吗？', async () => {
         try {
-            const res = await fetch(`${API_BASE}/sessions/${currentSessionId}/system-prompt`, {
+            const res = await apiFetch(`${API_BASE}/sessions/${currentSessionId}/system-prompt`, {
                 method: 'PUT',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ systemPrompt: content })
@@ -57,14 +57,14 @@ window.prepareEditPrompt = (p) => {
 window.savePrompt = async () => {
     const id = document.getElementById('p-id').value;
     const payload = { name: document.getElementById('p-name').value, category: document.getElementById('p-category').value, scope: document.getElementById('p-scope').value, content: document.getElementById('p-content').value };
-    const res = await fetch(API_BASE + (id ? `/prompts/${id}` : '/prompts'), { method: id ? 'PUT' : 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
+    const res = await apiFetch(API_BASE + (id ? `/prompts/${id}` : '/prompts'), { method: id ? 'PUT' : 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
     if (!res.ok) { const data = await res.json(); return showToast(data.error || '保存失败', 'error'); }
     closePromptModal(); loadPrompts(); showToast('指令已保存');
 };
 
 window.deletePrompt = (id) => {
     showConfirm('删除指令', '确定删除该指令模板吗？', async () => {
-        const res = await fetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('指令已删除'); loadPrompts(); }
     });
 };
@@ -91,7 +91,7 @@ const MIME_TYPE_MAP = {
 
 window.loadAttachments = async function(page = 1) {
     const keyword = document.getElementById('attachment-search-input')?.value || '';
-    const res = await fetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
     const { data, total, isSuperAdmin } = await res.json();
     const showOwner = isSuperAdmin === true;
     const attachmentsTab = document.getElementById('tab-content-attachments');
@@ -145,7 +145,7 @@ function formatFileSize(size) {
 
 window.deleteAttachment = (id) => {
     showConfirm('删除附件', '确定删除该附件吗？', async () => {
-        const res = await fetch(`${API_BASE}/attachments/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/attachments/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('附件已删除'); loadAttachments(pageState.attachments); }
     });
 };
@@ -166,7 +166,7 @@ window.changePassword = async () => {
     if (passwordError) return showToast(passwordError, 'error');
     showConfirm('确认修改密码', '修改密码后，您需要重新登录，确定继续吗？', async () => {
         try {
-            const res = await fetch(`${API_BASE}/settings/password`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ oldPassword, newPassword }) });
+            const res = await apiFetch(`${API_BASE}/settings/password`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ oldPassword, newPassword }) });
             if (!res.ok) { const data = await res.json(); throw new Error(data.error || '修改失败'); }
             showToast('密码修改成功，请重新登录', 'success');
             setTimeout(() => { localStorage.clear(); window.location.reload(); }, 1500);

@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.72",
+  "version": "0.0.76",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "server/index.js",
   "scripts": {
@@ -37,7 +37,7 @@
     "sharp": "^0.34.5",
     "uuid": "^9.0.1",
     "word-extractor": "^1.0.4",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "eslint": "^10.3.0",

@@ -33,7 +33,7 @@ window.toggleAuthPassword = (inputId, iconId) => {
 
 async function loadAuthConfig() {
     try {
-        const res = await fetch(API_BASE + '/auth/config');
+        const res = await apiFetch(API_BASE + '/auth/config');
         const data = await res.json();
         window.setPublicRegistrationState(data.allowPublicRegistration === true);
         window.publicUrl = data.publicUrl || '';
@@ -142,7 +142,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     const body = isLogin ? { username, password } : { username, password, nickname, unit };
 
     try {
-        const res = await fetch(API_BASE + path, {
+        const res = await apiFetch(API_BASE + path, {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },

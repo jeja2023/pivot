@@ -161,7 +161,7 @@ function markKnowledgeDocumentError({ docId, userId, error }) {
     `).run('error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId).changes > 0;
 }
 
-async function processKnowledgeDocument({ docId, userId }) {
+async function processKnowledgeDocument({ docId, userId, user = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     const doc = normalizedDocId ? getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
     if (!doc) {
@@ -186,6 +186,7 @@ async function processKnowledgeDocument({ docId, userId }) {
         const text = await readKnowledgeDocumentFromPath(sourcePath, doc.name);
         const chunkCount = await indexDocumentChunks(normalizedDocId, text, {
             userId,
+            user,
             onProgress: ({ indexed, total }) => {
                 const now = getBeijingTimestamp();
                 const progress = total > 0 ? Math.min(Math.floor((indexed / total) * 100), 99) : 0;
@@ -252,7 +253,7 @@ function batchDeleteKnowledgeDocuments({ userId, docIds }) {
     return { requested: ids.length, deleted };
 }
 
-function batchReindexKnowledgeDocuments({ userId, docIds }) {
+function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     const ids = normalizeDocIds(docIds);
     let scheduled = 0;
     let skipped = 0;
@@ -262,7 +263,7 @@ function batchReindexKnowledgeDocuments({ userId, docIds }) {
             skipped += 1;
             continue;
         }
-        const result = scheduleKnowledgeDocumentIndexing({ docId: id, userId });
+        const result = scheduleKnowledgeDocumentIndexing({ docId: id, userId, user });
         if (result.started) scheduled += 1;
         else skipped += 1;
     }
@@ -401,14 +402,14 @@ function drainKnowledgeDocumentIndexQueue() {
     }
 }
 
-function scheduleKnowledgeDocumentIndexing({ docId, userId }) {
+function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return { started: false, reason: 'invalid_doc_id' };
     const key = `${userId}:${normalizedDocId}`;
     if (activeIndexes.has(key)) return { started: false, reason: 'already_processing' };
 
     activeIndexes.add(key);
-    pendingIndexes.set(key, { docId: normalizedDocId, userId });
+    pendingIndexes.set(key, { docId: normalizedDocId, userId, user });
     drainKnowledgeDocumentIndexQueue();
     return { started: true };
 }
@@ -475,7 +476,7 @@ function getKnowledgeDocumentSummaryForUser(userId) {
     return summary;
 }
 
-function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20 }) {
+function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = null }) {
     const rows = db.prepare(`
         SELECT id
         FROM knowledge_docs
@@ -491,7 +492,7 @@ function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20 }) {
     let scheduled = 0;
     let alreadyProcessing = 0;
     for (const row of rows) {
-        const result = scheduleKnowledgeDocumentIndexing({ docId: row.id, userId });
+        const result = scheduleKnowledgeDocumentIndexing({ docId: row.id, userId, user });
         if (result.started) scheduled += 1;
         if (result.reason === 'already_processing') alreadyProcessing += 1;
     }

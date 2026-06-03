@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, encryptSecret, validateMcpEndpointUrl } = require('../security');
+const { decryptSecret, encryptSecret, assertSafeMcpOutboundUrl } = require('../security');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { debugRetrieveContext } = require('../services/rag-index');
 const {
@@ -330,7 +330,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const description = String(req.body?.description || '').trim();
         const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
         if (!name || !baseUrl) return res.status(400).json({ error: 'Name and Base URL are required.' });
-        validateMcpEndpointUrl(baseUrl);
+        await assertSafeMcpOutboundUrl(baseUrl, req.user);
         const now = getBeijingTimestamp();
         const info = db.prepare(`
             INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
@@ -388,6 +388,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!name) return res.status(400).json({ error: '请填写能力名称。' });
 
         const service = normalizeBuiltinPayload(req.body?.service_type || req.body?.serviceType, req.body);
+        if (service.serviceType === 'im') {
+            await assertSafeMcpOutboundUrl(service.config.endpointUrl, req.user);
+        }
         const now = getBeijingTimestamp();
         const userId = shared ? null : req.user.id;
         const tx = db.transaction(() => {
@@ -456,6 +459,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 ? decryptSecret(configRow.secret || '')
                 : req.body?.secret
         });
+        if (service.serviceType === 'im') {
+            await assertSafeMcpOutboundUrl(service.config.endpointUrl, req.user);
+        }
         const now = getBeijingTimestamp();
         db.transaction(() => {
             db.prepare(`
@@ -543,7 +549,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const nextApiKey = apiKeyInput === undefined || apiKeyInput === '********'
             ? encryptSecret(existing.api_key || '')
             : encryptSecret(String(apiKeyInput || '').trim());
-        validateMcpEndpointUrl(baseUrl);
+        await assertSafeMcpOutboundUrl(baseUrl, req.user);
         db.prepare(`
             UPDATE mcp_servers
             SET name = ?, base_url = ?, api_key = ?, description = ?, status = ?, updated_at = ?
@@ -668,7 +674,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                     });
                 }
                 if (params?.uri === 'pivot://knowledge/search') {
-                    const result = await debugRetrieveContext(req.user.id, String(params?.query || ''), {});
+                    const result = await debugRetrieveContext(req.user.id, String(params?.query || ''), { user: req.user });
                     return sendJsonRpc(res, id, {
                         contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(result, null, 2) }]
                     });

@@ -2,6 +2,7 @@ const axios = require('axios');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
+const { assertSafeModelRuntimeUrl, createSafeModelHttpAgents } = require('./model-adapter');
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
 const { recordSlowModelResponse } = require('./observability');
 const { parsePositiveInt } = require('../number');
@@ -192,9 +193,12 @@ async function refreshEndpointMonitor(runtime) {
 
     const start = Date.now();
     try {
+        await assertSafeModelRuntimeUrl(model, runtime.monitor.url);
+        const agents = createSafeModelHttpAgents(model);
         const response = await axios.get(runtime.monitor.url, {
             timeout: MONITOR_TIMEOUT_MS,
             proxy: false,
+            ...agents,
             validateStatus: status => status < 500
         });
         runtime.monitor.updatedAt = getBeijingTimestamp();

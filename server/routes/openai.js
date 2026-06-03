@@ -1,6 +1,4 @@
 const express = require('express');
-const http = require('http');
-const https = require('https');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const {
@@ -29,10 +27,12 @@ const { createSseEventParser, createStreamAccumulator } = require('../streaming'
 const { getBeijingTimestamp } = require('../time');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders
+    buildModelHeaders,
+    assertSafeModelRuntimeUrl,
+    createSafeModelHttpAgents
 } = require('../services/model-adapter');
 const { getEmbeddingConfig } = require('../services/rag-config');
-const { requestEmbeddings } = require('../services/rag-index');
+const { requestEmbeddings, getEmbeddingRuntimeGuardUser } = require('../services/rag-index');
 const { executeBuiltInTool, getBuiltInToolDefinitions } = require('../services/agent-tools');
 const {
     estimateEmbeddingTokens,
@@ -43,9 +43,6 @@ const {
     estimateMessagesTokens,
     fitMessagesToContextBudget
 } = require('../services/context-budget');
-
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
 
 function stringifyForAudit(value) {
     try {
@@ -260,7 +257,10 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         const startedAt = Date.now();
         const promptTokens = estimateEmbeddingTokens(inputs, estimateTokens);
         try {
-            const vectors = await requestEmbeddings(inputs, config.http, { model: configuredModel });
+            const vectors = await requestEmbeddings(inputs, config.http, {
+                model: configuredModel,
+                user: getEmbeddingRuntimeGuardUser(config, req.user)
+            });
             const payload = buildEmbeddingResponse({ vectors, model: configuredModel, promptTokens });
             const usageModelId = getOrCreateEmbeddingUsageModel({
                 userId: config.source?.url === 'user' || config.source?.model === 'user' || config.source?.apiKey === 'user' ? req.user.id : null,
@@ -491,6 +491,8 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         const headers = buildModelHeaders(modelCfg);
 
         try {
+            await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
+            const agents = createSafeModelHttpAgents(modelCfg, req.user);
             const response = await axios({
                 method: 'post',
                 url: targetUrl,
@@ -499,8 +501,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 responseType: stream ? 'stream' : 'json',
                 timeout: 180000,
                 proxy: false,
-                httpAgent,
-                httpsAgent
+                ...agents
             });
 
             if (stream) {

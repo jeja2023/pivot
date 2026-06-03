@@ -62,7 +62,7 @@ window.loadDetails = async function(page = 1) {
     const titleEl = document.getElementById('details-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
-        const res = await fetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
         const { data, total } = await res.json();
         document.getElementById('details-list-body').innerHTML = data.map((d, i) => {
             const roleLabel = formatUsageRoleLabel(d.role);
@@ -91,7 +91,7 @@ window.loadStats = async function() {
     const titleEl = document.getElementById('stats-title');
     if (titleEl) titleEl.innerText = '用量统计';
     try {
-        const res = await fetch(`${API_BASE}/stats/usage`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/stats/usage`, { headers: authHeaders() });
         const data = await res.json();
         document.getElementById('stats-list-body').innerHTML = data.map((s, idx) => `
             <tr>
@@ -232,8 +232,8 @@ window.loadOpsSummary = async function() {
     try {
         const includeMonitor = currentUser?.role === 'admin';
         const [summaryRes, trendRes, monitorRes] = await Promise.all([
-            fetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders() }),
-            fetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
             includeMonitor ? apiFetch(`${API_BASE}/stats/monitor-summary`) : Promise.resolve(null)
         ]);
         const summary = await summaryRes.json();
@@ -738,7 +738,7 @@ window.loadLogs = async function(page = 1) {
             end
         });
 
-        const res = await fetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
         const { data, total } = await res.json();
         document.getElementById('log-list-body').innerHTML = data.map((l, i) => {
             const username = l.username || '系统';
@@ -798,7 +798,7 @@ window.loadReport = async function() {
     }
 
     try {
-        const res = await fetch(`${API_BASE}/stats/report?${params.toString()}`, { headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/stats/report?${params.toString()}`, { headers: authHeaders() });
         const data = await res.json();
         
         // 动态填充部门下拉框

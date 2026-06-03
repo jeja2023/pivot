@@ -2,6 +2,7 @@ const pino = require('pino');
 const pinoHttp = require('pino-http');
 const path = require('path');
 const fs = require('fs');
+const { getClientIp } = require('./http');
 
 const isProduction = process.env.NODE_ENV === 'production';
 const logDir = path.resolve(__dirname, '../logs');
@@ -9,9 +10,38 @@ if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
 // 敏感字段脱敏配置
 const redactFields = [
-    'password', 'password_hash', 'api_key', 'key', 'key_hash', 
+    'password', 'password_hash', 'api_key', 'key', 'key_hash',
     '*.password', '*.api_key', 'headers.authorization', 'headers.cookie'
 ];
+
+// 敏感查询参数：附件访问令牌、api_key 等不应随 URL 落入访问日志
+const SENSITIVE_QUERY_KEYS = /^(token|access_token|api_key|apikey|key|signature|sig|secret)$/i;
+
+function safeDecodeQueryKey(value) {
+    try {
+        return decodeURIComponent(value);
+    } catch (e) {
+        return value;
+    }
+}
+
+// 脱敏 URL 中的敏感查询参数，保留路径与其余参数便于排查
+function scrubUrl(rawUrl) {
+    const url = String(rawUrl || '');
+    const qIndex = url.indexOf('?');
+    if (qIndex === -1) return url;
+    const pathPart = url.slice(0, qIndex);
+    const queryPart = url.slice(qIndex + 1);
+    const scrubbed = queryPart.split('&').map(pair => {
+        const eq = pair.indexOf('=');
+        const name = eq === -1 ? pair : pair.slice(0, eq);
+        if (SENSITIVE_QUERY_KEYS.test(safeDecodeQueryKey(name).trim())) {
+            return `${name}=[REDACTED]`;
+        }
+        return pair;
+    }).join('&');
+    return `${pathPart}?${scrubbed}`;
+}
 
 // 构建输出流
 const streams = [];
@@ -81,15 +111,15 @@ const httpLogger = pinoHttp({
     // 自动生成请求 ID
     genReqId: (req) => req.headers['x-request-id'] || require('uuid').v4(),
     // 自定义请求日志内容
-    customSuccessMessage: (req, res) => `${req.method} ${req.url} ${res.statusCode} - 完成`,
-    customErrorMessage: (req, res, err) => `${req.method} ${req.url} ${res.statusCode} - 失败: ${err.message}`,
+    customSuccessMessage: (req, res) => `${req.method} ${scrubUrl(req.url)} ${res.statusCode} - 完成`,
+    customErrorMessage: (req, res, err) => `${req.method} ${scrubUrl(req.url)} ${res.statusCode} - 失败: ${err.message}`,
     // 序列化配置
     serializers: {
         req: (req) => ({
             id: req.id,
             method: req.method,
-            url: req.url,
-            ip: req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown',
+            url: scrubUrl(req.url),
+            ip: getClientIp(req) || 'unknown',
             user: req.raw?.user ? req.raw.user.username : 'guest'
         }),
         res: (res) => ({

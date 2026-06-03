@@ -12,7 +12,7 @@
  *   - 与 safe-html.js 互补（safe-html 负责 HTML 转义，本文件负责行为工具）
  */
 (function () {
-    if (window.Pivot) return;
+    const existingPivot = window.Pivot || {};
 
     function throttle(fn, wait) {
         let lastCall = 0;
@@ -154,15 +154,15 @@
         return 320;
     }
 
-    window.Pivot = {
-        throttle,
-        debounce,
-        rafThrottle,
-        formatBytes,
-        formatNumber,
-        createLruCache,
-        clearChildren,
-        on,
-        chooseStreamInterval
-    };
+    existingPivot.throttle = throttle;
+    existingPivot.debounce = debounce;
+    existingPivot.rafThrottle = rafThrottle;
+    existingPivot.formatBytes = formatBytes;
+    existingPivot.formatNumber = formatNumber;
+    existingPivot.createLruCache = createLruCache;
+    existingPivot.clearChildren = clearChildren;
+    existingPivot.on = on;
+    existingPivot.chooseStreamInterval = chooseStreamInterval;
+    existingPivot.html = window.PivotSafeHtml || existingPivot.html || null;
+    window.Pivot = existingPivot;
 })();

@@ -24,6 +24,7 @@ const {
     recordModelTokenUsage
 } = require('./models');
 const { estimateTokens } = require('../llm');
+const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
 const { estimateEmbeddingTokens } = require('./token-accounting');
 const { recordSlowRagRetrieval } = require('./observability');
 
@@ -145,6 +146,16 @@ function buildEmbeddingPayload(text, model, mode, url) {
     return { input: text, model };
 }
 
+function usesUserEmbeddingConfig(config = {}) {
+    const source = config.source || {};
+    return source.url === 'user' || source.model === 'user' || source.apiKey === 'user';
+}
+
+function getEmbeddingRuntimeGuardUser(config = null, user = null) {
+    if (config && !usesUserEmbeddingConfig(config)) return { role: 'admin' };
+    return user || {};
+}
+
 async function requestEmbedding(text, httpConfig, options = {}) {
     const { url, apiKey, model } = httpConfig;
     if (!url) {
@@ -153,13 +164,16 @@ async function requestEmbedding(text, httpConfig, options = {}) {
     const targetUrl = resolveEmbeddingUrl(url);
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     try {
+        await assertSafeOutboundUrl(targetUrl, options.user || {});
+        const agents = createSafeHttpAgentsForUser(options.user || {});
         const res = await axios.post(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
             timeout: timeoutMs,
-            proxy: false
+            proxy: false,
+            ...agents
         });
         return normalizeEmbeddingVector(res.data);
     } catch (e) {
@@ -179,13 +193,16 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     const requestOne = async (input) => {
         try {
+            await assertSafeOutboundUrl(targetUrl, options.user || {});
+            const agents = createSafeHttpAgentsForUser(options.user || {});
             const res = await axios.post(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
                 headers: {
                     Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                     'Content-Type': 'application/json'
                 },
                 timeout: timeoutMs,
-                proxy: false
+                proxy: false,
+                ...agents
             });
             return normalizeEmbeddingVector(res.data);
         } catch (e) {
@@ -203,13 +220,16 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
 
     let res;
     try {
+        await assertSafeOutboundUrl(targetUrl, options.user || {});
+        const agents = createSafeHttpAgentsForUser(options.user || {});
         res = await axios.post(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
             timeout: timeoutMs,
-            proxy: false
+            proxy: false,
+            ...agents
         });
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);
@@ -228,7 +248,8 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
         const vector = await requestEmbedding(text, targetHttpConfig, {
-            timeoutMs: options.timeoutMs
+            timeoutMs: options.timeoutMs,
+            user: getEmbeddingRuntimeGuardUser(config, options.user)
         });
         recordEmbeddingUsage({
             userId,
@@ -251,7 +272,8 @@ async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, u
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
         const vectors = await requestEmbeddings(safeInputs, targetHttpConfig, {
-            timeoutMs: options.timeoutMs
+            timeoutMs: options.timeoutMs,
+            user: getEmbeddingRuntimeGuardUser(config, options.user)
         });
         recordEmbeddingUsage({
             userId,
@@ -452,7 +474,8 @@ async function debugRetrieveContext(userId, query, {
     topK = null,
     candidateLimit = null,
     scoreThreshold = null,
-    queryVector = null
+    queryVector = null,
+    user = null
 } = {}) {
     const config = getRagConfig({ topK, candidateLimit, scoreThreshold }, userId);
     const normalizedQuery = normalizeCacheQuery(query);
@@ -489,7 +512,7 @@ async function debugRetrieveContext(userId, query, {
             injectedContext: formatInjectedContext([])
         };
     }
-    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId);
+    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
     const scoredChunks = candidates.map(chunk => {
         try {
             if (!chunk.embedding) return null;
@@ -522,7 +545,7 @@ async function debugRetrieveContext(userId, query, {
     };
 }
 
-async function retrieveContext(userId, query, topK = null) {
+async function retrieveContext(userId, query, topK = null, options = {}) {
     const startedAt = Date.now();
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
@@ -576,7 +599,7 @@ async function retrieveContext(userId, query, topK = null) {
             return graphContext.context;
         }
 
-        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId);
+        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
         const scoredChunks = scoreChunks(chunks, queryVector).sort((a, b) => b.score - a.score);
         const topChunks = scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, config.topK);
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
@@ -611,7 +634,7 @@ async function retrieveContext(userId, query, topK = null) {
     }
 }
 
-async function indexDocumentChunks(docId, text, { onProgress, userId = null, embeddingTimeoutMs = null } = {}) {
+async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
     const chunks = chunkText(text, ragConfig.chunkSize, ragConfig.chunkOverlap);
@@ -625,7 +648,8 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, emb
             const batch = chunks.slice(i, i + batchSize);
             const vectors = await generateEmbeddings(batch, null, null, userId, {
                 timeoutMs: indexEmbeddingTimeoutMs,
-                source: 'rag_ingest_embedding'
+                source: 'rag_ingest_embedding',
+                user
             });
             const results = batch.map((chunk, index) => ({ chunk, vector: vectors[index] }));
             
@@ -654,7 +678,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, emb
     }
 }
 
-async function testEmbeddingConnection(config = {}) {
+async function testEmbeddingConnection(config = {}, user = null) {
     const startedAt = Date.now();
     try {
         const httpConfig = {
@@ -662,7 +686,7 @@ async function testEmbeddingConnection(config = {}) {
             model: config.model || '',
             apiKey: config.apiKey || ''
         };
-        const vector = await requestEmbedding('测试向量生成 (智枢 Test Connection)', httpConfig);
+        const vector = await requestEmbedding('测试向量生成 (智枢 Test Connection)', httpConfig, { user });
 
         if (!Array.isArray(vector) || vector.length === 0) {
             throw new Error('生成的向量数据无效');
@@ -688,6 +712,7 @@ module.exports = {
     generateEmbeddings,
     requestEmbedding,
     requestEmbeddings,
+    getEmbeddingRuntimeGuardUser,
     testEmbeddingConnection,
     getEmbeddingRequestTimeoutMs,
     getRagIndexEmbeddingTimeoutMs,

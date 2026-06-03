@@ -32,7 +32,8 @@ function normalizeRoute(req) {
         const base = req.baseUrl || '';
         return `${base}${routePath}`.replace(/\/+/g, '/');
     }
-    return (req.originalUrl || req.url || '').split(/[?#]/)[0] || 'unknown';
+    // 未匹配（404/扫描器等）归到常量桶，防止 routeStats Map 无界增长
+    return 'unmatched';
 }
 
 function ensureRouteStats(method, route, status) {

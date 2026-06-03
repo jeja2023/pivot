@@ -78,6 +78,14 @@ async function apiFetch(url, options = {}) {
 }
 
 // 初始化时检查登录状态
+window.Pivot = window.Pivot || {};
+window.Pivot.api = {
+    fetch: apiFetch,
+    authFetch,
+    authHeaders,
+    refreshAccessToken
+};
+
 async function checkLogin() {
     try {
         const res = await apiFetch(`${API_BASE}/auth/me`);

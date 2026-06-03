@@ -1,7 +1,13 @@
 const axios = require('axios');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, validateMcpEndpointUrl, redactSecrets } = require('../security');
+const {
+    decryptSecret,
+    validateMcpEndpointUrl,
+    assertSafeMcpOutboundUrl,
+    createSafeHttpAgentsForUser,
+    redactSecrets
+} = require('../security');
 const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServer,
@@ -100,7 +106,7 @@ function listMcpServers(user) {
     return rows.map(normalizeServerRow);
 }
 
-async function callMcpJsonRpc(server, method, params = {}) {
+async function callMcpJsonRpc(server, method, params = {}, user = null) {
     if (String(server.base_url || '').startsWith('pivot-db://')) {
         if (method === 'tools/list') return { tools: listDatabaseMcpTools(server) };
         if (method === 'tools/call') {
@@ -118,7 +124,7 @@ async function callMcpJsonRpc(server, method, params = {}) {
     if (getBuiltinServiceTypeFromUrl(server.base_url)) {
         if (method === 'tools/list') return { tools: listBuiltinMcpTools(server) };
         if (method === 'tools/call') {
-            const result = await executeBuiltinMcpTool(server, params?.name, params?.arguments || {});
+            const result = await executeBuiltinMcpTool(server, params?.name, params?.arguments || {}, user);
             return {
                 content: [{
                     type: 'text',
@@ -131,6 +137,12 @@ async function callMcpJsonRpc(server, method, params = {}) {
     }
 
     const url = String(server.base_url || '').trim().replace(/\/+$/, '');
+    // 调用时再次校验出站地址，拦截 loopback/link-local/云元数据等 SSRF 目标（含 DNS rebinding）。
+    await assertSafeMcpOutboundUrl(url, user);
+    const agents = createSafeHttpAgentsForUser(user, {
+        allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+        allowExplicitLoopbackForAdmin: true
+    });
     const response = await axios.post(url, {
         jsonrpc: '2.0',
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -145,7 +157,8 @@ async function callMcpJsonRpc(server, method, params = {}) {
             'User-Agent': 'Pivot-MCP-Client/1.0'
         },
         timeout: MCP_TIMEOUT_MS,
-        proxy: false
+        proxy: false,
+        ...agents
     });
     if (response.data?.error) {
         throw new Error(response.data.error.message || JSON.stringify(response.data.error));
@@ -181,12 +194,12 @@ function upsertToolCache(serverId, tools = []) {
     tx();
 }
 
-async function refreshMcpTools(server) {
+async function refreshMcpTools(server, user = null) {
     if (!isInternalMcpUrl(server.base_url)) {
         validateMcpEndpointUrl(server.base_url);
     }
     try {
-        const result = await callMcpJsonRpc(server, 'tools/list', {});
+        const result = await callMcpJsonRpc(server, 'tools/list', {}, user);
         const tools = Array.isArray(result?.tools) ? result.tools : Array.isArray(result) ? result : [];
         upsertToolCache(server.id, tools.filter(tool => tool?.name));
         db.prepare('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
@@ -249,7 +262,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         const result = await callMcpJsonRpc(server, 'tools/call', {
             name: match[2],
             arguments: input || {}
-        });
+        }, user);
         recordMcpCallLog({
             user,
             serverId: server.id,

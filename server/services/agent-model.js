@@ -4,7 +4,12 @@ const { db } = require('../db');
 const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
-const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
+const {
+    buildChatCompletionsUrl,
+    buildModelHeaders,
+    assertSafeModelRuntimeUrl,
+    createSafeModelHttpAgents
+} = require('./model-adapter');
 const { aiSemaphore } = require('./concurrency');
 const {
     acquireModelSlot,
@@ -34,9 +39,12 @@ async function withAgentModelConcurrency(modelCfg, operation) {
     }
 }
 
-async function callModelJson(modelCfg, messages) {
+async function callModelJson(modelCfg, messages, options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
-        const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), {
+        const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
+        const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
+        const response = await axios.post(targetUrl, {
             model: modelCfg.model_name || modelCfg.name,
             messages,
             stream: false,
@@ -45,14 +53,15 @@ async function callModelJson(modelCfg, messages) {
         }, {
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             timeout: 180000,
-            proxy: false
+            proxy: false,
+            ...agents
         });
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     });
 }
 
-async function callModelText(modelCfg, messages) {
-    return callModelJson(modelCfg, messages);
+async function callModelText(modelCfg, messages, options = {}) {
+    return callModelJson(modelCfg, messages, options);
 }
 
 /**
@@ -100,11 +109,15 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
                 }
             }
         });
-        const response = await axios.post(buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }), payload, {
+        const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
+        const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
+        const response = await axios.post(targetUrl, payload, {
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
             responseType: 'stream',
             timeout: 180000,
-            proxy: false
+            proxy: false,
+            ...agents
         });
         await new Promise((resolve, reject) => {
             response.data.on('data', chunk => {

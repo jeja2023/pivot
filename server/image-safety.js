@@ -18,7 +18,7 @@ function isImagePath(filePath = '') {
 }
 
 async function normalizeUploadedImage(inputPath, outputPath) {
-    const stats = fs.statSync(inputPath);
+    const stats = await fs.promises.stat(inputPath);
     if (stats.size > MAX_IMAGE_UPLOAD_BYTES) {
         const err = new Error(`Image file is too large. Maximum is ${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1024 / 1024)}MB.`);
         err.status = 413;
@@ -69,8 +69,8 @@ async function normalizeUploadedImage(inputPath, outputPath) {
     return outputInfo;
 }
 
-function imageFileToDataUrl(filePath) {
-    const stats = fs.statSync(filePath);
+async function imageFileToDataUrl(filePath) {
+    const stats = await fs.promises.stat(filePath);
     if (stats.size > MAX_IMAGE_CONTEXT_BYTES) return null;
 
     const ext = path.extname(filePath).toLowerCase();
@@ -83,7 +83,8 @@ function imageFileToDataUrl(filePath) {
     }[ext];
     if (!mime) return null;
 
-    return `data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`;
+    const data = await fs.promises.readFile(filePath);
+    return `data:${mime};base64,${data.toString('base64')}`;
 }
 
 module.exports = {

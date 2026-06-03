@@ -3,22 +3,79 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { getRunnableModelForUser } = require('./models');
-const { clampText, executeBuiltInTool, getBuiltInToolDefinitions } = require('./agent-tools');
-const { executeMcpTool, listCachedMcpTools } = require('./mcp-client');
+const { clampText, executeBuiltInTool } = require('./agent-tools');
+const { executeMcpTool } = require('./mcp-client');
 const { createAgentQueue } = require('./agent-queue');
 const { callModelText, recordAgentModelUsage, callModelStreamingWithTools } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('./model-router');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
-const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const {
-    filterBuiltInToolsByCapability,
-    filterMcpToolsByCapability
-} = require('./capability-market');
+    configureAgentSchedules,
+    computeNextScheduleRun,
+    createAgentSchedule,
+    deleteAgentSchedule,
+    listAgentSchedules,
+    runAgentScheduleNow,
+    runDueAgentSchedules,
+    startAgentScheduleRunner,
+    updateAgentSchedule
+} = require('./agent-schedules');
+const {
+    createAgentTemplate,
+    deleteAgentTemplate,
+    listAgentTemplates,
+    updateAgentTemplate
+} = require('./agent-templates');
+const {
+    createAgentWorkflow,
+    deleteAgentWorkflow,
+    diffAgentWorkflowVersions,
+    getAgentWorkflowForUser,
+    listAgentWorkflowVersions,
+    listAgentWorkflows,
+    normalizeDagInputsPayload,
+    normalizeDagRunInputs,
+    publishAgentWorkflowVersion,
+    resolveAgentWorkflowVersion,
+    restoreAgentWorkflowVersion,
+    updateAgentWorkflow
+} = require('./agent-workflows');
+const {
+    getRunDetailForUser: getRunDetailForUserHelper,
+    getRunForUser,
+    listDagNodes,
+    listSteps
+} = require('./agent-runs');
+const {
+    configureAgentArtifacts,
+    createAgentArtifactVersion,
+    diffAgentArtifactVersions,
+    exportAgentRun,
+    getAgentArtifactForUser,
+    listAgentArtifactVersions,
+    listAgentArtifacts,
+    listAgentNotifications,
+    markAgentNotificationRead,
+    rollbackAgentArtifactVersion,
+    saveAgentRunArtifact
+} = require('./agent-artifacts');
+const {
+    normalizeDagNodePolicy,
+    resolveDagNodeInput
+} = require('./agent-dag-utils');
+const {
+    buildAgentToolSchemas,
+    formatToolList
+} = require('./agent-tool-catalog');
+const {
+    getAgentMetrics,
+    getAgentRuntimeStatus: buildAgentRuntimeStatus
+} = require('./agent-monitoring');
+const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const {
     DEFAULT_STEPS,
     ACTIVE_STATUSES,
-    MAX_GOAL_LENGTH,
     parseJsonObject,
     normalizeMaxSteps,
     normalizePriority,
@@ -26,7 +83,6 @@ const {
     normalizeToolPolicy,
     normalizeApprovalPolicy,
     normalizePositiveInt,
-    normalizeScheduleFrequency,
     normalizeContextConfig,
     serializeContextConfig,
     normalizeDagSpec,
@@ -49,11 +105,11 @@ function createRunId() {
     return `run_${crypto.randomBytes(12).toString('hex')}`;
 }
 
-function withTimeout(promise, timeoutMs, label = '操作') {
+function withTimeout(promise, timeoutMs, label = 'operation') {
     const safeTimeout = Math.max(Number(timeoutMs) || 0, 1000);
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
-            const err = new Error(`${label}超时`);
+            const err = new Error(`${label} timed out`);
             err.code = 'AGENT_TIMEOUT';
             reject(err);
         }, safeTimeout);
@@ -72,133 +128,6 @@ function withTimeout(promise, timeoutMs, label = '操作') {
 
 function getAgentRunTitle(run) {
     return normalizeAgentTitle(run?.title, run?.goal);
-}
-
-function getRunForUser(runId, user, options = {}) {
-    const includeDeleted = Boolean(options.includeDeleted);
-    return db.prepare(`
-        SELECT * FROM agent_runs
-        WHERE id = ? AND user_id = ?
-          ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
-    `).get(runId, user.id);
-}
-
-function listRuns(user, options = {}) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 10, 1), 100);
-    const safePage = Math.max(Number.parseInt(options.page, 10) || 1, 1);
-    const offset = (safePage - 1) * safeLimit;
-    const status = String(options.status || '').trim();
-    const query = String(options.query || '').trim();
-    const where = ['r.user_id = ?', 'r.deleted_at IS NULL'];
-    const params = [user.id];
-    if (status) {
-        where.push('r.status = ?');
-        params.push(status);
-    }
-    if (query) {
-        where.push('(r.title LIKE ? OR r.goal LIKE ? OR m.name LIKE ?)');
-        const pattern = `%${query}%`;
-        params.push(pattern, pattern, pattern);
-    }
-    const whereSql = where.join('\n          AND ');
-    const total = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM agent_runs r
-        LEFT JOIN models m ON m.id = r.model_id
-        WHERE ${whereSql}
-    `).get(...params)?.count || 0;
-    const data = db.prepare(`
-        WITH filtered_runs AS (
-            SELECT r.id, r.session_id, r.model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
-                   r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
-                   r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count,
-                   r.max_token_budget, r.export_count, r.template_id, r.schedule_id, r.context_config, r.resume_from_step,
-                   r.started_at, r.last_heartbeat_at, r.input_tokens, r.output_tokens, r.total_tokens,
-                   r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
-                   m.name AS model_name
-            FROM agent_runs r
-            LEFT JOIN models m ON m.id = r.model_id
-            WHERE ${whereSql}
-            ORDER BY r.created_at DESC
-            LIMIT ?
-            OFFSET ?
-        ),
-        step_stats AS (
-            SELECT s.run_id,
-                   COUNT(*) AS step_count,
-                   SUM(CASE WHEN s.type = 'tool' THEN 1 ELSE 0 END) AS tool_count,
-                   SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) AS error_count
-            FROM agent_steps s
-            JOIN filtered_runs fr ON fr.id = s.run_id
-            GROUP BY s.run_id
-        )
-        SELECT fr.*,
-               COALESCE(ss.step_count, 0) AS step_count,
-               COALESCE(ss.tool_count, 0) AS tool_count,
-               COALESCE(ss.error_count, 0) AS error_count
-        FROM filtered_runs fr
-        LEFT JOIN step_stats ss ON ss.run_id = fr.id
-        ORDER BY fr.created_at DESC
-    `).all(...params, safeLimit, offset);
-    return { data, total, page: safePage, limit: safeLimit };
-}
-
-function listDeletedRunsForAdmin(user, limit = 100) {
-    if (user?.username !== 'admin') {
-        const err = new Error('仅 admin 超级管理员可查看智能体任务删除审计。');
-        err.status = 403;
-        throw err;
-    }
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
-    return db.prepare(`
-        SELECT r.id, r.user_id, u.username, u.nickname, u.unit, r.session_id, r.model_id,
-               m.name AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
-               r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.approval_policy,
-               r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.max_token_budget, r.export_count,
-               r.started_at, r.last_heartbeat_at,
-               r.input_tokens, r.output_tokens, r.total_tokens,
-               r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
-               r.deleted_at, r.deleted_by_user, r.delete_reason,
-               du.username AS deleted_by_username, du.nickname AS deleted_by_nickname,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id) AS step_count,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.type = 'tool') AS tool_count,
-               (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.status = 'error') AS error_count
-        FROM agent_runs r
-        LEFT JOIN users u ON u.id = r.user_id
-        LEFT JOIN users du ON du.id = r.deleted_by_user
-        LEFT JOIN models m ON m.id = r.model_id
-        WHERE r.deleted_at IS NOT NULL
-        ORDER BY r.deleted_at DESC
-        LIMIT ?
-    `).all(safeLimit);
-}
-
-function listSteps(runId) {
-    return db.prepare(`
-        SELECT id, step_index, type, title, tool_name, input, output, error_message, status, duration_ms, started_at, completed_at, created_at
-        FROM agent_steps
-        WHERE run_id = ?
-        ORDER BY step_index ASC, id ASC
-    `).all(runId).map(step => ({
-        ...step,
-        input: parseJsonObject(step.input) || step.input,
-        output: parseJsonObject(step.output) || step.output
-    }));
-}
-
-function listDagNodes(runId) {
-    return db.prepare(`
-        SELECT id, run_id, node_key, title, tool_name, input, depends_on, condition, status,
-               output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
-        FROM agent_dag_nodes
-        WHERE run_id = ?
-        ORDER BY id ASC
-    `).all(runId).map(node => ({
-        ...node,
-        input: parseJsonObject(node.input) || {},
-        depends_on: parseJsonObject(node.depends_on) || [],
-        output: parseJsonObject(node.output) || node.output
-    }));
 }
 
 function updateRun(runId, fields = {}) {
@@ -287,25 +216,6 @@ function getAgentQueue() {
     return agentQueue;
 }
 
-function getRunProgress(run, steps = []) {
-    const maxSteps = normalizeMaxSteps(run?.max_steps);
-    const planCount = steps.filter(step => step.type === 'plan').length;
-    const toolCount = steps.filter(step => step.type === 'tool').length;
-    const errorCount = steps.filter(step => step.status === 'error').length;
-    const totalDurationMs = steps.reduce((sum, step) => sum + (Number(step.duration_ms) || 0), 0);
-    const active = run && ACTIVE_STATUSES.has(run.status);
-    return {
-        maxSteps,
-        planCount,
-        toolCount,
-        errorCount,
-        stepCount: steps.length,
-        totalDurationMs,
-        isLimitReached: active && Math.max(planCount, toolCount) >= maxSteps,
-        percent: active ? Math.min(Math.round((Math.max(planCount, toolCount) / maxSteps) * 100), 95) : (run?.status === 'completed' ? 100 : 0)
-    };
-}
-
 function getRunMetadata(run) {
     const parsed = parseJsonObject(run?.metadata);
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -316,7 +226,7 @@ function createAgentNotification(userId, runId, type, title, body = '') {
     const run = runId
         ? db.prepare('SELECT title, goal FROM agent_runs WHERE id = ?').get(runId)
         : null;
-    const fallbackTitle = run ? getAgentRunTitle(run) : '智能体通知';
+    const fallbackTitle = run ? getAgentRunTitle(run) : '闁哄懘缂氶崗妯绘媴閹剧儵鍋撳杈╁弨';
     const safeTitle = looksLikeCorruptTitle(title) ? fallbackTitle : String(title || '').trim();
     const safeBody = looksLikeCorruptTitle(body) ? fallbackTitle : String(body || '').trim();
     const info = db.prepare(`
@@ -341,20 +251,13 @@ function setRunMetadata(runId, patch = {}) {
     updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
 }
 
-function getRunDetailForUser(runId, user) {
-    const run = getRunForUser(runId, user);
-    if (!run) return null;
-    const steps = listSteps(run.id);
-    return { run, steps, dagNodes: listDagNodes(run.id), progress: getRunProgress(run, steps) };
-}
-
 function isRunCancelled(runId) {
     return getRunStatus(runId) === 'cancelled';
 }
 
 function assertRunNotCancelled(runId) {
     if (isRunCancelled(runId)) {
-        const err = new Error('智能体任务已停止。');
+        const err = new Error('Agent run has been cancelled.');
         err.code = 'AGENT_RUN_CANCELLED';
         throw err;
     }
@@ -367,17 +270,17 @@ function cancelAgentRun(runId, user) {
     const now = getBeijingTimestamp();
     updateRun(runId, {
         status: 'cancelled',
-        error_message: '用户已停止任务。',
+        error_message: 'Run cancelled by user.',
         cancelled_at: now,
         completed_at: now,
         updated_at: now
     });
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'control',
-        title: '用户停止任务',
+        title: 'User cancelled run',
         output: { status: 'cancelled' }
     });
-    createAgentNotification(user.id, runId, 'cancelled', '智能体任务已停止', getAgentRunTitle(run));
+    createAgentNotification(user.id, runId, 'cancelled', 'Agent run cancelled', getAgentRunTitle(run));
     return getRunForUser(runId, user);
 }
 
@@ -469,13 +372,13 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
         throw err;
     }
     if (run.run_mode !== 'dag') {
-        const err = new Error('只有工作流编排任务支持节点重跑。');
+        const err = new Error('Only DAG runs can be rerun from a node.');
         err.status = 400;
         throw err;
     }
     const resume = buildDagResumeSpec(run, nodeId);
     if (!resume || !resume.dagSpec.nodes.length) {
-        const err = new Error('未找到可重跑的失败节点。');
+        const err = new Error('No reusable DAG node was found for rerun.');
         err.status = 400;
         throw err;
     }
@@ -485,7 +388,7 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
         goal: run.goal,
         modelId: run.model_id,
         sessionId: run.session_id,
-        title: `节点重跑：${getAgentRunTitle(run)}`.slice(0, 80),
+        title: `闁煎搫鍊婚崑锝夋煂瀹ュ牏鐛撻柨?{getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
         runMode: 'dag',
@@ -526,11 +429,11 @@ function resumeAgentRun(runId, user) {
     const resumeGoal = [
         run.goal,
         '',
-        '请从上一轮任务的执行结果继续，不要重复已经成功完成的检查。',
-        `上一轮状态：${run.status}`,
-        run.final_answer ? `上一轮结论：${clampText(run.final_answer, 1200)}` : '',
-        run.error_message ? `上一轮错误：${run.error_message}` : '',
-        failed.length ? `最近失败步骤：${JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
+        'Continue this task from the previous run context.',
+        `濞戞挸锕ｇ粩瀛樻姜椤旀儳笑闁诡兛绶ょ槐?{run.status}`,
+        run.final_answer ? `濞戞挸锕ｇ粩瀛樻姜椤斿墽娉㈤悹浣哄皑缁?{clampText(run.final_answer, 1200)}` : '',
+        run.error_message ? `濞戞挸锕ｇ粩瀛樻姜椤曗偓閺佸﹦鎷犻銈囩獥${run.error_message}` : '',
+        failed.length ? `闁哄牃鍋撻弶鈺傚灥閵囨垹鎷归妷锔诲妱濡ょ姰鍊х槐?{JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
     ].filter(Boolean).join('\n');
     const previousMetadata = getRunMetadata(run);
     return createAgentRun({
@@ -538,7 +441,7 @@ function resumeAgentRun(runId, user) {
         goal: resumeGoal,
         modelId: run.model_id,
         sessionId: run.session_id,
-        title: `继续：${getAgentRunTitle(run)}`.slice(0, 80),
+        title: `缂備綀鍛暰闁?{getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
         runMode: run.run_mode,
@@ -567,7 +470,7 @@ function softDeleteAgentRun(runId, user, reason = '') {
     const run = getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status)) {
-        const err = new Error('请先停止正在运行的智能体任务，再移除记录。');
+        const err = new Error('Active agent runs cannot be deleted.');
         err.status = 400;
         throw err;
     }
@@ -580,7 +483,7 @@ function softDeleteAgentRun(runId, user, reason = '') {
     });
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'control',
-        title: '用户移除任务记录',
+        title: '闁活潿鍔嶉崺娑氱矓婵犳碍鐝熷ù鐘侯嚙婵喓鎷嬮弶璺ㄧЭ',
         output: {
             status: 'deleted',
             deletedAt: now,
@@ -625,65 +528,33 @@ function insertStep(runId, stepIndex, data = {}) {
     }
 }
 
-function formatToolList(user, options = {}) {
-    const policy = normalizeToolPolicy(options.toolPolicy);
-    const allowlist = normalizeToolAllowlist(options.toolAllowlist);
-    const allowed = allowlist.length ? new Set(allowlist) : null;
-    const isAllowed = (name, source) => {
-        if (policy === 'builtin_only' && source === 'mcp') return false;
-        if (allowed && !allowed.has(name)) return false;
-        return true;
-    };
-    const builtIns = filterBuiltInToolsByCapability(getBuiltInToolDefinitions(user), user).map(tool => ({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        input_schema: tool.input_schema,
-        source: 'builtin',
-        risk: 'low',
-        requiresApproval: false,
-        admin: Boolean(tool.admin)
-    })).filter(tool => isAllowed(tool.name, 'builtin'));
-    const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, user), user).map(tool => ({
-        name: tool.fullName,
-        title: tool.name,
-        description: `[${tool.serverName}] ${tool.description || tool.name}`,
-        input_schema: tool.input_schema,
-        source: 'mcp',
-        risk: String(tool.name || '').startsWith('db.') ? 'low' : 'high',
-        requiresApproval: !String(tool.name || '').startsWith('db.'),
-        serverName: tool.serverName
-    })).filter(tool => isAllowed(tool.name, 'mcp'));
-    return [...builtIns, ...mcpTools];
-}
-
 function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
-    if (context.mode === 'recent') contextLines.push('优先参考当前会话与最近会话上下文。');
-    if (context.mode === 'knowledge') contextLines.push('优先使用知识库检索工具验证资料来源。');
-    if (context.mode === 'none') contextLines.push('除用户目标外，不主动扩展额外上下文。');
-    if (context.notes) contextLines.push(`用户补充上下文：${context.notes}`);
+    if (context.mode === 'recent') contextLines.push('Use recent conversation context.');
+    if (context.mode === 'knowledge') contextLines.push('Use knowledge-base context.');
+    if (context.mode === 'none') contextLines.push('Do not include extra session context.');
+    if (context.notes) contextLines.push(`闁活潿鍔嶉崺娑氭偘閵夈儱甯犲☉鎾筹梗缁楀懘寮崶椋庣獥${context.notes}`);
     return [
         {
             role: 'system',
             content: [
-                '你是 Pivot 智能体运行时，负责为私有企业 AI 平台决定下一步动作。',
-                '只能返回严格 JSON，不要返回 Markdown。',
+                'You are a Pivot agent. Plan carefully, call tools when useful, and return concise results.',
+                'Respond with JSON only when choosing an action; use Markdown only in final answers.',
                 'Schema: {"thought":"short reasoning","action":"tool|final","tool":"tool.name","input":{},"answer":"final answer"}',
-                `运行模式：${normalizeRunMode(runMode)}。standard 注重稳健，deep 可多轮检索，audit 为审查模式，必须强调证据、限制和风险。`,
-                '只能调用下方可用工具清单中的工具，不能臆造工具名；没有合适工具时直接 final。',
-                '当需要项目内最新数据时使用工具；证据足够后给出中文最终答案。',
-                contextLines.length ? `上下文策略：${contextLines.join(' ')}` : '上下文策略：自动选择与目标相关的安全上下文。',
-                '可用工具：',
+                `Run mode: ${normalizeRunMode(runMode)}. Standard is steady; deep allows extra retrieval; audit must emphasize evidence, limits, and risks.`,
+                'If action is tool, choose exactly one available tool and provide JSON input. If action is final, provide answer.',
+                'Use observations as evidence and avoid inventing tool results.',
+                contextLines.length ? `Context guidance: ${contextLines.join(' ')}` : 'No additional context guidance.',
+                'Available tools:',
                 JSON.stringify(toolList, null, 2)
             ].join('\n')
         },
         {
             role: 'user',
             content: [
-                `目标：${goal}`,
-                '已有观察：',
+                `闁烩晩鍠楅悥锝夋晬?{goal}`,
+                'Observations:',
                 observations.length ? JSON.stringify(observations, null, 2) : '[]'
             ].join('\n\n')
         }
@@ -694,7 +565,7 @@ async function executeToolByName(name, input, user, toolList = []) {
     const safeName = String(name || '').trim();
     const tool = toolList.find(item => item.name === safeName);
     if (!tool) {
-        const err = new Error(`工具未授权或不可用：${safeName || '-'}`);
+        const err = new Error(`鐎规悶鍎遍崣鍧楀嫉椤忓懎鎴块柡澶婂暞閸ㄣ劍绋夊鍛闁汇埄鐓夌槐?{safeName || '-'}`);
         err.status = 403;
         throw err;
     }
@@ -705,8 +576,8 @@ async function executeToolByName(name, input, user, toolList = []) {
 }
 
 function isApprovalGranted(run, toolName) {
-    // 审批结果只承认通过 approveAgentTool 写入的 approvedTools 白名单，
-    // 不再支持 metadata.approval 这类"全局放行"短路，避免后续路由扩展时被绕过。
+    // 閻庡厜鍓濇竟鎺旂磼閹惧浜柛娆樹簼婢规瑧鎷嬮妶澶嗗亾濮樺磭绠?approveAgentTool 闁告劖鐟ラ崣鍡涙儍?approvedTools 闁谎嗘閹洟宕￠弴顏嗙
+    // 濞戞挸绉撮崯鈧柡鈧娑樼槷 metadata.approval 閺夆晜鐟х悮?闁稿繈鍔岄惇顒勫绩閹规劦鏀?闁活収鍙€閻箖鏁嶅畝鍕級闁稿繐绉撮幃妤冪磼椤擄紕鐔呴柣銏ｉ哺婢ц法浠﹂弴鐔割槯閻炴凹鍋嗙划顐ｆ交閸ャ儮鍋?
     const metadata = getRunMetadata(run);
     const approved = Array.isArray(metadata.approvedTools) ? metadata.approvedTools : [];
     return approved.includes(toolName);
@@ -733,18 +604,18 @@ function maybePauseForApproval(run, tool, input) {
     });
     updateRun(run.id, {
         status: 'approval_required',
-        error_message: `等待用户审批能力库工具：${tool.title || tool.name}`,
+        error_message: `缂佹稑顦欢鐔兼偨閵婏箑鐓曢悗鍏夊墲婢规帡鎳楅挊澶婎潝閹煎瓨鎸告导鎰板礂閸戙倗绐?{tool.title || tool.name}`,
         updated_at: now,
         last_heartbeat_at: now
     });
     insertStep(run.id, listSteps(run.id).length + 1, {
         type: 'approval',
-        title: `等待审批：${tool.title || tool.name}`,
+        title: `缂佹稑顦欢鐔衡偓鍏夊墲婢规帡鏁?{tool.title || tool.name}`,
         toolName: tool.name,
         input,
         output: { status: 'approval_required', tool: tool.name }
     });
-    createAgentNotification(run.user_id, run.id, 'approval', '智能体等待能力库审批', tool.title || tool.name);
+    createAgentNotification(run.user_id, run.id, 'approval', 'Agent run requires tool approval', tool.title || tool.name);
     return true;
 }
 
@@ -752,16 +623,16 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     const messages = [
         {
             role: 'system',
-            content: '请用简洁中文为用户总结智能体工作，包含有用发现、已执行动作、错误和下一步建议。'
+            content: 'Summarize the agent observations into a clear final answer. Mention limitations and useful next steps when appropriate.'
         },
         {
             role: 'user',
-            content: `目标：${goal}\n\n执行记录：\n${JSON.stringify(observations, null, 2)}`
+            content: `闁烩晩鍠楅悥锝夋晬?{goal}\n\n闁圭瑳鍡╂斀閻犱焦婢樼紞宥夋晬濮濇樆${JSON.stringify(observations, null, 2)}`
         }
     ];
-    const content = await callModelText(modelCfg, messages);
+    const content = await callModelText(modelCfg, messages, { user });
     if (user) recordAgentModelUsage(user, modelCfg, messages, content, 'agent_summary', runId);
-    return content || '任务已完成，但模型没有返回总结。';
+    return content || 'No final answer was generated.';
 }
 
 function upsertDagNode(runId, node, patch = {}) {
@@ -829,26 +700,18 @@ function upsertDagNode(runId, node, patch = {}) {
     return info.lastInsertRowid;
 }
 
-// v0.0.49 流式 function calling 分支
+// v0.0.49 婵炵繝绀佺槐?function calling 闁告帒妫欓弫?
 function isStreamingToolsEnabled() {
     return String(process.env.AGENT_STREAMING_TOOLS || '').toLowerCase() === 'true';
 }
 
-// 把 agent 工具列表转成 OpenAI tools schema；保留命名与 input_schema
-function buildAgentToolSchemas(toolList) {
-    return (toolList || []).filter(tool => tool && tool.name).map(tool => ({
-        name: tool.name,
-        description: tool.description || tool.title || '',
-        input_schema: tool.input_schema || tool.parameters || { type: 'object', properties: {} }
-    }));
-}
-
-// 流式分支：把流式 tool_calls 协议转成 agent 步骤记录；失败时返回 { completed: false } 让外层回退
+// 闁?agent 鐎规悶鍎遍崣鍧楀礆濡ゅ嫨鈧啯娼浣哥亣 OpenAI tools schema闁挎稒绋愮换姘舵偩濞嗗繑鍤掗柛姘С缁?input_schema
+// 婵炵繝绀佺槐锟犲礆閸℃ɑ鏆滈柨娑欑婵＄霉娴ｅ摜纭€ tool_calls 闁告绻楅鍛姜椤掍礁鐏?agent 婵縿鍎甸鍐媼閺夎法绉块柨娑欑☉閵囨垹鎷归妷锔筋槯閺夆晜鏌ㄥú?{ completed: false } 閻犱讲鏅涢ˇ鑽や沪閸屾碍绀€闂侇偀鍋?
 async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }) {
     try {
         const tools = buildAgentToolSchemas(toolList);
-        const systemPrompt = `你是一个智能体。目标：${run.goal || ''}\n\n` +
-            `调用工具时务必通过 tool_calls 协议给出结构化参数；当无需继续调用工具且已可作答时直接输出最终答复。`;
+        const systemPrompt = `You are an agent. Goal: ${run.goal || ''}\n\nUse tool_calls when useful; otherwise provide a final answer. Return structured tool input JSON.`;
+
         const conversation = [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: run.goal || '' }
@@ -860,7 +723,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
-            // 节流：100ms 或 ≥120 字符增量时推送一次 snapshot，避免 SSE 风暴
+            // 闁煎搫鍊圭粊锕傛晬?00ms 闁?闁?20 閻庢稒顨堥浣规櫠閻愬搫娅ら柡鍐煐鐢綊鏌呮担椋庮伇婵?snapshot闁挎稑鐭傛导鈺呭礂?SSE 濡炲瀛╁В?
             let lastEmittedAt = 0;
             let lastEmittedLen = 0;
             const emitDelta = (snapshot) => {
@@ -880,11 +743,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 });
             };
             const result = await withTimeout(
-                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200, onDelta: emitDelta }),
+                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200, onDelta: emitDelta, user }),
                 Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-                '流式模型规划'
+                'streaming tool planning'
             );
-            // 步骤结束推一次最终快照
+            // 婵縿鍎甸鍐磼閹惧瓨灏嗛柟鎭掑妺缁旀潙鈻庨埄鍐╀粯缂備礁鐗嗛幓鈺呮偂?
             publishUserEvent(user.id, 'agent.streaming', {
                 runId,
                 step,
@@ -894,10 +757,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 completed: true
             });
             recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
-            // 把累加器结果当作"plan"记录到 agent_steps，便于审计与回看
             insertStep(runId, step, {
                 type: 'plan',
-                title: result?.hasToolCalls ? `流式规划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '无工具'}` : '流式规划：直接作答',
+                title: result?.hasToolCalls ? `Streaming tool plan: ${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || 'tool'}` : 'Streaming final answer',
                 input: { goal: run.goal },
                 output: {
                     content: result?.content || '',
@@ -916,24 +778,24 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
+                createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
                 return { completed: true };
             }
 
-            // 把 assistant tool_calls 写回会话，准备执行工具
+            // 闁?assistant tool_calls 闁告劖鐟ュú鏍ㄥ濮樺磭妯堥柨娑樿嫰閸ｎ垱寰勯崶銊モ挃閻炴稑鑻导鎰板礂?
             conversation.push(buildAssistantToolMessage(result));
 
-            // 顺序执行 tool_calls；任何一个工具失败仍保留 tool 消息以便模型决定下一步
+            // 濡炪倕鎼花顓㈠箥瑜戦、?tool_calls闁挎稒绋愰幑銏℃媴閺囨氨顏卞☉鎿冧簻娴兼劙宕楀畡鑸杭閻犳劑鍎扮划娑欑┍濠靛牊娈?tool 婵炴垵鐗婃导鍛閵夈倗鈹掓俊顖椻偓宕団偓鐑藉礃閸愯尙鏆板☉鎾愁儎缁旀潙顫?
             for (const call of result.toolCalls) {
                 assertRunWithinBudget();
                 assertRunNotCancelled(runId);
                 const selectedTool = toolList.find(t => t.name === call.name);
                 if (!selectedTool) {
-                    const message = `工具未授权或不存在：${call.name}`;
+                    const message = `鐎规悶鍎遍崣鍧楀嫉椤忓懎鎴块柡澶婂暞閸ㄣ劍绋夊鍛憼闁革富鐓夌槐?{call.name}`;
                     conversation.push(buildToolResultMessage(call.id, { error: message }));
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `跳过未知工具：${call.name || '-'}`,
+                        title: `閻犲搫鐤囩换鍐嫉椤忓棛鍙€鐎规悶鍎遍崣鍧楁晬?{call.name || '-'}`,
                         toolName: call.name || '',
                         input: call.arguments || {},
                         output: { error: message },
@@ -943,7 +805,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     continue;
                 }
                 if (maybePauseForApproval(run, selectedTool, call.arguments || {})) {
-                    // 已被暂停等待审批；流式分支退出，等用户审批后会重新入队
+                    // 鐎规瓕灏～锕傚汲閸屾矮绮荤紒娑橆槸缁剁喓鈧厜鍓濇竟鎺楁晬濞戞瑧銈︾€殿喖绻愰崹搴ㄥ绩椤栫偐鍋撻埀顒勫礄閻氬绀夌紒娑橆槺閺併倝骞嬪畡閭﹀悁闁圭數鎳撻幃妤佸濮樿泛娅㈤柡鍌涙緲閸欏棝姊?
                     return { completed: true };
                 }
                 const callStart = Date.now();
@@ -952,13 +814,13 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     const output = await withTimeout(
                         executeToolByName(call.name, args, user, toolList),
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                        `工具调用 ${call.name}`
+                        `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆?${call.name}`
                     );
                     const compactOutput = clampText(output, 10000);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput });
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `调用工具：${call.name}`,
+                        title: `閻犲鍟伴弫銈咁啅閵夈儱寰旈柨?{call.name}`,
                         toolName: call.name,
                         input: args,
                         output: compactOutput,
@@ -969,7 +831,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'tool',
-                        title: `工具调用失败：${call.name}`,
+                        title: `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆忓鎯扮簿鐟欙箓鏁?{call.name}`,
                         toolName: call.name,
                         input: call.arguments || {},
                         output: { error: toolErr.message },
@@ -981,115 +843,18 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 }
             }
         }
-        // 步数耗尽仍未完成 → 让外层旧逻辑兜底（合成最终答案）
+        // 婵縿鍎查弳鐔兼嚀濡も偓閺佹牗绂掑鍡樺紦閻庣懓鏈崹?闁?閻犱讲鏅涢ˇ鑽や沪閸屾稒锛嬮梺顐ｆ缁额偊宕楀鍐亢闁挎稑鐗嗛幃搴ㄥ箣閹邦厽浠樼紓浣哥墢閻＄喎顩奸崼顒傜
         return { completed: false };
     } catch (streamErr) {
-        // 流式失败时不让任务直接挂掉，记录后回退到旧分支
-        logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，回退到回合制 JSON 协议');
+        // 婵炵繝绀佺槐鈩冨緞鏉堫偉袝闁哄啯婀圭粭澶屾媼閳衡偓閹广垽宕濋敍鍕函闁规亽鍎茬€垫洟骞掓径娑氱閻犱焦婢樼紞宥夊触鎼粹剝绀€闂侇偀鍋撻柛鎺斿濡偊宕氶崱妯绘殰
+        logger.warn({ runId, err: streamErr.message }, 'Streaming tool call failed; falling back to JSON planner');
         insertStep(runId, listSteps(runId).length + 1, {
             type: 'control',
-            title: '流式工具调用失败，已回退',
+            title: 'Streaming tool fallback',
             output: { error: streamErr.message }
         });
         return { completed: false };
     }
-}
-
-function getPathValue(value, path = []) {
-    let current = value;
-    for (const part of path) {
-        if (current === null || current === undefined) return undefined;
-        if (Array.isArray(current) && /^\d+$/.test(part)) {
-            current = current[Number(part)];
-        } else if (typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, part)) {
-            current = current[part];
-        } else {
-            return undefined;
-        }
-    }
-    return current;
-}
-
-function stringifyDagTemplateValue(value) {
-    if (value === undefined || value === null) return '';
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    try {
-        return JSON.stringify(value);
-    } catch (e) {
-        return String(value);
-    }
-}
-
-function resolveDagTemplateReference(expression, context) {
-    const expr = String(expression || '').trim();
-    if (!expr) return undefined;
-    if (expr === 'goal' || expr === 'run.goal') return context.goal;
-    const parts = expr.split('.').map(part => part.trim()).filter(Boolean);
-    if (!parts.length) return undefined;
-    if (parts[0] === 'inputs' || parts[0] === 'input') {
-        return getPathValue(context.inputs || {}, parts.slice(1));
-    }
-    if (parts[0] === 'run') {
-        if (parts[1] === 'goal') return context.goal;
-        if (parts[1] === 'inputs' || parts[1] === 'input') return getPathValue(context.inputs || {}, parts.slice(2));
-    }
-    if (parts[0] === 'nodes' || parts[0] === 'node') {
-        const nodeId = parts[1];
-        const field = parts[2] || 'output';
-        if (!nodeId) return undefined;
-        const state = context.states.get(nodeId) || {};
-        const node = context.nodeMap.get(nodeId) || {};
-        if (field === 'status') return state.status;
-        if (field === 'error') return state.error || '';
-        if (field === 'title') return node.title || nodeId;
-        if (field === 'tool') return node.tool || '';
-        if (field === 'input') return getPathValue(state.input ?? node.input ?? {}, parts.slice(3));
-        if (field === 'output') return getPathValue(state.output, parts.slice(3));
-    }
-    return undefined;
-}
-
-function resolveDagInputValue(value, context) {
-    if (typeof value === 'string') {
-        const exact = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
-        if (exact) {
-            const resolved = resolveDagTemplateReference(exact[1], context);
-            return resolved === undefined ? value : resolved;
-        }
-        return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
-            const resolved = resolveDagTemplateReference(expression, context);
-            return resolved === undefined ? match : stringifyDagTemplateValue(resolved);
-        });
-    }
-    if (Array.isArray(value)) {
-        return value.map(item => resolveDagInputValue(item, context));
-    }
-    if (value && typeof value === 'object') {
-        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveDagInputValue(item, context)]));
-    }
-    return value;
-}
-
-function resolveDagNodeInput(node, context) {
-    const resolved = resolveDagInputValue(node.input || {}, context);
-    return resolved && typeof resolved === 'object' && !Array.isArray(resolved) ? resolved : {};
-}
-
-function normalizeDagRunInputs(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [String(key).trim().slice(0, 80), item]));
-}
-
-function normalizeDagNodePolicy(node, run) {
-    const defaultTimeout = normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000);
-    return {
-        retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
-        timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000) || defaultTimeout,
-        onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
-            ? String(node.onError || node.on_error || 'skip_dependents')
-            : 'skip_dependents'
-    };
 }
 
 async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolList, deadline, policy }) {
@@ -1103,7 +868,7 @@ async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolLi
             const output = await withTimeout(
                 executeToolByName(node.tool, resolvedInput, user, toolList),
                 Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
-                `工作流节点 ${node.title || node.id}`
+                `鐎规悶鍎扮紞鏂棵规担钘壩濋柣?${node.title || node.id}`
             );
             return {
                 ok: true,
@@ -1117,7 +882,7 @@ async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolLi
             lastError = e;
             insertStep(run.id, listSteps(run.id).length + 1, {
                 type: 'dag',
-                title: `工作流节点尝试失败：${node.title || node.id}（${attempt}/${attempts}）`,
+                title: `DAG node retry ${node.title || node.id} (${attempt}/${attempts})`,
                 toolName: node.tool,
                 input: resolvedInput,
                 output: { error: e.message, attempt, attempts, retrying: attempt < attempts },
@@ -1130,7 +895,7 @@ async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolLi
     }
     return {
         ok: false,
-        error: lastError || new Error('工作流节点执行失败。'),
+        error: lastError || new Error('DAG node failed without an error message.'),
         attempt: attempts,
         startedAt,
         startedAtText,
@@ -1144,7 +909,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const dagInputs = normalizeDagRunInputs(metadata.dagInputs || metadata.inputs || {});
     const reusedDagNodes = metadata.reusedDagNodes && typeof metadata.reusedDagNodes === 'object' ? metadata.reusedDagNodes : {};
     if (!dagSpec.nodes.length) {
-        throw new Error('工作流编排模式需要至少配置一个有效节点。');
+        throw new Error('DAG mode requires at least one valid node.');
     }
 
     dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
@@ -1171,7 +936,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             return node.dependsOn.every(dep => ['completed', 'error', 'skipped'].includes(states.get(dep)?.status));
         });
         if (!readyNodes.length) {
-            throw new Error('工作流编排存在循环依赖或无法满足的依赖。');
+            throw new Error('DAG execution stalled because no nodes are runnable.');
         }
 
         const runnable = [];
@@ -1187,7 +952,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `跳过工作流节点：${node.title}`,
+                    title: `閻犲搫鐤囩换鍐啅閵夈倗绋婃繛缈犳祰婵☆參鎮欓惂鍝ョ獥${node.title}`,
                     toolName: node.tool,
                     input: node.input,
                     output: { status: 'skipped', dependsOn: node.dependsOn }
@@ -1207,11 +972,11 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 nodeMap
             });
             if (maybePauseForApproval(run, selectedTool, resolvedInput)) {
-                const err = new Error('工作流节点等待能力库工具审批。');
+                const err = new Error('DAG node requires tool approval.');
                 err.code = 'AGENT_APPROVAL_REQUIRED';
                 throw err;
             }
-            const policy = normalizeDagNodePolicy(node, run);
+            const policy = normalizeDagNodePolicy(node, run, AGENT_TOOL_TIMEOUT_MS);
             const startedAtText = getBeijingTimestamp();
             states.set(node.id, { status: 'running', input: resolvedInput });
             upsertDagNode(run.id, node, { status: 'running', input: resolvedInput, startedAt: startedAtText });
@@ -1237,7 +1002,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, output: compactOutput, attempts: result.attempt });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: `工作流节点完成：${node.title}`,
+                    title: `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閻ｎ剟骞嬮幇鍓佺獥${node.title}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: compactOutput,
@@ -1267,7 +1032,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
                 insertStep(run.id, stepIndex, {
                     type: 'dag',
-                    title: policy.onError === 'continue' ? `工作流节点失败但继续：${node.title}` : `工作流节点失败：${node.title}`,
+                    title: policy.onError === 'continue' ? `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閵囨垹鎷归妷銈囩ɑ缂備綀鍛暰闁?{node.title}` : `鐎规悶鍎扮紞鏂棵规担钘壩濋柣鎰嚀閵囨垹鎷归妷顖滅獥${node.title}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: { error: e.message, onError: policy.onError },
@@ -1289,7 +1054,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (failedNodes.length || skippedNodes.length) {
         insertStep(run.id, stepIndex, {
             type: 'control',
-            title: failedNodes.length ? '工作流完成但存在失败节点' : '工作流完成并跳过部分节点',
+            title: failedNodes.length ? 'DAG completed with failed nodes' : 'DAG completed with skipped nodes',
             output: {
                 failedNodes: failedNodes.map(node => ({
                     id: node.id,
@@ -1305,12 +1070,12 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const answer = await withTimeout(
         synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
         Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-        '工作流结果总结'
+        'DAG final summary'
     );
     updateRun(run.id, {
         status: 'completed',
         final_answer: answer,
-        error_message: failedNodes.length ? `工作流完成但有 ${failedNodes.length} 个节点失败。` : '',
+        error_message: failedNodes.length ? `DAG failed nodes: ${failedNodes.length}` : '',
         completed_at: getBeijingTimestamp(),
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
@@ -1319,7 +1084,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         user.id,
         run.id,
         failedNodes.length ? 'warning' : 'completed',
-        failedNodes.length ? '智能体工作流完成但存在失败节点' : '智能体工作流任务已完成',
+        failedNodes.length ? 'DAG run completed with errors' : 'DAG run completed',
         getAgentRunTitle(run)
     );
 }
@@ -1327,20 +1092,20 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
 async function runAgent(runId, user) {
     try {
         const run = getRunForUser(runId, user, { includeDeleted: true });
-        if (!run) throw new Error('智能体任务不存在。');
+        if (!run) throw new Error('Agent run not found.');
         if (run.deleted_at) return;
         assertRunNotCancelled(runId);
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
         const assertRunWithinBudget = () => {
             if (Date.now() > deadline) {
-                const err = new Error('智能体任务运行超时。');
+                const err = new Error('Agent run timed out.');
                 err.code = 'AGENT_TIMEOUT';
                 throw err;
             }
         };
         const initialModelCfg = getRunnableModelForUser(run.model_id, user);
-        if (!initialModelCfg) throw new Error('当前智能体任务没有可用模型。');
-        // 按 run.model_router 进行运行时模型路由；fixed 等同旧行为
+        if (!initialModelCfg) throw new Error('No accessible model is available for this agent run.');
+        // 闁?run.model_router 閺夆晜绋栭、鎴炴交閹邦垼鏀介柡鍐煐鑶╅柛銊ヮ儓閻箖鎮介幉瀣耿fixed 缂佹稑顦幃鎾诲籍瑜戦、鎴炵▔?
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
         if (routerStrategy !== 'fixed') {
@@ -1358,13 +1123,13 @@ async function runAgent(runId, user) {
                         .run(modelCfg.id, getBeijingTimestamp(), runId);
                     insertStep(runId, listSteps(runId).length + 1, {
                         type: 'control',
-                        title: `模型路由：${routerStrategy}`,
+                        title: `婵☆垪鈧磭鈧鎹勯婊勬殸闁?{routerStrategy}`,
                         output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
                     });
-                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由命中');
+                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, 'Agent model router selected a model');
                 }
             } catch (routerErr) {
-                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，回退到原模型');
+                logger.warn({ runId, err: routerErr.message }, 'Agent model routing failed; using original model');
             }
         }
 
@@ -1374,7 +1139,7 @@ async function runAgent(runId, user) {
             toolAllowlist: run.tool_allowlist
         });
         if (toolList.length === 0) {
-            throw new Error('当前智能体没有可用工具，请调整工具范围后重试。');
+            throw new Error('No available tools match this agent configuration.');
         }
         assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
@@ -1390,14 +1155,14 @@ async function runAgent(runId, user) {
             return;
         }
 
-        // 可选：流式 function calling 分支（v0.0.49）
-        // 默认环境变量未开启时走旧回合制 JSON 协议；启用后失败也会自动回退，保证任务能完成
+        // 闁告瑯鍨堕埀顒€顧€缁辨澘霉娴ｅ摜纭€ function calling 闁告帒妫欓弫顕€鏁嶉崸?.0.49闁?
+        // 濮掓稒顭堥濠氭偝椤栨凹鏆旈柛娆愶耿閸ｆ椽寮甸鍕；闁告凹鍨卞鍌滄導閻楀牊锛嬮柛銉у仜閹酣宕?JSON 闁告绻楅鍛存晬濞戞ɑ鍎欓柣顫妼閹寰勬潏顐バ曞☉鏃傚枍缁变即鎳涢鍕楅柛銉у仱閳ь兘鍋撻柨娑樺缁绘氨鎷犳担閿嬪床闁告枀銈呭幋閻庣懓鏈崹?
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
             });
             if (streamingResult?.completed) return;
-            // 未完成（流式失败 / 超步数）则继续走旧回合制循环
+            // 闁哄牜浜滈悾顒勫箣閹板墎绀勬繛缈犵缁扁剝寰勬潏顐バ?/ 閻℃帒鎳忛鐐哄极鐢喚绀嗛柛鎺撶懅閹撮绱掗陇娉查柡鍐勫啯绀€闁告艾鐗嗛崺妤€顕ラ鍡楃畾
         }
 
         for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
@@ -1405,14 +1170,14 @@ async function runAgent(runId, user) {
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {});
-            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '模型规划');
+            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '婵☆垪鈧磭鈧鎲撮崟顐㈢亰');
             recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
             insertStep(runId, step, {
                 type: 'plan',
-                title: plan.thought || '规划下一步',
+                title: plan.thought || 'Agent plan',
                 input: { goal: run.goal },
                 output: plan
             });
@@ -1426,7 +1191,7 @@ async function runAgent(runId, user) {
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
+                createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
                 return;
             }
 
@@ -1440,7 +1205,7 @@ async function runAgent(runId, user) {
                 const output = await withTimeout(
                     executeToolByName(plan.tool, plan.input || {}, user, toolList),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                    `工具调用 ${plan.tool}`
+                    `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆?${plan.tool}`
                 );
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
@@ -1453,7 +1218,7 @@ async function runAgent(runId, user) {
                 });
                 insertStep(runId, step, {
                     type: 'tool',
-                    title: `调用工具：${plan.tool}`,
+                    title: `閻犲鍟伴弫銈咁啅閵夈儱寰旈柨?{plan.tool}`,
                     toolName: plan.tool,
                     input: plan.input || {},
                     output: compactOutput,
@@ -1468,7 +1233,7 @@ async function runAgent(runId, user) {
                 });
                 insertStep(runId, step, {
                     type: 'tool',
-                    title: `工具调用失败：${plan.tool}`,
+                    title: `鐎规悶鍎遍崣璺ㄦ嫬閸愵亝鏆忓鎯扮簿鐟欙箓鏁?{plan.tool}`,
                     toolName: plan.tool,
                     input: plan.input || {},
                     output: { error: toolErr.message },
@@ -1481,8 +1246,8 @@ async function runAgent(runId, user) {
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
-        let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '结果总结');
-        // v0.0.50 auto-escalate：低置信时升级到更强模型再合成一次
+        let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
+        // v0.0.50 auto-escalate闁挎稒鐭紞鍡欑磾椤旇绻嗛柡鍐硾瀹曞瞼鐥閸╁矂寮撮弶鎴濈箒婵☆垪鈧磭鈧兘宕樺鍛€ら柟瀛樺姃缁旀潙鈻?
         if (routerStrategy === 'auto-escalate') {
             const confidence = assessConfidence({ output: answer });
             if (!confidence.confident) {
@@ -1495,17 +1260,17 @@ async function runAgent(runId, user) {
                     if (escalation) {
                         insertStep(runId, listSteps(runId).length + 1, {
                             type: 'control',
-                            title: '模型升级：auto-escalate',
+                            title: '婵☆垪鈧磭鈧兘宕￠崶鈺呯崜闁挎稒鐡玼to-escalate',
                             output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
                         });
-                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度不足，升级到更强模型');
+                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, 'Agent confidence low; escalating model');
                         modelCfg = escalation;
                         db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
                             .run(modelCfg.id, getBeijingTimestamp(), runId);
-                        answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '升级模型结果总结');
+                        answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary');
                     }
                 } catch (escErr) {
-                    logger.warn({ runId, err: escErr.message }, 'auto-escalate 升级失败，保留首轮答案');
+                    logger.warn({ runId, err: escErr.message }, 'auto-escalate failed; keeping first answer');
                 }
             }
         }
@@ -1517,7 +1282,7 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'completed', '智能体任务已完成', getAgentRunTitle(run));
+        createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
     } catch (e) {
         if (e.code === 'AGENT_RUN_CANCELLED') {
             updateRun(runId, { updated_at: getBeijingTimestamp() });
@@ -1539,7 +1304,7 @@ async function runAgent(runId, user) {
             });
             insertStep(runId, listSteps(runId).length + 1, {
                 type: 'control',
-                title: `自动重试 ${retryCount + 1}/${retryLimit}`,
+                title: `闁煎浜滄慨鈺呮煂瀹ュ牏妲?${retryCount + 1}/${retryLimit}`,
                 output: { error: e.message }
             });
             enqueueAgentRun(runId, user);
@@ -1552,7 +1317,7 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'error', '智能体任务失败', e.message);
+        createAgentNotification(user.id, runId, 'error', 'Agent run failed', e.message);
     }
 }
 
@@ -1571,7 +1336,7 @@ function recoverAgentRuns() {
     staleRunning.forEach(run => {
         updateRun(run.id, {
             status: 'error',
-            error_message: '服务重启或心跳超时，任务已标记为异常。',
+            error_message: 'Service restarted or heartbeat timed out; run marked as error.',
             completed_at: now,
             updated_at: now,
             last_heartbeat_at: now,
@@ -1580,7 +1345,7 @@ function recoverAgentRuns() {
         });
         insertStep(run.id, listSteps(run.id).length + 1, {
             type: 'control',
-            title: '运行恢复标记异常',
+            title: 'Runtime recovery marked stale run',
             output: { status: 'error', reason: 'stale_running' }
         });
     });
@@ -1599,7 +1364,7 @@ function approveAgentTool(runId, user, approve = true) {
     if (!approve) {
         updateRun(runId, {
             status: 'cancelled',
-            error_message: `用户拒绝能力库工具审批：${pending.tool || '-'}`,
+            error_message: `闁活潿鍔嶉崺娑㈠箯閹烘梻鍗滈柤瀹犳婵繑鎯旈幘鍏呯矗闁稿繐鍢查鎼佸箥閻у摜绐?{pending.tool || '-'}`,
             cancelled_at: now,
             completed_at: now,
             updated_at: now
@@ -1607,11 +1372,11 @@ function approveAgentTool(runId, user, approve = true) {
         setRunMetadata(runId, { pendingApproval: null });
         insertStep(runId, listSteps(runId).length + 1, {
             type: 'approval',
-            title: '用户拒绝工具审批',
+            title: 'User rejected tool approval',
             toolName: pending.tool || '',
             output: { status: 'rejected' }
         });
-        createAgentNotification(user.id, runId, 'cancelled', '智能体审批已拒绝', pending.tool || getAgentRunTitle(run));
+        createAgentNotification(user.id, runId, 'cancelled', 'Agent approval rejected', pending.tool || getAgentRunTitle(run));
         return getRunForUser(runId, user);
     }
     const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
@@ -1620,7 +1385,7 @@ function approveAgentTool(runId, user, approve = true) {
     updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'approval',
-        title: '用户批准工具调用',
+        title: 'User approved tool call',
         toolName: pending.tool || '',
         output: { status: 'approved', tool: pending.tool || '' }
     });
@@ -1629,1007 +1394,23 @@ function approveAgentTool(runId, user, approve = true) {
 }
 
 function getAgentRuntimeStatus(user = null) {
-    const queueStatus = getAgentQueue().getStatus();
-    const queuedTotal = db.prepare(`
-        SELECT COUNT(*) AS count FROM agent_runs
-        WHERE status = 'queued' AND deleted_at IS NULL
-    `).get().count || 0;
-    const userQueued = user?.id ? db.prepare(`
-        SELECT COUNT(*) AS count FROM agent_runs
-        WHERE status = 'queued' AND deleted_at IS NULL AND user_id = ?
-    `).get(user.id).count || 0 : 0;
-    return {
+    return buildAgentRuntimeStatus({
         maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
-        instanceId: queueStatus.instanceId,
-        active: queueStatus.active,
-        queued: queueStatus.queued,
-        hinted: queueStatus.hinted,
-        databaseQueued: queuedTotal,
-        userQueued
-    };
-}
-
-function getAgentMetrics(user, days = 7) {
-    const safeDays = normalizePositiveInt(days, 7, 1, 90);
-    const params = [user.id, `-${safeDays} days`];
-    const baseWhere = user?.username === 'admin'
-        ? "created_at >= datetime('now', '+8 hours', ?)"
-        : "user_id = ? AND created_at >= datetime('now', '+8 hours', ?)";
-    const actualParams = user?.username === 'admin' ? [`-${safeDays} days`] : params;
-    const summary = db.prepare(`
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
-            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
-            SUM(CASE WHEN status IN ('queued','running','approval_required') THEN 1 ELSE 0 END) AS active,
-            COALESCE(SUM(total_tokens), 0) AS totalTokens
-        FROM agent_runs
-        WHERE deleted_at IS NULL AND ${baseWhere}
-    `).get(...actualParams);
-    const toolStats = db.prepare(`
-        SELECT s.tool_name, COUNT(*) AS count
-        FROM agent_steps s
-        JOIN agent_runs r ON r.id = s.run_id
-        WHERE r.deleted_at IS NULL AND s.type = 'tool' AND ${baseWhere.replace(/created_at/g, 'r.created_at')}
-        GROUP BY s.tool_name
-        ORDER BY count DESC
-        LIMIT 10
-    `).all(...actualParams);
-    return {
-        days: safeDays,
-        total: Number(summary.total || 0),
-        completed: Number(summary.completed || 0),
-        error: Number(summary.error || 0),
-        cancelled: Number(summary.cancelled || 0),
-        active: Number(summary.active || 0),
-        successRate: Number(summary.total || 0) ? Math.round((Number(summary.completed || 0) / Number(summary.total || 0)) * 100) : 0,
-        totalTokens: Number(summary.totalTokens || 0),
-        toolStats
-    };
-}
-
-function preflightAgentRun(user, body = {}) {
-    const goal = String(body.goal || '').trim();
-    const modelCfg = getRunnableModelForUser(body.modelId, user);
-    const toolPolicy = normalizeToolPolicy(body.toolPolicy || body.tool_policy);
-    const toolAllowlist = normalizeToolAllowlist(body.toolAllowlist || body.tool_allowlist);
-    const runMode = normalizeRunMode(body.runMode || body.run_mode);
-    const approvalPolicy = normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy);
-    const maxSteps = normalizeMaxSteps(body.maxSteps || body.max_steps);
-    const maxTokenBudget = normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000);
-    const toolList = formatToolList(user, { toolPolicy, toolAllowlist });
-    const mcpTools = toolList.filter(tool => tool.source === 'mcp');
-    const highRiskTools = mcpTools.filter(tool => tool.requiresApproval || tool.risk === 'high');
-    const knowledge = db.prepare(`
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS ready,
-            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
-            COALESCE(SUM(chunk_count), 0) AS chunks
-        FROM knowledge_docs
-        WHERE user_id = ? AND deleted_at IS NULL
-    `).get(user.id);
-    const warnings = [];
-    const blockers = [];
-    if (goal.length < 4) blockers.push('任务目标过短，智能体无法稳定规划。');
-    if (!modelCfg) blockers.push('未选择可用模型。');
-    if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
-    if (toolPolicy === 'builtin_only' && /mcp|数据库|外部|接口|工具/i.test(goal)) warnings.push('目标可能需要 MCP，但当前设置为仅内置工具。');
-    if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有能力库工具调用都会进入人工审批，长任务可能暂停等待。');
-    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险能力库工具会在执行前等待人工审批。');
-    if (Number(knowledge.ready || 0) === 0 && /知识库|资料|文档|依据|引用/i.test(goal)) warnings.push('目标提到了资料或知识库，但当前没有启用且就绪的知识库文档。');
-    if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
-    if (runMode === 'dag') {
-        let dag = null;
-        const workflowId = body.workflowId || body.workflow_id;
-        if (workflowId) {
-            try {
-                dag = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current')?.dagSpec;
-            } catch (e) {
-                blockers.push(e.message || 'Workflow version is not available.');
-            }
-        }
-        dag = dag || normalizeDagSpec(body.dagSpec || body.dag_spec || {});
-        if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
-    }
-    if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
-    if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('Token 预算偏低，可能导致任务提前停止。');
-    const status = blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'ready');
-    return {
-        status,
-        blockers,
-        warnings,
-        summary: {
-            model: modelCfg ? { id: modelCfg.id, name: modelCfg.name, model_name: modelCfg.model_name } : null,
-            runMode,
-            approvalPolicy,
-            maxSteps,
-            maxTokenBudget,
-            toolCount: toolList.length,
-            mcpToolCount: mcpTools.length,
-            highRiskToolCount: highRiskTools.length,
-            knowledgeReady: Number(knowledge.ready || 0),
-            knowledgeChunks: Number(knowledge.chunks || 0),
-            knowledgeErrors: Number(knowledge.error || 0)
-        },
-        recommendations: blockers.length
-            ? ['修复阻断项后再创建任务。']
-            : warnings.length
-                ? ['可继续运行，但建议根据风险调整工具范围、审批策略或知识库状态。']
-                : ['预检通过，当前配置适合创建任务。']
-    };
-}
-
-function assertTemplateAccess(template, user, write = false) {
-    if (!template || template.deleted_at) return false;
-    if (template.user_id === user.id) return true;
-    if (write) return false;
-    if (template.scope !== 'shared') return false;
-    const allowedUnits = String(template.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean);
-    return allowedUnits.length === 0 || allowedUnits.includes(user.unit || '');
-}
-
-function normalizeWorkflowPayload(body = {}, fallback = {}) {
-    const name = String(body.name || fallback.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
-    const dagSpec = normalizeDagSpec(body.dagSpec || body.dag_spec || fallback.dagSpec || fallback.dag_spec || {});
-    if (!dagSpec.nodes.length) {
-        const err = new Error('工作流库保存需要至少一个有效节点。');
-        err.status = 400;
-        throw err;
-    }
-    return {
-        name,
-        description: String(body.description || fallback.description || '').trim().slice(0, 300),
-        note: String(body.note || '').trim().slice(0, 300),
-        dagSpec
-    };
-}
-
-function normalizeDagInputsPayload(value) {
-    if (!value) return {};
-    if (typeof value === 'string') {
-        const parsed = parseJsonObject(value);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? normalizeDagRunInputs(parsed) : {};
-    }
-    return normalizeDagRunInputs(value);
-}
-
-function formatAgentWorkflow(row) {
-    if (!row) return null;
-    const dagSpec = parseJsonObject(row.current_dag_spec || row.dag_spec || '') || { nodes: [] };
-    return {
-        id: row.id,
-        user_id: row.user_id,
-        name: row.name,
-        description: row.description || '',
-        current_version_id: row.current_version_id || null,
-        current_version: Number(row.current_version || row.version || 0),
-        current_note: row.current_note || '',
-        published_version_id: row.published_version_id || null,
-        published_version: Number(row.published_version || 0),
-        published_at: row.published_at || '',
-        is_published: Boolean(row.published_version_id),
-        dag_spec: dagSpec,
-        node_count: Array.isArray(dagSpec.nodes) ? dagSpec.nodes.length : 0,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        version_created_at: row.version_created_at || ''
-    };
-}
-
-function getAgentWorkflowForUser(workflowId, user) {
-    const row = db.prepare(`
-        SELECT
-            w.*,
-            v.version AS current_version,
-            v.dag_spec AS current_dag_spec,
-            v.note AS current_note,
-            v.created_at AS version_created_at,
-            pv.version AS published_version
-        FROM agent_workflows w
-        LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
-        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
-        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
-    `).get(workflowId, user.id);
-    return formatAgentWorkflow(row);
-}
-
-function listAgentWorkflows(user) {
-    return db.prepare(`
-        SELECT
-            w.*,
-            v.version AS current_version,
-            v.dag_spec AS current_dag_spec,
-            v.note AS current_note,
-            v.created_at AS version_created_at,
-            pv.version AS published_version
-        FROM agent_workflows w
-        LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
-        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
-        WHERE w.user_id = ? AND w.deleted_at IS NULL
-        ORDER BY w.updated_at DESC, w.id DESC
-        LIMIT 100
-    `).all(user.id).map(formatAgentWorkflow);
-}
-
-function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
-    const normalizedWorkflowId = Number.parseInt(workflowId, 10);
-    if (!normalizedWorkflowId) return null;
-    const workflow = db.prepare(`
-        SELECT
-            w.*,
-            cv.version AS current_version,
-            pv.version AS published_version
-        FROM agent_workflows w
-        LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
-        LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
-        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
-    `).get(normalizedWorkflowId, user.id);
-    if (!workflow) return null;
-    const requested = String(version || 'current').trim().toLowerCase();
-    let versionRow = null;
-    let mode = requested || 'current';
-    if (requested === 'published') {
-        if (!workflow.published_version_id) {
-            const err = new Error('工作流尚未发布，不能以发布版运行。');
-            err.status = 400;
-            throw err;
-        }
-        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?')
-            .get(workflow.published_version_id, workflow.id);
-    } else if (requested === 'current') {
-        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?')
-            .get(workflow.current_version_id, workflow.id);
-    } else {
-        const numericVersion = Number.parseInt(requested, 10);
-        if (!numericVersion) return null;
-        mode = 'version';
-        versionRow = db.prepare('SELECT * FROM agent_workflow_versions WHERE workflow_id = ? AND version = ?')
-            .get(workflow.id, numericVersion);
-    }
-    if (!versionRow) return null;
-    const dagSpec = normalizeDagSpec(parseJsonObject(versionRow.dag_spec) || {});
-    if (!dagSpec.nodes.length) {
-        const err = new Error('目标工作流版本没有有效节点。');
-        err.status = 400;
-        throw err;
-    }
-    return {
-        workflow: {
-            id: workflow.id,
-            name: workflow.name,
-            current_version: Number(workflow.current_version || 0),
-            published_version: Number(workflow.published_version || 0),
-            published_at: workflow.published_at || ''
-        },
-        version: Number(versionRow.version || 0),
-        version_id: versionRow.id,
-        mode,
-        dagSpec
-    };
-}
-
-function createAgentWorkflow(user, body = {}) {
-    const data = normalizeWorkflowPayload(body);
-    const now = getBeijingTimestamp();
-    const create = db.transaction(() => {
-        const workflowInfo = db.prepare(`
-            INSERT INTO agent_workflows (user_id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-        `).run(user.id, data.name, data.description, now, now);
-        const workflowId = workflowInfo.lastInsertRowid;
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(workflowId, 1, JSON.stringify(data.dagSpec), data.note, user.id, now);
-        db.prepare('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?')
-            .run(versionInfo.lastInsertRowid, workflowId);
-        return workflowId;
-    });
-    return getAgentWorkflowForUser(create(), user);
-}
-
-function updateAgentWorkflow(workflowId, user, body = {}) {
-    const current = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
-    if (!current) return null;
-    const data = normalizeWorkflowPayload(body, current);
-    const now = getBeijingTimestamp();
-    const update = db.transaction(() => {
-        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(current.id)?.next || 1);
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now);
-        db.prepare(`
-            UPDATE agent_workflows
-            SET name = ?, description = ?, current_version_id = ?, updated_at = ?
-            WHERE id = ?
-        `).run(data.name, data.description, versionInfo.lastInsertRowid, now, current.id);
-        return current.id;
-    });
-    return getAgentWorkflowForUser(update(), user);
-}
-
-function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
-    const resolved = resolveAgentWorkflowVersion(workflowId, user, version || 'current');
-    if (!resolved) return null;
-    const now = getBeijingTimestamp();
-    db.prepare(`
-        UPDATE agent_workflows
-        SET published_version_id = ?, published_at = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(resolved.version_id, now, now, resolved.workflow.id, user.id);
-    return getAgentWorkflowForUser(resolved.workflow.id, user);
-}
-
-function listAgentWorkflowVersions(workflowId, user) {
-    const workflow = db.prepare('SELECT id FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
-    if (!workflow) return null;
-    return db.prepare(`
-        SELECT id, workflow_id, version, dag_spec, note, created_by, created_at
-        FROM agent_workflow_versions
-        WHERE workflow_id = ?
-        ORDER BY version DESC
-    `).all(workflow.id).map(row => ({
-        ...row,
-        dag_spec: parseJsonObject(row.dag_spec) || { nodes: [] }
-    }));
-}
-
-function restoreAgentWorkflowVersion(workflowId, user, version) {
-    const workflow = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
-    if (!workflow) return null;
-    const source = db.prepare(`
-        SELECT *
-        FROM agent_workflow_versions
-        WHERE workflow_id = ? AND version = ?
-    `).get(workflow.id, Number.parseInt(version, 10));
-    if (!source) return null;
-    const dagSpec = normalizeDagSpec(parseJsonObject(source.dag_spec) || {});
-    if (!dagSpec.nodes.length) {
-        const err = new Error('目标版本没有有效节点，无法回滚。');
-        err.status = 400;
-        throw err;
-    }
-    const now = getBeijingTimestamp();
-    const restore = db.transaction(() => {
-        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(workflow.id)?.next || 1);
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(workflow.id, nextVersion, JSON.stringify(dagSpec), `从 v${source.version} 回滚`, user.id, now);
-        db.prepare('UPDATE agent_workflows SET current_version_id = ?, updated_at = ? WHERE id = ?')
-            .run(versionInfo.lastInsertRowid, now, workflow.id);
-        return workflow.id;
-    });
-    return getAgentWorkflowForUser(restore(), user);
-}
-
-function normalizeWorkflowNodesForDiff(spec = {}) {
-    const dag = normalizeDagSpec(spec || {});
-    return new Map(dag.nodes.map(node => [node.id, node]));
-}
-
-function sameJsonValue(left, right) {
-    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-}
-
-function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'current') {
-    const workflow = db.prepare(`
-        SELECT w.*, cv.version AS current_version
-        FROM agent_workflows w
-        LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
-        WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
-    `).get(workflowId, user.id);
-    if (!workflow) return null;
-    const normalizeVersion = value => {
-        if (String(value || '').trim() === 'current') return Number(workflow.current_version || 0);
-        return Number.parseInt(value, 10);
-    };
-    const from = normalizeVersion(fromVersion);
-    const to = normalizeVersion(toVersion);
-    if (!from || !to) return null;
-    const rows = db.prepare(`
-        SELECT version, dag_spec, note, created_at
-        FROM agent_workflow_versions
-        WHERE workflow_id = ? AND version IN (?, ?)
-    `).all(workflow.id, from, to);
-    const fromRow = rows.find(row => Number(row.version) === from);
-    const toRow = rows.find(row => Number(row.version) === to);
-    if (!fromRow || !toRow) return null;
-    const fromNodes = normalizeWorkflowNodesForDiff(parseJsonObject(fromRow.dag_spec) || {});
-    const toNodes = normalizeWorkflowNodesForDiff(parseJsonObject(toRow.dag_spec) || {});
-    const added = [];
-    const removed = [];
-    const changed = [];
-    toNodes.forEach((node, id) => {
-        const before = fromNodes.get(id);
-        if (!before) {
-            added.push({ id, title: node.title, tool: node.tool });
-            return;
-        }
-        const changes = [];
-        if (before.title !== node.title) changes.push('标题');
-        if (before.tool !== node.tool) changes.push('工具');
-        if (!sameJsonValue(before.input, node.input)) changes.push('输入');
-        if (!sameJsonValue(before.dependsOn, node.dependsOn)) changes.push('依赖');
-        if (before.condition !== node.condition) changes.push('条件');
-        if (changes.length) {
-            changed.push({
-                id,
-                before: { title: before.title, tool: before.tool, dependsOn: before.dependsOn, condition: before.condition, input: before.input },
-                after: { title: node.title, tool: node.tool, dependsOn: node.dependsOn, condition: node.condition, input: node.input },
-                changes
-            });
-        }
-    });
-    fromNodes.forEach((node, id) => {
-        if (!toNodes.has(id)) removed.push({ id, title: node.title, tool: node.tool });
-    });
-    return {
-        workflow: { id: workflow.id, name: workflow.name },
-        from: { version: fromRow.version, note: fromRow.note || '', created_at: fromRow.created_at },
-        to: { version: toRow.version, note: toRow.note || '', created_at: toRow.created_at },
-        summary: {
-            added: added.length,
-            removed: removed.length,
-            changed: changed.length
-        },
-        added,
-        removed,
-        changed
-    };
-}
-
-function deleteAgentWorkflow(workflowId, user) {
-    const workflow = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
-    if (!workflow) return null;
-    const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, workflow.id);
-    return workflow;
-}
-
-function normalizeTemplatePayload(body = {}, user = {}) {
-    const name = String(body.name || '').trim().slice(0, 80);
-    const goalTemplate = String(body.goalTemplate || body.goal_template || body.goal || '').trim();
-    if (!name || goalTemplate.length < 4) {
-        const err = new Error('请填写模板名称和明确的任务目标。');
-        err.status = 400;
-        throw err;
-    }
-    const shared = body.scope === 'shared' && user?.username === 'admin';
-    const runMode = normalizeRunMode(body.runMode || body.run_mode);
-    const dagSpec = runMode === 'dag' ? normalizeDagSpec(body.dagSpec || body.dag_spec || {}) : { nodes: [] };
-    const workflowId = body.workflowId || body.workflow_id || null;
-    return {
-        name,
-        scope: shared ? 'shared' : 'personal',
-        description: String(body.description || '').trim().slice(0, 300),
-        goalTemplate: goalTemplate.slice(0, MAX_GOAL_LENGTH),
-        runMode,
-        toolPolicy: normalizeToolPolicy(body.toolPolicy || body.tool_policy),
-        toolAllowlist: serializeToolAllowlist(body.toolAllowlist || body.tool_allowlist),
-        approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy),
-        maxSteps: normalizeMaxSteps(body.maxSteps || body.max_steps),
-        maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
-        retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
-        contextConfig: serializeContextConfig(body.contextConfig || body.context_config),
-        allowedUnits: shared ? String(body.allowedUnits || body.allowed_units || '').trim().slice(0, 500) : '',
-        modelRouter: normalizeRouterStrategy(body.modelRouter || body.model_router),
-        dagSpec: runMode === 'dag' && dagSpec.nodes.length ? JSON.stringify(dagSpec) : '',
-        dagInputs: runMode === 'dag' ? JSON.stringify(normalizeDagInputsPayload(body.dagInputs || body.dag_inputs || {})) : '',
-        workflowId: runMode === 'dag' && workflowId ? Number.parseInt(workflowId, 10) || null : null,
-        workflowVersion: runMode === 'dag' ? String(body.workflowVersion || body.workflow_version || '').trim().slice(0, 40) : ''
-    };
-}
-
-function listAgentTemplates(user) {
-    return db.prepare(`
-        SELECT *
-        FROM agent_templates
-        WHERE deleted_at IS NULL
-          AND (user_id = ? OR scope = 'shared')
-        ORDER BY scope DESC, updated_at DESC, id DESC
-        LIMIT 100
-    `).all(user.id).filter(template => assertTemplateAccess(template, user, false));
-}
-
-function createAgentTemplate(user, body = {}) {
-    const data = normalizeTemplatePayload(body, user);
-    const now = getBeijingTimestamp();
-    const info = db.prepare(`
-        INSERT INTO agent_templates (
-            user_id, scope, name, description, goal_template, run_mode, tool_policy, tool_allowlist,
-            approval_policy, max_steps, max_token_budget, retry_limit, context_config, allowed_units,
-            model_router, dag_spec, dag_inputs, workflow_id, workflow_version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        user.id, data.scope, data.name, data.description, data.goalTemplate, data.runMode,
-        data.toolPolicy, data.toolAllowlist, data.approvalPolicy, data.maxSteps,
-        data.maxTokenBudget, data.retryLimit, data.contextConfig, data.allowedUnits,
-        data.modelRouter, data.dagSpec, data.dagInputs, data.workflowId, data.workflowVersion, now, now
-    );
-    return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(info.lastInsertRowid);
-}
-
-function updateAgentTemplate(templateId, user, body = {}) {
-    const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
-    if (!assertTemplateAccess(template, user, true)) return null;
-    const data = normalizeTemplatePayload(body, user);
-    db.prepare(`
-        UPDATE agent_templates
-        SET scope = ?, name = ?, description = ?, goal_template = ?, run_mode = ?, tool_policy = ?,
-            tool_allowlist = ?, approval_policy = ?, max_steps = ?, max_token_budget = ?, retry_limit = ?,
-            context_config = ?, allowed_units = ?, model_router = ?, dag_spec = ?, dag_inputs = ?,
-            workflow_id = ?, workflow_version = ?, updated_at = ?
-        WHERE id = ?
-    `).run(
-        data.scope, data.name, data.description, data.goalTemplate, data.runMode, data.toolPolicy,
-        data.toolAllowlist, data.approvalPolicy, data.maxSteps, data.maxTokenBudget, data.retryLimit,
-        data.contextConfig, data.allowedUnits, data.modelRouter, data.dagSpec, data.dagInputs,
-        data.workflowId, data.workflowVersion, getBeijingTimestamp(), templateId
-    );
-    return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
-}
-
-function deleteAgentTemplate(templateId, user) {
-    const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
-    if (!assertTemplateAccess(template, user, true)) return null;
-    const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_templates SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, templateId);
-    return { ...template, deleted_at: now };
-}
-
-function parseBeijingDate(value) {
-    const text = String(value || '').replace(' ', 'T');
-    const date = text ? new Date(text) : new Date();
-    return Number.isNaN(date.getTime()) ? new Date() : date;
-}
-
-function toBeijingTimestamp(date) {
-    const pad = n => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function computeNextScheduleRun(frequency, timeOfDay = '09:00', dayOfWeek = 1, from = getBeijingTimestamp()) {
-    const normalized = normalizeScheduleFrequency(frequency);
-    if (normalized === 'manual') return null;
-    const match = String(timeOfDay || '09:00').match(/^(\d{1,2}):(\d{2})$/);
-    const hour = Math.min(Number(match?.[1] || 9), 23);
-    const minute = Math.min(Number(match?.[2] || 0), 59);
-    const base = parseBeijingDate(from);
-    const candidate = new Date(base);
-    candidate.setHours(hour, minute, 0, 0);
-    if (normalized === 'daily') {
-        if (candidate <= base) candidate.setDate(candidate.getDate() + 1);
-        return toBeijingTimestamp(candidate);
-    }
-    const targetDay = Math.max(0, Math.min(Number.parseInt(dayOfWeek, 10) || 1, 6));
-    let diff = (targetDay - candidate.getDay() + 7) % 7;
-    if (diff === 0 && candidate <= base) diff = 7;
-    candidate.setDate(candidate.getDate() + diff);
-    return toBeijingTimestamp(candidate);
-}
-
-function normalizeSchedulePayload(body = {}) {
-    const name = String(body.name || '').trim().slice(0, 100);
-    const goal = String(body.goal || '').trim();
-    const frequency = normalizeScheduleFrequency(body.frequency);
-    if (!name || goal.length < 4) {
-        const err = new Error('请填写计划名称和明确的任务目标。');
-        err.status = 400;
-        throw err;
-    }
-    return {
-        name,
-        goal: goal.slice(0, MAX_GOAL_LENGTH),
-        modelId: body.modelId || body.model_id,
-        templateId: body.templateId || body.template_id || null,
-        frequency,
-        timeOfDay: String(body.timeOfDay || body.time_of_day || '09:00').slice(0, 5),
-        dayOfWeek: normalizePositiveInt(body.dayOfWeek || body.day_of_week, 1, 0, 6),
-        status: body.status === 'paused' ? 'paused' : 'active',
-        runConfig: {
-            maxSteps: normalizeMaxSteps(body.maxSteps || body.max_steps),
-            runMode: normalizeRunMode(body.runMode || body.run_mode),
-            toolPolicy: normalizeToolPolicy(body.toolPolicy || body.tool_policy),
-            toolAllowlist: normalizeToolAllowlist(body.toolAllowlist || body.tool_allowlist),
-            approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy),
-            retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
-            maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
-            contextConfig: normalizeContextConfig(body.contextConfig || body.context_config),
-            dagSpec: normalizeDagSpec(body.dagSpec || body.dag_spec || {}),
-            dagInputs: normalizeDagInputsPayload(body.dagInputs || body.dag_inputs || {}),
-            workflowId: body.workflowId || body.workflow_id || null,
-            workflowVersion: String(body.workflowVersion || body.workflow_version || '').trim() || null
-        }
-    };
-}
-
-function listAgentSchedules(user) {
-    return db.prepare(`
-        SELECT s.*, t.name AS template_name, m.name AS model_name
-        FROM agent_schedules s
-        LEFT JOIN agent_templates t ON t.id = s.template_id
-        LEFT JOIN models m ON m.id = s.model_id
-        WHERE s.user_id = ? AND s.deleted_at IS NULL
-        ORDER BY s.status ASC, s.next_run_at ASC, s.updated_at DESC
-        LIMIT 100
-    `).all(user.id);
-}
-
-function createAgentSchedule(user, body = {}) {
-    const data = normalizeSchedulePayload(body);
-    const modelCfg = getRunnableModelForUser(data.modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
-    if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
-        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
-    }
-    const now = getBeijingTimestamp();
-    const info = db.prepare(`
-        INSERT INTO agent_schedules (
-            user_id, template_id, model_id, name, goal, frequency, time_of_day, day_of_week,
-            status, run_config, next_run_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        user.id, data.templateId, modelCfg.id, data.name, data.goal, data.frequency,
-        data.timeOfDay, data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
-        data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
-        now, now
-    );
-    return db.prepare('SELECT * FROM agent_schedules WHERE id = ?').get(info.lastInsertRowid);
-}
-
-function updateAgentSchedule(scheduleId, user, body = {}) {
-    const schedule = db.prepare('SELECT * FROM agent_schedules WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(scheduleId, user.id);
-    if (!schedule) return null;
-    const data = normalizeSchedulePayload(body);
-    const modelCfg = getRunnableModelForUser(data.modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
-    if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
-        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
-    }
-    const now = getBeijingTimestamp();
-    db.prepare(`
-        UPDATE agent_schedules
-        SET template_id = ?, model_id = ?, name = ?, goal = ?, frequency = ?, time_of_day = ?,
-            day_of_week = ?, status = ?, run_config = ?, next_run_at = ?, updated_at = ?
-        WHERE id = ?
-    `).run(
-        data.templateId, modelCfg.id, data.name, data.goal, data.frequency, data.timeOfDay,
-        data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
-        data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
-        now, scheduleId
-    );
-    return db.prepare('SELECT * FROM agent_schedules WHERE id = ?').get(scheduleId);
-}
-
-function deleteAgentSchedule(scheduleId, user) {
-    const schedule = db.prepare('SELECT * FROM agent_schedules WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(scheduleId, user.id);
-    if (!schedule) return null;
-    db.prepare('UPDATE agent_schedules SET deleted_at = ?, updated_at = ? WHERE id = ?')
-        .run(getBeijingTimestamp(), getBeijingTimestamp(), scheduleId);
-    return schedule;
-}
-
-function runAgentScheduleNow(scheduleId, user) {
-    const schedule = db.prepare('SELECT * FROM agent_schedules WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(scheduleId, user.id);
-    if (!schedule) return null;
-    const cfg = parseJsonObject(schedule.run_config) || {};
-    const run = createAgentRun({
-        user,
-        goal: schedule.goal,
-        modelId: schedule.model_id,
-        title: schedule.name,
-        maxSteps: cfg.maxSteps,
-        runMode: cfg.runMode,
-        toolPolicy: cfg.toolPolicy,
-        toolAllowlist: cfg.toolAllowlist,
-        approvalPolicy: cfg.approvalPolicy,
-        retryLimit: cfg.retryLimit,
-        maxTokenBudget: cfg.maxTokenBudget,
-        templateId: schedule.template_id,
-        scheduleId: schedule.id,
-        contextConfig: cfg.contextConfig,
-        dagSpec: cfg.dagSpec,
-        dagInputs: cfg.dagInputs,
-        workflowId: cfg.workflowId,
-        workflowVersion: cfg.workflowVersion,
-        priority: 1
-    });
-    db.prepare('UPDATE agent_schedules SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?')
-        .run(getBeijingTimestamp(), run.id, getBeijingTimestamp(), schedule.id);
-    return run;
-}
-
-function runDueAgentSchedules(limit = 20) {
-    const due = db.prepare(`
-        SELECT s.*, u.username, u.nickname, u.unit, u.role
-        FROM agent_schedules s
-        JOIN users u ON u.id = s.user_id
-        WHERE s.status = 'active'
-          AND s.deleted_at IS NULL
-          AND s.next_run_at IS NOT NULL
-          AND s.next_run_at <= datetime('now', '+8 hours')
-        ORDER BY s.next_run_at ASC
-        LIMIT ?
-    `).all(normalizePositiveInt(limit, 20, 1, 100));
-    const created = [];
-    due.forEach(schedule => {
-        const user = { id: schedule.user_id, username: schedule.username, nickname: schedule.nickname, unit: schedule.unit, role: schedule.role };
-        try {
-            const claimed = db.prepare(`
-                UPDATE agent_schedules
-                SET next_run_at = NULL, updated_at = ?
-                WHERE id = ?
-                  AND status = 'active'
-                  AND deleted_at IS NULL
-                  AND next_run_at = ?
-            `).run(getBeijingTimestamp(), schedule.id, schedule.next_run_at);
-            if (claimed.changes === 0) return;
-            const run = runAgentScheduleNow(schedule.id, user);
-            const nextRunAt = computeNextScheduleRun(schedule.frequency, schedule.time_of_day, schedule.day_of_week, getBeijingTimestamp());
-            db.prepare('UPDATE agent_schedules SET next_run_at = ?, last_run_id = ?, last_run_at = ?, updated_at = ? WHERE id = ?')
-                .run(nextRunAt, run.id, getBeijingTimestamp(), getBeijingTimestamp(), schedule.id);
-            createAgentNotification(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
-            created.push(run);
-        } catch (e) {
-            logger.error({ err: e.message, scheduleId: schedule.id }, 'Agent schedule failed');
-            db.prepare('UPDATE agent_schedules SET status = ?, updated_at = ? WHERE id = ?')
-                .run('paused', getBeijingTimestamp(), schedule.id);
-            createAgentNotification(user.id, null, 'error', '计划任务已暂停', `${schedule.name}: ${e.message}`);
-        }
-    });
-    return created;
-}
-
-function startAgentScheduleRunner() {
-    const tick = () => {
-        try {
-            runDueAgentSchedules();
-        } catch (e) {
-            logger.error({ err: e.message }, 'Agent schedule runner failed');
-        }
-    };
-    const initial = setTimeout(tick, 5000);
-    initial.unref?.();
-    const timer = setInterval(tick, 60 * 1000);
-    timer.unref?.();
-    return timer;
-}
-
-function listAgentNotifications(user, limit = 20) {
-    return db.prepare(`
-        SELECT *
-        FROM agent_notifications
-        WHERE user_id = ?
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?
-    `).all(user.id, normalizePositiveInt(limit, 20, 1, 100));
-}
-
-function markAgentNotificationRead(notificationId, user) {
-    const notification = db.prepare('SELECT * FROM agent_notifications WHERE id = ? AND user_id = ?').get(notificationId, user.id);
-    if (!notification) return null;
-    db.prepare("UPDATE agent_notifications SET status = 'read', read_at = ? WHERE id = ?")
-        .run(getBeijingTimestamp(), notificationId);
-    const updated = db.prepare('SELECT * FROM agent_notifications WHERE id = ?').get(notificationId);
-    publishUserEvent(user.id, 'agent.notification', { notification: updated, reason: 'read' });
-    return updated;
-}
-
-function listAgentArtifacts(user, limit = 30) {
-    return db.prepare(`
-        SELECT a.*, r.title AS run_title, r.status AS run_status,
-               v.version AS current_version,
-               (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
-        FROM agent_artifacts a
-        LEFT JOIN agent_runs r ON r.id = a.run_id
-        LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.user_id = ?
-        ORDER BY COALESCE(a.updated_at, a.created_at) DESC, a.id DESC
-        LIMIT ?
-    `).all(user.id, normalizePositiveInt(limit, 30, 1, 100));
-}
-
-function getAgentArtifactForUser(artifactId, user) {
-    return db.prepare(`
-        SELECT a.*, r.title AS run_title, r.status AS run_status,
-               v.version AS current_version,
-               (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
-        FROM agent_artifacts a
-        LEFT JOIN agent_runs r ON r.id = a.run_id
-        LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.id = ? AND a.user_id = ?
-    `).get(artifactId, user.id);
-}
-
-function listAgentArtifactVersions(artifactId, user) {
-    const artifact = getAgentArtifactForUser(artifactId, user);
-    if (!artifact) return null;
-    const versions = db.prepare(`
-        SELECT id, artifact_id, version, content, note, created_by, created_at
-        FROM agent_artifact_versions
-        WHERE artifact_id = ?
-        ORDER BY version DESC
-    `).all(artifact.id);
-    return { artifact, versions };
-}
-
-function nextArtifactVersion(artifactId) {
-    const row = db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS version FROM agent_artifact_versions WHERE artifact_id = ?').get(artifactId);
-    return Number(row?.version || 1);
-}
-
-function createAgentArtifactVersion(artifactId, user, body = {}) {
-    const artifact = getAgentArtifactForUser(artifactId, user);
-    if (!artifact) return null;
-    const content = String(body.content ?? artifact.content ?? '').trim();
-    if (!content) {
-        const err = new Error('版本内容不能为空。');
-        err.status = 400;
-        throw err;
-    }
-    const note = String(body.note || '').trim().slice(0, 500);
-    const now = getBeijingTimestamp();
-    const version = nextArtifactVersion(artifact.id);
-    let versionId = 0;
-    db.transaction(() => {
-        const info = db.prepare(`
-            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(artifact.id, version, content, note, user.id, now);
-        versionId = info.lastInsertRowid;
-        db.prepare(`
-            UPDATE agent_artifacts
-            SET content = ?, note = ?, current_version_id = ?, updated_at = ?
-            WHERE id = ? AND user_id = ?
-        `).run(content, note, versionId, now, artifact.id, user.id);
-    })();
-    return getAgentArtifactForUser(artifact.id, user);
-}
-
-function buildLineDiff(fromContent, toContent) {
-    const fromLines = String(fromContent || '').split(/\r?\n/);
-    const toLines = String(toContent || '').split(/\r?\n/);
-    const max = Math.max(fromLines.length, toLines.length);
-    const rows = [];
-    for (let i = 0; i < max; i += 1) {
-        const before = fromLines[i] ?? '';
-        const after = toLines[i] ?? '';
-        if (before === after) rows.push({ type: 'same', line: i + 1, text: before });
-        else {
-            if (before) rows.push({ type: 'remove', line: i + 1, text: before });
-            if (after) rows.push({ type: 'add', line: i + 1, text: after });
-        }
-        if (rows.length >= 400) {
-            rows.push({ type: 'truncated', line: i + 1, text: 'Diff 已截断，仅展示前 400 行变化。' });
-            break;
-        }
-    }
-    return rows;
-}
-
-function diffAgentArtifactVersions(artifactId, user, fromVersion, toVersion) {
-    const artifact = getAgentArtifactForUser(artifactId, user);
-    if (!artifact) return null;
-    const from = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(fromVersion));
-    const to = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(toVersion));
-    if (!from || !to) {
-        const err = new Error('对比版本不存在。');
-        err.status = 404;
-        throw err;
-    }
-    return { artifact, from, to, diff: buildLineDiff(from.content, to.content) };
-}
-
-function rollbackAgentArtifactVersion(artifactId, user, version, note = '') {
-    const artifact = getAgentArtifactForUser(artifactId, user);
-    if (!artifact) return null;
-    const target = db.prepare('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?').get(artifact.id, Number(version));
-    if (!target) {
-        const err = new Error('回滚版本不存在。');
-        err.status = 404;
-        throw err;
-    }
-    return createAgentArtifactVersion(artifact.id, user, {
-        content: target.content,
-        note: String(note || `回滚到 v${target.version}`).slice(0, 500)
+        queueStatus: getAgentQueue().getStatus(),
+        user
     });
 }
 
-function saveAgentRunArtifact(runId, user, body = {}) {
-    const detail = getRunDetailForUser(runId, user);
-    if (!detail) return null;
-    const content = String(body.content || detail.run.final_answer || detail.run.error_message || '').trim();
-    if (!content) {
-        const err = new Error('当前任务没有可沉淀的结果。');
-        err.status = 400;
-        throw err;
-    }
-    const title = String(body.title || getAgentRunTitle(detail.run) || '智能体结果').trim().slice(0, 120);
-    const note = String(body.note || '初始沉淀').trim().slice(0, 500);
-    const now = getBeijingTimestamp();
-    let artifactId = 0;
-    db.transaction(() => {
-        const info = db.prepare(`
-            INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(runId, user.id, String(body.type || 'summary').slice(0, 40), title, content, note, now, now);
-        artifactId = info.lastInsertRowid;
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
-            VALUES (?, 1, ?, ?, ?, ?)
-        `).run(artifactId, content, note, user.id, now);
-        db.prepare('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?')
-            .run(versionInfo.lastInsertRowid, artifactId);
-    })();
-    createAgentNotification(user.id, runId, 'artifact', '智能体结果已沉淀', title);
-    return getAgentArtifactForUser(artifactId, user);
-}
+configureAgentSchedules({
+    createAgentRun,
+    createAgentNotification
+});
 
-function exportAgentRun(runId, user, format = 'json') {
-    const detail = getRunDetailForUser(runId, user);
-    if (!detail) return null;
-    const payload = {
-        exportedAt: getBeijingTimestamp(),
-        run: detail.run,
-        progress: detail.progress,
-        steps: detail.steps,
-        dagNodes: detail.dagNodes || []
-    };
-    db.prepare('UPDATE agent_runs SET export_count = COALESCE(export_count, 0) + 1, updated_at = ? WHERE id = ?')
-        .run(getBeijingTimestamp(), runId);
-    if (format === 'markdown') {
-        const lines = [
-            `# ${getAgentRunTitle(detail.run) || '智能体任务报告'}`,
-            '',
-            `- 状态：${detail.run.status}`,
-            `- 模型：${detail.run.model_name || detail.run.model_id || '-'}`,
-            `- 运行模式：${detail.run.run_mode || 'standard'}`,
-            `- 工具范围：${detail.run.tool_policy || 'all'}`,
-            `- Token：${Number(detail.run.total_tokens || 0)}`,
-            '',
-            '## 目标',
-            detail.run.goal || '',
-            '',
-            '## 最终结果',
-            detail.run.final_answer || detail.run.error_message || '暂无最终结果',
-            '',
-            '## 执行步骤',
-            ...detail.steps.map(step => [
-                `### ${step.step_index}. ${step.title || step.type}`,
-                `- 类型：${step.type}`,
-                `- 工具：${step.tool_name || '-'}`,
-                `- 状态：${step.status}`,
-                step.error_message ? `- 错误：${step.error_message}` : '',
-                '',
-                '```json',
-                JSON.stringify({ input: step.input, output: step.output }, null, 2),
-                '```',
-                ''
-            ].join('\n')),
-            ...(detail.dagNodes?.length ? [
-                '',
-                '## 工作流节点',
-                ...detail.dagNodes.map(node => [
-                    `### ${node.title || node.node_key}`,
-                    `- 工具：${node.tool_name || '-'}`,
-                    `- 状态：${node.status || '-'}`,
-                    node.error_message ? `- 错误：${node.error_message}` : '',
-                    '',
-                    '```json',
-                    JSON.stringify({ input: node.input, output: node.output }, null, 2),
-                    '```',
-                    ''
-                ].join('\n'))
-            ] : [])
-        ];
-        return { contentType: 'text/markdown; charset=utf-8', filename: `${runId}.md`, body: lines.join('\n') };
-    }
-    return { contentType: 'application/json; charset=utf-8', filename: `${runId}.json`, body: JSON.stringify(payload, null, 2) };
-}
+configureAgentArtifacts({
+    createAgentNotification,
+    getAgentRunTitle,
+    getRunDetailForUser: getRunDetailForUserHelper
+});
 
 function createAgentRun({
     user,
@@ -2678,7 +1459,7 @@ function createAgentRun({
         if (requestedWorkflowId && requestedWorkflowVersion) {
             const resolvedWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
             if (!resolvedWorkflow) {
-                const err = new Error('工作流不存在或目标版本不可用。');
+                const err = new Error('Workflow version is not available.');
                 err.status = 404;
                 throw err;
             }
@@ -2760,14 +1541,7 @@ module.exports = {
     listAgentWorkflowVersions,
     listAgentWorkflows,
     getAgentMetrics,
-    preflightAgentRun,
     getAgentRuntimeStatus,
-    getRunDetailForUser,
-    getRunForUser,
-    getRunProgress,
-    listDeletedRunsForAdmin,
-    listRuns,
-    listSteps,
     normalizeAgentGoal,
     normalizeDagSpec,
     normalizeRunMode,

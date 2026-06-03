@@ -3,7 +3,9 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders
+    buildModelHeaders,
+    assertSafeModelRuntimeUrl,
+    createSafeModelHttpAgents
 } = require('./model-adapter');
 const { countVisibleConversationMessages } = require('./chat-messages');
 
@@ -71,13 +73,15 @@ function shouldReplaceAutoTitle(currentTitle, userMsg) {
     return buildInitialAutoTitles(userMsg).has(normalized);
 }
 
-async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg) {
+async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user = null) {
     const fallbackTitle = buildFallbackTitle(userMsg, aiMsg);
     let newTitle = fallbackTitle;
 
     try {
         logger.info({ sessionId }, '正在生成会话标题');
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, user);
+        const agents = createSafeModelHttpAgents(modelCfg, user);
 
         const response = await axios({
             method: 'post',
@@ -101,7 +105,8 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg) {
                 temperature: 0.2
             },
             timeout: 60000,
-            proxy: false
+            proxy: false,
+            ...agents
         });
 
         newTitle = sanitizeGeneratedTitle(response.data.choices[0]?.message?.content, fallbackTitle);
@@ -121,10 +126,10 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg) {
     logger.info({ sessionId, newTitle }, '会话标题已更新');
 }
 
-function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg) {
+function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user = null) {
     const msgCount = countVisibleConversationMessages(sessionId, userId);
     if (msgCount <= 2) {
-        generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg);
+        generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user);
     }
 }
 

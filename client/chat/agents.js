@@ -2190,7 +2190,11 @@ window.bindAgentFilters = function() {
         if (!el || el.dataset.boundAgentFilter === '1') return;
         el.dataset.boundAgentFilter = '1';
         const reloadFirstPage = () => loadAgentRuns(1).catch(err => showToast(err.message || '任务列表刷新失败', 'error'));
-        el.addEventListener('input', reloadFirstPage);
+        // 文本输入防抖，避免逐键触发请求风暴与响应乱序覆盖；下拉 change 保持即时
+        const debouncedReload = window.Pivot && typeof window.Pivot.debounce === 'function'
+            ? window.Pivot.debounce(reloadFirstPage, 280)
+            : reloadFirstPage;
+        el.addEventListener('input', debouncedReload);
         el.addEventListener('change', reloadFirstPage);
     });
 };

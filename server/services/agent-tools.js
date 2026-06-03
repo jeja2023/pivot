@@ -143,7 +143,8 @@ async function executeBuiltInTool(name, input = {}, user) {
         if (!query) throw new Error('请填写检索问题。');
         const result = await debugRetrieveContext(user.id, query, {
             topK: parsePositiveInt(input.topK, 5, 10),
-            candidateLimit: parsePositiveInt(input.candidateLimit, 80, 200)
+            candidateLimit: parsePositiveInt(input.candidateLimit, 80, 200),
+            user
         });
         return {
             query,

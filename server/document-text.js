@@ -18,6 +18,8 @@ const CFB_DIFAT = 0xfffffffc;
 const MAX_ZIP_ENTRIES = 2000;
 const MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
 const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 60 * 1024 * 1024;
+// 限制工作簿单表解析行数，缓解超大/恶意表格触发的 CPU 耗尽与 ReDoS（xlsx 0.18.5 无官方修复）
+const MAX_WORKBOOK_SHEET_ROWS = 50000;
 
 function isOleFile(buffer) {
     return buffer.length >= 8
@@ -289,7 +291,7 @@ function isPasswordError(error) {
 }
 
 async function extractPdfText(filePath, options = {}) {
-    const buffer = fs.readFileSync(filePath);
+    const buffer = await fs.promises.readFile(filePath);
 
     if (typeof pdfParse === 'function') {
         const data = await pdfParse(buffer, options.password ? { password: options.password } : undefined);
@@ -315,8 +317,9 @@ async function extractPdfText(filePath, options = {}) {
 async function renderPdfPages(filePath, options = {}) {
     if (!pdfParse || typeof pdfParse.PDFParse !== 'function') return [];
 
+    const buffer = await fs.promises.readFile(filePath);
     const parser = new pdfParse.PDFParse({
-        data: fs.readFileSync(filePath),
+        data: buffer,
         ...(options.password ? { password: options.password } : {})
     });
     try {
@@ -339,8 +342,8 @@ async function renderPdfPages(filePath, options = {}) {
     }
 }
 
-function extractDocxText(filePath) {
-    const entries = readZipEntries(fs.readFileSync(filePath));
+async function extractDocxText(filePath) {
+    const entries = readZipEntries(await fs.promises.readFile(filePath));
     const xmlNames = Array.from(entries.keys())
         .filter(name => /^word\/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/i.test(name))
         .sort((a, b) => {
@@ -397,8 +400,8 @@ function extractCellValue(cellXml, sharedStrings) {
     return decodeXmlEntities(value).trim();
 }
 
-function extractXlsxText(filePath) {
-    const entries = readZipEntries(fs.readFileSync(filePath));
+async function extractXlsxText(filePath) {
+    const entries = readZipEntries(await fs.promises.readFile(filePath));
     const sharedStrings = entries.has('xl/sharedStrings.xml')
         ? extractSharedStrings(entries.get('xl/sharedStrings.xml').toString('utf8'))
         : [];
@@ -427,11 +430,14 @@ function extractXlsxText(filePath) {
     return sheets.join('\n\n');
 }
 
-function extractWorkbookText(filePath, options = {}) {
-    const workbook = XLSX.readFile(filePath, {
+async function extractWorkbookText(filePath, options = {}) {
+    const buffer = await fs.promises.readFile(filePath);
+    const workbook = XLSX.read(buffer, {
+        type: 'buffer',
         cellDates: true,
         dense: false,
         raw: false,
+        sheetRows: MAX_WORKBOOK_SHEET_ROWS,
         ...(options.password ? { password: options.password } : {})
     });
     const sheets = [];
@@ -491,8 +497,8 @@ function extractAsciiRuns(buffer, minChars = 4) {
     return results;
 }
 
-function extractDocBinaryText(filePath) {
-    const streams = readOleStreams(fs.readFileSync(filePath));
+async function extractDocBinaryText(filePath) {
+    const streams = readOleStreams(await fs.promises.readFile(filePath));
     const wordDocument = streams.get('WordDocument');
     if (!wordDocument) throw new Error('WordDocument stream not found');
 
@@ -555,8 +561,8 @@ function decodeXlsNumber(value) {
     return String(value);
 }
 
-function extractXlsBinaryText(filePath) {
-    const streams = readOleStreams(fs.readFileSync(filePath));
+async function extractXlsBinaryText(filePath) {
+    const streams = readOleStreams(await fs.promises.readFile(filePath));
     const workbook = streams.get('Workbook') || streams.get('Book');
     if (!workbook) throw new Error('Workbook stream not found');
 
@@ -657,7 +663,7 @@ async function extractDocumentText(filePath, mimeType = '', originalName = '', o
             return extractXlsxText(filePath);
         }
     }
-    if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return fs.readFileSync(filePath, 'utf8');
+    if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return fs.promises.readFile(filePath, 'utf8');
     return '';
 }
 

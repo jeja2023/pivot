@@ -3,7 +3,12 @@ const path = require('path');
 const axios = require('axios');
 const XLSX = require('xlsx');
 const { db } = require('../db');
-const { decryptSecret, validateMcpEndpointUrl } = require('../security');
+const {
+    decryptSecret,
+    validateMcpEndpointUrl,
+    assertSafeMcpOutboundUrl,
+    createSafeHttpAgentsForUser
+} = require('../security');
 
 const BUILTIN_MCP_PREFIXES = {
     reports: 'pivot-reports://',
@@ -176,7 +181,7 @@ function listBuiltinMcpTools(server) {
     throw new Error('Unsupported built-in MCP server.');
 }
 
-async function executeBuiltinMcpTool(server, name, input = {}) {
+async function executeBuiltinMcpTool(server, name, input = {}, user = null) {
     const type = getBuiltinServiceTypeFromUrl(server.base_url);
     if (type === 'reports') return executeReportTool(server, name, input);
     if (type === 'visualization') return executeVisualizationTool(server, name, input);
@@ -184,7 +189,7 @@ async function executeBuiltinMcpTool(server, name, input = {}) {
     if (type === 'documents') return executeDocumentTool(server, name, input);
     if (type === 'data') return executeDataProcessingTool(server, name, input);
     if (type === 'format') return executeFormatConversionTool(server, name, input);
-    if (type === 'im') return executeImTool(server, name, input);
+    if (type === 'im') return executeImTool(server, name, input, user);
     throw new Error('Unsupported built-in MCP server.');
 }
 
@@ -539,7 +544,7 @@ function getExtension(filePath) {
     return path.extname(filePath).replace(/^\./, '').toLowerCase();
 }
 
-function resolveReportFile(config, fileRef) {
+async function resolveReportFile(config, fileRef) {
     const raw = String(fileRef || '').trim();
     if (!raw) {
         const err = new Error('Report file path is required.');
@@ -556,14 +561,19 @@ function resolveReportFile(config, fileRef) {
         const root = path.resolve(item.root);
         const target = path.resolve(root, String(item.relative || '').replace(/^[/\\]+/, ''));
         if (!isPathInside(root, target)) continue;
-        if (!fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
+        let stat;
+        try {
+            stat = await fs.promises.stat(target);
+        } catch (e) {
+            continue;
+        }
+        if (!stat.isFile()) continue;
         const ext = getExtension(target);
         if (!config.extensions.includes(ext)) {
             const err = new Error(`当前报表文件能力不允许读取 .${ext} 文件。`);
             err.status = 400;
             throw err;
         }
-        const stat = fs.statSync(target);
         if (stat.size > config.maxFileMb * 1024 * 1024) {
             const err = new Error(`File exceeds configured max size of ${config.maxFileMb} MB.`);
             err.status = 413;
@@ -576,7 +586,7 @@ function resolveReportFile(config, fileRef) {
     throw err;
 }
 
-function listReportFiles(config, query = '', limit = 50) {
+async function listReportFiles(config, query = '', limit = 50) {
     const needle = String(query || '').trim().toLowerCase();
     const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const results = [];
@@ -587,7 +597,7 @@ function listReportFiles(config, query = '', limit = 50) {
         scanned += 1;
         let entries = [];
         try {
-            entries = fs.readdirSync(current.dir, { withFileTypes: true });
+            entries = await fs.promises.readdir(current.dir, { withFileTypes: true });
         } catch (e) {
             continue;
         }
@@ -604,7 +614,12 @@ function listReportFiles(config, query = '', limit = 50) {
             if (!config.extensions.includes(ext)) continue;
             const relative = path.relative(current.root, absolute);
             if (needle && !relative.toLowerCase().includes(needle)) continue;
-            const stat = fs.statSync(absolute);
+            let stat;
+            try {
+                stat = await fs.promises.stat(absolute);
+            } catch (e) {
+                continue;
+            }
             if (stat.size > config.maxFileMb * 1024 * 1024) continue;
             results.push({
                 path: `${current.rootIndex}:${relative}`,
@@ -621,8 +636,9 @@ function listReportFiles(config, query = '', limit = 50) {
     return { files: results, scanned };
 }
 
-function readWorkbookRows(file, sheetName, maxRows) {
-    const workbook = XLSX.readFile(file.target, { cellDates: true, sheetRows: maxRows + 1 });
+async function readWorkbookRows(file, sheetName, maxRows) {
+    const buffer = await fs.promises.readFile(file.target);
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
     const selectedSheet = sheetName && workbook.Sheets[sheetName] ? sheetName : workbook.SheetNames[0];
     const sheet = workbook.Sheets[selectedSheet];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
@@ -635,8 +651,8 @@ function readWorkbookRows(file, sheetName, maxRows) {
     return { workbook, selectedSheet, headers, rows: objects };
 }
 
-function readTextPreview(file, maxRows) {
-    const text = fs.readFileSync(file.target, 'utf8');
+async function readTextPreview(file, maxRows) {
+    const text = await fs.promises.readFile(file.target, 'utf8');
     const lines = text.split(/\r?\n/);
     return {
         lineCount: lines.length,
@@ -644,15 +660,15 @@ function readTextPreview(file, maxRows) {
     };
 }
 
-function queryReportTable(config, input = {}) {
-    const file = resolveReportFile(config, input.path);
+async function queryReportTable(config, input = {}) {
+    const file = await resolveReportFile(config, input.path);
     if (!['csv', 'xls', 'xlsx'].includes(file.ext)) {
         const err = new Error('reports.query_table supports CSV/XLS/XLSX files only.');
         err.status = 400;
         throw err;
     }
     const limit = Math.min(Math.max(Number(input.limit) || 50, 1), Math.min(config.maxRows, 1000));
-    const table = readWorkbookRows(file, input.sheet, Math.max(limit, config.maxRows));
+    const table = await readWorkbookRows(file, input.sheet, Math.max(limit, config.maxRows));
     const filters = input.filters && typeof input.filters === 'object' ? input.filters : {};
     const wantedColumns = Array.isArray(input.columns) ? input.columns.map(String).filter(Boolean) : [];
     const rows = table.rows.filter(row => Object.entries(filters).every(([key, value]) => {
@@ -1024,13 +1040,13 @@ async function executeReportComposerTool(_server, name, input = {}) {
 async function executeReportTool(server, name, input = {}) {
     const { config } = getRequiredBuiltinConfig(server, 'reports');
     if (name === 'reports.list_files') {
-        return listReportFiles(config, input.query, input.limit);
+        return await listReportFiles(config, input.query, input.limit);
     }
     if (name === 'reports.read_file_summary') {
-        const file = resolveReportFile(config, input.path);
+        const file = await resolveReportFile(config, input.path);
         const sampleRows = Math.min(Math.max(Number(input.sampleRows) || 20, 1), Math.min(config.maxRows, 200));
         if (['csv', 'xls', 'xlsx'].includes(file.ext)) {
-            const table = readWorkbookRows(file, input.sheet, sampleRows);
+            const table = await readWorkbookRows(file, input.sheet, sampleRows);
             return {
                 file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
                 sheets: table.workbook.SheetNames,
@@ -1040,7 +1056,7 @@ async function executeReportTool(server, name, input = {}) {
             };
         }
         if (file.ext === 'json') {
-            const value = JSON.parse(fs.readFileSync(file.target, 'utf8'));
+            const value = JSON.parse(await fs.promises.readFile(file.target, 'utf8'));
             return {
                 file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
                 type: Array.isArray(value) ? 'array' : typeof value,
@@ -1048,14 +1064,14 @@ async function executeReportTool(server, name, input = {}) {
                 sample: Array.isArray(value) ? value.slice(0, sampleRows) : value
             };
         }
-        const preview = readTextPreview(file, sampleRows);
+        const preview = await readTextPreview(file, sampleRows);
         return {
             file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
             ...preview
         };
     }
     if (name === 'reports.query_table') {
-        const result = queryReportTable(config, input);
+        const result = await queryReportTable(config, input);
         delete result.allRows;
         return result;
     }
@@ -1340,13 +1356,18 @@ function validateImTarget(config, target, targetType) {
     return value;
 }
 
-async function sendIm(config, secret, payload) {
+async function sendIm(config, secret, payload, user = null) {
     const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'User-Agent': 'Pivot-IM-MCP/1.0'
     };
     if (secret && config.authHeader) headers[config.authHeader] = secret;
+    await assertSafeMcpOutboundUrl(config.endpointUrl, user);
+    const agents = createSafeHttpAgentsForUser(user, {
+        allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+        allowExplicitLoopbackForAdmin: true
+    });
     const response = await axios({
         url: config.endpointUrl,
         method: config.method,
@@ -1354,6 +1375,7 @@ async function sendIm(config, secret, payload) {
         data: payload,
         timeout: IM_TIMEOUT_MS,
         proxy: false,
+        ...agents,
         validateStatus: status => status >= 200 && status < 300
     });
     return {
@@ -1363,7 +1385,7 @@ async function sendIm(config, secret, payload) {
     };
 }
 
-async function executeImTool(server, name, input = {}) {
+async function executeImTool(server, name, input = {}, user = null) {
     const { config, secret } = getRequiredBuiltinConfig(server, 'im');
     if (name === 'im.list_allowed_targets') {
         return {
@@ -1397,7 +1419,7 @@ async function executeImTool(server, name, input = {}) {
         message,
         format: name === 'im.send_markdown' ? 'markdown' : 'text',
         timestamp: new Date().toISOString()
-    });
+    }, user);
 }
 
 module.exports = {

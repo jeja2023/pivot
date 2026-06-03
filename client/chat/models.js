@@ -43,8 +43,8 @@ function renderModelCapabilityBadges(model) {
 
 window.loadModels = async function(page = 1) {
     const [modelRes, settingsRes] = await Promise.all([
-        fetch(`${API_BASE}/models?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() }),
-        fetch(`${API_BASE}/settings`, { headers: authHeaders() })
+        apiFetch(`${API_BASE}/models?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() }),
+        apiFetch(`${API_BASE}/settings`, { headers: authHeaders() })
     ]);
 
     if (modelRes.status === 401) {
@@ -161,7 +161,7 @@ async function checkSingleModelStatus(id) {
     pendingTests.add(id);
     const startTime = Date.now();
     try {
-        const res = await fetch('/api/models/test', {
+        const res = await apiFetch('/api/models/test', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ id, source: 'auto' })
@@ -248,7 +248,7 @@ async function testConnection(url, api_key, model_name, id = null) {
     if (!id && !url) return showToast('请输入接口地址', 'error');
     showToast('正在测试连接...', 'info');
     try {
-        const res = await fetch('/api/models/test', {
+        const res = await apiFetch('/api/models/test', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ id, url, api_key, model_name, source: 'manual' })
@@ -321,7 +321,7 @@ window.toggleKeyVisibility = async () => {
         if (!pwd) return;
 
         try {
-            const res = await fetch(`${API_BASE}/models/${modelId}/key`, {
+            const res = await apiFetch(`${API_BASE}/models/${modelId}/key`, {
                 method: 'POST',
                 headers: { ...authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: pwd })
@@ -377,7 +377,7 @@ window.addModel = async () => {
     btn.disabled = true;
     btn.innerText = '正在保存...';
     try {
-        const res = await fetch(API_BASE + (id ? `/models/${id}` : '/models'), {
+        const res = await apiFetch(API_BASE + (id ? `/models/${id}` : '/models'), {
             method: id ? 'PUT' : 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload)
@@ -390,7 +390,7 @@ window.addModel = async () => {
 
 window.deleteModel = (id) => {
     showConfirm('删除模型', '确定要删除该模型配置吗？', async () => {
-        const res = await fetch(`${API_BASE}/models/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const res = await apiFetch(`${API_BASE}/models/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('模型已删除'); loadModels(pageState.models); }
     });
 };
@@ -402,7 +402,7 @@ window.setGlobalDefaultModel = async (modelId, btn = null) => {
         btn.style.color = modelId ? 'var(--danger)' : 'var(--primary)';
     }
     try {
-        const res = await fetch(`${API_BASE}/admin/settings`, {
+        const res = await apiFetch(`${API_BASE}/admin/settings`, {
             method: 'PUT',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ default_model_id: modelId })

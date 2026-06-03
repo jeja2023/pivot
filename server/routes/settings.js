@@ -5,7 +5,7 @@ const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { clearAllRagCache } = require('../services/rag-cache');
-const { assertSafeOutboundUrl, validateModelUrl } = require('../security');
+const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
@@ -102,7 +102,7 @@ function getSettings() {
     return settings;
 }
 
-function saveUserEmbeddingSettings(req, updates) {
+async function saveUserEmbeddingSettings(req, updates) {
     const stmt = db.prepare(`
         INSERT INTO user_settings (user_id, key, value, updated_at)
         VALUES (?, ?, ?, ?)
@@ -113,13 +113,13 @@ function saveUserEmbeddingSettings(req, updates) {
     const removeStmt = db.prepare('DELETE FROM user_settings WHERE user_id = ? AND key = ?');
     const changed = [];
 
-    Object.keys(updates || {}).forEach(key => {
-        if (!userEmbeddingSettings.has(key)) return;
+    for (const key of Object.keys(updates || {})) {
+        if (!userEmbeddingSettings.has(key)) continue;
         const value = toSettingValue(key, updates[key]);
         if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {
-            validateModelUrl(value, req.user);
+            await assertSafeOutboundUrl(value, req.user);
         }
-        if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) return;
+        if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
         if (key !== RAG_CONFIG_KEYS.embeddingApiKey && !value) {
             removeStmt.run(req.user.id, key);
             changed.push(`${key}=<fallback>`);
@@ -127,7 +127,7 @@ function saveUserEmbeddingSettings(req, updates) {
         }
         stmt.run(req.user.id, key, value, getBeijingTimestamp());
         changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
-    });
+    }
 
     return changed;
 }
@@ -172,6 +172,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         for (const modelsUrl of candidates) {
             try {
                 await assertSafeOutboundUrl(modelsUrl, req.user);
+                const agents = createSafeHttpAgentsForUser(req.user);
                 const response = await axios.get(modelsUrl, {
                     headers: {
                         Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
@@ -179,7 +180,8 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
                         'User-Agent': 'Pivot-AI-Client/1.0'
                     },
                     timeout: 10000,
-                    proxy: false
+                    proxy: false,
+                    ...agents
                 });
                 const models = extractEmbeddingModelIds(response.data);
                 if (models.length === 0) {
@@ -197,7 +199,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.put('/settings/embedding', authMiddleware, asyncHandler(async (req, res) => {
-        const changed = saveUserEmbeddingSettings(req, req.body || {});
+        const changed = await saveUserEmbeddingSettings(req, req.body || {});
         if (changed.length > 0) {
             clearAllRagCache();
             logAction(req, '修改个人向量模型配置', changed.join('；'));
@@ -272,8 +274,8 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         `);
 
         const changed = [];
-        Object.keys(updates).forEach(key => {
-            if (!allowedSettings.has(key)) return;
+        for (const key of Object.keys(updates)) {
+            if (!allowedSettings.has(key)) continue;
             const value = toSettingValue(key, updates[key]);
             if (key === 'default_model_id' && value) {
                 const globalModel = db.prepare('SELECT id FROM models WHERE id = ? AND user_id IS NULL').get(value);
@@ -282,12 +284,12 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
                 }
             }
             if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {
-                validateModelUrl(value, req.user);
+                await assertSafeOutboundUrl(value, req.user);
             }
-            if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) return;
+            if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
             stmt.run(key, value, getBeijingTimestamp(), req.user.id);
             changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
-        });
+        }
 
         if (changed.length > 0) {
             logAction(req, '修改系统设置', changed.join('，'));

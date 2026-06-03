@@ -15,9 +15,8 @@ const formatDateToCN = (dateStr) => {
 };
 
 const escapeHtml = (str) => {
-    if (str === 0) return '0';
-    if (!str) return '';
-    return String(str)
+    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(str);
+    return String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')

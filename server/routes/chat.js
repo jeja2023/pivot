@@ -1,7 +1,5 @@
 /* 对话接口路由 Chat API Routes */
 const axios = require('axios');
-const http = require('http');
-const https = require('https');
 const express = require('express');
 const { asyncHandler } = require('../http');
 const { db } = require('../db');
@@ -22,8 +20,6 @@ const {
     recordModelSuccess,
     recordModelFailure
 } = require('../services/model-runtime');
-const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('../image-safety');
-const { resolveUploadUrlPath, toProjectRelativePath } = require('../security');
 const { createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../streaming');
 const {
     buildModelHeaders,
@@ -31,8 +27,20 @@ const {
     buildChatCompletionsUrl,
     convertChatMessagesToResponsesInput,
     normalizeModelBaseUrl,
-    shouldUseResponsesApi
+    shouldUseResponsesApi,
+    assertSafeModelRuntimeUrl,
+    createSafeModelHttpAgents
 } = require('../services/model-adapter');
+const {
+    extractModelTextFromRawResponse,
+    getRequestOrigin,
+    normalizeRegenerateFlag,
+    resolveRagQueryContent
+} = require('../services/chat-route-helpers');
+const {
+    buildRagContextMessage,
+    injectRagContextBeforeLatestUser
+} = require('../services/chat-rag-context');
 const {
     saveAssistantMessage,
     saveUserMessage,
@@ -46,613 +54,25 @@ const {
     fitMessagesToContextBudget
 } = require('../services/context-budget');
 const { maybeGenerateTitle } = require('../services/chat-title');
-const { executeMcpTool, listCachedMcpTools } = require('../services/mcp-client');
+const {
+    buildPersistedChatErrorContent,
+    readStreamErrorDetail,
+    writeChatErrorSse
+} = require('../services/chat-errors');
+const {
+    buildVisionHistory,
+    buildVisionUnsupportedMessage,
+    limitVisionImages
+} = require('../services/chat-vision');
+const { listCachedMcpTools } = require('../services/mcp-client');
 const { filterMcpToolsByCapability } = require('../services/capability-market');
-
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
-
-function getRequestOrigin(req, publicUrl = '') {
-    if (publicUrl) return publicUrl;
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    return host ? `${proto}://${host}` : '';
-}
-
-function getImageDataUrl(uploadUrl, userId, sessionId) {
-    const target = resolveUploadUrlPath(uploadUrl);
-    const filePath = target ? toProjectRelativePath(target) : '';
-    if (!filePath) return null;
-    const attachment = db.prepare(`
-        SELECT id FROM attachments
-        WHERE user_id = ? AND session_id = ? AND file_path = ?
-          AND deleted_at IS NULL
-    `).get(userId, sessionId, filePath);
-    if (!attachment) return null;
-    return imageFileToDataUrl(target);
-}
-
-function buildVisionHistory(history, origin, userId, sessionId) {
-    if (!origin) return history;
-    const uploadUrlPattern = String.raw`\/uploads\/(?:[^()]|\([^)]*\))+`;
-    const imageMarkdown = new RegExp(String.raw`!\[([^\]]*)\]\((${uploadUrlPattern})\)`, 'g');
-    return history.map(message => {
-        if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.includes('/uploads/')) {
-            return message;
-        }
-
-        const imageParts = [];
-        const text = message.content.replace(imageMarkdown, (match, alt, url) => {
-            if (imageParts.length >= MAX_IMAGES_PER_MESSAGE) {
-                return alt ? `[图片已跳过: ${alt}]` : '[图片已跳过]';
-            }
-            const imageUrl = getImageDataUrl(url, userId, sessionId);
-            if (!imageUrl) {
-                return alt ? `[图片不可用: ${alt}]` : '[图片不可用]';
-            }
-            imageParts.push({
-                type: 'image_url',
-                image_url: {
-                    url: imageUrl
-                }
-            });
-            return alt ? `[图片: ${alt}]` : '[图片]';
-        }).trim();
-
-        if (imageParts.length === 0) return message;
-        return {
-            ...message,
-            content: [
-                { type: 'text', text: text || '请分析这张图片。' },
-                ...imageParts
-            ]
-        };
-    });
-}
-
-function limitVisionImages(history) {
-    let usedImages = 0;
-    return history.map(message => {
-        if (!Array.isArray(message.content)) return message;
-        const content = [];
-        for (const part of message.content) {
-            if (part?.type === 'image_url') {
-                if (usedImages >= MAX_IMAGES_PER_MESSAGE) {
-                    content.push({ type: 'text', text: '[图片已跳过：当前模型一次只支持解析 1 张图片]' });
-                    continue;
-                }
-                usedImages += 1;
-            }
-            content.push(part);
-        }
-        return { ...message, content };
-    });
-}
-
-function buildRagContextMessage(ragContext) {
-    return [
-        'PIVOT_RAG_CONTEXT_BEGIN',
-        '【知识库检索结果】',
-        String(ragContext || '').trim(),
-        '',
-        '【回答要求】',
-        '1. 本轮必须优先依据以上知识库检索结果回答。',
-        '2. 如果知识库内容与通用知识、历史会话或模型记忆冲突，以知识库内容为准。',
-        '3. 如果知识库内容不足以回答，请明确说明“知识库中未找到足够依据”，不要自行编造。',
-        '4. 回答中尽量标注引用来源，例如“引用 1 / 来源: 文件名”。',
-        'PIVOT_RAG_CONTEXT_END'
-    ].join('\n');
-}
-
-function injectRagContextBeforeLatestUser(history, ragContext) {
-    if (!ragContext) return history;
-    const nextHistory = Array.isArray(history) ? history.slice() : [];
-    const ragMessage = { role: 'user', content: buildRagContextMessage(ragContext) };
-    for (let i = nextHistory.length - 1; i >= 0; i -= 1) {
-        if (nextHistory[i]?.role === 'user') {
-            nextHistory.splice(i, 0, ragMessage);
-            return nextHistory;
-        }
-    }
-    nextHistory.push(ragMessage);
-    return nextHistory;
-}
-
-function normalizeRegenerateFlag(value) {
-    return value === true || value === 'true';
-}
-
-function flattenMessageContentForQuery(content) {
-    if (typeof content === 'string') return content.trim();
-    if (Array.isArray(content)) {
-        return content.map(part => {
-            if (typeof part === 'string') return part;
-            if (!part || typeof part !== 'object') return '';
-            if (part.type === 'text' && typeof part.text === 'string') return part.text;
-            if (typeof part.text === 'string') return part.text;
-            if (typeof part.content === 'string') return part.content;
-            return '';
-        }).filter(Boolean).join('\n').trim();
-    }
-    if (content && typeof content === 'object') {
-        if (typeof content.text === 'string') return content.text.trim();
-        if (typeof content.content === 'string') return content.content.trim();
-    }
-    return '';
-}
-
-function resolveRagQueryContent(content, history = []) {
-    const currentContent = String(content || '').trim();
-    if (currentContent) return currentContent;
-    if (!Array.isArray(history)) return '';
-
-    for (let i = history.length - 1; i >= 0; i -= 1) {
-        const message = history[i];
-        if (message?.role !== 'user') continue;
-        const query = flattenMessageContentForQuery(message.content);
-        if (!query || query.includes('PIVOT_RAG_CONTEXT_BEGIN')) continue;
-        return query;
-    }
-    return '';
-}
-
-function buildVisionUnsupportedMessage(modelCfg) {
-    const name = modelCfg?.name || modelCfg?.model_name || '当前模型';
-    return `${name} 未配置视觉输入能力，不能处理图片或扫描件内容。请切换到已开启“视觉输入（图片/扫描件）”的模型，或联系管理员在模型配置中启用该能力。普通文档会先抽取文本，不受此限制。`;
-}
-
-function compactText(value, maxLength = 12000) {
-    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-    if (!text) return '';
-    return text.length > maxLength ? `${text.slice(0, maxLength)}\n...内容已截断...` : text;
-}
-
-function buildPersistedChatErrorContent({ error, detail, statusCode, code } = {}) {
-    const title = String(error || '模型响应异常').trim();
-    const detailText = compactText(String(detail || '').trim(), 4000);
-    const lines = [`生成失败：${title}`];
-
-    if (code) lines.push(`错误代码：${code}`);
-    if (statusCode) lines.push(`HTTP 状态：${statusCode}`);
-    if (detailText && detailText !== title) {
-        lines.push('', '错误详情：', detailText);
-    }
-    return lines.join('\n');
-}
-
-function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detail, statusCode, code, log }) {
-    if (!sessionId || !userId) return null;
-    const content = buildPersistedChatErrorContent({ error, detail, statusCode, code });
-    const tokenCount = estimateTokens(content);
-    try {
-        const result = saveAssistantMessage({
-            sessionId,
-            userId,
-            content,
-            tokenCount,
-            modelId
-        });
-        touchSession(sessionId);
-        return { content, messageId: result.lastInsertRowid, tokenCount };
-    } catch (err) {
-        log?.error?.({ sessionId, err: err.message }, '保存模型错误消息失败');
-        return null;
-    }
-}
-
-function writeChatErrorSse({
-    writeSse,
-    sessionId,
-    userId,
-    modelId,
-    error,
-    detail,
-    statusCode,
-    code,
-    retryable,
-    persist,
-    log
-}) {
-    const payload = { error, detail, statusCode, code };
-    if (retryable !== undefined) payload.retryable = retryable;
-    if (persist) {
-        const saved = persistAssistantErrorMessage({
-            sessionId,
-            userId,
-            modelId,
-            error,
-            detail,
-            statusCode,
-            code,
-            log
-        });
-        if (saved) {
-            payload.type = 'assistant_error';
-            payload.content = saved.content;
-            payload.messageId = saved.messageId;
-            payload.tokenCount = saved.tokenCount;
-        }
-    }
-    writeSse(JSON.stringify(payload));
-}
-
-function readStreamErrorDetail(stream, { maxLength = 4000, timeoutMs = 1000 } = {}) {
-    if (!stream || typeof stream.on !== 'function') return Promise.resolve('');
-    return new Promise(resolve => {
-        let settled = false;
-        let text = '';
-        const cleanup = () => {
-            stream.off?.('data', onData);
-            stream.off?.('end', onEnd);
-            stream.off?.('error', onError);
-            clearTimeout(timer);
-        };
-        const finish = () => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            resolve(text.trim());
-        };
-        const onData = chunk => {
-            text += chunk?.toString?.('utf8') || String(chunk || '');
-            if (text.length >= maxLength) {
-                text = `${text.slice(0, maxLength)}\n...内容已截断...`;
-                stream.destroy?.();
-                finish();
-            }
-        };
-        const onEnd = () => finish();
-        const onError = err => {
-            if (!text) text = err?.message || '';
-            finish();
-        };
-        const timer = setTimeout(finish, timeoutMs);
-        stream.on('data', onData);
-        stream.on('end', onEnd);
-        stream.on('error', onError);
-    });
-}
-
-function extractModelText(data) {
-    const choiceContent = data?.choices?.[0]?.message?.content;
-    if (typeof choiceContent === 'string') return choiceContent;
-    if (Array.isArray(choiceContent)) {
-        return choiceContent.map(part => part?.text || part?.content || '').filter(Boolean).join('\n');
-    }
-    if (typeof data?.output_text === 'string') return data.output_text;
-    if (Array.isArray(data?.output)) {
-        return data.output.map(item => {
-            if (typeof item?.content === 'string') return item.content;
-            if (Array.isArray(item?.content)) {
-                return item.content.map(part => part?.text || part?.content || '').filter(Boolean).join('\n');
-            }
-            return '';
-        }).filter(Boolean).join('\n');
-    }
-    return '';
-}
+const {
+    filterMcpToolsForChatIntent,
+    filterMcpToolsForPlanner,
+    maybeBuildMcpChatContext
+} = require('../services/chat-mcp-context');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
-
-function extractModelTextFromRawResponse(rawText) {
-    const text = String(rawText || '').trim();
-    if (!text || text.startsWith('data:')) return { content: '', usage: null };
-    try {
-        const data = JSON.parse(text);
-        return {
-            content: extractModelText(data),
-            usage: data?.usage || null
-        };
-    } catch (_err) {
-        return { content: '', usage: null };
-    }
-}
-
-function parsePlannerJson(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fenced ? fenced[1].trim() : raw;
-    try {
-        return JSON.parse(candidate);
-    } catch (e) {
-        const start = candidate.indexOf('{');
-        const end = candidate.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            try {
-                return JSON.parse(candidate.slice(start, end + 1));
-            } catch (inner) {}
-        }
-    }
-    return null;
-}
-
-function formatMcpToolsForPlanner(tools) {
-    return tools.slice(0, 40).map(tool => ({
-        name: tool.fullName,
-        server: cleanCapabilityDisplayName(tool.serverName),
-        tool: tool.name,
-        description: tool.description || '',
-        input_schema: tool.input_schema || { type: 'object' }
-    }));
-}
-
-function cleanCapabilityDisplayName(value) {
-    return String(value || '')
-        .replace(/\s*MCP$/iu, '')
-        .trim();
-}
-
-function getMcpToolIntent(userPrompt = '') {
-    const prompt = String(userPrompt || '').toLowerCase();
-    const wantsChart = /图表|画图|绘图|可视化|趋势图|折线图|柱状图|饼图|面积图|chart|visuali[sz]e|plot|graph/.test(prompt);
-    const wantsReport = /报告|报表|周报|月报|日报|汇总成文档|分析报告|report/.test(prompt);
-    return { wantsChart, wantsReport };
-}
-
-function filterMcpToolsForChatIntent(tools, userPrompt = '') {
-    const intent = getMcpToolIntent(userPrompt);
-    return tools.filter(tool => {
-        const name = String(tool.name || tool.fullName || '');
-        if (name.startsWith('viz.')) return intent.wantsChart || intent.wantsReport;
-        if (name.startsWith('report.')) return intent.wantsReport;
-        return true;
-    });
-}
-
-function isDataResultMcpTool(tool) {
-    const name = String(tool.name || tool.fullName || '');
-    return name.startsWith('db.')
-        || name === 'reports.query_table'
-        || name === 'reports.read_file_summary'
-        || name === 'reports.compare_files';
-}
-
-function filterMcpToolsForPlanner(tools, userPrompt = '') {
-    const intent = getMcpToolIntent(userPrompt);
-    const hasDataResultTool = tools.some(isDataResultMcpTool);
-    if (!intent.wantsChart || !hasDataResultTool) return tools;
-    return tools.filter(tool => !String(tool.name || tool.fullName || '').startsWith('viz.'));
-}
-
-function extractRowsFromMcpResult(result) {
-    const candidates = [
-        result?.structuredContent?.rows,
-        result?.structuredContent?.sampleRows,
-        result?.rows,
-        result?.sampleRows,
-        Array.isArray(result) ? result : null
-    ];
-    return candidates.find(rows => Array.isArray(rows) && rows.length && rows.every(row => row && typeof row === 'object')) || [];
-}
-
-function inferChartInputFromRows(rows, userPrompt = '') {
-    const columns = Array.from(rows.reduce((set, row) => {
-        Object.keys(row || {}).forEach(key => set.add(key));
-        return set;
-    }, new Set()));
-    if (!columns.length) return null;
-    const prompt = String(userPrompt || '').toLowerCase();
-    const numericColumns = columns.filter(col => rows.some(row => Number.isFinite(Number(row[col]))));
-    const mentioned = columns.find(col => prompt.includes(String(col).toLowerCase()));
-    const xAxis = mentioned || columns.find(col => !numericColumns.includes(col)) || columns[0];
-    const yAxis = numericColumns.find(col => col !== xAxis && /(count|cnt|数量|人数|总数|total|sum|amount|value|num|avg|平均)/i.test(col))
-        || numericColumns.find(col => col !== xAxis)
-        || '';
-    const chartType = /折线|趋势|line/.test(prompt)
-        ? 'line'
-        : /饼图|占比|比例|pie/.test(prompt)
-            ? 'pie'
-            : /面积|area/.test(prompt)
-                ? 'area'
-                : 'bar';
-    const sortBy = /升序|降序|排序|order|sort/.test(prompt) ? 'label' : (chartType === 'line' ? 'label' : 'value');
-    const sortOrder = /降序|desc/.test(prompt) ? 'desc' : /升序|asc/.test(prompt) ? 'asc' : (sortBy === 'label' ? 'asc' : 'desc');
-    return {
-        rows,
-        chartType,
-        title: xAxis && yAxis ? `${xAxis} 与 ${yAxis} 图表` : '查询结果图表',
-        xAxis,
-        yAxis,
-        aggregation: yAxis ? 'sum' : 'count',
-        sortBy,
-        sortOrder,
-        limit: 80
-    };
-}
-
-async function maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse }) {
-    const intent = getMcpToolIntent(userPrompt);
-    if (!intent.wantsChart || String(selected?.name || '').startsWith('viz.')) return null;
-    const rows = extractRowsFromMcpResult(result);
-    if (!rows.length) return null;
-    const chartTool = intentTools.find(tool => String(tool.name || '').startsWith('viz.build_chart'));
-    if (!chartTool) return null;
-    const chartInput = inferChartInputFromRows(rows, userPrompt);
-    if (!chartInput) return null;
-    writeSse(JSON.stringify({
-        type: 'mcp',
-        status: 'running',
-        tool: chartTool.fullName,
-        serverName: cleanCapabilityDisplayName(chartTool.serverName || '图表生成'),
-        message: '正在根据查询结果生成图表'
-    }));
-    const chartResult = await executeMcpTool(chartTool.fullName, chartInput, user, { source: 'chat_auto_chart' });
-    return compactText(extractMcpResultText(chartResult), 12000);
-}
-
-function buildChatMcpPlannerMessages(history, userPrompt, tools) {
-    const recentMessages = history
-        .filter(message => ['user', 'assistant'].includes(message.role) && typeof message.content === 'string')
-        .slice(-8)
-        .map(message => ({ role: message.role, content: compactText(message.content, 1200) }));
-    return [
-        {
-            role: 'system',
-            content: [
-                '你是 Pivot 普通对话里的能力库工具调度器。',
-                '你只能返回严格 JSON，不要返回 Markdown、解释或多余文本。',
-                'Schema: {"action":"none|tool","tool":"mcp.server.tool","input":{},"reason":"简短中文原因"}',
-                '只有当用户问题明确需要访问已保存能力服务中的外部数据、数据库结构或数据库查询结果时，才选择 action=tool。',
-                '不要主动扩展用户意图：用户只要求查询、列出、筛选或统计数据时，只能选择数据查询类工具，不要选择可视化、图表或报告工具。',
-                '只有用户明确要求图表、画图、可视化、趋势图、柱状图、折线图、饼图等展示时，才可以选择 viz.* 工具。',
-                '当用户同时要求查询数据库/报表并生成图表时，优先选择数据查询工具；系统会在查询结果返回后自动调用图表生成能力。',
-                '只有用户明确要求生成报告、报表、周报、月报或固定格式文档时，才可以选择 report.* 工具。',
-                '一轮最多选择一个工具。数据库查询必须保持只读，只生成 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等读取类输入。',
-                '如果用户只是闲聊、写作、总结当前上下文或知识库足够回答，返回 {"action":"none","reason":"不需要能力库"}。',
-                '可用能力库工具:',
-                compactText(formatMcpToolsForPlanner(tools), 18000)
-            ].join('\n')
-        },
-        {
-            role: 'user',
-            content: [
-                '最近对话:',
-                compactText(recentMessages, 6000),
-                '',
-                '用户本轮问题:',
-                userPrompt
-            ].join('\n')
-        }
-    ];
-}
-
-async function callChatMcpPlanner(modelCfg, messages) {
-    const modelName = modelCfg.model_name || modelCfg.name || 'default';
-    const headers = buildModelHeaders(modelCfg, { acceptJson: true });
-    if (shouldUseResponsesApi(modelName)) {
-        try {
-            const response = await axios({
-                method: 'post',
-                url: buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false }),
-                headers,
-                data: {
-                    model: modelName,
-                    input: convertChatMessagesToResponsesInput(messages),
-                    stream: false,
-                    temperature: 0,
-                    max_output_tokens: 600
-                },
-                responseType: 'json',
-                timeout: 120000,
-                proxy: false,
-                httpAgent,
-                httpsAgent
-            });
-            return extractModelText(response.data);
-        } catch (e) {
-            if (![404, 405, 502, 503].includes(e.response?.status)) throw e;
-        }
-    }
-    const response = await axios({
-        method: 'post',
-        url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false }),
-        headers,
-        data: {
-            model: modelName,
-            messages,
-            stream: false,
-            temperature: 0,
-            max_tokens: 600
-        },
-        responseType: 'json',
-        timeout: 120000,
-        proxy: false,
-        httpAgent,
-        httpsAgent
-    });
-    return extractModelText(response.data);
-}
-
-function extractMcpResultText(result) {
-    if (result?.structuredContent?.type === 'pivot_chart') {
-        return [
-            '能力库工具返回了可视化图表配置。回答用户时，如果需要展示图表，请原样输出下面的 fenced code block，语言必须保持为 pivot-echart：',
-            '```pivot-echart',
-            JSON.stringify(result.structuredContent, null, 2),
-            '```'
-        ].join('\n');
-    }
-    if (result?.structuredContent?.type === 'pivot_report' && result.structuredContent.markdown) {
-        return result.structuredContent.markdown;
-    }
-    if (result?.structuredContent?.type === 'pivot_table' && result.structuredContent.markdown) {
-        return result.structuredContent.markdown;
-    }
-    if (Array.isArray(result?.content)) {
-        const text = result.content
-            .map(item => item?.text || item?.content || '')
-            .filter(Boolean)
-            .join('\n');
-        if (text) return text;
-    }
-    if (result?.structuredContent !== undefined) return JSON.stringify(result.structuredContent, null, 2);
-    return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-}
-
-async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log }) {
-        if (!tools.length) {
-            writeSse(JSON.stringify({ type: 'mcp', status: 'empty', message: '没有可用的能力库工具缓存' }));
-            return '';
-        }
-        const intentTools = filterMcpToolsForChatIntent(tools, userPrompt);
-        if (!intentTools.length) {
-            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮没有匹配用户意图的能力库工具' }));
-            return '';
-        }
-    try {
-        writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用能力库工具' }));
-        const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
-        if (!plannerTools.length) {
-            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮没有适合优先调用的能力库工具' }));
-            return '';
-        }
-        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools));
-        const plan = parsePlannerJson(plannerText);
-        const toolNames = new Set(plannerTools.map(tool => tool.fullName));
-        if (!plan || plan.action !== 'tool' || !toolNames.has(plan.tool)) {
-            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用能力库工具' }));
-            return '';
-        }
-
-        const selected = plannerTools.find(tool => tool.fullName === plan.tool);
-        writeSse(JSON.stringify({
-            type: 'mcp',
-            status: 'running',
-            tool: plan.tool,
-            serverName: cleanCapabilityDisplayName(selected?.serverName || ''),
-            message: `正在调用能力库工具：${cleanCapabilityDisplayName(selected?.serverName || '能力服务')} / ${selected?.name || plan.tool}`
-        }));
-        const result = await executeMcpTool(plan.tool, plan.input || {}, user);
-        let resultText = compactText(extractMcpResultText(result), 18000);
-        const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
-        if (chartText) {
-            resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
-        }
-        writeSse(JSON.stringify({
-            type: 'mcp',
-            status: 'done',
-            tool: plan.tool,
-            message: '能力库工具调用完成，正在生成回答'
-        }));
-        return [
-            '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
-            '如果工具结果包含 ```pivot-echart 代码块，且用户需要图表，请在最终回答中原样保留该代码块，前端会自动渲染为可视化图表。',
-            `工具: ${plan.tool}`,
-            `调用原因: ${plan.reason || ''}`,
-            '结果:',
-            resultText
-        ].join('\n');
-    } catch (e) {
-        log?.warn?.({ err: e.message }, '普通对话能力库调用失败');
-        writeSse(JSON.stringify({
-            type: 'mcp',
-            status: 'error',
-            message: `能力库工具调用失败：${e.message}`
-        }));
-        return `本轮尝试调用能力库工具失败：${e.message}`;
-    }
-}
 
 function createChatRouter({
     authMiddleware,
@@ -791,7 +211,7 @@ function createChatRouter({
             const assistantTokens = estimateTokens(assistantContent);
             const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
-            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
+            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
 
             writeSse(JSON.stringify({
@@ -809,7 +229,7 @@ function createChatRouter({
             const assistantTokens = estimateTokens(assistantContent);
             const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
-            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
+            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
             
             writeSse(JSON.stringify({
@@ -896,7 +316,7 @@ function createChatRouter({
         let history = await getContext(sessionId, userId, modelCfg);
         const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
-            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt) : null;
+            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user }) : null;
             if (ragContext) {
                 history = injectRagContextBeforeLatestUser(history, ragContext);
                 writeSse(JSON.stringify({
@@ -912,7 +332,7 @@ function createChatRouter({
                 }));
             }
         }
-        let visionHistory = limitVisionImages(buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
+        let visionHistory = limitVisionImages(await buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
         
         if (visionHistory.length === 0) {
             req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
@@ -926,7 +346,7 @@ function createChatRouter({
                 }
 
                 // 补救的消息也需要经过 buildVisionHistory 处理以支持多模态
-                const rescuedHistory = limitVisionImages(buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl), userId, sessionId));
+                const rescuedHistory = limitVisionImages(await buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl), userId, sessionId));
                 visionHistory.push(...rescuedHistory);
             } else {
                 releaseSemaphore();
@@ -1067,10 +487,13 @@ function createChatRouter({
                 req.log.info({ inputSummary }, '请求体结构');
                 try {
                     requestData.input = responsesHistory;
+                    await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
+                    const agents = createSafeModelHttpAgents(modelCfg, req.user);
                     response = await axios({
                         method: 'post', url: targetUrl, headers,
                         data: requestData,
-                        responseType: 'stream', timeout: 180000, proxy: false
+                        responseType: 'stream', timeout: 180000, proxy: false,
+                        ...agents
                     });
                     req.log.info('连接成功 (Responses API)');
                 } catch (err) {
@@ -1082,11 +505,13 @@ function createChatRouter({
                         delete requestData.input;
                         requestData.messages = visionHistory;
                         
+                        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
+                        const agents = createSafeModelHttpAgents(modelCfg, req.user);
                         response = await axios({
                             method: 'post', url: targetUrl, headers,
                             data: requestData,
                             responseType: 'stream', timeout: 300000, proxy: false,
-                            httpAgent, httpsAgent
+                            ...agents
                         });
                         req.log.info('降级连接成功 (Chat Completions)');
                     } else {
@@ -1096,11 +521,13 @@ function createChatRouter({
             } else {
                 req.log.info('正在建立连接 (Chat Completions API, 流式)');
                 requestData.messages = visionHistory;
+                await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
+                const agents = createSafeModelHttpAgents(modelCfg, req.user);
                 response = await axios({
                     method: 'post', url: targetUrl, headers,
                     data: requestData,
                     responseType: 'stream', timeout: 300000, proxy: false,
-                    httpAgent, httpsAgent
+                    ...agents
                 });
                 req.log.info('连接成功');
             }
@@ -1166,7 +593,7 @@ function createChatRouter({
                         : estimateTokens(assistantContent);
                     const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
 
-                    maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg);
+                    maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);

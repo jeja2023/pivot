@@ -56,11 +56,15 @@ function clearPendingAttachments(message = '') {
 window.isChatImageAttachment = isChatImageAttachment;
 window.syncPendingAttachmentsGlobal = syncPendingAttachmentsGlobal;
 
-const escapeChatStatusHtml = (value) => String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+const escapeChatStatusHtml = (value) => {
+    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(value);
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+};
 
 const STREAM_RENDER_INTERVAL_MS = 80;
 const STREAM_LOCAL_REPLAY_INTERVAL_MS = 24;

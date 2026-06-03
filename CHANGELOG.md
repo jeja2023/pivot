@@ -1,5 +1,85 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.76] - 2026-06-03
+### 安全加固
+- **普通用户私网出口默认收紧**：个人 MCP 外部端点、内置 IM Webhook 与数据库 MCP 连接默认禁止普通用户配置 loopback、link-local、局域网或内部主机地址；管理员仍可在显式允许私网出口的部署策略下接入内网资源。`MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN` 改为默认开启，仅当明确设置为 `false` 时才允许普通用户配置私网数据库。
+- **可信反向代理识别**：新增 `TRUSTED_PROXY_IPS` 配置，只有直连来源命中受信任 IP/CIDR 时才采信 `X-Forwarded-For`；访问日志同步使用同一套客户端 IP 解析逻辑，避免伪造请求头污染审计来源。
+- **出站 DNS rebinding 防护闭环**：模型调用、MCP JSON-RPC、RAG Embedding、模型/向量模型探测、模型健康检查、标题生成、记忆压缩和告警 Webhook 等 HTTP 出口统一使用安全 lookup Agent，请求时复用受保护的 DNS 解析，阻断校验后重解析到敏感地址的 TOCTOU 风险。
+- **HTML 清洗兜底加固**：前端 `PivotSafeHtml.sanitizeHtml` 在 DOMPurify 未加载时不再返回原始 HTML，而是退回到文本转义，避免依赖加载异常时产生 XSS 兜底缺口。
+
+### 配置与文档
+- **新增代理配置说明**：`.env` 与 `.env.example` 新增中文注释的 `TRUSTED_PROXY_IPS`，说明仅受信反向代理可传递真实客户端 IP。
+- **版本升级**：应用版本升级至 `v0.0.76`，同步更新 `package.json`、`package-lock.json` 与 README 版本展示。
+
+### 回归验证
+- **安全测试补齐**：新增/调整 MCP loopback 阻断、数据库私网默认限制、可信代理 IP、出站安全 lookup 和 DOMPurify 缺失兜底测试。
+- **验证通过**：`npm run check` 通过；完整 `node tests/security.test.js` 安全回归在 Windows 非沙箱环境 `139/139` 通过。
+
+## [v0.0.75] - 2026-06-03
+### 安全复查修复
+- **记忆压缩出站补齐 SSRF 守卫**：会话记忆压缩（`llm.js` 的 `compressMemory`）此前是唯一未经运行时校验的模型出站点，现已补齐调用时 DNS 解析守卫，与聊天补全、标题生成、智能体等其它出站点一致，闭合 DNS rebinding 残留缺口。
+- **MongoDB / MySQL 连接 TLS 修复**：此前 MongoDB 的 SSL 开关被静默忽略（勾选 SSL 仍始终明文连接，凭据可被中间人窃取）、MySQL 的「信任自签名证书」开关被丢弃，本轮一并修复——MongoDB 改用 `tls`/`tlsAllowInvalidCertificates`，MySQL 对齐 `rejectUnauthorized`，默认校验证书且仅在显式信任自签名时放行，与 PostgreSQL/SQL Server 行为一致。
+- **工作簿解析行数上限**：用户上传的 Excel/CSV 经 `document-text.js` 解析时新增单表 5 万行上限（`sheetRows`），作为纵深防御缓解超大或恶意表格触发的 CPU 耗尽与 ReDoS。
+
+### 依赖安全
+- **xlsx 升级至修复版**：`xlsx` 升级至 SheetJS 官方修复版 `0.20.3`（修复原型污染 GHSA-4r6h-8v6p-xvw6 与 ReDoS GHSA-5pgg-2g8v-p4x9）。npm 源已停更在有漏洞的 `0.18.5`，改用官方 CDN 分发；用户上传文件直接进入 `XLSX.read` 的高危攻击面已消除。`npm audit` 仅剩 `uuid` 一项 moderate（项目仅用 `v4()`、不传 buffer 参数，不受该 CVE 影响）。
+
+### 前端体验
+- **智能体任务过滤防抖**：智能体任务列表的过滤文本框（`agents.js`）改为防抖触发刷新，避免逐键发起请求风暴与响应乱序覆盖列表，下拉筛选仍即时生效。
+
+### 复查方法与验证
+- **多维度深入审查**：以并行子代理对安全、服务端、前端、依赖/构建四个维度做全面复查，对每个发现独立验证后修复，确认上一轮重构无回归。
+- **验证通过**：改动文件语法检查与模块加载通过，`node tests/security.test.js` 安全回归 `135/135` 通过。
+
+### 版本同步
+- **版本升级**：应用版本升级至 `v0.0.75`，同步更新 `package.json`、`package-lock.json` 与 README 版本展示。
+
+## [v0.0.74] - 2026-06-03
+### 安全加固
+- **MCP 出站 SSRF 防护**：外部 MCP JSON-RPC 调用（`mcp-client.js`）和 IM Webhook 推送（`builtin-mcp.js`）在请求发起前新增出站地址校验，拦截 loopback、link-local 和云元数据（如 `169.254.169.254`）等敏感目标；校验在调用时执行并包含 DNS 解析，可阻断 DNS rebinding 绕过，普通局域网地址仍放行以兼容内网模型/服务接入。
+- **数据库连接默认校验 TLS 证书**：PostgreSQL（`rejectUnauthorized`）与 SQL Server（`trustServerCertificate`）连接默认改为校验服务端证书，防止开启 SSL 后仍被中间人攻击窃取凭据与数据；新增显式「信任自签名证书」开关（`allowSelfSigned`），仅在用户主动开启时才放行自签名证书。
+- **访问日志敏感参数脱敏**：HTTP 访问日志新增 `scrubUrl`，对 URL 查询串中的 `token`、`access_token`、`api_key`、`signature`、`secret` 等敏感参数做 `[REDACTED]` 脱敏，避免附件访问令牌等凭据随 URL 落入日志被重放。
+
+### 性能优化
+- **聊天热路径消除同步文件读**：报表 MCP 工具（`builtin-mcp.js`）的文件解析、目录遍历与预览（`resolveReportFile`/`listReportFiles`/`readWorkbookRows`/`readTextPreview`/`queryReportTable`）以及 PDF/图片读取（`document-text.js`/`image-safety.js`）全部从 `fs.readFileSync` 改为异步 `fs.promises`，XLSX 改为异步读 buffer 后再解析，避免大文件同步读阻塞事件循环影响并发请求。
+- **监控指标内存增长收敛**：HTTP 指标路由统计在路由未匹配（404、扫描器随机 URL）时归入常量 `unmatched` 桶，不再按原始 URL 无限创建键，防止 `routeStats` Map 无界增长。
+- **GPU 监控定时器 unref**：GPU 动态负载监控的 `setInterval` 补齐 `.unref()`，与维护/模型运行时监控一致，不再阻止进程干净退出。
+
+### 工程重构（行为不变）
+- **巨型文件按领域拆分**：`agent-runtime.js` 从约 2797 行拆分为 runs / dag-utils / monitoring / preflight / schedules / templates / tool-catalog / workflows / artifacts 等模块（主文件降至约 1571 行）；`routes/chat.js` 的 `/chat` 处理器拆出 errors / mcp-context / rag-context / route-helpers / vision 等模块（路由文件降至约 711 行），按现有导出边界拆分，对外行为保持不变。
+- **前端 RAG 模块拆分**：`rag.js` 拆出 `rag-format.js`、`rag-graph-layout.js`、`rag-graph-render.js`、`rag-graph-ui.js`，通过 `window.Pivot.*` 命名空间挂载并带默认值兜底消费。
+- **前端 HTML 转义统一**：各处 `escapeHtml`/`escapeRagHtml`/`escapeChatStatusHtml` 统一委托 `PivotSafeHtml.escapeHtml`，`safe-html.js` 提供完整 5 字符转义（含 `"` 与 `'`），消除模块间转义语义分叉。
+- **前端工具命名空间合并挂载**：`pivot-core.js` 改为合并挂载到既有 `window.Pivot` 而非首次定义即早退，并桥接 `Pivot.html`，避免工具函数被覆盖丢失。
+- **裸 fetch 统一收敛**：`rag.js`、`users.js`、`models.js`、`stats.js` 的裸 `fetch` 全部改用带 CSRF 头与 401 自动刷新的 `apiFetch` 封装。
+
+### 依赖安全
+- **修复 6 项依赖漏洞**：`npm audit fix` 非破坏性升级 `axios`（1.15.2 → 1.16.1，含原型污染 MITM 与代理绕过修复）、`qs`、`brace-expansion`、`ip-address`、`express-rate-limit`；保留 `uuid`（仅使用 `v4()`，不受 buffer 越界 CVE 影响）。
+
+### 回归验证
+- **错误文案回归修复**：拆分 `agent-runtime` 时误将 rerun / rerun-node / resume 三处面向用户的中文错误提示改成英文，已恢复为「当前任务仍在执行中…」等原中文文案。
+- **验证通过**：全部 57 个改动/新增 JS 文件语法检查通过，完整服务端模块成功加载，`node tests/security.test.js` 安全回归 `135/135` 通过。
+
+### 版本同步
+- **版本升级**：应用版本升级至 `v0.0.74`，同步更新 `package.json`、`package-lock.json` 与 README 版本展示。
+
+## [v0.0.73] - 2026-06-02
+### 知识图谱体验优化
+- **关系地图图谱化展示**：知识图谱页面的局部关系视图升级为中文关系地图，节点、关系标签、可信度、统计摘要和操作入口统一中文化，关系类型以“相关、负责、归属、依赖、包含、影响”等标签展示。
+- **关系地图交互增强**：关系地图支持空白区域拖拽平移、滚轮缩放、放大/缩小/1:1 复位控件；节点点击继续用于切换中心实体，拖拽逻辑不会再误吞节点点击。
+- **节点完整信息提示**：关系地图节点在名称被截断时会保留完整 `title`，并提供悬浮提示数据，包含实体名称、类型、中心/关系数、实体 ID、可信度和描述等可用信息。
+- **实体列表可信度完整显示**：左侧实体节点卡片为可信度徽标预留固定宽度，完整显示“可信度 0.xx”，避免被长实体名称挤压成省略号。
+- **实体与关系校准弹窗化**：实体校准从页面底部嵌入区域改为独立弹窗；关系编辑也统一进入校准弹窗，浏览关系地图时不再被表单区域挤占。
+- **关系明细卡片压缩**：右侧关系明细卡片合并来源、描述和操作按钮为紧凑底部行，减小内边距、行高、按钮高度和卡片间距，提高同屏关系数量；卡片悬浮可查看完整起点、关系、终点、来源、可信度和描述。
+- **页面顶部与工具栏对齐修正**：知识图谱全屏页清除外层弹层默认 padding，标题行、关闭按钮和内容起点对齐知识库页面；统计标签与搜索筛选合并到同一行，减少顶部占用空间。
+
+### 系统监控展示修复
+- **慢查询与异常告警滚动修复**：系统监控页慢查询和异常告警区域补齐内部滚动约束，长列表可在卡片内部滚动查看，不再被外层布局截断。
+
+### 文档与版本同步
+- **文档同步**：README、使用手册和 CHANGELOG 已记录本轮知识图谱交互、校准弹窗、关系明细密度、顶部对齐和系统监控滚动修复。
+- **版本升级**：应用版本升级至 `v0.0.73`，同步更新 `package.json`、`package-lock.json` 与 README 版本展示。
+- **验证通过**：已运行 `npm run check` 与 `npm run lint`。
+
 ## [v0.0.72] - 2026-06-01
 ### 公告中心体验优化
 - **登录页公告公开展示**：公告新增“登录页展示”开关和公开只读接口，未登录用户可在登录页查看管理员发布的全员公开公告；仅内置超级管理员 `admin` 可设置该开关，避免普通定向公告被公开泄露。

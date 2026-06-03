@@ -244,6 +244,8 @@ function normalizeDatabaseConnection(row, { includeSecret = false } = {}) {
         username: row.username || '',
         schema: options.schema || '',
         ssl: Boolean(options.ssl),
+        // 默认校验服务端证书，仅当用户显式开启「信任自签名」时才放行无效证书
+        ssl_allow_self_signed: Boolean(options.allowSelfSigned || options.sslAllowSelfSigned),
         max_rows: Number(options.maxRows || 100),
         status: row.status || 'active',
         has_password: Boolean(row.password),
@@ -336,7 +338,8 @@ function buildRelationalConnectionConfig(connection) {
         ...connection,
         password: connection.password || '',
         schema: connection.schema || options.schema || '',
-        ssl: Boolean(connection.ssl || options.ssl)
+        ssl: Boolean(connection.ssl || options.ssl),
+        ssl_allow_self_signed: Boolean(connection.ssl_allow_self_signed || options.allowSelfSigned || options.sslAllowSelfSigned)
     };
 }
 
@@ -353,6 +356,9 @@ function buildDatabaseTestConnectionConfig(connection = {}) {
     return {
         ...connection,
         ssl: connection.ssl !== undefined ? connection.ssl : options.ssl,
+        ssl_allow_self_signed: connection.ssl_allow_self_signed !== undefined
+            ? connection.ssl_allow_self_signed
+            : Boolean(options.allowSelfSigned || options.sslAllowSelfSigned),
         schema: connection.schema || options.schema || '',
         connect_timeout_ms: getDatabaseTestTimeoutMs()
     };
@@ -385,7 +391,8 @@ async function withPostgres(connection, handler) {
         database: connection.database_name,
         user: connection.username,
         password: connection.password,
-        ssl: connection.ssl ? { rejectUnauthorized: false } : false,
+        // 默认校验证书防止 MITM；仅当用户显式信任自签名时才放行
+        ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : false,
         connectionTimeoutMillis: timeoutMs
     });
     await client.connect();
@@ -405,7 +412,8 @@ async function withMysql(connection, handler) {
         database: connection.database_name,
         user: connection.username,
         password: connection.password,
-        ssl: connection.ssl ? {} : undefined,
+        // 默认校验证书防 MITM；仅当用户显式信任自签名时才放行
+        ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : undefined,
         connectTimeout: timeoutMs
     });
     try {
@@ -426,7 +434,8 @@ async function withSqlServer(connection, handler) {
         password: connection.password,
         options: {
             encrypt: Boolean(connection.ssl),
-            trustServerCertificate: true
+            // 默认校验证书防止 MITM；仅当用户显式信任自签名时才放行
+            trustServerCertificate: Boolean(connection.ssl_allow_self_signed)
         },
         connectionTimeout: timeoutMs,
         requestTimeout: timeoutMs
@@ -571,7 +580,14 @@ async function executeMongoTool(connection, name, input = {}) {
         : '';
     const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
     const timeoutMs = getConnectionTimeoutMs(connection);
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, connectTimeoutMS: timeoutMs, socketTimeoutMS: timeoutMs });
+    const client = new MongoClient(uri, {
+        // 默认校验证书防 MITM；仅当用户显式信任自签名时才放行
+        tls: Boolean(connection.ssl),
+        ...(connection.ssl && connection.ssl_allow_self_signed ? { tlsAllowInvalidCertificates: true } : {}),
+        serverSelectionTimeoutMS: timeoutMs,
+        connectTimeoutMS: timeoutMs,
+        socketTimeoutMS: timeoutMs
+    });
     await client.connect();
     try {
         const database = client.db(connection.database_name);
@@ -631,7 +647,14 @@ async function testDatabaseConnection(connection) {
             ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';
         const uri = `mongodb://${auth}${testConnection.host}:${testConnection.port || DEFAULT_PORTS.mongodb}`;
-        const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, connectTimeoutMS: timeoutMs, socketTimeoutMS: timeoutMs });
+        const client = new MongoClient(uri, {
+            // 默认校验证书防 MITM；仅当用户显式信任自签名时才放行
+            tls: Boolean(testConnection.ssl),
+            ...(testConnection.ssl && testConnection.ssl_allow_self_signed ? { tlsAllowInvalidCertificates: true } : {}),
+            serverSelectionTimeoutMS: timeoutMs,
+            connectTimeoutMS: timeoutMs,
+            socketTimeoutMS: timeoutMs
+        });
         return withOperationTimeout((async () => {
             await client.connect();
             try {
@@ -664,6 +687,9 @@ function validateDatabaseConnectionPayload(payload, user) {
     const schema = String(payload.schema || '').trim();
     const maxRows = clampLimit(payload.max_rows || payload.maxRows, 100);
     const ssl = payload.ssl === true || payload.ssl === 'true';
+    // 显式「信任自签名证书」开关，默认关闭（即校验证书防 MITM）
+    const allowSelfSigned = payload.allow_self_signed === true || payload.allow_self_signed === 'true'
+        || payload.allowSelfSigned === true || payload.allowSelfSigned === 'true';
 
     if (type === 'sqlite') {
         if (!databaseName) throw createDatabaseMcpError('请填写 SQLite 文件路径。', 'DB_SQLITE_PATH_REQUIRED', 400);
@@ -671,7 +697,8 @@ function validateDatabaseConnectionPayload(payload, user) {
     } else {
         if (!host || !databaseName) throw createDatabaseMcpError('请填写数据库主机和数据库名。', 'DB_HOST_OR_NAME_REQUIRED', 400);
         if (!username && type !== 'mongodb') throw createDatabaseMcpError('请填写数据库用户名。', 'DB_USERNAME_REQUIRED', 400);
-        if (process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN === 'true' && isPrivateHost(host) && user?.role !== 'admin') {
+        const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
+        if (restrictPrivateHostsToAdmin && isPrivateHost(host) && user?.role !== 'admin') {
             throw createDatabaseMcpError('普通用户不能配置内网或本机数据库地址。', 'MCP_PRIVATE_HOST_RESTRICTED', 403);
         }
     }
@@ -683,7 +710,7 @@ function validateDatabaseConnectionPayload(payload, user) {
         database_name: databaseName,
         username,
         password: String(payload.password || ''),
-        options: { schema, ssl, maxRows }
+        options: { schema, ssl, maxRows, allowSelfSigned }
     };
 }
 

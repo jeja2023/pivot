@@ -5,6 +5,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const zlib = require('node:zlib');
 const Sqlite = require('better-sqlite3');
 
@@ -16,6 +17,8 @@ if (generatedTestDataDir) {
 
 const {
     assertSafeOutboundUrl,
+    assertSafeMcpOutboundUrl,
+    createSafeLookup,
     encodeAttachmentUrl,
     encryptSecret,
     resolveUploadUrlPath,
@@ -23,6 +26,7 @@ const {
     toProjectRelativePath,
     isPathInsideUploadRoot
 } = require('../server/security');
+const { getClientIp } = require('../server/http');
 const { getBeijingTimestamp } = require('../server/time');
 const { buildContextMeta, estimateTokens, getContext } = require('../server/llm');
 const { normalizeUploadedOriginalName } = require('../server/upload');
@@ -212,16 +216,10 @@ const {
     createAgentSchedule,
     createAgentTemplate,
     createAgentRun,
-    formatToolList,
     listAgentArtifacts,
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
-    getRunDetailForUser,
-    getRunProgress,
-    getRunForUser,
-    listDeletedRunsForAdmin,
-    listRuns,
     normalizeApprovalPolicy,
     normalizeAgentGoal,
     normalizeToolAllowlist,
@@ -234,6 +232,14 @@ const {
     shouldPauseForApproval,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
+const { formatToolList } = require('../server/services/agent-tool-catalog');
+const {
+    getRunDetailForUser,
+    getRunProgress,
+    getRunForUser,
+    listDeletedRunsForAdmin,
+    listRuns
+} = require('../server/services/agent-runs');
 const {
     buildDatabaseTestConnectionConfig,
     normalizeDatabaseConnectionError,
@@ -383,6 +389,59 @@ test('outbound URL guard blocks sensitive SSRF targets', async () => {
     await assert.rejects(
         assertSafeOutboundUrl('http://localhost:11434/v1', { role: 'admin' }),
         /sensitive local|metadata target/
+    );
+});
+
+test('MCP outbound guard blocks loopback for non-admin users and allows admin loopback', async () => {
+    await assert.rejects(
+        assertSafeMcpOutboundUrl('http://127.0.0.1:3001/rpc', { role: 'user' }),
+        /private or local MCP endpoints|sensitive local|metadata target/
+    );
+    await assert.doesNotReject(
+        assertSafeMcpOutboundUrl('http://127.0.0.1:3001/rpc', { role: 'admin' })
+    );
+});
+
+test('getClientIp trusts forwarded headers only from configured proxies', () => {
+    const previous = process.env.TRUSTED_PROXY_IPS;
+    try {
+        delete process.env.TRUSTED_PROXY_IPS;
+        assert.equal(getClientIp({
+            headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.5' },
+            socket: { remoteAddress: '10.0.0.5' }
+        }), '10.0.0.5');
+
+        process.env.TRUSTED_PROXY_IPS = '10.0.0.5,127.0.0.1/32';
+        assert.equal(getClientIp({
+            headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.5' },
+            socket: { remoteAddress: '10.0.0.5' }
+        }), '203.0.113.9');
+    } finally {
+        if (previous === undefined) delete process.env.TRUSTED_PROXY_IPS;
+        else process.env.TRUSTED_PROXY_IPS = previous;
+    }
+});
+
+test('safe outbound lookup rejects private resolved addresses during HTTP requests', async () => {
+    const lookup = createSafeLookup({ blockPrivate: true });
+    await assert.rejects(
+        new Promise((resolve, reject) => {
+            lookup('localhost', { all: false }, (err, address) => {
+                if (err) return reject(err);
+                resolve(address);
+            });
+        }),
+        /sensitive local|metadata target/
+    );
+});
+
+test('safe HTML fallback escapes input when DOMPurify is unavailable', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'client', 'chat', 'safe-html.js'), 'utf8');
+    const sandbox = { window: {} };
+    vm.runInNewContext(source, sandbox);
+    assert.equal(
+        sandbox.window.PivotSafeHtml.sanitizeHtml('<img src=x onerror=alert(1)>'),
+        '&lt;img src=x onerror=alert(1)&gt;'
     );
 });
 
@@ -681,7 +740,7 @@ test('chat route persists assistant error messages when upstream model fails', a
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(`chat_error_${suffix}`, 'hash', 'Chat Error Test', 'QA', 'user', 'active');
+    `).run(`chat_error_${suffix}`, 'hash', 'Chat Error Test', 'QA', 'admin', 'active');
     const userId = Number(userInfo.lastInsertRowid);
     const sessionId = `chat-error-${suffix}`;
     const upstreamPort = upstream.address().port;
@@ -700,7 +759,7 @@ test('chat route persists assistant error messages when upstream model fails', a
     app.use(express.json());
     app.use(createChatRouter({
         authMiddleware: (req, _res, next) => {
-            req.user = { id: userId, username: `chat_error_${suffix}`, role: 'user', unit: 'QA' };
+            req.user = { id: userId, username: `chat_error_${suffix}`, role: 'admin', unit: 'QA' };
             req.log = { info() {}, warn() {}, error() {} };
             next();
         },
@@ -780,7 +839,7 @@ test('chat route replays non-streaming upstream JSON as chat SSE content', async
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(`chat_json_${suffix}`, 'hash', 'Chat JSON Test', 'QA', 'user', 'active');
+    `).run(`chat_json_${suffix}`, 'hash', 'Chat JSON Test', 'QA', 'admin', 'active');
     const userId = Number(userInfo.lastInsertRowid);
     const sessionId = `chat-json-${suffix}`;
     const upstreamPort = upstream.address().port;
@@ -799,7 +858,7 @@ test('chat route replays non-streaming upstream JSON as chat SSE content', async
     app.use(express.json());
     app.use(createChatRouter({
         authMiddleware: (req, _res, next) => {
-            req.user = { id: userId, username: `chat_json_${suffix}`, role: 'user', unit: 'QA' };
+            req.user = { id: userId, username: `chat_json_${suffix}`, role: 'admin', unit: 'QA' };
             req.log = { info() {}, warn() {}, error() {} };
             next();
         },
@@ -3997,8 +4056,8 @@ test('system IM MCP uses default service identity with user configuration', asyn
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(`mcp_system_im_${suffix}`, 'hash', 'MCP System IM Test', 'QA', 'user', 'active');
-    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_system_im_${suffix}`, role: 'user', unit: 'QA' };
+    `).run(`mcp_system_im_${suffix}`, 'hash', 'MCP System IM Test', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_system_im_${suffix}`, role: 'admin', unit: 'QA' };
     const router = createMcpRouter({
         authMiddleware: (req, _res, next) => { req.user = user; next(); },
         adminMiddleware: (_req, _res, next) => next(),
@@ -4148,22 +4207,12 @@ test('built-in IM MCP enforces target whitelist and sends LAN webhook payloads',
     }
 });
 
-test('database MCP allows private LAN hosts by default and restricts only when configured', () => {
+test('database MCP restricts private LAN hosts by default and allows explicit opt-out', () => {
     const previous = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
     const user = { id: 1001, username: 'lan_user', role: 'user' };
+    const admin = { id: 1002, username: 'admin', role: 'admin' };
     try {
         delete process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
-        const connection = validateDatabaseConnectionPayload({
-            database_type: 'mysql',
-            host: '192.168.1.88',
-            port: 3306,
-            database_name: 'biz',
-            username: 'reader',
-            password: 'secret'
-        }, user);
-        assert.equal(connection.host, '192.168.1.88');
-
-        process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = 'true';
         assert.throws(() => validateDatabaseConnectionPayload({
             database_type: 'mysql',
             host: '192.168.1.88',
@@ -4171,7 +4220,29 @@ test('database MCP allows private LAN hosts by default and restricts only when c
             database_name: 'biz',
             username: 'reader',
             password: 'secret'
-        }, user), /普通用户不能配置内网|private/i);
+        }, user), err => err?.code === 'MCP_PRIVATE_HOST_RESTRICTED');
+
+
+        const adminConnection = validateDatabaseConnectionPayload({
+            database_type: 'mysql',
+            host: '192.168.1.88',
+            port: 3306,
+            database_name: 'biz',
+            username: 'reader',
+            password: 'secret'
+        }, admin);
+        assert.equal(adminConnection.host, '192.168.1.88');
+
+        process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = 'false';
+        const userConnection = validateDatabaseConnectionPayload({
+            database_type: 'mysql',
+            host: '192.168.1.88',
+            port: 3306,
+            database_name: 'biz',
+            username: 'reader',
+            password: 'secret'
+        }, user);
+        assert.equal(userConnection.host, '192.168.1.88');
     } finally {
         if (previous === undefined) delete process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
         else process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = previous;
@@ -4189,7 +4260,7 @@ test('database MCP test config flattens options used by drivers', () => {
         password: 'secret',
         schema: 'reporting',
         ssl: true
-    }, { id: 1002, username: 'lan_ssl_user', role: 'user' });
+    }, { id: 1002, username: 'lan_ssl_admin', role: 'admin' });
     const testConfig = buildDatabaseTestConnectionConfig(connection);
     assert.equal(testConfig.ssl, true);
     assert.equal(testConfig.schema, 'reporting');

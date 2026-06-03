@@ -135,8 +135,8 @@ window.compactCurrentSessionContext = async function() {
 
 window.loadSelectableModels = async function() {
     const [modelRes, settingsRes] = await Promise.all([
-        fetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
-        fetch(`${API_BASE}/settings`, { headers: authHeaders() })
+        apiFetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
+        apiFetch(`${API_BASE}/settings`, { headers: authHeaders() })
     ]);
     if (!modelRes.ok) throw new Error('Model list failed to load');
 

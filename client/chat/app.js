@@ -240,10 +240,18 @@ window.updateSettingsWorkspaceScale = function() {
     const layoutWidth = Math.max(baseWidth, availableWidth);
     const scale = Math.min(1, availableWidth / baseWidth);
     const stageWidth = Math.max(1, Math.ceil(layoutWidth * scale));
+    const isMonitorTabActive = content.classList.contains('is-monitor-tab-active');
     stage.style.removeProperty('--settings-stage-height');
     canvas.style.setProperty('--settings-canvas-width', `${layoutWidth}px`);
     canvas.style.setProperty('--settings-scale', String(Number(scale.toFixed(4))));
     stage.style.setProperty('--settings-stage-width', `${stageWidth}px`);
+    if (isMonitorTabActive) {
+        const canvasHeight = Math.max(1, Math.ceil(availableHeight / scale));
+        canvas.style.setProperty('--settings-canvas-height', `${canvasHeight}px`);
+        stage.style.setProperty('--settings-stage-height', `${availableHeight}px`);
+        return;
+    }
+    canvas.style.removeProperty('--settings-canvas-height');
     window.requestAnimationFrame(() => {
         const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
         const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
@@ -493,7 +501,7 @@ window.forkSessionFromMessage = async (messageId) => {
 window.exportSession = async (id) => {
     showToast('正在导出...', 'info');
     try {
-        const res = await fetch(`${API_BASE}/sessions/${id}/export`, {
+        const res = await apiFetch(`${API_BASE}/sessions/${id}/export`, {
             headers: authHeaders()
         });
         if (res.ok) {

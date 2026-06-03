@@ -3,13 +3,15 @@
     const escapeHtml = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 
     const escapeAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
 
     const sanitizeHtml = (html, options = {}) => {
         const raw = String(html ?? '');
-        if (!window.DOMPurify) return raw;
+        if (!window.DOMPurify) return escapeHtml(raw);
         return DOMPurify.sanitize(raw, options);
     };
 
@@ -24,4 +26,6 @@
         sanitizeHtml,
         setHtml
     };
+    window.Pivot = window.Pivot || {};
+    window.Pivot.html = window.PivotSafeHtml;
 })();

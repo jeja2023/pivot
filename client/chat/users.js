@@ -26,7 +26,7 @@ window.loadUsers = async function(page = 1) {
     const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
     pageState.users = requestedPage;
     const params = new URLSearchParams({ page: String(requestedPage), limit: String(limit) });
-    const res = await fetch(`${API_BASE}/admin/users?${params.toString()}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/admin/users?${params.toString()}`, { headers: authHeaders() });
     const { data = [], total = 0, isSuperAdmin, allowPublicRegistration } = await res.json();
     const totalCount = Number(total) || 0;
     const lastPage = Math.max(Math.ceil(totalCount / limit), 1);
@@ -142,7 +142,7 @@ window.saveUser = async () => {
         const passwordError = userPasswordError(payload.password, '初始密码');
         if (passwordError) return showToast(passwordError, 'error');
     }
-    const res = await fetch(API_BASE + (id ? `/admin/users/${id}` : '/admin/users'), {
+    const res = await apiFetch(API_BASE + (id ? `/admin/users/${id}` : '/admin/users'), {
         method: id ? 'PUT' : 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
@@ -165,7 +165,7 @@ window.resetUserPassword = async (id) => {
     if (!password) return;
     const passwordError = userPasswordError(password, '新密码');
     if (passwordError) return showToast(passwordError, 'error');
-    const res = await fetch(`${API_BASE}/admin/users/${id}/password`, {
+    const res = await apiFetch(`${API_BASE}/admin/users/${id}/password`, {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ password })
@@ -181,7 +181,7 @@ window.updatePublicRegistrationSetting = async () => {
     const previous = !toggle.checked;
     toggle.disabled = true;
     try {
-        const res = await fetch(`${API_BASE}/admin/users/registration`, {
+        const res = await apiFetch(`${API_BASE}/admin/users/registration`, {
             method: 'PUT',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ allowPublicRegistration: toggle.checked })
@@ -250,7 +250,7 @@ window.loadUserRecordSessions = async () => {
     const includeDeleted = document.getElementById('user-record-include-deleted')?.checked === true;
     if (!select) return;
     const previous = select.value;
-    const res = await fetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/sessions?includeDeleted=${includeDeleted}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/sessions?includeDeleted=${includeDeleted}`, { headers: authHeaders() });
     const { data = [] } = await res.json();
     select.innerHTML = '<option value="">全部会话</option>' + data.map(s => {
         const title = escapeHtml(s.title || '未命名会话');
@@ -272,7 +272,7 @@ window.loadUserRecordMessages = async (page = 1) => {
     const limit = pageState.limit || 15;
     const params = new URLSearchParams({ includeDeleted: String(includeDeleted), page, limit });
     if (sessionId) params.set('sessionId', sessionId);
-    const res = await fetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/messages?${params.toString()}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/messages?${params.toString()}`, { headers: authHeaders() });
     const { data = [], total = 0 } = await res.json();
     if (!res.ok) {
         renderTableMessage(body, 7, '记录加载失败');
@@ -313,7 +313,7 @@ window.importUsers = async () => {
     const formData = new FormData();
     formData.append('file', file);
     try {
-        const res = await fetch(`${API_BASE}/admin/users/import`, {
+        const res = await apiFetch(`${API_BASE}/admin/users/import`, {
             method: 'POST',
             headers: authHeaders(),
             body: formData
@@ -331,7 +331,7 @@ window.importUsers = async () => {
 
 window.deleteUser = (id) => {
     showConfirm('删除用户', '确定删除该用户吗？账号将被禁用，历史对话、附件、审计和用量数据会保留，仅 admin 超级管理员可追溯查看。', async () => {
-        const res = await fetch(API_BASE + `/admin/users/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const res = await apiFetch(API_BASE + `/admin/users/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('用户已删除'); loadUsers(pageState.users); }
     });
 };
