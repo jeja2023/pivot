@@ -133,6 +133,13 @@ window.compactCurrentSessionContext = async function() {
     }
 };
 
+function isSelectableModelForCurrentUser(model) {
+    if (!model?.user_id) return true;
+    return String(model.user_id) === String(currentUser?.id);
+}
+
+window.isSelectableModelForCurrentUser = isSelectableModelForCurrentUser;
+
 window.loadSelectableModels = async function() {
     const [modelRes, settingsRes] = await Promise.all([
         apiFetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
@@ -145,11 +152,7 @@ window.loadSelectableModels = async function() {
     const settings = settingsRes.ok ? await settingsRes.json() : {};
     const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
 
-    const models = data.filter(model => {
-        if (!model.user_id) return true;
-        if (String(model.user_id) === String(currentUser?.id)) return true;
-        return currentUser?.username === 'admin' && model.owner_role === 'admin';
-    });
+    const models = data.filter(isSelectableModelForCurrentUser);
 
     return { models, defaultModelId, settings };
 };

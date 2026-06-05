@@ -162,7 +162,7 @@ const ensureRagAuditModal = () => {
             <div class="rag-detail-header">
                 <div>
                     <h3>知识库删除审计</h3>
-                    <p class="model-modal-desc">仅 admin 超级管理员可见，保留用户删除后的文档元数据、源文件路径与索引状态。</p>
+                    <p class="model-modal-desc">仅 admin 权限层级可见，保留用户删除后的文档元数据、源文件路径与索引状态。</p>
                 </div>
                 <button type="button" id="rag-audit-close-btn" class="btn-danger-outline">关闭</button>
             </div>
@@ -255,8 +255,8 @@ const showRagDetailModal = (data) => {
 };
 
 window.showKnowledgeDocAudit = async () => {
-    if (currentUser?.username !== 'admin') {
-        showToast('仅 admin 超级管理员可查看知识库删除审计', 'error');
+    if (!isSuperAdminUser()) {
+        showToast('仅 admin 权限层级可查看知识库删除审计', 'error');
         return;
     }
     try {
@@ -941,10 +941,10 @@ window.openKnowledgeWorkbench = async function() {
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
     panel.querySelectorAll('.admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+        el.classList.toggle('hidden', !isAdminUser());
     });
     panel.querySelectorAll('.admin-root-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     window.bindEmbeddingModalEvents?.();
     window.bindRagDebugModalEvents?.();

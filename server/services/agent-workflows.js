@@ -10,14 +10,31 @@ function normalizeDagRunInputs(value) {
     return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [String(key).trim().slice(0, 80), item]));
 }
 
+function assertWorkflowHasConfiguredLlm(dagSpec) {
+    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
+    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    if (!llmNode) {
+        const err = new Error('工作流必须包含 1 个大模型节点。');
+        err.status = 400;
+        throw err;
+    }
+    const model = String(llmNode?.input?.model || llmNode?.input?.modelId || llmNode?.input?.model_id || '').trim();
+    if (!model) {
+        const err = new Error('大模型节点需要填写节点模型。');
+        err.status = 400;
+        throw err;
+    }
+}
+
 function normalizeWorkflowPayload(body = {}, fallback = {}) {
     const name = String(body.name || fallback.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
     const dagSpec = normalizeDagSpec(body.dagSpec || body.dag_spec || fallback.dagSpec || fallback.dag_spec || {});
     if (!dagSpec.nodes.length) {
-        const err = new Error('工作流库保存需要至少一个有效节点。');
+        const err = new Error('保存工作流需要至少一个有效节点。');
         err.status = 400;
         throw err;
     }
+    assertWorkflowHasConfiguredLlm(dagSpec);
     return {
         name,
         description: String(body.description || fallback.description || '').trim().slice(0, 300),

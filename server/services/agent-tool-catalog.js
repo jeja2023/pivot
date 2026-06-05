@@ -13,9 +13,9 @@ function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
     const allowed = allowlist.length ? new Set(allowlist) : null;
-    const isAllowed = (name, source) => {
+    const isAllowed = (name, source, aliases = []) => {
         if (policy === 'builtin_only' && source === 'mcp') return false;
-        if (allowed && !allowed.has(name)) return false;
+        if (allowed && !allowed.has(name) && !aliases.some(alias => allowed.has(alias))) return false;
         return true;
     };
     const builtIns = filterBuiltInToolsByCapability(getBuiltInToolDefinitions(user), user).map(tool => ({
@@ -29,23 +29,113 @@ function formatToolList(user, options = {}) {
         admin: Boolean(tool.admin)
     })).filter(tool => isAllowed(tool.name, 'builtin'));
     // 内置工具已统一提供 viz.build_chart 等能力；当用户另外添加了系统可视化等内置 MCP 服务时，
-    // 缓存的工具名（如 viz.build_chart）会与内置工具同名而在目录中重复。这里按裸工具名去重，
-    // 同名时只保留内置工具，避免工作流工具选择器出现重复项（外部 MCP 工具名带服务前缀，不受影响）。
+    // 缓存的工具名（如 viz.build_chart）会与内置工具同名而在目录中重复。这里仅对系统内置 MCP 按裸工具名去重；
+    // 外部第三方 MCP 即使短名相同，也保留完整 mcp.<id>.* 工具名，避免把语义/参数不同的工具误折叠。
     const builtinToolNames = new Set(builtIns.map(tool => tool.name));
-    const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, user), user)
-        .filter(tool => !builtinToolNames.has(String(tool.name || '')))
+    const cachedMcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, user), user)
+        .filter(tool => tool.serverType === 'external' || !builtinToolNames.has(String(tool.name || '')));
+    const databaseTools = buildGenericDatabaseTools(cachedMcpTools)
+        .map(tool => filterDatabaseToolForPolicy(tool, policy, allowed))
+        .filter(Boolean);
+    const mcpTools = cachedMcpTools
+        .filter(tool => tool.serverType !== 'database')
         .map(tool => ({
             name: tool.fullName,
             title: tool.name,
             description: `[${tool.serverName}] ${tool.description || tool.name}`,
             input_schema: tool.input_schema,
             source: 'mcp',
-            risk: String(tool.name || '').startsWith('db.') ? 'low' : 'high',
-            requiresApproval: !String(tool.name || '').startsWith('db.'),
+            risk: 'high',
+            requiresApproval: true,
             serverName: tool.serverName
         }))
         .filter(tool => isAllowed(tool.name, 'mcp'));
-    return [...builtIns, ...mcpTools];
+    return [...builtIns, ...databaseTools, ...mcpTools];
+}
+
+function cloneJson(value, fallback = {}) {
+    try {
+        return JSON.parse(JSON.stringify(value || fallback)) || fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function buildDatabaseToolSchema(schema, connections) {
+    const next = cloneJson(schema, { type: 'object', properties: {} });
+    next.type = 'object';
+    const properties = next.properties && typeof next.properties === 'object' ? next.properties : {};
+    const ids = connections.map(item => String(item.serverId)).filter(Boolean);
+    const connectionProperty = {
+        type: 'string',
+        enum: ids,
+        default: ids[0] || '',
+        description: 'Database connection ID used by Pivot to choose the concrete database MCP server.'
+    };
+    delete properties.connectionId;
+    delete properties.databaseConnectionId;
+    delete properties.database_connection_id;
+    delete properties.mcpServerId;
+    delete properties.mcp_server_id;
+    next.properties = {
+        connectionId: connectionProperty,
+        ...properties
+    };
+    const required = new Set(Array.isArray(next.required) ? next.required : []);
+    required.delete('databaseConnectionId');
+    required.delete('database_connection_id');
+    required.delete('mcpServerId');
+    required.delete('mcp_server_id');
+    required.add('connectionId');
+    next.required = [...required];
+    return next;
+}
+
+function buildGenericDatabaseTools(tools = []) {
+    const grouped = new Map();
+    tools
+        .filter(tool => tool.serverType === 'database' && String(tool.name || '').startsWith('db.'))
+        .forEach(tool => {
+            const name = String(tool.name || '').trim();
+            if (!name) return;
+            if (!grouped.has(name)) grouped.set(name, []);
+            grouped.get(name).push(tool);
+        });
+    return [...grouped.entries()].map(([name, items]) => {
+        const first = items[0] || {};
+        const connections = items.map(tool => ({
+            serverId: String(tool.serverId || ''),
+            connectionId: String(tool.serverId || ''),
+            serverName: tool.serverName || `Database ${tool.serverId}`,
+            databaseType: tool.databaseType || '',
+            fullName: tool.fullName
+        })).filter(item => item.serverId);
+        return {
+            name,
+            title: name,
+            description: first.description || name,
+            input_schema: buildDatabaseToolSchema(first.input_schema, connections),
+            source: 'mcp',
+            risk: 'low',
+            requiresApproval: false,
+            serverName: 'Database connections',
+            databaseTool: true,
+            databaseConnections: connections
+        };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function filterDatabaseToolForPolicy(tool, policy, allowed) {
+    if (!tool || policy === 'builtin_only') return null;
+    const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
+    if (!allowed || allowed.has(tool.name)) return tool;
+    const scopedConnections = connections.filter(connection => allowed.has(connection.fullName));
+    if (!scopedConnections.length) return null;
+    return {
+        ...tool,
+        input_schema: buildDatabaseToolSchema(tool.input_schema, scopedConnections),
+        databaseConnections: scopedConnections
+    };
 }
 
 function buildAgentToolSchemas(toolList) {
@@ -58,5 +148,6 @@ function buildAgentToolSchemas(toolList) {
 
 module.exports = {
     buildAgentToolSchemas,
+    buildGenericDatabaseTools,
     formatToolList
 };

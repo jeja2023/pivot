@@ -1,6 +1,6 @@
 /* 对话页面逻辑 Chat Page Logic */
 
-/* exported API_BASE, APP_NAME, APP_VERSION, APP_COPYRIGHT, csrfToken, currentUser, currentSessionId, authHeaders, authFetch, apiFetch, checkLogin, setCsrfToken */
+/* exported API_BASE, APP_NAME, APP_VERSION, APP_COPYRIGHT, csrfToken, currentUser, currentSessionId, authHeaders, authFetch, apiFetch, checkLogin, setCsrfToken, isAdminUser, isSuperAdminUser, getPermissionTier, getPermissionLabel */
 const API_BASE = '/api';
 const APP_NAME = '智枢';
 const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
@@ -10,6 +10,31 @@ localStorage.removeItem('pivot_token');
 let csrfToken = sessionStorage.getItem('pivot_csrf_token') || '';
 let currentUser = null;
 let currentSessionId = null;
+
+function isAdminUser(user = currentUser) {
+    return user?.isAdmin === true || user?.is_admin === true || user?.role === 'admin';
+}
+
+function isSuperAdminUser(user = currentUser) {
+    if (user?.isSuperAdmin === true || user?.is_super_admin === true) return true;
+    return (user?.permissionTier || user?.permission_tier) === 'admin';
+}
+
+function getPermissionTier(user = currentUser) {
+    if (user?.permissionTier) return user.permissionTier;
+    if (user?.permission_tier) return user.permission_tier;
+    if (isSuperAdminUser(user)) return 'admin';
+    return isAdminUser(user) ? 'manager' : 'user';
+}
+
+function getPermissionLabel(user = currentUser) {
+    if (user?.permissionLabel) return user.permissionLabel;
+    if (user?.permission_label) return user.permission_label;
+    const tier = getPermissionTier(user);
+    if (tier === 'admin') return '系统管理员';
+    if (tier === 'manager') return '管理员';
+    return '用户';
+}
 
 // 刷新状态管理
 let isRefreshing = false;
@@ -84,6 +109,12 @@ window.Pivot.api = {
     authFetch,
     authHeaders,
     refreshAccessToken
+};
+window.Pivot.permissions = {
+    isAdminUser,
+    isSuperAdminUser,
+    getPermissionTier,
+    getPermissionLabel
 };
 
 async function checkLogin() {

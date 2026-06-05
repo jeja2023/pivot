@@ -15,7 +15,9 @@ let agentRunsPage = 1;
 let agentRunsTotal = 0;
 let agentWorkflowsCache = [];
 let activeAgentWorkflowId = '';
+let agentWorkflowDraftName = '';
 let agentWorkflowDraftDescription = '';
+let agentWorkflowPickerQuery = '';
 const AGENT_RUNS_PAGE_SIZE = 10;
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
 const AGENT_WORKFLOW_SAVED_KEY = 'pivot.agent.workflow.saved';
@@ -293,7 +295,8 @@ function renderAgentStructuredOutput(value, label = '') {
     `;
 }
 
-function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = '') {
+function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = '', runStatus = '') {
+    if (isAgentRunActive(runStatus)) return '';
     if (/```(?:pivot-echart|pivot-chart|chart|charts)\b/i.test(String(finalAnswer || ''))) return '';
     const items = [];
     const seen = new Set();
@@ -562,26 +565,44 @@ function selectAgentModel(id, close = true) {
 }
 
 const agentToolDisplayMap = {
+    'agent.llm': { title: '大模型节点', description: '在工作流中调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。' },
     'rag.search': { title: '知识库检索', description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。' },
     'sessions.search': { title: '会话检索', description: '按关键词检索当前用户的历史会话内容。' },
     'sessions.recent': { title: '最近会话', description: '列出当前用户最近的未删除会话。' },
     'knowledge.list': { title: '知识库文档', description: '列出当前用户的知识库文档及索引状态。' },
     'models.list': { title: '可用模型', description: '列出当前用户可以使用的模型。' },
     'system.health': { title: '系统健康', description: '查看数据库、存储、内存和磁盘健康状态。' },
-    'system.modelRuntime': { title: '模型运行状态', description: '查看模型端点队列、熔断器和监控状态。' }
+    'system.modelRuntime': { title: '模型运行状态', description: '查看模型端点队列、熔断器和监控状态。' },
+    'db.list_tables': { title: '列出数据表', description: '列出当前数据库中可查询的表和视图。' },
+    'db.count_tables': { title: '统计数据表数量', description: '统计当前数据库中可查询的数据表和视图数量。' },
+    'db.describe_table': { title: '查看表结构', description: '查看表字段、类型和可空性。' },
+    'db.run_readonly_query': { title: '只读 SQL 查询', description: '执行 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等只读查询。' },
+    'db.group_count': { title: '分组统计', description: '按指定表字段分组并统计数量。' },
+    'db.list_collections': { title: '列出集合', description: '列出 MongoDB 数据库集合。' },
+    'db.count_collections': { title: '统计集合数量', description: '统计 MongoDB 数据库中的集合数量。' },
+    'db.sample_collection': { title: '读取集合样本', description: '读取 MongoDB 集合的小样本，辅助理解字段结构。' },
+    'db.aggregate': { title: 'Mongo 聚合查询', description: '执行只读统计分析聚合管道。' }
 };
 
+function agentToolShortName(toolOrName) {
+    const name = typeof toolOrName === 'string' ? toolOrName : (toolOrName?.name || toolOrName?.fullName || '');
+    const match = String(name || '').match(/^mcp\.\d+\.(.+)$/);
+    return match ? match[1] : String(name || '');
+}
+
 function agentToolTitle(tool) {
-    const name = typeof tool === 'string' ? tool : tool?.name;
-    if (String(name || '').startsWith('mcp.')) {
-        return tool?.title || String(name).replace(/^mcp\.[^.]+\./, '') || '工具';
-    }
-    return tool?.title || agentToolDisplayMap[name]?.title || name || '工具';
+    const name = typeof tool === 'string' ? tool : (tool?.name || tool?.fullName);
+    const shortName = agentToolShortName(tool);
+    return agentToolDisplayMap[shortName]?.title || tool?.title || shortName || name || '工具';
 }
 
 function agentToolDescription(tool) {
-    if (String(tool?.name || '').startsWith('mcp.')) return '来自已保存的能力服务，可由智能体任务按需调用。';
-    return agentToolDisplayMap[tool?.name]?.description || tool?.description || '';
+    const shortName = agentToolShortName(tool);
+    const description = agentToolDisplayMap[shortName]?.description || tool?.description || '';
+    if (String(tool?.name || '').startsWith('mcp.') && tool?.serverName) {
+        return `来自「${tool.serverName}」：${description || '已保存的能力服务，可由智能体任务按需调用。'}`;
+    }
+    return description;
 }
 
 function agentCleanCapabilityName(name) {
@@ -613,17 +634,31 @@ function agentStepTitle(step) {
 }
 
 async function loadAgentModels() {
-    const select = document.getElementById('agent-model-select');
-    if (!select) return;
     const loaded = typeof window.loadSelectableModels === 'function'
         ? await window.loadSelectableModels()
         : { models: [], defaultModelId: '' };
     const defaultModelId = loaded.defaultModelId || '';
-    const nextModels = (loaded.models || []).filter(model => model.type !== 'embedding');
+    const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
+        ? window.isSelectableModelForCurrentUser
+        : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
+    const nextModels = (loaded.models || []).filter(model => model.type !== 'embedding' && canSelectModel(model));
     window._cachedAgentModels = nextModels;
-    select.innerHTML = nextModels
+    const optionHtml = nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
         .join('');
+    const mainSelectedId = document.getElementById('model-selector')?.value || '';
+    const initialId = (mainSelectedId && nextModels.some(model => String(model.id) === String(mainSelectedId)))
+        ? mainSelectedId
+        : (defaultModelId && nextModels.some(model => String(model.id) === String(defaultModelId)))
+            ? defaultModelId
+            : (nextModels[0]?.id || '');
+
+    const select = document.getElementById('agent-model-select');
+    if (select) {
+        const previousId = select.value;
+        select.innerHTML = optionHtml;
+        select.value = nextModels.some(model => String(model.id) === String(previousId)) ? previousId : initialId;
+    }
     const list = document.getElementById('agent-model-list');
     if (list) {
         list.innerHTML = nextModels.length ? nextModels.map(model => {
@@ -656,18 +691,11 @@ async function loadAgentModels() {
             if (!event.target.closest('#agent-model-picker')) setAgentModelListOpen(false);
         });
     }
-    if (select.dataset.agentCapsBound !== '1') {
+    if (select && select.dataset.agentCapsBound !== '1') {
         select.dataset.agentCapsBound = '1';
         select.addEventListener('change', () => selectAgentModel(select.value, false));
     }
-    const mainSelectedId = document.getElementById('model-selector')?.value || '';
-    const initialId = (mainSelectedId && nextModels.some(model => String(model.id) === String(mainSelectedId)))
-        ? mainSelectedId
-        : (defaultModelId && nextModels.some(model => String(model.id) === String(defaultModelId)))
-            ? defaultModelId
-            : (nextModels[0]?.id || '');
-    if (nextModels.length) select.value = initialId;
-    selectAgentModel(select.value || initialId, false);
+    if (select) selectAgentModel(select.value || initialId, false);
 }
 
 async function _loadAgentModelsLegacy() {
@@ -675,7 +703,10 @@ async function _loadAgentModelsLegacy() {
     if (!select) return;
     const res = await apiFetch(`${API_BASE}/models/available`);
     if (!res.ok) throw new Error('智能体模型列表加载失败');
-    const nextModels = (await res.json()).filter(model => model.type !== 'embedding');
+    const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
+        ? window.isSelectableModelForCurrentUser
+        : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
+    const nextModels = (await res.json()).filter(model => model.type !== 'embedding' && canSelectModel(model));
     window._cachedAgentModels = nextModels;
     select.innerHTML = nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
@@ -748,7 +779,7 @@ async function loadAgentTools() {
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
     const seenToolKeys = new Set();
     const visibleTools = (data.tools || [])
-        .filter(tool => currentUser?.username === 'admin' || !isAdminOnlyAgentTool(tool))
+        .filter(tool => isSuperAdminUser() || !isAdminOnlyAgentTool(tool))
         .filter(tool => {
             const key = String(tool?.name || `${tool?.source || ''}:${tool?.title || ''}:${tool?.description || ''}`);
             if (!key || seenToolKeys.has(key)) return false;
@@ -1060,7 +1091,7 @@ window.openAgentRun = async function(runId) {
     const tokenUsage = formatAgentTokenUsage(run);
     const progressPercent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
     const progressLabel = agentProgressLabel(run, progress);
-    const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer);
+    const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
     if (title) title.textContent = agentDisplayTitle(run);
     detail.innerHTML = `
@@ -1125,7 +1156,7 @@ function ensureAgentAuditModal() {
             <div class="rag-detail-header">
                 <div>
                     <h3>智能体删除审计</h3>
-                    <p class="model-modal-desc">仅 admin 超级管理员可查看，普通用户移除的任务记录会保留在这里。</p>
+                    <p class="model-modal-desc">仅 admin 权限层级可查看，普通用户移除的任务记录会保留在这里。</p>
                 </div>
                 <button type="button" id="agent-audit-close-btn" class="btn-danger-outline">关闭</button>
             </div>
@@ -1373,30 +1404,45 @@ function summarizeAgentDagSpec(raw = getAgentWorkflowText()) {
 }
 
 function updateAgentWorkflowRunUi() {
-    const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
-    const isDagMode = runMode === 'dag';
-    document.getElementById('agent-run-workflow-field')?.classList.toggle('hidden', !isDagMode);
-    const status = document.getElementById('agent-workflow-run-status');
-    const text = document.getElementById('agent-workflow-run-status-text');
-    if (!status) return;
-    status.classList.toggle('hidden', !isDagMode);
-    if (!isDagMode) { refreshAgentDagInputsPanel(); return; }
-    const selected = selectedAgentWorkflow();
-    const summary = selected ? summarizeAgentDagSpec(selected.dag_spec || { nodes: [] }) : summarizeAgentDagSpec();
-    const ready = Boolean(selected) && summary.valid && summary.executableNodeCount > 0;
-    status.classList.toggle('is-ready', ready);
-    status.classList.toggle('is-error', !ready);
-    // 同步刷新运行时输入面板
+    renderAgentWorkflowLifecycle();
     refreshAgentDagInputsPanel();
-    if (!text) return;
-    if (!selected) {
-        text.textContent = '请选择要运行的工作流';
-    } else if (!summary.valid) {
-        text.textContent = '工作流 JSON 需要修正';
-    } else if (summary.executableNodeCount > 0) {
-        text.textContent = `${selected.name || '工作流'} · ${summary.executableNodeCount} 个可运行节点`;
-    } else {
-        text.textContent = '未配置可运行工作流';
+}
+
+function workflowLifecycleChip(label, value, state = '') {
+    return `
+        <span class="agent-workflow-lifecycle-chip ${state}">
+            <strong>${agentEscape(label)}</strong>
+            <em>${agentEscape(value)}</em>
+        </span>
+    `;
+}
+
+function renderAgentWorkflowLifecycle() {
+    const target = document.getElementById('agent-workflow-lifecycle');
+    if (!target) return;
+    const workflow = selectedAgentWorkflow();
+    const draftSummary = summarizeAgentDagSpec();
+    const savedSummary = workflow ? summarizeAgentDagSpec(workflow.dag_spec || { nodes: [] }) : null;
+    const draftMatchesSaved = workflow ? currentWorkflowMatchesSelected(workflow) : false;
+    const currentText = workflow
+        ? `v${workflow.current_version || 1}`
+        : '未保存';
+    const publishedText = workflow?.published_version
+        ? `v${workflow.published_version}`
+        : '未发布';
+    const draftText = draftSummary.valid
+        ? `${draftSummary.executableNodeCount || savedSummary?.executableNodeCount || 0} 节点 · ${workflow ? (draftMatchesSaved ? '已同步' : '未保存') : '草稿'}`
+        : '需修正';
+    const runText = workflow?.published_version
+        ? '草稿/发布版'
+        : '仅草稿';
+    if (target) {
+        target.innerHTML = [
+            workflowLifecycleChip('草稿', draftText, draftMatchesSaved ? '' : 'is-draft'),
+            workflowLifecycleChip('当前', currentText, workflow ? 'is-ready' : ''),
+            workflowLifecycleChip('发布', publishedText, workflow?.published_version ? 'is-ready' : 'is-draft'),
+            workflowLifecycleChip('运行', runText, workflow?.published_version ? 'is-ready' : '')
+        ].join('');
     }
 }
 
@@ -1445,25 +1491,135 @@ function closeAgentDagNodeDrawer() {
     updateAgentDagNodeDrawer(null);
 }
 
+function deleteSelectedAgentDagNode() {
+    dagEditorInstance?.deleteSelectedNode?.();
+}
+
+function agentWorkflowNodeCount(item) {
+    const fromRow = Number(item?.node_count || 0);
+    if (fromRow > 0) return fromRow;
+    const nodes = Array.isArray(item?.dag_spec?.nodes) ? item.dag_spec.nodes : [];
+    return nodes.length;
+}
+
+function agentWorkflowVersionText(item) {
+    const currentVersion = Number(item?.current_version || 0);
+    const publishedVersion = Number(item?.published_version || 0);
+    const parts = [];
+    if (currentVersion > 0) parts.push(`v${currentVersion}`);
+    parts.push(`${agentWorkflowNodeCount(item)} 节点`);
+    parts.push(publishedVersion > 0 ? `已发布 v${publishedVersion}` : '未发布');
+    return parts.join(' · ');
+}
+
+function agentWorkflowUpdatedText(item) {
+    const value = item?.updated_at || item?.version_created_at || item?.created_at || '';
+    if (!value) return '';
+    return typeof formatDateToCN === 'function' ? formatDateToCN(value) : String(value);
+}
+
+function agentWorkflowPickerOptionMarkup(item, selectedId) {
+    const id = String(item?.id || '');
+    const selected = id && String(selectedId || '') === id;
+    const updatedText = agentWorkflowUpdatedText(item);
+    const searchable = [
+        item?.name,
+        item?.description,
+        agentWorkflowVersionText(item),
+        updatedText
+    ].filter(Boolean).join(' ');
+    return `
+        <button type="button" role="option" class="agent-workflow-picker-option ${selected ? 'is-selected' : ''}" data-agent-workflow-picker-id="${agentEscapeAttr(id)}" data-search-text="${agentEscapeAttr(searchable)}" aria-selected="${selected ? 'true' : 'false'}">
+            <span class="agent-workflow-picker-option-main">
+                <strong>${agentEscape(item?.name || '未命名工作流')}</strong>
+                ${item?.description ? `<small>${agentEscape(agentShortText(item.description, 82))}</small>` : ''}
+            </span>
+            <span class="agent-workflow-picker-option-side">
+                <em>${agentEscape(agentWorkflowVersionText(item))}</em>
+                ${updatedText ? `<small>${agentEscape(updatedText)}</small>` : ''}
+            </span>
+        </button>
+    `;
+}
+
+function setAgentWorkflowPickerOpen(isOpen, options = {}) {
+    const picker = document.getElementById('agent-workflow-picker');
+    const trigger = document.getElementById('agent-workflow-picker-trigger');
+    const menu = document.getElementById('agent-workflow-picker-menu');
+    const search = document.getElementById('agent-workflow-picker-search');
+    if (!picker || !trigger || !menu) return;
+    picker.classList.toggle('is-open', Boolean(isOpen));
+    menu.classList.toggle('hidden', !isOpen);
+    trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen && options.focusSearch !== false) {
+        requestAnimationFrame(() => {
+            search?.focus();
+            search?.select();
+        });
+    }
+}
+
+function selectAgentWorkflowFromPicker(workflowId) {
+    const select = document.getElementById('agent-workflow-select');
+    if (!select) return;
+    select.value = String(workflowId || '');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    setAgentWorkflowPickerOpen(false);
+}
+
+function renderAgentWorkflowPicker() {
+    const picker = document.getElementById('agent-workflow-picker');
+    const trigger = document.getElementById('agent-workflow-picker-trigger');
+    const title = document.getElementById('agent-workflow-picker-title');
+    const meta = document.getElementById('agent-workflow-picker-meta');
+    const list = document.getElementById('agent-workflow-picker-list');
+    const search = document.getElementById('agent-workflow-picker-search');
+    if (!picker || !trigger || !title || !meta || !list) return;
+    const selected = selectedAgentWorkflow();
+    const query = String(agentWorkflowPickerQuery || '').trim().toLowerCase();
+    const filtered = query
+        ? agentWorkflowsCache.filter(item => {
+            const text = [
+                item?.name,
+                item?.description,
+                agentWorkflowVersionText(item),
+                agentWorkflowUpdatedText(item)
+            ].filter(Boolean).join(' ').toLowerCase();
+            return text.includes(query);
+        })
+        : agentWorkflowsCache;
+    picker.classList.toggle('is-empty', !agentWorkflowsCache.length);
+    title.textContent = selected?.name || '选择已保存工作流';
+    trigger.title = selected?.name
+        ? `${selected.name} · ${agentWorkflowVersionText(selected)}`
+        : '选择已保存工作流';
+    meta.textContent = selected
+        ? agentWorkflowVersionText(selected)
+        : (agentWorkflowsCache.length ? `${agentWorkflowsCache.length} 个可用 · 支持搜索筛选` : '暂无已保存工作流');
+    if (search && search.value !== agentWorkflowPickerQuery) search.value = agentWorkflowPickerQuery;
+    if (!agentWorkflowsCache.length) {
+        list.innerHTML = '<div class="agent-workflow-picker-empty">保存当前画布后，会在这里选择、搜索和加载工作流。</div>';
+        return;
+    }
+    if (!filtered.length) {
+        list.innerHTML = `<div class="agent-workflow-picker-empty">没有匹配“${agentEscape(agentWorkflowPickerQuery)}”的工作流</div>`;
+        return;
+    }
+    list.innerHTML = filtered.map(item => agentWorkflowPickerOptionMarkup(item, activeAgentWorkflowId)).join('');
+    list.querySelectorAll('[data-agent-workflow-picker-id]').forEach(option => {
+        option.addEventListener('click', () => selectAgentWorkflowFromPicker(option.dataset.agentWorkflowPickerId));
+    });
+}
+
 function renderAgentWorkflowLibrary() {
     const select = document.getElementById('agent-workflow-select');
-    const runSelect = document.getElementById('agent-run-workflow-select');
-    const nameInput = document.getElementById('agent-workflow-name');
-    const versionLabel = document.getElementById('agent-workflow-version-label');
+    const currentLabel = document.getElementById('agent-workflow-current-label');
     const current = activeAgentWorkflowId || '';
     const editorOptions = [
-        '<option value="">选择已有工作流</option>',
+        '<option value="">选择已保存工作流</option>',
         ...agentWorkflowsCache.map(item => {
             const version = item.current_version ? ` v${item.current_version}` : '';
             return `<option value="${agentEscape(item.id)}">${agentEscape(item.name)}${agentEscape(version)}</option>`;
-        })
-    ].join('');
-    const runOptions = [
-        '<option value="">选择要运行的工作流</option>',
-        ...agentWorkflowsCache.map(item => {
-            const version = item.current_version ? ` v${item.current_version}` : '';
-            const nodes = Number(item.node_count || 0) ? ` · ${Number(item.node_count || 0)} 节点` : '';
-            return `<option value="${agentEscape(item.id)}">${agentEscape(item.name)}${agentEscape(version)}${agentEscape(nodes)}</option>`;
         })
     ].join('');
     const nextValue = agentWorkflowsCache.some(item => String(item.id) === String(current)) ? String(current) : '';
@@ -1471,21 +1627,21 @@ function renderAgentWorkflowLibrary() {
         select.innerHTML = editorOptions;
         select.value = nextValue;
     }
-    if (runSelect) {
-        runSelect.innerHTML = runOptions;
-        runSelect.value = nextValue;
-    }
     activeAgentWorkflowId = nextValue;
     const selected = agentWorkflowsCache.find(item => String(item.id) === String(nextValue));
-    if (selected && nameInput && !nameInput.value.trim()) nameInput.value = selected.name || '';
-    if (versionLabel) {
-        if (selected) {
-            const publishText = selected.published_version ? `已发布 v${selected.published_version}` : '未发布';
-            versionLabel.textContent = `当前 v${selected.current_version || 1} · ${publishText} · ${selected.node_count || 0} 节点`;
-        } else {
-            versionLabel.textContent = '';
-        }
+    if (selected) {
+        agentWorkflowDraftName = selected.name || agentWorkflowDraftName;
+        agentWorkflowDraftDescription = selected.description || agentWorkflowDraftDescription;
     }
+    if (currentLabel) {
+        const canvasLabel = selected
+            ? (currentWorkflowMatchesSelected(selected) ? '已同步' : '未保存更改')
+            : (agentWorkflowDraftName ? '草稿未保存' : '新建草稿');
+        currentLabel.textContent = canvasLabel;
+        currentLabel.title = selected?.name || agentWorkflowDraftName || canvasLabel;
+    }
+    renderAgentWorkflowPicker();
+    renderAgentWorkflowLifecycle();
     updateAgentWorkflowRunUi();
 }
 
@@ -1495,11 +1651,11 @@ async function loadAgentWorkflows() {
     try {
         const res = await apiFetch(`${API_BASE}/agents/workflows`);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || '工作流库加载失败');
+        if (!res.ok) throw new Error(data.error || '已保存工作流加载失败');
         agentWorkflowsCache = data.data || [];
         renderAgentWorkflowLibrary();
     } catch (e) {
-        showToast(e.message || '工作流库加载失败', 'error');
+        showToast(e.message || '已保存工作流加载失败', 'error');
     }
 }
 
@@ -1527,15 +1683,8 @@ function newAgentWorkflow(options = {}) {
     activeAgentWorkflowId = '';
     const select = document.getElementById('agent-workflow-select');
     if (select) select.value = '';
-    const nameInput = document.getElementById('agent-workflow-name');
-    if (nameInput) nameInput.value = String(name || '').trim().slice(0, 100);
+    agentWorkflowDraftName = String(name || '').trim().slice(0, 100);
     agentWorkflowDraftDescription = String(description || '').trim().slice(0, 300);
-    if (Object.prototype.hasOwnProperty.call(options, 'goal')) {
-        const goalInput = document.getElementById('agent-goal-input');
-        if (goalInput) goalInput.value = String(options.goal || '').trim().slice(0, 2000);
-    }
-    const runMode = document.getElementById('agent-run-mode');
-    if (runMode) runMode.value = 'dag';
     if (clearSnapshots) clearAgentWorkflowLocalSnapshots();
     closeAgentDagNodeDrawer();
     writeAgentWorkflowText({ nodes: [] });
@@ -1545,106 +1694,47 @@ function newAgentWorkflow(options = {}) {
         window.refreshAgentDagEditor?.();
     }
     updateAgentWorkflowRunUi();
-    if (shouldShowToast) showToast(`已新建工作流：${currentAgentWorkflowName()}`, 'success');
-}
-
-function closeAgentWorkflowCreateModal() {
-    document.getElementById('agent-workflow-create-modal')?.classList.add('hidden');
-}
-
-function ensureAgentWorkflowCreateModal() {
-    let modal = document.getElementById('agent-workflow-create-modal');
-    if (modal) return modal;
-    modal = document.createElement('div');
-    modal.id = 'agent-workflow-create-modal';
-    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
-        <div class="modal rag-detail-modal agent-workflow-create-modal">
-            <div class="rag-detail-header">
-                <div>
-                    <h3>新建工作流</h3>
-                    <p class="model-modal-desc">填写基础信息后进入空白编排画布。</p>
-                </div>
-                <button type="button" id="agent-workflow-create-close-btn" class="btn-danger-outline">关闭</button>
-            </div>
-            <form id="agent-workflow-create-form" class="agent-workflow-create-form">
-                <label class="agent-workflow-create-field">
-                    <span>工作流名称</span>
-                    <input id="agent-workflow-create-name" class="form-input" maxlength="100" placeholder="例如：日报生成流程" required>
-                </label>
-                <label class="agent-workflow-create-field">
-                    <span>工作流说明</span>
-                    <textarea id="agent-workflow-create-description" class="form-input" maxlength="300" rows="3" placeholder="说明用途、输入约定或交付格式"></textarea>
-                </label>
-                <label class="agent-workflow-create-field">
-                    <span>默认执行目标</span>
-                    <textarea id="agent-workflow-create-goal" class="form-input" maxlength="2000" rows="3" placeholder="可选，会同步到智能体任务目标"></textarea>
-                </label>
-                <div id="agent-workflow-create-status" class="agent-workflow-create-status" aria-live="polite"></div>
-                <div class="agent-workflow-create-actions">
-                    <button type="button" class="btn-secondary" id="agent-workflow-create-cancel-btn">取消</button>
-                    <button type="submit" class="btn-primary">创建空白工作流</button>
-                </div>
-            </form>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    const close = () => closeAgentWorkflowCreateModal();
-    modal.addEventListener('click', event => {
-        if (
-            event.target === modal
-            || event.target.closest('#agent-workflow-create-close-btn')
-            || event.target.closest('#agent-workflow-create-cancel-btn')
-        ) {
-            close();
-        }
-    });
-    modal.addEventListener('keydown', event => {
-        if (event.key === 'Escape') close();
-    });
-    modal.querySelector('#agent-workflow-create-form')?.addEventListener('submit', event => {
-        event.preventDefault();
-        const nameInput = modal.querySelector('#agent-workflow-create-name');
-        const status = modal.querySelector('#agent-workflow-create-status');
-        const name = String(nameInput?.value || '').trim();
-        if (!name) {
-            if (status) status.textContent = '请填写工作流名称';
-            nameInput?.focus();
-            return;
-        }
-        const description = String(modal.querySelector('#agent-workflow-create-description')?.value || '').trim();
-        const goal = String(modal.querySelector('#agent-workflow-create-goal')?.value || '').trim();
-        newAgentWorkflow({ name, description, goal });
-        close();
-    });
-    return modal;
-}
-
-function openAgentWorkflowCreateModal() {
-    const modal = ensureAgentWorkflowCreateModal();
-    const nameInput = modal.querySelector('#agent-workflow-create-name');
-    const descriptionInput = modal.querySelector('#agent-workflow-create-description');
-    const goalInput = modal.querySelector('#agent-workflow-create-goal');
-    const status = modal.querySelector('#agent-workflow-create-status');
-    if (nameInput) nameInput.value = '';
-    if (descriptionInput) descriptionInput.value = '';
-    if (goalInput) goalInput.value = document.getElementById('agent-goal-input')?.value.trim() || '';
-    if (status) status.textContent = '';
-    modal.classList.remove('hidden');
-    requestAnimationFrame(() => nameInput?.focus());
+    if (shouldShowToast) showToast(agentWorkflowDraftName ? `已新建工作流草稿：${agentWorkflowDraftName}` : '已新建工作流草稿', 'success');
 }
 
 function currentAgentWorkflowName() {
-    const input = document.getElementById('agent-workflow-name');
-    const goal = document.getElementById('agent-goal-input')?.value.trim().slice(0, 40);
-    return String(input?.value || goal || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
+    const selected = selectedAgentWorkflow();
+    return String(selected?.name || agentWorkflowDraftName || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
+}
+
+window.setAgentWorkflowDraftName = function(name, options = {}) {
+    const nextName = String(name || '').trim().slice(0, 100);
+    if (!nextName) return;
+    if (options.ifEmpty && (selectedAgentWorkflow()?.name || agentWorkflowDraftName)) return;
+    agentWorkflowDraftName = nextName;
+    renderAgentWorkflowLibrary();
+};
+
+async function ensureAgentWorkflowNameForSave() {
+    const existing = String(selectedAgentWorkflow()?.name || agentWorkflowDraftName || '').trim().slice(0, 100);
+    if (existing) return existing;
+    const suggested = '未命名工作流';
+    const value = await window.showInputPrompt?.({
+        title: '保存工作流',
+        message: '给当前工作流起一个名称，保存后会进入已保存工作流。',
+        value: suggested,
+        placeholder: '例如：日报汇总、客户回访分析',
+        requiredMessage: '请填写工作流名称'
+    });
+    if (value === null || value === undefined) return '';
+    const name = String(value || '').trim().slice(0, 100);
+    if (!name) {
+        showToast('请填写工作流名称后再保存', 'error');
+        return '';
+    }
+    agentWorkflowDraftName = name;
+    renderAgentWorkflowLibrary();
+    return name;
 }
 
 function inferAgentWorkflowRunGoal() {
-    const explicitGoal = document.getElementById('agent-goal-input')?.value.trim();
-    if (explicitGoal) return explicitGoal;
     const selected = selectedAgentWorkflow();
-    const workflowName = String(selected?.name || document.getElementById('agent-workflow-name')?.value || '').trim();
+    const workflowName = String(selected?.name || agentWorkflowDraftName || '').trim();
     if (workflowName) return `执行工作流：${workflowName}`.slice(0, 2000);
     const summary = summarizeAgentDagSpec();
     if (summary.valid && summary.executableNodeCount > 0) return `执行当前工作流（${summary.executableNodeCount} 个节点）`;
@@ -1663,6 +1753,11 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     // 保存前主动校验，发现错误时弹出确认门禁
     const validation = dagEditorInstance?.validate?.();
     if (validation && validation.errors.length) {
+        const blockingLlmError = validation.errors.find(item => /大模型节点|节点模型/.test(String(item || '')));
+        if (blockingLlmError) {
+            showToast(blockingLlmError, 'error');
+            return null;
+        }
         const msg = [
             `工作流存在 ${validation.errors.length} 个问题：`,
             ...validation.errors.map((e, i) => `${i + 1}. ${e}`),
@@ -1672,6 +1767,8 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         const confirmed = await (window.showConfirm?.('工作流校验未通过', msg) || Promise.resolve(window.confirm(msg)));
         if (!confirmed) return null;
     }
+    const workflowName = await ensureAgentWorkflowNameForSave();
+    if (!workflowName) return null;
     const workflowId = activeAgentWorkflowId || document.getElementById('agent-workflow-select')?.value || '';
     const method = workflowId ? 'PUT' : 'POST';
     const url = workflowId
@@ -1681,7 +1778,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            name: currentAgentWorkflowName(),
+            name: workflowName,
             description: currentAgentWorkflowDescription(),
             dagSpec: parsed,
             note: method === 'POST' ? '创建工作流' : '保存新版本'
@@ -1689,15 +1786,14 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        showToast(data.error || '保存工作流库失败', 'error');
+        showToast(data.error || '保存已保存工作流失败', 'error');
         return null;
     }
     activeAgentWorkflowId = String(data.workflow.id);
+    agentWorkflowDraftName = data.workflow.name || workflowName;
     agentWorkflowDraftDescription = data.workflow.description || currentAgentWorkflowDescription();
-    const nameInput = document.getElementById('agent-workflow-name');
-    if (nameInput) nameInput.value = data.workflow.name || currentAgentWorkflowName();
     await loadAgentWorkflows();
-    if (showSuccess) showToast(`工作流已保存到库：v${data.workflow.current_version || 1}`, 'success');
+    if (showSuccess) showToast(`工作流已保存：v${data.workflow.current_version || 1}`, 'success');
     return data.workflow;
 }
 
@@ -1706,39 +1802,14 @@ function loadSelectedAgentWorkflow() {
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
     if (!workflow) return showToast('请选择要加载的工作流', 'warning');
     activeAgentWorkflowId = String(workflow.id);
-    const runSelect = document.getElementById('agent-run-workflow-select');
-    if (runSelect) runSelect.value = activeAgentWorkflowId;
+    agentWorkflowDraftName = workflow.name || '';
     agentWorkflowDraftDescription = workflow.description || '';
-    const nameInput = document.getElementById('agent-workflow-name');
-    if (nameInput) nameInput.value = workflow.name || '';
     writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
-    const runMode = document.getElementById('agent-run-mode');
-    if (runMode) runMode.value = 'dag';
     updateAgentWorkflowRunUi();
     renderAgentWorkflowLibrary();
     mountAgentDagEditor();
     window.refreshAgentDagEditor?.();
     showToast(`已加载工作流：${workflow.name}`, 'success');
-}
-
-function applyAgentRunWorkflowSelection(workflowId, options = {}) {
-    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId || ''));
-    activeAgentWorkflowId = workflow ? String(workflow.id) : '';
-    const runSelect = document.getElementById('agent-run-workflow-select');
-    if (runSelect) runSelect.value = activeAgentWorkflowId;
-    const editorSelect = document.getElementById('agent-workflow-select');
-    if (editorSelect) editorSelect.value = activeAgentWorkflowId;
-    if (workflow) {
-        agentWorkflowDraftDescription = workflow.description || '';
-        const nameInput = document.getElementById('agent-workflow-name');
-        if (nameInput && !nameInput.value.trim()) nameInput.value = workflow.name || '';
-        writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
-    } else {
-        closeAgentDagNodeDrawer();
-        writeAgentWorkflowText({ nodes: [] });
-    }
-    updateAgentWorkflowRunUi();
-    if (workflow && options.showToast) showToast(`已选择工作流：${workflow.name}`, 'success');
 }
 
 function deleteSelectedAgentWorkflow() {
@@ -1753,21 +1824,20 @@ function deleteSelectedAgentWorkflow() {
         const deletedInfo = { id: workflow.id, name: workflow.name };
         const wasActive = String(activeAgentWorkflowId) === String(workflow.id);
         if (wasActive) activeAgentWorkflowId = '';
+        if (wasActive) agentWorkflowDraftName = '';
         agentWorkflowDraftDescription = '';
-        const nameInput = document.getElementById('agent-workflow-name');
-        if (nameInput) nameInput.value = '';
         await loadAgentWorkflows();
         // 显示含恢复操作的提示
         showToast(`工作流「${deletedInfo.name}」已删除，30 天内可恢复`, 'success');
-        const versionLabel = document.getElementById('agent-workflow-version-label');
-        if (versionLabel) {
-            versionLabel.innerHTML = `<button type="button" class="btn-secondary agent-undo-delete-btn" title="恢复已删除的工作流" style="font-size:0.72rem;padding:2px 8px;">↩ 撤销删除</button>`;
-            versionLabel.querySelector('.agent-undo-delete-btn')?.addEventListener('click', async () => {
+        const lifecycle = document.getElementById('agent-workflow-lifecycle');
+        if (lifecycle) {
+            lifecycle.innerHTML = `<button type="button" class="btn-secondary agent-workflow-undo-delete" title="恢复已删除的工作流">撤销删除：${agentEscape(deletedInfo.name)}</button>`;
+            lifecycle.querySelector('.agent-workflow-undo-delete')?.addEventListener('click', async () => {
                 const restoreRes = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(deletedInfo.id)}/restore`, { method: 'PATCH' });
                 const restoreData = await restoreRes.json().catch(() => ({}));
                 if (!restoreRes.ok) return showToast(restoreData.error || '恢复失败', 'error');
                 if (wasActive) activeAgentWorkflowId = String(restoreData.workflow.id);
-                if (nameInput) nameInput.value = restoreData.workflow.name || deletedInfo.name;
+                if (wasActive) agentWorkflowDraftName = restoreData.workflow.name || deletedInfo.name;
                 await loadAgentWorkflows();
                 showToast(`工作流「${restoreData.workflow.name || deletedInfo.name}」已恢复`, 'success');
             });
@@ -1790,6 +1860,8 @@ async function publishSelectedAgentWorkflow(version = 'current') {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '发布工作流失败', 'error');
     activeAgentWorkflowId = String(data.workflow.id);
+    agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
+    agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;
     await loadAgentWorkflows();
     showToast(`工作流已发布：v${data.workflow.published_version || data.workflow.current_version || ''}`, 'success');
     return data.workflow;
@@ -1823,9 +1895,8 @@ function ensureAgentWorkflowVersionsModal() {
 }
 
 function selectedAgentWorkflow() {
-    const runSelect = document.getElementById('agent-run-workflow-select');
     const select = document.getElementById('agent-workflow-select');
-    return agentWorkflowsCache.find(item => String(item.id) === String(runSelect?.value || select?.value || activeAgentWorkflowId));
+    return agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
 }
 
 function currentWorkflowMatchesSelected(workflow) {
@@ -1961,6 +2032,8 @@ async function openAgentWorkflowVersions() {
                 const restoreData = await restoreRes.json().catch(() => ({}));
                 if (!restoreRes.ok) return showToast(restoreData.error || '版本回滚失败', 'error');
                 activeAgentWorkflowId = String(restoreData.workflow.id);
+                agentWorkflowDraftName = restoreData.workflow.name || agentWorkflowDraftName;
+                agentWorkflowDraftDescription = restoreData.workflow.description || agentWorkflowDraftDescription;
                 writeAgentWorkflowText(restoreData.workflow.dag_spec || { nodes: [] });
                 await loadAgentWorkflows();
                 mountAgentDagEditor();
@@ -2002,8 +2075,6 @@ window.saveAgentWorkflowDraft = function() {
 
 window.saveAgentWorkflow = async function() {
     if (!persistAgentWorkflow(AGENT_WORKFLOW_SAVED_KEY, '保存工作流')) return;
-    const runMode = document.getElementById('agent-run-mode');
-    if (runMode) runMode.value = 'dag';
     updateAgentWorkflowRunUi();
     try {
         localStorage.removeItem(AGENT_WORKFLOW_DRAFT_KEY);
@@ -2015,11 +2086,11 @@ window.saveAgentWorkflow = async function() {
 
 function getAgentRunPayload(goalOverride = '') {
     const allowMcp = document.getElementById('agent-allow-mcp')?.checked !== false;
-    const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
+    const rawRunMode = document.getElementById('agent-run-mode')?.value || 'standard';
+    const runMode = ['standard', 'deep', 'audit'].includes(rawRunMode) ? rawRunMode : 'standard';
     const typedGoal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
-    const goal = runMode === 'dag' ? (typedGoal || inferAgentWorkflowRunGoal()) : typedGoal;
     const payload = {
-        goal,
+        goal: typedGoal,
         modelId: document.getElementById('agent-model-select')?.value,
         maxSteps: document.getElementById('agent-max-steps')?.value || 10,
         runMode,
@@ -2032,28 +2103,6 @@ function getAgentRunPayload(goalOverride = '') {
         contextConfig: getAgentContextConfig(),
         sessionId: window.currentSessionId || null
     };
-    if (runMode === 'dag') {
-        const selectedWorkflow = selectedAgentWorkflow();
-        if (!selectedWorkflow) {
-            showToast('请选择要运行的工作流', 'error');
-            payload._invalid = true;
-            return payload;
-        }
-        payload.workflowId = selectedWorkflow.id;
-        payload.workflowVersion = 'current';
-        const dagSummary = summarizeAgentDagSpec(selectedWorkflow.dag_spec || { nodes: [] });
-        if (!dagSummary.valid) {
-            showToast('工作流配置格式不正确', 'error');
-            payload._invalid = true;
-        } else if (dagSummary.executableNodeCount <= 0) {
-            showToast('工作流至少需要 1 个已选择工具的节点', 'error');
-            payload._invalid = true;
-        }
-        const visualInputs = collectAgentDagInputs();
-        if (Object.keys(visualInputs).length) {
-            payload.dagInputs = visualInputs;
-        }
-    }
     return payload;
 }
 
@@ -2062,7 +2111,8 @@ function applyAgentTemplate(template) {
     const goalInput = document.getElementById('agent-goal-input');
     if (goalInput) goalInput.value = template.goal_template || '';
     const runMode = document.getElementById('agent-run-mode');
-    if (runMode) runMode.value = template.run_mode || 'standard';
+    const templateRunMode = ['standard', 'deep', 'audit'].includes(template.run_mode) ? template.run_mode : 'standard';
+    if (runMode) runMode.value = templateRunMode;
     const allowMcp = document.getElementById('agent-allow-mcp');
     if (allowMcp) allowMcp.checked = template.tool_policy !== 'builtin_only';
     const approval = document.getElementById('agent-approval-policy');
@@ -2085,18 +2135,6 @@ function applyAgentTemplate(template) {
     document.querySelectorAll('[data-agent-tool-allow]').forEach(input => {
         input.checked = selectedTools.length === 0 ? true : selectedTools.includes(input.dataset.agentToolAllow);
     });
-    if ((template.run_mode || '') === 'dag') {
-        const dagSpec = agentParsePayload(template.dag_spec || '');
-        if (dagSpec && typeof dagSpec === 'object') {
-            writeAgentWorkflowText(dagSpec);
-            activeAgentWorkflowId = template.workflow_id ? String(template.workflow_id) : '';
-            const workflowSelect = document.getElementById('agent-workflow-select');
-            if (workflowSelect) workflowSelect.value = activeAgentWorkflowId;
-            const runWorkflowSelect = document.getElementById('agent-run-workflow-select');
-            if (runWorkflowSelect) runWorkflowSelect.value = activeAgentWorkflowId;
-        }
-    }
-    updateAgentWorkflowRunUi();
     showToast('模板已应用', 'success');
 }
 
@@ -2352,6 +2390,168 @@ async function loadAgentArtifactModal(artifactId) {
 
 window.openAgentArtifactVersions = loadAgentArtifactModal;
 
+function agentWorkflowRunSourceLabel(source) {
+    if (source === 'published') return '发布版运行';
+    if (source === 'current') return '当前版本运行';
+    return '预览运行';
+}
+
+function setAgentWorkflowRunConsoleStatus(message, type = '') {
+    void message;
+    void type;
+}
+
+function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
+    let spec;
+    try {
+        spec = parseAgentWorkflowText(raw);
+    } catch (e) {
+        return { valid: false, error: e };
+    }
+    const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
+    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm') || null;
+    const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
+    const maxSteps = Number.parseInt(input.maxSteps ?? input.max_steps ?? 20, 10);
+    return {
+        valid: true,
+        llmNode,
+        modelId: String(input.model || input.modelId || input.model_id || '').trim(),
+        maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 20,
+        toolPolicy: 'all',
+        approvalPolicy: 'safe_mcp_auto',
+        modelRouter: 'fixed',
+        maxTokenBudget: 0,
+        retryLimit: 1,
+        toolAllowlist: [],
+        contextConfig: { mode: 'auto', notes: '' }
+    };
+}
+
+function validateAgentWorkflowRunSettings(settings, options = {}) {
+    const requireModel = options.requireModel !== false;
+    if (!settings?.valid) return '工作流 JSON 格式不正确，无法读取 LLM 节点配置';
+    if (!settings.llmNode) return '工作流必须包含 1 个大模型节点';
+    if (requireModel && !settings.modelId) return `${settings.llmNode.title || settings.llmNode.id || '大模型节点'} 需要填写节点模型`;
+    return '';
+}
+
+function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverride = null) {
+    const workflow = workflowOverride || selectedAgentWorkflow();
+    const sourceMode = ['draft', 'current', 'published'].includes(source) ? source : 'draft';
+    const summaryForSettings = sourceMode === 'draft'
+        ? summarizeAgentDagSpec()
+        : summarizeAgentDagSpec(workflow?.dag_spec || { nodes: [] });
+    const runSettings = getAgentWorkflowRunSettings(sourceMode === 'draft' ? getAgentWorkflowText() : (workflow?.dag_spec || { nodes: [] }));
+    const goal = inferAgentWorkflowRunGoal();
+    const payload = {
+        goal,
+        title: `${agentWorkflowRunSourceLabel(sourceMode)}：${currentAgentWorkflowName()}`,
+        modelId: runSettings.modelId,
+        maxSteps: runSettings.maxSteps,
+        runMode: 'dag',
+        toolPolicy: runSettings.toolPolicy,
+        approvalPolicy: runSettings.approvalPolicy,
+        modelRouter: runSettings.modelRouter,
+        maxTokenBudget: runSettings.maxTokenBudget,
+        retryLimit: runSettings.retryLimit,
+        toolAllowlist: runSettings.toolAllowlist,
+        contextConfig: runSettings.contextConfig,
+        sessionId: window.currentSessionId || null
+    };
+    if (!payload.goal) {
+        showToast('请先填写任务目标或工作流名称', 'error');
+        payload._invalid = true;
+        return payload;
+    }
+    if (sourceMode === 'draft') {
+        const summary = summaryForSettings;
+        if (!summary.valid) {
+            showToast('工作流 JSON 格式不正确，无法预览运行', 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        if (summary.executableNodeCount <= 0) {
+            showToast('预览运行至少需要 1 个已选择工具的节点', 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        const settingsError = validateAgentWorkflowRunSettings(runSettings);
+        if (settingsError) {
+            showToast(settingsError, 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        payload.dagSpec = summary.spec;
+        payload.workflowVersion = 'draft';
+    } else {
+        if (!workflow) {
+            showToast('请选择要运行的工作流', 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        if (sourceMode === 'published' && !workflow.published_version) {
+            showToast('当前工作流还没有发布版本，请先发布后再运行发布版', 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        const settingsError = validateAgentWorkflowRunSettings(runSettings, { requireModel: sourceMode !== 'published' });
+        if (settingsError) {
+            showToast(settingsError, 'error');
+            payload._invalid = true;
+            return payload;
+        }
+        payload.workflowId = workflow.id;
+        payload.workflowVersion = sourceMode === 'published' ? 'published' : 'current';
+    }
+    const visualInputs = collectAgentDagInputs();
+    if (Object.keys(visualInputs).length) payload.dagInputs = visualInputs;
+    return payload;
+}
+
+async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
+    const sourceMode = ['draft', 'current', 'published'].includes(source) ? source : 'draft';
+    const payload = buildAgentWorkflowWorkbenchRunPayload(sourceMode, options.workflow || null);
+    if (payload._invalid) return null;
+    try {
+        setAgentWorkflowRunConsoleStatus(`正在预检：${agentWorkflowRunSourceLabel(sourceMode)}...`, 'running');
+        const preflight = await preflightAgentPayload(payload);
+        if (preflight.status === 'blocked') {
+            setAgentWorkflowRunConsoleStatus('预检未通过，请先处理阻断项。', 'error');
+            showToast('工作流预检未通过，请先处理阻断项', 'error');
+            return null;
+        }
+        setAgentWorkflowRunConsoleStatus(`正在创建任务：${agentWorkflowRunSourceLabel(sourceMode)}...`, 'running');
+        const res = await apiFetch(`${API_BASE}/agents/runs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '工作流运行失败');
+        setAgentWorkflowRunConsoleStatus(`${agentWorkflowRunSourceLabel(sourceMode)}已入队，可在任务详情查看节点轨迹。`, 'ready');
+        showToast(`${agentWorkflowRunSourceLabel(sourceMode)}已入队`, 'success');
+        await Promise.all([loadAgentRuns(1), loadAgentSchedules(), loadAgentNotifications()]);
+        await window.openAgentRun(data.run.id);
+        return data.run;
+    } catch (e) {
+        setAgentWorkflowRunConsoleStatus(e.message || '工作流运行失败', 'error');
+        showToast(e.message || '工作流运行失败', 'error');
+        return null;
+    }
+}
+
+async function publishAndRunAgentWorkflow() {
+    const workflow = await publishSelectedAgentWorkflow('current');
+    if (!workflow) return null;
+    return runAgentWorkflowFromWorkbench('published', { workflow });
+}
+
+window.runAgentWorkflowPreview = () => runAgentWorkflowFromWorkbench('draft');
+window.runAgentWorkflowPublished = () => runAgentWorkflowFromWorkbench('published');
+window.publishSelectedAgentWorkflow = publishSelectedAgentWorkflow;
+window.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow;
+window.openAgentWorkflowVersions = openAgentWorkflowVersions;
+
 window.createAgentRun = async function() {
     const payload = getAgentRunPayload();
     const frequency = document.getElementById('agent-schedule-frequency')?.value || 'manual';
@@ -2361,15 +2561,7 @@ window.createAgentRun = async function() {
     const preflight = await preflightAgentPayload(payload);
     if (preflight.status === 'blocked') return showToast('任务预检未通过，请先处理阻断项', 'error');
     if (frequency !== 'manual') {
-        const selectedWorkflow = payload.runMode === 'dag' ? selectedAgentWorkflow() : null;
         const schedulePayload = { ...payload };
-        if (selectedWorkflow?.published_version && Number(selectedWorkflow.published_version) === Number(selectedWorkflow.current_version) && currentWorkflowMatchesSelected(selectedWorkflow)) {
-            schedulePayload.workflowId = selectedWorkflow.id;
-            schedulePayload.workflowVersion = 'published';
-            delete schedulePayload.dagSpec;
-        } else if (payload.runMode === 'dag') {
-            showToast('计划任务将使用当前画布快照；保存并发布后可复用稳定发布版。', 'warning');
-        }
         const scheduleRes = await apiFetch(`${API_BASE}/agents/schedules`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2469,7 +2661,7 @@ window.saveAgentArtifact = async function(runId) {
 };
 
 window.deleteAgentRun = function(runId) {
-    showConfirm('移除智能体任务记录', '确定从任务列表移除这条智能体任务记录吗？记录会保留给超级管理员审计。', async () => {
+    showConfirm('移除智能体任务记录', '确定从任务列表移除这条智能体任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '移除记录失败', 'error');
@@ -2480,8 +2672,8 @@ window.deleteAgentRun = function(runId) {
 };
 
 window.showAgentRunAudit = async function() {
-    if (currentUser?.username !== 'admin') {
-        showToast('仅 admin 超级管理员可查看智能体删除审计', 'error');
+    if (!isSuperAdminUser()) {
+        showToast('仅 admin 权限层级可查看智能体删除审计', 'error');
         return;
     }
     try {
@@ -2508,7 +2700,6 @@ window.loadAgentWorkbench = async function() {
             loadAgentRuntimeStatus(),
             loadAgentMetrics(),
             loadAgentTemplates(),
-            loadAgentWorkflows(),
             loadAgentSchedules(),
             loadAgentNotifications(),
             loadAgentArtifacts()
@@ -2523,29 +2714,28 @@ window.openAgentWorkbench = async function() {
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;
     panel.querySelectorAll('.admin-root-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     await window.loadAgentWorkbench();
     window.bindAgentFilters?.();
     window.bindAgentEnterpriseControls?.();
     window.bindAgentConfigModal?.();
-    updateAgentWorkflowRunUi();
 };
 
 window.openAgentDagWorkbench = async function() {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');
-    const requestedWorkflowId = activeAgentWorkflowId || document.getElementById('agent-run-workflow-select')?.value || '';
+    const requestedWorkflowId = activeAgentWorkflowId || '';
     await Promise.all([
+        loadAgentModels(),
         agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
         loadAgentWorkflows()
     ]);
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(requestedWorkflowId));
     if (workflow) {
         activeAgentWorkflowId = String(workflow.id);
+        agentWorkflowDraftName = workflow.name || '';
         agentWorkflowDraftDescription = workflow.description || '';
-        const nameInput = document.getElementById('agent-workflow-name');
-        if (nameInput) nameInput.value = workflow.name || '';
         writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
         renderAgentWorkflowLibrary();
     } else {
@@ -2586,7 +2776,6 @@ window.bindAgentGoalTemplates = function() {
                 const allowMcp = document.getElementById('agent-allow-mcp');
                 if (allowMcp) allowMcp.checked = btn.dataset.agentMcp === 'true';
             }
-            updateAgentWorkflowRunUi();
             input.focus();
         });
     });
@@ -2621,29 +2810,6 @@ window.bindAgentEnterpriseControls = function() {
         frequency.addEventListener('change', update);
         update();
     }
-    const runMode = document.getElementById('agent-run-mode');
-    if (runMode && runMode.dataset.boundAgentRunMode !== '1') {
-        runMode.dataset.boundAgentRunMode = '1';
-        runMode.addEventListener('change', updateAgentWorkflowRunUi);
-    }
-    const runWorkflowSelect = document.getElementById('agent-run-workflow-select');
-    if (runWorkflowSelect && runWorkflowSelect.dataset.boundAgentRunWorkflow !== '1') {
-        runWorkflowSelect.dataset.boundAgentRunWorkflow = '1';
-        runWorkflowSelect.addEventListener('change', () => {
-            applyAgentRunWorkflowSelection(runWorkflowSelect.value, { showToast: false });
-        });
-    }
-    const workflowOpenBtn = document.getElementById('agent-workflow-run-open-btn');
-    if (workflowOpenBtn && workflowOpenBtn.dataset.boundAgentWorkflowRunOpen !== '1') {
-        workflowOpenBtn.dataset.boundAgentWorkflowRunOpen = '1';
-        workflowOpenBtn.addEventListener('click', () => window.openAgentDagWorkbench?.());
-    }
-    const runInputsRefreshBtn = document.getElementById('agent-run-dag-inputs-refresh-btn');
-    if (runInputsRefreshBtn && runInputsRefreshBtn.dataset.boundInputsRefresh !== '1') {
-        runInputsRefreshBtn.dataset.boundInputsRefresh = '1';
-        runInputsRefreshBtn.addEventListener('click', refreshAgentDagInputsPanel);
-    }
-    updateAgentWorkflowRunUi();
 };
 
 const agentConfigSectionTitles = {
@@ -2729,7 +2895,7 @@ window.bindAgentDagWorkbench = function() {
     const newBtn = document.getElementById('agent-workflow-new-btn');
     if (newBtn && newBtn.dataset.boundAgentWorkflowNew !== '1') {
         newBtn.dataset.boundAgentWorkflowNew = '1';
-        newBtn.addEventListener('click', openAgentWorkflowCreateModal);
+        newBtn.addEventListener('click', () => newAgentWorkflow());
     }
     const draftBtn = document.getElementById('agent-dag-save-draft-btn');
     if (draftBtn && draftBtn.dataset.boundAgentDagDraft !== '1') {
@@ -2746,6 +2912,70 @@ window.bindAgentDagWorkbench = function() {
         backBtn.dataset.boundAgentDagBack = '1';
         backBtn.addEventListener('click', () => window.closeAgentDagWorkbench?.());
     }
+    const workflowPicker = document.getElementById('agent-workflow-picker');
+    const workflowPickerTrigger = document.getElementById('agent-workflow-picker-trigger');
+    const workflowPickerSearch = document.getElementById('agent-workflow-picker-search');
+    const workflowPickerList = document.getElementById('agent-workflow-picker-list');
+    if (workflowPickerTrigger && workflowPickerTrigger.dataset.boundAgentWorkflowPicker !== '1') {
+        workflowPickerTrigger.dataset.boundAgentWorkflowPicker = '1';
+        workflowPickerTrigger.addEventListener('click', () => {
+            const isOpen = workflowPicker?.classList.contains('is-open');
+            setAgentWorkflowPickerOpen(!isOpen);
+        });
+        workflowPickerTrigger.addEventListener('keydown', event => {
+            if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setAgentWorkflowPickerOpen(true);
+            }
+        });
+    }
+    if (workflowPickerSearch && workflowPickerSearch.dataset.boundAgentWorkflowSearch !== '1') {
+        workflowPickerSearch.dataset.boundAgentWorkflowSearch = '1';
+        workflowPickerSearch.addEventListener('input', () => {
+            agentWorkflowPickerQuery = workflowPickerSearch.value || '';
+            renderAgentWorkflowPicker();
+        });
+        workflowPickerSearch.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setAgentWorkflowPickerOpen(false);
+                workflowPickerTrigger?.focus();
+                return;
+            }
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                workflowPickerList?.querySelector('.agent-workflow-picker-option')?.focus();
+            }
+        });
+    }
+    if (workflowPickerList && workflowPickerList.dataset.boundAgentWorkflowList !== '1') {
+        workflowPickerList.dataset.boundAgentWorkflowList = '1';
+        workflowPickerList.addEventListener('keydown', event => {
+            const option = event.target.closest('.agent-workflow-picker-option');
+            if (!option) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setAgentWorkflowPickerOpen(false);
+                workflowPickerTrigger?.focus();
+                return;
+            }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const options = Array.from(workflowPickerList.querySelectorAll('.agent-workflow-picker-option'));
+                const index = options.indexOf(option);
+                const nextIndex = event.key === 'ArrowDown'
+                    ? Math.min(index + 1, options.length - 1)
+                    : Math.max(index - 1, 0);
+                options[nextIndex]?.focus();
+            }
+        });
+    }
+    if (workflowPicker && workflowPicker.dataset.boundAgentWorkflowOutside !== '1') {
+        workflowPicker.dataset.boundAgentWorkflowOutside = '1';
+        document.addEventListener('click', event => {
+            if (!workflowPicker.contains(event.target)) setAgentWorkflowPickerOpen(false, { focusSearch: false });
+        });
+    }
     const workflowSelect = document.getElementById('agent-workflow-select');
     if (workflowSelect && workflowSelect.dataset.boundAgentWorkflowSelect !== '1') {
         workflowSelect.dataset.boundAgentWorkflowSelect = '1';
@@ -2756,9 +2986,8 @@ window.bindAgentDagWorkbench = function() {
                 return;
             }
             const selected = agentWorkflowsCache.find(item => String(item.id) === String(activeAgentWorkflowId));
+            agentWorkflowDraftName = selected?.name || '';
             agentWorkflowDraftDescription = selected?.description || '';
-            const nameInput = document.getElementById('agent-workflow-name');
-            if (nameInput) nameInput.value = selected?.name || '';
             renderAgentWorkflowLibrary();
             updateAgentWorkflowRunUi();
         });
@@ -2773,15 +3002,15 @@ window.bindAgentDagWorkbench = function() {
         versionsBtn.dataset.boundAgentWorkflowVersions = '1';
         versionsBtn.addEventListener('click', openAgentWorkflowVersions);
     }
-    const publishBtn = document.getElementById('agent-workflow-publish-btn');
-    if (publishBtn && publishBtn.dataset.boundAgentWorkflowPublish !== '1') {
-        publishBtn.dataset.boundAgentWorkflowPublish = '1';
-        publishBtn.addEventListener('click', () => publishSelectedAgentWorkflow('current'));
-    }
     const deleteBtn = document.getElementById('agent-workflow-delete-btn');
     if (deleteBtn && deleteBtn.dataset.boundAgentWorkflowDelete !== '1') {
         deleteBtn.dataset.boundAgentWorkflowDelete = '1';
         deleteBtn.addEventListener('click', deleteSelectedAgentWorkflow);
+    }
+    const drawerDeleteBtn = document.getElementById('agent-dag-node-drawer-delete');
+    if (drawerDeleteBtn && drawerDeleteBtn.dataset.boundAgentDagDrawerDelete !== '1') {
+        drawerDeleteBtn.dataset.boundAgentDagDrawerDelete = '1';
+        drawerDeleteBtn.addEventListener('click', deleteSelectedAgentDagNode);
     }
     const drawerCloseBtn = document.getElementById('agent-dag-node-drawer-close');
     if (drawerCloseBtn && drawerCloseBtn.dataset.boundAgentDagDrawerClose !== '1') {
@@ -2847,60 +3076,49 @@ window.refreshAgentDagEditor = () => dagEditorInstance?.refresh();
 
 // 运行时输入参数面板：自动扫描工作流中引用的 {{inputs.*}} 变量并生成输入表单
 function refreshAgentDagInputsPanel() {
-    const targets = [
-        {
-            panel: document.getElementById('agent-run-dag-inputs-panel'),
-            list: document.getElementById('agent-run-dag-inputs-list')
-        },
-        {
-            panel: document.getElementById('agent-dag-inputs-panel'),
-            list: document.getElementById('agent-dag-inputs-list')
+    const workflowWorkbench = document.getElementById('agent-dag-workbench-modal');
+    const workflowWorkbenchOpen = Boolean(workflowWorkbench && !workflowWorkbench.classList.contains('hidden'));
+    const panel = document.getElementById('agent-dag-inputs-panel');
+    const list = document.getElementById('agent-dag-inputs-list');
+    if (!panel || !list) return;
+    if (!workflowWorkbenchOpen) {
+        panel.classList.add('hidden');
+        return;
+    }
+    const scanRefs = (dagText) => {
+        const refs = new Set();
+        const regex = /\{\{\s*inputs\.([\w.-]+)\s*\}\}/g;
+        let match;
+        while ((match = regex.exec(dagText || '')) !== null) {
+            const key = String(match[1] || '').trim();
+            if (key) refs.add(key);
         }
-    ].filter(item => item.panel && item.list);
-    if (!targets.length) return;
-    const runMode = document.getElementById('agent-run-mode')?.value || 'standard';
-    if (runMode !== 'dag') {
-        targets.forEach(({ panel }) => panel.classList.add('hidden'));
-        return;
-    }
+        return refs;
+    };
     let dagText = '';
-    const selected = selectedAgentWorkflow();
-    if (selected) {
-        try { dagText = JSON.stringify(selected.dag_spec || { nodes: [] }); } catch (e) { dagText = ''; }
-    } else {
-        try { dagText = document.getElementById('agent-dag-spec')?.value || ''; } catch (e) { /* ignore */ }
-    }
-    const refs = new Set();
-    const regex = /\{\{\s*inputs\.([\w.-]+)\s*\}\}/g;
-    let match;
-    while ((match = regex.exec(dagText)) !== null) {
-        const key = String(match[1] || '').trim();
-        if (key) refs.add(key);
-    }
+    try { dagText = document.getElementById('agent-dag-spec')?.value || ''; } catch (e) { dagText = ''; }
+    const refs = scanRefs(dagText);
     if (!refs.size) {
-        targets.forEach(({ panel }) => panel.classList.add('hidden'));
+        panel.classList.add('hidden');
         return;
     }
-    targets.forEach(({ panel, list }) => {
-        panel.classList.remove('hidden');
-        // 保留已有值，避免刷新时丢失用户输入
-        const existing = {};
-        list.querySelectorAll('.agent-dag-input-item input').forEach(input => {
-            existing[input.dataset.dagInputKey || input.name] = input.value;
-        });
-        list.innerHTML = [...refs].map(key => `
-            <label class="agent-dag-input-item">
-                <span>${agentEscape(key)}</span>
-                <input class="form-input" type="text" data-dag-input-key="${agentEscape(key)}" value="${agentEscape(existing[key] || '')}" placeholder="输入 ${agentEscape(key)} 的值">
-            </label>
-        `).join('');
+    panel.classList.remove('hidden');
+    const existing = {};
+    list.querySelectorAll('.agent-dag-input-item input').forEach(input => {
+        existing[input.dataset.dagInputKey || input.name] = input.value;
     });
+    list.innerHTML = [...refs].map(key => `
+        <label class="agent-dag-input-item">
+            <span>${agentEscape(key)}</span>
+            <input class="form-input" type="text" data-dag-input-key="${agentEscape(key)}" value="${agentEscape(existing[key] || '')}" placeholder="输入 ${agentEscape(key)} 的值">
+        </label>
+    `).join('');
 }
 
 // 从运行时输入面板收集 dagInputs
 function collectAgentDagInputs() {
     const result = {};
-    document.querySelectorAll('#agent-run-dag-inputs-list [data-dag-input-key], #agent-dag-inputs-list [data-dag-input-key]').forEach(input => {
+    document.querySelectorAll('#agent-dag-inputs-list [data-dag-input-key]').forEach(input => {
         const key = String(input.dataset.dagInputKey || '').trim();
         const value = String(input.value || '').trim();
         if (key) result[key] = value;

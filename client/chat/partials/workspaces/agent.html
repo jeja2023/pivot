@@ -61,31 +61,8 @@
                                     <option value="standard">标准</option>
                                     <option value="deep">深度</option>
                                     <option value="audit">审查</option>
-                                    <option value="dag">工作流</option>
                                 </select>
                             </label>
-                        </div>
-                        <div id="agent-run-workflow-field" class="agent-run-workflow-field hidden">
-                            <label>
-                                <span>工作流</span>
-                                <select id="agent-run-workflow-select" class="form-input">
-                                    <option value="">选择要运行的工作流</option>
-                                </select>
-                            </label>
-                            <button id="agent-workflow-run-open-btn" class="btn-secondary" type="button">打开工作流</button>
-                        </div>
-                        <div id="agent-workflow-run-status" class="agent-workflow-run-status hidden" aria-live="polite">
-                            <span id="agent-workflow-run-status-text">未配置工作流</span>
-                        </div>
-                        <div class="agent-dag-inputs-panel hidden" id="agent-run-dag-inputs-panel">
-                            <div class="agent-dag-inputs-head">
-                                <h4>运行输入</h4>
-                                <span class="agent-dag-inputs-hint">所选工作流引用了以下输入变量，运行前填写即可。</span>
-                            </div>
-                            <div class="agent-dag-inputs-list" id="agent-run-dag-inputs-list"></div>
-                            <div class="agent-dag-inputs-actions">
-                                <button type="button" id="agent-run-dag-inputs-refresh-btn" class="btn-secondary">重新扫描变量</button>
-                            </div>
                         </div>
                         <div class="agent-enterprise-controls">
                             <label>
@@ -126,9 +103,9 @@
                                     <option value="none">不扩展</option>
                                 </select>
                             </label>
-                            <label>
+                            <label class="agent-context-notes-field">
                                 <span>补充说明</span>
-                                <input id="agent-context-notes" class="form-input" placeholder="可选，限定范围、部门或资料来源">
+                                <textarea id="agent-context-notes" class="form-input" rows="2" placeholder="可选，限定范围、部门或资料来源"></textarea>
                             </label>
                         </div>
                     </div>

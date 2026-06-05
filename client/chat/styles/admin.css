@@ -898,7 +898,7 @@
 .users-table .col-username { width: 132px; }
 .users-table .col-nickname { width: 132px; }
 .users-table .col-unit { width: auto; }
-.users-table .col-role { width: 78px; }
+.users-table .col-role { width: 100px; }
 .users-table .col-status { width: 76px; }
 .users-table .col-created { width: 156px; }
 .users-table .col-login { width: 156px; }

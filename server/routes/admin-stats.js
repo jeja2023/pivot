@@ -20,6 +20,7 @@ const {
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { getBeijingTimestamp } = require('../time');
+const { isSuperAdmin } = require('../permissions');
 
 const USAGE_ROLE_LABELS = {
     user: '提问',
@@ -278,8 +279,6 @@ function getMonitorKnowledgeChunkCount() {
     `).get();
     return Number(row?.count || 0);
 }
-
-const isSuperAdmin = (user) => user?.username === 'admin';
 
 function createAdminStatsRouter({
     authMiddleware,
@@ -748,7 +747,7 @@ function createAdminStatsRouter({
     }));
 
     router.get('/api-call-logs', authMiddleware, asyncHandler(async (req, res) => {
-        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '仅 admin 超级管理员可查看第三方 API 调用内容' });
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '仅 admin 权限层级可查看第三方 API 调用内容' });
         const page = parseInt(req.query.page, 10) || 1;
         const limit = Math.min(parseInt(req.query.limit, 10) || 15, 100);
         const offset = (page - 1) * limit;

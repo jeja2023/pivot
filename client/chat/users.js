@@ -36,16 +36,19 @@ window.loadUsers = async function(page = 1) {
         renderPagination('users', 0, 1);
         return;
     }
-    const canViewUserRecords = isSuperAdmin === true || currentUser?.username === 'admin';
+    const canViewUserRecords = isSuperAdmin === true || isSuperAdminUser();
     setPublicRegistrationToggle(allowPublicRegistration === true);
     userActionCache.clear();
-    document.getElementById('user-list-body').innerHTML = data.map(u => `
+    document.getElementById('user-list-body').innerHTML = data.map(u => {
+        const permissionTier = u.permissionTier || u.permission_tier || getPermissionTier(u);
+        const permissionLabel = u.permissionLabel || u.permission_label || getPermissionLabel(u);
+        return `
         <tr>
             <td class="text-center" title="${u.id}">${u.id}</td>
             <td title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
             <td title="${escapeHtml(u.nickname || '')}">${escapeHtml(u.nickname || u.username)}</td>
             <td title="${escapeHtml(u.unit || '')}">${escapeHtml(u.unit || '-')}</td>
-            <td title="${escapeHtml(u.role)}">${escapeHtml(u.role)}</td>
+            <td title="${escapeHtml(`权限层级: ${permissionTier}; 存储角色: ${u.role}`)}">${escapeHtml(permissionLabel)}</td>
             <td title="${escapeHtml(u.deleted_at ? '已删除' : (u.status || 'active'))}">${u.deleted_at ? '已删除' : ((u.status || 'active') === 'disabled' ? '禁用' : '启用')}</td>
             <td title="${escapeHtml(formatDateToCN(u.created_at))}">${escapeHtml(formatDateToCN(u.created_at))}</td>
             <td title="${escapeHtml(formatDateToCN(u.last_login_at))}">${escapeHtml(formatDateToCN(u.last_login_at))}</td>
@@ -58,7 +61,8 @@ window.loadUsers = async function(page = 1) {
                 </div>
             </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
     renderPagination('users', totalCount, requestedPage);
 }
 
@@ -118,11 +122,11 @@ window.prepareEditUser = (user) => {
     document.getElementById('u-username').disabled = true;
     document.getElementById('u-nickname').value = user.nickname || '';
     document.getElementById('u-unit').value = user.unit || '';
-    const isRootAdmin = user.username === 'admin';
+    const isBuiltInAdminAccount = user.username === 'admin';
     document.getElementById('u-role').value = user.role || 'user';
-    document.getElementById('u-role').disabled = isRootAdmin;
+    document.getElementById('u-role').disabled = isBuiltInAdminAccount;
     document.getElementById('u-status').value = user.status || 'active';
-    document.getElementById('u-status').disabled = isRootAdmin;
+    document.getElementById('u-status').disabled = isBuiltInAdminAccount;
     document.getElementById('u-password-wrap').classList.add('hidden');
     document.getElementById('user-modal-title').innerText = '编辑用户';
     document.getElementById('user-modal-container').classList.remove('hidden');
@@ -177,7 +181,7 @@ window.resetUserPassword = async (id) => {
 
 window.updatePublicRegistrationSetting = async () => {
     const toggle = document.getElementById('public-registration-toggle');
-    if (!toggle || currentUser?.username !== 'admin') return;
+    if (!toggle || !isSuperAdminUser()) return;
     const previous = !toggle.checked;
     toggle.disabled = true;
     try {
@@ -225,7 +229,7 @@ function bindUserRecordsEvents() {
 }
 
 window.openUserRecords = async (user) => {
-    if (currentUser?.username !== 'admin') return showToast('仅 admin 超级管理员可查看用户详细记录', 'error');
+    if (!isSuperAdminUser()) return showToast('仅 admin 权限层级可查看用户详细记录', 'error');
     userRecordsTarget = user;
     bindUserRecordsEvents();
     document.getElementById('user-records-title').innerText = `${user.nickname || user.username}（${user.username}）`;
@@ -330,7 +334,7 @@ window.importUsers = async () => {
 };
 
 window.deleteUser = (id) => {
-    showConfirm('删除用户', '确定删除该用户吗？账号将被禁用，历史对话、附件、审计和用量数据会保留，仅 admin 超级管理员可追溯查看。', async () => {
+    showConfirm('删除用户', '确定删除该用户吗？账号将被禁用，历史对话、附件、审计和用量数据会保留，仅 admin 权限层级可追溯查看。', async () => {
         const res = await apiFetch(API_BASE + `/admin/users/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('用户已删除'); loadUsers(pageState.users); }
     });

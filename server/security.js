@@ -7,6 +7,7 @@ const https = require('https');
 const net = require('net');
 const path = require('path');
 const { logger } = require('./logger');
+const { isAdmin } = require('./permissions');
 const dnsPromises = dns.promises;
 
 const encryptedPrefix = 'enc:v1:';
@@ -179,7 +180,7 @@ function getSafeOutboundOptionsForUser(user, {
     allowPrivateEnv = 'ALLOW_PRIVATE_MODEL_URLS',
     allowExplicitLoopbackForAdmin = false
 } = {}) {
-    const allowPrivateForAdmin = process.env[allowPrivateEnv] !== 'false' && user?.role === 'admin';
+    const allowPrivateForAdmin = process.env[allowPrivateEnv] !== 'false' && isAdmin(user);
     return {
         blockPrivate: !allowPrivateForAdmin,
         allowExplicitLoopback: allowExplicitLoopbackForAdmin && allowPrivateForAdmin
@@ -192,7 +193,7 @@ function createSafeHttpAgentsForUser(user, options = {}) {
 
 async function assertSafeOutboundUrl(rawUrl, user) {
     const parsed = validateModelUrl(rawUrl, user);
-    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && user?.role === 'admin';
+    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && isAdmin(user);
     await assertSafeOutboundHost(parsed.hostname, { blockPrivate: !allowPrivateForAdmin });
     return parsed;
 }
@@ -201,7 +202,7 @@ async function assertSafeOutboundUrl(rawUrl, user) {
 // 敏感目标，关闭 DNS rebinding 与云元数据 SSRF；普通用户不能访问内网目标。
 async function assertSafeMcpOutboundUrl(rawUrl, user = null) {
     const parsed = validateMcpEndpointUrl(rawUrl);
-    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MCP_URLS !== 'false' && user?.role === 'admin';
+    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MCP_URLS !== 'false' && isAdmin(user);
     const allowExplicitLoopback = allowPrivateForAdmin && isLoopbackHost(parsed.hostname);
     if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
         throw new Error('Non-admin users cannot configure private or local MCP endpoints.');
@@ -238,7 +239,7 @@ function validateModelUrl(rawUrl, user) {
         throw new Error('Model endpoint host is not in the allowlist.');
     }
 
-    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && user?.role === 'admin';
+    const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && isAdmin(user);
     if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
         throw new Error('Non-admin users cannot configure private or local model endpoints.');
     }

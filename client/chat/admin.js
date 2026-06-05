@@ -111,12 +111,12 @@ const SETTINGS_TABS = ['users', 'models', 'logs', 'monitor', 'stats', 'report', 
 const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'users', 'logs', 'monitor', 'report', 'announcements']);
 
 function getDefaultSettingsTab() {
-    return currentUser?.role === 'admin' ? 'ops' : 'models';
+    return isAdminUser() ? 'ops' : 'models';
 }
 
 function normalizeSettingsTab(tab) {
     let target = SETTINGS_TABS.includes(tab) ? tab : getDefaultSettingsTab();
-    if (ADMIN_ONLY_SETTINGS_TABS.has(target) && currentUser?.role !== 'admin') target = 'models';
+    if (ADMIN_ONLY_SETTINGS_TABS.has(target) && !isAdminUser()) target = 'models';
     return target;
 }
 
@@ -169,8 +169,8 @@ window.openAdminPanel = async (options = {}) => {
     const adminContainer = document.getElementById('admin-container');
     window.showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
-    const isAdmin = currentUser?.role === 'admin';
-    const isSuperAdmin = currentUser?.username === 'admin';
+    const isAdmin = isAdminUser();
+    const isSuperAdmin = isSuperAdminUser();
     const titleEl = adminContainer?.querySelector('.settings-workspace-header h3');
     const descEl = adminContainer?.querySelector('.settings-workspace-header p');
     if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
@@ -443,7 +443,7 @@ window.saveSettings = async () => {
         if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
         if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
         if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
-        const endpoint = currentUser?.username === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+        const endpoint = isSuperAdminUser() ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
         const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -457,7 +457,7 @@ window.saveSettings = async () => {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        showToast(currentUser?.username === 'admin' ? '系统设置已保存' : '个人设置已保存');
+        showToast(isSuperAdminUser() ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
         showToast(e.message || '系统设置保存失败', 'error');
     }
@@ -495,7 +495,7 @@ window.saveEmbeddingSettings = async () => {
         if (embeddingKeyInput && embeddingKeyInput.value.trim()) {
             payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
         }
-        const endpoint = currentUser?.username === 'admin' ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+        const endpoint = isSuperAdminUser() ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
         const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -504,7 +504,7 @@ window.saveEmbeddingSettings = async () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '检索配置保存失败');
         updateEmbeddingSettingsForm(data.embeddingConfig);
-        showToast(currentUser?.username === 'admin' ? '系统检索配置已保存' : '个人检索配置已保存');
+        showToast(isSuperAdminUser() ? '系统检索配置已保存' : '个人检索配置已保存');
         if (modal) modal.classList.add('hidden');
     } catch (e) {
         showToast(e.message || '检索配置保存失败', 'error');

@@ -21,8 +21,7 @@ const {
 } = require('../services/models');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
-
-const isSuperAdmin = (user) => user?.username === 'admin';
+const { isAdmin, isSuperAdmin } = require('../permissions');
 
 function canManageModel(model, user) {
     if (!model || !user) return false;
@@ -50,7 +49,7 @@ function getTestableModel(modelId, user) {
     const model = db.prepare(sql).get(...params);
     if (!model) return null;
     if (model.user_id && model.user_id !== user.id) return null;
-    if (!model.user_id && user.role !== 'admin' && model.allowed_units) {
+    if (!model.user_id && !isAdmin(user) && model.allowed_units) {
         const units = String(model.allowed_units || '').split(',').map(unit => unit.trim()).filter(Boolean);
         const userUnit = String(user.unit || '').trim();
         if (!userUnit || !units.includes(userUnit)) return null;
@@ -257,7 +256,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let where = '';
         let params = [];
 
-        if (req.user.role !== 'admin') {
+        if (!isAdmin(req.user)) {
             where = "WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)))";
             params = [req.user.id, `,${(req.user.unit || '').trim()},`];
         } else {
@@ -265,7 +264,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         // 为管理员增加过滤：不显示普通用户的私有默认模型
-        if (req.user.role === 'admin') {
+        if (isAdmin(req.user)) {
             const adminFilter = isSuperAdmin(req.user)
                 ? "(m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)"
                 : "(m.user_id IS NULL OR m.user_id = ?)";
@@ -310,7 +309,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         validateModelUrl(url, req.user);
         if (monitor_url) validateModelUrl(monitor_url, req.user);
 
-        const targetUserId = req.user.role === 'admin' && isSuperAdmin(req.user) && req.body.scope === 'global'
+        const targetUserId = isSuperAdmin(req.user) && req.body.scope === 'global'
             ? null
             : req.user.id;
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
@@ -344,7 +343,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
-        const allowedUnits = req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null
+        const allowedUnits = isSuperAdmin(req.user) && existing.user_id === null
             ? normalizeTags(req.body.allowed_units)
             : (existing.allowed_units || '');
         
@@ -359,7 +358,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
 
         let info;
-        if (req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null) {
+        if (isSuperAdmin(req.user) && existing.user_id === null) {
             info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?')
               .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id);
         } else {
@@ -381,7 +380,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             return res.status(403).json({ error: '无权删除或模型不存在' });
         }
         let info;
-        if (req.user.role === 'admin' && isSuperAdmin(req.user) && existing.user_id === null) {
+        if (isSuperAdmin(req.user) && existing.user_id === null) {
             info = db.prepare('DELETE FROM models WHERE id = ?').run(req.params.id);
         } else {
             info = db.prepare('DELETE FROM models WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);

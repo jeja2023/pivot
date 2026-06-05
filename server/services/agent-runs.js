@@ -4,6 +4,7 @@ const {
     parseJsonObject,
     normalizeMaxSteps
 } = require('./agent-validators');
+const { isSuperAdmin } = require('../permissions');
 
 function getRunForUser(runId, user, options = {}) {
     const includeDeleted = Boolean(options.includeDeleted);
@@ -75,8 +76,8 @@ function listRuns(user, options = {}) {
 }
 
 function listDeletedRunsForAdmin(user, limit = 100) {
-    if (user?.username !== 'admin') {
-        const err = new Error('仅 admin 超级管理员可查看智能体任务删除审计。');
+    if (!isSuperAdmin(user)) {
+        const err = new Error('仅 admin 权限层级可查看智能体任务删除审计。');
         err.status = 403;
         throw err;
     }

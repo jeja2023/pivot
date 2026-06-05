@@ -2,10 +2,10 @@ const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { getBuiltInToolDefinitions } = require('./agent-tools');
 const { listMcpServers } = require('./mcp-client');
+const { isSuperAdmin } = require('../permissions');
 
 const PACKAGE_TYPES = new Set(['builtin_tool', 'mcp_server', 'database_connection']);
 const PACKAGE_STATUSES = new Set(['enabled', 'disabled']);
-const isSuperAdmin = (user) => user?.username === 'admin';
 
 function sourceKey(type, ref) {
     return `${type}:${String(ref || '').trim()}`;
@@ -120,7 +120,7 @@ function setCapabilityPackageStatus(packageKey, user, status = 'enabled') {
     const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
     if (!canAccessPackage(row, user)) return null;
     if (row.scope === 'global' && !isSuperAdmin(user)) {
-        const err = new Error('只有 admin 超级管理员可以启停全局能力包。');
+        const err = new Error('只有 admin 权限层级可以启停全局能力包。');
         err.status = 403;
         throw err;
     }
@@ -144,7 +144,7 @@ function filterBuiltInToolsByCapability(tools, user) {
 
 function filterMcpToolsByCapability(tools, user) {
     return tools.filter(tool => {
-        const type = String(tool.name || '').startsWith('db.') || String(tool.fullName || '').includes('.db.')
+        const type = tool.serverType === 'database'
             ? 'database_connection'
             : 'mcp_server';
         return isCapabilityEnabled(type, String(tool.serverId || ''), user);

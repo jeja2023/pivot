@@ -47,7 +47,7 @@ function ensureStatsExportActions() {
     costBtn.textContent = '导出费用';
     costBtn.addEventListener('click', () => window.exportModelCosts?.());
     wrap.appendChild(costBtn);
-    if (currentUser?.role === 'admin') {
+    if (isAdminUser()) {
         const complianceBtn = document.createElement('button');
         complianceBtn.id = 'compliance-export-btn';
         complianceBtn.type = 'button';
@@ -230,7 +230,7 @@ function renderMonitorEndpointLists(endpoints = {}) {
 
 window.loadOpsSummary = async function() {
     try {
-        const includeMonitor = currentUser?.role === 'admin';
+        const includeMonitor = isAdminUser();
         const [summaryRes, trendRes, monitorRes] = await Promise.all([
             apiFetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders() }),
             apiFetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
@@ -427,7 +427,7 @@ const ROUTE_NAME_MAP = {
 };
 
 window.loadMonitorSummary = async function() {
-    if (currentUser?.role !== 'admin') return;
+    if (!isAdminUser()) return;
     try {
         const res = await apiFetch(`${API_BASE}/stats/monitor-summary`);
         if (!res.ok) throw new Error('系统监控加载失败');

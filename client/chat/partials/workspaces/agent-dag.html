@@ -4,7 +4,7 @@
             <div class="agent-dag-modal-header">
                 <div>
                     <h3>工作流</h3>
-                    <p>自定义节点、工具输入与依赖关系，也可从模板生成可编辑工作流。</p>
+                    <p>像独立流程资产一样设计、预览、发布和运行，适合搭建稳定可复用的自动化编排。</p>
                 </div>
                 <div class="agent-dag-header-actions">
                     <button id="agent-dag-save-draft-btn" class="btn-secondary" type="button">保存草稿</button>
@@ -14,41 +14,42 @@
             </div>
             <div class="agent-dag-library-bar">
                 <div class="agent-dag-library-fields">
-                    <label class="agent-dag-library-name">
-                        <span>工作流名称</span>
-                        <input id="agent-workflow-name" class="form-input" maxlength="100" placeholder="例如：日报生成流程">
-                    </label>
-                    <label class="agent-dag-library-select">
-                        <span>工作流库</span>
-                        <select id="agent-workflow-select" class="form-input">
-                            <option value="">选择已有工作流</option>
-                        </select>
-                    </label>
+                    <div class="agent-dag-current-draft" aria-live="polite">
+                        <span>当前画布</span>
+                        <strong id="agent-workflow-current-label">新建草稿</strong>
+                    </div>
+                    <div class="agent-dag-library-select" role="group" aria-labelledby="agent-workflow-library-label">
+                        <span id="agent-workflow-library-label">已保存工作流</span>
+                        <div id="agent-workflow-picker" class="agent-workflow-picker">
+                            <button id="agent-workflow-picker-trigger" class="agent-workflow-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="agent-workflow-picker-menu">
+                                <span class="agent-workflow-picker-trigger-copy">
+                                    <strong id="agent-workflow-picker-title">选择已保存工作流</strong>
+                                    <small id="agent-workflow-picker-meta">可按名称、版本或节点数筛选</small>
+                                </span>
+                                <span class="agent-workflow-picker-caret" aria-hidden="true">⌄</span>
+                            </button>
+                            <div id="agent-workflow-picker-menu" class="agent-workflow-picker-menu hidden" role="presentation">
+                                <input id="agent-workflow-picker-search" class="form-input agent-workflow-picker-search" autocomplete="off" placeholder="搜索工作流名称、版本、节点数" aria-label="搜索已保存工作流">
+                                <div id="agent-workflow-picker-list" class="agent-workflow-picker-list" role="listbox" aria-label="已保存工作流列表"></div>
+                            </div>
+                            <select id="agent-workflow-select" class="form-input agent-workflow-native-select" aria-label="已保存工作流">
+                                <option value="">选择已保存工作流</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
-                <div class="agent-dag-library-actions" aria-label="工作流库操作">
+                <div class="agent-dag-library-actions" aria-label="已保存工作流操作">
                     <button id="agent-workflow-new-btn" class="btn-secondary" type="button">新建工作流</button>
                     <button id="agent-workflow-load-btn" class="btn-secondary" type="button">加载</button>
                     <button id="agent-workflow-versions-btn" class="btn-secondary" type="button">版本</button>
-                    <button id="agent-workflow-publish-btn" class="btn-primary" type="button">发布</button>
                     <button id="agent-workflow-delete-btn" class="btn-danger-outline" type="button">删除</button>
                 </div>
-                <span id="agent-workflow-version-label" class="agent-workflow-version-label"></span>
+                <div id="agent-workflow-lifecycle" class="agent-workflow-lifecycle" aria-live="polite"></div>
             </div>
             <div class="agent-dag-workbench">
                 <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
                     <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
                     <div class="pivot-dag-editor-canvas" id="agent-dag-editor-canvas"></div>
-                </div>
-                <!-- 运行时输入面板：自动解析工作流中引用的 {{inputs.*}} 变量 -->
-                <div class="agent-dag-inputs-panel hidden" id="agent-dag-inputs-panel">
-                    <div class="agent-dag-inputs-head">
-                        <h4>运行输入参数</h4>
-                        <span class="agent-dag-inputs-hint">工作流中引用了以下输入变量，请在运行前填写实际值。</span>
-                    </div>
-                    <div class="agent-dag-inputs-list" id="agent-dag-inputs-list"></div>
-                    <div class="agent-dag-inputs-actions">
-                        <button type="button" id="agent-dag-inputs-refresh-btn" class="btn-secondary">重新扫描变量</button>
-                    </div>
                 </div>
                 <aside id="agent-dag-node-drawer" class="agent-dag-node-drawer hidden" aria-hidden="true">
                     <div class="agent-dag-node-drawer-panel">
@@ -57,7 +58,10 @@
                                 <h3 id="agent-dag-node-drawer-title">节点配置</h3>
                                 <span id="agent-dag-node-drawer-subtitle"></span>
                             </div>
-                            <button id="agent-dag-node-drawer-close" class="btn-secondary" type="button">关闭</button>
+                            <div class="agent-dag-drawer-actions">
+                                <button id="agent-dag-node-drawer-delete" class="btn-danger-outline" type="button">删除</button>
+                                <button id="agent-dag-node-drawer-close" class="btn-secondary" type="button">关闭</button>
+                            </div>
                         </div>
                         <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
                     </div>

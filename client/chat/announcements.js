@@ -414,7 +414,7 @@
     }
 
     window.loadAnnouncementsAdmin = async function (page = 1) {
-        if (currentUser?.role !== 'admin') return;
+        if (!isAdminUser()) return;
         const body = document.getElementById('announcement-list-body');
         if (!body) return;
         try {

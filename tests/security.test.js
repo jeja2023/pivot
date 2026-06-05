@@ -167,6 +167,16 @@ const {
     renderPrometheusMetrics
 } = require('../server/metrics');
 const { aiSemaphore } = require('../server/services/concurrency');
+const {
+    ADMIN_TIER,
+    MANAGER_TIER,
+    USER_TIER,
+    getPermissionLabel,
+    getPermissionTier,
+    isAdmin,
+    isSuperAdmin,
+    withPermissionFlags
+} = require('../server/permissions');
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
 const { createAttachmentsRouter } = require('../server/routes/attachments');
 const { createModelsRouter } = require('../server/routes/models');
@@ -189,6 +199,13 @@ const {
     resolveRagQueryContent
 } = require('../server/routes/chat');
 const { createMcpRouter } = require('../server/routes/mcp');
+const {
+    listCachedMcpTools,
+    refreshMcpTools
+} = require('../server/services/mcp-client');
+const {
+    maybeBuildMcpChatContext
+} = require('../server/services/chat-mcp-context');
 const {
     buildEmbeddingModelItem,
     buildEmbeddingResponse,
@@ -232,13 +249,17 @@ const {
     parseJsonObject,
     rerunAgentRun,
     resumeAgentRun,
+    runAgent,
     runAgentScheduleNow,
     saveAgentRunArtifact,
     shouldPauseForApproval,
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 const { resolveDagNodeInput } = require('../server/services/agent-dag-utils');
-const { formatToolList } = require('../server/services/agent-tool-catalog');
+const {
+    buildGenericDatabaseTools,
+    formatToolList
+} = require('../server/services/agent-tool-catalog');
 const {
     getRunDetailForUser,
     getRunProgress,
@@ -334,6 +355,41 @@ test('seed repair restores built-in admin role and login status', () => {
         db.prepare('UPDATE users SET role = ?, status = ?, deleted_at = ?, nickname = ?, unit = ? WHERE id = ?')
             .run(admin.role, admin.status, admin.deleted_at, admin.nickname, admin.unit, admin.id);
     }
+});
+
+test('permission helpers expose admin, manager, and user tiers', () => {
+    const superAdmin = withPermissionFlags({ id: 1, username: 'admin', role: 'admin' });
+    const limitedAdmin = withPermissionFlags({ id: 2, username: 'ops_admin', role: 'admin' });
+    const caseVariantAdmin = withPermissionFlags({ id: 3, username: 'Admin', role: 'admin' });
+    const spoofedAdminName = withPermissionFlags({ id: 4, username: 'admin', role: 'user' });
+    const normalUser = withPermissionFlags({ id: 5, username: 'normal_user', role: 'user' });
+
+    assert.equal(isAdmin(superAdmin), true);
+    assert.equal(isSuperAdmin(superAdmin), true);
+    assert.equal(superAdmin.is_super_admin, true);
+    assert.equal(getPermissionTier(superAdmin), ADMIN_TIER);
+    assert.equal(superAdmin.permissionTier, ADMIN_TIER);
+    assert.equal(getPermissionLabel(superAdmin), '系统管理员');
+    assert.equal(superAdmin.permissionLabel, '系统管理员');
+    assert.equal(isAdmin(limitedAdmin), true);
+    assert.equal(isSuperAdmin(limitedAdmin), false);
+    assert.equal(limitedAdmin.is_super_admin, false);
+    assert.equal(getPermissionTier(limitedAdmin), MANAGER_TIER);
+    assert.equal(limitedAdmin.permissionTier, MANAGER_TIER);
+    assert.equal(getPermissionLabel(limitedAdmin), '管理员');
+    assert.equal(limitedAdmin.permissionLabel, '管理员');
+    assert.equal(isAdmin(caseVariantAdmin), true);
+    assert.equal(isSuperAdmin(caseVariantAdmin), false);
+    assert.equal(getPermissionTier(caseVariantAdmin), MANAGER_TIER);
+    assert.equal(isAdmin(spoofedAdminName), false);
+    assert.equal(isSuperAdmin(spoofedAdminName), false);
+    assert.equal(getPermissionTier(spoofedAdminName), USER_TIER);
+    assert.equal(isAdmin(normalUser), false);
+    assert.equal(isSuperAdmin(normalUser), false);
+    assert.equal(getPermissionTier(normalUser), USER_TIER);
+    assert.equal(normalUser.permissionTier, USER_TIER);
+    assert.equal(getPermissionLabel(normalUser), '用户');
+    assert.equal(normalUser.permissionLabel, '用户');
 });
 
 test('resolveUploadUrlPath accepts normal and encoded upload URLs', () => {
@@ -590,6 +646,229 @@ test('chat renderer defers pivot chart blocks while streaming', () => {
 
     const finalHtml = sandbox.renderAiMessage(markdown, false);
     assert.match(finalHtml, /pivot-echart-block/);
+});
+
+function createAgentWorkbenchSandbox() {
+    const sandbox = createChatRenderSandbox();
+    sandbox.escapeHtml = value => sandbox.PivotSafeHtml.escapeHtml(value);
+    const rootDir = path.resolve(__dirname, '..');
+    vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'chat', 'agents.js'), 'utf8'), sandbox, {
+        filename: 'client/chat/agents.js'
+    });
+    return sandbox;
+}
+
+test('agent run visual outputs wait until the run finishes', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const chart = {
+        type: 'pivot_chart',
+        chartType: 'bar',
+        title: 'group_id count',
+        labels: ['0', '3'],
+        series: [{ name: 'count', data: [2, 1] }]
+    };
+
+    const runningHtml = sandbox.renderAgentRunVisualOutputs([{ output: chart, title: '图表节点' }], [], '', 'running');
+    assert.equal(runningHtml, '');
+
+    const completedHtml = sandbox.renderAgentRunVisualOutputs([{ output: chart, title: '图表节点' }], [], '', 'completed');
+    assert.match(completedHtml, /agent-visual-results/);
+    assert.match(completedHtml, /pivot-echart-block/);
+});
+
+test('agent DAG inspector uses modal entry points for parameter editing', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    assert.match(source, /data-pivot-dag-open-wizard="1">配置参数/);
+    assert.match(source, /data-pivot-dag-open-json="1">编辑 JSON/);
+    assert.match(source, /data-pivot-dag-node-id-display/);
+    assert.match(source, /readonly aria-readonly="true"/);
+    assert.doesNotMatch(source, /data-pivot-dag-field="id"/);
+    assert.match(source, /function friendlyFieldLabel/);
+    assert.match(source, /数据库 Schema \/ 命名空间/);
+    assert.match(source, /pivot-dag-tool-meta-badges/);
+    assert.match(source, /pivot-dag-tool-meta-body/);
+    assert.match(source, /const upstreamNodes = getDependencyCandidateNodes\(node\)/);
+    assert.match(source, />上游节点</);
+    assert.match(source, />上游成功后执行</);
+    assert.match(source, /这是起始节点，没有可选上游节点/);
+    assert.match(source, /只能从左侧上游节点连接到右侧下游节点/);
+    assert.doesNotMatch(source, />依赖节点</);
+    assert.ok(
+        source.indexOf('<div class="pivot-dag-inspector-depends">') < source.indexOf('<div class="pivot-dag-input-overview">'),
+        '上游节点选择区应显示在参数输入上方'
+    );
+    assert.match(source, /pivot-dag-json-input-editor/);
+    assert.doesNotMatch(source, /pivot-dag-input-advanced/);
+    assert.doesNotMatch(source, /data-pivot-dag-insert-token/);
+});
+
+test('agent task panel context notes uses full-width textarea', () => {
+    const partial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
+    assert.match(partial, /<label class="agent-context-notes-field">/);
+    assert.match(partial, /<textarea id="agent-context-notes" class="form-input" rows="2"/);
+    assert.doesNotMatch(partial, /<input id="agent-context-notes"/);
+    assert.match(css, /\.agent-context-controls \.agent-context-notes-field\s*\{[\s\S]*grid-column: 1 \/ -1/);
+    assert.match(css, /\.agent-context-controls textarea\.form-input\s*\{[\s\S]*min-height: 58px/);
+});
+
+test('agent stats chart wizard explains optional database schema field', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    assert.match(source, /Schema \/ 命名空间（可选）/);
+    assert.match(source, /SQLite\/MySQL 通常留空/);
+    assert.match(source, /不确定就留空，系统会使用当前连接的默认数据库范围/);
+    assert.match(source, /正在读取默认范围的数据表/);
+});
+
+test('agent DAG parameter modals use large fixed-height workbench layout', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
+    assert.match(css, /\.pivot-dag-input-wizard\s*\{[\s\S]*width: min\(1320px, calc\(100vw - 24px\)\)/);
+    assert.match(css, /\.pivot-dag-input-wizard\s*\{[\s\S]*height: min\(92vh, 900px\)/);
+    assert.match(css, /\.pivot-dag-wizard-form\s*\{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+    assert.match(css, /\.pivot-dag-wizard-actions\s*\{[\s\S]*flex: 0 0 auto/);
+    assert.match(css, /\.pivot-dag-wizard-field\.is-wide/);
+    assert.match(css, /\.pivot-dag-node-id-field input\[readonly\]/);
+});
+
+test('agent DAG tool meta card uses compact full-width summary styling', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
+    assert.match(css, /\.pivot-dag-tool-meta\s*\{[\s\S]*box-shadow: inset 3px 0 0/);
+    assert.match(css, /\.pivot-dag-tool-meta-body\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) max-content/);
+    assert.match(css, /\.pivot-dag-tool-meta p\s*\{[\s\S]*-webkit-line-clamp: 2/);
+    assert.match(css, /\.pivot-dag-tool-meta-badges\s*\{[\s\S]*max-width: 55%/);
+});
+
+test('agent DAG parameter editor localizes common tool input fields', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    assert.match(source, /query: '检索问题 \/ 查询条件'/);
+    assert.match(source, /sql: 'SQL 语句'/);
+    assert.match(source, /topK: '返回片段数'/);
+    assert.match(source, /candidateLimit: '候选数量上限'/);
+    assert.match(source, /columns: '字段列表'/);
+    assert.match(source, /prompt: '提示词'/);
+    assert.match(source, /model: '模型'/);
+    assert.match(source, /temperature: '随机性'/);
+    assert.match(source, /maxTokens: '最大输出长度'/);
+    assert.match(source, /filters: '筛选条件'/);
+    assert.match(source, /rows: '数据行'/);
+    assert.match(source, /function friendlyFieldPlaceholder/);
+    assert.match(source, /friendlyFieldLabel\(name, item, tool\)/);
+    assert.match(source, /friendlyFieldDescription\(name, item, tool\)/);
+    assert.match(source, /friendlyEnumOptionLabel\(name, option\)/);
+    assert.match(source, /data-pivot-dag-db-connection-select="1"/);
+    assert.match(source, /const syncAssistConnection = \(\) =>/);
+    assert.match(source, /databaseConnectionId/);
+    assert.match(source, /读取表\/字段会跟随这个选择/);
+    assert.match(source, /请先填写：\$\{missingLabels\.join\('、'\)\}/);
+});
+
+test('agent workflow workbench exposes preview and published-version run controls', () => {
+    const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
+    const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents.js'), 'utf8');
+    const editor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
+
+    assert.doesNotMatch(dagPartial, /id="agent-dag-preview-run-btn"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-run-published-btn"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-publish-run-btn"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-console-preview-run-btn"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-console-run-published-btn"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-console-publish-run-btn"/);
+    assert.match(editor, /makeToolbarDropdown\('节点'/);
+    assert.match(editor, /makeToolbarDropdown\('发布'/);
+    assert.match(editor, /makeToolbarDropdown\('运行'/);
+    assert.match(editor, /const closeToolbarDropdowns = \(event\) =>/);
+    assert.match(editor, /document\.addEventListener\('pointerdown', closeToolbarDropdowns\)/);
+    assert.match(editor, /document\.removeEventListener\('pointerdown', closeToolbarDropdowns\)/);
+    assert.match(editor, /makeButton\('预览运行'/);
+    assert.match(editor, /makeButton\('运行发布版'/);
+    assert.match(editor, /makeButton\('发布并运行'/);
+    assert.match(dagPartial, /id="agent-workflow-current-label"/);
+    assert.match(dagPartial, />已保存工作流</);
+    assert.match(dagPartial, /id="agent-workflow-lifecycle"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console-status"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-name"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-version-label"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-run-source"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-model-select"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-max-steps"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-allow-mcp"/);
+    assert.doesNotMatch(agentPartial, /id="agent-run-workflow-field"/);
+    assert.doesNotMatch(agentPartial, /id="agent-run-workflow-version"/);
+    assert.doesNotMatch(agentPartial, /id="agent-workflow-model-select"/);
+    assert.doesNotMatch(agentPartial, /<option value="dag">工作流<\/option>/);
+    assert.match(source, /function buildAgentWorkflowWorkbenchRunPayload/);
+    assert.match(source, /function getAgentWorkflowRunSettings/);
+    assert.match(source, /const llmNode = nodes\.find\(node => String\(node\?\.tool/);
+    assert.match(source, /modelId: runSettings\.modelId/);
+    assert.match(source, /maxSteps: runSettings\.maxSteps/);
+    assert.match(source, /async function ensureAgentWorkflowNameForSave/);
+    assert.match(source, /await window\.showInputPrompt\?\.\(\{/);
+    assert.match(source, /const workflowName = await ensureAgentWorkflowNameForSave\(\)/);
+    assert.doesNotMatch(source, /window\.prompt\?\(/);
+    assert.match(source, /payload\.workflowVersion = 'draft'/);
+    assert.match(source, /payload\.workflowVersion = sourceMode === 'published' \? 'published' : 'current'/);
+    assert.match(source, /window\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
+    assert.doesNotMatch(source, /agent-run-workflow/);
+    assert.doesNotMatch(source, /agent-run-dag-inputs/);
+    assert.doesNotMatch(source, /agent-workflow-model-select/);
+    assert.doesNotMatch(source, /agent-workflow-version-label/);
+    assert.doesNotMatch(source, /agent-workflow-run-source/);
+    assert.doesNotMatch(source, /getSelectedAgentWorkflowRunVersion/);
+    assert.match(css, /\.agent-workflow-lifecycle\s*\{/);
+    assert.match(css, /\.agent-workflow-lifecycle-chip\s*\{/);
+    assert.match(css, /\.agent-dag-library-select:focus-within\s*\{/);
+    assert.match(css, /\.agent-dag-library-actions\s*\{[\s\S]*?border: 0;[\s\S]*?background: transparent;/);
+    assert.doesNotMatch(css, /\.agent-workflow-run-console\s*\{/);
+    assert.match(css, /\.pivot-dag-toolbar-dropdown\s*\{/);
+    assert.match(css, /\.pivot-dag-toolbar-summary::marker\s*\{/);
+    assert.match(css, /\.pivot-dag-toolbar-summary::after\s*\{\s*display: none;/);
+    assert.doesNotMatch(css, /padding: 0 28px 0 12px/);
+    assert.doesNotMatch(css, /\.agent-workflow-run-settings\s*\{/);
+    assert.doesNotMatch(css, /\.agent-workflow-run-source/);
+    assert.doesNotMatch(css, /\.agent-run-workflow-field/);
+    assert.doesNotMatch(css, /\.agent-workflow-run-status/);
+});
+
+test('agent DAG editor and runtime expose first-class LLM workflow node', () => {
+    const ui = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'ui.js'), 'utf8');
+    const agents = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents.js'), 'utf8');
+    const editor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    const tools = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools.js'), 'utf8');
+    const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime.js'), 'utf8');
+    const model = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-model.js'), 'utf8');
+
+    assert.match(ui, /function isSelectableModelForCurrentUser/);
+    assert.match(ui, /const models = data\.filter\(isSelectableModelForCurrentUser\)/);
+    assert.doesNotMatch(ui, /owner_role === 'admin'/);
+    assert.match(agents, /window\.isSelectableModelForCurrentUser/);
+
+    assert.match(editor, /'agent\.llm': \['大模型节点'/);
+    assert.match(editor, /key: 'llm', label: '大模型'/);
+    assert.match(editor, /function defaultLlmInput/);
+    assert.match(editor, /function defaultWorkflowModelId/);
+    assert.match(editor, /function workflowModelOptions/);
+    assert.match(editor, /window\.isSelectableModelForCurrentUser/);
+    assert.match(editor, /isLlmModelField && workflowModelOptions\(\)\.length/);
+    assert.match(editor, /createDefaultLlmNode/);
+    assert.match(editor, /工作流必须包含 1 个大模型节点/);
+    assert.match(editor, /工作流必须保留 1 个大模型节点/);
+    assert.match(editor, /需要填写节点模型/);
+    assert.match(editor, /makeButton\('大模型'/);
+    assert.match(editor, /patterns: \['agent\.llm'\]/);
+    assert.match(editor, /prompt: selectedNode/);
+    assert.match(tools, /name: 'agent\.llm'/);
+    assert.match(tools, /maxSteps: \{ type: 'integer'/);
+    assert.match(tools, /\['prompt', 'model'\]/);
+    assert.match(tools, /async function executeAgentLlmNode/);
+    assert.match(tools, /recordAgentModelUsage\(user, modelCfg, messages, content, 'agent_llm_node'/);
+    assert.match(runtime, /function inferDagLlmRuntimeSettings/);
+    assert.match(runtime, /if \(!effectiveModelId && llmRuntimeSettings\.modelId\)/);
+    assert.match(runtime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg \}\)/);
+    assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
+    assert.match(model, /max_tokens: maxTokens/);
 });
 
 test('chat route embeds streamed chart specs into persisted assistant content', () => {
@@ -2300,6 +2579,8 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     assert.equal(formatToolList(user).some(tool => tool.name === 'system.health'), false);
     const limitedAdminTools = formatToolList({ id: 1, username: 'ops-admin', role: 'admin', unit: '' });
     assert.equal(limitedAdminTools.some(tool => tool.name === 'system.health'), false);
+    const spoofedAdminNameTools = formatToolList({ id: 1, username: 'admin', role: 'user', unit: '' });
+    assert.equal(spoofedAdminNameTools.some(tool => tool.name === 'system.health'), false);
     const superAdminTools = formatToolList({ id: 1, username: 'admin', role: 'admin', unit: '' });
     const systemHealth = superAdminTools.find(tool => tool.name === 'system.health');
     assert.equal(systemHealth.admin, true);
@@ -2325,6 +2606,10 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
         { approval_policy: 'approve_all_mcp', metadata: '{"approvedTools":["mcp.db"]}' },
         { name: 'mcp.db', source: 'mcp', risk: 'low', requiresApproval: false }
     ), false);
+    await assert.rejects(
+        () => executeBuiltInTool('system.health', {}, { id: 1, username: 'admin', role: 'user', unit: '' }),
+        /admin/
+    );
     const result = await executeBuiltInTool('models.list', {}, user);
     assert.equal(Array.isArray(result), true);
 });
@@ -2438,7 +2723,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(getRunForUser(run.id, user), undefined);
     assert.equal(getRunDetailForUser(run.id, user), null);
     assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === run.id), false);
-    assert.throws(() => listDeletedRunsForAdmin(user, 20), /admin 超级管理员/);
+    assert.throws(() => listDeletedRunsForAdmin(user, 20), /admin 权限层级/);
     const adminAudit = listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
     assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
 
@@ -3896,6 +4181,7 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
         assert.equal(refreshRes.statusCode, 200);
         assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.run_readonly_query'), true);
         assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.group_count'), true);
+        assert.equal(refreshRes.body.tools.some(tool => tool.name === 'db.count_tables'), true);
 
         const queryReq = {
             body: {
@@ -3926,6 +4212,21 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
             { kind: 'blue', total: 1 }
         ]);
 
+        const countTablesReq = {
+            body: {
+                name: `mcp.${serverId}.db.count_tables`,
+                input: {}
+            },
+            user: adminUser
+        };
+        const countTablesRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), countTablesReq, countTablesRes);
+        assert.equal(countTablesRes.statusCode, 200);
+        assert.equal(countTablesRes.body.result.structuredContent.total, 1);
+        assert.deepEqual(countTablesRes.body.result.structuredContent.rows, [
+            { type: 'table', total: 1 }
+        ]);
+
         const writeReq = {
             body: {
                 name: `mcp.${serverId}.db.run_readonly_query`,
@@ -3946,6 +4247,242 @@ test('database MCP preset exposes SQLite readonly tools and rejects writes', asy
         }
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
         fs.rmSync(sqlitePath, { force: true });
+    }
+});
+
+test('agent tool catalog collapses database MCP tools into generic actions', () => {
+    const generic = buildGenericDatabaseTools([
+        {
+            serverId: 101,
+            serverName: '生产库',
+            serverType: 'database',
+            databaseType: 'sqlite',
+            name: 'db.run_readonly_query',
+            fullName: 'mcp.101.db.run_readonly_query',
+            description: '只读查询',
+            input_schema: {
+                type: 'object',
+                required: ['sql'],
+                properties: { sql: { type: 'string' }, limit: { type: 'integer' } }
+            }
+        },
+        {
+            serverId: 202,
+            serverName: '测试库',
+            serverType: 'database',
+            databaseType: 'postgres',
+            name: 'db.run_readonly_query',
+            fullName: 'mcp.202.db.run_readonly_query',
+            description: '只读查询',
+            input_schema: {
+                type: 'object',
+                required: ['sql'],
+                properties: { sql: { type: 'string' }, connectionId: { type: 'string' } }
+            }
+        },
+        {
+            serverId: 101,
+            serverName: '生产库',
+            serverType: 'database',
+            databaseType: 'sqlite',
+            name: 'db.describe_table',
+            fullName: 'mcp.101.db.describe_table',
+            description: '表结构',
+            input_schema: {
+                type: 'object',
+                required: ['table'],
+                properties: { table: { type: 'string' } }
+            }
+        },
+        {
+            serverId: 303,
+            serverName: '第三方服务',
+            serverType: 'external',
+            name: 'db.run_readonly_query',
+            fullName: 'mcp.303.db.run_readonly_query',
+            description: '外部同名工具',
+            input_schema: { type: 'object' }
+        }
+    ]);
+
+    assert.deepEqual(generic.map(tool => tool.name), ['db.describe_table', 'db.run_readonly_query']);
+    const queryTool = generic.find(tool => tool.name === 'db.run_readonly_query');
+    assert.equal(queryTool.databaseTool, true);
+    assert.equal(queryTool.requiresApproval, false);
+    assert.deepEqual(queryTool.input_schema.required, ['sql', 'connectionId']);
+    assert.deepEqual(queryTool.input_schema.properties.connectionId.enum, ['101', '202']);
+    assert.deepEqual(queryTool.databaseConnections.map(connection => connection.fullName), [
+        'mcp.101.db.run_readonly_query',
+        'mcp.202.db.run_readonly_query'
+    ]);
+    assert.equal(queryTool.input_schema.properties.sql.type, 'string');
+});
+
+test('agent tool list exposes database connections as parameters and routes generic DAG tools', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const sqlitePathA = path.join(process.env.DATA_DIR, `agent-db-a-${suffix}.db`);
+    const sqlitePathB = path.join(process.env.DATA_DIR, `agent-db-b-${suffix}.db`);
+    const sourceA = new Sqlite(sqlitePathA);
+    sourceA.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+        INSERT INTO widgets (name) VALUES ('prod-alpha'), ('prod-beta');
+    `);
+    sourceA.close();
+    const sourceB = new Sqlite(sqlitePathB);
+    sourceB.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+        INSERT INTO widgets (name) VALUES ('test-only');
+    `);
+    sourceB.close();
+
+    const now = getBeijingTimestamp();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_db_${suffix}`, 'hash', 'Agent DB Test', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `agent_db_${suffix}`, role: 'admin', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Agent DB Summary Model', 'http://127.0.0.1:65530/v1/chat/completions', `agent-db-summary-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+
+    const serverIds = [];
+    const insertDbServer = (name, sqlitePath) => {
+        const serverInfo = db.prepare(`
+            INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+            VALUES (?, ?, 'pivot-db://pending', '', ?, 'active', ?, ?)
+        `).run(user.id, name, `${name} test database`, now, now);
+        const serverId = Number(serverInfo.lastInsertRowid);
+        serverIds.push(serverId);
+        db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
+            .run(`pivot-db://connection/${serverId}`, serverId);
+        db.prepare(`
+            INSERT INTO mcp_database_connections (
+                mcp_server_id, user_id, database_type, host, port, database_name, username, password, options, status, created_at, updated_at
+            ) VALUES (?, ?, 'sqlite', '', 0, ?, '', '', ?, 'active', ?, ?)
+        `).run(serverId, user.id, sqlitePath, JSON.stringify({ maxRows: 10 }), now, now);
+        return serverId;
+    };
+
+    let runId = '';
+    try {
+        const prodServerId = insertDbServer(`生产库 ${suffix}`, sqlitePathA);
+        const testServerId = insertDbServer(`测试库 ${suffix}`, sqlitePathB);
+        for (const serverId of serverIds) {
+            await refreshMcpTools(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId), user);
+        }
+
+        const allTools = formatToolList(user);
+        const genericQueryTools = allTools.filter(tool => tool.name === 'db.run_readonly_query');
+        assert.equal(genericQueryTools.length, 1);
+        const queryTool = genericQueryTools[0];
+        assert.equal(queryTool.databaseTool, true);
+        assert.equal(allTools.some(tool => tool.name === `mcp.${prodServerId}.db.run_readonly_query`), false);
+        assert.equal(allTools.some(tool => tool.name === `mcp.${testServerId}.db.run_readonly_query`), false);
+        assert.deepEqual(queryTool.input_schema.properties.connectionId.enum.sort(), [String(prodServerId), String(testServerId)].sort());
+        assert.deepEqual(
+            queryTool.databaseConnections.map(connection => connection.fullName).sort(),
+            [`mcp.${prodServerId}.db.run_readonly_query`, `mcp.${testServerId}.db.run_readonly_query`].sort()
+        );
+        assert.equal(allTools.some(tool => tool.name === 'db.describe_table'), true);
+        assert.equal(allTools.some(tool => tool.name === 'db.group_count'), true);
+        assert.equal(allTools.some(tool => tool.name === 'db.count_tables'), true);
+
+        const scopedTools = formatToolList(user, {
+            toolAllowlist: [`mcp.${prodServerId}.db.run_readonly_query`]
+        });
+        assert.deepEqual(scopedTools.map(tool => tool.name), ['db.run_readonly_query']);
+        assert.deepEqual(scopedTools[0].input_schema.properties.connectionId.enum, [String(prodServerId)]);
+        assert.deepEqual(scopedTools[0].databaseConnections.map(connection => connection.fullName), [`mcp.${prodServerId}.db.run_readonly_query`]);
+
+        axios.post = async (_url, payload) => {
+            assert.match(JSON.stringify(payload.messages || []), /prod-alpha/);
+            return { data: { choices: [{ message: { content: 'DAG 查询完成' } }] } };
+        };
+
+        runId = `agent-db-dag-${suffix}`;
+        db.prepare(`
+            INSERT INTO agent_runs (
+                id, user_id, model_id, title, goal, status, max_steps, run_mode, tool_policy,
+                tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms, retry_limit,
+                context_config, metadata, model_router, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'queued', 3, 'dag', 'all', '', 'safe_mcp_auto', 600000, 120000, 0, ?, ?, 'fixed', ?, ?)
+        `).run(
+            runId,
+            user.id,
+            modelId,
+            '数据库通用工具路由',
+            '查询生产库 widgets',
+            '{}',
+            JSON.stringify({
+                dagSpec: {
+                    nodes: [{
+                        id: 'query',
+                        title: '只读查询',
+                        tool: 'db.run_readonly_query',
+                        input: {
+                            connectionId: String(prodServerId),
+                            sql: 'SELECT name FROM widgets ORDER BY id',
+                            limit: 1
+                        },
+                        dependsOn: [],
+                        condition: 'success',
+                        retryLimit: 0,
+                        timeoutMs: 0,
+                        onError: 'stop'
+                    }]
+                }
+            }),
+            now,
+            now
+        );
+
+        await runAgent(runId, user);
+        const detail = getRunDetailForUser(runId, user);
+        assert.equal(detail.run.status, 'completed');
+        assert.equal(detail.run.final_answer, 'DAG 查询完成');
+        assert.equal(detail.dagNodes[0].tool_name, 'db.run_readonly_query');
+        assert.equal(detail.dagNodes[0].input.connectionId, String(prodServerId));
+        assert.equal(detail.dagNodes[0].status, 'completed');
+        const dagOutputText = typeof detail.dagNodes[0].output === 'string'
+            ? detail.dagNodes[0].output
+            : JSON.stringify(detail.dagNodes[0].output);
+        assert.match(dagOutputText, /prod-alpha/);
+        assert.doesNotMatch(dagOutputText, /test-only/);
+        const callLog = db.prepare(`
+            SELECT server_id, tool_name, source, input_preview, output_preview
+            FROM mcp_call_logs
+            WHERE user_id = ? AND source = 'agent'
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(user.id);
+        assert.equal(callLog.server_id, prodServerId);
+        assert.equal(callLog.tool_name, 'db.run_readonly_query');
+        assert.match(callLog.input_preview, /widgets/);
+        assert.match(callLog.output_preview, /prod-alpha/);
+        assert.doesNotMatch(callLog.output_preview, /test-only/);
+    } finally {
+        axios.post = originalPost;
+        if (runId) {
+            db.prepare('DELETE FROM agent_notifications WHERE run_id = ?').run(runId);
+            db.prepare('DELETE FROM agent_dag_nodes WHERE run_id = ?').run(runId);
+            db.prepare('DELETE FROM agent_steps WHERE run_id = ?').run(runId);
+            db.prepare('DELETE FROM agent_runs WHERE id = ?').run(runId);
+        }
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM mcp_call_logs WHERE user_id = ?').run(user.id);
+        serverIds.forEach(serverId => {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_database_connections WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        });
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        fs.rmSync(sqlitePathA, { force: true });
+        fs.rmSync(sqlitePathB, { force: true });
     }
 });
 
@@ -4396,6 +4933,250 @@ test('chat MCP fallback builds group_count input for table distribution charts',
     const queryInput = buildFallbackDataQueryInput(prompt, { name: 'db.run_readonly_query' });
     assert.equal(queryInput.sql, 'SELECT group_id, COUNT(*) AS count FROM table_account GROUP BY group_id ORDER BY count DESC');
     assert.equal(queryInput.limit, 80);
+
+    const tableCountInput = buildFallbackDataQueryInput('查询hcdb数据库中数据表的数量。', { name: 'db.count_tables' });
+    assert.deepEqual(tableCountInput, {});
+
+    assert.equal(detectStrongDataQueryIntent('查询 MongoDB 数据库中集合的数量。'), true);
+    const collectionCountInput = buildFallbackDataQueryInput('查询 MongoDB 数据库中集合的数量。', { name: 'db.count_collections' });
+    assert.deepEqual(collectionCountInput, {});
+});
+
+test('chat MCP context reports missing matching tool for explicit capability requests', async () => {
+    const events = [];
+    const context = await maybeBuildMcpChatContext({
+        modelCfg: {
+            id: 1,
+            name: 'Unused Planner',
+            model_name: 'planner-test',
+            url: 'http://127.0.0.1:9/v1',
+            api_key: '',
+            user_id: null
+        },
+        history: [{ role: 'user', content: '查询hcdb数据库中数据表的数量。' }],
+        userPrompt: '查询hcdb数据库中数据表的数量。',
+        tools: [{
+            fullName: 'mcp.viz.viz.build_chart',
+            name: 'viz.build_chart',
+            serverName: '图表能力',
+            description: '生成图表',
+            input_schema: { type: 'object' }
+        }],
+        user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+        writeSse(payload) {
+            events.push(JSON.parse(payload));
+        },
+        log: { warn() {} }
+    });
+
+    assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['skipped']);
+    assert.match(events[0].message, /没有匹配用户请求的能力库工具/);
+    assert.match(context, /需要能力库工具/);
+    assert.match(context, /没有匹配的能力库工具/);
+    assert.doesNotMatch(context, /本轮不需要调用能力库工具/);
+});
+
+test('chat MCP context invokes selected MCP tool and injects result for user dialogue', async () => {
+    const suffix = Date.now().toString(36);
+    const sqlitePath = path.join(process.env.DATA_DIR, `chat-mcp-${suffix}.db`);
+    const source = new Sqlite(sqlitePath);
+    source.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL);
+        INSERT INTO widgets (name, kind) VALUES ('alpha', 'red'), ('beta', 'blue'), ('gamma', 'red');
+    `);
+    source.close();
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`chat_mcp_${suffix}`, 'hash', 'Chat MCP Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `chat_mcp_${suffix}`, role: 'admin', unit: 'QA' };
+    const now = getBeijingTimestamp();
+    const serverInfo = db.prepare(`
+        INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, 'active', ?, ?)
+    `).run(adminUser.id, `Chat SQLite MCP ${suffix}`, 'pivot-db://pending', 'chat MCP test database', now, now);
+    const serverId = Number(serverInfo.lastInsertRowid);
+    db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
+        .run(`pivot-db://connection/${serverId}`, serverId);
+    db.prepare(`
+        INSERT INTO mcp_database_connections (
+            mcp_server_id, user_id, database_type, host, port, database_name, username, password, options, status, created_at, updated_at
+        ) VALUES (?, ?, 'sqlite', '', 0, ?, '', '', ?, 'active', ?, ?)
+    `).run(serverId, adminUser.id, sqlitePath, JSON.stringify({ maxRows: 10 }), now, now);
+
+    const toolName = `mcp.${serverId}.db.run_readonly_query`;
+    const listTablesToolName = `mcp.${serverId}.db.list_tables`;
+    const countTablesToolName = `mcp.${serverId}.db.count_tables`;
+    const plannerRequests = [];
+    const plannerServer = http.createServer((req, res) => {
+        let raw = '';
+        req.on('data', chunk => { raw += chunk; });
+        req.on('end', () => {
+            plannerRequests.push(JSON.parse(raw || '{}'));
+            const requestText = raw.toLowerCase();
+            let plannerContent;
+            if (requestText.includes('短名')) {
+                plannerContent = {
+                    action: 'tool',
+                    tool: 'db.count_tables',
+                    input: {},
+                    reason: '用户要求查询数据库表数量'
+                };
+            } else if (requestText.includes('数据表的数量')) {
+                plannerContent = {
+                    action: 'none',
+                    reason: '不需要能力库'
+                };
+            } else {
+                plannerContent = {
+                    action: 'tool',
+                    tool: toolName,
+                    input: {
+                        sql: 'SELECT name, kind FROM widgets ORDER BY id',
+                        limit: 2
+                    },
+                    reason: '用户要求查询数据库表'
+                };
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                choices: [{
+                    message: {
+                        content: JSON.stringify(plannerContent)
+                    }
+                }]
+            }));
+        });
+    });
+
+    try {
+        await new Promise(resolve => plannerServer.listen(0, '127.0.0.1', resolve));
+        await refreshMcpTools(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId), adminUser);
+        const tools = listCachedMcpTools(null, adminUser).filter(tool => tool.serverId === serverId);
+        assert.equal(tools.some(tool => tool.fullName === toolName), true);
+        assert.equal(tools.some(tool => tool.fullName === listTablesToolName), true);
+        assert.equal(tools.some(tool => tool.fullName === countTablesToolName), true);
+
+        const sseEvents = [];
+        const context = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Fake Planner',
+                model_name: 'planner-test',
+                url: `http://127.0.0.1:${plannerServer.address().port}/v1`,
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '查询 widgets 表前两条数据' }],
+            userPrompt: '查询 widgets 表前两条数据',
+            tools,
+            user: adminUser,
+            writeSse(payload) {
+                sseEvents.push(JSON.parse(payload));
+            },
+            log: { warn() {} }
+        });
+
+        assert.equal(plannerRequests.length, 1);
+        assert.match(JSON.stringify(plannerRequests[0]), /db\.run_readonly_query/);
+        assert.match(context, new RegExp(`工具: ${toolName.replace(/\./g, '\\.')}`));
+        assert.match(context, /alpha/);
+        assert.match(context, /beta/);
+        assert.doesNotMatch(context, /gamma/);
+        assert.deepEqual(sseEvents.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'done']);
+
+        const callLog = db.prepare(`
+            SELECT source, status, tool_name, input_preview, output_preview
+            FROM mcp_call_logs
+            WHERE server_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(serverId);
+        assert.equal(callLog.source, 'chat');
+        assert.equal(callLog.status, 'success');
+        assert.equal(callLog.tool_name, 'db.run_readonly_query');
+        assert.match(callLog.input_preview, /widgets/);
+        assert.match(callLog.output_preview, /alpha/);
+
+        const tableCountEvents = [];
+        const tableCountContext = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Fake Planner',
+                model_name: 'planner-test',
+                url: `http://127.0.0.1:${plannerServer.address().port}/v1`,
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '查询hcdb数据库中数据表的数量。' }],
+            userPrompt: '查询hcdb数据库中数据表的数量。',
+            tools,
+            user: adminUser,
+            writeSse(payload) {
+                tableCountEvents.push(JSON.parse(payload));
+            },
+            log: { warn() {} }
+        });
+
+        assert.match(tableCountContext, new RegExp(`工具: ${countTablesToolName.replace(/\./g, '\\.')}`));
+        assert.match(tableCountContext, /"total": 1/);
+        assert.deepEqual(tableCountEvents.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'done']);
+        const fallbackLog = db.prepare(`
+            SELECT source, status, tool_name, input_preview, output_preview
+            FROM mcp_call_logs
+            WHERE server_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(serverId);
+        assert.equal(fallbackLog.source, 'chat_fallback');
+        assert.equal(fallbackLog.status, 'success');
+        assert.equal(fallbackLog.tool_name, 'db.count_tables');
+        assert.match(fallbackLog.output_preview, /"total":1/);
+
+        const shortNameEvents = [];
+        const shortNameContext = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Fake Planner',
+                model_name: 'planner-test',
+                url: `http://127.0.0.1:${plannerServer.address().port}/v1`,
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '短名方式查询hcdb数据库中数据表的数量。' }],
+            userPrompt: '短名方式查询hcdb数据库中数据表的数量。',
+            tools,
+            user: adminUser,
+            writeSse(payload) {
+                shortNameEvents.push(JSON.parse(payload));
+            },
+            log: { warn() {} }
+        });
+
+        assert.match(shortNameContext, new RegExp(`工具: ${countTablesToolName.replace(/\./g, '\\.')}`));
+        assert.match(shortNameContext, /"total": 1/);
+        assert.deepEqual(shortNameEvents.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'done']);
+        const shortNameLog = db.prepare(`
+            SELECT source, status, tool_name, output_preview
+            FROM mcp_call_logs
+            WHERE server_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(serverId);
+        assert.equal(shortNameLog.source, 'chat');
+        assert.equal(shortNameLog.status, 'success');
+        assert.equal(shortNameLog.tool_name, 'db.count_tables');
+        assert.match(shortNameLog.output_preview, /"total":1/);
+    } finally {
+        await new Promise(resolve => plannerServer.close(resolve));
+        db.prepare('DELETE FROM mcp_call_logs WHERE server_id = ?').run(serverId);
+        db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+        db.prepare('DELETE FROM mcp_database_connections WHERE mcp_server_id = ?').run(serverId);
+        db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        fs.rmSync(sqlitePath, { force: true });
+    }
 });
 
 test('built-in IM MCP enforces target whitelist and sends LAN webhook payloads', async () => {

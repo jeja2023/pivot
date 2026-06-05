@@ -32,7 +32,7 @@ const {
     getBuiltinServiceTypeFromUrl,
     normalizeBuiltinPayload
 } = require('../services/builtin-mcp');
-const isSuperAdmin = (user) => user?.username === 'admin';
+const { isSuperAdmin } = require('../permissions');
 
 const SYSTEM_MCP_SERVICES = {
     visualization: {
@@ -176,9 +176,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.get('/mcp/governance', authMiddleware, asyncHandler(async (req, res) => {
-        const isAdmin = isSuperAdmin(req.user);
-        const serverScope = isAdmin ? 's.status != \'deleted\'' : "s.status != 'deleted' AND (s.user_id IS NULL OR s.user_id = ?)";
-        const scopeParams = isAdmin ? [] : [req.user.id];
+        const superAdmin = isSuperAdmin(req.user);
+        const serverScope = superAdmin ? 's.status != \'deleted\'' : "s.status != 'deleted' AND (s.user_id IS NULL OR s.user_id = ?)";
+        const scopeParams = superAdmin ? [] : [req.user.id];
         const summary = db.prepare(`
             SELECT
                 COUNT(*) AS total,
@@ -194,10 +194,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             WHERE ${serverScope}
         `).get(...scopeParams);
         const recentWindow = "datetime('now', '+8 hours', '-7 days')";
-        const callScope = isAdmin
+        const callScope = superAdmin
             ? `l.created_at >= ${recentWindow}`
             : `(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?) AND l.created_at >= ${recentWindow}`;
-        const callParams = isAdmin ? [] : [req.user.id, req.user.id];
+        const callParams = superAdmin ? [] : [req.user.id, req.user.id];
         const callSummary = db.prepare(`
             SELECT
                 COUNT(*) AS total,
@@ -239,9 +239,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/call-logs', authMiddleware, asyncHandler(async (req, res) => {
         const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 30, 1), 100);
-        const isAdmin = isSuperAdmin(req.user);
-        const where = isAdmin ? "s.status != 'deleted'" : "(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?)";
-        const params = isAdmin ? [limit] : [req.user.id, req.user.id, limit];
+        const superAdmin = isSuperAdmin(req.user);
+        const where = superAdmin ? "s.status != 'deleted'" : "(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?)";
+        const params = superAdmin ? [limit] : [req.user.id, req.user.id, limit];
         const rows = db.prepare(`
             SELECT l.id, l.user_id, u.username, u.nickname, l.server_id, s.name AS server_name,
                    l.tool_name, l.source, l.status, l.duration_ms, l.input_preview,
@@ -443,7 +443,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
         const serviceType = getBuiltinServiceTypeFromUrl(existing.base_url);
         if (!serviceType) return res.status(400).json({ error: '该能力服务不是系统预设。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以编辑全局能力服务。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
 
         const configRow = db.prepare('SELECT * FROM mcp_builtin_configs WHERE mcp_server_id = ?').get(existing.id);
@@ -490,7 +490,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
         if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该能力服务不是数据库连接。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以编辑全局能力服务。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
 
         const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
@@ -538,7 +538,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
         if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '数据库预设请使用数据库连接表单编辑。' });
         if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统能力预设请使用对应的系统服务表单编辑。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以编辑全局能力服务。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
 
         const name = String(req.body?.name || existing.name).trim();
@@ -562,7 +562,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.patch('/mcp/servers/:id/status', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以管理全局能力服务。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以管理全局能力服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权管理该能力服务。' });
         const status = req.body?.status === 'paused' ? 'paused' : 'active';
         const now = getBeijingTimestamp();
@@ -579,7 +579,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.delete('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 超级管理员可以删除全局能力服务。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以删除全局能力服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权删除该能力服务。' });
         const now = getBeijingTimestamp();
         db.prepare("UPDATE mcp_servers SET status = 'deleted', updated_at = ? WHERE id = ?").run(now, existing.id);
@@ -614,7 +614,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (name.startsWith('mcp.')) {
             const cached = listCachedMcpTools(null, req.user).find(tool => tool.fullName === name);
             const sourceRef = cached?.serverId || cached?.server_id || cached?.serverName || '';
-            const type = String(cached?.name || '').startsWith('db.') || String(cached?.fullName || '').includes('.db.')
+            const type = cached?.serverType === 'database'
                 ? 'database_connection'
                 : 'mcp_server';
             if (sourceRef && !isCapabilityEnabled(type, sourceRef, req.user)) {

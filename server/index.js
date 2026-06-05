@@ -51,6 +51,7 @@ process.on('unhandledRejection', (reason) => {
 });
 const { stmts } = require('./db');
 const { authMiddleware, csrfMiddleware } = require('./auth');
+const { isAdmin } = require('./permissions');
 const {
     escapeCsvCell
 } = require('./security');
@@ -436,7 +437,7 @@ app.use('/api', createAuthRouter({
 
 // --- 管理员权限中间件 ---
 const adminMiddleware = (req, res, next) => {
-    if (req.user.role !== 'admin') {
+    if (!isAdmin(req.user)) {
         logAction(req, '权限拒绝', `访问管理员接口: ${req.method} ${req.originalUrl}`);
         return res.status(403).json({ error: '权限不足' });
     }

@@ -565,9 +565,29 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     ];
 }
 
-async function executeToolByName(name, input, user, toolList = []) {
+function findDatabaseCompatTool(fullName, toolList = []) {
+    const match = String(fullName || '').match(/^mcp\.(\d+)\.(db\..+)$/);
+    if (!match) return null;
+    const serverId = match[1];
+    const shortName = match[2];
+    return (toolList || []).find(tool => {
+        if (!tool?.databaseTool || tool.name !== shortName) return false;
+        const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
+        return connections.some(connection => (
+            String(connection.serverId || '') === serverId
+            && String(connection.fullName || '') === String(fullName || '')
+        ));
+    }) || null;
+}
+
+function findAgentToolByName(name, toolList = []) {
     const safeName = String(name || '').trim();
-    const tool = toolList.find(item => item.name === safeName);
+    return (toolList || []).find(item => item.name === safeName) || findDatabaseCompatTool(safeName, toolList);
+}
+
+async function executeToolByName(name, input, user, toolList = [], context = {}) {
+    const safeName = String(name || '').trim();
+    const tool = findAgentToolByName(safeName, toolList);
     if (!tool) {
         const err = new Error(`工具不可用或无权访问：${safeName || '-'}`);
         err.status = 403;
@@ -576,7 +596,29 @@ async function executeToolByName(name, input, user, toolList = []) {
     if (safeName.startsWith('mcp.')) {
         return executeMcpTool(safeName, input, user, { source: 'agent' });
     }
-    return executeBuiltInTool(safeName, input, user);
+    if (tool.databaseTool && safeName.startsWith('db.')) {
+        const rawConnectionId = input?.connectionId ?? input?.connection_id ?? input?.databaseConnectionId ?? input?.database_connection_id ?? input?.mcpServerId ?? input?.mcp_server_id;
+        const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
+        const selectedConnectionId = String(rawConnectionId || '').trim() || (connections.length === 1 ? String(connections[0].connectionId || connections[0].serverId || '') : '');
+        const connection = connections.find(item => (
+            String(item.connectionId || item.serverId || '') === selectedConnectionId
+            || String(item.serverId || '') === selectedConnectionId
+        ));
+        if (!connection?.fullName) {
+            const err = new Error('Please choose an available database connection for this database tool.');
+            err.status = 400;
+            throw err;
+        }
+        const toolInput = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
+        delete toolInput.connectionId;
+        delete toolInput.connection_id;
+        delete toolInput.databaseConnectionId;
+        delete toolInput.database_connection_id;
+        delete toolInput.mcpServerId;
+        delete toolInput.mcp_server_id;
+        return executeMcpTool(connection.fullName, toolInput, user, { source: 'agent' });
+    }
+    return executeBuiltInTool(safeName, input, user, context);
 }
 
 function isApprovalGranted(run, toolName) {
@@ -797,7 +839,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             for (const call of result.toolCalls) {
                 assertRunWithinBudget();
                 assertRunNotCancelled(runId);
-                const selectedTool = toolList.find(t => t.name === call.name);
+                const selectedTool = findAgentToolByName(call.name, toolList);
                 if (!selectedTool) {
                     const message = `工具不可用或无权访问：${call.name || '-'}`;
                     conversation.push(buildToolResultMessage(call.id, { error: message }));
@@ -820,7 +862,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 try {
                     const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
                     const output = await withTimeout(
-                        executeToolByName(call.name, args, user, toolList),
+                        executeToolByName(call.name, args, user, toolList, { run, modelCfg }),
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                         `执行工具：${call.name}`
                     );
@@ -865,7 +907,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
     }
 }
 
-async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolList, deadline, policy }) {
+async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy }) {
     const startedAt = Date.now();
     const startedAtText = getBeijingTimestamp();
     let lastError = null;
@@ -874,7 +916,7 @@ async function executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolLi
         assertRunNotCancelled(run.id);
         try {
             const output = await withTimeout(
-                executeToolByName(node.tool, resolvedInput, user, toolList),
+                executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg }),
                 Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
                 `执行 DAG 节点：${node.title || node.id}`
             );
@@ -972,7 +1014,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
 
         await Promise.all(runnable.slice(0, AGENT_DAG_NODE_CONCURRENCY).map(async node => {
-            const selectedTool = toolList.find(tool => tool.name === node.tool);
+            const selectedTool = findAgentToolByName(node.tool, toolList);
             const resolvedInput = resolveDagNodeInput(node, {
                 goal: run.goal,
                 inputs: dagInputs,
@@ -989,7 +1031,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             states.set(node.id, { status: 'running', input: resolvedInput });
             upsertDagNode(run.id, node, { status: 'running', input: resolvedInput, startedAt: startedAtText });
             try {
-                const result = await executeDagNodeWithPolicy({ run, user, node, resolvedInput, toolList, deadline, policy });
+                const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy });
                 assertRunNotCancelled(run.id);
                 if (!result.ok) {
                     result.error.dagAttempt = result.attempt;
@@ -1208,10 +1250,10 @@ async function runAgent(runId, user) {
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-                const selectedTool = toolList.find(tool => tool.name === plan.tool);
+                const selectedTool = findAgentToolByName(plan.tool, toolList);
                 if (maybePauseForApproval(run, selectedTool, plan.input || {})) return;
                 const output = await withTimeout(
-                    executeToolByName(plan.tool, plan.input || {}, user, toolList),
+                    executeToolByName(plan.tool, plan.input || {}, user, toolList, { run, modelCfg }),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                     `执行工具：${plan.tool}`
                 );
@@ -1439,6 +1481,17 @@ function inferDagRunGoal({ goal, title, workflowId, runMetadata = {}, dagSpec = 
     return '';
 }
 
+function inferDagLlmRuntimeSettings(dagSpec = {}) {
+    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
+    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
+    const maxSteps = Number.parseInt(input.maxSteps ?? input.max_steps, 10);
+    return {
+        modelId: String(input.model || input.modelId || input.model_id || '').trim(),
+        maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : null
+    };
+}
+
 function createAgentRun({
     user,
     goal,
@@ -1474,14 +1527,14 @@ function createAgentRun({
     const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
         ? inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
         : goal);
-    const modelCfg = getRunnableModelForUser(modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
     const runId = createRunId();
     const now = getBeijingTimestamp();
     const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});
     if (Object.keys(normalizedDagInputs).length) {
         runMetadata.dagInputs = normalizedDagInputs;
     }
+    let effectiveModelId = modelId;
+    let effectiveMaxSteps = maxSteps;
     if (normalizedRunMode === 'dag') {
         const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
         const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
@@ -1501,7 +1554,12 @@ function createAgentRun({
         } else {
             runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
         }
+        const llmRuntimeSettings = inferDagLlmRuntimeSettings(runMetadata.dagSpec);
+        if (!effectiveModelId && llmRuntimeSettings.modelId) effectiveModelId = llmRuntimeSettings.modelId;
+        if (llmRuntimeSettings.maxSteps) effectiveMaxSteps = llmRuntimeSettings.maxSteps;
     }
+    const modelCfg = getRunnableModelForUser(effectiveModelId, user);
+    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
     db.prepare(`
         INSERT INTO agent_runs (
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
@@ -1518,7 +1576,7 @@ function createAgentRun({
         normalizeAgentTitle(title, cleanGoal),
         cleanGoal,
         'queued',
-        normalizeMaxSteps(maxSteps),
+        normalizeMaxSteps(effectiveMaxSteps),
         parentRunId || null,
         normalizePriority(priority),
         normalizedRunMode,

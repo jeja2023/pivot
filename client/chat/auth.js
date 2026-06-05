@@ -74,14 +74,14 @@ window.showApp = () => {
         userDisplay.title = displayName;
     }
     
-    const isSuperAdmin = currentUser.username === 'admin';
-    const isAdminRole = currentUser.role === 'admin';
+    const isSuperAdmin = isSuperAdminUser(currentUser);
+    const isAdminRole = isAdminUser(currentUser);
     const tag = document.getElementById('admin-tag');
     if (tag) {
         tag.classList.toggle('hidden', !isAdminRole);
         tag.classList.toggle('is-super-admin', isSuperAdmin);
         tag.classList.toggle('is-role-admin', isAdminRole && !isSuperAdmin);
-        const label = isSuperAdmin ? '系统管理员' : '管理员';
+        const label = getPermissionLabel(currentUser);
         tag.title = label;
         tag.setAttribute('aria-label', label);
     }
@@ -195,7 +195,7 @@ loadAuthConfig();
 window.loadApiKeys = async function() {
     try {
         document.querySelectorAll('.super-admin-only').forEach(el => {
-            el.classList.toggle('hidden', currentUser?.username !== 'admin');
+            el.classList.toggle('hidden', !isSuperAdminUser());
         });
         const res = await apiFetch(`${API_BASE}/auth/keys`);
         if (!res.ok) throw new Error('加载 API Key 失败');
@@ -234,7 +234,7 @@ document.getElementById('api-keys-body')?.addEventListener('click', (event) => {
 });
 
 window.openApiCallLogsModal = function() {
-    if (currentUser?.username !== 'admin') return;
+    if (!isSuperAdminUser()) return;
     document.getElementById('api-call-logs-modal')?.classList.remove('hidden');
     window.loadApiCallLogs?.(1);
 }
@@ -244,7 +244,7 @@ window.closeApiCallLogsModal = function() {
 }
 
 window.loadApiCallLogs = async function(page = 1) {
-    if (currentUser?.username !== 'admin') return;
+    if (!isSuperAdminUser()) return;
     pageState.apiCallLogs = page;
     const body = document.getElementById('api-call-logs-body');
     if (!body) return;

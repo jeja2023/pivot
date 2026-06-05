@@ -31,6 +31,24 @@ function getMcpToolIntent(userPrompt = '') {
     return { wantsChart, wantsReport };
 }
 
+function detectTableInventoryIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    const mentionsTable = /数据表|数据库表|表清单|表列表|所有表|全部表|表数量|表的数量|多少张表|几张表|几(\s*)个表|list\s+tables|show\s+tables|\btables?\b/.test(prompt);
+    const mentionsCollection = /集合|collections?/i.test(prompt);
+    const asksInventory = /数量|个数|多少|几张|几个|列出|有哪些|所有|全部|清单|列表|list|show/.test(prompt);
+    return (mentionsTable || mentionsCollection) && asksInventory;
+}
+
+function detectCollectionInventoryIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    return /集合|collections?/i.test(prompt);
+}
+
+function detectTableCountIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    return detectTableInventoryIntent(prompt) && /数量|个数|多少|几张|几个|count/.test(prompt);
+}
+
 // 检测用户是否明确要求查询数据库（即使规划器返回 none 也应强行走数据工具）
 function detectStrongDataQueryIntent(userPrompt = '') {
     const prompt = String(userPrompt || '').toLowerCase();
@@ -40,7 +58,21 @@ function detectStrongDataQueryIntent(userPrompt = '') {
     const hasAggregation = /统计|分组|数量|计数|汇总|count|group|sum|avg/i.test(prompt);
     // 指定了具体的列/字段
     const hasColumn = /字段|列|column|按照|根据.*分组|根据.*统计/i.test(prompt);
-    return hasTableRef || (hasAggregation && hasColumn);
+    return detectTableInventoryIntent(userPrompt) || hasTableRef || (hasAggregation && hasColumn);
+}
+
+function detectExplicitMcpCapabilityIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    const intent = getMcpToolIntent(prompt);
+    const wantsChartOutput = intent.wantsChart && /生成|画|绘|可视化|展示|呈现|创建|输出|做|build|create|make|plot|visuali[sz]e/.test(prompt);
+    const wantsReportOutput = intent.wantsReport && /生成|写|出|汇总|导出|创建|输出|compose|build|create|make/.test(prompt);
+    const wantsDataOperation = /查询|查找|统计|计数|列出|读取|筛选|分析|汇总|调用|请求|select\s|show\s|describe\s|count\s/i.test(prompt)
+        && /数据库|数据表|数据库表|sql\b|集合|collections?|api|接口|webhook/.test(prompt);
+    return detectStrongDataQueryIntent(userPrompt)
+        || wantsChartOutput
+        || wantsReportOutput
+        || wantsDataOperation
+        || /能力库|mcp|工具调用|调用工具/.test(prompt);
 }
 
 // 从用户自然语言中尝试提取表名
@@ -63,10 +95,24 @@ function extractGroupByField(userPrompt = '') {
     return groupMatch ? groupMatch[1] : null;
 }
 
+function extractSchemaName(userPrompt = '') {
+    const prompt = String(userPrompt || '');
+    const match = prompt.match(/(?:schema|模式|架构)\s*[：:]*\s*['`"]?([A-Za-z_][\w]*)/i);
+    return match ? match[1] : '';
+}
+
+function buildFallbackListTablesInput(userPrompt = '') {
+    const schema = extractSchemaName(userPrompt);
+    return schema ? { schema } : {};
+}
+
 // 当规划器失败时，尝试为数据查询工具构造合理的 SQL
 function buildFallbackDataQueryInput(userPrompt = '', tool) {
     const toolName = String(tool?.name || tool?.fullName || '');
     const table = extractTableName(userPrompt);
+    if (!table && /list_tables|list_collections|count_tables|count_collections/i.test(toolName) && detectTableInventoryIntent(userPrompt)) {
+        return buildFallbackListTablesInput(userPrompt);
+    }
     if (!table) return null;
     const groupBy = extractGroupByField(userPrompt);
     if (toolName.includes('group_count')) {
@@ -91,6 +137,61 @@ function buildFallbackDataQueryInput(userPrompt = '', tool) {
         sql: `SELECT * FROM ${table}`,
         limit: 50
     };
+}
+
+function toolMatchesPromptSource(tool, userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    if (!prompt) return false;
+    const labels = [
+        tool?.serverName,
+        cleanCapabilityDisplayName(tool?.serverName || ''),
+        String(tool?.serverName || '').replace(/\s+/g, ''),
+        String(tool?.serverName || '').replace(/\s*MCP$/iu, '').replace(/\s+/g, '')
+    ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+    return labels.some(label => label.length >= 2 && prompt.includes(label));
+}
+
+function chooseToolForPrompt(tools, userPrompt, matcher) {
+    const candidates = tools.filter(tool => matcher(String(tool.name || tool.fullName || '')));
+    if (candidates.length <= 1) return candidates[0] || null;
+    return candidates.find(tool => toolMatchesPromptSource(tool, userPrompt)) || candidates[0];
+}
+
+function resolvePlannerTool(toolName, tools, userPrompt = '') {
+    const raw = String(toolName || '').trim();
+    if (!raw) return null;
+    const exact = tools.find(tool => tool.fullName === raw);
+    if (exact) return exact;
+    const matches = tools.filter(tool => tool.name === raw || String(tool.fullName || '').endsWith(`.${raw}`));
+    if (matches.length <= 1) return matches[0] || null;
+    return matches.find(tool => toolMatchesPromptSource(tool, userPrompt)) || null;
+}
+
+function buildDeterministicDataFallback(userPrompt = '', tools = []) {
+    const table = extractTableName(userPrompt);
+    if (!table && detectTableInventoryIntent(userPrompt)) {
+        const collectionIntent = detectCollectionInventoryIntent(userPrompt);
+        const countTool = detectTableCountIntent(userPrompt)
+            ? chooseToolForPrompt(tools, userPrompt, name => collectionIntent ? /db\.count_collections/i.test(name) : /db\.count_tables/i.test(name))
+            : null;
+        const inventoryTool = countTool || chooseToolForPrompt(tools, userPrompt, name => collectionIntent ? /db\.list_collections/i.test(name) : /db\.list_tables/i.test(name));
+        if (inventoryTool) {
+            return {
+                tool: inventoryTool,
+                input: buildFallbackListTablesInput(userPrompt),
+                reason: collectionIntent
+                    ? (countTool ? '用户要求统计数据库集合数量' : '用户要求查询数据库集合清单')
+                    : (countTool ? '用户要求统计数据库表数量' : '用户要求查询数据库表清单')
+            };
+        }
+    }
+
+    const groupTool = chooseToolForPrompt(tools, userPrompt, name => /group_count/i.test(name));
+    const queryTool = chooseToolForPrompt(tools, userPrompt, name => /run_readonly_query|run_query/i.test(name));
+    const dataTool = extractGroupByField(userPrompt) && groupTool ? groupTool : (queryTool || groupTool);
+    if (!dataTool) return null;
+    const input = buildFallbackDataQueryInput(userPrompt, dataTool);
+    return input ? { tool: dataTool, input, reason: '用户明确要求查询数据库数据' } : null;
 }
 
 function filterMcpToolsForChatIntent(tools, userPrompt = '') {
@@ -304,14 +405,40 @@ function buildMcpToolsHint(tools, reason = '') {
     ].join('\n');
 }
 
+function buildMcpMissingToolHint(tools, reason = '') {
+    const toolNames = tools.slice(0, 8).map(t => t.name || t.fullName || '').filter(Boolean);
+    const availability = toolNames.length
+        ? `当前可用工具：${toolNames.join('、')}。`
+        : '当前没有可用的能力库工具缓存。';
+    const note = reason ? `无法调用的原因：${reason}。` : '无法调用的原因：没有匹配用户请求的能力库工具。';
+    return [
+        '本轮用户请求需要能力库工具，但当前没有匹配的能力库工具，因此未实际调用。',
+        availability,
+        note,
+        '请直接告诉用户当前缺少对应能力库工具，无法完成该类实时查询、数据库查询或外部能力调用；不要把未调用原因描述成用户请求不需要工具，也不要编造工具结果。'
+    ].join('\n');
+}
+
 async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log }) {
+    const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
-        writeSse(JSON.stringify({ type: 'mcp', status: 'empty', message: '没有可用的能力库工具缓存' }));
-        return '';
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'empty',
+            message: explicitToolIntent ? '没有可用的能力库工具，无法完成本轮能力调用' : '没有可用的能力库工具缓存'
+        }));
+        return explicitToolIntent ? buildMcpMissingToolHint([], '没有可用的能力库工具缓存') : '';
     }
     const intentTools = filterMcpToolsForChatIntent(tools, userPrompt);
     if (!intentTools.length) {
-        writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮没有匹配用户意图的能力库工具' }));
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'skipped',
+            message: explicitToolIntent ? '没有匹配用户请求的能力库工具' : '本轮没有匹配用户意图的能力库工具'
+        }));
+        if (explicitToolIntent) {
+            return buildMcpMissingToolHint(tools, '没有匹配用户请求的能力库工具');
+        }
         // 注入可用工具提示，防止主模型自行生成代码
         const dataTools = tools.filter(isDataResultMcpTool);
         if (dataTools.length) {
@@ -323,69 +450,76 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用能力库工具' }));
         const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
         if (!plannerTools.length) {
-            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮没有适合优先调用的能力库工具' }));
-            return buildMcpToolsHint(intentTools, '工具过滤后无匹配');
+            writeSse(JSON.stringify({
+                type: 'mcp',
+                status: 'skipped',
+                message: explicitToolIntent ? '没有适合本轮请求的能力库工具' : '本轮没有适合优先调用的能力库工具'
+            }));
+            return explicitToolIntent
+                ? buildMcpMissingToolHint(intentTools, '工具过滤后没有适合本轮请求的工具')
+                : buildMcpToolsHint(intentTools, '工具过滤后无匹配');
         }
         const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user);
         const plan = parsePlannerJson(plannerText);
-        const toolNames = new Set(plannerTools.map(tool => tool.fullName));
-        if (!plan || plan.action !== 'tool' || !toolNames.has(plan.tool)) {
+        const plannedTool = plan?.action === 'tool' ? resolvePlannerTool(plan.tool, plannerTools, userPrompt) : null;
+        if (!plan || plan.action !== 'tool' || !plannedTool) {
             // 规划器返回 none 或解析失败——尝试确定性回退：用户明显要查数据时直接执行
             if (detectStrongDataQueryIntent(userPrompt)) {
-                const groupTool = plannerTools.find(t => /group_count/i.test(String(t.name || t.fullName || '')));
-                const queryTool = plannerTools.find(t => /run_readonly_query|run_query/i.test(String(t.name || t.fullName || '')));
-                const dataTool = extractGroupByField(userPrompt) && groupTool ? groupTool : (queryTool || groupTool);
-                if (dataTool) {
-                    const fallbackInput = buildFallbackDataQueryInput(userPrompt, dataTool);
-                    if (fallbackInput) {
+                const fallback = buildDeterministicDataFallback(userPrompt, plannerTools);
+                if (fallback) {
+                    const dataTool = fallback.tool;
+                    const fallbackInput = fallback.input;
+                    writeSse(JSON.stringify({
+                        type: 'mcp',
+                        status: 'running',
+                        tool: dataTool.fullName,
+                        serverName: cleanCapabilityDisplayName(dataTool.serverName || ''),
+                        message: `规划器未选择工具，根据意图自动调用：${cleanCapabilityDisplayName(dataTool.serverName || '能力服务')} / ${dataTool.name || dataTool.fullName}`
+                    }));
+                    try {
+                        const result = await executeMcpTool(dataTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
+                        let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
+                        const chartText = await maybeBuildChartAfterDataTool({ selected: dataTool, result, intentTools, userPrompt, user, writeSse });
+                        if (chartText) {
+                            resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
+                        }
                         writeSse(JSON.stringify({
                             type: 'mcp',
-                            status: 'running',
+                            status: 'done',
                             tool: dataTool.fullName,
-                            serverName: cleanCapabilityDisplayName(dataTool.serverName || ''),
-                            message: `规划器未选择工具，根据意图自动调用：${cleanCapabilityDisplayName(dataTool.serverName || '能力服务')} / ${dataTool.name || dataTool.fullName}`
+                            message: '能力库工具调用完成，正在生成回答'
                         }));
-                        try {
-                            const result = await executeMcpTool(dataTool.fullName, fallbackInput, user);
-                            let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
-                            const chartText = await maybeBuildChartAfterDataTool({ selected: dataTool, result, intentTools, userPrompt, user, writeSse });
-                            if (chartText) {
-                                resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
-                            }
-                            writeSse(JSON.stringify({
-                                type: 'mcp',
-                                status: 'done',
-                                tool: dataTool.fullName,
-                                message: '能力库工具调用完成，正在生成回答'
-                            }));
-                            return [
-                                '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
-                                `工具: ${dataTool.fullName}`,
-                                `输入: ${JSON.stringify(fallbackInput)}`,
-                                '结果:',
-                                resultText
-                            ].join('\n');
-                        } catch (fallbackErr) {
-                            // 回退执行也失败，降级到提示
-                            log?.warn?.({ err: fallbackErr.message }, '回退数据查询也失败');
-                        }
+                        return [
+                            '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+                            `工具: ${dataTool.fullName}`,
+                            `输入: ${JSON.stringify(fallbackInput)}`,
+                            '结果:',
+                            resultText
+                        ].join('\n');
+                    } catch (fallbackErr) {
+                        // 回退执行也失败，降级到提示
+                        log?.warn?.({ err: fallbackErr.message }, '回退数据查询也失败');
                     }
                 }
+            }
+            if (explicitToolIntent) {
+                writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '没有匹配用户请求的能力库工具，无法完成本轮能力调用' }));
+                return buildMcpMissingToolHint(plannerTools, plan?.reason || '规划器未选择工具，且没有可确定执行的匹配工具');
             }
             writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用能力库工具' }));
             // 注入可用工具提示，防止主模型自行生成代码
             return buildMcpToolsHint(plannerTools, plan?.reason || '规划器判断不需要调用');
         }
 
-        const selected = plannerTools.find(tool => tool.fullName === plan.tool);
+        const selected = plannedTool;
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'running',
-            tool: plan.tool,
+            tool: selected.fullName,
             serverName: cleanCapabilityDisplayName(selected?.serverName || ''),
-            message: `正在调用能力库工具：${cleanCapabilityDisplayName(selected?.serverName || '能力服务')} / ${selected?.name || plan.tool}`
+            message: `正在调用能力库工具：${cleanCapabilityDisplayName(selected?.serverName || '能力服务')} / ${selected?.name || selected.fullName}`
         }));
-        const result = await executeMcpTool(plan.tool, plan.input || {}, user);
+        const result = await executeMcpTool(selected.fullName, plan.input || {}, user, { source: 'chat' });
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
         if (chartText) {
@@ -400,7 +534,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         return [
             '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
             '如果工具结果包含 ```pivot-echart 代码块，且用户需要图表，请在最终回答中原样保留该代码块，前端会自动渲染为可视化图表。',
-            `工具: ${plan.tool}`,
+            `工具: ${selected.fullName}`,
             `调用原因: ${plan.reason || ''}`,
             '结果:',
             resultText

@@ -17,6 +17,14 @@ const {
     getPublicRegistrationSetting,
     setPublicRegistrationSetting
 } = require('../services/registration-settings');
+const {
+    SUPER_ADMIN_USERNAME,
+    getPermissionLabel,
+    getPermissionTier,
+    isSuperAdmin,
+    normalizeRole,
+    withPermissionFlags
+} = require('../permissions');
 
 function createAdminUsersRouter({
     authMiddleware,
@@ -25,10 +33,9 @@ function createAdminUsersRouter({
     logAction
 }) {
     const router = express.Router();
-    const isSuperAdmin = (user) => user?.username === 'admin';
     const requireSuperAdmin = (req, res) => {
         if (isSuperAdmin(req.user)) return true;
-        res.status(403).json({ error: '仅超级管理员 admin 可执行该操作' });
+        res.status(403).json({ error: '仅 admin 权限层级可执行该操作' });
         return false;
     };
 
@@ -43,19 +50,21 @@ function createAdminUsersRouter({
             FROM users
             ${where}
             ORDER BY id ASC LIMIT ? OFFSET ?
-        `).all(limit, offset);
+        `).all(limit, offset).map(withPermissionFlags);
         const total = db.prepare(`SELECT COUNT(*) as count FROM users ${where}`).get().count;
         res.json({
             data: users,
             total,
             isSuperAdmin: isSuperAdmin(req.user),
+            permissionTier: getPermissionTier(req.user),
+            permissionLabel: getPermissionLabel(req.user),
             allowPublicRegistration: getPublicRegistrationSetting()
         });
     }));
 
     router.put('/admin/users/registration', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) {
-            return res.status(403).json({ error: '只有 admin 超级管理员可以修改开放注册设置' });
+            return res.status(403).json({ error: '只有 admin 权限层级可以修改开放注册设置' });
         }
         const enabled = req.body?.allowPublicRegistration === true;
         const allowPublicRegistration = setPublicRegistrationSetting(enabled, req.user.id);
@@ -66,7 +75,7 @@ function createAdminUsersRouter({
     router.post('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const { username, password, nickname, unit, role } = req.body;
         if (role === 'admin' && !isSuperAdmin(req.user)) {
-            return res.status(403).json({ error: '只有 admin 超级管理员可以创建管理员账号' });
+            return res.status(403).json({ error: '只有 admin 权限层级可以创建 manager 账号' });
         }
         try {
             const user = register(username, password, nickname, unit, role);
@@ -81,18 +90,18 @@ function createAdminUsersRouter({
     router.put('/admin/users/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const targetUserId = parseInt(req.params.id, 10);
         const { nickname, unit, role, status } = req.body;
-        const safeRole = role === 'admin' ? 'admin' : 'user';
+        const safeRole = normalizeRole(role);
         const safeStatus = status === 'disabled' ? 'disabled' : 'active';
 
         const targetUser = db.prepare('SELECT username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能修改' });
         if (!isSuperAdmin(req.user) && (targetUser.role === 'admin' || safeRole === 'admin')) {
-            return res.status(403).json({ error: '只有 admin 超级管理员可以修改管理员账号或授予管理员角色' });
+            return res.status(403).json({ error: '只有 admin 权限层级可以修改 manager 账号或授予 manager 权限' });
         }
         
-        if (targetUser.username === 'admin' && (safeRole !== 'admin' || safeStatus === 'disabled')) {
-            return res.status(400).json({ error: '不能降低或禁用内置管理员权限' });
+        if (targetUser.username === SUPER_ADMIN_USERNAME && (safeRole !== 'admin' || safeStatus === 'disabled')) {
+            return res.status(400).json({ error: '不能降低或禁用内置 admin 账号权限' });
         }
         if (targetUserId === req.user.id && (safeRole !== 'admin' || safeStatus === 'disabled')) {
             return res.status(400).json({ error: '不能降低或禁用自己的管理员权限' });
@@ -110,8 +119,8 @@ function createAdminUsersRouter({
         const targetUser = db.prepare('SELECT username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.status(400).json({ error: '用户已删除，不能重置密码' });
-        if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员密码不可由其他用户重置' });
-        if (!isSuperAdmin(req.user) && targetUser.role === 'admin') return res.status(403).json({ error: '只有 admin 超级管理员可以重置管理员密码' });
+        if (targetUser.username === SUPER_ADMIN_USERNAME) return res.status(400).json({ error: '内置 admin 账号密码不可由其他用户重置' });
+        if (!isSuperAdmin(req.user) && targetUser.role === 'admin') return res.status(403).json({ error: '只有 admin 权限层级可以重置 manager 密码' });
         try {
             validatePassword(password);
         } catch (e) {
@@ -397,9 +406,9 @@ function createAdminUsersRouter({
         const targetUser = db.prepare('SELECT id, username, role, deleted_at FROM users WHERE id = ?').get(targetUserId);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
         if (targetUser.deleted_at) return res.json({ success: true });
-        if (targetUser.username === 'admin') return res.status(400).json({ error: '内置管理员账号禁止删除' });
+        if (targetUser.username === SUPER_ADMIN_USERNAME) return res.status(400).json({ error: '内置 admin 账号禁止删除' });
         if (targetUser.role === 'admin' && !isSuperAdmin(req.user)) {
-            return res.status(403).json({ error: '只有 admin 超级管理员可以删除管理员账号' });
+            return res.status(403).json({ error: '只有 admin 权限层级可以删除 manager 账号' });
         }
         if (targetUser.role === 'admin') {
             const adminCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status != 'disabled' AND deleted_at IS NULL").get().count;

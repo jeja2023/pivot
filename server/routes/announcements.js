@@ -2,12 +2,12 @@ const express = require('express');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
+const { isAdmin, isSuperAdmin } = require('../permissions');
 
 const ANNOUNCEMENT_TYPES = new Set(['system', 'security', 'knowledge', 'normal']);
 const ANNOUNCEMENT_PRIORITIES = new Set(['low', 'normal', 'high', 'critical']);
 const ANNOUNCEMENT_TARGETS = new Set(['all', 'unit', 'role', 'users']);
 const ANNOUNCEMENT_STATUSES = new Set(['draft', 'published', 'archived']);
-const isSuperAdmin = (user) => user?.username === 'admin';
 
 const splitTargetValue = (value) => String(value || '')
     .split(',')
@@ -63,7 +63,7 @@ const normalizeAnnouncementPayload = (body = {}, fallback = {}) => {
 
 const getAnnouncementAdminPermissions = (user) => ({
     canManageAll: isSuperAdmin(user),
-    canCreate: user?.role === 'admin',
+    canCreate: isAdmin(user),
     canShowOnLogin: isSuperAdmin(user),
     allowedTargetTypes: isSuperAdmin(user) ? ['all', 'unit', 'role', 'users'] : ['unit'],
     defaultTargetType: isSuperAdmin(user) ? 'all' : 'unit',
@@ -72,7 +72,7 @@ const getAnnouncementAdminPermissions = (user) => ({
 
 const enforceAnnouncementAdminScope = (req, res, payload, current = null) => {
     if (payload.showOnLogin && !isSuperAdmin(req.user)) {
-        res.status(403).json({ error: '只有 admin 超级管理员可以发布登录页公告' });
+        res.status(403).json({ error: '只有 admin 权限层级可以发布登录页公告' });
         return false;
     }
     if (payload.showOnLogin && payload.targetType !== 'all') {

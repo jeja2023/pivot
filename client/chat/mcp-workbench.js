@@ -154,6 +154,10 @@ const mcpToolDisplayMap = {
         title: '列出数据表',
         description: '列出当前数据库中可查询的表和视图。'
     },
+    'db.count_tables': {
+        title: '统计数据表数量',
+        description: '统计当前数据库中可查询的表和视图数量。'
+    },
     'db.describe_table': {
         title: '查看表结构',
         description: '查看字段、类型、默认值和可空性，辅助模型生成安全 SQL。'
@@ -165,6 +169,10 @@ const mcpToolDisplayMap = {
     'db.list_collections': {
         title: '列出集合',
         description: '列出 MongoDB 数据库中的集合。'
+    },
+    'db.count_collections': {
+        title: '统计集合数量',
+        description: '统计 MongoDB 数据库中的集合数量。'
     },
     'db.sample_collection': {
         title: '读取集合样本',
@@ -178,12 +186,14 @@ const mcpToolDisplayMap = {
 
 const mcpSqlDatabaseFallbackTools = [
     'db.list_tables',
+    'db.count_tables',
     'db.describe_table',
     'db.run_readonly_query'
 ];
 
 const mcpMongoDatabaseFallbackTools = [
     'db.list_collections',
+    'db.count_collections',
     'db.sample_collection',
     'db.aggregate'
 ];
@@ -440,10 +450,10 @@ window.openMcpWorkbench = async function() {
     if (!panel) return;
     bindMcpToolsModalControls();
     panel.querySelectorAll('.admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+        el.classList.toggle('hidden', !isAdminUser());
     });
     panel.querySelectorAll('.super-admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     await window.loadMcpWorkbench?.();
 };
@@ -488,10 +498,10 @@ window.openMcpCreateModal = function(type = 'external') {
         mcpFormEl('url', 'edit').focus?.();
     }
     document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+        el.classList.toggle('hidden', !isAdminUser());
     });
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     modal.classList.remove('hidden');
 };
@@ -547,10 +557,10 @@ window.openMcpEditModal = function(serverId) {
     bindMcpFormControls('edit');
     fillMcpForm(server, 'edit');
     document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+        el.classList.toggle('hidden', !isAdminUser());
     });
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     modal.classList.remove('hidden');
 };
@@ -723,10 +733,10 @@ window.openMcpSystemConfig = function(type) {
     const shared = mcpFormEl('shared', 'edit');
     if (shared) shared.checked = false;
     document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.role !== 'admin');
+        el.classList.toggle('hidden', !isAdminUser());
     });
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
-        el.classList.toggle('hidden', currentUser?.username !== 'admin');
+        el.classList.toggle('hidden', !isSuperAdminUser());
     });
     modal.classList.remove('hidden');
 };

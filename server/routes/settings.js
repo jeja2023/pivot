@@ -18,6 +18,7 @@ const {
     getMemoryConfig,
     toMemorySettingValue
 } = require('../services/memory-config');
+const { isSuperAdmin } = require('../permissions');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -44,8 +45,6 @@ const userEmbeddingSettings = new Set([
     RAG_CONFIG_KEYS.embeddingApiKey,
     RAG_CONFIG_KEYS.embeddingModel
 ]);
-
-const isSuperAdmin = (user) => user?.username === 'admin';
 
 function buildEmbeddingModelListUrls(url) {
     const rawUrl = String(url || '').trim().replace(/\/+$/, '');
@@ -261,7 +260,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/admin/settings', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) {
-            return res.status(403).json({ error: '只有 admin 超级管理员可以修改系统全局设置。' });
+            return res.status(403).json({ error: '只有 admin 权限层级可以修改系统全局设置。' });
         }
         const updates = req.body || {};
         const stmt = db.prepare(`

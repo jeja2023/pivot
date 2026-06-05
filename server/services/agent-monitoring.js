@@ -1,5 +1,6 @@
 const { db } = require('../db');
 const { normalizePositiveInt } = require('./agent-validators');
+const { isSuperAdmin } = require('../permissions');
 
 function getAgentRuntimeStatus(options = {}) {
     const user = options.user || null;
@@ -27,10 +28,11 @@ function getAgentRuntimeStatus(options = {}) {
 function getAgentMetrics(user, days = 7) {
     const safeDays = normalizePositiveInt(days, 7, 1, 90);
     const params = [user.id, `-${safeDays} days`];
-    const baseWhere = user?.username === 'admin'
+    const superAdmin = isSuperAdmin(user);
+    const baseWhere = superAdmin
         ? "created_at >= datetime('now', '+8 hours', ?)"
         : "user_id = ? AND created_at >= datetime('now', '+8 hours', ?)";
-    const actualParams = user?.username === 'admin' ? [`-${safeDays} days`] : params;
+    const actualParams = superAdmin ? [`-${safeDays} days`] : params;
     const summary = db.prepare(`
         SELECT
             COUNT(*) AS total,

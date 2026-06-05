@@ -13,6 +13,7 @@ const {
     normalizeDagSpec,
     serializeToolAllowlist
 } = require('./agent-validators');
+const { isSuperAdmin } = require('../permissions');
 
 function assertTemplateAccess(template, user, write = false) {
     if (!template || template.deleted_at) return false;
@@ -31,7 +32,7 @@ function normalizeTemplatePayload(body = {}, user = {}) {
         err.status = 400;
         throw err;
     }
-    const shared = body.scope === 'shared' && user?.username === 'admin';
+    const shared = body.scope === 'shared' && isSuperAdmin(user);
     const runMode = normalizeRunMode(body.runMode || body.run_mode);
     const dagSpec = runMode === 'dag' ? normalizeDagSpec(body.dagSpec || body.dag_spec || {}) : { nodes: [] };
     const workflowId = body.workflowId || body.workflow_id || null;

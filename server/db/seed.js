@@ -70,7 +70,7 @@ function ensureBuiltInAdminAccount() {
         WHERE id = ?
     `).run(admin.id);
     recordMigration('initial_admin_repaired_v1', 'done');
-    logger.warn({ username: 'admin', userId: admin.id }, '系统初始化：已修复内置管理员账号角色或状态');
+    logger.warn({ username: 'admin', userId: admin.id }, '系统初始化：已修复内置 admin 账号角色或状态');
 }
 
 function runSeeds() {

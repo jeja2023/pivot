@@ -11,6 +11,7 @@ const { isImagePath, isLikelyImageMime, normalizeUploadedImage } = require('../i
 const { logger } = require('../logger');
 const { normalizeUploadedOriginalName } = require('../upload');
 const { encodeAttachmentUrl } = require('../security');
+const { isSuperAdmin } = require('../permissions');
 
 function getSafeUploadPath(userId, sessionId, filename) {
     const uploadRoot = path.resolve(__dirname, '../../uploads');
@@ -43,7 +44,6 @@ function createAttachmentsRouter({
     logAction
 }) {
     const router = express.Router();
-    const isSuperAdmin = (user) => user?.username === 'admin';
 
     router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
         const token = req.query.token;

@@ -2,6 +2,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { db, dataDir } = require('../db');
 const { decryptSecret, isPrivateHost } = require('../security');
+const { isAdmin } = require('../permissions');
 
 const DEFAULT_PORTS = {
     postgres: 5432,
@@ -145,6 +146,16 @@ const SQL_TOOL_DEFINITIONS = [
         }
     },
     {
+        name: 'db.count_tables',
+        description: '统计当前数据库中可查询的数据表和视图数量，适合回答“有多少张表”等问题。',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                schema: { type: 'string', description: '可选，数据库 schema 名称。' }
+            }
+        }
+    },
+    {
         name: 'db.describe_table',
         description: '查看表字段、类型和可空性，辅助模型生成安全 SQL。',
         inputSchema: {
@@ -191,6 +202,11 @@ const MONGO_TOOL_DEFINITIONS = [
     {
         name: 'db.list_collections',
         description: '列出 MongoDB 数据库中的集合。',
+        inputSchema: { type: 'object', properties: {} }
+    },
+    {
+        name: 'db.count_collections',
+        description: '统计 MongoDB 数据库中的集合数量，适合回答“有多少个集合”等问题。',
         inputSchema: { type: 'object', properties: {} }
     },
     {
@@ -550,6 +566,11 @@ async function executeSqlTool(connection, name, input = {}) {
             if (name === 'db.list_tables') {
                 return client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
             }
+            if (name === 'db.count_tables') {
+                const rows = client.prepare("SELECT type, COUNT(*) AS total FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' GROUP BY type ORDER BY type").all();
+                const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+                return { total, rows };
+            }
             if (name === 'db.describe_table') {
                 return client.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
             }
@@ -576,6 +597,18 @@ async function executeSqlTool(connection, name, input = {}) {
                     ORDER BY table_schema, table_name
                 `, [schema]);
                 return result.rows;
+            }
+            if (name === 'db.count_tables') {
+                const result = await client.query(`
+                    SELECT table_schema, table_type, COUNT(*)::int AS total
+                    FROM information_schema.tables
+                    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                      AND ($1::text = '' OR table_schema = $1)
+                    GROUP BY table_schema, table_type
+                    ORDER BY table_schema, table_type
+                `, [schema]);
+                const total = result.rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+                return { total, rows: result.rows };
             }
             if (name === 'db.describe_table') {
                 const result = await client.query(`
@@ -609,6 +642,17 @@ async function executeSqlTool(connection, name, input = {}) {
                     ORDER BY table_name
                 `, [schema]);
                 return rows;
+            }
+            if (name === 'db.count_tables') {
+                const [rows] = await client.execute(`
+                    SELECT table_schema, table_type, COUNT(*) AS total
+                    FROM information_schema.tables
+                    WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+                    GROUP BY table_schema, table_type
+                    ORDER BY table_schema, table_type
+                `, [schema]);
+                const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+                return { total, rows };
             }
             if (name === 'db.describe_table') {
                 const [rows] = await client.execute(`
@@ -644,6 +688,19 @@ async function executeSqlTool(connection, name, input = {}) {
                         ORDER BY TABLE_SCHEMA, TABLE_NAME
                     `);
                 return result.recordset;
+            }
+            if (name === 'db.count_tables') {
+                const result = await pool.request()
+                    .input('schema', schema)
+                    .query(`
+                        SELECT TABLE_SCHEMA AS table_schema, TABLE_TYPE AS table_type, COUNT(*) AS total
+                        FROM INFORMATION_SCHEMA.TABLES
+                        WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
+                        GROUP BY TABLE_SCHEMA, TABLE_TYPE
+                        ORDER BY TABLE_SCHEMA, TABLE_TYPE
+                    `);
+                const total = result.recordset.reduce((sum, row) => sum + Number(row.total || 0), 0);
+                return { total, rows: result.recordset };
             }
             if (name === 'db.describe_table') {
                 const result = await pool.request()
@@ -693,6 +750,10 @@ async function executeMongoTool(connection, name, input = {}) {
         const database = client.db(connection.database_name);
         if (name === 'db.list_collections') {
             return await database.listCollections({}, { nameOnly: true }).toArray();
+        }
+        if (name === 'db.count_collections') {
+            const collections = await database.listCollections({}, { nameOnly: true }).toArray();
+            return { total: collections.length, rows: collections };
         }
         if (name === 'db.sample_collection') {
             const limit = clampLimit(input.limit, 20, 100);
@@ -798,7 +859,7 @@ function validateDatabaseConnectionPayload(payload, user) {
         if (!host || !databaseName) throw createDatabaseMcpError('请填写数据库主机和数据库名。', 'DB_HOST_OR_NAME_REQUIRED', 400);
         if (!username && type !== 'mongodb') throw createDatabaseMcpError('请填写数据库用户名。', 'DB_USERNAME_REQUIRED', 400);
         const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
-        if (restrictPrivateHostsToAdmin && isPrivateHost(host) && user?.role !== 'admin') {
+        if (restrictPrivateHostsToAdmin && isPrivateHost(host) && !isAdmin(user)) {
             throw createDatabaseMcpError('普通用户不能配置内网或本机数据库地址。', 'MCP_PRIVATE_HOST_RESTRICTED', 403);
         }
     }

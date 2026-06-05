@@ -44,12 +44,14 @@ async function callModelJson(modelCfg, messages, options = {}) {
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
         const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
+        const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
+        const maxTokens = typeof options.maxTokens === 'number' ? options.maxTokens : 1200;
         const response = await axios.post(targetUrl, {
             model: modelCfg.model_name || modelCfg.name,
             messages,
             stream: false,
-            temperature: 0.2,
-            max_tokens: 1200
+            temperature,
+            max_tokens: maxTokens
         }, {
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             timeout: 180000,

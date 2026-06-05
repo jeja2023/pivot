@@ -64,7 +64,7 @@ window.loadModels = async function(page = 1) {
         const isGlobalModel = !m.user_id;
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
-        const isSuperAdmin = currentUser.username === 'admin';
+        const isSuperAdmin = isSuperAdminUser();
         const isMyModel = String(m.user_id) === String(currentUser.id);
         
         let defaultBtn = '';
@@ -280,7 +280,7 @@ window.resetModelForm = () => {
 };
 
 window.updateModelScopeControls = (model = null) => {
-    const isSuperAdmin = currentUser?.username === 'admin';
+    const isSuperAdmin = isSuperAdminUser();
     const scopeWrap = document.getElementById('m-scope-wrap');
     const scopeUnitsRow = scopeWrap?.closest('.model-scope-units-row');
     const scopeEl = document.getElementById('m-scope');
@@ -369,7 +369,7 @@ window.addModel = async () => {
         input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
         output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
         price_currency: (document.getElementById('m-price-currency')?.value || 'CNY').trim(),
-        scope: currentUser?.username === 'admin' ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
+        scope: isSuperAdminUser() ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
     const btn = document.getElementById('m-submit-btn');

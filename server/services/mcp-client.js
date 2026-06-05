@@ -20,9 +20,9 @@ const {
     isInternalMcpUrl,
     listBuiltinMcpTools
 } = require('./builtin-mcp');
+const { isSuperAdmin } = require('../permissions');
 
 const MCP_TIMEOUT_MS = 20000;
-const isSuperAdmin = (user) => user?.username === 'admin';
 const PREVIEW_LIMIT = 1800;
 
 function previewValue(value, limit = PREVIEW_LIMIT) {
@@ -215,17 +215,19 @@ async function refreshMcpTools(server, user = null) {
 function listCachedMcpTools(serverId = null, user = null) {
     if (serverId) {
         return db.prepare(`
-            SELECT t.*, s.name AS server_name
+            SELECT t.*, s.name AS server_name, s.base_url AS server_base_url, c.database_type
             FROM mcp_tool_cache t
             JOIN mcp_servers s ON s.id = t.server_id
+            LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
             WHERE t.server_id = ?
             ORDER BY t.name ASC
         `).all(serverId).map(formatMcpTool);
     }
     const rows = db.prepare(`
-        SELECT t.*, s.name AS server_name
+        SELECT t.*, s.name AS server_name, s.base_url AS server_base_url, c.database_type
         FROM mcp_tool_cache t
         JOIN mcp_servers s ON s.id = t.server_id
+        LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
         WHERE s.status = 'active'
           AND (? IS NULL OR s.user_id IS NULL OR s.user_id = ? OR ? = 1)
         ORDER BY s.name ASC, t.name ASC
@@ -238,9 +240,15 @@ function formatMcpTool(row) {
     try {
         schema = JSON.parse(row.input_schema || '{}') || schema;
     } catch (e) {}
+    const serverBaseUrl = String(row.server_base_url || row.base_url || '');
+    const serverType = serverBaseUrl.startsWith('pivot-db://')
+        ? 'database'
+        : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
     return {
         serverId: row.server_id,
         serverName: row.server_name,
+        serverType,
+        databaseType: row.database_type || '',
         name: row.name,
         fullName: `mcp.${row.server_id}.${row.name}`,
         description: row.description || '',

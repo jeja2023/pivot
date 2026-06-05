@@ -5,6 +5,7 @@ const { db, stmts } = require('./db');
 const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
+const { normalizeRole, withPermissionFlags } = require('./permissions');
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -77,7 +78,7 @@ function generateCsrfToken() {
 
 function generateAccessToken(user) {
     return jwt.sign(
-        { id: user.id, username: user.username, role: user.role },
+        { id: user.id, username: user.username, role: normalizeRole(user.role) },
         JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRES }
     );
@@ -128,7 +129,7 @@ function resolveAuthenticatedUser(req) {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = stmts.getUserById.get(decoded.id);
         if (user && user.status !== 'disabled') {
-            return { user, token, code: 'AUTH_OK' };
+            return { user: withPermissionFlags(user), token, code: 'AUTH_OK' };
         }
     } catch (e) {
         if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
@@ -141,7 +142,7 @@ function resolveAuthenticatedUser(req) {
         const user = stmts.getUserById.get(apiKeyData.user_id);
         if (user && user.status !== 'disabled') {
             db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
-            return { user, token, apiKeyData, code: 'AUTH_OK' };
+            return { user: withPermissionFlags(user), token, apiKeyData, code: 'AUTH_OK' };
         }
     }
 
@@ -156,11 +157,11 @@ function register(username, password, nickname, unit, role = 'user') {
     }
     validatePassword(password);
     const hash = bcrypt.hashSync(password, 10);
-    const safeRole = role === 'admin' ? 'admin' : 'user';
+    const safeRole = normalizeRole(role);
     const stmt = db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
     try {
         const info = stmt.run(cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp());
-        return { id: info.lastInsertRowid, username: cleanUsername, nickname, role: safeRole, status: 'active' };
+        return withPermissionFlags({ id: info.lastInsertRowid, username: cleanUsername, nickname, role: safeRole, status: 'active' });
     } catch (e) {
         if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
             throw new UserInputError('用户名已存在');
@@ -188,7 +189,7 @@ function login(username, password) {
     return { 
         accessToken, 
         refreshToken, 
-        user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' } 
+        user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' })
     };
 }
 

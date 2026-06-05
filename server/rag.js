@@ -44,6 +44,7 @@ const {
     updateRelation
 } = require('./services/knowledge-graph');
 const { normalizeAuditAction } = require('./audit-actions');
+const { isSuperAdmin } = require('./permissions');
 
 const ragRouter = express.Router();
 const debugQueryLimiter = rateLimit({
@@ -72,8 +73,6 @@ function auditRagAction(req, action, details) {
     }
 }
 
-const isSuperAdmin = (user) => user?.username === 'admin';
-
 ragRouter.get('/docs', authMiddleware, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
@@ -85,7 +84,7 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
 
 ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
     if (!isSuperAdmin(req.user)) {
-        return res.status(403).json({ error: '仅 admin 超级管理员可查看知识库删除审计' });
+        return res.status(403).json({ error: '仅 admin 权限层级可查看知识库删除审计' });
     }
     return res.json(getKnowledgeDocumentAuditList({
         limit: req.query.limit,

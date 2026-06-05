@@ -2,12 +2,13 @@ const { db } = require('../db');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
-const { getUserRunnableModels } = require('./models');
+const { callModelText, recordAgentModelUsage } = require('./agent-model');
+const { getRunnableModelForUser, getUserRunnableModels } = require('./models');
 const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
+const { isSuperAdmin } = require('../permissions');
 
 const MAX_TEXT = 12000;
-const isSuperAdmin = (user) => user?.username === 'admin';
 
 function clampText(value, max = MAX_TEXT) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
@@ -17,7 +18,7 @@ function clampText(value, max = MAX_TEXT) {
 
 function assertAdmin(user) {
     if (!isSuperAdmin(user)) {
-        const err = new Error('只有 admin 超级管理员可以使用此工具。');
+        const err = new Error('只有 admin 权限层级可以使用此工具。');
         err.status = 403;
         throw err;
     }
@@ -35,6 +36,20 @@ function asJsonSchema(properties = {}, required = []) {
 function getBuiltInToolDefinitions(user) {
     const adminOnly = isSuperAdmin(user);
     return [
+        {
+            name: 'agent.llm',
+            title: '大模型节点',
+            description: '在工作流中调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。',
+            input_schema: asJsonSchema({
+                prompt: { type: 'string', description: '用户提示词，支持引用 {{goal}}、{{inputs.*}} 和 {{nodes.*.output}}。' },
+                systemPrompt: { type: 'string', description: '可选系统提示词，用于限定角色、边界和输出口径。' },
+                model: { type: 'string', description: '必填模型 ID 或 model_name；工作流运行会从 LLM 节点读取模型。' },
+                maxSteps: { type: 'integer', minimum: 1, maximum: 80, default: 20, description: '本工作流运行允许的最大步骤数。' },
+                temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.2 },
+                maxTokens: { type: 'integer', minimum: 1, maximum: 8000, default: 1200 },
+                responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' }
+            }, ['prompt', 'model'])
+        },
         {
             name: 'rag.search',
             title: '知识库检索',
@@ -137,7 +152,55 @@ function getUserAccessibleModels(user) {
     }));
 }
 
-async function executeBuiltInTool(name, input = {}, user) {
+function chooseAgentLlmModel(input = {}, user, context = {}) {
+    const requested = String(input.model || context.modelCfg?.id || context.run?.model_id || '').trim();
+    if (requested) return getRunnableModelForUser(requested, user);
+    const first = getUserRunnableModels(user).find(model => model.status !== 'usage_only');
+    return first ? getRunnableModelForUser(first.id, user) : null;
+}
+
+async function executeAgentLlmNode(input = {}, user, context = {}) {
+    const prompt = String(input.prompt || input.input || input.text || '').trim();
+    if (!prompt) throw new Error('大模型节点需要填写提示词。');
+    const modelCfg = chooseAgentLlmModel(input, user, context);
+    if (!modelCfg) throw new Error('没有可用于大模型节点的模型，或当前用户无权访问指定模型。');
+    const responseFormat = ['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
+        ? String(input.responseFormat || input.response_format || 'markdown')
+        : 'markdown';
+    const systemPrompt = String(input.systemPrompt || input.system_prompt || '').trim()
+        || '你是 Pivot 工作流中的大模型节点。请严格根据输入和上游结果完成本节点任务，输出使用中文，避免编造未提供的信息。';
+    const formatGuide = responseFormat === 'json'
+        ? '请只输出合法 JSON，不要包裹 Markdown 代码块。'
+        : responseFormat === 'text'
+            ? '请输出纯文本。'
+            : '请输出清晰的 Markdown。';
+    const messages = [
+        { role: 'system', content: `${systemPrompt}\n${formatGuide}` },
+        { role: 'user', content: prompt }
+    ];
+    const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
+    const maxTokens = parsePositiveInt(input.maxTokens ?? input.max_tokens, 1200, 8000);
+    const content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
+    recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+    return {
+        content,
+        text: content,
+        model: {
+            id: modelCfg.id,
+            name: modelCfg.name,
+            model_name: modelCfg.model_name
+        },
+        responseFormat,
+        temperature,
+        maxTokens
+    };
+}
+
+async function executeBuiltInTool(name, input = {}, user, context = {}) {
+    if (name === 'agent.llm') {
+        return executeAgentLlmNode(input, user, context);
+    }
+
     if (name === 'rag.search') {
         const query = String(input.query || '').trim();
         if (!query) throw new Error('请填写检索问题。');
