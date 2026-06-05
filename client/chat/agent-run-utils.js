@@ -1,0 +1,186 @@
+/* eslint-disable no-undef, no-unused-vars */
+// Agent 运行通用工具 Agent run utils
+// Split from agent-run-renderers.js.
+// Agent run shared labels and formatting helpers.
+function ensureAgentRunTitleTooltip() {
+    if (agentRunTitleTooltipEl?.isConnected) return agentRunTitleTooltipEl;
+    agentRunTitleTooltipEl = document.createElement('div');
+    agentRunTitleTooltipEl.className = 'agent-run-title-tooltip hidden';
+    agentRunTitleTooltipEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(agentRunTitleTooltipEl);
+    return agentRunTitleTooltipEl;
+}
+
+function positionAgentRunTitleTooltip(target) {
+    if (!agentRunTitleTooltipEl || !target) return;
+    const rect = target.getBoundingClientRect();
+    const tooltipRect = agentRunTitleTooltipEl.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 12;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - tooltipRect.width - viewportPadding);
+    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
+    let top = rect.bottom + gap;
+    if (top + tooltipRect.height > window.innerHeight - viewportPadding) {
+        top = Math.max(viewportPadding, rect.top - tooltipRect.height - gap);
+    }
+    agentRunTitleTooltipEl.style.left = `${Math.round(left)}px`;
+    agentRunTitleTooltipEl.style.top = `${Math.round(top)}px`;
+}
+
+function showAgentRunTitleTooltip(target) {
+    const text = target?.dataset?.agentRunTitleFull || '';
+    if (!text) return;
+    const tooltip = ensureAgentRunTitleTooltip();
+    tooltip.textContent = text;
+    tooltip.classList.remove('hidden');
+    agentRunTitleTooltipTarget = target;
+    positionAgentRunTitleTooltip(target);
+}
+
+function hideAgentRunTitleTooltip(target = null) {
+    if (target && target !== agentRunTitleTooltipTarget) return;
+    agentRunTitleTooltipEl?.classList.add('hidden');
+    agentRunTitleTooltipTarget = null;
+}
+
+function agentNotificationTitle(item) {
+    const title = String(item?.title || '').trim();
+    if (!agentLooksLikeCorruptTitle(title)) return title;
+    const body = String(item?.body || '').trim();
+    if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
+    return '智能体通知';
+}
+
+function agentNotificationBody(item) {
+    const body = String(item?.body || item?.created_at || '').trim();
+    if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
+    return item?.created_at || '任务状态已更新';
+}
+
+function agentStatusLabel(status) {
+    const map = {
+        queued: '排队中',
+        running: '运行中',
+        completed: '已完成',
+        error: '失败',
+        cancelled: '已停止',
+        approval_required: '待审批'
+    };
+    return map[status] || status || '-';
+}
+
+function isAgentRunActive(status) {
+    return status === 'queued' || status === 'running' || status === 'approval_required';
+}
+
+function agentRunModeLabel(mode) {
+    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式', dag: '工作流' };
+    return map[mode] || '标准模式';
+}
+
+function agentToolPolicyLabel(policy) {
+    return policy === 'builtin_only' ? '仅系统工具' : '系统 + 能力库';
+}
+
+function agentDownload(url) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+function formatAgentTokenUsage(run) {
+    const total = Number(run?.total_tokens || 0);
+    if (!total) return '';
+    return `Token ${total}（入 ${Number(run.input_tokens || 0)} / 出 ${Number(run.output_tokens || 0)}）`;
+}
+
+function formatAgentCompactCount(value) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '0';
+    const units = [
+        { value: 1_000_000_000, suffix: 'B' },
+        { value: 1_000_000, suffix: 'M' },
+        { value: 1_000, suffix: 'K' }
+    ];
+    const unit = units.find(item => Math.abs(num) >= item.value);
+    if (!unit) return String(Math.round(num));
+    const scaled = num / unit.value;
+    const digits = Math.abs(scaled) >= 100 ? 0 : 1;
+    return `${scaled.toFixed(digits).replace(/\.0$/, '')}${unit.suffix}`;
+}
+
+const formatAgentAuditDate = (dateStr) => {
+    if (!dateStr) return '-';
+    if (typeof formatDateToCN === 'function') return formatDateToCN(dateStr);
+    return String(dateStr);
+};
+
+function buildAgentRunTaskTooltip(run, title, mode, counts = {}) {
+    const stepCount = Number(counts.stepCount || 0);
+    const toolCount = Number(counts.toolCount || 0);
+    const errorCount = Number(counts.errorCount || 0);
+    const goal = String(run?.goal || '').trim();
+    const lines = [
+        `任务：${title || '-'}`,
+        `状态：${agentStatusLabel(run?.status)}`,
+        `创建时间：${formatAgentAuditDate(run?.created_at)}`,
+        `开始时间：${formatAgentAuditDate(run?.started_at)}`,
+        `完成时间：${formatAgentAuditDate(run?.completed_at)}`,
+        `模型：${run?.model_name || '-'}`,
+        `模式：${mode || '-'}`,
+        `步骤数：${stepCount}`,
+        `工具数：${toolCount}`,
+        `错误数：${errorCount}`
+    ];
+    if (goal) lines.push(`目标：${goal}`);
+    return lines.join('\n');
+}
+
+function agentShortText(value, max = 260) {
+    const text = String(value === undefined || value === null ? '' : value)
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (text.length <= max) return text;
+    return `${text.slice(0, max)}...`;
+}
+
+function agentParsePayload(payload) {
+    if (typeof payload !== 'string') return payload;
+    const text = payload.trim();
+    if (!text) return '';
+    if (!text.startsWith('{') && !text.startsWith('[')) return text;
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        return text;
+    }
+}
+
+function agentSummarizeInput(input) {
+    const payload = agentParsePayload(input);
+    if (!payload || typeof payload !== 'object') return agentShortText(payload || '');
+    const parts = [];
+    if (payload.query) parts.push(`查询：${payload.query}`);
+    if (payload.limit) parts.push(`数量：${payload.limit}`);
+    if (payload.topK) parts.push(`Top K：${payload.topK}`);
+    if (payload.candidateLimit) parts.push(`候选：${payload.candidateLimit}`);
+    return parts.join(' · ') || agentShortText(JSON.stringify(payload));
+}
+
+function agentReadableCell(value) {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'object') return agentShortText(JSON.stringify(value), 80);
+    return agentShortText(value, 80);
+}
+
+function agentRowsFromStructuredPayload(payload) {
+    if (!payload || typeof payload !== 'object') return [];
+    if (Array.isArray(payload.rows)) return payload.rows;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.items)) return payload.items;
+    if (Array.isArray(payload.result)) return payload.result;
+    return [];
+}

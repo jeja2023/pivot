@@ -1,0 +1,139 @@
+/* 拆自 agent-dag-editor.css。 */
+/* DAG 输入概览、摘要标签与输入工具操作样式。 */
+.pivot-dag-input-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.pivot-dag-input-overview-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pivot-dag-input-overview-head strong,
+.pivot-dag-wizard-overview-head strong,
+.pivot-dag-wizard-sources-title,
+.pivot-dag-wizard-field-head strong,
+.pivot-dag-wizard-sources-head {
+    color: var(--text-main);
+    font-size: 0.74rem;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.pivot-dag-wizard-field-head em {
+    flex: 0 0 auto;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(16, 163, 127, 0.1);
+    color: #047857;
+    font-size: 0.62rem;
+    font-style: normal;
+    font-weight: 800;
+    line-height: 1.5;
+}
+
+.pivot-dag-input-overview-head span,
+.pivot-dag-wizard-overview-head span,
+.pivot-dag-wizard-sources-help,
+.pivot-dag-wizard-field-usage,
+.pivot-dag-wizard-field-desc,
+.pivot-dag-wizard-sources-note,
+.pivot-dag-wizard-sources-empty {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.pivot-dag-input-overview-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
+}
+
+.pivot-dag-input-overview-actions .btn-primary,
+.pivot-dag-input-overview-actions .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
+.pivot-dag-input-overview-summary {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+}
+
+.pivot-dag-input-summary-chip {
+    display: grid;
+    grid-template-columns: minmax(78px, max-content) minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    max-width: 100%;
+    padding: 6px 8px;
+    border: 1px solid rgba(59, 130, 246, 0.16);
+    border-radius: 7px;
+    background: rgba(59, 130, 246, 0.06);
+    color: #1d4ed8;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.pivot-dag-input-summary-chip strong {
+    min-width: 0;
+    color: inherit;
+    font-weight: 800;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+.pivot-dag-input-summary-chip em {
+    min-width: 0;
+    font-style: normal;
+    color: var(--text-muted);
+    font-weight: 700;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.pivot-dag-input-summary-empty {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.pivot-dag-input-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.pivot-dag-input-tools > .btn-secondary {
+    align-self: flex-start;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
+.pivot-dag-input-wizard-overlay {
+    z-index: 1930;
+}
+
+.pivot-dag-json-input-overlay {
+    z-index: 1935;
+}

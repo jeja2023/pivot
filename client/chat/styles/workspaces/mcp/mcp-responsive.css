@@ -1,0 +1,70 @@
+/* 拆自 workspaces/mcp.css。 */
+/* MCP 响应式布局与滚动条样式。 */
+@media (max-width: 1180px) {
+    .mcp-governance-panel {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .mcp-governance-panel .governance-metrics,
+    .mcp-governance-panel .governance-list {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .mcp-server-main {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 680px) {
+    .mcp-tool-grid,
+    .mcp-tools-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-server-card,
+    .mcp-governance-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-card-actions {
+        justify-content: flex-start;
+    }
+}
+
+@media (min-width: 1280px) {
+    .mcp-tool-grid {
+        grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    }
+
+    .mcp-tool-card {
+        min-height: 78px;
+    }
+}
+
+/* 滚动条细化美化 */
+.mcp-list-wrap::-webkit-scrollbar,
+.mcp-edit-form::-webkit-scrollbar,
+.mcp-tools-list::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.mcp-list-wrap::-webkit-scrollbar-track,
+.mcp-edit-form::-webkit-scrollbar-track,
+.mcp-tools-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.mcp-list-wrap::-webkit-scrollbar-thumb,
+.mcp-edit-form::-webkit-scrollbar-thumb,
+.mcp-tools-list::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 999px;
+}
+
+.mcp-list-wrap::-webkit-scrollbar-thumb:hover,
+.mcp-edit-form::-webkit-scrollbar-thumb:hover,
+.mcp-tools-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.45);
+}

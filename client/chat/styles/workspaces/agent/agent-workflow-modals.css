@@ -1,0 +1,225 @@
+/* 拆自 agent-dag-shell.css。 */
+/* 工作流创建、版本与差异弹窗样式。 */
+.agent-workflow-create-modal {
+    width: min(560px, calc(100vw - 32px));
+}
+
+.agent-workflow-create-form {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+}
+
+.agent-workflow-create-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.agent-workflow-create-field span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.agent-workflow-create-field small {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.agent-workflow-create-modal .form-input,
+.pivot-dag-stats-wizard .form-input {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.agent-workflow-create-modal .form-input::placeholder,
+.pivot-dag-stats-wizard .form-input::placeholder {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    opacity: 0.72;
+}
+
+.agent-workflow-create-field textarea {
+    min-height: 68px;
+    resize: vertical;
+    line-height: 1.4;
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+
+.agent-workflow-create-status {
+    min-height: 16px;
+    color: var(--danger);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.agent-workflow-create-status:empty {
+    display: none;
+}
+
+.agent-workflow-create-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 1px;
+}
+
+.agent-workflow-create-actions .btn-secondary,
+.agent-workflow-create-actions .btn-primary,
+.agent-workflow-create-modal .btn-danger-outline,
+.pivot-dag-stats-wizard .btn-danger-outline {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+}
+
+.agent-workflow-versions-modal {
+    max-width: min(760px, calc(100vw - 32px));
+}
+
+.agent-workflow-versions-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: min(520px, calc(100vh - 210px));
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.agent-workflow-version-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.agent-workflow-version-item.current {
+    border-color: rgba(16, 163, 127, 0.35);
+    background: rgba(16, 163, 127, 0.06);
+}
+
+.agent-workflow-version-item strong,
+.agent-workflow-version-item span,
+.agent-workflow-version-item small {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-version-item strong {
+    color: var(--text-main);
+    font-size: 0.84rem;
+}
+
+.agent-workflow-version-item span,
+.agent-workflow-version-item small {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-workflow-version-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-workflow-version-actions .btn-secondary,
+.agent-workflow-version-actions .btn-primary {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.agent-workflow-diff-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px;
+    border: 1px solid rgba(59, 130, 246, 0.24);
+    border-radius: 8px;
+    background: #eff6ff;
+}
+
+.agent-workflow-diff-panel header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: #1e3a8a;
+    font-size: 0.78rem;
+}
+
+.agent-workflow-diff-panel h4 {
+    margin: 4px 0 0;
+    color: #475569;
+    font-size: 0.72rem;
+}
+
+.agent-workflow-diff-row {
+    padding: 7px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 7px;
+    background: #fff;
+}
+
+.agent-workflow-diff-row.added {
+    border-color: rgba(16, 185, 129, 0.28);
+}
+
+.agent-workflow-diff-row.removed {
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.agent-workflow-diff-row.changed {
+    border-color: rgba(245, 158, 11, 0.32);
+}
+
+.agent-workflow-diff-row strong,
+.agent-workflow-diff-row span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-diff-row strong {
+    color: var(--text-main);
+    font-size: 0.76rem;
+}
+
+.agent-workflow-diff-row span,
+.agent-workflow-diff-row summary {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.agent-workflow-diff-row pre {
+    max-height: 220px;
+    overflow: auto;
+    margin: 6px 0 0;
+    padding: 8px;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.68rem;
+}

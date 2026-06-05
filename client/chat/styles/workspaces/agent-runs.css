@@ -1,0 +1,6 @@
+/* agent-runs.css 兼容入口。保持导入顺序稳定。 */
+@import url("./agent/agent-runs-list-table.css");
+@import url("./agent/agent-run-detail.css");
+@import url("./agent/agent-run-steps.css");
+@import url("./agent/agent-run-capabilities.css");
+@import url("./agent/agent-run-dag-artifacts.css");

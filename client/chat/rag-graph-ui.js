@@ -1,4 +1,7 @@
-/* Knowledge graph interaction helpers */
+/* 知识图谱交互辅助函数 Knowledge graph interaction helpers */
+
+
+
 (function () {
     const DEFAULT_MIN_ZOOM = 0.55;
     const DEFAULT_MAX_ZOOM = 2.2;

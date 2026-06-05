@@ -1,0 +1,144 @@
+/* 拆自 admin.css。 */
+/* 分页、审计日志筛选与表格布局样式。 */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.pagination button,
+.pagination .btn-secondary {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.pagination span {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.audit-log-tab {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.audit-log-tab > div:first-child {
+    flex: 0 0 auto;
+    margin-bottom: 20px !important;
+}
+.audit-log-tab h3 {
+    margin: 0;
+}
+.audit-log-tab .filter-bar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px !important;
+    margin-bottom: 16px !important;
+    padding: 10px 12px !important;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.audit-log-tab .filter-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.audit-log-tab .filter-item label {
+    flex: 0 0 auto;
+    margin: 0;
+    color: #64748b;
+    font-size: 0.74rem !important;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+.audit-log-tab .filter-item .form-input {
+    height: 32px !important;
+    margin: 0;
+    padding: 5px 9px !important;
+    background: #fff;
+    font-size: 0.78rem !important;
+}
+.audit-log-tab #log-filter-user,
+.audit-log-tab #log-filter-action,
+.audit-log-tab #log-filter-ip {
+    width: 116px;
+}
+.audit-log-tab #log-filter-details {
+    width: 156px;
+}
+.audit-log-tab #log-filter-start,
+.audit-log-tab #log-filter-end {
+    width: 138px;
+}
+.audit-log-tab .filter-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+.audit-log-tab .filter-actions button {
+    height: 32px;
+    padding: 0 14px;
+    font-size: 0.78rem;
+}
+@media (max-width: 1240px) {
+    .audit-log-tab .filter-actions {
+        margin-left: auto;
+    }
+}
+.audit-log-tab .table-container {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: auto;
+}
+.audit-log-tab .data-table th,
+.audit-log-tab .data-table td {
+    height: 32px;
+    padding: 4px 8px;
+}
+.audit-log-tab .pagination {
+    flex: 0 0 auto;
+    margin-top: 10px;
+    padding-top: 10px;
+    gap: 8px;
+}
+.audit-log-tab .pagination button {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 0.78rem;
+}
+.audit-log-tab .pagination span {
+    font-size: 0.78rem;
+}
+
+/* 日志表格宽度设置 */
+.audit-log-table .col-index { width: 58px; }
+.audit-log-table .col-time { width: 160px; }
+.audit-log-table .col-user { width: 108px; }
+.audit-log-table .col-name { width: 118px; }
+.audit-log-table .col-ip { width: 124px; }
+.audit-log-table .col-action { width: 140px; }
+.audit-log-table .col-details { width: auto; }
+.audit-log-table th:nth-child(1),
+.audit-log-table td:nth-child(1) {
+    text-align: center;
+}
+.audit-log-table td:nth-child(6) strong {
+    font-weight: 800;
+}
+
+/* 图片预览样式 - 支持全屏查看 */

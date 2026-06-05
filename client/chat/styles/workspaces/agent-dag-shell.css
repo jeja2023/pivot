@@ -1,0 +1,5 @@
+/* agent-dag-shell.css 兼容入口。保持导入顺序稳定。 */
+@import url("./agent/agent-dag-toolbar.css");
+@import url("./agent/agent-dag-workspace-shell.css");
+@import url("./agent/agent-workflow-modals.css");
+@import url("./agent/agent-dag-workbench.css");

@@ -1,4 +1,7 @@
-/* Knowledge base formatting helpers */
+/* 知识库格式化辅助函数 Knowledge base formatting helpers */
+
+
+
 (function () {
     const formatRagDateToCN = (dateStr) => {
         if (!dateStr) return '-';

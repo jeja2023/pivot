@@ -1,0 +1,198 @@
+/* 拆自 workspaces/mcp.css。 */
+/* MCP 分页、表单、编辑弹窗与空服务面板样式。 */
+.workspace-pagination {
+    flex: 0 0 auto;
+    margin-top: 10px;
+    padding-top: 10px;
+}
+
+.mcp-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+}
+
+.mcp-form .form-input {
+    margin: 0;
+    height: 34px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+.mcp-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mcp-form-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+.mcp-form textarea {
+    min-height: 78px;
+    resize: vertical;
+}
+
+.mcp-edit-modal {
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.mcp-edit-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.mcp-edit-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.mcp-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: calc(100vh - 106px);
+    padding: 14px 16px 16px;
+    overflow: auto;
+}
+
+.mcp-edit-form .form-input {
+    margin: 0;
+    height: 34px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+.mcp-edit-form textarea {
+    min-height: 82px;
+    resize: vertical;
+}
+
+.mcp-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.mcp-edit-actions .btn-primary,
+.mcp-edit-actions .btn-secondary {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    border-radius: 8px;
+}
+
+.mcp-shared-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.mcp-server-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mcp-empty-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fafc;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.mcp-empty-panel strong {
+    color: var(--text-main);
+    font-size: 0.88rem;
+}
+
+.mcp-empty-panel span {
+    line-height: 1.45;
+}
+
+.mcp-empty-panel.compact {
+    margin-top: 8px;
+}
+
+.mcp-server-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.015);
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.22s ease;
+}
+
+.mcp-server-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px -4px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
+    border-color: rgba(16, 163, 127, 0.3);
+}
+
+.mcp-list-head,
+.mcp-system-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-main);
+}
+
+.mcp-list-head {
+    padding-top: 2px;
+}
+
+.mcp-list-head strong,
+.mcp-system-head strong {
+    display: block;
+    font-size: 0.84rem;
+}
+
+.mcp-list-head span,
+.mcp-system-head span {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.mcp-list-head > span {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    margin-top: 0;
+    padding: 0 7px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 999px;
+    font-weight: 700;
+    white-space: nowrap;
+}

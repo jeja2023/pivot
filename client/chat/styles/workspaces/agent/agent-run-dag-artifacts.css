@@ -1,0 +1,317 @@
+/* 拆自 agent-runs.css。 */
+/* Agent DAG 运行时节点、产物、版本列表与空状态样式。 */
+.agent-dag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.agent-dag-node {
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: linear-gradient(180deg, #fff 0%, rgba(248, 250, 252, 0.72) 100%);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.agent-dag-node.completed {
+    border-color: rgba(16, 185, 129, 0.34);
+    background: linear-gradient(180deg, #fff 0%, rgba(236, 253, 245, 0.62) 100%);
+}
+
+.agent-dag-node.error {
+    border-color: rgba(239, 68, 68, 0.35);
+    background: linear-gradient(180deg, #fff 0%, rgba(254, 242, 242, 0.68) 100%);
+}
+
+.agent-dag-node-rerun {
+    margin: 6px 0 2px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
+.agent-dag-node-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.agent-dag-node-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.agent-dag-node-title strong {
+    color: #0f172a;
+    font-size: 0.88rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.agent-dag-node-title span {
+    color: var(--text-muted);
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.64rem;
+}
+
+.agent-dag-node-badges {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-width: 58%;
+}
+
+.agent-dag-node-status,
+.agent-dag-node-tool {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.agent-dag-node-status {
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: #f8fafc;
+    color: #64748b;
+}
+
+.agent-dag-node-status.completed {
+    border-color: rgba(16, 185, 129, 0.25);
+    background: rgba(16, 185, 129, 0.09);
+    color: #047857;
+}
+
+.agent-dag-node-status.running {
+    border-color: rgba(59, 130, 246, 0.26);
+    background: rgba(59, 130, 246, 0.09);
+    color: #1d4ed8;
+}
+
+.agent-dag-node-status.error {
+    border-color: rgba(239, 68, 68, 0.28);
+    background: rgba(239, 68, 68, 0.08);
+    color: #b91c1c;
+}
+
+.agent-dag-node-status.skipped {
+    border-color: rgba(245, 158, 11, 0.28);
+    background: rgba(245, 158, 11, 0.1);
+    color: #92400e;
+}
+
+.agent-dag-node-tool {
+    max-width: 260px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(255, 255, 255, 0.8);
+    color: #334155;
+    text-overflow: ellipsis;
+}
+
+.agent-dag-node-meta {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(84px, 0.6fr));
+    gap: 6px;
+}
+
+.agent-dag-node-meta span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 26px;
+    padding: 4px 7px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.76);
+}
+
+.agent-dag-node-meta em {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.64rem;
+    font-style: normal;
+}
+
+.agent-dag-node-meta strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 0.66rem;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-dag-node-folders {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.agent-dag-node-folders details {
+    flex: 1 1 180px;
+    min-width: 0;
+}
+
+.agent-dag-node-folders summary {
+    width: fit-content;
+    min-height: 24px;
+    padding: 4px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 6px;
+    background: #fff;
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.agent-dag-node-folders summary:hover {
+    border-color: rgba(16, 163, 127, 0.32);
+    background: #f8fafc;
+}
+
+.agent-dag-node-readable-output {
+    margin-top: 8px;
+    padding: 9px 10px;
+    border: 1px solid rgba(16, 163, 127, 0.18);
+    border-radius: 7px;
+    background: #f8fffc;
+    color: #0f172a;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.agent-dag-node-readable-output p,
+.agent-dag-node-readable-output ul,
+.agent-dag-node-readable-output ol {
+    margin-top: 0;
+    margin-bottom: 7px;
+}
+
+.agent-dag-node-readable-output :last-child {
+    margin-bottom: 0;
+}
+
+.agent-artifact-version {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.agent-artifact-version small {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+}
+
+.agent-dag-node pre,
+.agent-artifact-diff pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow: auto;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 7px;
+    font-size: 0.66rem;
+}
+
+.agent-artifact-modal {
+    max-width: 860px;
+}
+
+.agent-artifact-editor,
+.agent-artifact-version-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.agent-artifact-version {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    background: #fff;
+}
+
+.agent-artifact-version.current {
+    border-color: rgba(16, 185, 129, 0.45);
+}
+
+.agent-artifact-version > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agent-artifact-version-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.agent-empty-state {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fff 0%, rgba(248, 250, 252, 0.75) 100%);
+    color: var(--text-muted);
+    text-align: center;
+    padding: 22px;
+}
+
+.agent-empty-state.compact {
+    min-height: 58px;
+    width: 100%;
+    padding: 12px;
+    gap: 0;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.agent-template-list .agent-empty-state.compact {
+    flex: 1 1 100%;
+}
+
+.agent-ops-list .agent-empty-state.compact {
+    min-height: 64px;
+}
+
+.agent-empty-state strong {
+    color: var(--text-main);
+    font-size: 0.92rem;
+}
+
+.agent-empty-state span {
+    max-width: 340px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.agent-empty-hero {
+    min-height: 320px;
+}

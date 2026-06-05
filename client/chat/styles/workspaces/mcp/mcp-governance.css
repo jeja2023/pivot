@@ -1,0 +1,313 @@
+/* 拆自 workspaces/mcp.css。 */
+/* MCP 治理指标、工作区布局与工具缓存卡片样式。 */
+.mcp-governance-panel {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    align-items: center;
+    gap: 8px 16px;
+    margin: 0 0 16px;
+    padding: 10px 18px;
+    min-height: 48px;
+    background: linear-gradient(135deg, #ffffff 0%, #f9fbfa 100%);
+    border: 1px solid rgba(16, 163, 127, 0.12);
+    box-shadow: 0 10px 20px -2px rgba(15, 23, 42, 0.04), 0 2px 6px -1px rgba(15, 23, 42, 0.01);
+    border-radius: 10px;
+}
+
+.mcp-governance-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.mcp-governance-title > div {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.mcp-governance-title strong {
+    flex: 0 0 auto;
+    color: var(--text-main);
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.mcp-governance-title span {
+    min-width: 0;
+    overflow: hidden;
+    color: #64748b;
+    font-size: 0.74rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-governance-title .btn-secondary {
+    flex: 0 0 auto;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.74rem;
+}
+
+.mcp-governance-panel .governance-metrics,
+.mcp-governance-panel .governance-list {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.mcp-governance-panel .governance-metrics {
+    justify-content: flex-end;
+}
+
+.mcp-governance-panel .governance-list {
+    justify-content: flex-end;
+    overflow: hidden;
+}
+
+.mcp-governance-panel .governance-metrics span,
+.mcp-governance-panel .governance-list span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 10px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.mcp-governance-panel .governance-metrics span {
+    background-color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: var(--text-main);
+}
+
+.mcp-governance-panel .governance-metrics span::before {
+    content: none !important;
+    display: none !important;
+}
+
+/* 活跃 */
+.mcp-governance-panel .governance-metrics span:nth-child(1) {
+    background-color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: var(--text-main);
+}
+.mcp-governance-panel .governance-metrics span:nth-child(1)::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #22c55e;
+    margin-right: 6px;
+    animation: mcp-pulse 2s infinite;
+}
+
+/* 异常 */
+.mcp-governance-panel .governance-metrics span:nth-child(2) {
+    background-color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: var(--text-main);
+}
+.mcp-governance-panel .governance-metrics span:nth-child(2)::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #ef4444;
+    margin-right: 6px;
+}
+
+/* 未检查 */
+.mcp-governance-panel .governance-metrics span:nth-child(3) {
+    background-color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: var(--text-main);
+}
+.mcp-governance-panel .governance-metrics span:nth-child(3)::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #94a3b8;
+    margin-right: 6px;
+}
+
+/* 数据库 */
+.mcp-governance-panel .governance-metrics span:nth-child(4) {
+    background-color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: var(--text-main);
+}
+.mcp-governance-panel .governance-metrics span:nth-child(4)::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #3b82f6;
+    margin-right: 6px;
+}
+
+.mcp-governance-panel .governance-list span {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mcp-governance-empty {
+    color: var(--text-muted);
+}
+
+.mcp-workspace-modal .workspace-modal-body {
+    overflow: hidden;
+}
+
+.mcp-workspace-modal .mcp-layout {
+    display: block;
+    height: calc(100% - 50px);
+}
+
+.mcp-list-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    min-height: 0;
+    overflow: auto;
+}
+
+.mcp-tools-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: calc(100vh - 40px);
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.mcp-tools-list {
+    max-height: calc(100vh - 116px);
+    padding: 14px 16px 16px;
+    overflow: auto;
+}
+
+.mcp-tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 8px;
+}
+
+#mcp-tool-cache {
+    display: none;
+}
+
+.mcp-tool-cache-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 2px;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 800;
+}
+
+.mcp-tool-cache-head span {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mcp-tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+}
+
+.mcp-tool-card {
+    display: grid;
+    grid-template-rows: auto minmax(34px, auto) auto;
+    gap: 5px;
+    min-width: 0;
+    min-height: 84px;
+    padding: 8px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.mcp-tool-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.mcp-tool-card-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-tool-card p {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+}
+
+.mcp-tool-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.mcp-tool-meta span {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 20px;
+    padding: 2px 7px;
+    border: 1px solid rgba(16, 163, 127, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--primary);
+    font-size: 0.66rem;
+    font-family: Consolas, 'SFMono-Regular', monospace;
+    font-weight: 800;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    word-break: break-word;
+}

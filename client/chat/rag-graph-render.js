@@ -1,4 +1,7 @@
-/* Knowledge graph render helpers */
+/* 知识图谱渲染辅助函数 Knowledge graph render helpers */
+
+
+
 (function () {
     const layout = window.Pivot?.ragGraphLayout || {};
     const GRAPH_TYPE_LABELS = {

@@ -1,0 +1,415 @@
+/* 拆自 agent-dag-shell.css。 */
+/* Pivot DAG 工具栏、下拉菜单、发布/运行控件与统计向导外壳样式。 */
+/* Agent 工作流与 DAG 工作台外壳样式。拆自 agent.css。 */
+/* v0.0.47 智能体 DAG 可视化编辑器 */
+.pivot-dag-editor-wrap {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    padding: 8px;
+    min-height: 360px;
+}
+
+.agent-config-modal-body .pivot-dag-editor-wrap {
+    min-height: 68vh;
+    height: min(72vh, 760px);
+    grid-template-rows: auto minmax(480px, 1fr);
+}
+
+.pivot-dag-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.pivot-dag-toolbar-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 5px 6px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.82);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pivot-dag-toolbar-group.is-node-group {
+    border-color: rgba(16, 163, 127, 0.28);
+    background: rgba(16, 163, 127, 0.06);
+}
+
+.pivot-dag-toolbar-group.is-template-group {
+    border-color: rgba(99, 102, 241, 0.28);
+    background: rgba(99, 102, 241, 0.06);
+}
+
+.pivot-dag-toolbar-dropdown {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.pivot-dag-toolbar-dropdown[open] {
+    z-index: 20;
+}
+
+.pivot-dag-toolbar-summary {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 74px;
+    height: 32px;
+    padding: 0 13px;
+    border: 1px solid rgba(148, 163, 184, 0.34);
+    border-radius: 7px;
+    background: #fff;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1;
+    list-style: none;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.pivot-dag-toolbar-summary::marker {
+    content: "";
+    font-size: 0;
+}
+
+.pivot-dag-toolbar-summary::-webkit-details-marker {
+    display: none;
+}
+
+.pivot-dag-toolbar-summary::after {
+    display: none;
+    content: none;
+}
+
+.pivot-dag-toolbar-dropdown[open] .pivot-dag-toolbar-summary {
+    border-color: rgba(16, 163, 127, 0.38);
+    background: #f0fdfa;
+    color: #047857;
+}
+
+.pivot-dag-toolbar-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    display: grid;
+    gap: 5px;
+    min-width: 178px;
+    padding: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
+}
+
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn {
+    width: 100%;
+    justify-content: flex-start;
+    box-shadow: none;
+}
+
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn,
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.btn-primary,
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish {
+    border-color: rgba(148, 163, 184, 0.34);
+    background: #fff;
+    color: var(--text-main);
+    font-weight: 700;
+}
+
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:hover,
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:focus-visible {
+    border-color: rgba(16, 163, 127, 0.32);
+    background: #f8fafc;
+    color: var(--text-main);
+}
+
+.pivot-dag-toolbar-dropdown.is-run-group .pivot-dag-toolbar-summary {
+    border-color: rgba(16, 163, 127, 0.3);
+    background: rgba(16, 163, 127, 0.07);
+    color: #047857;
+}
+
+.pivot-dag-toolbar-label {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--text-main);
+    font-size: 0.7rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.pivot-dag-toolbar-btn {
+    flex-shrink: 0;
+    gap: 5px;
+    height: 30px;
+    padding: 0 11px;
+    font-size: 0.78rem;
+    line-height: 1;
+    border-radius: 6px;
+    box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
+    white-space: nowrap;
+}
+
+.pivot-dag-toolbar-btn.btn-primary {
+    padding: 0 12px;
+    box-shadow: 0 3px 8px rgba(16, 163, 127, 0.22);
+}
+
+.pivot-dag-toolbar-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    color: inherit;
+    font-size: 0.78rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.pivot-dag-toolbar-btn.btn-primary .pivot-dag-toolbar-btn-icon {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+}
+
+.pivot-dag-toolbar-btn.is-template {
+    border-color: rgba(99, 102, 241, 0.36);
+    background: rgba(99, 102, 241, 0.1);
+    color: #4338ca;
+    font-weight: 700;
+}
+
+.pivot-dag-toolbar-btn.is-template:hover {
+    border-color: rgba(99, 102, 241, 0.5);
+    background: rgba(99, 102, 241, 0.16);
+}
+
+.pivot-dag-toolbar-btn.is-publish {
+    border-color: rgba(16, 163, 127, 0.46);
+    background: #10a37f;
+    color: #fff;
+    font-weight: 800;
+}
+
+.pivot-dag-toolbar-btn.is-publish:hover,
+.pivot-dag-toolbar-btn.is-publish:focus-visible {
+    border-color: rgba(5, 150, 105, 0.58);
+    background: #059669;
+}
+
+.pivot-dag-toolbar-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    min-width: 180px;
+    max-width: 420px;
+    margin-left: auto;
+    padding: 0 10px;
+    border: 1px solid rgba(16, 185, 129, 0.26);
+    border-radius: 999px;
+    background: rgba(16, 185, 129, 0.07);
+    color: #047857;
+    font-size: 0.72rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .pivot-dag-toolbar-dropdown {
+        flex: 1 1 140px;
+    }
+
+    .pivot-dag-toolbar-summary {
+        width: 100%;
+    }
+
+    .pivot-dag-toolbar-menu {
+        min-width: 100%;
+    }
+
+    .pivot-dag-toolbar-group {
+        width: 100%;
+    }
+
+    .pivot-dag-toolbar-status {
+        width: 100%;
+        max-width: none;
+        margin-left: 0;
+    }
+}
+
+body.dark-mode .pivot-dag-toolbar-group,
+.dark-mode .pivot-dag-toolbar-group {
+    background: rgba(31, 41, 55, 0.72);
+    border-color: rgba(148, 163, 184, 0.32);
+    box-shadow: none;
+}
+
+body.dark-mode .pivot-dag-toolbar-group.is-node-group,
+.dark-mode .pivot-dag-toolbar-group.is-node-group {
+    border-color: rgba(16, 163, 127, 0.42);
+    background: rgba(16, 163, 127, 0.1);
+}
+
+body.dark-mode .pivot-dag-toolbar-group.is-template-group,
+.dark-mode .pivot-dag-toolbar-group.is-template-group {
+    border-color: rgba(129, 140, 248, 0.42);
+    background: rgba(99, 102, 241, 0.12);
+}
+
+body.dark-mode .pivot-dag-toolbar-label,
+.dark-mode .pivot-dag-toolbar-label {
+    background: rgba(15, 23, 42, 0.52);
+    border-color: rgba(148, 163, 184, 0.28);
+    color: var(--text-main);
+}
+
+body.dark-mode .pivot-dag-toolbar-summary,
+.dark-mode .pivot-dag-toolbar-summary,
+body.dark-mode .pivot-dag-toolbar-menu,
+.dark-mode .pivot-dag-toolbar-menu {
+    border-color: rgba(148, 163, 184, 0.32);
+    background: #111827;
+    color: var(--text-main);
+}
+
+body.dark-mode .pivot-dag-toolbar-dropdown[open] .pivot-dag-toolbar-summary,
+.dark-mode .pivot-dag-toolbar-dropdown[open] .pivot-dag-toolbar-summary {
+    border-color: rgba(45, 212, 191, 0.4);
+    background: rgba(20, 184, 166, 0.14);
+    color: #99f6e4;
+}
+
+body.dark-mode .pivot-dag-toolbar-btn.is-template,
+.dark-mode .pivot-dag-toolbar-btn.is-template {
+    border-color: rgba(129, 140, 248, 0.48);
+    background: rgba(99, 102, 241, 0.18);
+    color: #c7d2fe;
+}
+
+body.dark-mode .pivot-dag-toolbar-btn.is-publish,
+.dark-mode .pivot-dag-toolbar-btn.is-publish {
+    border-color: rgba(45, 212, 191, 0.46);
+    background: rgba(20, 184, 166, 0.88);
+    color: #ecfeff;
+}
+
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn,
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.btn-primary,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.btn-primary,
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish {
+    border-color: rgba(148, 163, 184, 0.32);
+    background: #111827;
+    color: var(--text-main);
+}
+
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:hover,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:hover,
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:focus-visible,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:focus-visible {
+    border-color: rgba(148, 163, 184, 0.42);
+    background: rgba(31, 41, 55, 0.84);
+    color: var(--text-main);
+}
+
+.pivot-dag-toolbar-status.warn {
+    border-color: rgba(245, 158, 11, 0.34);
+    background: rgba(245, 158, 11, 0.08);
+    color: #92400e;
+}
+
+.pivot-dag-toolbar-status.error {
+    border-color: rgba(239, 68, 68, 0.34);
+    background: rgba(239, 68, 68, 0.07);
+    color: #b91c1c;
+}
+
+.pivot-dag-stats-wizard-overlay {
+    z-index: 1930;
+}
+
+.pivot-dag-stats-wizard {
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(86vh, 680px);
+    overflow: auto;
+}
+
+.pivot-dag-stats-head {
+    margin-bottom: 0;
+}
+
+.pivot-dag-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 11px 12px;
+}
+
+.pivot-dag-stats-title {
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-stats-status {
+    min-height: 24px;
+    padding: 5px 9px;
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.06);
+    color: #1d4ed8;
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.pivot-dag-stats-status:empty {
+    display: none;
+}
+
+.pivot-dag-stats-status.warn {
+    border-color: rgba(245, 158, 11, 0.28);
+    background: rgba(245, 158, 11, 0.08);
+    color: #92400e;
+}
+
+.pivot-dag-stats-status.error {
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.07);
+    color: #b91c1c;
+}
+
+.pivot-dag-stats-actions {
+    padding-top: 0;
+}
+
+@media (max-width: 720px) {
+    .pivot-dag-stats-grid {
+        grid-template-columns: 1fr;
+    }
+}

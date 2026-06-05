@@ -1,0 +1,4 @@
+/* agent-base.css 兼容入口。保持导入顺序稳定。 */
+@import url("./agent/agent-layout.css");
+@import url("./agent/agent-controls.css");
+@import url("./agent/agent-model-tools.css");

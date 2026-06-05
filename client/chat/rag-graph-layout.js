@@ -1,4 +1,7 @@
-/* Knowledge graph layout helpers */
+/* 知识图谱布局辅助函数 Knowledge graph layout helpers */
+
+
+
 (function () {
     function graphRelationTone(type) {
         return ({

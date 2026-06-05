@@ -1,0 +1,273 @@
+/* 拆自 stats-monitor.css。 */
+/* 紧凑监控卡片、端点行、表格辅助与 RAG 调试弹窗样式。 */
+/* 监控专用样式 (Compact) */
+.monitor-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px;
+}
+.monitor-card {
+    background: #ffffff; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 10px;
+    padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    transition: all 0.2s ease;
+}
+.monitor-card:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
+.monitor-card span { color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
+.monitor-card strong {
+    color: var(--text-main); font-size: 0.92rem; line-height: 1.1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.04em;
+}
+.monitor-card small {
+    color: var(--text-muted); font-size: 0.68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.monitor-card.is-warning { border-color: rgba(245, 158, 11, 0.4); background: #fffcf0; }
+.monitor-card.is-warning strong { color: #d97706; }
+
+.monitor-empty { color: var(--text-muted); font-size: 0.82rem; padding: 8px 0; text-align: left; line-height: 1.45; }
+.monitor-empty.is-warning { 
+    color: #92400e; background: #fffbeb; 
+    border: 1px solid rgba(245, 158, 11, 0.2); 
+    border-radius: 8px; padding: 8px 10px; text-align: left;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.05);
+}
+.monitor-empty.is-info { 
+    color: #1e40af; background: #eff6ff; 
+    border: 1px solid rgba(59, 130, 246, 0.2); 
+    border-radius: 8px; padding: 8px 10px; text-align: left;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.05);
+}
+.monitor-empty.is-ok {
+    color: #047857; background: #f0fdf4;
+    border: 1px solid rgba(5, 150, 105, 0.16);
+    border-radius: 8px; padding: 8px 10px; text-align: left;
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.04);
+}
+.monitor-panels {
+    display: grid; 
+    grid-template-columns: repeat(3, 1fr); 
+    gap: 12px; 
+    margin-top: 12px;
+}
+@media (max-width: 1366px) {
+    .monitor-panels { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+    .monitor-panels { grid-template-columns: 1fr; }
+}
+.monitor-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
+
+.observability-webhook-inline {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.observability-webhook-inline input {
+    min-width: 0;
+}
+.monitor-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 4px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+.monitor-row:last-child { border-bottom: 0; }
+.monitor-row span { 
+    color: var(--text-muted); font-size: 0.78rem; 
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+#monitor-resource-list .monitor-row span,
+#monitor-health-maintenance-list .monitor-row span,
+#monitor-rag-storage-list .monitor-row span {
+    width: auto; flex: 0 0 auto;
+}
+#monitor-resource-list .monitor-row > strong,
+#monitor-resource-list .monitor-row > div,
+#monitor-health-maintenance-list .monitor-row > strong,
+#monitor-rag-storage-list .monitor-row > strong {
+    flex: 0 0 auto;
+    text-align: right;
+}
+.monitor-memory-cell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+.monitor-memory-cell strong {
+    max-width: 100%;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+.monitor-memory-bar {
+    width: min(150px, 100%);
+    height: 4px;
+    background: rgba(148, 163, 184, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+#monitor-gpu-list .monitor-row span {
+    width: auto; max-width: 160px; flex: 1;
+}
+#monitor-gpu-list .monitor-empty {
+    font-size: 0.76rem;
+}
+#monitor-model-list .monitor-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    align-items: start;
+}
+#monitor-model-list .monitor-row span {
+    width: auto;
+    flex: none;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+    padding-top: 1px;
+    text-align: left;
+}
+#monitor-model-list .monitor-row strong {
+    justify-self: end;
+    text-align: right;
+}
+.monitor-row strong { 
+    color: var(--text-main); font-size: 0.82rem; 
+    white-space: nowrap; flex-shrink: 0; 
+    text-align: left;
+}
+.monitor-endpoint { border-bottom: 1px solid rgba(148, 163, 184, 0.12); padding-bottom: 6px; }
+.monitor-endpoint:last-child { border-bottom: 0; padding-bottom: 0; }
+.monitor-endpoint.is-warning .monitor-row strong { color: #d97706; }
+.monitor-endpoint.is-warning .monitor-empty { color: #92400e; }
+.monitor-endpoint-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+.monitor-endpoint-badge.is-local {
+    color: #059669;
+    background: #f0fdf4;
+    border: 1px solid rgba(5, 150, 105, 0.1);
+}
+.monitor-endpoint-badge.is-remote {
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid rgba(220, 38, 38, 0.1);
+}
+
+/* 状态圆点样式 */
+.status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px;
+}
+.status-online { background: #10b981; box-shadow: 0 0 5px #10b981; }
+.status-offline { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
+
+/* 允许内容溢出显示 */
+.data-table td.allow-overflow {
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+}
+
+/* 紧凑表格优化 */
+.compact-table { font-size: 0.82rem; }
+.compact-table th, .compact-table td { padding: 6px 8px; height: 38px; min-height: 38px; }
+.compact-table th { font-size: 0.72rem; }
+.agent-audit-table-wrap {
+    max-height: min(62vh, 620px);
+}
+.agent-audit-table-wrap td small {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.rag-debug-modal {
+    width: min(1040px, calc(100vw - 36px));
+    min-height: min(520px, 100%);
+    max-height: min(850px, calc(100vh - 36px));
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    text-align: left;
+}
+
+.rag-debug-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 20px;
+}
+
+.rag-debug-modal-head h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    color: var(--text-main);
+}
+
+.rag-debug-modal-head .model-modal-desc {
+    margin: 4px 0 0;
+}
+
+.rag-debug-modal-head #rag-debug-modal-close {
+    flex: 0 0 auto;
+    height: 34px;
+    padding: 0 20px;
+    font-size: 0.85rem;
+}
+
+#rag-debug-btn:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none !important;
+    box-shadow: none;
+}
+
+.rag-debug-loading {
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.rag-debug-loading strong {
+    color: var(--text-main);
+    font-size: 0.9rem;
+}
+
+.rag-debug-loading small {
+    font-size: 0.76rem;
+}
+
+.rag-debug-spinner {
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(16, 185, 129, 0.18);
+    border-top-color: var(--primary);
+    border-radius: 999px;
+    animation: rag-debug-spin 0.8s linear infinite;
+}
+
+@keyframes rag-debug-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 系统监控页 */

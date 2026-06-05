@@ -1,0 +1,207 @@
+/* 拆自 admin.css。 */
+/* 管理关闭按钮、API 调用日志、用户记录与监控路由弹窗样式。 */
+.settings-dialog-close {
+    position: absolute;
+    z-index: 100;
+    height: 34px;
+    padding: 0 14px;
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--danger);
+}
+.settings-panel-close {
+    position: static;
+    width: 100%;
+    height: 38px;
+    margin-top: 12px;
+    flex: 0 0 auto;
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--danger);
+}
+.settings-dialog-close {
+    top: 22px;
+    right: 24px;
+}
+.api-call-logs-modal {
+    width: min(1480px, calc(100vw - 48px));
+    max-height: min(760px, calc(100vh - 72px));
+    padding: 0;
+    overflow: hidden;
+}
+.api-call-logs-panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    box-sizing: border-box;
+    max-height: min(760px, calc(100vh - 72px));
+    background: #fff;
+}
+.api-call-logs-panel .table-container {
+    flex: 1;
+    min-height: 0;
+    max-height: 520px;
+}
+.api-call-logs-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.api-call-logs-toolbar .form-input {
+    flex: 0 0 auto;
+}
+.api-call-logs-header-close {
+    height: 34px;
+    padding: 0 14px;
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--danger);
+}
+.api-call-logs-table-wrap {
+    overflow-x: hidden !important;
+}
+.api-call-logs-table {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 0;
+}
+.api-call-logs-table .col-index { width: 48px; }
+.api-call-logs-table .col-time { width: 136px; }
+.api-call-logs-table .col-user { width: 92px; }
+.api-call-logs-table .col-key { width: 106px; }
+.api-call-logs-table .col-model { width: 108px; }
+.api-call-logs-table .col-token { width: 66px; }
+.api-call-logs-table .col-status { width: 70px; }
+.api-call-logs-table .col-content { width: auto; }
+.api-call-logs-table th,
+.api-call-logs-table td {
+    padding: 6px 7px;
+}
+.api-call-logs-panel .pagination {
+    margin-top: 10px;
+    padding-top: 10px;
+}
+.user-records-modal {
+    width: min(1500px, calc(100vw - 48px));
+    min-width: min(1060px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+    max-height: min(820px, calc(100vh - 48px));
+    padding: 0;
+    overflow: hidden;
+    resize: horizontal;
+}
+.user-records-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-height: min(820px, calc(100vh - 48px));
+    padding: 24px;
+    background: #fff;
+}
+.user-records-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    padding-right: 38px;
+}
+.user-records-header h3 {
+    margin: 0 0 4px 0;
+    font-size: 1.1rem;
+    color: var(--text-main);
+}
+.user-records-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.user-records-toolbar .form-input {
+    width: 260px;
+    height: 34px;
+    margin: 0;
+    font-size: 0.84rem;
+    padding: 5px 10px;
+}
+.user-records-toolbar .btn-secondary {
+    height: 34px;
+    padding: 0 14px;
+}
+.user-records-toolbar .user-records-header-close {
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--danger);
+}
+.user-records-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+.user-records-check input {
+    margin: 0;
+}
+.user-records-table-wrap {
+    flex: 1;
+    min-height: 0;
+    max-height: 650px;
+    overflow: auto;
+}
+.user-records-panel .pagination {
+    margin-top: 10px;
+    padding-top: 10px;
+}
+.user-records-table {
+    table-layout: fixed;
+    min-width: 0;
+}
+.user-records-table .col-time { width: 150px; }
+.user-records-table .col-session { width: 190px; }
+.user-records-table .col-model { width: 130px; }
+.user-records-table .col-token { width: 92px; }
+.user-records-table .col-content { width: auto; }
+.user-records-table th,
+.user-records-table td {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+}
+.user-record-content {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.record-deleted {
+    margin-left: 6px;
+    color: var(--danger);
+    font-size: 0.72rem;
+}
+
+#monitor-routes-modal .modal {
+    width: min(1000px, 100%) !important;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    text-align: left;
+}
+#monitor-routes-modal .table-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important;
+    overflow: auto;
+}
+
+#key-modal .modal,
+#input-prompt-container .modal,
+#rename-container .modal,
+#tags-container .modal {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* 统计与监控卡片样式 */

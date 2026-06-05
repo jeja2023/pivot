@@ -1,6 +1,14 @@
-/* Chat page style entry. Keep import order stable. */
+/* 聊天页面样式入口。保持导入顺序稳定。 */
 @import url("./styles/core.css");
-@import url("./styles/admin.css");
-@import url("./styles/stats-monitor.css");
+@import url("./styles/admin/admin-layout.css");
+@import url("./styles/admin/admin-account-api.css");
+@import url("./styles/admin/admin-tables-models.css");
+@import url("./styles/admin/admin-audit.css");
+@import url("./styles/admin/admin-chat-attachments.css");
+@import url("./styles/admin/admin-announcements.css");
+@import url("./styles/admin/admin-records.css");
+@import url("./styles/stats-monitor/stats-report.css");
+@import url("./styles/stats-monitor/stats-monitor-common.css");
+@import url("./styles/stats-monitor/stats-system-monitor.css");
 @import url("./styles/workspaces.css");
 @import url("./styles/sessions-prompts.css");

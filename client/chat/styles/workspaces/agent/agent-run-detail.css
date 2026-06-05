@@ -1,0 +1,243 @@
+/* 拆自 agent-runs.css。 */
+/* Agent 运行详情弹窗、进度摘要、最终答案与结构化输出面板样式。 */
+.agent-run-detail {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+    background: #f8fafc;
+}
+
+.agent-run-detail-modal {
+    display: flex;
+    flex-direction: column;
+    width: min(1220px, calc(100vw - 32px));
+    height: min(860px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    overflow: hidden;
+    border-radius: 10px;
+}
+
+.agent-detail-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.9);
+    border: 1px solid var(--border);
+}
+
+.agent-detail-head h4 {
+    margin: 7px 0 3px;
+    font-size: 0.9rem;
+}
+
+.agent-detail-head p,
+.agent-detail-head small {
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.45;
+    font-size: 0.76rem;
+}
+
+.agent-detail-actions {
+    display: flex;
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.agent-detail-actions .btn-secondary,
+.agent-detail-actions .btn-danger-outline {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 0.72rem;
+    border-radius: 7px;
+}
+
+.agent-progress-summary {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+}
+
+.agent-progress-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.agent-progress-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 0.25s ease;
+}
+
+.agent-progress-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px 10px;
+    margin-top: 7px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-progress-meta .btn-secondary,
+.agent-progress-meta .btn-danger-outline {
+    height: 26px;
+    padding: 0 9px;
+    font-size: 0.7rem;
+    border-radius: 7px;
+}
+
+.agent-progress-meta .btn-secondary:first-of-type,
+.agent-progress-meta .btn-danger-outline:first-of-type {
+    margin-left: auto;
+}
+
+.agent-final {
+    position: relative;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+    font-size: 0.82rem;
+    line-height: 1.75;
+    text-align: left;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+
+.agent-final::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    border-radius: 8px 0 0 8px;
+    background: linear-gradient(180deg, #10a37f, #3b82f6);
+}
+
+.agent-final > :first-child {
+    margin-top: 0;
+}
+
+.agent-final > :last-child {
+    margin-bottom: 0;
+}
+
+.agent-final p {
+    margin: 0.55em 0;
+    text-align: left;
+    text-indent: 0;
+}
+
+.agent-final p:has(strong:only-child) {
+    text-indent: 0;
+}
+
+.agent-final ol,
+.agent-final ul {
+    margin: 0.55em 0 0.75em;
+    padding-left: 1.55em;
+    text-align: left;
+    list-style-position: outside;
+}
+
+.agent-final li {
+    margin: 0.3em 0;
+    padding-left: 0.15em;
+    text-align: left;
+    text-indent: 0;
+}
+
+.agent-final h1,
+.agent-final h2 {
+    margin: 0 0 0.75em;
+    color: #0f172a;
+    font-size: clamp(1.22rem, 1.6vw, 1.55rem);
+    line-height: 1.25;
+    letter-spacing: 0;
+}
+
+.agent-final h3,
+.agent-final h4 {
+    margin: 1.05em 0 0.45em;
+    color: #0f172a;
+    font-size: 0.92rem;
+    line-height: 1.35;
+}
+
+.agent-final strong,
+.agent-final h1,
+.agent-final h2,
+.agent-final h3,
+.agent-final h4 {
+    text-align: left;
+}
+
+.agent-final code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #0f172a;
+    font-size: 0.86em;
+}
+
+.agent-final .table-wrapper {
+    margin: 12px 0 14px;
+    border-color: rgba(148, 163, 184, 0.22);
+    box-shadow: none;
+}
+
+.agent-final table {
+    font-size: 0.76rem;
+}
+
+.agent-final th,
+.agent-final td {
+    padding: 8px 10px;
+    line-height: 1.5;
+}
+
+.agent-visual-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.agent-structured-output {
+    min-width: 0;
+}
+
+.agent-structured-output-title {
+    margin: 0 0 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.agent-structured-output-body {
+    min-width: 0;
+}
+
+.agent-structured-output-body .pivot-echart-block {
+    max-width: 100%;
+    margin: 0;
+}
+
+.agent-structured-output-body .table-wrapper {
+    margin: 0;
+}

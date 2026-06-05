@@ -1,0 +1,279 @@
+/* Agent 流式输出、工具统计、运行时输入与 DAG 结果图样式。拆自 agent.css。 */
+/* v0.0.52 流式 function calling 实时演示面板 */
+.agent-streaming-panel {
+    margin: 0 0 12px;
+    border: 1px solid rgba(59, 130, 246, 0.45);
+    background: rgba(59, 130, 246, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.78rem;
+    transition: opacity 0.6s ease;
+}
+
+.agent-streaming-panel.is-fading {
+    opacity: 0.35;
+}
+
+.agent-streaming-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+}
+
+.agent-streaming-head strong::before {
+    content: "● ";
+    color: #3b82f6;
+    animation: pivot-streaming-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pivot-streaming-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.agent-streaming-head span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-streaming-body {
+    display: grid;
+    gap: 8px;
+}
+
+.agent-streaming-content {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-height: 36px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+}
+
+body.dark-mode .agent-streaming-content,
+.dark-mode .agent-streaming-content {
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.agent-streaming-empty {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-streaming-tool {
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.55);
+    padding: 6px 10px;
+}
+
+body.dark-mode .agent-streaming-tool,
+.dark-mode .agent-streaming-tool {
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.agent-streaming-tool-head {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-size: 0.72rem;
+}
+
+.agent-streaming-tool-head strong {
+    color: var(--text-primary);
+}
+
+.agent-streaming-tool-args {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    background: rgba(15, 23, 42, 0.05);
+    padding: 5px 8px;
+    border-radius: 4px;
+    max-height: 80px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+body.dark-mode .agent-streaming-tool-args,
+.dark-mode .agent-streaming-tool-args {
+    background: rgba(15, 23, 42, 0.65);
+}
+
+.agent-tool-stats {
+    margin: 0 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+}
+
+.agent-tool-stats-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+}
+
+.agent-tool-stats-head span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-tool-stats-list {
+    display: grid;
+    gap: 6px;
+}
+
+.agent-tool-stat-row {
+    display: grid;
+    grid-template-columns: minmax(80px, 160px) 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    font-size: 0.72rem;
+}
+
+.agent-tool-stat-row.has-error .agent-tool-stat-extra em {
+    color: #ef4444;
+    font-style: normal;
+    font-weight: 600;
+}
+
+.agent-tool-stat-name {
+    color: var(--text-primary);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-tool-stat-bar {
+    height: 6px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.agent-tool-stat-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.9), rgba(59, 130, 246, 0.9));
+    border-radius: inherit;
+}
+
+.agent-tool-stat-count {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-stat-extra {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 运行时输入参数面板 */
+.agent-dag-inputs-panel {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px 12px;
+    margin-top: 8px;
+}
+
+.agent-dag-inputs-panel.hidden {
+    display: none;
+}
+
+.agent-dag-inputs-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.agent-dag-inputs-head h4 {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-main);
+}
+
+.agent-dag-inputs-hint {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.agent-dag-inputs-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+}
+
+.agent-dag-input-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.agent-dag-input-item span {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.agent-dag-input-item input {
+    font-size: 0.78rem;
+    height: 32px;
+}
+
+.agent-dag-inputs-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+}
+
+/* DAG 运行结果可视化 */
+.agent-dag-run-graph {
+    margin: 8px 0 12px;
+}
+
+.agent-dag-run-graph svg {
+    display: block;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+}
+
+.agent-dag-run-legend {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 6px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+}
+
+.agent-dag-run-legend .dag-legend-completed { color: #10b981; }
+.agent-dag-run-legend .dag-legend-running { color: #3b82f6; }
+.agent-dag-run-legend .dag-legend-error { color: #ef4444; }
+.agent-dag-run-legend .dag-legend-skipped { color: #f59e0b; }
+.agent-dag-run-legend .dag-legend-pending { color: #94a3b8; }
+
+/* 工作流删除撤销按钮 */
+.agent-undo-delete-btn {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    animation: agent-undo-pulse 2s ease-in-out;
+}
+
+@keyframes agent-undo-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}

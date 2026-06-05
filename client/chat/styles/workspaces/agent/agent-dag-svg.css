@@ -1,0 +1,149 @@
+/* 拆自 agent-dag-editor.css。 */
+/* DAG SVG 节点、端口、连线与基础图形元素样式。 */
+/* Pivot DAG 编辑器、检查器、向导、JSON 编辑器与小地图样式。拆自 agent.css。 */
+.pivot-dag-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+}
+
+.pivot-dag-node {
+    cursor: grab;
+}
+
+.pivot-dag-node:active {
+    cursor: grabbing;
+}
+
+.pivot-dag-node-body {
+    fill: #fff;
+    stroke: rgba(148, 163, 184, 0.6);
+    stroke-width: 1.5;
+    transition: fill 0.15s ease, stroke 0.15s ease;
+}
+
+.pivot-dag-node.is-selected .pivot-dag-node-body {
+    fill: rgba(59, 130, 246, 0.08);
+    stroke: #3b82f6;
+}
+
+.pivot-dag-node.has-warning .pivot-dag-node-body {
+    fill: #fffbeb;
+    stroke: rgba(245, 158, 11, 0.72);
+}
+
+.pivot-dag-node-title {
+    fill: #0f172a;
+    font-size: 12px;
+    font-weight: 800;
+    pointer-events: none;
+}
+
+.pivot-dag-node-tool-foreign {
+    pointer-events: none;
+}
+
+.pivot-dag-node-tool {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    grid-template-rows: 14px 14px;
+    column-gap: 4px;
+    width: 100%;
+    height: 30px;
+    min-width: 0;
+    overflow: hidden;
+    color: #64748b;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.15;
+    pointer-events: none;
+}
+
+.pivot-dag-node-tool-arrow {
+    grid-row: 1 / 3;
+    align-self: start;
+    padding-top: 1px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 13px;
+}
+
+.pivot-dag-node-tool-name {
+    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+    color: #334155;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pivot-dag-node-tool-id {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    min-width: 0;
+    width: fit-content;
+    max-width: 100%;
+    height: 14px;
+    padding: 0 6px;
+    overflow: hidden;
+    border: 1px solid rgba(37, 99, 235, 0.14);
+    border-radius: 5px;
+    background: rgba(59, 130, 246, 0.07);
+    color: #475569;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pivot-dag-node-tool.is-empty {
+    color: #b45309;
+}
+
+.pivot-dag-node-tool.is-empty .pivot-dag-node-tool-name {
+    color: #b45309;
+}
+
+.pivot-dag-node.is-selected .pivot-dag-node-tool-id {
+    border-color: rgba(37, 99, 235, 0.26);
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+}
+
+.pivot-dag-port {
+    fill: #fff;
+    stroke: #94a3b8;
+    stroke-width: 1.5;
+    cursor: crosshair;
+    transition: fill 0.15s ease;
+}
+
+.pivot-dag-port:hover {
+    fill: #3b82f6;
+    stroke: #2563eb;
+}
+
+.pivot-dag-edge {
+    fill: none;
+    stroke: #94a3b8;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+.pivot-dag-edge-ghost {
+    stroke-dasharray: 4 3;
+    opacity: 0.7;
+}

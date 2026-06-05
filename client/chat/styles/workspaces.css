@@ -1,6 +1,29 @@
-/* Workspace styles. Keep import order stable. */
-@import url("./workspaces/agent.css");
+/* 工作区样式入口。保持导入顺序稳定。 */
+@import url("./workspaces/agent/agent-layout.css");
+@import url("./workspaces/agent/agent-controls.css");
+@import url("./workspaces/agent/agent-model-tools.css");
+@import url("./workspaces/agent/agent-runs-list-table.css");
+@import url("./workspaces/agent/agent-run-detail.css");
+@import url("./workspaces/agent/agent-run-steps.css");
+@import url("./workspaces/agent/agent-run-capabilities.css");
+@import url("./workspaces/agent/agent-run-dag-artifacts.css");
+@import url("./workspaces/agent/agent-dag-toolbar.css");
+@import url("./workspaces/agent/agent-dag-workspace-shell.css");
+@import url("./workspaces/agent/agent-workflow-modals.css");
+@import url("./workspaces/agent/agent-dag-workbench.css");
+@import url("./workspaces/agent/agent-dag-svg.css");
+@import url("./workspaces/agent/agent-dag-drawer-inspector.css");
+@import url("./workspaces/agent/agent-dag-input-overview.css");
+@import url("./workspaces/agent/agent-dag-input-wizard.css");
+@import url("./workspaces/agent/agent-dag-minimap.css");
+@import url("./workspaces/agent-runtime.css");
 @import url("./workspaces/shared.css");
 @import url("./workspaces/knowledge.css");
-@import url("./workspaces/mcp.css");
+@import url("./workspaces/rag-graph-base.css");
+@import url("./workspaces/rag-graph-map.css");
+@import url("./workspaces/mcp/mcp-forms.css");
+@import url("./workspaces/mcp/mcp-system-cards.css");
+@import url("./workspaces/mcp/mcp-call-logs.css");
+@import url("./workspaces/mcp/mcp-governance.css");
+@import url("./workspaces/mcp/mcp-responsive.css");
 @import url("./workspaces/responsive.css");

@@ -1,0 +1,83 @@
+/* 拆自 agent-runs.css。 */
+/* Agent 能力选择列表与紧凑空状态样式。 */
+.agent-capability-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-auto-rows: max-content;
+    align-content: start;
+    align-items: start;
+    gap: 7px;
+    margin-bottom: 0;
+}
+
+.agent-capability-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 9px;
+    background: #fff;
+    font-size: 0.74rem;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.agent-capability-item:hover {
+    border-color: rgba(16, 163, 127, 0.32);
+    background: rgba(16, 163, 127, 0.04);
+}
+
+.agent-capability-item.disabled {
+    background: #f8fafc;
+    color: var(--text-muted);
+}
+
+.agent-capability-item input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--primary);
+    flex: 0 0 auto;
+}
+
+.agent-capability-item span {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.agent-capability-item strong,
+.agent-capability-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-capability-item strong {
+    color: var(--text-main);
+    font-size: 0.74rem;
+    line-height: 1.25;
+}
+
+.agent-capability-item small {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+
+.agent-capability-list .empty-state.compact,
+.agent-tool-list .empty-state {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fff 0%, rgba(248, 250, 252, 0.75) 100%);
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-align: center;
+}
