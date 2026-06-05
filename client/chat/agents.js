@@ -18,6 +18,8 @@ let activeAgentWorkflowId = '';
 let agentWorkflowDraftName = '';
 let agentWorkflowDraftDescription = '';
 let agentWorkflowPickerQuery = '';
+let activeAgentWorkflowPreviewRunId = '';
+let agentWorkflowPreviewTimer = null;
 const AGENT_RUNS_PAGE_SIZE = 10;
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
 const AGENT_WORKFLOW_SAVED_KEY = 'pivot.agent.workflow.saved';
@@ -42,6 +44,14 @@ function agentDisplayTitle(item) {
     const goal = String(item?.goal || '').trim();
     if (!agentLooksLikeCorruptTitle(title)) return title;
     return goal || '智能体任务';
+}
+
+function agentPreviewDisplayTitle(value) {
+    let text = String(value || '').trim();
+    while (/^预览运行\s*[:：]\s*/.test(text)) {
+        text = text.replace(/^预览运行\s*[:：]\s*/, '').trim();
+    }
+    return text || '预览运行';
 }
 
 function ensureAgentRunTitleTooltip() {
@@ -364,6 +374,24 @@ function normalizeAgentMarkdown(text) {
         .replace(/\*\*([^*\n]+?):\s+\*\*/g, '**$1:**');
 }
 
+function stripAgentWorkflowReportHeading(text) {
+    const value = String(text || '').replace(/^\uFEFF/, '');
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const lines = value.split(/\r?\n/);
+    let start = 0;
+    while (start < lines.length && !String(lines[start] || '').trim()) start += 1;
+    if (start >= lines.length) return '';
+    const firstLine = String(lines[start] || '').trim();
+    const normalized = firstLine.replace(/^#{1,6}\s*/, '').replace(/^\*\*(.*)\*\*$/, '$1').trim();
+    if (!/^(?:工作流分析报告|工作流报告|分析报告)\s*[：:]/.test(normalized)) {
+        return trimmed;
+    }
+    const remainder = lines.slice(start + 1);
+    while (remainder.length && !String(remainder[0] || '').trim()) remainder.shift();
+    return remainder.join('\n').trim();
+}
+
 function agentStepRawDetail(step, preview) {
     const payload = step.output || step.input;
     if (payload === undefined || payload === null) return '';
@@ -480,6 +508,41 @@ function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = ''
     `;
 }
 
+function agentSortDagNodesForDisplay(dagNodes = []) {
+    const nodes = Array.isArray(dagNodes) ? dagNodes.slice() : [];
+    const entries = nodes.map((node, index) => ({
+        node,
+        index,
+        key: String(node?.node_key || node?.id || `__node_${index}`),
+        uniqueKey: `${String(node?.node_key || node?.id || '__node')}::${index}`
+    }));
+    const keySet = new Set(entries.map(entry => entry.key));
+    const dependencyKeys = (node) => {
+        const rawDepends = node?.depends_on ?? node?.dependsOn;
+        const parsedDeps = agentParsePayload(rawDepends);
+        const deps = Array.isArray(rawDepends)
+            ? rawDepends
+            : (Array.isArray(parsedDeps) ? parsedDeps : []);
+        return deps.map(dep => String(dep || '').trim()).filter(dep => dep && keySet.has(dep));
+    };
+    const ordered = [];
+    const placed = new Set();
+    const placedKeys = new Set();
+    while (ordered.length < entries.length) {
+        const remaining = entries.filter(entry => !placed.has(entry.uniqueKey));
+        const ready = remaining.filter(entry => dependencyKeys(entry.node).every(dep => placedKeys.has(dep)));
+        const layer = ready.length ? ready : remaining;
+        layer.sort((a, b) => a.index - b.index);
+        layer.forEach(entry => {
+            if (placed.has(entry.uniqueKey)) return;
+            placed.add(entry.uniqueKey);
+            placedKeys.add(entry.key);
+            ordered.push(entry.node);
+        });
+    }
+    return ordered;
+}
+
 function buildAgentToolStatsMarkup(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return '';
     const toolSteps = steps.filter(s => String(s.type || '').toLowerCase() === 'tool' && s.tool_name);
@@ -525,10 +588,46 @@ function agentProgressLabel(run = {}, progress = {}) {
     return `已执行 ${stepCount} 步`;
 }
 
+function agentDagNodeReadableText(node) {
+    if (String(node?.tool_name || '').trim() !== 'agent.llm') return '';
+    const payload = agentParsePayload(node.output);
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload.trim();
+    if (typeof payload !== 'object') return String(payload || '').trim();
+    const contentText = Array.isArray(payload.content)
+        ? payload.content.map(item => {
+            if (typeof item === 'string') return item;
+            if (!item || typeof item !== 'object') return '';
+            return String(item.text || item.content || item.markdown || '').trim();
+        }).filter(Boolean).join('\n').trim()
+        : '';
+    return [
+        typeof payload.content === 'string' ? payload.content : '',
+        payload.text,
+        payload.markdown,
+        payload.answer,
+        payload.message,
+        payload.summary,
+        contentText
+    ].map(value => String(value || '').trim()).find(Boolean) || '';
+}
+
+function agentDagNodeReadableOutputMarkup(node) {
+    const text = agentDagNodeReadableText(node);
+    if (!text) return '';
+    const cleanText = stripAgentWorkflowReportHeading(text);
+    const parsed = agentParsePayload(cleanText);
+    if (parsed && typeof parsed === 'object') {
+        return `<div class="agent-dag-node-readable-output"><pre>${agentEscape(JSON.stringify(parsed, null, 2))}</pre></div>`;
+    }
+    return `<div class="agent-dag-node-readable-output">${renderMarkdown(normalizeAgentMarkdown(cleanText))}</div>`;
+}
+
 function agentDagNodeMarkup(node) {
     const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
+    const readableOutput = agentDagNodeReadableOutputMarkup(node);
     const canRerun = String(node.status || '').toLowerCase() === 'error';
     const status = String(node.status || 'pending').toLowerCase();
     const statusLabel = {
@@ -560,6 +659,7 @@ function agentDagNodeMarkup(node) {
             </div>
             ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
             ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">重跑此节点</button>` : ''}
+            ${readableOutput}
             ${(input || output) ? `
                 <div class="agent-dag-node-folders">
                     ${input ? `<details><summary>节点输入</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
@@ -1230,47 +1330,81 @@ function isAgentRunDetailModalOpen() {
     return !document.getElementById('agent-run-detail-modal')?.classList.contains('hidden');
 }
 
+function agentRunMetadata(run = {}) {
+    const metadata = run?.metadata || {};
+    if (metadata && typeof metadata === 'object') return metadata;
+    if (typeof metadata !== 'string') return {};
+    try {
+        const parsed = JSON.parse(metadata);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function isAgentWorkflowPreviewRun(run = {}, options = {}) {
+    if (options.workflowPreview) return true;
+    const metadata = agentRunMetadata(run);
+    return String(metadata.workflowRunSource || metadata.workflow_run_source || metadata.runSource || '').toLowerCase() === 'preview';
+}
+
+function ensureAgentRunDetailModalVisible() {
+    const modal = document.getElementById('agent-run-detail-modal');
+    if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
+    return modal;
+}
+
 function closeAgentRunDetailModal() {
     const modal = document.getElementById('agent-run-detail-modal');
     const detail = document.getElementById('agent-run-detail');
+    const closingPreview = activeAgentRunId === activeAgentWorkflowPreviewRunId;
     modal?.classList.add('hidden');
     if (detail) detail.innerHTML = '';
     document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
+    if (closingPreview) {
+        stopAgentWorkflowPreviewPolling();
+        activeAgentWorkflowPreviewRunId = '';
+    }
     activeAgentRunId = '';
 }
 
 window.closeAgentRunDetailModal = closeAgentRunDetailModal;
 
-window.openAgentRun = async function(runId) {
+window.openAgentRun = async function(runId, options = {}) {
     activeAgentRunId = runId;
-    const modal = document.getElementById('agent-run-detail-modal');
+    const modal = ensureAgentRunDetailModalVisible();
     const detail = document.getElementById('agent-run-detail');
-    if (!detail) return;
+    if (!detail) return null;
     document.querySelectorAll('[data-agent-run-id]').forEach(row => {
         const active = row.dataset.agentRunId === runId;
         row.classList.toggle('active', active);
     });
     modal?.classList.remove('hidden');
-    detail.innerHTML = '<div class="empty-state agent-empty-state">正在加载任务详情...</div>';
+    if (!options.silent) detail.innerHTML = '<div class="empty-state agent-empty-state">正在加载任务详情...</div>';
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
     const data = await res.json();
     if (!res.ok) {
         detail.innerHTML = `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`;
-        return;
+        return null;
     }
     const run = data.run;
+    const isPreview = isAgentWorkflowPreviewRun(run, options);
     const steps = data.steps || [];
-    const dagNodes = data.dagNodes || [];
+    const dagNodes = agentSortDagNodesForDisplay(data.dagNodes || []);
     const progress = data.progress || {};
     const canCancel = isAgentRunActive(run.status);
-    const canRerun = !isAgentRunActive(run.status);
-    const canApprove = run.status === 'approval_required';
+    const canRerun = !isPreview && !isAgentRunActive(run.status);
+    const canApprove = !isPreview && run.status === 'approval_required';
     const tokenUsage = formatAgentTokenUsage(run);
     const progressPercent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
     const progressLabel = agentProgressLabel(run, progress);
+    if (isPreview) {
+        run.title = agentPreviewDisplayTitle(agentDisplayTitle(run));
+        run.final_answer = stripAgentWorkflowReportHeading(run.final_answer);
+    }
     const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
-    if (title) title.textContent = agentDisplayTitle(run);
+    if (title) title.textContent = isPreview ? `预览运行：${agentPreviewDisplayTitle(agentDisplayTitle(run))}` : agentDisplayTitle(run);
     detail.innerHTML = `
         <div class="agent-progress-summary">
             <div class="agent-progress-bar"><span style="width: ${progressPercent}%"></span></div>
@@ -1286,8 +1420,8 @@ window.openAgentRun = async function(runId) {
                 ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">断点续跑</button>` : ''}
-                ${run.final_answer || run.error_message ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
-                <button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>
+                ${!isPreview && (run.final_answer || run.error_message) ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
+                ${!isPreview ? `<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>` : ''}
             </div>
         </div>
         ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
@@ -1308,7 +1442,10 @@ window.openAgentRun = async function(runId) {
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
         </div>
     `;
-    detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => window.cancelAgentRun(run.id));
+    detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
+        if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
+        return window.cancelAgentRun(run.id);
+    });
     detail.querySelector('[data-agent-approve]')?.addEventListener('click', () => window.approveAgentRun(run.id, true));
     detail.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.approveAgentRun(run.id, false));
     detail.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
@@ -1319,7 +1456,30 @@ window.openAgentRun = async function(runId) {
     detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.saveAgentArtifact(run.id));
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
     window.renderPivotCharts?.(detail);
+    return run;
 };
+
+function stopAgentWorkflowPreviewPolling() {
+    if (agentWorkflowPreviewTimer) {
+        clearInterval(agentWorkflowPreviewTimer);
+        agentWorkflowPreviewTimer = null;
+    }
+}
+
+function startAgentWorkflowPreviewPolling(runId) {
+    stopAgentWorkflowPreviewPolling();
+    activeAgentWorkflowPreviewRunId = runId;
+    agentWorkflowPreviewTimer = setInterval(async () => {
+        if (activeAgentWorkflowPreviewRunId !== runId || activeAgentRunId !== runId || !isAgentRunDetailModalOpen()) {
+            stopAgentWorkflowPreviewPolling();
+            return;
+        }
+        try {
+            const run = await window.openAgentRun(runId, { workflowPreview: true, silent: true });
+            if (run && !isAgentRunActive(run.status)) stopAgentWorkflowPreviewPolling();
+        } catch (e) {}
+    }, 3000);
+}
 
 function ensureAgentAuditModal() {
     let modal = document.getElementById('agent-audit-modal');
@@ -2659,6 +2819,12 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
         }
         payload.dagSpec = summary.spec;
         payload.workflowVersion = 'draft';
+        payload.metadata = {
+            ...(payload.metadata || {}),
+            workflowRunSource: 'preview',
+            workflowVersionMode: 'draft',
+            workflowName: currentAgentWorkflowName()
+        };
     } else {
         if (!workflow) {
             showToast('请选择要运行的工作流', 'error');
@@ -2678,6 +2844,12 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
         }
         payload.workflowId = workflow.id;
         payload.workflowVersion = sourceMode === 'published' ? 'published' : 'current';
+        payload.metadata = {
+            ...(payload.metadata || {}),
+            workflowRunSource: sourceMode === 'published' ? 'published' : 'current',
+            workflowVersionMode: sourceMode,
+            workflowName: workflow.name || currentAgentWorkflowName()
+        };
     }
     const visualInputs = collectAgentDagInputs();
     if (Object.keys(visualInputs).length) payload.dagInputs = visualInputs;
@@ -2704,10 +2876,17 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '工作流运行失败');
-        setAgentWorkflowRunConsoleStatus(`${agentWorkflowRunSourceLabel(sourceMode)}已入队，可在任务详情查看节点轨迹。`, 'ready');
-        showToast(`${agentWorkflowRunSourceLabel(sourceMode)}已入队`, 'success');
-        await Promise.all([loadAgentRuns(1), loadAgentSchedules(), loadAgentNotifications()]);
-        await window.openAgentRun(data.run.id);
+        if (sourceMode === 'draft') {
+            setAgentWorkflowRunConsoleStatus('预览运行已入队，可在预览详情查看节点轨迹。', 'ready');
+            showToast('预览运行已入队', 'success');
+            await window.openAgentRun(data.run.id, { workflowPreview: true });
+            startAgentWorkflowPreviewPolling(data.run.id);
+        } else {
+            setAgentWorkflowRunConsoleStatus(`${agentWorkflowRunSourceLabel(sourceMode)}已入队，可在任务详情查看节点轨迹。`, 'ready');
+            showToast(`${agentWorkflowRunSourceLabel(sourceMode)}已入队`, 'success');
+            await Promise.all([loadAgentRuns(1), loadAgentSchedules(), loadAgentNotifications()]);
+            await window.openAgentRun(data.run.id);
+        }
         return data.run;
     } catch (e) {
         setAgentWorkflowRunConsoleStatus(e.message || '工作流运行失败', 'error');
@@ -2790,6 +2969,16 @@ window.cancelAgentRun = function(runId) {
         await loadAgentRuns();
         const stillExists = agentRunsCache.some(run => run.id === runId);
         if (stillExists) await window.openAgentRun(runId);
+    });
+};
+
+window.cancelAgentWorkflowPreviewRun = function(runId) {
+    showConfirm('停止预览运行', '确定停止这次工作流预览运行吗？', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || '停止失败', 'error');
+        showToast('预览运行已停止', 'success');
+        await window.openAgentRun(runId, { workflowPreview: true });
     });
 };
 

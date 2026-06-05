@@ -269,7 +269,8 @@ const {
     getRunProgress,
     getRunForUser,
     listDeletedRunsForAdmin,
-    listRuns
+    listRuns,
+    sortDagNodesByDependencies
 } = require('../server/services/agent-runs');
 const {
     buildDatabaseTestConnectionConfig,
@@ -745,6 +746,44 @@ test('agent step details render structured tool output as readable summaries', (
     assert.doesNotMatch(chartHtml.slice(0, chartHtml.indexOf('agent-step-raw')), /&quot;type&quot;:&quot;pivot_chart&quot;/);
 });
 
+test('agent DAG node details render LLM output as readable content', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const html = sandbox.agentDagNodeMarkup({
+        node_key: 'summary',
+        title: '总结',
+        tool_name: 'agent.llm',
+        status: 'completed',
+        depends_on: ['query'],
+        condition: 'success',
+        attempt_count: 1,
+        duration_ms: 123,
+        input: { prompt: '总结上游结果' },
+        output: {
+            content: '这是大模型节点正文',
+            text: '这是大模型节点正文',
+            responseFormat: 'markdown',
+            model: { name: 'Agent Test Model' }
+        }
+    });
+
+    assert.match(html, /agent-dag-node-readable-output/);
+    assert.match(html, /这是大模型节点正文/);
+    assert.match(html, /<summary>节点输出<\/summary>/);
+    assert.match(html, /responseFormat/);
+});
+
+test('agent preview run display strips redundant report heading', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    assert.equal(
+        sandbox.agentPreviewDisplayTitle('预览运行：table_account group_id 分布'),
+        'table_account group_id 分布'
+    );
+    assert.equal(
+        sandbox.stripAgentWorkflowReportHeading('# 工作流分析报告：table_account 表 group_id 分布\n\n## 1. 任务目标\n内容'),
+        '## 1. 任务目标\n内容'
+    );
+});
+
 test('agent DAG inspector uses modal entry points for parameter editing', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
     assert.match(source, /data-pivot-dag-open-wizard="1">配置参数/);
@@ -884,7 +923,14 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(source, /const workflowName = await ensureAgentWorkflowNameForSave\(\)/);
     assert.doesNotMatch(source, /window\.prompt\?\(/);
     assert.match(source, /payload\.workflowVersion = 'draft'/);
+    assert.match(source, /workflowRunSource: 'preview'/);
     assert.match(source, /payload\.workflowVersion = sourceMode === 'published' \? 'published' : 'current'/);
+    assert.match(source, /workflowRunSource: sourceMode === 'published' \? 'published' : 'current'/);
+    assert.match(source, /await window\.openAgentRun\(data\.run\.id, \{ workflowPreview: true \}\)/);
+    assert.match(source, /function ensureAgentRunDetailModalVisible/);
+    assert.match(source, /function startAgentWorkflowPreviewPolling/);
+    assert.match(source, /window\.cancelAgentWorkflowPreviewRun/);
+    assert.match(source, /function agentDagNodeReadableOutputMarkup/);
     assert.match(source, /window\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
     assert.match(source, /data-agent-run-title-full/);
     assert.match(source, /function bindAgentRunTitleTooltip/);
@@ -906,6 +952,7 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(css, /\.pivot-dag-toolbar-summary::after\s*\{\s*display: none;/);
     assert.match(css, /\.pivot-dag-toolbar-menu \.pivot-dag-toolbar-btn\.btn-primary/);
     assert.match(css, /\.agent-run-title-tooltip\s*\{/);
+    assert.match(css, /\.agent-dag-node-readable-output\s*\{/);
     assert.doesNotMatch(css, /padding: 0 28px 0 12px/);
     assert.doesNotMatch(css, /\.agent-workflow-run-settings\s*\{/);
     assert.doesNotMatch(css, /\.agent-workflow-run-source/);
@@ -2785,6 +2832,19 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(listedRun.tool_count, detail.steps.filter(step => step.type === 'tool').length);
     assert.equal(listedRun.error_count, detail.steps.filter(step => step.status === 'error').length);
 
+    const previewRun = createAgentRun({
+        user,
+        goal: '预览当前工作流执行结果',
+        modelId: Number(modelInfo.lastInsertRowid),
+        maxSteps: 3,
+        toolPolicy: 'builtin_only',
+        metadata: { workflowRunSource: 'preview', workflowVersionMode: 'draft' }
+    });
+    cancelAgentRun(previewRun.id, user);
+    assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === previewRun.id), false);
+    assert.equal(listRuns(user, { limit: 30, includePreview: true }).data.some(item => item.id === previewRun.id), true);
+    assert.equal(listAgentNotifications(user, 50).some(item => item.run_id === previewRun.id), false);
+
     const rerun = rerunAgentRun(run.id, user);
     assert.equal(rerun.goal, run.goal);
     assert.equal(rerun.model_id, run.model_id);
@@ -2947,6 +3007,91 @@ test('DAG templates read MCP structured rows through output.rows shorthand', () 
     }, context);
     assert.deepEqual(resolved.rows, rows);
     assert.deepEqual(resolved.explicitRows, rows);
+});
+
+test('DAG final answer falls back to successful node output when summary is empty', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const now = getBeijingTimestamp();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`agent_dag_fallback_${suffix}`, 'hash', 'DAG Fallback User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `agent_dag_fallback_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'DAG Fallback Model', 'https://example.com/v1/chat/completions', `agent-dag-fallback-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+    const runId = `agent-dag-fallback-${suffix}`;
+    let callCount = 0;
+    axios.post = async () => {
+        callCount += 1;
+        return {
+            data: {
+                choices: [{
+                    message: {
+                        content: callCount === 1 ? '这是大模型节点输出' : ''
+                    }
+                }]
+            }
+        };
+    };
+
+    try {
+        db.prepare(`
+            INSERT INTO agent_runs (
+                id, user_id, model_id, title, goal, status, max_steps, run_mode, tool_policy,
+                tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms, retry_limit,
+                context_config, metadata, model_router, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'queued', 3, 'dag', 'builtin_only', '', 'safe_mcp_auto', 600000, 120000, 0, ?, ?, 'fixed', ?, ?)
+        `).run(
+            runId,
+            user.id,
+            modelId,
+            'DAG 摘要兜底',
+            '运行大模型节点并输出最终结果',
+            '{}',
+            JSON.stringify({
+                dagSpec: {
+                    nodes: [{
+                        id: 'summary',
+                        title: '大模型总结',
+                        tool: 'agent.llm',
+                        input: {
+                            model: String(modelId),
+                            prompt: '请总结测试数据',
+                            responseFormat: 'markdown'
+                        },
+                        dependsOn: [],
+                        condition: 'success',
+                        retryLimit: 0,
+                        timeoutMs: 0,
+                        onError: 'stop'
+                    }]
+                }
+            }),
+            now,
+            now
+        );
+
+        await runAgent(runId, user);
+        const detail = getRunDetailForUser(runId, user);
+        assert.equal(detail.run.status, 'completed');
+        assert.equal(detail.run.final_answer, '这是大模型节点输出');
+        assert.equal(detail.dagNodes[0].tool_name, 'agent.llm');
+        assert.equal(callCount, 2);
+    } finally {
+        axios.post = originalPost;
+        db.prepare('DELETE FROM agent_notifications WHERE run_id = ?').run(runId);
+        db.prepare('DELETE FROM agent_dag_nodes WHERE run_id = ?').run(runId);
+        db.prepare('DELETE FROM agent_steps WHERE run_id = ?').run(runId);
+        db.prepare('DELETE FROM agent_runs WHERE id = ?').run(runId);
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
 });
 
 test('OpenAI embedding helpers normalize requests and responses', () => {

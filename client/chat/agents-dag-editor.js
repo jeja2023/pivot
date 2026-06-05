@@ -2092,6 +2092,8 @@
             const connections = databaseWizardConnections();
             const chartTool = currentTools().find(tool => toolValue(tool) === 'viz.build_chart')
                 || findPreferredTool(currentTools(), ['viz.build_chart', 'chart']);
+            const llmTool = currentTools().find(tool => toolValue(tool) === 'agent.llm')
+                || findPreferredTool(currentTools(), ['agent.llm']);
             if (!connections.length) {
                 window.showToast?.('请先在能力库启用数据库连接，并刷新工具。', 'error');
                 return;
@@ -2220,6 +2222,18 @@
                         sql: buildWizardGroupCountSql({ table: schema ? `${schema}.${table}` : table, groupBy, groupAlias, countAlias, limit }),
                         limit
                     };
+                const llmInput = {
+                    ...defaultLlmInput(),
+                    prompt: [
+                        `请基于「${title}」的统计查询结果和图表配置，输出简洁的数据解读。`,
+                        '',
+                        '分组统计结果：',
+                        '{{nodes.group_count.output.rows}}',
+                        '',
+                        '图表配置：',
+                        '{{nodes.group_chart.output}}'
+                    ].join('\n')
+                };
                 const nextSpec = {
                     nodes: [
                         {
@@ -2254,12 +2268,23 @@
                             retryLimit: 0,
                             timeoutMs: 0,
                             onError: 'skip_dependents'
+                        },
+                        {
+                            id: 'llm_summary',
+                            title: '大模型处理',
+                            tool: toolValue(llmTool) || 'agent.llm',
+                            input: llmInput,
+                            dependsOn: ['group_chart'],
+                            condition: 'success',
+                            retryLimit: 0,
+                            timeoutMs: 0,
+                            onError: 'skip_dependents'
                         }
                     ]
                 };
                 const apply = () => {
                     spec = ensureDefaults(nextSpec);
-                    selectedId = 'group_count';
+                    selectedId = 'llm_summary';
                     window.setAgentWorkflowDraftName?.(title, { ifEmpty: true });
                     render();
                     fitToContent();

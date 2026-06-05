@@ -2448,6 +2448,28 @@ button.agent-ops-item {
     background: #f8fafc;
 }
 
+.agent-dag-node-readable-output {
+    margin-top: 8px;
+    padding: 9px 10px;
+    border: 1px solid rgba(16, 163, 127, 0.18);
+    border-radius: 7px;
+    background: #f8fffc;
+    color: #0f172a;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.agent-dag-node-readable-output p,
+.agent-dag-node-readable-output ul,
+.agent-dag-node-readable-output ol {
+    margin-top: 0;
+    margin-bottom: 7px;
+}
+
+.agent-dag-node-readable-output :last-child {
+    margin-bottom: 0;
+}
+
 .agent-artifact-version {
     display: flex;
     justify-content: space-between;

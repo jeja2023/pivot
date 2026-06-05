@@ -15,6 +15,24 @@ function getRunForUser(runId, user, options = {}) {
     `).get(runId, user.id);
 }
 
+function normalizeBooleanOption(value) {
+    if (value === true) return true;
+    return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function previewRunFilterSql(alias = 'r') {
+    return `(CASE
+        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND json_valid(${alias}.metadata)
+        THEN lower(COALESCE(
+            json_extract(${alias}.metadata, '$.workflowRunSource'),
+            json_extract(${alias}.metadata, '$.workflow_run_source'),
+            json_extract(${alias}.metadata, '$.runSource'),
+            ''
+        ))
+        ELSE ''
+    END) != 'preview'`;
+}
+
 function listRuns(user, options = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 10, 1), 100);
     const safePage = Math.max(Number.parseInt(options.page, 10) || 1, 1);
@@ -23,6 +41,9 @@ function listRuns(user, options = {}) {
     const query = String(options.query || '').trim();
     const where = ['r.user_id = ?', 'r.deleted_at IS NULL'];
     const params = [user.id];
+    if (!normalizeBooleanOption(options.includePreview)) {
+        where.push(previewRunFilterSql('r'));
+    }
     if (status) {
         where.push('r.status = ?');
         params.push(status);
@@ -118,8 +139,37 @@ function listSteps(runId) {
     }));
 }
 
+function sortDagNodesByDependencies(nodes = []) {
+    const entries = nodes.map((node, index) => ({
+        node,
+        index,
+        key: String(node.node_key || node.id || `__node_${index}`),
+        uniqueKey: `${String(node.node_key || node.id || '__node')}::${index}`
+    }));
+    const keys = new Set(entries.map(entry => entry.key));
+    const dependencyKeys = (node) => (Array.isArray(node.depends_on) ? node.depends_on : [])
+        .map(dep => String(dep || '').trim())
+        .filter(dep => dep && keys.has(dep));
+    const ordered = [];
+    const placed = new Set();
+    const placedKeys = new Set();
+    while (ordered.length < entries.length) {
+        const remaining = entries.filter(entry => !placed.has(entry.uniqueKey));
+        const ready = remaining.filter(entry => dependencyKeys(entry.node).every(dep => placedKeys.has(dep)));
+        const layer = ready.length ? ready : remaining;
+        layer.sort((a, b) => a.index - b.index);
+        layer.forEach(entry => {
+            if (placed.has(entry.uniqueKey)) return;
+            placed.add(entry.uniqueKey);
+            placedKeys.add(entry.key);
+            ordered.push(entry.node);
+        });
+    }
+    return ordered;
+}
+
 function listDagNodes(runId) {
-    return db.prepare(`
+    const nodes = db.prepare(`
         SELECT id, run_id, node_key, title, tool_name, input, depends_on, condition, status,
                output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
         FROM agent_dag_nodes
@@ -131,6 +181,7 @@ function listDagNodes(runId) {
         depends_on: parseJsonObject(node.depends_on) || [],
         output: parseJsonObject(node.output) || node.output
     }));
+    return sortDagNodesByDependencies(nodes);
 }
 
 function getRunProgress(run, steps = []) {
@@ -166,5 +217,6 @@ module.exports = {
     listDagNodes,
     listDeletedRunsForAdmin,
     listRuns,
+    sortDagNodesByDependencies,
     listSteps
 };

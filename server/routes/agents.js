@@ -231,7 +231,8 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             page: req.query.page,
             limit: normalizeLimit(req.query.limit, 10, 100),
             status: req.query.status,
-            query: req.query.query
+            query: req.query.query,
+            includePreview: req.query.includePreview || req.query.include_preview
         });
         res.json(result);
     }));
@@ -260,6 +261,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             templateId: req.body?.templateId,
             scheduleId: req.body?.scheduleId,
             contextConfig: req.body?.contextConfig,
+            metadata: req.body?.metadata,
             dagSpec: req.body?.dagSpec,
             dagInputs: req.body?.dagInputs || req.body?.dag_inputs,
             workflowId: req.body?.workflowId || req.body?.workflow_id,

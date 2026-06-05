@@ -223,11 +223,17 @@ function getRunMetadata(run) {
     return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
+function isPreviewAgentRun(run) {
+    const metadata = getRunMetadata(run);
+    return String(metadata.workflowRunSource || metadata.workflow_run_source || metadata.runSource || '').toLowerCase() === 'preview';
+}
+
 function createAgentNotification(userId, runId, type, title, body = '') {
     if (!userId || !title) return null;
     const run = runId
-        ? db.prepare('SELECT title, goal FROM agent_runs WHERE id = ?').get(runId)
+        ? db.prepare('SELECT title, goal, metadata FROM agent_runs WHERE id = ?').get(runId)
         : null;
+    if (run && isPreviewAgentRun(run)) return null;
     const fallbackTitle = run ? getAgentRunTitle(run) : '智能体通知';
     const safeTitle = looksLikeCorruptTitle(title) ? fallbackTitle : String(title || '').trim();
     const safeBody = looksLikeCorruptTitle(body) ? fallbackTitle : String(body || '').trim();
@@ -681,6 +687,105 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     return content || '未能生成最终答案。';
 }
 
+function isMissingFinalAnswer(value) {
+    const text = String(value || '').trim();
+    return !text
+        || text === '\u672a\u80fd\u751f\u6210\u6700\u7ec8\u7b54\u6848\u3002'
+        || text === 'No final answer was generated.';
+}
+
+function parseMaybeJsonPayload(value) {
+    if (!value) return value;
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') return value;
+    const text = value.trim();
+    if (!text) return '';
+    const parsed = parseJsonObject(text);
+    return parsed || text;
+}
+
+function firstReadableString(...values) {
+    return values
+        .map(value => String(value || '').trim())
+        .find(Boolean) || '';
+}
+
+function extractTextFromContentArray(content) {
+    if (!Array.isArray(content)) return '';
+    return content
+        .map(item => {
+            if (typeof item === 'string') return item;
+            if (!item || typeof item !== 'object') return '';
+            return firstReadableString(item.text, item.content, item.markdown);
+        })
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+}
+
+function summarizeStructuredDagOutput(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    const structured = payload.structuredContent && typeof payload.structuredContent === 'object'
+        ? payload.structuredContent
+        : payload;
+    if (!structured || typeof structured !== 'object') return '';
+    const type = String(structured.type || '').trim();
+    const markdown = String(structured.markdown || '').trim();
+    if (markdown && ['pivot_table', 'pivot_report', 'format_markdown_table'].includes(type)) return markdown;
+    if (type === 'pivot_chart') {
+        const title = String(structured.title || '').trim();
+        const points = Math.max(
+            Array.isArray(structured.labels) ? structured.labels.length : 0,
+            ...(Array.isArray(structured.series)
+                ? structured.series.map(item => Array.isArray(item?.data) ? item.data.length : 0)
+                : [0])
+        );
+        return `已生成图表${title ? `：${title}` : ''}${points ? `，包含 ${points} 个数据点` : ''}。`;
+    }
+    const rows = Array.isArray(structured.rows)
+        ? structured.rows
+        : Array.isArray(structured.data)
+            ? structured.data
+            : Array.isArray(structured.items)
+                ? structured.items
+                : [];
+    if (rows.length) return `查询完成，返回 ${rows.length} 行数据。`;
+    return '';
+}
+
+function extractReadableDagOutput(output) {
+    const payload = parseMaybeJsonPayload(output);
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload.trim();
+    if (typeof payload !== 'object') return String(payload || '').trim();
+    const contentText = extractTextFromContentArray(payload.content);
+    return firstReadableString(
+        typeof payload.content === 'string' ? payload.content : '',
+        payload.text,
+        payload.markdown,
+        payload.answer,
+        payload.message,
+        payload.summary,
+        summarizeStructuredDagOutput(payload),
+        contentText
+    );
+}
+
+function buildDagFallbackFinalAnswer(dagSpec, states) {
+    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
+    const completedNodes = nodes.filter(node => states.get(node.id)?.status === 'completed');
+    const reversedCompleted = completedNodes.slice().reverse();
+    const llmNode = reversedCompleted.find(node => String(node.tool || '').trim() === 'agent.llm');
+    const llmText = llmNode ? extractReadableDagOutput(states.get(llmNode.id)?.output) : '';
+    if (llmText) return llmText;
+    for (const node of reversedCompleted) {
+        const text = extractReadableDagOutput(states.get(node.id)?.output);
+        if (text) return text;
+    }
+    if (completedNodes.length) return `工作流执行完成，共 ${completedNodes.length} 个节点完成。`;
+    return '';
+}
+
 function upsertDagNode(runId, node, patch = {}) {
     const existing = db.prepare('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?').get(runId, node.id);
     const now = getBeijingTimestamp();
@@ -1117,11 +1222,26 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
     }
 
-    const answer = await withTimeout(
-        synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
-        Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-        'DAG final summary'
-    );
+    const fallbackAnswer = buildDagFallbackFinalAnswer(dagSpec, states);
+    let answer = '';
+    try {
+        const synthesizedAnswer = await withTimeout(
+            synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
+            Math.min(180000, Math.max(deadline - Date.now(), 1000)),
+            'DAG final summary'
+        );
+        answer = isMissingFinalAnswer(synthesizedAnswer) && fallbackAnswer
+            ? fallbackAnswer
+            : synthesizedAnswer;
+    } catch (summaryErr) {
+        if (!fallbackAnswer) throw summaryErr;
+        answer = fallbackAnswer;
+        insertStep(run.id, stepIndex + 1, {
+            type: 'control',
+            title: 'DAG final summary fallback',
+            output: { warning: summaryErr.message, fallback: 'dag_node_output' }
+        });
+    }
     updateRun(run.id, {
         status: 'completed',
         final_answer: answer,
