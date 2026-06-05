@@ -10,6 +10,30 @@ function normalizeDagRunInputs(value) {
     return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [String(key).trim().slice(0, 80), item]));
 }
 
+function llmNodeInputText(node) {
+    const input = node?.input && typeof node.input === 'object' ? node.input : {};
+    return [
+        input.prompt,
+        input.systemPrompt,
+        input.system_prompt,
+        input.input,
+        input.text
+    ].map(value => String(value || '')).join('\n');
+}
+
+function llmNodeReferencesWorkflowInput(node) {
+    return /\{\{\s*(?:goal|run\.goal|inputs?\.|run\.inputs?\.)/i.test(llmNodeInputText(node));
+}
+
+function validateLlmNodePlacement(dagSpec) {
+    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
+    return nodes
+        .filter(node => String(node?.tool || '').trim() === 'agent.llm')
+        .filter(node => !(Array.isArray(node.dependsOn) && node.dependsOn.length > 0))
+        .filter(node => !llmNodeReferencesWorkflowInput(node))
+        .map(node => `${node.title || node.id} 缺少上游输入，请连接数据/检索节点，或在提示词中引用 {{goal}} / {{inputs.*}}。`);
+}
+
 function assertWorkflowHasConfiguredLlm(dagSpec) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
     const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
@@ -21,6 +45,12 @@ function assertWorkflowHasConfiguredLlm(dagSpec) {
     const model = String(llmNode?.input?.model || llmNode?.input?.modelId || llmNode?.input?.model_id || '').trim();
     if (!model) {
         const err = new Error('大模型节点需要填写节点模型。');
+        err.status = 400;
+        throw err;
+    }
+    const placementIssues = validateLlmNodePlacement(dagSpec);
+    if (placementIssues.length) {
+        const err = new Error(placementIssues[0]);
         err.status = 400;
         throw err;
     }
@@ -361,6 +391,7 @@ function restoreAgentWorkflow(workflowId, user) {
 }
 
 module.exports = {
+    assertWorkflowHasConfiguredLlm,
     createAgentWorkflow,
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,

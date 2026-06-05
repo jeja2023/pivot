@@ -114,6 +114,71 @@
     font-size: 0.68rem;
 }
 
+.agent-step-llm-output {
+    display: block;
+    color: #0f172a;
+    line-height: 1.68;
+    text-align: left;
+}
+
+.agent-step-llm-output h1,
+.agent-step-llm-output h2,
+.agent-step-llm-output h3,
+.agent-step-llm-output h4,
+.agent-step-llm-output h5,
+.agent-step-llm-output h6 {
+    margin: 0.75em 0 0.38em;
+    color: #0f172a;
+    font-weight: 800;
+    line-height: 1.32;
+    letter-spacing: 0;
+    text-align: left;
+}
+
+.agent-step-llm-output h1:first-child,
+.agent-step-llm-output h2:first-child,
+.agent-step-llm-output h3:first-child {
+    margin-top: 0;
+}
+
+.agent-step-llm-output h1 {
+    font-size: 1rem;
+}
+
+.agent-step-llm-output h2 {
+    font-size: 0.94rem;
+}
+
+.agent-step-llm-output h3,
+.agent-step-llm-output h4 {
+    font-size: 0.86rem;
+}
+
+.agent-step-llm-output p {
+    margin: 0.36em 0;
+}
+
+.agent-step-llm-output ol,
+.agent-step-llm-output ul {
+    margin: 0.4em 0 0.62em;
+    padding-left: 1.45rem;
+    list-style-position: outside;
+}
+
+.agent-step-llm-output li {
+    display: list-item;
+    margin: 0.22em 0;
+    padding-left: 0.08rem;
+}
+
+.agent-step-llm-output code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #0f172a;
+    font-size: 0.9em;
+}
+
 .agent-step-table-wrap {
     max-width: 100%;
     overflow: auto;

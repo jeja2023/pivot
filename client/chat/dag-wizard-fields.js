@@ -3,7 +3,7 @@
 
 
 
-        const renderWizardField = (name, schema = {}, value, required = false, dependencyNodes = [], tool = null) => {
+        const renderWizardField = (name, schema = {}, value, required = false, dependencyNodes = [], tool = null, wizardTools = []) => {
             const type = normalizeSchemaType(schema);
             const typeLabel = friendlySchemaTypeLabel(schema);
             const label = friendlyFieldLabel(name, schema, tool);
@@ -37,8 +37,8 @@
             ].filter(Boolean).join(' ');
             let controlHtml = '';
             if (isDatabaseConnection) {
-                const options = databaseToolConnectionOptions(tool);
-                const selectedId = selectedDatabaseConnectionId(tool, { [name]: value });
+                const options = databaseToolConnectionOptions(tool, wizardTools);
+                const selectedId = selectedDatabaseConnectionId(tool, { [name]: value }, wizardTools);
                 controlHtml = `
                     <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-db-connection-select="1">
                         ${options.length
@@ -122,13 +122,13 @@
             `;
         };
 
-        const renderDatabaseAssistPanel = (node, tool, initialInput = {}) => {
+        const renderDatabaseAssistPanel = (node, tool, initialInput = {}, wizardTools = []) => {
             const shortName = toolShortName(tool);
             if (!shortName.startsWith('db.')) return '';
-            const selectedServerId = selectedDatabaseConnectionId(tool, initialInput);
-            const entries = databaseWizardConnections();
+            const selectedServerId = selectedDatabaseConnectionId(tool, initialInput, wizardTools);
+            const entries = databaseWizardConnections(wizardTools);
             const selectedEntry = entries.find(item => item.serverId === selectedServerId);
-            if (!selectedEntry && !databaseToolConnectionOptions(tool).length) return '';
+            if (!selectedEntry && !databaseToolConnectionOptions(tool, wizardTools).length) return '';
             const canPickTable = ['db.describe_table', 'db.group_count'].includes(shortName);
             const canPickColumn = shortName === 'db.group_count';
             const canLoadTables = canPickTable && entries.some(entry => Boolean(entry.tools['db.list_tables']));
@@ -139,7 +139,7 @@
                     <div class="pivot-dag-wizard-assist-head">
                         <div>
                             <strong>数据库辅助</strong>
-                            <span data-pivot-dag-assist-connection-label>${dagEscapeHtml(selectedEntry?.serverName || databaseConnectionLabel(tool, selectedServerId) || '当前数据库')}</span>
+                            <span data-pivot-dag-assist-connection-label>${dagEscapeHtml(selectedEntry?.serverName || databaseConnectionLabel(tool, selectedServerId, wizardTools) || '当前数据库')}</span>
                         </div>
                         <div class="pivot-dag-wizard-assist-actions">
                             ${canLoadTables ? '<button type="button" class="btn-secondary" data-pivot-dag-load-tables="1">读取表</button>' : ''}

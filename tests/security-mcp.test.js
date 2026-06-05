@@ -421,6 +421,19 @@ test('agent tool list exposes database connections as parameters and routes gene
                         retryLimit: 0,
                         timeoutMs: 0,
                         onError: 'stop'
+                    }, {
+                        id: 'summary',
+                        title: '大模型汇总',
+                        tool: 'agent.llm',
+                        input: {
+                            model: String(modelId),
+                            prompt: '请基于查询结果输出摘要：\n{{nodes.query.output}}'
+                        },
+                        dependsOn: ['query'],
+                        condition: 'success',
+                        retryLimit: 0,
+                        timeoutMs: 0,
+                        onError: 'stop'
                     }]
                 }
             }),

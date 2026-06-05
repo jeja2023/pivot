@@ -214,7 +214,7 @@ function createDagInspectorController(ctx) {
                         <span>侧栏只显示摘要，点击按钮进入弹窗编辑。</span>
                     </div>
                 </div>
-                <div class="pivot-dag-input-overview-summary">${renderInputSummary(node.input, selectedTool)}</div>
+                <div class="pivot-dag-input-overview-summary">${renderInputSummary(node.input, selectedTool, tools)}</div>
                 <div class="pivot-dag-input-overview-actions">
                     <button type="button" class="btn-primary" data-pivot-dag-open-wizard="1">配置参数</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑 JSON</button>

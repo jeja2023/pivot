@@ -116,26 +116,7 @@ function agentProgressLabel(run = {}, progress = {}) {
 
 function agentDagNodeReadableText(node) {
     if (String(node?.tool_name || '').trim() !== 'agent.llm') return '';
-    const payload = agentParsePayload(node.output);
-    if (!payload) return '';
-    if (typeof payload === 'string') return payload.trim();
-    if (typeof payload !== 'object') return String(payload || '').trim();
-    const contentText = Array.isArray(payload.content)
-        ? payload.content.map(item => {
-            if (typeof item === 'string') return item;
-            if (!item || typeof item !== 'object') return '';
-            return String(item.text || item.content || item.markdown || '').trim();
-        }).filter(Boolean).join('\n').trim()
-        : '';
-    return [
-        typeof payload.content === 'string' ? payload.content : '',
-        payload.text,
-        payload.markdown,
-        payload.answer,
-        payload.message,
-        payload.summary,
-        contentText
-    ].map(value => String(value || '').trim()).find(Boolean) || '';
+    return agentLlmOutputText(node.output);
 }
 
 function agentDagNodeReadableOutputMarkup(node) {
@@ -144,9 +125,9 @@ function agentDagNodeReadableOutputMarkup(node) {
     const cleanText = stripAgentWorkflowReportHeading(text);
     const parsed = agentParsePayload(cleanText);
     if (parsed && typeof parsed === 'object') {
-        return `<div class="agent-dag-node-readable-output"><pre>${agentEscape(JSON.stringify(parsed, null, 2))}</pre></div>`;
+        return `<div class="agent-dag-node-readable-output is-json"><pre>${agentEscape(JSON.stringify(parsed, null, 2))}</pre></div>`;
     }
-    return `<div class="agent-dag-node-readable-output">${renderMarkdown(normalizeAgentMarkdown(cleanText))}</div>`;
+    return `<div class="agent-dag-node-readable-output is-markdown">${renderMarkdown(normalizeAgentMarkdown(cleanText))}</div>`;
 }
 
 function agentDagNodeMarkup(node) {

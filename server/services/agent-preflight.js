@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { getRunnableModelForUser } = require('./models');
 const { formatToolList } = require('./agent-tool-catalog');
-const { resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { assertWorkflowHasConfiguredLlm, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
@@ -65,6 +65,13 @@ function preflightAgentRun(user, body = {}) {
     if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
     if (runMode === 'dag') {
         if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
+        if (dag.nodes.length) {
+            try {
+                assertWorkflowHasConfiguredLlm(dag);
+            } catch (e) {
+                blockers.push(e.message || '工作流大模型节点配置不完整。');
+            }
+        }
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
     if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('Token 预算偏低，可能导致任务提前停止。');

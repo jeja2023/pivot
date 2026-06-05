@@ -6,11 +6,12 @@ function createDagWizardStatsController(ctx) {
     const currentTools = () => typeof ctx.currentTools === 'function' ? (ctx.currentTools() || []) : [];
 
     const openStatsChartWizard = () => {
-        const connections = databaseWizardConnections();
-        const chartTool = currentTools().find(tool => toolValue(tool) === 'viz.build_chart')
-            || findPreferredTool(currentTools(), ['viz.build_chart', 'chart']);
-        const llmTool = currentTools().find(tool => toolValue(tool) === 'agent.llm')
-            || findPreferredTool(currentTools(), ['agent.llm']);
+        const wizardTools = currentTools();
+        const connections = databaseWizardConnections(wizardTools);
+        const chartTool = wizardTools.find(tool => toolValue(tool) === 'viz.build_chart')
+            || findPreferredTool(wizardTools, ['viz.build_chart', 'chart']);
+        const llmTool = wizardTools.find(tool => toolValue(tool) === 'agent.llm')
+            || findPreferredTool(wizardTools, ['agent.llm']);
         if (!connections.length) {
             window.showToast?.('请先在能力库启用数据库连接，并刷新工具。', 'error');
             return;
@@ -142,13 +143,17 @@ function createDagWizardStatsController(ctx) {
             const llmInput = {
                 ...defaultLlmInput(),
                 prompt: [
-                    `请基于「${title}」的统计查询结果和图表配置，输出简洁的数据解读。`,
+                    `请基于「${title}」的统计查询结果，输出简洁的数据解读，并指出适合图表呈现的关键分组。`,
+                    '',
+                    '工作流目标：',
+                    '{{goal}}',
                     '',
                     '分组统计结果：',
                     '{{nodes.group_count.output.rows}}',
                     '',
-                    '图表配置：',
-                    '{{nodes.group_chart.output}}'
+                    `图表类型：${chartType}`,
+                    `横轴字段：${groupAlias}`,
+                    `纵轴字段：${countAlias}`
                 ].join('\n')
             };
             const nextSpec = {
@@ -159,6 +164,17 @@ function createDagWizardStatsController(ctx) {
                         tool: toolShortName(queryTool),
                         input: queryInput,
                         dependsOn: [],
+                        condition: 'success',
+                        retryLimit: 0,
+                        timeoutMs: 0,
+                        onError: 'skip_dependents'
+                    },
+                    {
+                        id: 'llm_summary',
+                        title: '大模型处理',
+                        tool: toolValue(llmTool) || 'agent.llm',
+                        input: llmInput,
+                        dependsOn: ['group_count'],
                         condition: 'success',
                         retryLimit: 0,
                         timeoutMs: 0,
@@ -180,18 +196,7 @@ function createDagWizardStatsController(ctx) {
                             sortOrder: 'desc',
                             limit
                         },
-                        dependsOn: ['group_count'],
-                        condition: 'success',
-                        retryLimit: 0,
-                        timeoutMs: 0,
-                        onError: 'skip_dependents'
-                    },
-                    {
-                        id: 'llm_summary',
-                        title: '大模型处理',
-                        tool: toolValue(llmTool) || 'agent.llm',
-                        input: llmInput,
-                        dependsOn: ['group_chart'],
+                        dependsOn: ['llm_summary'],
                         condition: 'success',
                         retryLimit: 0,
                         timeoutMs: 0,

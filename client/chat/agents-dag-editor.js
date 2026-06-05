@@ -233,6 +233,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             requiredLlmNodes.forEach(node => {
                 if (!llmNodeModel(node)) errors.push(`${node.title || node.id} 需要填写节点模型`);
             });
+            validateLlmNodePlacement(spec.nodes).forEach(message => errors.push(message));
             spec.nodes.forEach(node => {
                 if (!node.tool) errors.push(`${node.title || node.id} 未选择工具`);
                 if (node.tool && toolNames.size && !isKnownToolValue(tools, node.tool)) warnings.push(`${node.title || node.id} 使用的工具当前不可用`);

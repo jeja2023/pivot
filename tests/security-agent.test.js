@@ -45,7 +45,8 @@ const {
     softDeleteAgentRun,
     streamingTools,
     subscribeUserEvents,
-    test
+    test,
+    assertWorkflowHasConfiguredLlm
 } = require('./security-helpers');
 
 function readAgentSourceBundle() {
@@ -64,6 +65,7 @@ function readAgentSourceBundle() {
         'agent-workflow-library.js',
         'agent-workflow-versions.js',
         'agent-workflow-editor.js',
+        'agent-workflow-runners.js',
         'agent-workflows.js',
         'agent-templates.js',
         'agent-schedules.js',
@@ -76,6 +78,8 @@ function readDagEditorSourceBundle() {
         'dag-core.js',
         'dag-render.js',
         'dag-interaction.js',
+        'dag-toolbar-tools.js',
+        'dag-toolbar-db.js',
         'dag-toolbar.js',
         'dag-toolbar-field-overrides.js',
         'dag-toolbar-fields.js',
@@ -178,6 +182,27 @@ test('agent step details render structured tool output as readable summaries', (
     assert.match(chartHtml, />数据点</);
     assert.match(chartHtml, /agent-step-raw/);
     assert.doesNotMatch(chartHtml.slice(0, chartHtml.indexOf('agent-step-raw')), /&quot;type&quot;:&quot;pivot_chart&quot;/);
+
+    const llmHtml = sandbox.agentStepMarkup({
+        step_index: 2,
+        status: 'completed',
+        type: 'dag_node',
+        title: '完成 DAG 节点：大模型处理',
+        tool_name: 'agent.llm',
+        duration_ms: 31452,
+        output: {
+            content: '# Report\n\n1. First point\n2. Second point',
+            text: '# Report\n\n1. First point\n2. Second point',
+            responseFormat: 'markdown'
+        }
+    });
+    const llmReadableHtml = llmHtml.slice(0, llmHtml.indexOf('agent-step-raw'));
+    assert.match(llmReadableHtml, /agent-step-llm-output/);
+    assert.match(llmReadableHtml, /<h1>Report<\/h1>/);
+    assert.match(llmReadableHtml, /<ol>/);
+    assert.doesNotMatch(llmReadableHtml, /&quot;content&quot;|responseFormat/);
+    assert.match(llmHtml, /agent-step-raw/);
+    assert.match(llmHtml, /responseFormat/);
 });
 
 test('agent DAG node details render LLM output as readable content', () => {
@@ -204,6 +229,22 @@ test('agent DAG node details render LLM output as readable content', () => {
     assert.match(html, /这是大模型节点正文/);
     assert.match(html, /<summary>节点输出<\/summary>/);
     assert.match(html, /responseFormat/);
+
+    const markdownHtml = sandbox.agentDagNodeMarkup({
+        node_key: 'summary',
+        title: 'Summary',
+        tool_name: 'agent.llm',
+        status: 'completed',
+        depends_on: ['query'],
+        condition: 'success',
+        attempt_count: 1,
+        duration_ms: 123,
+        input: { prompt: 'Summarize upstream rows' },
+        output: { text: '# Report\n\n1. First point\n2. Second point' }
+    });
+    assert.match(markdownHtml, /agent-dag-node-readable-output is-markdown/);
+    assert.match(markdownHtml, /<h1>Report<\/h1>/);
+    assert.match(markdownHtml, /<ol>/);
 });
 
 test('agent preview run display strips redundant report heading', () => {
@@ -260,6 +301,11 @@ test('agent stats chart wizard explains optional database schema field', () => {
     assert.match(source, /SQLite\/MySQL 通常留空/);
     assert.match(source, /不确定就留空，系统会使用当前连接的默认数据库范围/);
     assert.match(source, /正在读取默认范围的数据表/);
+    assert.match(source, /const wizardTools = currentTools\(\);/);
+    assert.match(source, /const connections = databaseWizardConnections\(wizardTools\);/);
+    assert.match(source, /const normalizeWizardTools = \(toolsOrResolver = \[\]\) =>/);
+    assert.doesNotMatch(source, /currentTools\(\)\.forEach/);
+    assert.doesNotMatch(source, /databaseWizardConnections\(\)/);
 });
 
 test('agent DAG parameter modals use large fixed-height workbench layout', () => {
@@ -387,6 +433,12 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(css, /\.pivot-dag-toolbar-menu \.pivot-dag-toolbar-btn\.btn-primary/);
     assert.match(css, /\.agent-run-title-tooltip\s*\{/);
     assert.match(css, /\.agent-dag-node-readable-output\s*\{/);
+    assert.match(css, /\.agent-dag-node-readable-output \.text-body\s*\{/);
+    assert.match(css, /\.agent-dag-node-readable-output h1[\s\S]*?font-size: 1\.08rem/);
+    assert.match(css, /\.agent-dag-node-readable-output ul,[\s\S]*?padding-left: 1\.45rem/);
+    assert.match(css, /\.agent-step-llm-output\s*\{/);
+    assert.match(css, /\.agent-step-llm-output h1[\s\S]*?font-size: 1rem/);
+    assert.match(css, /text-align: left/);
     assert.doesNotMatch(css, /padding: 0 28px 0 12px/);
     assert.doesNotMatch(css, /\.agent-workflow-run-settings\s*\{/);
     assert.doesNotMatch(css, /\.agent-workflow-run-source/);
@@ -417,20 +469,73 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     assert.match(editor, /createDefaultLlmNode/);
     assert.match(editor, /工作流必须包含 1 个大模型节点/);
     assert.match(editor, /工作流必须保留 1 个大模型节点/);
+    assert.match(editor, /function validateLlmNodePlacement/);
+    assert.match(editor, /缺少上游输入/);
     assert.match(editor, /需要填写节点模型/);
     assert.match(editor, /makeButton\('大模型'/);
     assert.match(editor, /patterns: \['agent\.llm'\]/);
     assert.match(editor, /prompt: selectedNode/);
+    assert.match(editor, /id: 'llm_summary'[\s\S]*?dependsOn: \['group_count'\]/);
+    assert.match(editor, /id: 'group_chart'[\s\S]*?dependsOn: \['llm_summary'\]/);
     assert.match(tools, /name: 'agent\.llm'/);
     assert.match(tools, /maxSteps: \{ type: 'integer'/);
     assert.match(tools, /\['prompt', 'model'\]/);
     assert.match(tools, /async function executeAgentLlmNode/);
     assert.match(tools, /recordAgentModelUsage\(user, modelCfg, messages, content, 'agent_llm_node'/);
     assert.match(runtime, /function inferDagLlmRuntimeSettings/);
+    assert.match(runtime, /assertWorkflowHasConfiguredLlm\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!effectiveModelId && llmRuntimeSettings\.modelId\)/);
     assert.match(runtime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
+});
+
+test('agent workflow rejects LLM start nodes without workflow input', () => {
+    assert.throws(() => assertWorkflowHasConfiguredLlm({
+        nodes: [{
+            id: 'llm_start',
+            title: '大模型处理',
+            tool: 'agent.llm',
+            input: {
+                model: 'model_1',
+                prompt: '请总结上游数据'
+            },
+            dependsOn: []
+        }]
+    }), /缺少上游输入/);
+    assert.doesNotThrow(() => assertWorkflowHasConfiguredLlm({
+        nodes: [{
+            id: 'llm_start',
+            title: '大模型处理',
+            tool: 'agent.llm',
+            input: {
+                model: 'model_1',
+                prompt: '请处理本次目标：{{goal}}'
+            },
+            dependsOn: []
+        }]
+    }));
+    assert.doesNotThrow(() => assertWorkflowHasConfiguredLlm({
+        nodes: [
+            {
+                id: 'query',
+                title: '查询数据',
+                tool: 'models.list',
+                input: {},
+                dependsOn: []
+            },
+            {
+                id: 'llm_after_query',
+                title: '大模型处理',
+                tool: 'agent.llm',
+                input: {
+                    model: 'model_1',
+                    prompt: '请总结查询结果：{{nodes.query.output}}'
+                },
+                dependsOn: ['query']
+            }
+        ]
+    }));
 });
 
 test('agent JSON parser extracts strict object from model text', () => {
@@ -713,7 +818,21 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
         maxSteps: 3,
         runMode: 'dag',
         toolPolicy: 'builtin_only',
-        dagSpec: { nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {} }] }
+        dagSpec: {
+            nodes: [
+                { id: 'models', title: '列出模型', tool: 'models.list', input: {} },
+                {
+                    id: 'summary',
+                    title: '大模型汇总',
+                    tool: 'agent.llm',
+                    input: {
+                        model: String(modelId),
+                        prompt: '请基于可用模型列表输出摘要：\n{{nodes.models.output}}'
+                    },
+                    dependsOn: ['models']
+                }
+            ]
+        }
     });
     cancelAgentRun(dagRun.id, user);
     const dagResumed = resumeAgentRun(dagRun.id, user);
@@ -774,7 +893,7 @@ test('DAG final answer falls back to successful node output when summary is empt
                         tool: 'agent.llm',
                         input: {
                             model: String(modelId),
-                            prompt: '请总结测试数据',
+                            prompt: '请总结测试数据：{{goal}}',
                             responseFormat: 'markdown'
                         },
                         dependsOn: [],

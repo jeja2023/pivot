@@ -319,6 +319,8 @@ const {
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 
+const { assertWorkflowHasConfiguredLlm } = require('../server/services/agent-workflows');
+
 const { resolveDagNodeInput } = require('../server/services/agent-dag-utils');
 
 const {
@@ -510,6 +512,8 @@ function createAgentWorkbenchSandbox() {
         'dag-core.js',
         'dag-render.js',
         'dag-interaction.js',
+        'dag-toolbar-tools.js',
+        'dag-toolbar-db.js',
         'dag-toolbar.js',
         'dag-toolbar-field-overrides.js',
         'dag-toolbar-fields.js',
@@ -533,6 +537,7 @@ function createAgentWorkbenchSandbox() {
         'agent-workflow-library.js',
         'agent-workflow-versions.js',
         'agent-workflow-editor.js',
+        'agent-workflow-runners.js',
         'agent-workflows.js',
         'agent-templates.js',
         'agent-schedules.js',
@@ -631,6 +636,7 @@ module.exports = {
     assert,
     assertSafeMcpOutboundUrl,
     assertSafeOutboundUrl,
+    assertWorkflowHasConfiguredLlm,
     backupDatabase,
     buildChatCompletionsUrl,
     buildComplianceAuditPackage,

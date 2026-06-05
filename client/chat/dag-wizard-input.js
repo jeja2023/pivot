@@ -52,7 +52,7 @@ const cloneDagInput = (value) => {
                 : '可以直接填写，必要时也能插入变量。';
         };
 
-        const renderInputSummary = (input = {}, tool = null) => {
+        const renderInputSummary = (input = {}, tool = null, wizardTools = []) => {
             if (!input || typeof input !== 'object' || Array.isArray(input)) {
                 return '<span class="pivot-dag-input-summary-empty">未配置</span>';
             }
@@ -61,7 +61,7 @@ const cloneDagInput = (value) => {
                 return '<span class="pivot-dag-input-summary-empty">未配置</span>';
             }
             const previewValue = (key, value) => {
-                if (isDatabaseConnectionField(key, tool)) return databaseConnectionLabel(tool, value);
+                if (isDatabaseConnectionField(key, tool)) return databaseConnectionLabel(tool, value, wizardTools);
                 if (value === undefined || value === null || value === '') return '空';
                 if (typeof value === 'string') {
                     const normalized = value.replace(/\s+/g, ' ').trim();

@@ -175,6 +175,32 @@ function llmNodes(nodes = []) {
         return nodes.filter(isLlmNode);
     }
 
+function llmNodeInputText(node) {
+        const input = node?.input && typeof node.input === 'object' ? node.input : {};
+        return [
+            input.prompt,
+            input.systemPrompt,
+            input.system_prompt,
+            input.input,
+            input.text
+        ].map(value => String(value || '')).join('\n');
+    }
+
+function llmNodeReferencesWorkflowInput(node) {
+        return /\{\{\s*(?:goal|run\.goal|inputs?\.|run\.inputs?\.)/i.test(llmNodeInputText(node));
+    }
+
+function validateLlmNodePlacement(nodes = []) {
+        const issues = [];
+        nodes.filter(isLlmNode).forEach(node => {
+            const deps = Array.isArray(node.dependsOn) ? node.dependsOn : [];
+            if (deps.length > 0) return;
+            if (llmNodeReferencesWorkflowInput(node)) return;
+            issues.push(`${node.title || node.id} 缺少上游输入，请连接数据/检索节点，或在提示词中引用 {{goal}} / {{inputs.*}}`);
+        });
+        return issues;
+    }
+
 function llmNodeModel(node) {
         return String(node?.input?.model || node?.input?.modelId || node?.input?.model_id || '').trim();
     }

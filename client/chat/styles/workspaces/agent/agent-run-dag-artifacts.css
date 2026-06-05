@@ -188,20 +188,106 @@
 
 .agent-dag-node-readable-output {
     margin-top: 8px;
-    padding: 9px 10px;
+    padding: 14px 16px;
     border: 1px solid rgba(16, 163, 127, 0.18);
     border-radius: 7px;
-    background: #f8fffc;
+    background: #fbfffe;
     color: #0f172a;
-    font-size: 0.78rem;
-    line-height: 1.55;
+    font-size: 0.82rem;
+    line-height: 1.68;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.agent-dag-node-readable-output .text-body {
+    max-width: 920px;
+    margin: 0 auto;
+    overflow: visible;
+    text-align: left;
+}
+
+.agent-dag-node-readable-output h1,
+.agent-dag-node-readable-output h2,
+.agent-dag-node-readable-output h3,
+.agent-dag-node-readable-output h4,
+.agent-dag-node-readable-output h5,
+.agent-dag-node-readable-output h6 {
+    margin: 0.85em 0 0.45em;
+    color: #0f172a;
+    font-weight: 800;
+    line-height: 1.32;
+    letter-spacing: 0;
+    text-align: left;
+}
+
+.agent-dag-node-readable-output h1:first-child,
+.agent-dag-node-readable-output h2:first-child,
+.agent-dag-node-readable-output h3:first-child {
+    margin-top: 0;
+}
+
+.agent-dag-node-readable-output h1 {
+    font-size: 1.08rem;
+}
+
+.agent-dag-node-readable-output h2 {
+    font-size: 1rem;
+}
+
+.agent-dag-node-readable-output h3,
+.agent-dag-node-readable-output h4 {
+    font-size: 0.92rem;
 }
 
 .agent-dag-node-readable-output p,
 .agent-dag-node-readable-output ul,
 .agent-dag-node-readable-output ol {
     margin-top: 0;
-    margin-bottom: 7px;
+    margin-bottom: 8px;
+    text-align: left;
+}
+
+.agent-dag-node-readable-output p {
+    margin-bottom: 0.48em;
+}
+
+.agent-dag-node-readable-output ul,
+.agent-dag-node-readable-output ol {
+    padding-left: 1.45rem;
+    list-style-position: outside;
+}
+
+.agent-dag-node-readable-output li {
+    display: list-item;
+    margin: 0.28em 0;
+    padding-left: 0.08rem;
+    line-height: 1.6;
+    text-align: left;
+}
+
+.agent-dag-node-readable-output li > p {
+    margin: 0.18em 0;
+}
+
+.agent-dag-node-readable-output strong {
+    font-weight: 800;
+}
+
+.agent-dag-node-readable-output code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #0f172a;
+    font-size: 0.9em;
+}
+
+.agent-dag-node-readable-output .table-wrapper {
+    margin: 10px 0 12px;
+}
+
+.agent-dag-node-readable-output .code-block {
+    margin: 10px 0 12px;
+    box-shadow: none;
 }
 
 .agent-dag-node-readable-output :last-child {

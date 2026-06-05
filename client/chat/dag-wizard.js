@@ -3,10 +3,13 @@
 
 
 function createDagWizardController(ctx) {
+        const currentTools = () => typeof ctx.currentTools === 'function' ? (ctx.currentTools() || []) : [];
+
         const openNodeInputWizard = (nodeId) => {
             const node = ctx.spec.nodes.find(n => n.id === nodeId);
             if (!node) return;
-            const tool = resolveToolForNode(currentTools(), node.tool);
+            const wizardTools = currentTools();
+            const tool = resolveToolForNode(wizardTools, node.tool);
             const schema = getToolSchema(tool);
             const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
             const required = new Set(Array.isArray(schema.required) ? schema.required : []);
@@ -27,7 +30,7 @@ function createDagWizardController(ctx) {
             }
             const initialInput = { ...templateInput, ...currentInput };
             const fieldMarkup = fields.length
-                ? fields.map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool)).join('')
+                ? fields.map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools)).join('')
                 : '<div class="pivot-dag-wizard-empty">当前工具不需要配置参数，直接应用即可。</div>';
             modal.innerHTML = `
                 <div class="modal rag-detail-modal pivot-dag-input-wizard">
@@ -46,10 +49,10 @@ function createDagWizardController(ctx) {
                                     <span>表单会写入节点 input；需要写复杂结构时再打开 JSON 编辑。</span>
                                 </div>
                                 <div class="pivot-dag-wizard-overview-body">
-                                    ${renderInputSummary(initialInput, tool)}
+                                    ${renderInputSummary(initialInput, tool, wizardTools)}
                                 </div>
                             </section>
-                            ${renderDatabaseAssistPanel(node, tool, initialInput)}
+                            ${renderDatabaseAssistPanel(node, tool, initialInput, wizardTools)}
                             ${fieldMarkup}
                         </div>
                         <aside class="pivot-dag-wizard-sources">
@@ -192,7 +195,7 @@ function createDagWizardController(ctx) {
 
             const assistEntry = () => {
                 const serverId = currentDatabaseConnectionId();
-                return databaseWizardConnections().find(entry => entry.serverId === serverId) || null;
+                return databaseWizardConnections(wizardTools).find(entry => entry.serverId === serverId) || null;
             };
 
             const syncAssistConnection = () => {
@@ -200,7 +203,7 @@ function createDagWizardController(ctx) {
                 const assist = modal.querySelector('[data-pivot-dag-db-assist]');
                 if (assist) assist.dataset.pivotDagDbAssist = serverId;
                 const label = modal.querySelector('[data-pivot-dag-assist-connection-label]');
-                if (label) label.textContent = databaseConnectionLabel(tool, serverId);
+                if (label) label.textContent = databaseConnectionLabel(tool, serverId, wizardTools);
                 const tableList = modal.querySelector('#pivot-dag-assist-table-options');
                 const columnList = modal.querySelector('#pivot-dag-assist-column-options');
                 if (tableList) tableList.innerHTML = '';

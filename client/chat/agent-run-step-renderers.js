@@ -93,13 +93,49 @@ function agentStepChartSummaryMarkup(structured) {
     `;
 }
 
+function agentLlmOutputText(value) {
+    const payload = agentParsePayload(value);
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload.trim();
+    if (typeof payload !== 'object') return String(payload || '').trim();
+    const contentText = Array.isArray(payload.content)
+        ? payload.content.map(item => {
+            if (typeof item === 'string') return item;
+            if (!item || typeof item !== 'object') return '';
+            return String(item.text || item.content || item.markdown || '').trim();
+        }).filter(Boolean).join('\n').trim()
+        : '';
+    return [
+        typeof payload.content === 'string' ? payload.content : '',
+        payload.text,
+        payload.markdown,
+        payload.answer,
+        payload.message,
+        payload.summary,
+        contentText
+    ].map(item => String(item || '').trim()).find(Boolean) || '';
+}
+
+function agentStepLlmReadableMarkup(step) {
+    if (String(step?.tool_name || '').trim() !== 'agent.llm') return '';
+    const text = stripAgentWorkflowReportHeading(agentLlmOutputText(step.output));
+    if (!text) return '';
+    return `<div class="agent-step-readable agent-step-llm-output">${renderMarkdown(normalizeAgentMarkdown(text))}</div>`;
+}
+
 function agentStepReadableMarkup(step) {
+    const llmReadable = agentStepLlmReadableMarkup(step);
+    if (llmReadable) return llmReadable;
     const structured = unwrapAgentStructuredPayload(step.output || step.input || {});
     if (!structured || typeof structured !== 'object') return '';
     return agentStepChartSummaryMarkup(structured) || agentStepRowsMarkup(structured);
 }
 
 function agentStepPreview(step) {
+    if (String(step?.tool_name || '').trim() === 'agent.llm') {
+        const llmText = stripAgentWorkflowReportHeading(agentLlmOutputText(step.output));
+        if (llmText) return agentShortText(llmText, 500);
+    }
     const payload = agentParsePayload(step.output || step.input || {});
     if (typeof payload === 'string') return agentShortText(payload, 500);
     if (Array.isArray(payload)) return `返回 ${payload.length} 条结果。`;

@@ -1,11 +1,16 @@
 /* DAG 输入向导数据库辅助函数（拆自 dag-wizard-input.js） */
 
 
+        const normalizeWizardTools = (toolsOrResolver = []) => {
+            if (Array.isArray(toolsOrResolver)) return toolsOrResolver;
+            if (typeof toolsOrResolver === 'function') return toolsOrResolver() || [];
+            return [];
+        };
 
-
-        const databaseWizardConnections = () => {
+        const databaseWizardConnections = (toolsOrResolver = []) => {
+            const tools = normalizeWizardTools(toolsOrResolver);
             const entries = new Map();
-            currentTools().forEach(tool => {
+            tools.forEach(tool => {
                 const shortName = toolShortName(tool);
                 if (!shortName.startsWith('db.')) return;
                 databaseConnectionsFromTool(tool).forEach(connection => {
@@ -33,12 +38,12 @@
                 .sort((a, b) => a.serverName.localeCompare(b.serverName, 'zh-Hans-CN'));
         };
 
-        const databaseToolConnectionOptions = (tool) => {
+        const databaseToolConnectionOptions = (tool, toolsOrResolver = []) => {
             const direct = databaseConnectionsFromTool(tool);
             if (direct.length) return direct;
             const serverId = mcpServerIdFromTool(tool);
             if (!serverId) return [];
-            const entry = databaseWizardConnections().find(item => item.serverId === serverId);
+            const entry = databaseWizardConnections(toolsOrResolver).find(item => item.serverId === serverId);
             return entry ? [{
                 serverId: entry.serverId,
                 connectionId: entry.serverId,
@@ -58,15 +63,15 @@
             ?? ''
         ).trim();
 
-        const selectedDatabaseConnectionId = (tool, input = {}) => {
-            const options = databaseToolConnectionOptions(tool);
+        const selectedDatabaseConnectionId = (tool, input = {}, toolsOrResolver = []) => {
+            const options = databaseToolConnectionOptions(tool, toolsOrResolver);
             const explicit = databaseConnectionInputValue(input);
             if (explicit && options.some(item => String(item.connectionId || item.serverId || '') === explicit)) return explicit;
             return options[0]?.connectionId || options[0]?.serverId || explicit || '';
         };
 
-        const databaseConnectionLabel = (tool, serverId) => {
-            const option = databaseToolConnectionOptions(tool).find(item => String(item.connectionId || item.serverId || '') === String(serverId || ''));
+        const databaseConnectionLabel = (tool, serverId, toolsOrResolver = []) => {
+            const option = databaseToolConnectionOptions(tool, toolsOrResolver).find(item => String(item.connectionId || item.serverId || '') === String(serverId || ''));
             if (!option) return String(serverId || '') || '未选择';
             return [option.serverName || `数据库 ${option.serverId}`, option.databaseType].filter(Boolean).join(' · ');
         };

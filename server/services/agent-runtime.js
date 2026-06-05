@@ -32,6 +32,7 @@ const {
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,
     getAgentWorkflowForUser,
+    assertWorkflowHasConfiguredLlm,
     listAgentWorkflowVersions,
     listAgentWorkflows,
     normalizeDagInputsPayload,
@@ -1066,6 +1067,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (!dagSpec.nodes.length) {
         throw new Error('DAG mode requires at least one valid node.');
     }
+    assertWorkflowHasConfiguredLlm(dagSpec);
 
     dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
     const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
@@ -1674,6 +1676,7 @@ function createAgentRun({
         } else {
             runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
         }
+        assertWorkflowHasConfiguredLlm(runMetadata.dagSpec);
         const llmRuntimeSettings = inferDagLlmRuntimeSettings(runMetadata.dagSpec);
         if (!effectiveModelId && llmRuntimeSettings.modelId) effectiveModelId = llmRuntimeSettings.modelId;
         if (llmRuntimeSettings.maxSteps) effectiveMaxSteps = llmRuntimeSettings.maxSteps;
