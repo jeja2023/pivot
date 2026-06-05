@@ -14,6 +14,10 @@ const generatedTestDataDir = !process.env.DATA_DIR;
 if (generatedTestDataDir) {
     process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-security-test-'));
 }
+const generatedTestUploadDir = !process.env.PIVOT_UPLOAD_DIR && !process.env.UPLOAD_DIR;
+if (generatedTestUploadDir) {
+    process.env.PIVOT_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-security-uploads-'));
+}
 
 const {
     assertSafeOutboundUrl,
@@ -276,7 +280,19 @@ const { callModelText } = require('../server/services/agent-model');
 const { db, stmts } = require('../server/db');
 const { ensureBuiltInAdminAccount } = require('../server/db/seed');
 
-const uploadRoot = path.resolve(__dirname, '..', 'uploads');
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.resolve(__dirname, '..', 'uploads');
+
+function removeTestPath(targetPath, options = {}) {
+    if (!targetPath) return;
+    fs.rmSync(targetPath, {
+        force: true,
+        maxRetries: 5,
+        retryDelay: 80,
+        ...options
+    });
+}
 
 function runExpressHandlers(handlers, req, res) {
     return new Promise((resolve, reject) => {
@@ -332,9 +348,12 @@ function createFakeSseResponse() {
 
 test.after(async () => {
     await new Promise(resolve => setImmediate(resolve));
+    if (generatedTestUploadDir && process.env.PIVOT_UPLOAD_DIR) {
+        removeTestPath(process.env.PIVOT_UPLOAD_DIR, { recursive: true });
+    }
     if (generatedTestDataDir && process.env.DATA_DIR) {
         db.close();
-        fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+        removeTestPath(process.env.DATA_DIR, { recursive: true });
     }
 });
 
@@ -676,6 +695,56 @@ test('agent run visual outputs wait until the run finishes', () => {
     assert.match(completedHtml, /pivot-echart-block/);
 });
 
+test('agent step details render structured tool output as readable summaries', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const queryOutput = {
+        content: [{ type: 'text', text: '{"rows":[{"group_id":0,"account_count":2}]}' }],
+        structuredContent: {
+            rows: [
+                { group_id: 0, account_count: 2 },
+                { group_id: 1, account_count: 1 }
+            ],
+            limit: 50
+        }
+    };
+    const queryHtml = sandbox.agentStepMarkup({
+        step_index: 1,
+        status: 'completed',
+        type: 'tool',
+        tool_name: 'db.run_readonly_query',
+        duration_ms: 46,
+        output: queryOutput
+    });
+    assert.match(queryHtml, /agent-step-table/);
+    assert.match(queryHtml, />查询结果</);
+    assert.match(queryHtml, />group_id</);
+    assert.match(queryHtml, />account_count</);
+    assert.match(queryHtml, /agent-step-raw/);
+    assert.doesNotMatch(queryHtml.slice(0, queryHtml.indexOf('agent-step-raw')), /&quot;structuredContent&quot;/);
+
+    const chartHtml = sandbox.agentStepMarkup({
+        step_index: 2,
+        status: 'completed',
+        type: 'tool',
+        tool_name: 'viz.build_chart',
+        duration_ms: 1,
+        output: {
+            type: 'pivot_chart',
+            chartType: 'bar',
+            title: 'table_account group_id 分布',
+            xAxis: { field: 'group_id', label: 'group_id' },
+            yAxis: { field: 'account_count', label: '数量' },
+            labels: ['0', '1'],
+            series: [{ name: 'account_count', data: [2, 1] }]
+        }
+    });
+    assert.match(chartHtml, /agent-step-chart-summary/);
+    assert.match(chartHtml, />图表已生成</);
+    assert.match(chartHtml, />数据点</);
+    assert.match(chartHtml, /agent-step-raw/);
+    assert.doesNotMatch(chartHtml.slice(0, chartHtml.indexOf('agent-step-raw')), /&quot;type&quot;:&quot;pivot_chart&quot;/);
+});
+
 test('agent DAG inspector uses modal entry points for parameter editing', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
     assert.match(source, /data-pivot-dag-open-wizard="1">配置参数/);
@@ -778,12 +847,18 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(editor, /makeToolbarDropdown\('节点'/);
     assert.match(editor, /makeToolbarDropdown\('发布'/);
     assert.match(editor, /makeToolbarDropdown\('运行'/);
+    assert.match(editor, /const DEFAULT_VIEW_SCALE = 0\.72/);
+    assert.match(editor, /const NODE_WIDTH = 188/);
+    assert.match(editor, /const NODE_HEIGHT = 62/);
+    assert.match(editor, /const MIN_CONTENT_WIDTH = 960/);
+    assert.match(editor, /scale: DEFAULT_VIEW_SCALE/);
+    assert.match(editor, /viewState\.scale = DEFAULT_VIEW_SCALE/);
     assert.match(editor, /const closeToolbarDropdowns = \(event\) =>/);
     assert.match(editor, /document\.addEventListener\('pointerdown', closeToolbarDropdowns\)/);
     assert.match(editor, /document\.removeEventListener\('pointerdown', closeToolbarDropdowns\)/);
     assert.match(editor, /makeButton\('预览运行'/);
     assert.match(editor, /makeButton\('运行发布版'/);
-    assert.match(editor, /makeButton\('发布并运行'/);
+    assert.doesNotMatch(editor, /makeButton\('发布并运行'/);
     assert.match(dagPartial, /id="agent-workflow-current-label"/);
     assert.match(dagPartial, />已保存工作流</);
     assert.match(dagPartial, /id="agent-workflow-lifecycle"/);
@@ -811,6 +886,10 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(source, /payload\.workflowVersion = 'draft'/);
     assert.match(source, /payload\.workflowVersion = sourceMode === 'published' \? 'published' : 'current'/);
     assert.match(source, /window\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
+    assert.match(source, /data-agent-run-title-full/);
+    assert.match(source, /function bindAgentRunTitleTooltip/);
+    assert.match(source, /const NODE_W = 112, NODE_H = 34/);
+    assert.match(source, /const MIN_VIEW_W = 880, MIN_VIEW_H = 150/);
     assert.doesNotMatch(source, /agent-run-workflow/);
     assert.doesNotMatch(source, /agent-run-dag-inputs/);
     assert.doesNotMatch(source, /agent-workflow-model-select/);
@@ -825,6 +904,8 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(css, /\.pivot-dag-toolbar-dropdown\s*\{/);
     assert.match(css, /\.pivot-dag-toolbar-summary::marker\s*\{/);
     assert.match(css, /\.pivot-dag-toolbar-summary::after\s*\{\s*display: none;/);
+    assert.match(css, /\.pivot-dag-toolbar-menu \.pivot-dag-toolbar-btn\.btn-primary/);
+    assert.match(css, /\.agent-run-title-tooltip\s*\{/);
     assert.doesNotMatch(css, /padding: 0 28px 0 12px/);
     assert.doesNotMatch(css, /\.agent-workflow-run-settings\s*\{/);
     assert.doesNotMatch(css, /\.agent-workflow-run-source/);
@@ -1533,7 +1614,7 @@ test('attachment upload requires a session owned by the current user', async () 
         assert.equal(fs.existsSync(tempFile), false);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ?').get(userId).count, 0);
     } finally {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        removeTestPath(tempFile);
         db.prepare('DELETE FROM attachments WHERE user_id = ?').run(userId);
         db.prepare('DELETE FROM sessions WHERE id = ?').run(ownedSessionId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -3073,13 +3154,13 @@ test('RAG document upload stores repaired Chinese filename', () => {
     } finally {
         if (docId) {
             const doc = db.prepare('SELECT source_path FROM knowledge_docs WHERE id = ?').get(docId);
-            const sourcePath = doc?.source_path ? path.resolve(__dirname, '..', doc.source_path) : null;
-            if (sourcePath) fs.rmSync(sourcePath, { force: true });
+            const sourcePath = doc?.source_path ? getKnowledgeSourcePath(doc.source_path) : null;
+            removeTestPath(sourcePath);
             db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
             db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
         }
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        removeTestPath(tempDir, { recursive: true });
     }
 });
 
@@ -3109,7 +3190,7 @@ test('RAG document reader supports office data and web text formats', async () =
         assert.match(await readKnowledgeDocumentFromPath(htmlPath, 'page.html'), /知识库 HTML 测试/);
         assert.match(await readKnowledgeDocumentFromPath(xlsxPath, 'book.xlsx'), /研发/);
     } finally {
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        removeTestPath(tempDir, { recursive: true });
     }
 });
 
@@ -3223,8 +3304,8 @@ test('soft-deleted storage cleanup purges expired files and RAG chunks', () => {
         db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-        fs.rmSync(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true, force: true });
-        fs.rmSync(path.join(uploadRoot, 'knowledge_docs', String(userId)), { recursive: true, force: true });
+        removeTestPath(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true });
+        removeTestPath(path.join(uploadRoot, 'knowledge_docs', String(userId)), { recursive: true });
     }
 });
 
@@ -3282,7 +3363,7 @@ test('soft-deleted storage cleanup keeps files within retention window', () => {
     } finally {
         db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-        fs.rmSync(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true, force: true });
+        removeTestPath(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true });
     }
 });
 

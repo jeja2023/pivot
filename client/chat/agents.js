@@ -21,6 +21,8 @@ let agentWorkflowPickerQuery = '';
 const AGENT_RUNS_PAGE_SIZE = 10;
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
 const AGENT_WORKFLOW_SAVED_KEY = 'pivot.agent.workflow.saved';
+let agentRunTitleTooltipEl = null;
+let agentRunTitleTooltipTarget = null;
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr
@@ -40,6 +42,47 @@ function agentDisplayTitle(item) {
     const goal = String(item?.goal || '').trim();
     if (!agentLooksLikeCorruptTitle(title)) return title;
     return goal || '智能体任务';
+}
+
+function ensureAgentRunTitleTooltip() {
+    if (agentRunTitleTooltipEl?.isConnected) return agentRunTitleTooltipEl;
+    agentRunTitleTooltipEl = document.createElement('div');
+    agentRunTitleTooltipEl.className = 'agent-run-title-tooltip hidden';
+    agentRunTitleTooltipEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(agentRunTitleTooltipEl);
+    return agentRunTitleTooltipEl;
+}
+
+function positionAgentRunTitleTooltip(target) {
+    if (!agentRunTitleTooltipEl || !target) return;
+    const rect = target.getBoundingClientRect();
+    const tooltipRect = agentRunTitleTooltipEl.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 12;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - tooltipRect.width - viewportPadding);
+    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
+    let top = rect.bottom + gap;
+    if (top + tooltipRect.height > window.innerHeight - viewportPadding) {
+        top = Math.max(viewportPadding, rect.top - tooltipRect.height - gap);
+    }
+    agentRunTitleTooltipEl.style.left = `${Math.round(left)}px`;
+    agentRunTitleTooltipEl.style.top = `${Math.round(top)}px`;
+}
+
+function showAgentRunTitleTooltip(target) {
+    const text = target?.dataset?.agentRunTitleFull || '';
+    if (!text) return;
+    const tooltip = ensureAgentRunTitleTooltip();
+    tooltip.textContent = text;
+    tooltip.classList.remove('hidden');
+    agentRunTitleTooltipTarget = target;
+    positionAgentRunTitleTooltip(target);
+}
+
+function hideAgentRunTitleTooltip(target = null) {
+    if (target && target !== agentRunTitleTooltipTarget) return;
+    agentRunTitleTooltipEl?.classList.add('hidden');
+    agentRunTitleTooltipTarget = null;
 }
 
 function agentNotificationTitle(item) {
@@ -70,32 +113,6 @@ function agentStatusLabel(status) {
 
 function isAgentRunActive(status) {
     return status === 'queued' || status === 'running' || status === 'approval_required';
-}
-
-function agentRunMeta(run) {
-    const parts = [];
-    if (run.model_name) parts.push(`模型 ${run.model_name}`);
-    if (run.run_mode) parts.push(agentRunModeLabel(run.run_mode));
-    if (run.tool_policy === 'builtin_only') parts.push('仅系统工具');
-    if (Number(run.tool_count || 0) > 0) parts.push(`工具 ${run.tool_count}`);
-    if (Number(run.error_count || 0) > 0) parts.push(`错误 ${run.error_count}`);
-    if (Number(run.step_count || 0) > 0) parts.push(`步骤 ${run.step_count}`);
-    return parts.join(' · ');
-}
-
-function agentRunTooltip(run) {
-    const lines = [];
-    const title = agentDisplayTitle(run);
-    const goal = run.goal || '';
-    const meta = agentRunMeta(run);
-    if (title) lines.push(`标题：${title}`);
-    lines.push(`状态：${agentStatusLabel(run.status)}`);
-    if (run.created_at) lines.push(`创建时间：${formatDateToCN(run.created_at)}`);
-    if (run.started_at) lines.push(`开始时间：${formatDateToCN(run.started_at)}`);
-    if (run.completed_at) lines.push(`完成时间：${formatDateToCN(run.completed_at)}`);
-    if (meta) lines.push(`详情：${meta}`);
-    if (goal && goal !== title) lines.push(`目标：${goal}`);
-    return lines.join('\n');
 }
 
 function agentRunModeLabel(mode) {
@@ -143,6 +160,27 @@ const formatAgentAuditDate = (dateStr) => {
     return String(dateStr);
 };
 
+function buildAgentRunTaskTooltip(run, title, mode, counts = {}) {
+    const stepCount = Number(counts.stepCount || 0);
+    const toolCount = Number(counts.toolCount || 0);
+    const errorCount = Number(counts.errorCount || 0);
+    const goal = String(run?.goal || '').trim();
+    const lines = [
+        `任务：${title || '-'}`,
+        `状态：${agentStatusLabel(run?.status)}`,
+        `创建时间：${formatAgentAuditDate(run?.created_at)}`,
+        `开始时间：${formatAgentAuditDate(run?.started_at)}`,
+        `完成时间：${formatAgentAuditDate(run?.completed_at)}`,
+        `模型：${run?.model_name || '-'}`,
+        `模式：${mode || '-'}`,
+        `步骤数：${stepCount}`,
+        `工具数：${toolCount}`,
+        `错误数：${errorCount}`
+    ];
+    if (goal) lines.push(`目标：${goal}`);
+    return lines.join('\n');
+}
+
 function agentShortText(value, max = 260) {
     const text = String(value === undefined || value === null ? '' : value)
         .replace(/\s+/g, ' ')
@@ -174,11 +212,125 @@ function agentSummarizeInput(input) {
     return parts.join(' · ') || agentShortText(JSON.stringify(payload));
 }
 
+function agentReadableCell(value) {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'object') return agentShortText(JSON.stringify(value), 80);
+    return agentShortText(value, 80);
+}
+
+function agentRowsFromStructuredPayload(payload) {
+    if (!payload || typeof payload !== 'object') return [];
+    if (Array.isArray(payload.rows)) return payload.rows;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.items)) return payload.items;
+    if (Array.isArray(payload.result)) return payload.result;
+    return [];
+}
+
+function agentStepStructuredSummary(value) {
+    const structured = unwrapAgentStructuredPayload(value);
+    if (!structured || typeof structured !== 'object') return '';
+    if (isAgentPivotChartSpec(structured)) {
+        const typeLabel = {
+            bar: '柱状图',
+            line: '折线图',
+            pie: '饼图',
+            scatter: '散点图',
+            area: '面积图'
+        }[String(structured.chartType || '').toLowerCase()] || '图表';
+        const points = Math.max(
+            Array.isArray(structured.labels) ? structured.labels.length : 0,
+            ...(Array.isArray(structured.series) ? structured.series.map(item => Array.isArray(item?.data) ? item.data.length : 0) : [0])
+        );
+        return `已生成${typeLabel}${structured.title ? `：${structured.title}` : ''}${points ? `，包含 ${points} 个数据点` : ''}。`;
+    }
+    const rows = agentRowsFromStructuredPayload(structured);
+    if (rows.length) {
+        const limit = Number(structured.limit || structured.total || 0);
+        return `查询完成，返回 ${rows.length} 行数据${limit && limit !== rows.length ? `（限制 ${limit} 行）` : ''}。`;
+    }
+    return '';
+}
+
+function agentStepRowsMarkup(structured) {
+    const rows = agentRowsFromStructuredPayload(structured);
+    if (!rows.length) return '';
+    const objectRows = rows
+        .map(row => (row && typeof row === 'object' && !Array.isArray(row)) ? row : { value: row });
+    const columns = [...new Set(objectRows.flatMap(row => Object.keys(row)))].slice(0, 6);
+    const previewRows = objectRows.slice(0, 5);
+    const hiddenCount = Math.max(rows.length - previewRows.length, 0);
+    const limit = Number(structured?.limit || 0);
+    return `
+        <div class="agent-step-readable">
+            <div class="agent-step-readable-head">
+                <strong>查询结果</strong>
+                <span>返回 ${rows.length} 行${limit && limit !== rows.length ? ` · 限制 ${limit} 行` : ''}</span>
+            </div>
+            <div class="agent-step-table-wrap">
+                <table class="agent-step-table">
+                    <thead>
+                        <tr>${columns.map(column => `<th>${agentEscape(column)}</th>`).join('')}</tr>
+                    </thead>
+                    <tbody>
+                        ${previewRows.map(row => `
+                            <tr>${columns.map(column => `<td>${agentEscape(agentReadableCell(row[column]))}</td>`).join('')}</tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            ${hiddenCount ? `<div class="agent-step-readable-note">仅展示前 ${previewRows.length} 行，还有 ${hiddenCount} 行可在原始数据中查看。</div>` : ''}
+        </div>
+    `;
+}
+
+function agentStepChartSummaryMarkup(structured) {
+    if (!isAgentPivotChartSpec(structured)) return '';
+    const typeLabel = {
+        bar: '柱状图',
+        line: '折线图',
+        pie: '饼图',
+        scatter: '散点图',
+        area: '面积图'
+    }[String(structured.chartType || '').toLowerCase()] || '图表';
+    const series = Array.isArray(structured.series) ? structured.series : [];
+    const points = Math.max(
+        Array.isArray(structured.labels) ? structured.labels.length : 0,
+        ...series.map(item => Array.isArray(item?.data) ? item.data.length : 0),
+        0
+    );
+    const xAxis = structured.xAxis?.label || structured.xAxis?.field || '';
+    const yAxis = structured.yAxis?.label || structured.yAxis?.field || '';
+    return `
+        <div class="agent-step-readable agent-step-chart-summary">
+            <div class="agent-step-readable-head">
+                <strong>图表已生成</strong>
+                <span>${agentEscape(typeLabel)}</span>
+            </div>
+            <div class="agent-step-kpis">
+                ${structured.title ? `<span><em>标题</em><strong>${agentEscape(structured.title)}</strong></span>` : ''}
+                ${xAxis ? `<span><em>X 轴</em><strong>${agentEscape(xAxis)}</strong></span>` : ''}
+                ${yAxis ? `<span><em>Y 轴</em><strong>${agentEscape(yAxis)}</strong></span>` : ''}
+                <span><em>数据点</em><strong>${Number(points || 0)}</strong></span>
+                ${series.length ? `<span><em>系列</em><strong>${series.map(item => agentEscape(item?.name || '数据')).join('、')}</strong></span>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function agentStepReadableMarkup(step) {
+    const structured = unwrapAgentStructuredPayload(step.output || step.input || {});
+    if (!structured || typeof structured !== 'object') return '';
+    return agentStepChartSummaryMarkup(structured) || agentStepRowsMarkup(structured);
+}
+
 function agentStepPreview(step) {
     const payload = agentParsePayload(step.output || step.input || {});
     if (typeof payload === 'string') return agentShortText(payload, 500);
     if (Array.isArray(payload)) return `返回 ${payload.length} 条结果。`;
     if (!payload || typeof payload !== 'object') return agentShortText(payload || '');
+    const structuredSummary = agentStepStructuredSummary(payload);
+    if (structuredSummary) return structuredSummary;
     if (payload.answer) return payload.answer;
     if (payload.error) return payload.error;
     if (payload.thought || payload.action) {
@@ -222,6 +374,7 @@ function agentStepRawDetail(step, preview) {
 
 function agentStepMarkup(step) {
     const preview = normalizeAgentMarkdown(agentStepPreview(step));
+    const readable = agentStepReadableMarkup(step);
     const raw = agentStepRawDetail(step, preview);
     return `
         <div class="agent-step ${agentEscape(step.status)}">
@@ -229,7 +382,7 @@ function agentStepMarkup(step) {
                 <strong>${step.step_index}. ${agentEscape(agentStepTitle(step))}</strong>
                 <span>${agentEscape(agentToolTitle(step.tool_name || step.type))} · ${Number(step.duration_ms || 0)} 毫秒</span>
             </div>
-            <div class="agent-step-body">${renderMarkdown(agentEscape(preview))}</div>
+            <div class="agent-step-body">${readable || renderMarkdown(agentEscape(preview))}</div>
             ${raw ? `<details class="agent-step-raw"><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
         </div>
     `;
@@ -327,41 +480,6 @@ function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = ''
     `;
 }
 
-// 任务历史可视化：水平时间轴 + 工具调用频次榜
-function buildAgentTimelineMarkup(steps) {
-    if (!Array.isArray(steps) || steps.length === 0) return '';
-    const durations = steps.map(s => Math.max(Number(s.duration_ms || 0), 0));
-    const totalDuration = durations.reduce((a, b) => a + b, 0);
-    // 当所有 duration 都是 0（异步任务还没记录）时，按等宽切分
-    const segments = steps.map((step, idx) => {
-        const dur = durations[idx];
-        const ratio = totalDuration > 0 ? (dur / totalDuration) : (1 / steps.length);
-        const width = Math.max(ratio * 100, 1.5); // 至少 1.5%，保证窄段也可见
-        const type = String(step.type || '').toLowerCase();
-        const status = String(step.status || '').toLowerCase();
-        const title = `${step.step_index}. ${(step.tool_name || step.type || '步骤')} · ${dur} ms${status === 'error' ? ' · 失败' : ''}`;
-        return `<div class="agent-timeline-seg agent-timeline-type-${agentEscape(type)} ${status === 'error' ? 'is-error' : ''}" style="flex: ${width.toFixed(2)} 0 0%" title="${agentEscape(title)}" aria-label="${agentEscape(title)}">
-            <span class="agent-timeline-seg-label">${step.step_index}</span>
-        </div>`;
-    }).join('');
-    const legend = [
-        { type: 'plan', label: '规划' },
-        { type: 'tool', label: '工具' },
-        { type: 'control', label: '控制' },
-        { type: 'approval', label: '审批' }
-    ].map(item => `<span class="agent-timeline-legend-item"><i class="agent-timeline-legend-swatch agent-timeline-type-${item.type}"></i>${item.label}</span>`).join('');
-    return `
-        <section class="agent-timeline">
-            <header class="agent-timeline-head">
-                <strong>任务时间轴</strong>
-                <span class="agent-timeline-legend">${legend}<span class="agent-timeline-legend-item is-error"><i class="agent-timeline-legend-swatch is-error"></i>失败步骤</span></span>
-            </header>
-            <div class="agent-timeline-bar" role="list">${segments}</div>
-            <footer class="agent-timeline-foot">${steps.length} 步 · 总耗时 ${totalDuration} ms</footer>
-        </section>
-    `;
-}
-
 function buildAgentToolStatsMarkup(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return '';
     const toolSteps = steps.filter(s => String(s.type || '').toLowerCase() === 'tool' && s.tool_name);
@@ -412,18 +530,42 @@ function agentDagNodeMarkup(node) {
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
     const canRerun = String(node.status || '').toLowerCase() === 'error';
+    const status = String(node.status || 'pending').toLowerCase();
+    const statusLabel = {
+        completed: '完成',
+        running: '运行中',
+        error: '错误',
+        skipped: '跳过',
+        pending: '待执行'
+    }[status] || agentStatusLabel(status);
+    const depText = deps.length ? deps.join(', ') : '无依赖';
+    const toolName = agentToolTitle(node.tool_name || '-');
     return `
         <div class="agent-dag-node ${agentEscape(node.status)}">
             <div class="agent-dag-node-head">
-                <strong>${agentEscape(node.title || node.node_key)}</strong>
-                <span>${agentEscape(node.status || 'pending')} · ${agentEscape(agentToolTitle(node.tool_name))}</span>
+                <div class="agent-dag-node-title">
+                    <strong>${agentEscape(node.title || node.node_key)}</strong>
+                    ${node.node_key ? `<span>${agentEscape(node.node_key)}</span>` : ''}
+                </div>
+                <div class="agent-dag-node-badges">
+                    <span class="agent-dag-node-status ${agentEscape(status)}">${agentEscape(statusLabel)}</span>
+                    <span class="agent-dag-node-tool">${agentEscape(toolName)}</span>
+                </div>
             </div>
-            ${deps.length ? `<small>依赖：${agentEscape(deps.join(', '))}</small>` : ''}
-            <small>尝试 ${Number(node.attempt_count || 0)} 次 · 耗时 ${Number(node.duration_ms || 0)} ms · 条件 ${agentEscape(node.condition || '-')}</small>
+            <div class="agent-dag-node-meta">
+                <span><em>依赖</em><strong>${agentEscape(depText)}</strong></span>
+                <span><em>尝试</em><strong>${Number(node.attempt_count || 0)} 次</strong></span>
+                <span><em>耗时</em><strong>${Number(node.duration_ms || 0)} ms</strong></span>
+                <span><em>条件</em><strong>${agentEscape(node.condition || '-')}</strong></span>
+            </div>
             ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
             ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">重跑此节点</button>` : ''}
-            ${input ? `<details><summary>节点输入</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
-            ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
+            ${(input || output) ? `
+                <div class="agent-dag-node-folders">
+                    ${input ? `<details><summary>节点输入</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
+                    ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
+                </div>
+            ` : ''}
         </div>
     `;
 }
@@ -431,7 +573,8 @@ function agentDagNodeMarkup(node) {
 // DAG运行结果可视化：渲染迷你状态图
 function renderAgentDagRunGraph(dagNodes) {
     if (!dagNodes.length) return '';
-    const NODE_W = 130, NODE_H = 40, GAP_X = 50, GAP_Y = 30, PAD = 20;
+    const NODE_W = 112, NODE_H = 34, GAP_X = 44, GAP_Y = 24, PAD = 18;
+    const MIN_VIEW_W = 880, MIN_VIEW_H = 150;
     // 状态 -> 颜色映射
     const statusColor = (status) => {
         const s = String(status || 'pending').toLowerCase();
@@ -473,6 +616,8 @@ function renderAgentDagRunGraph(dagNodes) {
     const totalW = PAD + layers.length * (NODE_W + GAP_X) - GAP_X + PAD;
     const lastLayerHeight = Math.max(...layers.map(l => l.length), 1) * (NODE_H + GAP_Y) - GAP_Y;
     const totalH = PAD + lastLayerHeight + PAD;
+    const viewW = Math.max(totalW, MIN_VIEW_W);
+    const viewH = Math.max(totalH, MIN_VIEW_H);
     // 渲染边
     const edges = [];
     dagNodes.forEach(n => {
@@ -495,14 +640,14 @@ function renderAgentDagRunGraph(dagNodes) {
         return `
             <g transform="translate(${pos.x},${pos.y})">
                 <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5" opacity="0.9"/>
-                <text x="${NODE_W/2}" y="${NODE_H/2 + 4}" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">${agentEscape(label)}</text>
-                <text x="${NODE_W/2}" y="${NODE_H - 6}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="8">${agentEscape(n.status || 'pending')}</text>
+                <text x="${NODE_W/2}" y="${NODE_H/2 + 3}" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${agentEscape(label)}</text>
+                <text x="${NODE_W/2}" y="${NODE_H - 5}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">${agentEscape(n.status || 'pending')}</text>
             </g>
         `;
     });
     return `
         <div class="agent-dag-run-graph">
-            <svg viewBox="0 0 ${totalW} ${totalH}" preserveAspectRatio="xMinYMin meet" style="width:100%;max-height:260px;border:1px solid var(--border);border-radius:8px;background:#f8fafc;">
+            <svg viewBox="0 0 ${viewW} ${viewH}" preserveAspectRatio="xMinYMin meet" style="width:100%;max-height:220px;border:1px solid var(--border);border-radius:8px;background:#f8fafc;">
                 <defs>
                     <marker id="dag-run-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
                         <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
@@ -1008,11 +1153,12 @@ async function loadAgentRuns(page = agentRunsPage) {
         const toolCount = Number(run.tool_count || 0);
         const errorCount = Number(run.error_count || 0);
         const canDelete = !isAgentRunActive(run.status);
+        const taskTooltip = buildAgentRunTaskTooltip(run, title, mode, { stepCount, toolCount, errorCount });
         return `
             <tr class="${run.id === activeAgentRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}">
                 <td class="text-center">${(agentRunsPage - 1) * pageSize + index + 1}</td>
-                <td class="agent-runs-title-cell" title="${agentEscape(agentRunTooltip(run))}">
-                    <strong>${agentEscape(title)}</strong>
+                <td class="agent-runs-title-cell">
+                    <strong tabindex="0" aria-label="${agentEscapeAttr(taskTooltip)}" data-agent-run-title-full="${agentEscapeAttr(taskTooltip)}">${agentEscape(title)}</strong>
                 </td>
                 <td>
                     <strong class="agent-runs-compact">${agentEscape(run.model_name || '-')}</strong>
@@ -1047,6 +1193,37 @@ async function loadAgentRuns(page = agentRunsPage) {
     list.querySelectorAll('[data-agent-run-delete]').forEach(btn => {
         btn.addEventListener('click', () => window.deleteAgentRun(btn.dataset.agentRunDelete));
     });
+    bindAgentRunTitleTooltip(list);
+}
+
+function bindAgentRunTitleTooltip(list = document.getElementById('agent-runs-list')) {
+    if (!list || list.dataset.boundAgentRunTitleTooltip === '1') return;
+    list.dataset.boundAgentRunTitleTooltip = '1';
+    const getTarget = event => event.target.closest?.('[data-agent-run-title-full]');
+    list.addEventListener('mouseover', event => {
+        const target = getTarget(event);
+        if (target) showAgentRunTitleTooltip(target);
+    });
+    list.addEventListener('mousemove', event => {
+        const target = getTarget(event);
+        if (target && target === agentRunTitleTooltipTarget) positionAgentRunTitleTooltip(target);
+    });
+    list.addEventListener('mouseout', event => {
+        const target = getTarget(event);
+        if (target && !target.contains(event.relatedTarget)) hideAgentRunTitleTooltip(target);
+    });
+    list.addEventListener('focusin', event => {
+        const target = getTarget(event);
+        if (target) showAgentRunTitleTooltip(target);
+    });
+    list.addEventListener('focusout', event => {
+        const target = getTarget(event);
+        if (target) hideAgentRunTitleTooltip(target);
+    });
+    list.addEventListener('scroll', () => {
+        if (agentRunTitleTooltipTarget?.isConnected) positionAgentRunTitleTooltip(agentRunTitleTooltipTarget);
+    });
+    window.addEventListener('resize', () => hideAgentRunTitleTooltip());
 }
 
 function isAgentRunDetailModalOpen() {
@@ -1126,7 +1303,6 @@ window.openAgentRun = async function(runId) {
                 ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
             </div>
         ` : ''}
-        ${buildAgentTimelineMarkup(steps)}
         ${buildAgentToolStatsMarkup(steps)}
         <div class="agent-step-list">
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}

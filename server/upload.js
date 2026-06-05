@@ -4,7 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 
-const uploadRoot = path.resolve(__dirname, '../uploads');
+const projectRoot = path.resolve(__dirname, '..');
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.join(projectRoot, 'uploads');
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.doc', '.docx', '.xls', '.xlsx']);
 
 function scoreFilenameEncoding(value) {
@@ -95,7 +98,10 @@ function uploadSecurityMiddleware(req, res, next) {
 
 function createUploadMiddleware() {
     const storage = multer.diskStorage({
-        destination: (req, file, cb) => cb(null, 'uploads/'),
+        destination: (req, file, cb) => {
+            fs.mkdirSync(uploadRoot, { recursive: true });
+            cb(null, uploadRoot);
+        },
         filename: (req, file, cb) => cb(null, Date.now() + '-' + crypto.randomUUID() + path.extname(normalizeUploadedOriginalName(file.originalname)))
     });
 

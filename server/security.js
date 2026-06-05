@@ -10,9 +10,11 @@ const { logger } = require('./logger');
 const { isAdmin } = require('./permissions');
 const dnsPromises = dns.promises;
 
-const encryptedPrefix = 'enc:v1:';
-const uploadRoot = path.resolve(__dirname, '../uploads');
 const projectRoot = path.resolve(__dirname, '..');
+const encryptedPrefix = 'enc:v1:';
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.join(projectRoot, 'uploads');
 
 function getEncryptionKey() {
     const source = process.env.DATA_ENCRYPTION_KEY || process.env.JWT_SECRET;
@@ -314,7 +316,10 @@ function removeAttachmentFiles(attachments) {
         results.push(result);
 
         if (!filePath) continue;
-        const target = path.resolve(__dirname, '..', filePath);
+        const relativePath = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        const target = relativePath.startsWith('uploads/')
+            ? path.resolve(uploadRoot, relativePath.slice('uploads/'.length))
+            : path.resolve(projectRoot, relativePath);
         if (target === uploadRoot || !isPathInsideUploadRoot(target)) {
             result.skipped = true;
             logger.warn({ filePath }, 'Attachment cleanup skipped unsafe path');
@@ -322,12 +327,14 @@ function removeAttachmentFiles(attachments) {
         }
         try {
             if (fs.existsSync(target)) {
-                fs.unlinkSync(target);
+                fs.rmSync(target, { force: true, maxRetries: 5, retryDelay: 80 });
                 result.removed = true;
             }
             let dir = path.dirname(target);
             while (dir.startsWith(uploadRoot + path.sep) && dir !== uploadRoot) {
-                if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+                if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
+                    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+                }
                 dir = path.dirname(dir);
             }
         } catch (e) {
@@ -380,7 +387,8 @@ function resolveUploadUrlPath(uploadUrl) {
 function toProjectRelativePath(targetPath) {
     const target = path.resolve(targetPath);
     if (!isPathInsideUploadRoot(target)) return '';
-    return path.relative(projectRoot, target).replace(/\\/g, '/');
+    const uploadRelative = path.relative(uploadRoot, target).replace(/\\/g, '/');
+    return uploadRelative ? `uploads/${uploadRelative}` : 'uploads';
 }
 
 // 常见密钥字段名称（统一小写比较）

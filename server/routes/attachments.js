@@ -10,11 +10,15 @@ const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedT
 const { isImagePath, isLikelyImageMime, normalizeUploadedImage } = require('../image-safety');
 const { logger } = require('../logger');
 const { normalizeUploadedOriginalName } = require('../upload');
-const { encodeAttachmentUrl } = require('../security');
+const { encodeAttachmentUrl, toProjectRelativePath } = require('../security');
 const { isSuperAdmin } = require('../permissions');
 
+const projectRoot = path.resolve(__dirname, '../..');
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.join(projectRoot, 'uploads');
+
 function getSafeUploadPath(userId, sessionId, filename) {
-    const uploadRoot = path.resolve(__dirname, '../../uploads');
     const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
     const safeSessionId = String(sessionId).replace(/[^a-zA-Z0-9_-]/g, '');
     const safeFilename = path.basename(filename);
@@ -26,13 +30,22 @@ function getSafeUploadPath(userId, sessionId, filename) {
     return { uploadRoot, target };
 }
 
+function removeLocalFile(filePath, logContext = 'Remove upload file failed') {
+    if (!filePath) return false;
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.rmSync(filePath, { force: true, maxRetries: 5, retryDelay: 80 });
+            return true;
+        }
+    } catch (e) {
+        logger.warn({ err: e.message, path: filePath }, logContext);
+    }
+    return false;
+}
+
 function removeTempUploadFile(file) {
     if (!file?.path) return;
-    try {
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-    } catch (e) {
-        logger.warn({ err: e.message, path: file.path }, 'Remove temporary upload file failed');
-    }
+    removeLocalFile(file.path, 'Remove temporary upload file failed');
 }
 
 function createAttachmentsRouter({
@@ -113,7 +126,7 @@ function createAttachmentsRouter({
             return res.status(404).json({ error: '会话不存在或无权上传附件' });
         }
 
-        const targetDir = path.join('uploads', userId.toString(), sessionId);
+        const targetDir = path.join(uploadRoot, userId.toString(), sessionId);
         if (!fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }
@@ -125,7 +138,7 @@ function createAttachmentsRouter({
             : safeOriginalName;
         const finalFileName = Date.now() + '-' + crypto.randomUUID() + '-' + outputOriginalName;
         const finalPath = path.join(targetDir, finalFileName);
-        const relativePath = path.join(targetDir, finalFileName).replace(/\\/g, '/');
+        const relativePath = toProjectRelativePath(finalPath);
         const publicUrl = encodeAttachmentUrl(relativePath);
         const accessToken = crypto.randomBytes(24).toString('base64url');
         let extractedText = null;
@@ -134,14 +147,14 @@ function createAttachmentsRouter({
         try {
             if (imageOutput) {
                 await normalizeUploadedImage(req.file.path, finalPath);
-                fs.unlinkSync(req.file.path);
+                removeLocalFile(req.file.path);
             } else {
                 try {
                     extractedText = truncateExtractedText(await extractDocumentText(req.file.path, mimeType, originalName, { password }));
                 } catch (readErr) {
                     logger.error({ err: readErr.message, path: req.file.path, originalName }, 'Read attachment text failed');
                     if (isPasswordError(readErr) || readErr.code === 'PASSWORD_UNSUPPORTED') {
-                        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+                        removeLocalFile(req.file.path);
                         return res.status(422).json({
                             error: password ? '文档密码不正确或当前格式不支持密码解密' : '该文档已加密，请输入密码后重试',
                             code: 'DOCUMENT_PASSWORD_REQUIRED',
@@ -163,7 +176,7 @@ function createAttachmentsRouter({
                             const pageFileName = `${Date.now()}-${crypto.randomUUID()}-${path.basename(safeOriginalName, path.extname(safeOriginalName))}-page-${page.page}.png`;
                             const pagePath = path.join(targetDir, pageFileName);
                             fs.writeFileSync(pagePath, page.data);
-                            const pageRelativePath = pagePath.replace(/\\/g, '/');
+                            const pageRelativePath = toProjectRelativePath(pagePath);
                             const pageUrl = encodeAttachmentUrl(pageRelativePath, pageToken);
                             db.prepare(`
                                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
@@ -191,8 +204,8 @@ function createAttachmentsRouter({
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
             res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, type: imageOutput ? 'image/jpeg' : mimeType, sessionId, extractedText, visionAttachments });
         } catch (e) {
-            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-            if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+            removeLocalFile(req.file.path);
+            removeLocalFile(finalPath);
             throw e; // 转发给全局错误处理器
         }
     }));

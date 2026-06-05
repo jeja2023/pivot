@@ -28,11 +28,14 @@
     if (window.PivotDagEditor) return;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const NODE_WIDTH = 220;
-    const NODE_HEIGHT = 76;
-    const NODE_GAP_X = 88;
-    const NODE_GAP_Y = 36;
+    const NODE_WIDTH = 188;
+    const NODE_HEIGHT = 62;
+    const NODE_GAP_X = 72;
+    const NODE_GAP_Y = 30;
     const PADDING = 24;
+    const DEFAULT_VIEW_SCALE = 0.72;
+    const MIN_CONTENT_WIDTH = 960;
+    const MIN_CONTENT_HEIGHT = 360;
     const raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (cb => setTimeout(cb, 16));
     const caf = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
     const cssEscape = window.CSS && typeof window.CSS.escape === 'function'
@@ -1192,7 +1195,7 @@
         let suppressTextareaSync = false;
         let toolbarStatus = null;
         // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
-        const viewState = { x: 0, y: 0, scale: 1 };
+        const viewState = { x: 0, y: 0, scale: DEFAULT_VIEW_SCALE };
         const SCALE_MIN = 0.3;
         const SCALE_MAX = 2.5;
         let panning = null; // { startX, startY, originX, originY }
@@ -1289,8 +1292,8 @@
 
         // 计算内容包围盒；保证空 DAG 也有合理底盘
         const contentBounds = () => {
-            const w = Math.max(640, ...spec.nodes.map(n => n._x + NODE_WIDTH)) + PADDING;
-            const h = Math.max(280, ...spec.nodes.map(n => n._y + NODE_HEIGHT)) + PADDING;
+            const w = Math.max(MIN_CONTENT_WIDTH, ...spec.nodes.map(n => n._x + NODE_WIDTH)) + PADDING;
+            const h = Math.max(MIN_CONTENT_HEIGHT, ...spec.nodes.map(n => n._y + NODE_HEIGHT)) + PADDING;
             return { width: w, height: h };
         };
 
@@ -1309,7 +1312,7 @@
         const fitToContent = () => {
             viewState.x = 0;
             viewState.y = 0;
-            viewState.scale = 1;
+            viewState.scale = DEFAULT_VIEW_SCALE;
             updateViewBox();
         };
 
@@ -2823,16 +2826,16 @@
                     rx: 8,
                     ry: 8
                 }));
-                const title = makeSvgEl('text', { class: 'pivot-dag-node-title', x: 12, y: 22 });
+                const title = makeSvgEl('text', { class: 'pivot-dag-node-title', x: 10, y: 18 });
                 title.textContent = node.title || node.id;
                 group.appendChild(title);
                 const toolDisplay = buildNodeToolDisplay(tools, node.tool);
                 const toolWrap = makeSvgEl('foreignObject', {
                     class: 'pivot-dag-node-tool-foreign',
-                    x: 12,
-                    y: 33,
-                    width: NODE_WIDTH - 24,
-                    height: 36
+                    x: 10,
+                    y: 27,
+                    width: NODE_WIDTH - 20,
+                    height: 30
                 });
                 const toolBody = document.createElement('div');
                 toolBody.className = `pivot-dag-node-tool ${node.tool ? '' : 'is-empty'}`;
@@ -2858,7 +2861,7 @@
                     class: 'pivot-dag-port pivot-dag-port-out',
                     cx: NODE_WIDTH,
                     cy: NODE_HEIGHT / 2,
-                    r: 6,
+                    r: 5,
                     'data-pivot-dag-port': 'out',
                     'data-pivot-dag-id': node.id
                 });
@@ -2868,7 +2871,7 @@
                     class: 'pivot-dag-port pivot-dag-port-in',
                     cx: 0,
                     cy: NODE_HEIGHT / 2,
-                    r: 6,
+                    r: 5,
                     'data-pivot-dag-port': 'in',
                     'data-pivot-dag-id': node.id
                 });
@@ -3080,7 +3083,7 @@
         if (toolbar) {
             toolbar.replaceChildren();
             toolbar.appendChild(makeToolbarDropdown('节点', [
-                makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', addNode, { variant: 'primary', icon: '+' }),
+                makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', addNode, { icon: '+' }),
                 makeButton('大模型', '添加大模型处理节点，可总结、抽取或生成内容', () => addPresetNode({
                     base: 'llm',
                     title: '大模型处理',
@@ -3113,7 +3116,7 @@
                 }), { icon: '+' })
             ], 'is-node-group'));
             toolbar.appendChild(makeToolbarDropdown('模板', [
-                makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', openStatsChartWizard, { tone: 'template' })
+                makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', openStatsChartWizard)
             ], 'is-template-group'));
             toolbar.appendChild(makeToolbarDropdown('操作', [
                 makeButton('校验', '校验节点、依赖和工具可用性', showValidationResult),
@@ -3124,12 +3127,11 @@
                 })
             ], 'is-action-group'));
             toolbar.appendChild(makeToolbarDropdown('发布', [
-                makeButton('发布当前版本', '保存并发布当前工作流版本', () => window.publishSelectedAgentWorkflow?.('current'), { variant: 'primary', tone: 'publish' }),
-                makeButton('发布并运行', '发布当前工作流后立即按发布版运行', () => window.publishAndRunAgentWorkflow?.(), { tone: 'publish' })
+                makeButton('发布当前版本', '保存并发布当前工作流版本', () => window.publishSelectedAgentWorkflow?.('current'))
             ], 'is-publish-group'));
             toolbar.appendChild(makeToolbarDropdown('运行', [
                 makeButton('预览运行', '使用当前画布快照运行一次', () => window.runAgentWorkflowPreview?.()),
-                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.runAgentWorkflowPublished?.(), { variant: 'primary' })
+                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.runAgentWorkflowPublished?.())
             ], 'is-run-group'));
             toolbarStatus = document.createElement('div');
             toolbarStatus.className = 'pivot-dag-toolbar-status';

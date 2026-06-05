@@ -9,7 +9,10 @@ const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
 const { clearKnowledgeGraphForDocument } = require('./knowledge-graph');
 
-const uploadRoot = path.resolve(__dirname, '../../uploads');
+const projectRoot = path.resolve(__dirname, '../..');
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.join(projectRoot, 'uploads');
 const knowledgeSourceRoot = path.join(uploadRoot, 'knowledge_docs');
 const allowedExtensions = new Set([
     '.txt', '.md', '.pdf',
@@ -42,13 +45,14 @@ function getKnowledgeSourcePath(relativePath) {
     const normalized = String(relativePath).replace(/\\/g, '/');
     if (normalized.includes('%')) return null;
     if (!normalized.startsWith('uploads/knowledge_docs/') || normalized.includes('\0')) return null;
-    const target = path.resolve(__dirname, '../..', normalized);
+    const target = path.resolve(uploadRoot, normalized.slice('uploads/'.length));
     if (target !== knowledgeSourceRoot && !target.startsWith(knowledgeSourceRoot + path.sep)) return null;
     return target;
 }
 
 function toProjectRelativePath(filePath) {
-    return path.relative(path.resolve(__dirname, '../..'), filePath).replace(/\\/g, '/');
+    const uploadRelative = path.relative(uploadRoot, filePath).replace(/\\/g, '/');
+    return uploadRelative ? `uploads/${uploadRelative}` : 'uploads';
 }
 
 function persistUploadedKnowledgeFile(file, userId, docId) {
