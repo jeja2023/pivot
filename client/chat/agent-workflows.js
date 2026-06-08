@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 工作流编排与运行控制 Agent workflow orchestration and run controls
 // Agent 工作流功能从 agents.js 拆分而来。
 // Split from agents.js.
+/* eslint-disable no-undef */
 window.openAgentDagWorkbench = async function() {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');

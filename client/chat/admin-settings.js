@@ -281,17 +281,17 @@ window.bindEmbeddingModalEvents = function() {
     const modal = document.getElementById('rag-embedding-modal');
     const modeSelect = document.getElementById('setting-rag-embedding-mode');
     if (!openBtn || !modal) return;
-    
-    // 移除旧监听防止重复
-    const newOpenBtn = openBtn.cloneNode(true);
-    openBtn.parentNode.replaceChild(newOpenBtn, openBtn);
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
 
-    newOpenBtn.onclick = () => {
-        modal.classList.remove('hidden');
-    };
-    newCancelBtn.onclick = () => modal.classList.add('hidden');
+    if (openBtn.dataset.boundEmbeddingOpen !== '1') {
+        openBtn.dataset.boundEmbeddingOpen = '1';
+        openBtn.addEventListener('click', () => {
+            modal.classList.remove('hidden');
+        });
+    }
+    if (cancelBtn && cancelBtn.dataset.boundEmbeddingCancel !== '1') {
+        cancelBtn.dataset.boundEmbeddingCancel = '1';
+        cancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    }
     
     if (testBtn) {
         testBtn.onclick = () => window.testEmbeddingConnection();

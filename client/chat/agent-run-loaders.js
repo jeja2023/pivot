@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行加载器 Agent run loaders
 // Split from agent-runs-list.js.
 // Agent run model/tool loaders and run list rendering.
+/* eslint-disable no-undef */
 async function loadAgentModels() {
     const loaded = typeof window.loadSelectableModels === 'function'
         ? await window.loadSelectableModels()

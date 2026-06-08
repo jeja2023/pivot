@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行详情 Agent run detail
 // Split from agent-runs-list.js.
 // Agent run detail, preview polling, and audit modal rendering.
+/* eslint-disable no-undef */
 function bindAgentRunTitleTooltip(list = document.getElementById('agent-runs-list')) {
     if (!list || list.dataset.boundAgentRunTitleTooltip === '1') return;
     list.dataset.boundAgentRunTitleTooltip = '1';

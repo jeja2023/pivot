@@ -1,6 +1,6 @@
-/* eslint-disable no-undef, no-unused-vars */
 // RAG 文档列表与操作 RAG document list and actions
 // RAG 文档功能从 rag.js 拆分而来。
+/* eslint-disable no-undef */
 function renderRagDocsPagination(total, page, limit) {
     window.renderWorkspacePagination?.('pagination-ragDocs', {
         total,
@@ -25,11 +25,11 @@ function updateRagDebugSamples(docs = []) {
     const samples = docName ? [
         { label: `总结《${docName}》`, query: `请总结《${docName}》的主要内容。` },
         { label: '查流程规则', query: `《${docName}》里有哪些流程、规则或注意事项？` },
-        { label: '找可引用内容', query: `哪些内容可以回答用户关于《${docName}》的常见问题？` }
+        { label: '找命中分块', query: `哪些分块可以回答用户关于《${docName}》的常见问题？` }
     ] : [
-        { label: '总结资料', query: '请总结已上传资料的主要内容。' },
-        { label: '查流程规则', query: '资料里有哪些流程、规则或注意事项？' },
-        { label: '找可引用内容', query: '哪些内容可以回答用户常见问题？' }
+        { label: '总结文档', query: '请总结已上传文档的主要内容。' },
+        { label: '查流程规则', query: '文档里有哪些流程、规则或注意事项？' },
+        { label: '找命中分块', query: '哪些分块可以回答用户常见问题？' }
     ];
     buttons.forEach((button, index) => {
         const sample = samples[index] || samples[0];
@@ -63,8 +63,8 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
             const items = summaryEl?.querySelector('.rag-summary-items');
             if (items) {
                 items.insertAdjacentHTML('beforeend', `
-                    <span><b>${Number(graphSummary.entities || 0)}</b>关键词</span>
-                    <span><b>${Number(graphSummary.relations || 0)}</b>资料关系</span>
+                    <span><b>${Number(graphSummary.entities || 0)}</b>实体</span>
+                    <span><b>${Number(graphSummary.relations || 0)}</b>关系</span>
                 `);
             }
         }
@@ -89,7 +89,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="10" class="text-center">还没有上传资料，先点击右上角“上传文档”。</td></tr>';
+        `).join('') || '<tr><td colspan="10" class="text-center">暂无知识库文档</td></tr>';
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
     } catch (e) {
@@ -101,6 +101,12 @@ window.openKnowledgeWorkbench = async function() {
     window.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
+    try {
+        await window.ensureAdminSettingsScript?.();
+    } catch (e) {
+        console.error('加载知识库配置脚本失败', e);
+        showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
+    }
     bindKnowledgeDropUpload();
     panel.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !isAdminUser());
@@ -259,8 +265,8 @@ window.debugRagQuery = async () => {
             results.innerHTML = `
                 <div class="rag-debug-loading">
                     <span class="rag-debug-spinner"></span>
-                    <strong>正在查找相关资料</strong>
-                    <small>系统正在从知识库里寻找可引用的内容段，请稍候</small>
+                    <strong>正在测试召回效果</strong>
+                    <small>正在检索知识库分块，请稍候</small>
                 </div>
             `;
         }
@@ -278,12 +284,12 @@ window.debugRagQuery = async () => {
             })
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.error) throw new Error(data.error || '试问失败');
+        if (!res.ok || data.error) throw new Error(data.error || '检索测试失败');
         renderRagDebugResults(data);
     } catch (e) {
-        showToast(e.message || '试问失败', 'error');
+        showToast(e.message || '检索测试失败', 'error');
         if (results) {
-            results.innerHTML = `<div class="rag-debug-empty">试问失败，请换一个问题或稍后重试</div>`;
+            results.innerHTML = `<div class="rag-debug-empty">检索测试失败，请调整问题或稍后重试</div>`;
         }
     } finally {
         if (button) {
@@ -302,10 +308,10 @@ window.retryFailedKnowledgeDocs = async () => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '批量重试失败');
-        showToast(`已安排 ${data.scheduled || 0} 份资料重新学习`);
+        showToast(`已加入 ${data.scheduled || 0} 个重新索引任务`);
         window.loadKnowledgeDocs();
     } catch (e) {
-        showToast(e.message || '重试失败', 'error');
+        showToast(e.message || '批量重试失败', 'error');
     }
 };
 
@@ -317,7 +323,7 @@ window.uploadKnowledgeDoc = async (selectedFile = null) => {
     const formData = new FormData();
     formData.append('file', file);
 
-    showToast('正在上传并学习资料，请稍候...', 'info');
+    showToast('正在上传并向量化文档，请稍候...', 'info');
     if (fileInput) fileInput.value = ''; // 重置 input
 
     try {
@@ -329,7 +335,7 @@ window.uploadKnowledgeDoc = async (selectedFile = null) => {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         
-        showToast(data.message || '文档已加入学习队列');
+        showToast(data.message || '文档已加入后台索引队列');
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档上传失败', 'error');
@@ -343,11 +349,11 @@ window.reindexKnowledgeDoc = async (id) => {
             headers: authHeaders()
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.error) throw new Error(data.error || '重新学习失败');
-        showToast(data.message || '已加入重新学习队列');
+        if (!res.ok || data.error) throw new Error(data.error || '重新索引失败');
+        showToast(data.message || '已加入重新索引队列');
         window.loadKnowledgeDocs();
     } catch (e) {
-        showToast(e.message || '重新学习失败', 'error');
+        showToast(e.message || '重新索引失败', 'error');
     }
 };
 

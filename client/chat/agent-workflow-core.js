@@ -1,5 +1,5 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 工作流状态、文本与抽屉辅助函数。
+/* eslint-disable no-undef */
 function getAgentWorkflowText() {
     return document.getElementById('agent-dag-spec')?.value.trim() || '';
 }

@@ -65,8 +65,8 @@ function getAssistantTraceEventCopy(event = {}) {
                 label: '知识库',
                 tone: 'ready',
                 text: citationCount > 0
-                    ? `知识库已找到 ${citationCount} 条可引用资料${sourceText}，会优先依据资料回答。`
-                    : '知识库已找到相关资料，会优先依据资料回答。'
+                    ? `知识库已命中 ${citationCount} 条可引用文档${sourceText}，会优先依据知识库回答。`
+                    : '知识库已命中相关文档，会优先依据知识库回答。'
             };
         }
         if (status === 'empty') {
@@ -74,7 +74,7 @@ function getAssistantTraceEventCopy(event = {}) {
                 tool: 'rag',
                 label: '知识库',
                 tone: 'warning',
-                text: '知识库没有找到足够相关资料，本轮会按普通聊天继续。',
+                text: '知识库未命中足够相关内容，本轮会按普通聊天继续。',
                 action: 'rag',
                 actionLabel: '补充资料'
             };

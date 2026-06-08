@@ -1,6 +1,6 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 结果沉淀与导出辅助 Agent artifacts and export helpers
 // Split from agents.js.
+/* eslint-disable no-undef */
 async function loadAgentArtifacts() {
     const list = document.getElementById('agent-artifact-list');
     if (!list) return;

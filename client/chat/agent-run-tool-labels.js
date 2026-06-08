@@ -1,4 +1,3 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 工具标签 Agent run tool labels
 // Split from agent-run-renderers.js.
 // Agent model capability and tool label helpers.

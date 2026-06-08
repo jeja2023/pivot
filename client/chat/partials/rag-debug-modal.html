@@ -1,10 +1,10 @@
-    <!-- 知识库试问弹窗 -->
+    <!-- 召回测试弹窗 (RAG Debug) -->
     <div id="rag-debug-modal" class="modal-overlay hidden">
         <div class="modal rag-debug-modal">
             <div class="rag-debug-modal-head">
                 <div>
-                    <h3>试问知识库</h3>
-                    <p class="model-modal-desc">先输入一个真实问题，看看系统会参考哪些资料，再回到聊天正式提问。</p>
+                    <h3>知识库召回测试</h3>
+                    <p class="model-modal-desc">测试知识库检索准确度，查看匹配详情。</p>
                 </div>
                 <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" type="button">关闭</button>
             </div>
@@ -15,15 +15,15 @@
                     <!-- 第一行：标签 -->
                     <div style="display: flex; gap: 12px; margin-bottom: 6px;">
                         <div style="flex: 1;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); padding-left: 2px;">测试问题</label></div>
-                        <div style="width: 75px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">匹配要求</label></div>
-                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">参考数</label></div>
-                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">查找范围</label></div>
+                        <div style="width: 75px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">阈值</label></div>
+                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">命中</label></div>
+                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">候选</label></div>
                         <div style="width: 95px;"></div> <!-- 按钮占位空位 -->
                     </div>
                     <!-- 第二行：输入框与按钮 -->
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div style="flex: 1; display: flex;">
-                            <input id="rag-debug-query" class="form-input" placeholder="输入一个真实会问的问题，例如：这份资料主要讲什么？" style="height: 34px; border-radius: 6px; font-size: 0.85rem; width: 100%; margin: 0;">
+                            <input id="rag-debug-query" class="form-input" placeholder="输入测试问题..." style="height: 34px; border-radius: 6px; font-size: 0.85rem; width: 100%; margin: 0;">
                         </div>
                         <div style="width: 75px; display: flex;">
                             <input id="rag-debug-score-threshold" class="form-input" type="number" min="0" max="1" step="0.05" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
@@ -38,10 +38,10 @@
                     </div>
                     <div class="rag-debug-helper">
                         <strong>不知道测什么？</strong>
-                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="请总结已上传资料的主要内容。">总结资料</button>
-                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="资料里有哪些流程、规则或注意事项？">查流程规则</button>
-                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="哪些内容可以回答用户常见问题？">找可引用内容</button>
-                        <small>建议用真实业务问题测试；越靠前的资料越可能被聊天引用。</small>
+                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="请总结已上传文档的主要内容。">总结文档</button>
+                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="文档里有哪些流程、规则或注意事项？">查流程规则</button>
+                        <button class="rag-debug-sample" type="button" data-rag-debug-sample="哪些分块可以回答用户常见问题？">找命中分块</button>
+                        <small>建议用真实业务问题测试；越靠前的分块越可能被聊天引用。</small>
                     </div>
                 </div>
 

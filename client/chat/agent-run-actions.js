@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行操作 Agent run actions
 // Split from agent-runs-list.js.
 // Agent run payload assembly and mutating actions.
+/* eslint-disable no-undef */
 function getSelectedAgentToolAllowlist() {
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
     if (!checked.length) return ['__none__'];

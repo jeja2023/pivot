@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行步骤渲染器 Agent run step renderers
 // Split from agent-run-renderers.js.
 // Agent run step previews and structured output renderers.
+/* eslint-disable no-undef */
 function agentStepStructuredSummary(value) {
     const structured = unwrapAgentStructuredPayload(value);
     if (!structured || typeof structured !== 'object') return '';

@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // RAG 文档面板与诊断 RAG document panels and diagnostics
 // RAG 文档面板功能从 rag-documents.js 拆分而来。
 // RAG document panels and diagnostics, split from rag-documents.js.
+/* eslint-disable no-undef */
 const ensureRagDetailModal = () => {
     let modal = document.getElementById('rag-detail-modal');
     if (modal) return modal;
@@ -43,7 +43,7 @@ const ensureRagAuditModal = () => {
             <div class="rag-detail-header">
                 <div>
                     <h3>知识库删除审计</h3>
-                    <p class="model-modal-desc">仅 admin 权限层级可见，保留用户删除后的文档信息、源文件路径与学习状态。</p>
+                    <p class="model-modal-desc">仅 admin 权限层级可见，保留用户删除后的文档元数据、源文件路径与索引状态。</p>
                 </div>
                 <button type="button" id="rag-audit-close-btn" class="btn-danger-outline">关闭</button>
             </div>
@@ -55,7 +55,7 @@ const ensureRagAuditModal = () => {
                             <th>文档</th>
                             <th>用户</th>
                             <th>状态</th>
-                            <th>内容段</th>
+                            <th>分块</th>
                             <th>源文件</th>
                             <th>删除时间</th>
                         </tr>
@@ -142,14 +142,14 @@ const showRagDetailModal = (data) => {
     const chunkList = document.getElementById('rag-detail-chunks');
 
     if (title) title.textContent = doc.name || '知识库文档详情';
-    if (subtitle) subtitle.textContent = `共 ${Number(data.totalChunks || 0)} 个内容段，当前展示 ${chunks.length} 个`;
+    if (subtitle) subtitle.textContent = `共 ${Number(data.totalChunks || 0)} 个分块，当前展示 ${chunks.length} 个`;
     if (meta) {
         const enabledText = Number(doc.is_enabled ?? 1) === 1 ? '已启用' : '已停用';
         const items = [
             { icon: RAG_ICONS.status, label: '解析状态', value: getRagStatusLabel(doc.status), class: `status-${doc.status}` },
             { icon: RAG_ICONS.enable, label: '生效状态', value: enabledText, class: enabledText === '已启用' ? 'status-ready' : 'status-error' },
-            { icon: RAG_ICONS.progress, label: '学习进度', value: `${Number(doc.progress || 0)}%` },
-            { icon: RAG_ICONS.chunks, label: '内容段', value: Number(data.totalChunks || 0) },
+            { icon: RAG_ICONS.progress, label: '索引进度', value: `${Number(doc.progress || 0)}%` },
+            { icon: RAG_ICONS.chunks, label: '分块总数', value: Number(data.totalChunks || 0) },
             { icon: RAG_ICONS.time, label: '创建时间', value: formatRagDateToCN(doc.created_at) },
             { icon: RAG_ICONS.time, label: '更新时间', value: formatRagDateToCN(doc.updated_at || doc.processed_at) }
         ];
@@ -171,7 +171,7 @@ const showRagDetailModal = (data) => {
                     <p>${escapeRagHtml(chunk.content || '')}</p>
                 </article>
             `).join('')
-            : '<div class="rag-debug-empty">暂无可预览内容段</div>';
+            : '<div class="rag-debug-empty">暂无可预览分块</div>';
     }
     modal.classList.remove('hidden');
 };
@@ -206,16 +206,16 @@ const renderRagSummary = (summary) => {
     const nextStep = (() => {
         if (total === 0) {
             return {
-                title: '先上传一份资料',
-                detail: '支持 PDF、Word、Excel、CSV、Markdown、网页文本等文件。上传后系统会自动学习资料内容。',
+                title: '先上传一份文档',
+                detail: '支持 PDF、Word、Excel、CSV、Markdown、网页文本等文件。上传后系统会自动索引文档内容。',
                 action: '上传文档',
                 actionKey: 'upload'
             };
         }
         if (processing > 0) {
             return {
-                title: '正在学习资料',
-                detail: '文档还在学习中，完成后会自动变成“就绪”。页面会自动刷新。',
+                title: '正在索引文档',
+                detail: '文档还在索引中，完成后会自动变成“就绪”。页面会自动刷新。',
                 action: '刷新状态',
                 actionKey: 'refresh'
             };
@@ -230,18 +230,18 @@ const renderRagSummary = (summary) => {
         }
         if (ready === 0) {
             return {
-                title: '还没有可用资料',
-                detail: '文档可能被停用或尚未学习完成。启用并重新学习后才能被聊天引用。',
+                title: '还没有可用文档',
+                detail: '文档可能被停用或尚未索引完成。启用并重新索引后才能被聊天引用。',
                 action: '刷新并检查',
                 actionKey: 'refresh'
             };
         }
         return {
             title: '可以开始提问',
-            detail: '可以先试问确认命中效果，也可以直接回到聊天并打开知识库。',
-            action: disabled > 0 ? '打开聊天知识库' : '试问一下',
+            detail: '可以先通过召回测试确认命中效果，也可以直接回到聊天并启用知识库。',
+            action: disabled > 0 ? '启用聊天知识库' : '召回测试',
             actionKey: disabled > 0 ? 'chat-rag' : 'debug',
-            secondaryAction: disabled > 0 ? '试问一下' : '打开聊天知识库',
+            secondaryAction: disabled > 0 ? '召回测试' : '启用聊天知识库',
             secondaryActionKey: disabled > 0 ? 'debug' : 'chat-rag'
         };
     })();
@@ -250,7 +250,7 @@ const renderRagSummary = (summary) => {
         ['就绪', summary.ready || 0],
         ['处理中', summary.processing || 0],
         ['失败', summary.error || 0],
-        ['内容段', summary.chunks || 0],
+        ['分块', summary.chunks || 0],
         ['源文件', formatRagSize(summary.sourceSize || 0)],
         ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`]
     ];
@@ -293,25 +293,22 @@ const renderRagQualityReport = (report) => {
     const overview = report.overview || {};
     const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
     const recommendations = Array.isArray(report.recommendations) ? report.recommendations : [];
-    const localizeQualityTip = (text = '') => String(text || '')
-        .replace(/召回测试/g, '试问一下')
-        .replace(/分块/g, '内容段');
     const userTips = [
-        '资料变更后点击“重新学习”，确保回答引用的是最新内容。',
-        '试问结果太少时，换成用户真实会问的问题再测一次。',
-        '聊天时需要先点亮输入框旁的知识库按钮，才会引用这些资料。'
+        '文档变更后点击“批量重建”或“重新索引”，确保回答引用的是最新内容。',
+        '召回测试结果太少时，换成用户真实会问的问题再测一次。',
+        '聊天时需要先点亮输入框旁的知识库按钮，才会引用这些文档。'
     ];
     el.innerHTML = `
         <div class="governance-head">
             <strong>质量诊断</strong>
-            <span>异常 ${Number(overview.error || 0)} · 停用 ${Number(overview.disabled || 0)} · 空资料 ${Number(overview.emptyReady || 0)}</span>
+            <span>异常 ${Number(overview.error || 0)} · 停用 ${Number(overview.disabled || 0)} · 空分块 ${Number(overview.emptyReady || 0)}</span>
         </div>
         <div class="governance-list">
-            ${recommendations.slice(0, 3).map(item => `<span>${escapeRagHtml(localizeQualityTip(item))}</span>`).join('')}
+            ${recommendations.slice(0, 3).map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}
             ${userTips.map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}
             ${problemDocs.slice(0, 4).map(doc => `
                 <span class="${doc.status === 'error' ? 'is-error' : ''}">
-                    ${escapeRagHtml(doc.name || '文档')} · ${escapeRagHtml(getRagStatusLabel(doc.status))} · 内容段 ${Number(doc.chunk_count || 0)}
+                    ${escapeRagHtml(doc.name || '文档')} · ${escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
                 </span>
             `).join('')}
         </div>
@@ -368,22 +365,22 @@ const renderRagDebugResults = (data) => {
             return {
                 tone: 'ready',
                 title: '可以带着这个问题去聊天',
-                detail: `已找到 ${matchedCount} 条可引用资料，聊天时打开知识库即可使用。`,
+                detail: `已召回 ${matchedCount} 条可引用分块，聊天时启用知识库即可使用。`,
                 action: '用这个问题去聊天'
             };
         }
         if (matches.length > 0) {
             return {
                 tone: 'warning',
-                title: '找到了相近资料，但证据还不够稳',
-                detail: '可以换成更具体的问题，或降低匹配要求后再试一次。',
+                title: '召回到相近分块，但证据还不够稳',
+                detail: '可以换成更具体的问题，或降低阈值后再测试一次。',
                 action: '带着问题去聊天'
             };
         }
         return {
             tone: 'empty',
-            title: '这次没有找到可用资料',
-            detail: '请换个问法、上传相关资料，或确认资料已经就绪并启用。',
+            title: '这次没有召回到可用分块',
+            detail: '请换个问法、上传相关文档，或确认文档已经就绪并启用。',
             action: '回到聊天'
         };
     })();
@@ -398,9 +395,9 @@ const renderRagDebugResults = (data) => {
         </div>
         <div class="rag-debug-meta">
             <span>关键词：${escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
-            <span>查找范围：${Number(data.candidateCount || 0)}</span>
-            <span>匹配要求：${Number(data.threshold || 0).toFixed(2)}</span>
-            ${elapsed > 0 ? `<span>查找耗时：${elapsed} ms</span>` : ''}
+            <span>候选：${Number(data.candidateCount || 0)}</span>
+            <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
+            ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
         </div>
         ${groupedList.length > 1 ? `
             <div class="rag-debug-grouped" role="list">
@@ -432,7 +429,7 @@ const renderRagDebugResults = (data) => {
                     </div>
                 </div>
                 `;
-            }).join('') || '<div class="rag-debug-empty">没有找到可用内容段</div>'}
+            }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
         </div>
     `;
 };

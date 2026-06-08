@@ -21,7 +21,6 @@ const {
     getCookie,
     getPermissionLabel,
     getPermissionTier,
-    http,
     isAdmin,
     isPathInsideUploadRoot,
     isSensitiveOutboundHost,

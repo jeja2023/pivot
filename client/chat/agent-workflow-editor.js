@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 工作流编辑器桥接 Agent workflow editor bridge
 // 从 agent-workflows.js 拆分。
 // Agent workflow visual editor bridge, split from agent-workflows.js.
+/* eslint-disable no-undef */
 let dagEditorInstance = null;
 
 function mountAgentDagEditor() {

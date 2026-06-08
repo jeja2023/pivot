@@ -1,5 +1,5 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 工作流运行与发布运行辅助函数。
+/* eslint-disable no-undef */
 function agentWorkflowRunSourceLabel(source) {
     if (source === 'published') return '发布版运行';
     if (source === 'current') return '当前版本运行';

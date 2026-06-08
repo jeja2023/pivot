@@ -1,5 +1,5 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Split from agents.js.
+/* eslint-disable no-undef */
 let agentRunsCache = [];
 
 let agentRefreshTimer = null;

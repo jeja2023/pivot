@@ -1,6 +1,6 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 计划任务 Agent schedules
 // Split from agents.js.
+/* eslint-disable no-undef */
 async function loadAgentSchedules() {
     const list = document.getElementById('agent-schedule-list');
     if (!list) return;

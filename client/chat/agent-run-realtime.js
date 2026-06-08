@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行实时刷新 Agent run realtime
 // Split from agent-runs-list.js.
 // Agent run auto-refresh, realtime events, and streaming panel.
+/* eslint-disable no-undef */
 function updateAgentAutoRefresh() {
     const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
     const hasActiveRun = agentRunsCache.some(run => isAgentRunActive(run.status));

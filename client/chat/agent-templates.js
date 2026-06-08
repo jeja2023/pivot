@@ -1,6 +1,6 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 模板管理 Agent templates
 // Split from agents.js.
+/* eslint-disable no-undef */
 function applyAgentTemplate(template) {
     if (!template) return;
     const goalInput = document.getElementById('agent-goal-input');

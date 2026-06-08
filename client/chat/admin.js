@@ -151,6 +151,8 @@ const loadScriptOnce = (src) => new Promise((resolve, reject) => {
     document.head.appendChild(script);
 });
 
+window.ensureAdminSettingsScript = () => loadScriptOnce('/chat/admin-settings.js');
+
 window.ensureAdminFeatureScripts = async () => {
     if (adminFeatureLoadPromise) return adminFeatureLoadPromise;
     adminFeatureLoadPromise = (async () => {

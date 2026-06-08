@@ -1,7 +1,7 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Agent 运行可视化 Agent run visuals
 // Split from agent-run-renderers.js.
 // Agent run visual outputs, DAG graph, and progress helpers.
+/* eslint-disable no-undef */
 function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = '', runStatus = '') {
     if (isAgentRunActive(runStatus)) return '';
     if (/```(?:pivot-echart|pivot-chart|chart|charts)\b/i.test(String(finalAnswer || ''))) return '';

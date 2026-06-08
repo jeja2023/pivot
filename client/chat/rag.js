@@ -1,5 +1,5 @@
-/* eslint-disable no-undef, no-unused-vars */
 // Split from rag.js.
+/* eslint-disable no-undef */
 const {
     RAG_ICONS,
     escapeRagHtml,

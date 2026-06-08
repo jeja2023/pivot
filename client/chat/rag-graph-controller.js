@@ -1,6 +1,6 @@
-/* eslint-disable no-undef, no-unused-vars */
 // RAG 知识图谱控制器 RAG graph controller
 // Split from rag.js.
+/* eslint-disable no-undef */
 let ragGraphState = {
     selectedEntityId: null,
     selectedEntity: null,
