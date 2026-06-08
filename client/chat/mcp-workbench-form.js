@@ -6,6 +6,157 @@ function mcpFormEl(name, mode = 'create') {
     return document.getElementById(`${mcpFormPrefix(mode)}-${name}`);
 }
 
+const MCP_CONFIG_HELPERS = {
+    external: {
+        title: '外部能力服务',
+        steps: ['填写服务名称', '粘贴技术同事提供的服务地址', '需要鉴权时填写访问密钥'],
+        note: '普通用户通常先使用系统能力；外部能力服务需要由技术同事提供地址和密钥。'
+    },
+    database: {
+        title: '数据库连接',
+        steps: ['选择数据库类型', '填写主机和数据库名', '先点“测试连接”，通过后再保存'],
+        note: '默认只读查询并限制返回行数，不会执行写入 SQL。'
+    },
+    reports: {
+        title: '报表文件',
+        steps: ['填写报表目录', '确认允许的文件格式', '保存后查看可用动作'],
+        note: '适合把共享目录里的 Excel、CSV、JSON、Markdown 文件交给模型读取。'
+    },
+    im: {
+        title: '消息通知',
+        steps: ['填写聊天工具接收地址', '按需填写访问密钥', '白名单里每行写一个可发送目标'],
+        note: '建议先配置一个测试群或测试用户，确认能收到消息后再扩大白名单。'
+    },
+    visualization: {
+        title: '图表生成',
+        steps: ['保存默认名称', '回到能力库查看动作', '聊天中打开能力库后让模型生成图表'],
+        note: '系统内置能力无需额外连接，适合先验证能力库是否可用。'
+    },
+    report: {
+        title: '报告编排',
+        steps: ['保存默认名称', '回到能力库查看动作', '把摘要、表格、图表组合成报告'],
+        note: '适合日报、周报和固定格式分析报告。'
+    },
+    documents: {
+        title: '文档解析',
+        steps: ['保存默认名称', '回到能力库查看动作', '让模型提取大纲、键值或分段'],
+        note: '适合合同、制度、说明书等长文档的结构化处理。'
+    },
+    data: {
+        title: '数据处理',
+        steps: ['保存默认名称', '回到能力库查看动作', '让模型做筛选、汇总和字段标准化'],
+        note: '适合表格行数据的清洗、分组统计和字段画像。'
+    },
+    format: {
+        title: '格式转换',
+        steps: ['保存默认名称', '回到能力库查看动作', '让模型在 JSON、Markdown 表格和文本之间转换'],
+        note: '适合整理模型输出或把杂乱文本转成结构化格式。'
+    }
+};
+
+const MCP_DATABASE_TYPE_TIPS = {
+    postgres: 'PostgreSQL 常用端口 5432；数据分组/Schema 不确定时可以先留空。',
+    mysql: 'MySQL/MariaDB 常用端口 3306；数据库名通常是业务库名称。',
+    sqlserver: 'SQL Server 常用端口 1433；数据分组/Schema 常见为 dbo，不确定可留空。',
+    sqlite: 'SQLite 只需要填写数据库文件路径，主机、端口、用户名和密码会自动隐藏。',
+    mongodb: 'MongoDB 常用端口 27017；数据库名填写要查询的 database。'
+};
+
+const MCP_DATABASE_PLACEHOLDERS = {
+    postgres: {
+        host: '主机地址，例如 10.0.0.8',
+        port: '端口，默认 5432',
+        name: '数据库名，例如 analytics',
+        user: '只读账号用户名',
+        password: '只读账号密码',
+        schema: '数据分组/Schema，可选，例如 public；不确定留空'
+    },
+    mysql: {
+        host: '主机地址，例如 10.0.0.8',
+        port: '端口，默认 3306',
+        name: '数据库名，例如 biz',
+        user: '只读账号用户名',
+        password: '只读账号密码',
+        schema: '可留空'
+    },
+    sqlserver: {
+        host: '主机地址，例如 10.0.0.8',
+        port: '端口，默认 1433',
+        name: '数据库名，例如 BI',
+        user: '只读账号用户名',
+        password: '只读账号密码',
+        schema: '数据分组/Schema，可选，例如 dbo；不确定留空'
+    },
+    sqlite: {
+        host: 'SQLite 不需要主机',
+        port: 'SQLite 不需要端口',
+        name: 'SQLite 文件路径，例如 D:\\data\\report.db',
+        user: 'SQLite 不需要用户名',
+        password: 'SQLite 不需要密码',
+        schema: '可留空'
+    },
+    mongodb: {
+        host: '主机地址，例如 10.0.0.8',
+        port: '端口，默认 27017',
+        name: '数据库名，例如 admin 或 reporting',
+        user: '只读账号用户名，可选',
+        password: '只读账号密码，可选',
+        schema: '集合前缀或命名空间，可选；不确定留空'
+    }
+};
+
+function updateMcpConfigHelper(mode = 'create') {
+    const helper = mcpFormEl('helper', mode);
+    if (!helper) return;
+    const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
+    const config = MCP_CONFIG_HELPERS[sourceType] || MCP_CONFIG_HELPERS.external;
+    const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
+    const note = sourceType === 'database'
+        ? `${config.note} ${MCP_DATABASE_TYPE_TIPS[dbType] || ''}`.trim()
+        : config.note;
+    helper.innerHTML = `
+        <strong>${mcpEscape(config.title)}配置助手</strong>
+        <div>${config.steps.map(step => `<span>${mcpEscape(step)}</span>`).join('')}</div>
+        <small>${mcpEscape(note)}</small>
+    `;
+}
+
+function setMcpPlaceholder(id, value, mode = 'create') {
+    const el = mcpFormEl(id, mode);
+    if (el) el.placeholder = value;
+}
+
+function updateMcpDatabaseGuidance(mode = 'create') {
+    const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
+    const placeholders = MCP_DATABASE_PLACEHOLDERS[dbType] || MCP_DATABASE_PLACEHOLDERS.postgres;
+    setMcpPlaceholder('db-host', placeholders.host, mode);
+    setMcpPlaceholder('db-port', placeholders.port, mode);
+    setMcpPlaceholder('db-name', placeholders.name, mode);
+    setMcpPlaceholder('db-user', placeholders.user, mode);
+    setMcpPlaceholder('db-password', placeholders.password, mode);
+    setMcpPlaceholder('db-schema', placeholders.schema, mode);
+}
+
+function setValueIfEmpty(id, value, mode = 'create') {
+    const el = mcpFormEl(id, mode);
+    if (el && !String(el.value || '').trim()) el.value = value;
+}
+
+function applyMcpRecommendedDefaults(type, mode = 'create') {
+    if (type === 'database') {
+        setValueIfEmpty('db-max-rows', '200', mode);
+    }
+    if (type === 'reports') {
+        setValueIfEmpty('reports-extensions', 'csv,xlsx,xls,json,txt,md', mode);
+        setValueIfEmpty('reports-max-file-mb', '20', mode);
+        setValueIfEmpty('reports-max-rows', '500', mode);
+    }
+    if (type === 'im') {
+        setValueIfEmpty('im-auth-header', 'Authorization', mode);
+        setValueIfEmpty('im-max-message-length', '2000', mode);
+    }
+}
+
 function setMcpSourceType(type, mode = 'create') {
     const editableBuiltins = mode === 'edit' ? ['reports', 'visualization', 'report', 'documents', 'data', 'format', 'im'] : [];
     const sourceType = ['database', ...editableBuiltins].includes(type) ? type : 'external';
@@ -24,6 +175,9 @@ function setMcpSourceType(type, mode = 'create') {
     const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
     const port = mcpFormEl('db-port', mode);
     if (sourceType === 'database' && port && !port.value) port.value = mcpDbDefaultPorts[dbType] || '';
+    updateMcpDatabaseGuidance(mode);
+    applyMcpRecommendedDefaults(sourceType, mode);
+    updateMcpConfigHelper(mode);
     updateMcpDbTypeFields(mode);
 }
 
@@ -68,7 +222,9 @@ function bindMcpFormControls(mode = 'create') {
         dbType.addEventListener('change', () => {
             const port = mcpFormEl('db-port', mode);
             if (port) port.value = mcpDbDefaultPorts[dbType.value] || '';
+            updateMcpDatabaseGuidance(mode);
             updateMcpDbTypeFields(mode);
+            updateMcpConfigHelper(mode);
         });
     }
     const testButton = mcpFormEl('test-db-btn', mode);
@@ -77,6 +233,8 @@ function bindMcpFormControls(mode = 'create') {
         testButton.addEventListener('click', () => window.testMcpDatabaseConnection(mode));
     }
     updateMcpDbTypeFields(mode);
+    updateMcpDatabaseGuidance(mode);
+    updateMcpConfigHelper(mode);
 }
 
 function bindMcpToolsModalControls() {
@@ -157,7 +315,8 @@ window.openMcpCreateModal = function(type = 'external') {
 
 function fillMcpForm(server, mode = 'create') {
     const database = server.database_connection || {};
-    const serverType = ['database', 'reports', 'visualization', 'report', 'im'].includes(server.server_type) ? server.server_type : 'external';
+    const editableTypes = ['database', ...mcpBuiltinServices.map(item => item.type)];
+    const serverType = editableTypes.includes(server.server_type) ? server.server_type : 'external';
     setMcpSourceType(serverType, mode);
     mcpFormEl('id', mode).value = server.id || '';
     mcpFormEl('name', mode).value = server.name || '';
@@ -175,6 +334,8 @@ function fillMcpForm(server, mode = 'create') {
         mcpFormEl('db-max-rows', mode).value = database.max_rows || '';
         mcpFormEl('db-ssl', mode).checked = Boolean(database.ssl);
         updateMcpDbTypeFields(mode);
+        updateMcpDatabaseGuidance(mode);
+        updateMcpConfigHelper(mode);
     }
     if (server.server_type === 'reports') {
         const config = server.builtin_config?.config || {};

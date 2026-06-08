@@ -4,11 +4,22 @@
             <div class="workspace-modal-header">
                 <div>
                     <h3>能力库</h3>
-                    <p>系统能力可直接启用；数据库和外部能力服务需要连接后供聊天与智能体任务调用。</p>
+                    <p>把图表、报表、数据库、通知等能力交给聊天使用；先启用，再回到聊天点亮能力库。</p>
                 </div>
                 <button id="mcp-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
             </div>
             <div class="workspace-modal-body">
+                <div class="mcp-onboarding-panel">
+                    <div>
+                        <strong>三步用好能力库</strong>
+                        <span>先启用系统能力，再按需连接数据库、报表或通知服务，回到聊天时点亮能力库按钮即可让模型调用。</span>
+                    </div>
+                    <div class="mcp-onboarding-steps">
+                        <span>1 启用能力</span>
+                        <span>2 确认可用动作</span>
+                        <span>3 聊天中授权使用</span>
+                    </div>
+                </div>
                 <div id="mcp-governance-panel" class="workspace-governance-panel"></div>
                 <div class="mcp-layout">
                     <div class="mcp-list-wrap">
@@ -30,7 +41,7 @@
             <div class="mcp-edit-form">
                 <input type="hidden" id="mcp-edit-id">
                 <select id="mcp-edit-source-type" class="form-input" disabled>
-                    <option value="external">外部能力服务</option>
+                    <option value="external">外部能力服务（技术同事提供）</option>
                     <option value="database">数据库连接</option>
                     <option value="reports">报表文件</option>
                     <option value="visualization">图表生成</option>
@@ -38,9 +49,10 @@
                     <option value="im">IM 通知</option>
                 </select>
                 <input id="mcp-edit-name" class="form-input" placeholder="服务名称">
+                <div id="mcp-edit-helper" class="mcp-config-helper" aria-live="polite"></div>
                 <div id="mcp-edit-external-fields" class="mcp-field-group">
-                    <input id="mcp-edit-url" class="form-input" placeholder="能力服务 JSON-RPC URL，例如 http://localhost:8787/mcp">
-                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="API Key，可选">
+                    <input id="mcp-edit-url" class="form-input" placeholder="外部能力服务地址，由技术同事提供，例如 http://localhost:8787/mcp">
+                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="访问密钥，可选；没有就留空">
                 </div>
                 <div id="mcp-edit-db-fields" class="mcp-field-group hidden">
                     <div class="mcp-form-row">
@@ -60,7 +72,7 @@
                         <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码">
                     </div>
                     <div class="mcp-form-row">
-                        <input id="mcp-edit-db-schema" class="form-input" placeholder="Schema，可选">
+                        <input id="mcp-edit-db-schema" class="form-input" placeholder="数据分组/Schema，可选；不确定就留空">
                         <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
                     </div>
                     <label class="mcp-shared-row">
@@ -76,7 +88,7 @@
                     <input id="mcp-edit-reports-max-rows" class="form-input" type="number" min="1" max="5000" placeholder="单次最大读取行数，默认 500">
                 </div>
                 <div id="mcp-edit-im-fields" class="mcp-field-group hidden">
-                    <input id="mcp-edit-im-endpoint-url" class="form-input" placeholder="局域网聊天工具 Webhook/API URL，例如 http://10.0.0.8:9000/api/message">
+                    <input id="mcp-edit-im-endpoint-url" class="form-input" placeholder="局域网聊天工具接收地址，由技术同事提供，例如 http://10.0.0.8:9000/api/message">
                     <div class="mcp-form-row">
                         <input id="mcp-edit-im-auth-header" class="form-input" placeholder="认证 Header，默认 Authorization">
                         <input id="mcp-edit-im-token" class="form-input" type="password" placeholder="Token / 密钥，可选">
@@ -106,9 +118,9 @@
     <div id="mcp-tools-modal" class="modal-overlay hidden" style="z-index: 1910;">
         <div class="modal mcp-tools-modal">
             <div class="mcp-edit-header">
-                <h3 id="mcp-tools-title">可用工具</h3>
+                <h3 id="mcp-tools-title">可用动作</h3>
                 <div class="mcp-tools-header-actions">
-                    <button id="mcp-tools-refresh-btn" class="btn-secondary" type="button">刷新工具</button>
+                    <button id="mcp-tools-refresh-btn" class="btn-secondary" type="button">刷新动作</button>
                     <button id="mcp-tools-close-btn" class="btn-secondary" type="button">关闭</button>
                 </div>
             </div>

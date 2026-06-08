@@ -26,6 +26,29 @@ const CHAT_TOOL_TOGGLE_STORAGE = {
     mcp: 'pivot_chat_mcp_enabled'
 };
 
+const CHAT_TOOL_STATUS_COPY = {
+    rag: {
+        label: '知识库',
+        ready: '知识库已打开，本轮回答会优先检索已启用资料。',
+        checking: '知识库正在检查资料状态。',
+        empty: '知识库已打开，但还没有就绪资料。',
+        loading: '知识库正在索引，稍等片刻就能参与回答。',
+        error: '知识库有资料索引失败，请先处理后再提问。',
+        offline: '知识库状态暂时无法确认，仍会按当前开关尝试检索。',
+        action: '打开知识库'
+    },
+    mcp: {
+        label: '能力库',
+        ready: '能力库已打开，本轮对话可按需调用已启用工具。',
+        checking: '能力库正在检查可用工具。',
+        empty: '能力库已打开，但还没有可用工具。',
+        loading: '能力库正在检查可用工具。',
+        error: '能力库状态暂时无法确认，请打开能力库检查配置。',
+        offline: '能力库状态暂时无法确认，仍会按当前开关尝试调用。',
+        action: '打开能力库'
+    }
+};
+
 function findChatToolToggle(target) {
     let node = target;
     while (node && node !== document) {
@@ -45,7 +68,7 @@ function getChatToolName(button) {
     return '';
 }
 
-function setChatToolToggleState(button, enabled) {
+function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {}) {
     if (!button) return;
     const target = button.matches?.('.chat-tool-toggle') ? button : button.closest?.('.chat-tool-toggle') || button;
     const nestedInput = target.querySelector?.('input[type="checkbox"][id^="chat-"]');
@@ -58,14 +81,112 @@ function setChatToolToggleState(button, enabled) {
     button.dataset.enabled = enabled ? 'true' : 'false';
     button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
     button.classList.toggle('is-active', enabled);
+    if (refreshReadiness && typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
 }
 
 function syncChatToolToggles() {
     document.querySelectorAll('[data-chat-tool-toggle], #chat-rag-enabled, #chat-mcp-enabled').forEach(button => {
         const tool = getChatToolName(button);
         const storageKey = CHAT_TOOL_TOGGLE_STORAGE[tool];
-        setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true');
+        setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true', { refreshReadiness: false });
     });
+    if (typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
+}
+
+function getEnabledChatTools() {
+    return Object.keys(CHAT_TOOL_TOGGLE_STORAGE).filter(tool => {
+        const button = document.querySelector(`[data-chat-tool-toggle="${tool}"]`);
+        return button?.dataset.enabled === 'true' || button?.getAttribute('aria-pressed') === 'true' || button?.checked === true;
+    });
+}
+
+function buildChatToolStatusItem({ tool, tone, text, action }) {
+    const item = document.createElement('span');
+    item.className = `chat-tool-status-item is-${tone || 'ready'}`;
+    const label = document.createElement('strong');
+    label.textContent = CHAT_TOOL_STATUS_COPY[tool]?.label || tool;
+    const message = document.createElement('span');
+    message.textContent = text;
+    item.append(label, message);
+    if (action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.chatToolStatusAction = tool;
+        button.textContent = CHAT_TOOL_STATUS_COPY[tool]?.action || '打开';
+        item.appendChild(button);
+    }
+    return item;
+}
+
+function renderChatToolStatus(items = []) {
+    const status = document.getElementById('chat-tool-status');
+    if (!status) return;
+    status.innerHTML = '';
+    status.classList.toggle('hidden', items.length === 0);
+    status.classList.toggle('has-warning', items.some(item => item.tone === 'warning'));
+    status.classList.toggle('has-error', items.some(item => item.tone === 'error'));
+    items.forEach(item => status.appendChild(buildChatToolStatusItem(item)));
+}
+
+async function fetchChatToolReadiness(tool) {
+    if (tool === 'rag') {
+        const res = await apiFetch(`${API_BASE}/rag/summary`);
+        if (!res.ok) throw new Error('知识库状态获取失败');
+        const summary = await res.json();
+        const ready = Number(summary.ready || 0);
+        const processing = Number(summary.processing || 0);
+        const error = Number(summary.error || 0);
+        if (ready > 0) return { tone: 'ready', text: `知识库已打开，${ready} 份资料可参与回答。` };
+        if (processing > 0) return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.loading, action: true };
+        if (error > 0) return { tone: 'error', text: CHAT_TOOL_STATUS_COPY.rag.error, action: true };
+        return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.empty, action: true };
+    }
+
+    if (tool === 'mcp') {
+        const res = await apiFetch(`${API_BASE}/mcp/tools`);
+        if (!res.ok) throw new Error('能力库状态获取失败');
+        const data = await res.json();
+        const count = Array.isArray(data.tools) ? data.tools.length : 0;
+        if (count > 0) return { tone: 'ready', text: `能力库已打开，${count} 个工具可按需调用。` };
+        return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.mcp.empty, action: true };
+    }
+
+    return null;
+}
+
+let chatToolReadinessRequestId = 0;
+
+async function updateChatToolReadiness({ silent = false } = {}) {
+    const enabledTools = getEnabledChatTools();
+    if (!enabledTools.length) {
+        renderChatToolStatus([]);
+        return;
+    }
+
+    const requestId = ++chatToolReadinessRequestId;
+    if (!silent) {
+        renderChatToolStatus(enabledTools.map(tool => ({
+            tool,
+            tone: 'ready',
+            text: CHAT_TOOL_STATUS_COPY[tool]?.checking || '正在检查状态。'
+        })));
+    }
+
+    const readiness = await Promise.all(enabledTools.map(async tool => {
+        try {
+            const item = await fetchChatToolReadiness(tool);
+            return { tool, ...item };
+        } catch (e) {
+            return {
+                tool,
+                tone: 'warning',
+                text: CHAT_TOOL_STATUS_COPY[tool]?.offline || '状态暂时无法确认。',
+                action: true
+            };
+        }
+    }));
+
+    if (requestId === chatToolReadinessRequestId) renderChatToolStatus(readiness);
 }
 
 async function toggleChatTool(button) {
@@ -83,6 +204,7 @@ async function toggleChatTool(button) {
     }
     setChatToolToggleState(button, enabled);
     if (storageKey) localStorage.setItem(storageKey, enabled ? 'true' : 'false');
+    await updateChatToolReadiness();
 }
 
 async function handleChatToolToggleEvent(event) {
@@ -103,8 +225,18 @@ document.addEventListener('DOMContentLoaded', syncChatToolToggles);
 window.addEventListener('pageshow', syncChatToolToggles);
 document.addEventListener('pointerdown', handleChatToolToggleEvent, true);
 document.addEventListener('click', handleChatToolToggleEvent, true);
+document.addEventListener('click', (event) => {
+    const action = event.target.closest('[data-chat-tool-status-action]');
+    if (!action) return;
+    event.preventDefault();
+    const tool = action.dataset.chatToolStatusAction;
+    if (tool === 'rag') window.openKnowledgeWorkbench?.();
+    if (tool === 'mcp') window.openMcpWorkbench?.();
+});
 window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
+window.updateChatToolReadiness = updateChatToolReadiness;
+updateChatToolReadiness({ silent: true });
 
 const MAIN_WORKSPACE_STORAGE_KEY = 'pivot_active_workspace';
 const SETTINGS_TAB_STORAGE_KEY = 'pivot_settings_tab';

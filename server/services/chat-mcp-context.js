@@ -18,10 +18,73 @@ const {
     parsePlannerJson
 } = require('./chat-route-helpers');
 
+const MCP_CHAT_TOOL_TITLES = {
+    'db.list_tables': '列出数据表',
+    'db.count_tables': '统计数据表数量',
+    'db.describe_table': '查看表结构',
+    'db.run_readonly_query': '执行只读 SQL',
+    'db.group_count': '分组统计',
+    'db.list_collections': '列出集合',
+    'db.count_collections': '统计集合数量',
+    'db.sample_collection': '读取集合样本',
+    'db.aggregate': '执行聚合分析',
+    'reports.list_files': '查找报表文件',
+    'reports.read_file_summary': '读取报表摘要',
+    'reports.query_table': '查询表格数据',
+    'reports.compare_files': '对比数据文件',
+    'viz.build_chart': '生成图表',
+    'viz.build_table': '整理表格',
+    'report.compose': '编排报告',
+    'report.validate_template': '校验报告模板',
+    'doc.extract_outline': '提取文档大纲',
+    'doc.extract_key_values': '提取关键信息',
+    'doc.chunk_text': '切分文档文本',
+    'data.profile_rows': '分析表格字段',
+    'data.filter_rows': '筛选表格行',
+    'data.group_summary': '分组汇总数据',
+    'data.normalize_fields': '标准化字段',
+    'format.to_markdown_table': '转换 Markdown 表格',
+    'format.to_json': '转换 JSON',
+    'format.extract_json': '提取 JSON',
+    'format.normalize_text': '规范化文本',
+    'im.list_allowed_targets': '查看通知目标',
+    'im.send_user_message': '发送用户消息',
+    'im.send_group_message': '发送群组消息',
+    'im.send_markdown': '发送 Markdown 消息'
+};
+
 function compactText(value, maxLength = 12000) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (!text) return '';
     return text.length > maxLength ? `${text.slice(0, maxLength)}\n...内容已截断...` : text;
+}
+
+function normalizeMcpToolShortName(tool) {
+    const raw = String(tool?.name || tool?.toolName || tool?.fullName || tool || '').trim();
+    const match = raw.match(/^mcp\.\d+\.(.+)$/);
+    return match ? match[1] : raw;
+}
+
+function getMcpActionName(tool) {
+    const shortName = normalizeMcpToolShortName(tool);
+    const readableName = shortName.split('.').pop().replace(/[_-]+/g, ' ').trim();
+    return MCP_CHAT_TOOL_TITLES[shortName] || cleanCapabilityDisplayName(tool?.title || '') || readableName || '能力动作';
+}
+
+function buildMcpTracePayload(tool) {
+    const toolName = normalizeMcpToolShortName(tool);
+    return {
+        tool: tool?.fullName || tool?.name || toolName,
+        toolFullName: tool?.fullName || '',
+        toolName,
+        actionName: getMcpActionName(tool),
+        serverName: cleanCapabilityDisplayName(tool?.serverName || '')
+    };
+}
+
+function buildMcpTraceMessage(actionName, serverName, fallback = '能力服务', prefix = '正在使用能力库') {
+    const service = cleanCapabilityDisplayName(serverName || fallback) || fallback;
+    return `${prefix}：${service} / ${actionName || '能力动作'}`;
 }
 
 function getMcpToolIntent(userPrompt = '') {
@@ -293,12 +356,13 @@ async function maybeBuildChartAfterDataTool({ selected, result, intentTools, use
     if (!chartTool) return null;
     const chartInput = inferChartInputFromRows(rows, userPrompt);
     if (!chartInput) return null;
+    const chartTrace = buildMcpTracePayload(chartTool);
     writeSse(JSON.stringify({
         type: 'mcp',
         status: 'running',
-        tool: chartTool.fullName,
-        serverName: cleanCapabilityDisplayName(chartTool.serverName || '图表生成'),
-        message: '正在根据查询结果生成图表'
+        ...chartTrace,
+        serverName: chartTrace.serverName || '图表生成',
+        message: buildMcpTraceMessage(chartTrace.actionName, chartTrace.serverName || '图表生成')
     }));
     const chartResult = await executeMcpTool(chartTool.fullName, chartInput, user, { source: 'chat_auto_chart' });
     return compactText(extractMcpResultText(chartResult, writeSse), 12000);
@@ -469,12 +533,12 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 if (fallback) {
                     const dataTool = fallback.tool;
                     const fallbackInput = fallback.input;
+                    const trace = buildMcpTracePayload(dataTool);
                     writeSse(JSON.stringify({
                         type: 'mcp',
                         status: 'running',
-                        tool: dataTool.fullName,
-                        serverName: cleanCapabilityDisplayName(dataTool.serverName || ''),
-                        message: `规划器未选择工具，根据意图自动调用：${cleanCapabilityDisplayName(dataTool.serverName || '能力服务')} / ${dataTool.name || dataTool.fullName}`
+                        ...trace,
+                        message: buildMcpTraceMessage(trace.actionName, trace.serverName, '能力服务', '已自动选择能力库动作')
                     }));
                     try {
                         const result = await executeMcpTool(dataTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
@@ -486,8 +550,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                         writeSse(JSON.stringify({
                             type: 'mcp',
                             status: 'done',
-                            tool: dataTool.fullName,
-                            message: '能力库工具调用完成，正在生成回答'
+                            ...trace,
+                            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '能力服务', '能力库动作已完成')
                         }));
                         return [
                             '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
@@ -512,12 +576,12 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         }
 
         const selected = plannedTool;
+        const trace = buildMcpTracePayload(selected);
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'running',
-            tool: selected.fullName,
-            serverName: cleanCapabilityDisplayName(selected?.serverName || ''),
-            message: `正在调用能力库工具：${cleanCapabilityDisplayName(selected?.serverName || '能力服务')} / ${selected?.name || selected.fullName}`
+            ...trace,
+            message: buildMcpTraceMessage(trace.actionName, trace.serverName)
         }));
         const result = await executeMcpTool(selected.fullName, plan.input || {}, user, { source: 'chat' });
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
@@ -528,8 +592,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'done',
-            tool: plan.tool,
-            message: '能力库工具调用完成，正在生成回答'
+            ...trace,
+            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '能力服务', '能力库动作已完成')
         }));
         return [
             '以下是本轮普通对话启用能力库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',

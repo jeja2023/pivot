@@ -21,7 +21,6 @@ const {
     getRunProgress,
     getRunnableModelForUser,
     getUserRunnableModels,
-    http,
     listAgentArtifacts,
     listAgentNotifications,
     listAgentSchedules,
@@ -452,6 +451,7 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     const editor = readDagEditorSourceBundle();
     const tools = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools.js'), 'utf8');
     const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime.js'), 'utf8');
+    const dagRuntime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-dag-runtime.js'), 'utf8');
     const model = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-model.js'), 'utf8');
 
     assert.match(ui, /function isSelectableModelForCurrentUser/);
@@ -485,7 +485,8 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     assert.match(runtime, /function inferDagLlmRuntimeSettings/);
     assert.match(runtime, /assertWorkflowHasConfiguredLlm\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!effectiveModelId && llmRuntimeSettings\.modelId\)/);
-    assert.match(runtime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg \}\)/);
+    assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(\)\)/);
+    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
 });
@@ -648,16 +649,17 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(run.max_token_budget, 100000);
     assert.throws(() => rerunAgentRun(run.id, user), /仍在执行/);
 
+    const corruptTitle = String.fromCharCode(0xFFFD).repeat(8);
     const repairedTitleRun = createAgentRun({
         user,
         goal: '请使用数据库 MCP 查询 hcd_b 表并输出部门统计',
-        title: '????????',
+        title: corruptTitle,
         modelId: Number(modelInfo.lastInsertRowid),
         maxSteps: 3,
         toolPolicy: 'builtin_only'
     });
     assert.equal(repairedTitleRun.title, '请使用数据库 MCP 查询 hcd_b 表并输出部门统计'.slice(0, 40));
-    db.prepare('UPDATE agent_runs SET title = ? WHERE id = ?').run('????????', repairedTitleRun.id);
+    db.prepare('UPDATE agent_runs SET title = ? WHERE id = ?').run(corruptTitle, repairedTitleRun.id);
     const realtime = createFakeSseResponse();
     const unsubscribeRealtime = subscribeUserEvents(user, realtime, { heartbeatMs: 0 });
     cancelAgentRun(repairedTitleRun.id, user);

@@ -3,10 +3,11 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { getRunnableModelForUser } = require('./models');
-const { clampText, executeBuiltInTool } = require('./agent-tools');
-const { executeMcpTool } = require('./mcp-client');
+const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { runAgentDag } = require('./agent-dag-runtime');
+const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('./agent-streaming-runtime');
 const { createAgentQueue } = require('./agent-queue');
-const { callModelText, recordAgentModelUsage, callModelStreamingWithTools } = require('./agent-model');
+const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { publishUserEvent } = require('./realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('./model-router');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
@@ -36,7 +37,6 @@ const {
     listAgentWorkflowVersions,
     listAgentWorkflows,
     normalizeDagInputsPayload,
-    normalizeDagRunInputs,
     publishAgentWorkflowVersion,
     restoreAgentWorkflow,
     resolveAgentWorkflowVersion,
@@ -62,19 +62,11 @@ const {
     rollbackAgentArtifactVersion,
     saveAgentRunArtifact
 } = require('./agent-artifacts');
-const {
-    normalizeDagNodePolicy,
-    resolveDagNodeInput
-} = require('./agent-dag-utils');
-const {
-    buildAgentToolSchemas,
-    formatToolList
-} = require('./agent-tool-catalog');
+const { formatToolList } = require('./agent-tool-catalog');
 const {
     getAgentMetrics,
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('./agent-monitoring');
-const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const {
     DEFAULT_STEPS,
     ACTIVE_STATUSES,
@@ -572,62 +564,6 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     ];
 }
 
-function findDatabaseCompatTool(fullName, toolList = []) {
-    const match = String(fullName || '').match(/^mcp\.(\d+)\.(db\..+)$/);
-    if (!match) return null;
-    const serverId = match[1];
-    const shortName = match[2];
-    return (toolList || []).find(tool => {
-        if (!tool?.databaseTool || tool.name !== shortName) return false;
-        const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
-        return connections.some(connection => (
-            String(connection.serverId || '') === serverId
-            && String(connection.fullName || '') === String(fullName || '')
-        ));
-    }) || null;
-}
-
-function findAgentToolByName(name, toolList = []) {
-    const safeName = String(name || '').trim();
-    return (toolList || []).find(item => item.name === safeName) || findDatabaseCompatTool(safeName, toolList);
-}
-
-async function executeToolByName(name, input, user, toolList = [], context = {}) {
-    const safeName = String(name || '').trim();
-    const tool = findAgentToolByName(safeName, toolList);
-    if (!tool) {
-        const err = new Error(`工具不可用或无权访问：${safeName || '-'}`);
-        err.status = 403;
-        throw err;
-    }
-    if (safeName.startsWith('mcp.')) {
-        return executeMcpTool(safeName, input, user, { source: 'agent' });
-    }
-    if (tool.databaseTool && safeName.startsWith('db.')) {
-        const rawConnectionId = input?.connectionId ?? input?.connection_id ?? input?.databaseConnectionId ?? input?.database_connection_id ?? input?.mcpServerId ?? input?.mcp_server_id;
-        const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
-        const selectedConnectionId = String(rawConnectionId || '').trim() || (connections.length === 1 ? String(connections[0].connectionId || connections[0].serverId || '') : '');
-        const connection = connections.find(item => (
-            String(item.connectionId || item.serverId || '') === selectedConnectionId
-            || String(item.serverId || '') === selectedConnectionId
-        ));
-        if (!connection?.fullName) {
-            const err = new Error('Please choose an available database connection for this database tool.');
-            err.status = 400;
-            throw err;
-        }
-        const toolInput = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
-        delete toolInput.connectionId;
-        delete toolInput.connection_id;
-        delete toolInput.databaseConnectionId;
-        delete toolInput.database_connection_id;
-        delete toolInput.mcpServerId;
-        delete toolInput.mcp_server_id;
-        return executeMcpTool(connection.fullName, toolInput, user, { source: 'agent' });
-    }
-    return executeBuiltInTool(safeName, input, user, context);
-}
-
 function isApprovalGranted(run, toolName) {
     // approveAgentTool persists approved tools in metadata.approvedTools.
     // Keep this check scoped so pendingApproval cleanup remains in the approval flow.
@@ -695,570 +631,26 @@ function isMissingFinalAnswer(value) {
         || text === 'No final answer was generated.';
 }
 
-function parseMaybeJsonPayload(value) {
-    if (!value) return value;
-    if (typeof value === 'object') return value;
-    if (typeof value !== 'string') return value;
-    const text = value.trim();
-    if (!text) return '';
-    const parsed = parseJsonObject(text);
-    return parsed || text;
-}
-
-function firstReadableString(...values) {
-    return values
-        .map(value => String(value || '').trim())
-        .find(Boolean) || '';
-}
-
-function extractTextFromContentArray(content) {
-    if (!Array.isArray(content)) return '';
-    return content
-        .map(item => {
-            if (typeof item === 'string') return item;
-            if (!item || typeof item !== 'object') return '';
-            return firstReadableString(item.text, item.content, item.markdown);
-        })
-        .filter(Boolean)
-        .join('\n')
-        .trim();
-}
-
-function summarizeStructuredDagOutput(payload) {
-    if (!payload || typeof payload !== 'object') return '';
-    const structured = payload.structuredContent && typeof payload.structuredContent === 'object'
-        ? payload.structuredContent
-        : payload;
-    if (!structured || typeof structured !== 'object') return '';
-    const type = String(structured.type || '').trim();
-    const markdown = String(structured.markdown || '').trim();
-    if (markdown && ['pivot_table', 'pivot_report', 'format_markdown_table'].includes(type)) return markdown;
-    if (type === 'pivot_chart') {
-        const title = String(structured.title || '').trim();
-        const points = Math.max(
-            Array.isArray(structured.labels) ? structured.labels.length : 0,
-            ...(Array.isArray(structured.series)
-                ? structured.series.map(item => Array.isArray(item?.data) ? item.data.length : 0)
-                : [0])
-        );
-        return `已生成图表${title ? `：${title}` : ''}${points ? `，包含 ${points} 个数据点` : ''}。`;
-    }
-    const rows = Array.isArray(structured.rows)
-        ? structured.rows
-        : Array.isArray(structured.data)
-            ? structured.data
-            : Array.isArray(structured.items)
-                ? structured.items
-                : [];
-    if (rows.length) return `查询完成，返回 ${rows.length} 行数据。`;
-    return '';
-}
-
-function extractReadableDagOutput(output) {
-    const payload = parseMaybeJsonPayload(output);
-    if (!payload) return '';
-    if (typeof payload === 'string') return payload.trim();
-    if (typeof payload !== 'object') return String(payload || '').trim();
-    const contentText = extractTextFromContentArray(payload.content);
-    return firstReadableString(
-        typeof payload.content === 'string' ? payload.content : '',
-        payload.text,
-        payload.markdown,
-        payload.answer,
-        payload.message,
-        payload.summary,
-        summarizeStructuredDagOutput(payload),
-        contentText
-    );
-}
-
-function buildDagFallbackFinalAnswer(dagSpec, states) {
-    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const completedNodes = nodes.filter(node => states.get(node.id)?.status === 'completed');
-    const reversedCompleted = completedNodes.slice().reverse();
-    const llmNode = reversedCompleted.find(node => String(node.tool || '').trim() === 'agent.llm');
-    const llmText = llmNode ? extractReadableDagOutput(states.get(llmNode.id)?.output) : '';
-    if (llmText) return llmText;
-    for (const node of reversedCompleted) {
-        const text = extractReadableDagOutput(states.get(node.id)?.output);
-        if (text) return text;
-    }
-    if (completedNodes.length) return `工作流执行完成，共 ${completedNodes.length} 个节点完成。`;
-    return '';
-}
-
-function upsertDagNode(runId, node, patch = {}) {
-    const existing = db.prepare('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?').get(runId, node.id);
-    const now = getBeijingTimestamp();
-    const row = {
-        title: patch.title ?? node.title,
-        toolName: patch.toolName ?? node.tool,
-        input: patch.input ?? node.input ?? {},
-        dependsOn: patch.dependsOn ?? node.dependsOn ?? [],
-        condition: patch.condition ?? node.condition ?? 'success',
-        status: patch.status ?? 'pending',
-        output: patch.output ?? null,
-        errorMessage: patch.errorMessage ?? '',
-        attemptCount: patch.attemptCount ?? 0,
-        durationMs: patch.durationMs ?? null,
-        startedAt: patch.startedAt ?? null,
-        completedAt: patch.completedAt ?? null
-    };
-    if (existing) {
-        db.prepare(`
-            UPDATE agent_dag_nodes
-            SET title = ?, tool_name = ?, input = ?, depends_on = ?, condition = ?, status = ?,
-                output = ?, error_message = ?, attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?
-            WHERE id = ?
-        `).run(
-            row.title,
-            row.toolName,
-            JSON.stringify(row.input),
-            JSON.stringify(row.dependsOn),
-            row.condition,
-            row.status,
-            row.output === null ? null : JSON.stringify(row.output),
-            row.errorMessage,
-            row.attemptCount,
-            row.durationMs,
-            row.startedAt,
-            row.completedAt,
-            existing.id
-        );
-        return existing.id;
-    }
-    const info = db.prepare(`
-        INSERT INTO agent_dag_nodes (
-            run_id, node_key, title, tool_name, input, depends_on, condition, status,
-            output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        runId,
-        node.id,
-        row.title,
-        row.toolName,
-        JSON.stringify(row.input),
-        JSON.stringify(row.dependsOn),
-        row.condition,
-        row.status,
-        row.output === null ? null : JSON.stringify(row.output),
-        row.errorMessage,
-        row.attemptCount,
-        row.durationMs,
-        row.startedAt,
-        row.completedAt,
-        now
-    );
-    return info.lastInsertRowid;
-}
-
-// v0.0.49 supports streaming function calling for agent runs.
-function isStreamingToolsEnabled() {
-    return String(process.env.AGENT_STREAMING_TOOLS || '').toLowerCase() === 'true';
-}
-
-// Streaming mode converts agent tools into OpenAI tools schema for direct tool_calls.
-// If the stream does not finish the run, return { completed: false } for JSON planner fallback.
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }) {
-    try {
-        const tools = buildAgentToolSchemas(toolList);
-        const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
-
-需要时使用 tool_calls 调用工具；否则提供最终答案。返回结构化的工具输入 JSON。
-
-【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。`;
-
-        const conversation = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: run.goal || '' }
-        ];
-        let lastStep = listSteps(runId).length;
-        const maxSteps = normalizeMaxSteps(run.max_steps);
-        for (let step = lastStep + 1; step <= lastStep + maxSteps; step += 1) {
-            assertRunWithinBudget();
-            assertRunNotCancelled(runId);
-            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            const stepStart = Date.now();
-            // Throttle streaming updates: emit at most every 100ms unless content grows enough.
-            let lastEmittedAt = 0;
-            let lastEmittedLen = 0;
-            const emitDelta = (snapshot) => {
-                if (!snapshot) return;
-                const now = Date.now();
-                const contentLen = (snapshot.content || '').length;
-                const sizeDelta = Math.abs(contentLen - lastEmittedLen);
-                if (now - lastEmittedAt < 100 && sizeDelta < 120) return;
-                lastEmittedAt = now;
-                lastEmittedLen = contentLen;
-                publishUserEvent(user.id, 'agent.streaming', {
-                    runId,
-                    step,
-                    content: snapshot.content || '',
-                    partialToolCalls: snapshot.partialToolCalls || [],
-                    finishReason: snapshot.finishReason || null
-                });
-            };
-            const result = await withTimeout(
-                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200, onDelta: emitDelta, user }),
-                Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-                'streaming tool planning'
-            );
-            // Emit a final streaming snapshot so the UI can mark this step complete.
-            publishUserEvent(user.id, 'agent.streaming', {
-                runId,
-                step,
-                content: result?.content || '',
-                partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
-                finishReason: result?.finishReason || null,
-                completed: true
-            });
-            recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
-            insertStep(runId, step, {
-                type: 'plan',
-                title: result?.hasToolCalls ? `Streaming tool plan: ${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || 'tool'}` : 'Streaming final answer',
-                input: { goal: run.goal },
-                output: {
-                    content: result?.content || '',
-                    toolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, arguments: c.arguments || c.argumentsRaw })),
-                    finishReason: result?.finishReason || ''
-                },
-                durationMs: Date.now() - stepStart
-            });
-
-            if (!result?.hasToolCalls) {
-                const answer = result?.content || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
-                updateRun(runId, {
-                    status: 'completed',
-                    final_answer: answer,
-                    completed_at: getBeijingTimestamp(),
-                    last_heartbeat_at: getBeijingTimestamp(),
-                    updated_at: getBeijingTimestamp()
-                });
-                createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
-                return { completed: true };
-            }
-
-            // Persist the assistant tool-call message before appending tool results.
-            conversation.push(buildAssistantToolMessage(result));
-
-            // Execute each requested tool call and append its result back to the conversation.
-            for (const call of result.toolCalls) {
-                assertRunWithinBudget();
-                assertRunNotCancelled(runId);
-                const selectedTool = findAgentToolByName(call.name, toolList);
-                if (!selectedTool) {
-                    const message = `工具不可用或无权访问：${call.name || '-'}`;
-                    conversation.push(buildToolResultMessage(call.id, { error: message }));
-                    insertStep(runId, listSteps(runId).length + 1, {
-                        type: 'tool',
-                        title: `工具不可用：${call.name || '-'}`,
-                        toolName: call.name || '',
-                        input: call.arguments || {},
-                        output: { error: message },
-                        errorMessage: message,
-                        status: 'error'
-                    });
-                    continue;
-                }
-                if (maybePauseForApproval(run, selectedTool, call.arguments || {})) {
-                    // Leave the run in approval_required; the resume path continues after approval.
-                    return { completed: true };
-                }
-                const callStart = Date.now();
-                try {
-                    const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
-                    const output = await withTimeout(
-                        executeToolByName(call.name, args, user, toolList, { run, modelCfg }),
-                        Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                        `执行工具：${call.name}`
-                    );
-                    const compactOutput = clampText(output, 10000);
-                    observations.push({ step, tool: call.name, input: args, output: compactOutput });
-                    insertStep(runId, listSteps(runId).length + 1, {
-                        type: 'tool',
-                        title: `工具执行完成：${call.name}`,
-                        toolName: call.name,
-                        input: args,
-                        output: compactOutput,
-                        durationMs: Date.now() - callStart
-                    });
-                    conversation.push(buildToolResultMessage(call.id, compactOutput));
-                } catch (toolErr) {
-                    observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
-                    insertStep(runId, listSteps(runId).length + 1, {
-                        type: 'tool',
-                        title: `工具执行失败：${call.name}`,
-                        toolName: call.name,
-                        input: call.arguments || {},
-                        output: { error: toolErr.message },
-                        errorMessage: toolErr.message,
-                        status: 'error',
-                        durationMs: Date.now() - callStart
-                    });
-                    conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
-                }
-            }
-        }
-        // No final answer was produced in streaming mode, so fall back to the JSON planner.
-        return { completed: false };
-    } catch (streamErr) {
-        // Streaming failed unexpectedly; record a control step and continue with JSON planning.
-        logger.warn({ runId, err: streamErr.message }, 'Streaming tool call failed; falling back to JSON planner');
-        insertStep(runId, listSteps(runId).length + 1, {
-            type: 'control',
-            title: 'Streaming tool fallback',
-            output: { error: streamErr.message }
-        });
-        return { completed: false };
-    }
-}
-
-async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy }) {
-    const startedAt = Date.now();
-    const startedAtText = getBeijingTimestamp();
-    let lastError = null;
-    const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-        assertRunNotCancelled(run.id);
-        try {
-            const output = await withTimeout(
-                executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg }),
-                Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
-                `执行 DAG 节点：${node.title || node.id}`
-            );
-            return {
-                ok: true,
-                output,
-                attempt,
-                startedAt,
-                startedAtText,
-                durationMs: Date.now() - startedAt
-            };
-        } catch (e) {
-            lastError = e;
-            insertStep(run.id, listSteps(run.id).length + 1, {
-                type: 'dag',
-                title: `DAG node retry ${node.title || node.id} (${attempt}/${attempts})`,
-                toolName: node.tool,
-                input: resolvedInput,
-                output: { error: e.message, attempt, attempts, retrying: attempt < attempts },
-                errorMessage: e.message,
-                status: attempt < attempts ? 'success' : 'error',
-                durationMs: Date.now() - startedAt
-            });
-            if (attempt >= attempts) break;
-        }
-    }
+function getAgentRuntimeDeps() {
     return {
-        ok: false,
-        error: lastError || new Error('DAG node failed without an error message.'),
-        attempt: attempts,
-        startedAt,
-        startedAtText,
-        durationMs: Date.now() - startedAt
+        agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
+        dagNodeConcurrency: AGENT_DAG_NODE_CONCURRENCY,
+        db,
+        logger,
+        assertRunNotCancelled,
+        createAgentNotification,
+        getAgentRunTitle,
+        getRunMetadata,
+        insertStep,
+        isMissingFinalAnswer,
+        listSteps,
+        maybePauseForApproval,
+        parseJsonObject,
+        publishUserEvent,
+        synthesizeFinalAnswer,
+        updateRun,
+        withTimeout
     };
-}
-
-async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }) {
-    const metadata = getRunMetadata(run);
-    const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
-    const dagInputs = normalizeDagRunInputs(metadata.dagInputs || metadata.inputs || {});
-    const reusedDagNodes = metadata.reusedDagNodes && typeof metadata.reusedDagNodes === 'object' ? metadata.reusedDagNodes : {};
-    if (!dagSpec.nodes.length) {
-        throw new Error('DAG mode requires at least one valid node.');
-    }
-    assertWorkflowHasConfiguredLlm(dagSpec);
-
-    dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
-    const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
-    const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
-    Object.entries(reusedDagNodes).forEach(([nodeId, state]) => {
-        states.set(nodeId, {
-            status: state?.status || 'completed',
-            input: state?.input || {},
-            output: state?.output,
-            compactOutput: clampText(state?.output, 12000),
-            reused: true
-        });
-    });
-    const observations = [];
-    let stepIndex = listSteps(run.id).length + 1;
-
-    while ([...states.values()].some(state => state.status === 'pending')) {
-        assertRunWithinBudget();
-        assertRunNotCancelled(run.id);
-        const readyNodes = dagSpec.nodes.filter(node => {
-            const state = states.get(node.id);
-            if (state?.status !== 'pending') return false;
-            return node.dependsOn.every(dep => ['completed', 'error', 'skipped'].includes(states.get(dep)?.status));
-        });
-        if (!readyNodes.length) {
-            throw new Error('DAG execution stalled because no nodes are runnable.');
-        }
-
-        const runnable = [];
-        const stopErrors = [];
-        readyNodes.forEach(node => {
-            const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
-            if (node.condition !== 'always' && depStates.some(status => status !== 'completed')) {
-                states.set(node.id, { status: 'skipped' });
-                upsertDagNode(run.id, node, {
-                    status: 'skipped',
-                    output: { status: 'skipped', reason: 'dependency_not_completed' },
-                    completedAt: getBeijingTimestamp()
-                });
-                insertStep(run.id, stepIndex, {
-                    type: 'dag',
-                    title: `跳过 DAG 节点：${node.title || node.id}`,
-                    toolName: node.tool,
-                    input: node.input,
-                    output: { status: 'skipped', dependsOn: node.dependsOn }
-                });
-                stepIndex += 1;
-            } else {
-                runnable.push(node);
-            }
-        });
-
-        await Promise.all(runnable.slice(0, AGENT_DAG_NODE_CONCURRENCY).map(async node => {
-            const selectedTool = findAgentToolByName(node.tool, toolList);
-            const resolvedInput = resolveDagNodeInput(node, {
-                goal: run.goal,
-                inputs: dagInputs,
-                states,
-                nodeMap
-            });
-            if (maybePauseForApproval(run, selectedTool, resolvedInput)) {
-                const err = new Error('DAG node requires tool approval.');
-                err.code = 'AGENT_APPROVAL_REQUIRED';
-                throw err;
-            }
-            const policy = normalizeDagNodePolicy(node, run, AGENT_TOOL_TIMEOUT_MS);
-            const startedAtText = getBeijingTimestamp();
-            states.set(node.id, { status: 'running', input: resolvedInput });
-            upsertDagNode(run.id, node, { status: 'running', input: resolvedInput, startedAt: startedAtText });
-            try {
-                const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy });
-                assertRunNotCancelled(run.id);
-                if (!result.ok) {
-                    result.error.dagAttempt = result.attempt;
-                    result.error.dagDurationMs = result.durationMs;
-                    throw result.error;
-                }
-                const { output } = result;
-                const compactOutput = clampText(output, 12000);
-                states.set(node.id, { status: 'completed', input: resolvedInput, output, compactOutput, attemptCount: result.attempt });
-                upsertDagNode(run.id, node, {
-                    status: 'completed',
-                    input: resolvedInput,
-                    output: compactOutput,
-                    attemptCount: result.attempt,
-                    durationMs: result.durationMs,
-                    completedAt: getBeijingTimestamp()
-                });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, output: compactOutput, attempts: result.attempt });
-                insertStep(run.id, stepIndex, {
-                    type: 'dag',
-                    title: `完成 DAG 节点：${node.title || node.id}`,
-                    toolName: node.tool,
-                    input: resolvedInput,
-                    output: compactOutput,
-                    durationMs: result.durationMs
-                });
-            } catch (e) {
-                const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
-                const durationMs = Number(e.dagDurationMs || 0);
-                const status = policy.onError === 'continue' ? 'completed' : 'error';
-                states.set(node.id, {
-                    status,
-                    input: resolvedInput,
-                    error: e.message,
-                    output: policy.onError === 'continue' ? { error: e.message, continued: true } : undefined,
-                    attemptCount,
-                    onError: policy.onError
-                });
-                upsertDagNode(run.id, node, {
-                    status,
-                    input: resolvedInput,
-                    output: { error: e.message, onError: policy.onError },
-                    errorMessage: e.message,
-                    attemptCount,
-                    durationMs,
-                    completedAt: getBeijingTimestamp()
-                });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
-                insertStep(run.id, stepIndex, {
-                    type: 'dag',
-                    title: policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`,
-                    toolName: node.tool,
-                    input: resolvedInput,
-                    output: { error: e.message, onError: policy.onError },
-                    errorMessage: e.message,
-                    status: policy.onError === 'continue' ? 'success' : 'error',
-                    durationMs
-                });
-                if (policy.onError === 'stop') stopErrors.push(e);
-            } finally {
-                stepIndex += 1;
-                updateRun(run.id, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            }
-        }));
-        if (stopErrors.length) throw stopErrors[0];
-    }
-
-    const failedNodes = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'error');
-    const skippedNodes = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'skipped');
-    if (failedNodes.length || skippedNodes.length) {
-        insertStep(run.id, stepIndex, {
-            type: 'control',
-            title: failedNodes.length ? 'DAG completed with failed nodes' : 'DAG completed with skipped nodes',
-            output: {
-                failedNodes: failedNodes.map(node => ({
-                    id: node.id,
-                    title: node.title,
-                    error: states.get(node.id)?.error || ''
-                })),
-                skippedNodes: skippedNodes.map(node => ({ id: node.id, title: node.title }))
-            },
-            status: failedNodes.length ? 'error' : 'success'
-        });
-    }
-
-    const fallbackAnswer = buildDagFallbackFinalAnswer(dagSpec, states);
-    let answer = '';
-    try {
-        const synthesizedAnswer = await withTimeout(
-            synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
-            Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-            'DAG final summary'
-        );
-        answer = isMissingFinalAnswer(synthesizedAnswer) && fallbackAnswer
-            ? fallbackAnswer
-            : synthesizedAnswer;
-    } catch (summaryErr) {
-        if (!fallbackAnswer) throw summaryErr;
-        answer = fallbackAnswer;
-        insertStep(run.id, stepIndex + 1, {
-            type: 'control',
-            title: 'DAG final summary fallback',
-            output: { warning: summaryErr.message, fallback: 'dag_node_output' }
-        });
-    }
-    updateRun(run.id, {
-        status: 'completed',
-        final_answer: answer,
-        error_message: failedNodes.length ? `DAG failed nodes: ${failedNodes.length}` : '',
-        completed_at: getBeijingTimestamp(),
-        last_heartbeat_at: getBeijingTimestamp(),
-        updated_at: getBeijingTimestamp()
-    });
-    createAgentNotification(
-        user.id,
-        run.id,
-        failedNodes.length ? 'warning' : 'completed',
-        failedNodes.length ? 'DAG run completed with errors' : 'DAG run completed',
-        getAgentRunTitle(run)
-    );
 }
 
 async function runAgent(runId, user) {
@@ -1323,7 +715,7 @@ async function runAgent(runId, user) {
         });
 
         if (normalizeRunMode(run.run_mode) === 'dag') {
-            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget });
+            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps());
             return;
         }
 
@@ -1332,7 +724,7 @@ async function runAgent(runId, user) {
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
-            });
+            }, getAgentRuntimeDeps());
             if (streamingResult?.completed) return;
             // Streaming emitted partial work but did not finish; continue with the JSON planner path.
         }

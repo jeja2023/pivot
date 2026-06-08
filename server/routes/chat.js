@@ -39,7 +39,8 @@ const {
 } = require('../services/chat-route-helpers');
 const {
     buildRagContextMessage,
-    injectRagContextBeforeLatestUser
+    injectRagContextBeforeLatestUser,
+    summarizeRagContextSources
 } = require('../services/chat-rag-context');
 const {
     saveAssistantMessage,
@@ -423,11 +424,17 @@ function createChatRouter({
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
             const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user }) : null;
             if (ragContext) {
+                const ragSourceSummary = summarizeRagContextSources(ragContext);
                 history = injectRagContextBeforeLatestUser(history, ragContext);
                 writeSse(JSON.stringify({
                     type: 'rag',
                     status: 'hit',
-                    message: '知识库已命中，正在基于检索结果生成回答'
+                    message: ragSourceSummary.sourceCount > 0
+                        ? `知识库已找到 ${ragSourceSummary.citationCount || ragSourceSummary.sourceCount} 条资料，正在基于来源生成回答`
+                        : '知识库已找到相关资料，正在基于资料生成回答',
+                    citationCount: ragSourceSummary.citationCount,
+                    sourceCount: ragSourceSummary.sourceCount,
+                    sources: ragSourceSummary.sources
                 }));
             } else {
                 writeSse(JSON.stringify({
@@ -822,5 +829,6 @@ module.exports = {
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,
     normalizeRegenerateFlag,
-    resolveRagQueryContent
+    resolveRagQueryContent,
+    summarizeRagContextSources
 };

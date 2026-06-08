@@ -4,7 +4,7 @@
             <div class="workspace-modal-header">
                 <div>
                     <h3>知识库</h3>
-                    <p>管理项目资料、索引状态和召回测试，让聊天与智能体任务可以稳定使用私有文档。</p>
+                    <p>把项目资料交给系统学习，确认资料可用后，聊天就能按你的文档回答。</p>
                 </div>
                 <button id="knowledge-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
             </div>
@@ -12,16 +12,31 @@
                 <div class="workspace-panel knowledge-panel">
                     <div class="workspace-toolbar knowledge-toolbar">
                         <input type="file" id="rag-upload-input" class="hidden" accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm">
-                        <button id="rag-embedding-modal-open-btn" class="btn-secondary">检索配置</button>
-                        <button id="rag-debug-modal-open-btn" class="btn-secondary">召回测试</button>
-                        <button id="rag-graph-open-btn" class="btn-secondary">知识图谱</button>
+                        <button id="rag-embedding-modal-open-btn" class="btn-secondary">高级设置</button>
+                        <button id="rag-debug-modal-open-btn" class="btn-secondary">试问一下</button>
+                        <button id="rag-graph-open-btn" class="btn-secondary">资料关系</button>
                         <button id="rag-refresh-btn" class="btn-secondary">刷新</button>
                         <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
-                        <button id="rag-batch-reindex-btn" class="btn-secondary">批量重建</button>
+                        <button id="rag-batch-reindex-btn" class="btn-secondary">重新学习</button>
                         <button id="rag-batch-delete-btn" class="btn-secondary">批量删除</button>
                         <button id="rag-retry-failed-btn" class="btn-secondary">重试失败</button>
                         <button id="rag-upload-btn" class="btn-primary">上传文档</button>
                     </div>
+                    <div class="knowledge-onboarding-panel">
+                        <div>
+                            <strong>三步用好知识库</strong>
+                            <span>上传资料，等待状态变成“就绪”，再用“试问一下”确认系统能找到答案。</span>
+                        </div>
+                        <div class="knowledge-onboarding-steps">
+                            <span>1 上传文档</span>
+                            <span>2 测试问题</span>
+                            <span>3 聊天时打开知识库</span>
+                        </div>
+                    </div>
+                    <button id="knowledge-drop-zone" class="knowledge-drop-zone" type="button">
+                        <strong>拖拽文件到这里，或点击上传</strong>
+                        <span>支持 PDF、Word、Excel、CSV、Markdown、网页文本；上传后系统会自动学习资料内容。</span>
+                    </button>
                     <div id="rag-summary" class="rag-summary"></div>
                     <div id="rag-quality-report" class="workspace-governance-panel"></div>
                     <div class="table-container workspace-table-wrap">
@@ -33,7 +48,7 @@
                                     <th style="width: auto;">文档名称</th>
                                     <th style="width: 120px;">状态</th>
                                     <th style="width: 90px;" class="text-center">启用</th>
-                                    <th style="width: 90px;" class="text-center">分块</th>
+                                    <th style="width: 90px;" class="text-center">内容段</th>
                                     <th style="width: 90px;" class="text-center">进度</th>
                                     <th style="width: 150px;">上传时间</th>
                                     <th style="width: 150px;">更新时间</th>

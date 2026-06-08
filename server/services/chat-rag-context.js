@@ -27,7 +27,28 @@ function injectRagContextBeforeLatestUser(history, ragContext) {
     return nextHistory;
 }
 
+function summarizeRagContextSources(ragContext, limit = 3) {
+    const text = String(ragContext || '');
+    const seen = new Set();
+    const sources = [];
+    const citationPattern = /\[引用\s+(\d+)\s*\|\s*来源:\s*([^\]\n]+)\]/g;
+    let match = null;
+    while ((match = citationPattern.exec(text)) !== null) {
+        const source = String(match[2] || '').trim();
+        if (!source || seen.has(source)) continue;
+        seen.add(source);
+        sources.push(source);
+    }
+
+    return {
+        citationCount: (text.match(/\[引用\s+\d+/g) || []).length,
+        sourceCount: seen.size,
+        sources: sources.slice(0, Math.max(1, Number(limit) || 3))
+    };
+}
+
 module.exports = {
     buildRagContextMessage,
-    injectRagContextBeforeLatestUser
+    injectRagContextBeforeLatestUser,
+    summarizeRagContextSources
 };

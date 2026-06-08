@@ -32,6 +32,88 @@
     background: #fff1f2;
     border: 1px solid rgba(225, 29, 72, 0.2);
 }
+.chat-answer-trace {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 8px;
+}
+.chat-answer-trace.hidden {
+    display: none;
+}
+.chat-answer-trace-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+}
+.chat-answer-trace-item strong {
+    color: #0f172a;
+    font-size: 0.76rem;
+    line-height: 1.2;
+}
+.chat-answer-trace-item span {
+    flex: 1 1 180px;
+    min-width: 0;
+}
+.chat-answer-trace-item.is-ready {
+    color: #047857;
+    background: #ecfdf5;
+    border-color: rgba(16, 185, 129, 0.24);
+}
+.chat-answer-trace-item.is-ready strong {
+    color: #065f46;
+}
+.chat-answer-trace-item.is-info {
+    color: #0369a1;
+    background: #eff6ff;
+    border-color: rgba(59, 130, 246, 0.22);
+}
+.chat-answer-trace-item.is-info strong {
+    color: #075985;
+}
+.chat-answer-trace-item.is-warning {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: rgba(245, 158, 11, 0.26);
+}
+.chat-answer-trace-item.is-warning strong {
+    color: #78350f;
+}
+.chat-answer-trace-item.is-error {
+    color: #b42318;
+    background: #fff1f2;
+    border-color: rgba(225, 29, 72, 0.22);
+}
+.chat-answer-trace-item.is-error strong {
+    color: #9f1239;
+}
+.chat-answer-trace-item.is-quiet {
+    color: #64748b;
+    background: rgba(248, 250, 252, 0.72);
+}
+.chat-answer-trace-action {
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 6px;
+    padding: 3px 7px;
+    background: rgba(15, 23, 42, 0.08);
+    color: #0f172a;
+    font-size: 0.74rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+.chat-answer-trace-action:hover {
+    background: rgba(15, 23, 42, 0.14);
+}
 .message-footer {
     display: flex;
     align-items: center;

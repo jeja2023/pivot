@@ -152,6 +152,27 @@ document.addEventListener('click', (event) => {
         return;
     }
 
+    const debugChatBtn = event.target.closest('[data-rag-debug-chat]');
+    if (debugChatBtn) {
+        const query = debugChatBtn.dataset.ragDebugChat || document.getElementById('rag-debug-query')?.value || '';
+        document.getElementById('rag-debug-modal')?.classList.add('hidden');
+        window.showMainWorkspace?.('chat');
+        try {
+            localStorage.setItem('pivot_chat_rag_enabled', 'true');
+        } catch (e) {
+            // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
+        }
+        window.syncChatToolToggles?.();
+        const input = document.getElementById('user-input');
+        if (input && query) {
+            input.value = query;
+            window.resizeUserInput?.();
+            input.focus();
+        }
+        showToast('已带着这个问题回到聊天，并打开知识库', 'success');
+        return;
+    }
+
     const deleteBtn = event.target.closest('.rag-delete-btn');
     if (deleteBtn) {
         window.deleteKnowledgeDoc(deleteBtn.dataset.ragId);
@@ -261,6 +282,16 @@ document.addEventListener('click', (event) => {
 
     if (event.target.closest('#rag-retry-failed-btn')) {
         window.retryFailedKnowledgeDocs();
+        return;
+    }
+
+    const debugSampleBtn = event.target.closest('[data-rag-debug-sample]');
+    if (debugSampleBtn) {
+        const input = document.getElementById('rag-debug-query');
+        if (input) {
+            input.value = debugSampleBtn.dataset.ragDebugSample || '';
+            input.focus();
+        }
         return;
     }
 

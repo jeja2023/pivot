@@ -253,6 +253,7 @@ window.sendMessage = async function(isRegenerate = false) {
                     return;
                 }
                 if (data.type === 'mcp') {
+                    window.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在处理能力库工具');
                     if (data.status === 'error') showToast(data.message || '能力库工具调用失败', 'warning');
                     return;
@@ -261,6 +262,7 @@ window.sendMessage = async function(isRegenerate = false) {
                     return;
                 }
                 if (data.type === 'rag') {
+                    window.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在检索知识库');
                     if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
                     if (data.status === 'empty') showToast(data.message || '知识库未命中', 'warning');

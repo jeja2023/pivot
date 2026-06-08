@@ -249,7 +249,8 @@ const {
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,
     normalizeRegenerateFlag,
-    resolveRagQueryContent
+    resolveRagQueryContent,
+    summarizeRagContextSources
 } = require('../server/routes/chat');
 
 const { createMcpRouter } = require('../server/routes/mcp');
@@ -831,6 +832,7 @@ module.exports = {
     sortDagNodesByDependencies,
     splitStreamTextForDisplay,
     stmts,
+    summarizeRagContextSources,
     streamingTools,
     subscribeUserEvents,
     test,

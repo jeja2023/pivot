@@ -9,6 +9,222 @@ const escapeChatStatusHtml = (value) => {
         .replace(/'/g, '&#039;');
 };
 
+function normalizeAssistantTraceTone(tone = '') {
+    const value = String(tone || '').toLowerCase();
+    if (['ready', 'info', 'warning', 'error', 'quiet'].includes(value)) return value;
+    return 'info';
+}
+
+function normalizeAssistantTraceMcpToolName(value = '') {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^mcp\.\d+\.(.+)$/);
+    return match ? match[1] : raw;
+}
+
+function getAssistantTraceMcpActionName(event = {}) {
+    const explicit = String(event?.actionName || '').trim();
+    if (explicit) return explicit;
+
+    const toolName = normalizeAssistantTraceMcpToolName(event?.toolName || event?.tool || event?.toolFullName || '');
+    if (!toolName) return '';
+    if (typeof mcpToolTitle === 'function') {
+        try {
+            const title = mcpToolTitle({
+                name: toolName,
+                fullName: event?.toolFullName || event?.tool || toolName,
+                serverName: event?.serverName || ''
+            });
+            if (title && title !== '动作') return title;
+        } catch (_) {}
+    }
+    return toolName.split('.').pop().replace(/[_-]+/g, ' ').trim();
+}
+
+function formatAssistantTraceMcpActionText(event = {}, prefix = '正在使用能力库', fallback = '') {
+    const serverName = String(event?.serverName || '').trim();
+    const actionName = getAssistantTraceMcpActionName(event);
+    const target = [serverName, actionName].filter(Boolean).join(' / ');
+    if (target) return `${prefix}：${target}。`;
+    return String(event?.message || '').trim() || fallback;
+}
+
+function getAssistantTraceEventCopy(event = {}) {
+    const type = String(event?.type || '').toLowerCase();
+    const status = String(event?.status || '').toLowerCase();
+    const message = String(event?.message || '').trim();
+    const sources = Array.isArray(event?.sources)
+        ? event.sources.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
+        : [];
+    const citationCount = Number(event?.citationCount || event?.sourceCount || sources.length || 0);
+
+    if (type === 'rag') {
+        if (status === 'hit') {
+            const sourceText = sources.length ? `：${sources.join('、')}` : '';
+            return {
+                tool: 'rag',
+                label: '知识库',
+                tone: 'ready',
+                text: citationCount > 0
+                    ? `知识库已找到 ${citationCount} 条可引用资料${sourceText}，会优先依据资料回答。`
+                    : '知识库已找到相关资料，会优先依据资料回答。'
+            };
+        }
+        if (status === 'empty') {
+            return {
+                tool: 'rag',
+                label: '知识库',
+                tone: 'warning',
+                text: '知识库没有找到足够相关资料，本轮会按普通聊天继续。',
+                action: 'rag',
+                actionLabel: '补充资料'
+            };
+        }
+        return {
+            tool: 'rag',
+            label: '知识库',
+            tone: status === 'error' ? 'error' : 'info',
+            text: message || '正在查找知识库资料。',
+            action: status === 'error' ? 'rag' : '',
+            actionLabel: status === 'error' ? '检查知识库' : ''
+        };
+    }
+
+    if (type === 'mcp') {
+        if (status === 'planning') {
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: 'info',
+                text: '正在判断本轮是否需要使用能力库。'
+            };
+        }
+        if (status === 'running') {
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: 'info',
+                text: formatAssistantTraceMcpActionText(event, '正在使用能力库', '正在使用能力库动作。')
+            };
+        }
+        if (status === 'done') {
+            const doneText = getAssistantTraceMcpActionName(event)
+                ? formatAssistantTraceMcpActionText(event, '能力库动作已完成').replace(/。$/u, '，正在整理结果回答你。')
+                : (message || '能力库动作已完成，正在整理结果回答你。');
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: 'ready',
+                text: doneText
+            };
+        }
+        if (status === 'empty') {
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: 'warning',
+                text: message || '能力库还没有可用动作。',
+                action: 'mcp',
+                actionLabel: '检查能力库'
+            };
+        }
+        if (status === 'skipped') {
+            const needsAction = /没有匹配|没有适合|无法完成|没有可用/.test(message);
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: needsAction ? 'warning' : 'quiet',
+                text: message || '本轮不需要调用能力库。',
+                action: needsAction ? 'mcp' : '',
+                actionLabel: needsAction ? '检查能力库' : ''
+            };
+        }
+        if (status === 'error') {
+            return {
+                tool: 'mcp',
+                label: '能力库',
+                tone: 'error',
+                text: message || '能力库动作调用失败。',
+                action: 'mcp',
+                actionLabel: '检查能力库'
+            };
+        }
+        return {
+            tool: 'mcp',
+            label: '能力库',
+            tone: 'info',
+            text: message || '能力库正在处理本轮请求。'
+        };
+    }
+
+    return null;
+}
+
+function ensureAssistantTracePanel(messageContent) {
+    if (!messageContent) return null;
+    let panel = messageContent.querySelector('.chat-answer-trace');
+    if (panel) return panel;
+
+    panel = document.createElement('div');
+    panel.className = 'chat-answer-trace hidden';
+    panel.setAttribute('aria-label', '回答依据和能力状态');
+    panel.setAttribute('aria-live', 'polite');
+
+    const textBody = messageContent.querySelector('.text-body');
+    if (textBody) {
+        messageContent.insertBefore(panel, textBody);
+    } else {
+        messageContent.prepend(panel);
+    }
+    return panel;
+}
+
+function renderAssistantTraceEvent(messageContent, event = {}) {
+    const copy = getAssistantTraceEventCopy(event);
+    if (!copy) return;
+
+    const panel = ensureAssistantTracePanel(messageContent);
+    if (!panel) return;
+
+    let item = panel.querySelector(`[data-chat-trace-item="${copy.tool}"]`);
+    if (!item) {
+        item = document.createElement('div');
+        item.dataset.chatTraceItem = copy.tool;
+        panel.appendChild(item);
+    }
+
+    item.className = `chat-answer-trace-item is-${normalizeAssistantTraceTone(copy.tone)}`;
+    item.innerHTML = '';
+
+    const label = document.createElement('strong');
+    label.textContent = copy.label;
+    const text = document.createElement('span');
+    text.textContent = copy.text;
+    item.append(label, text);
+
+    if (copy.action && copy.actionLabel) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chat-answer-trace-action';
+        button.dataset.chatTraceAction = copy.action;
+        button.textContent = copy.actionLabel;
+        item.appendChild(button);
+    }
+
+    panel.classList.remove('hidden');
+}
+
+function handleAssistantTraceAction(event) {
+    const action = event.target.closest?.('[data-chat-trace-action]');
+    if (!action) return;
+    event.preventDefault();
+    const target = action.dataset.chatTraceAction;
+    if (target === 'rag') window.openKnowledgeWorkbench?.();
+    if (target === 'mcp') window.openMcpWorkbench?.();
+}
+
+document.addEventListener('click', handleAssistantTraceAction);
+window.renderAssistantTraceEvent = renderAssistantTraceEvent;
+
 const STREAM_RENDER_INTERVAL_MS = 80;
 const STREAM_LOCAL_REPLAY_INTERVAL_MS = 24;
 const STREAM_LOCAL_REPLAY_MAX_WAIT_MS = 3200;
