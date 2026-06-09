@@ -93,6 +93,61 @@ test('聊天 MCP 上下文会为明确能力请求报告缺少匹配工具', asy
     assert.doesNotMatch(context, /本轮不需要调用工具箱工具/);
 });
 
+test('聊天 MCP 规划模型限流时不会误报为工具执行失败', async () => {
+    const plannerServer = http.createServer((_req, res) => {
+        res.writeHead(429, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            error: {
+                message: 'Upstream rate limit exceeded, please retry later',
+                type: 'rate_limit_error'
+            }
+        }));
+    });
+
+    try {
+        await new Promise(resolve => plannerServer.listen(0, '127.0.0.1', resolve));
+        const events = [];
+        const warnings = [];
+        const context = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Rate Limited Planner',
+                model_name: 'planner-test',
+                url: `http://127.0.0.1:${plannerServer.address().port}/v1`,
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '查询 widgets 表前两条数据' }],
+            userPrompt: '查询 widgets 表前两条数据',
+            tools: [{
+                fullName: 'mcp.1.db.run_readonly_query',
+                name: 'db.run_readonly_query',
+                serverName: '测试数据库',
+                description: '执行只读 SQL',
+                input_schema: { type: 'object' }
+            }],
+            user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+            writeSse(payload) {
+                events.push(JSON.parse(payload));
+            },
+            log: {
+                warn(payload) {
+                    warnings.push(payload);
+                }
+            }
+        });
+
+        assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'error']);
+        assert.match(events.at(-1).message, /工具规划模型暂时被限流/);
+        assert.doesNotMatch(events.at(-1).message, /Request failed with status code 429/);
+        assert.match(context, /没有实际调用工具/);
+        assert.equal(warnings.at(-1).statusCode, 429);
+        assert.equal(warnings.at(-1).stage, 'planning');
+    } finally {
+        await new Promise(resolve => plannerServer.close(resolve));
+    }
+});
+
 test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户对话使用', async () => {
     const suffix = Date.now().toString(36);
     const sqlitePath = path.join(process.env.DATA_DIR, `chat-mcp-${suffix}.db`);

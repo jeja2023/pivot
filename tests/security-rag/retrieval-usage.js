@@ -24,6 +24,58 @@ test('RAG 索引会拒绝空文档，而不是标记为就绪', async () => {
     );
 });
 
+test('RAG 索引在向量服务失败时保留关键词分片', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_keyword_index_${suffix}`, 'hash', 'RAG Keyword Index', 'QA', 'admin', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, `rag_keyword_index_${suffix}.txt`, 'processing', 0);
+    const upsertUserSetting = db.prepare(`
+        INSERT INTO user_settings (user_id, key, value, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+        ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+
+    axios.post = async () => {
+        const error = new Error('Request failed with status code 401');
+        error.response = { status: 401 };
+        throw error;
+    };
+
+    try {
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingMode, 'http');
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingApiUrl, 'http://127.0.0.1:9/v1');
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingModel, 'broken-embedding');
+
+        const chunkCount = await indexDocumentChunks(
+            docInfo.lastInsertRowid,
+            '关键词兜底索引内容。'.repeat(80),
+            { userId, user: { id: userId, role: 'admin', unit: 'QA' } }
+        );
+        const stored = db.prepare(`
+            SELECT COUNT(*) AS total, SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END) AS keywordOnly
+            FROM knowledge_chunks
+            WHERE doc_id = ?
+        `).get(docInfo.lastInsertRowid);
+        assert.equal(chunkCount > 0, true);
+        assert.equal(stored.total, chunkCount);
+        assert.equal(stored.keywordOnly, chunkCount);
+    } finally {
+        axios.post = originalPost;
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('RAG 汇总会返回个人检索配置', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

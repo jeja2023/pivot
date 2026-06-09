@@ -32,6 +32,7 @@ const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 const DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS = 120000;
 const MAX_EMBEDDING_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+const KEYWORD_FALLBACK_MIN_SCORE = 0.12;
 
 function normalizeTimeoutMs(value, fallback, min = 1000, max = MAX_EMBEDDING_REQUEST_TIMEOUT_MS) {
     const parsed = Number.parseInt(value, 10);
@@ -451,6 +452,29 @@ function scoreChunks(chunks, queryVector) {
     }).filter(Boolean);
 }
 
+function scoreKeywordChunks(chunks, query, minScore = KEYWORD_FALLBACK_MIN_SCORE) {
+    const keywords = buildKeywordCandidates(query, 32);
+    if (!keywords.length) return [];
+    const totalWeight = keywords.reduce((sum, term) => sum + Math.min(String(term).length, 8), 0) || 1;
+    return chunks.map(chunk => {
+        const haystack = `${chunk.content || ''}\n${chunk.name || ''}`.toLowerCase();
+        let matchedWeight = 0;
+        keywords.forEach(term => {
+            const normalizedTerm = String(term || '').toLowerCase();
+            if (normalizedTerm && haystack.includes(normalizedTerm)) {
+                matchedWeight += Math.min(normalizedTerm.length, 8);
+            }
+        });
+        const score = matchedWeight / totalWeight;
+        if (score <= minScore) return null;
+        return {
+            text: chunk.content,
+            source: chunk.name,
+            score
+        };
+    }).filter(Boolean);
+}
+
 function formatInjectedContext(topChunks) {
     let injectedContext = '\n\n【参考内部知识库信息如下】：\n';
     topChunks.forEach((chunk, index) => {
@@ -542,23 +566,31 @@ async function debugRetrieveContext(userId, query, {
             injectedContext: formatInjectedContext([])
         };
     }
-    const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
-    const scoredChunks = candidates.map(chunk => {
-        try {
-            if (!chunk.embedding) return null;
-            const docVec = JSON.parse(chunk.embedding);
-            if (!Array.isArray(docVec) || docVec.length !== vector.length) return null;
-            return {
-                chunkId: chunk.id,
-                text: chunk.content,
-                source: chunk.name,
-                score: cosineSimilarity(vector, docVec)
-            };
-        } catch (e) {
-            logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 调试向量解析失败，已跳过分片');
-            return null;
-        }
-    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    let scoredChunks = [];
+    try {
+        const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
+        scoredChunks = candidates.map(chunk => {
+            try {
+                if (!chunk.embedding) return null;
+                const docVec = JSON.parse(chunk.embedding);
+                if (!Array.isArray(docVec) || docVec.length !== vector.length) return null;
+                return {
+                    chunkId: chunk.id,
+                    text: chunk.content,
+                    source: chunk.name,
+                    score: cosineSimilarity(vector, docVec)
+                };
+            } catch (e) {
+                logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 调试向量解析失败，已跳过分片');
+                return null;
+            }
+        }).filter(Boolean).sort((a, b) => b.score - a.score);
+    } catch (e) {
+        logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
+        scoredChunks = scoreKeywordChunks(candidates, normalizedQuery)
+            .map(chunk => ({ ...chunk, chunkId: candidates.find(item => item.content === chunk.text && item.name === chunk.source)?.id }))
+            .sort((a, b) => b.score - a.score);
+    }
     const matches = scoredChunks.map(match => normalizeRetrievalDebugMatch(match, config.scoreThreshold));
 
     return {
@@ -630,9 +662,20 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             return graphContext.context;
         }
 
-        const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
-        const scoredChunks = scoreChunks(chunks, queryVector).sort((a, b) => b.score - a.score);
-        const topChunks = scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, config.topK);
+        let scoredChunks = [];
+        let usedKeywordFallback = false;
+        try {
+            const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
+            scoredChunks = scoreChunks(chunks, queryVector).sort((a, b) => b.score - a.score);
+        } catch (e) {
+            usedKeywordFallback = true;
+            logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
+            scoredChunks = scoreKeywordChunks(chunks, normalizedQuery).sort((a, b) => b.score - a.score);
+        }
+        const topChunks = (usedKeywordFallback
+            ? scoredChunks
+            : scoredChunks.filter(chunk => chunk.score > config.scoreThreshold)
+        ).slice(0, config.topK);
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
 
         if (topChunks.length === 0 && !graphContext.context) {
@@ -650,7 +693,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         const injectedContext = formatInjectedContext(topChunks) + (graphContext.context || '');
         setToCache(userId, normalizedQuery, config.topK, injectedContext, cacheScope);
         recordRetrieval({
-            status: 'hit',
+            status: usedKeywordFallback ? 'keyword_fallback_hit' : 'hit',
             durationMs: Date.now() - startedAt,
             candidates: chunks.length,
             matches: topChunks.length,
@@ -677,18 +720,27 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         }
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
-            const vectors = await generateEmbeddings(batch, null, null, userId, {
-                timeoutMs: indexEmbeddingTimeoutMs,
-                source: 'rag_ingest_embedding',
-                user
-            });
-            const results = batch.map((chunk, index) => ({ chunk, vector: vectors[index] }));
+            let vectors = null;
+            try {
+                vectors = await generateEmbeddings(batch, null, null, userId, {
+                    timeoutMs: indexEmbeddingTimeoutMs,
+                    source: 'rag_ingest_embedding',
+                    user
+                });
+            } catch (e) {
+                logger.warn({ err: e.message, docId }, 'RAG 分片向量生成失败，已按关键词索引继续');
+            }
+            const results = batch.map((chunk, index) => ({
+                chunk,
+                vector: Array.isArray(vectors) ? vectors[index] : null
+            }));
             
             const insert = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding) VALUES (?, ?, ?, ?)');
             const insertedChunks = [];
             const transaction = db.transaction((items) => {
                 for (const item of items) {
-                    const result = insert.run(docId, item.chunk, buildRagSearchContent(item.chunk), JSON.stringify(item.vector));
+                    const embedding = Array.isArray(item.vector) ? JSON.stringify(item.vector) : null;
+                    const result = insert.run(docId, item.chunk, buildRagSearchContent(item.chunk), embedding);
                     insertedChunks.push({ chunkId: result.lastInsertRowid, content: item.chunk });
                 }
             });

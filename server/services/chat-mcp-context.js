@@ -483,6 +483,39 @@ function buildMcpMissingToolHint(tools, reason = '') {
     ].join('\n');
 }
 
+function getAxiosStatusCode(error) {
+    return Number(error?.response?.status || error?.statusCode || error?.status || 0) || 0;
+}
+
+function buildMcpFailureMessage(error, stage = 'planning') {
+    const statusCode = getAxiosStatusCode(error);
+    if (stage === 'planning') {
+        if (statusCode === 429) return '工具规划模型暂时被限流，已跳过本轮工具调用，请稍后重试。';
+        if (statusCode === 401 || statusCode === 403) return '工具规划模型鉴权失败，已跳过本轮工具调用，请检查当前聊天模型配置。';
+        return '工具规划暂时失败，已跳过本轮工具调用。';
+    }
+    if (statusCode === 429) return '工具服务请求过多，本轮工具调用暂未完成，请稍后重试。';
+    if (statusCode === 401 || statusCode === 403) return '工具服务鉴权失败，请检查工具箱连接配置。';
+    return '工具箱工具调用失败，请稍后重试或检查工具箱配置。';
+}
+
+function buildMcpFailureHint(error, stage = 'planning') {
+    const statusCode = getAxiosStatusCode(error);
+    const statusText = statusCode ? `HTTP ${statusCode}` : '未知状态';
+    if (stage === 'planning') {
+        return [
+            '本轮已开启工具箱，但用于判断是否需要调用工具的模型请求失败，因此没有实际调用工具。',
+            `失败原因：${statusText}。`,
+            '请向用户说明工具规划暂时不可用，不要编造工具调用结果。'
+        ].join('\n');
+    }
+    return [
+        '本轮已开启工具箱，但工具执行阶段失败，因此没有可用的工具结果。',
+        `失败原因：${statusText}。`,
+        '请向用户说明工具调用暂时不可用，不要编造工具调用结果。'
+    ].join('\n');
+}
+
 async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log }) {
     const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
@@ -510,6 +543,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         }
         return '';
     }
+    let mcpStage = 'planning';
     try {
         writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用工具箱工具' }));
         const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
@@ -523,6 +557,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 ? buildMcpMissingToolHint(intentTools, '工具过滤后没有适合本轮请求的工具')
                 : buildMcpToolsHint(intentTools, '工具过滤后无匹配');
         }
+        mcpStage = 'planning';
         const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user);
         const plan = parsePlannerJson(plannerText);
         const plannedTool = plan?.action === 'tool' ? resolvePlannerTool(plan.tool, plannerTools, userPrompt) : null;
@@ -541,6 +576,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                         message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具箱工具')
                     }));
                     try {
+                        mcpStage = 'execution';
                         const result = await executeMcpTool(dataTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
                         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
                         const chartText = await maybeBuildChartAfterDataTool({ selected: dataTool, result, intentTools, userPrompt, user, writeSse });
@@ -583,6 +619,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             ...trace,
             message: buildMcpTraceMessage(trace.actionName, trace.serverName)
         }));
+        mcpStage = 'execution';
         const result = await executeMcpTool(selected.fullName, plan.input || {}, user, { source: 'chat' });
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
@@ -604,13 +641,14 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             resultText
         ].join('\n');
     } catch (e) {
-        log?.warn?.({ err: e.message }, '普通对话工具箱调用失败');
+        log?.warn?.({ err: e.message, statusCode: getAxiosStatusCode(e), stage: mcpStage }, '普通对话工具箱调用失败');
+        const message = buildMcpFailureMessage(e, mcpStage);
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'error',
-            message: `工具箱工具调用失败：${e.message}`
+            message
         }));
-        return `本轮尝试调用工具箱工具失败：${e.message}`;
+        return buildMcpFailureHint(e, mcpStage);
     }
 }
 

@@ -41,6 +41,7 @@ const {
     recordRagRetrieval,
     queryKnowledgeGraph,
     renderPrometheusMetrics,
+    retrieveContext,
     resolveRagQueryContent,
     summarizeRagContextSources,
     suggestDuplicateEntities,
@@ -403,6 +404,56 @@ test('聊天 RAG 状态会提取可见引用来源', () => {
     assert.equal(summary.citationCount, 3);
     assert.equal(summary.sourceCount, 2);
     assert.deepEqual(summary.sources, ['policy.md', 'ops-guide.pdf']);
+});
+
+test('RAG 查询向量生成失败时会回退到关键词检索', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_keyword_${suffix}`, 'hash', 'RAG Keyword Fallback', 'QA', 'admin', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const now = getBeijingTimestamp();
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, 'ready', 1, 1, 1, 100, ?, ?)
+    `).run(userId, `keyword_${suffix}.md`, now, now);
+    const text = '产品权限流程需要部门负责人审批，并在系统设置中完成授权。';
+    db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docInfo.lastInsertRowid, text, buildRagSearchContent(text), null);
+    const upsertUserSetting = db.prepare(`
+        INSERT INTO user_settings (user_id, key, value, updated_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+        ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+
+    axios.post = async () => {
+        const error = new Error('Request failed with status code 401');
+        error.response = { status: 401 };
+        throw error;
+    };
+
+    try {
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingMode, 'http');
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingApiUrl, 'http://127.0.0.1:9/v1');
+        upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingModel, 'broken-embedding');
+
+        const context = await retrieveContext(userId, '产品权限流程怎么审批', null, {
+            user: { id: userId, role: 'admin', unit: 'QA' }
+        });
+        assert.match(context, /产品权限流程需要部门负责人审批/);
+        assert.match(context, new RegExp(`keyword_${suffix}\\.md`));
+    } finally {
+        axios.post = originalPost;
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
 });
 
 test('请求内容为空时，聊天重新生成会复用最新用户提示做 RAG 检索', () => {
