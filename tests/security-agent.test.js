@@ -208,6 +208,30 @@ test('agent step details render structured tool output as readable summaries', (
 
 test('agent DAG node details render LLM output as readable content', () => {
     const sandbox = createAgentWorkbenchSandbox();
+    const tableHtml = sandbox.agentDagNodeMarkup({
+        node_key: 'query',
+        title: 'Group stats',
+        tool_name: 'db.run_readonly_query',
+        status: 'completed',
+        depends_on: [],
+        condition: 'success',
+        attempt_count: 1,
+        duration_ms: 11,
+        output: {
+            structuredContent: {
+                rows: [
+                    { group_id: 0, account_count: 2 },
+                    { group_id: 1, account_count: 1 }
+                ],
+                limit: 50
+            }
+        }
+    });
+    assert.match(tableHtml, /agent-dag-node-readable-output/);
+    assert.match(tableHtml, /agent-step-table/);
+    assert.match(tableHtml, />group_id</);
+    assert.match(tableHtml, />account_count</);
+
     const html = sandbox.agentDagNodeMarkup({
         node_key: 'summary',
         title: '总结',
@@ -246,6 +270,14 @@ test('agent DAG node details render LLM output as readable content', () => {
     assert.match(markdownHtml, /agent-dag-node-readable-output is-markdown/);
     assert.match(markdownHtml, /<h1>Report<\/h1>/);
     assert.match(markdownHtml, /<ol>/);
+});
+
+test('agent DAG run detail does not duplicate DAG nodes as generic execution steps', () => {
+    const source = readAgentSourceBundle();
+    assert.match(source, /const showDagNodeDetails = dagNodes\.length > 0;/);
+    assert.match(source, /\$\{showDagNodeDetails \? '' : buildAgentToolStatsMarkup\(steps\)\}/);
+    assert.match(source, /\$\{showDagNodeDetails \? '' : `<div class="agent-step-list">/);
+    assert.match(source, /\$\{showDagNodeDetails \? `/);
 });
 
 test('agent preview run display strips redundant report heading', () => {
@@ -294,6 +326,17 @@ test('agent task panel context notes uses full-width textarea', () => {
     assert.doesNotMatch(partial, /<input id="agent-context-notes"/);
     assert.match(css, /\.agent-context-controls \.agent-context-notes-field\s*\{[\s\S]*grid-column: 1 \/ -1/);
     assert.match(css, /\.agent-context-controls textarea\.form-input\s*\{[\s\S]*min-height: 58px/);
+});
+
+test('agent quick task exposes save template action without opening templates panel', () => {
+    const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const source = readAgentSourceBundle();
+    assert.match(agentPartial, /data-agent-save-template/);
+    assert.ok(
+        agentPartial.indexOf('data-agent-save-template') < agentPartial.indexOf('id="agent-goal-input"'),
+        'save template action should be available from the quick task header'
+    );
+    assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
 });
 
 test('agent stats chart wizard explains optional database schema field', () => {
@@ -453,7 +496,7 @@ test('agent free task and workflow positioning is explicit in UI and actions', (
     const source = readAgentSourceBundle();
     const css = readAgentCssBundle();
 
-    assert.match(agentPartial, /<h3>自由任务<\/h3>/);
+    assert.match(agentPartial, /<h3>快速任务<\/h3>/);
     assert.match(agentPartial, /快速任务/);
     assert.match(agentPartial, /生成工作流草稿/);
     assert.match(agentPartial, /id="agent-filter-run-type"/);
@@ -464,7 +507,7 @@ test('agent free task and workflow positioning is explicit in UI and actions', (
     assert.match(dagPartial, /工作流编排/);
     assert.match(dagPartial, /发布版本、计划运行和审计复用/);
     assert.match(dagPartial, />步骤\/节点模板</);
-    assert.match(dagPartial, /返回自由任务/);
+    assert.match(dagPartial, /返回智能体/);
     assert.match(source, /window\.createWorkflowDraftFromAgentRun/);
     assert.match(source, /workflow-draft/);
     assert.match(source, /data-agent-create-workflow-draft/);

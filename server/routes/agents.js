@@ -230,7 +230,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
     router.get('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
         const result = listRuns(req.user, {
             page: req.query.page,
-            limit: normalizeLimit(req.query.limit, 10, 100),
+            limit: normalizeLimit(req.query.limit, 15, 100),
             status: req.query.status,
             query: req.query.query,
             runType: req.query.runType || req.query.run_type || req.query.type,

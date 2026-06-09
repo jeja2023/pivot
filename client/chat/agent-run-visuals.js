@@ -120,6 +120,13 @@ function agentDagNodeReadableText(node) {
 }
 
 function agentDagNodeReadableOutputMarkup(node) {
+    const structured = unwrapAgentStructuredPayload(node.output);
+    if (structured && typeof structured === 'object') {
+        const structuredMarkup = agentStepChartSummaryMarkup(structured) || agentStepRowsMarkup(structured);
+        if (structuredMarkup) return `<div class="agent-dag-node-readable-output">${structuredMarkup}</div>`;
+        const renderedOutput = renderAgentStructuredOutput(structured);
+        if (renderedOutput) return `<div class="agent-dag-node-readable-output">${renderedOutput}</div>`;
+    }
     const text = agentDagNodeReadableText(node);
     if (!text) return '';
     const cleanText = stripAgentWorkflowReportHeading(text);

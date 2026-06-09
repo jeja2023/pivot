@@ -16,6 +16,7 @@
                             <p>选择模型并设定目标，适合先探索路径，再从任务结果生成工作流草稿。</p>
                         </div>
                         <div class="agent-panel-head-actions">
+                            <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
                             <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
                         </div>
                     </div>
@@ -125,7 +126,7 @@
                             <div class="agent-template-strip">
                                 <div class="agent-tool-section-head compact">
                                     <strong>自由任务模板库</strong>
-                                    <button id="agent-save-template-btn" class="btn-secondary" type="button">保存目标模板</button>
+                                    <button id="agent-save-template-btn" class="btn-secondary" type="button" data-agent-save-template>保存当前任务</button>
                                 </div>
                                 <div id="agent-template-list" class="agent-template-list"></div>
                             </div>

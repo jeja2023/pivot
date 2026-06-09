@@ -41,7 +41,7 @@ function normalizeRunTypeFilter(value) {
 }
 
 function listRuns(user, options = {}) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 10, 1), 100);
+    const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 15, 1), 100);
     const safePage = Math.max(Number.parseInt(options.page, 10) || 1, 1);
     const offset = (safePage - 1) * safeLimit;
     const status = String(options.status || '').trim();

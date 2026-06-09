@@ -44,7 +44,7 @@ let agentWorkflowPreviewTimer = null;
 
 let pendingAgentWorkflowDraft = null;
 
-const AGENT_RUNS_PAGE_SIZE = 10;
+const AGENT_RUNS_PAGE_SIZE = 15;
 
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
 
@@ -160,11 +160,11 @@ window.bindAgentFilters = function() {
 };
 
 window.bindAgentEnterpriseControls = function() {
-    const saveTemplateBtn = document.getElementById('agent-save-template-btn');
-    if (saveTemplateBtn && saveTemplateBtn.dataset.boundAgentTemplateSave !== '1') {
+    document.querySelectorAll('[data-agent-save-template]').forEach(saveTemplateBtn => {
+        if (saveTemplateBtn.dataset.boundAgentTemplateSave === '1') return;
         saveTemplateBtn.dataset.boundAgentTemplateSave = '1';
         saveTemplateBtn.addEventListener('click', saveCurrentAgentTemplate);
-    }
+    });
     const frequency = document.getElementById('agent-schedule-frequency');
     const weekday = document.getElementById('agent-schedule-weekday');
     if (frequency && frequency.dataset.boundAgentSchedule !== '1') {

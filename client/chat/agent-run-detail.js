@@ -109,6 +109,7 @@ window.openAgentRun = async function(runId, options = {}) {
         run.title = agentPreviewDisplayTitle(agentDisplayTitle(run));
         run.final_answer = stripAgentWorkflowReportHeading(run.final_answer);
     }
+    const showDagNodeDetails = dagNodes.length > 0;
     const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
     if (title) title.textContent = isPreview ? `预览运行：${agentPreviewDisplayTitle(agentDisplayTitle(run))}` : agentDisplayTitle(run);
@@ -135,7 +136,7 @@ window.openAgentRun = async function(runId, options = {}) {
         ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
         ${visualOutputs}
-        ${dagNodes.length ? `
+        ${showDagNodeDetails ? `
             <div class="agent-dag-list">
                 <div class="agent-tool-section-head compact">
                     <strong>工作流节点</strong>
@@ -145,10 +146,10 @@ window.openAgentRun = async function(runId, options = {}) {
                 ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
             </div>
         ` : ''}
-        ${buildAgentToolStatsMarkup(steps)}
-        <div class="agent-step-list">
+        ${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}
+        ${showDagNodeDetails ? '' : `<div class="agent-step-list">
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
-        </div>
+        </div>`}
     `;
     detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
         if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
