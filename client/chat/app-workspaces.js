@@ -29,22 +29,22 @@ const CHAT_TOOL_TOGGLE_STORAGE = {
 const CHAT_TOOL_STATUS_COPY = {
     rag: {
         label: '知识库',
-        ready: '知识库已打开，本轮回答会优先检索已启用资料。',
-        checking: '知识库正在检查资料状态。',
-        empty: '知识库已打开，但还没有就绪资料。',
-        loading: '知识库正在索引，稍等片刻就能参与回答。',
-        error: '知识库有资料索引失败，请先处理后再提问。',
-        offline: '知识库状态暂时无法确认，仍会按当前开关尝试检索。',
+        ready: '已打开，优先检索资料。',
+        checking: '检查中',
+        empty: '暂无就绪资料',
+        loading: '索引中',
+        error: '资料索引失败',
+        offline: '状态未确认',
         action: '打开知识库'
     },
     mcp: {
         label: '工具箱',
-        ready: '工具箱已打开，本轮对话可按需调用已启用工具。',
-        checking: '工具箱正在检查可用工具。',
-        empty: '工具箱已打开，但还没有可用工具。',
-        loading: '工具箱正在检查可用工具。',
-        error: '工具箱状态暂时无法确认，请打开工具箱检查配置。',
-        offline: '工具箱状态暂时无法确认，仍会按当前开关尝试调用。',
+        ready: '已打开，可按需调用。',
+        checking: '检查中',
+        empty: '暂无可用工具',
+        loading: '检查中',
+        error: '状态异常',
+        offline: '状态未确认',
         action: '打开工具箱'
     }
 };
@@ -136,7 +136,7 @@ async function fetchChatToolReadiness(tool) {
         const ready = Number(summary.ready || 0);
         const processing = Number(summary.processing || 0);
         const error = Number(summary.error || 0);
-        if (ready > 0) return { tone: 'ready', text: `知识库已打开，${ready} 份资料可参与回答。` };
+        if (ready > 0) return { tone: 'ready', text: `${ready} 份资料可用` };
         if (processing > 0) return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.loading, action: true };
         if (error > 0) return { tone: 'error', text: CHAT_TOOL_STATUS_COPY.rag.error, action: true };
         return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.empty, action: true };
@@ -147,7 +147,7 @@ async function fetchChatToolReadiness(tool) {
         if (!res.ok) throw new Error('工具箱状态获取失败');
         const data = await res.json();
         const count = Array.isArray(data.tools) ? data.tools.length : 0;
-        if (count > 0) return { tone: 'ready', text: `工具箱已打开，${count} 个工具可按需调用。` };
+        if (count > 0) return { tone: 'ready', text: `${count} 个工具可用` };
         return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.mcp.empty, action: true };
     }
 
