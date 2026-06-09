@@ -30,6 +30,18 @@
     .mcp-card-actions {
         justify-content: flex-start;
     }
+
+    .mcp-tool-governance {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-tool-governance [data-mcp-tool-usage] {
+        grid-column: auto;
+    }
+
+    .mcp-tool-governance .btn-secondary {
+        width: 100%;
+    }
 }
 
 @media (min-width: 1280px) {

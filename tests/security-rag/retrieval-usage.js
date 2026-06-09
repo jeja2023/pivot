@@ -14,6 +14,8 @@ const {
     recordModelTokenUsage,
     test
 } = require('../security-helpers');
+const { buildRagCacheScope } = require('../../server/services/rag-index');
+const { getKnowledgeQualityReport } = require('../../server/services/rag-documents');
 
 test('RAG 索引会拒绝空文档，而不是标记为就绪', async () => {
     await assert.rejects(
@@ -171,5 +173,57 @@ test('可用模型路由包含已配置的嵌入模型', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+    }
+});
+
+test('RAG cache scope changes when knowledge version changes', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_scope_${suffix}`, 'hash', 'RAG Scope Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (
+            user_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at, processed_at
+        ) VALUES (?, ?, 'ready', 1, 2, 2, 100, ?, ?, ?)
+    `).run(userId, `scope-${suffix}.md`, '2026-01-01 00:00:00', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+
+    try {
+        const first = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
+        db.prepare('UPDATE knowledge_docs SET updated_at = ? WHERE id = ?').run('2026-01-02 00:00:00', docInfo.lastInsertRowid);
+        const second = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
+        assert.notEqual(first, second);
+        assert.match(second, /d=1/);
+        assert.match(second, /h=2/);
+    } finally {
+        db.prepare('DELETE FROM knowledge_docs WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('knowledge quality report exposes scored governance signals', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_quality_${suffix}`, 'hash', 'RAG Quality Test', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    db.prepare(`
+        INSERT INTO knowledge_docs (
+            user_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at, processed_at
+        ) VALUES (?, ?, 'ready', 1, 4, 4, 100, datetime('now', '+8 hours'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, `quality-${suffix}.md`);
+
+    try {
+        const report = getKnowledgeQualityReport(userId);
+        assert.equal(report.overview.readyEnabled, 1);
+        assert.equal(report.signals.readinessRate, 100);
+        assert.equal(report.signals.avgChunksPerReadyDoc, 4);
+        assert.ok(Number.isInteger(report.signals.score));
+        assert.ok(Array.isArray(report.recommendations));
+    } finally {
+        db.prepare('DELETE FROM knowledge_docs WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });

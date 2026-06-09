@@ -72,7 +72,7 @@ window.createAgentRun = async function() {
     });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '任务创建失败', 'error');
-    showToast('智能体任务已入队', 'success');
+    showToast('自由任务已入队', 'success');
     document.getElementById('agent-goal-input').value = '';
     await Promise.all([loadAgentRuns(1), loadAgentSchedules(), loadAgentNotifications()]);
     await window.openAgentRun(data.run.id);
@@ -92,11 +92,11 @@ window.approveAgentRun = async function(runId, approve = true) {
 };
 
 window.cancelAgentRun = function(runId) {
-    showConfirm('停止智能体任务', '确定停止这个正在执行的智能体任务吗？', async () => {
+    showConfirm('停止自由任务', '确定停止这个正在执行的自由任务吗？', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '停止失败', 'error');
-        showToast('智能体任务已停止', 'success');
+        showToast('自由任务已停止', 'success');
         await loadAgentRuns();
         const stillExists = agentRunsCache.some(run => run.id === runId);
         if (stillExists) await window.openAgentRun(runId);
@@ -117,7 +117,7 @@ window.rerunAgentRun = async function(runId) {
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '重新运行失败', 'error');
-    showToast('已创建新的智能体任务', 'success');
+    showToast('已创建新的自由任务', 'success');
     await loadAgentRuns(1);
     await window.openAgentRun(data.run.id);
 };
@@ -129,6 +129,20 @@ window.resumeAgentRun = async function(runId) {
     showToast('已从上次执行位置创建续跑任务', 'success');
     await loadAgentRuns(1);
     await window.openAgentRun(data.run.id);
+};
+
+window.createWorkflowDraftFromAgentRun = async function(runId) {
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/workflow-draft`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '生成工作流草稿失败');
+        pendingAgentWorkflowDraft = data.draft || null;
+        showToast('已生成工作流草稿，请在编排页检查后保存或发布。', 'success');
+        closeAgentRunDetailModal();
+        await window.openAgentDagWorkbench?.({ draft: pendingAgentWorkflowDraft });
+    } catch (e) {
+        showToast(e.message || '生成工作流草稿失败', 'error');
+    }
 };
 
 window.rerunAgentDagNode = async function(runId, nodeId = '') {
@@ -145,11 +159,11 @@ window.rerunAgentDagNode = async function(runId, nodeId = '') {
 };
 
 window.deleteAgentRun = function(runId) {
-    showConfirm('移除智能体任务记录', '确定从任务列表移除这条智能体任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
+    showConfirm('移除任务记录', '确定从任务列表移除这条任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '移除记录失败', 'error');
-        showToast('智能体任务记录已移除', 'success');
+        showToast('任务记录已移除', 'success');
         closeAgentRunDetailModal();
         await loadAgentRuns();
     });
@@ -157,7 +171,7 @@ window.deleteAgentRun = function(runId) {
 
 window.showAgentRunAudit = async function() {
     if (!isSuperAdminUser()) {
-        showToast('仅 admin 权限层级可查看智能体删除审计', 'error');
+        showToast('仅 admin 权限层级可查看任务删除审计', 'error');
         return;
     }
     try {

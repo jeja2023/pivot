@@ -220,3 +220,98 @@ test('数据库 MCP 预设暴露 SQLite 只读工具并拒绝写入', async () =
         fs.rmSync(sqlitePath, { force: true });
     }
 });
+
+test('数据库 MCP 治理会限制表字段并脱敏敏感字段', async () => {
+    const suffix = Date.now().toString(36);
+    const sqlitePath = path.join(process.env.DATA_DIR, `mcp-governed-${suffix}.db`);
+    const source = new Sqlite(sqlitePath);
+    source.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, kind TEXT NOT NULL);
+        CREATE TABLE secrets (id INTEGER PRIMARY KEY, token TEXT NOT NULL);
+        INSERT INTO widgets (name, email, kind) VALUES ('alpha', 'alpha@example.test', 'red'), ('beta', 'beta@example.test', 'blue');
+        INSERT INTO secrets (token) VALUES ('top-secret');
+    `);
+    source.close();
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_governed_${suffix}`, 'hash', 'MCP Governed DB Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `mcp_governed_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/mcp/database-connections' && layer.route?.methods?.post);
+    const refreshRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/refresh' && layer.route?.methods?.post);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    let serverId = null;
+    try {
+        const createReq = {
+            body: {
+                name: `Governed SQLite ${suffix}`,
+                database_type: 'sqlite',
+                database_name: sqlitePath,
+                max_rows: 5,
+                table_allowlist: 'widgets',
+                field_allowlist: 'widgets: id,name,email,kind',
+                sensitive_fields: 'email',
+                row_policy_hint: '仅演示脱敏字段',
+                query_timeout_ms: 5000
+            },
+            user: adminUser
+        };
+        const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), createReq, createRes);
+        assert.equal(createRes.statusCode, 201);
+        serverId = createRes.body.server.id;
+
+        const refreshReq = { params: { id: String(serverId) }, user: adminUser };
+        const refreshRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(refreshRoute.route.stack.map(layer => layer.handle), refreshReq, refreshRes);
+        assert.equal(refreshRes.statusCode, 200);
+
+        const listReq = { body: { name: `mcp.${serverId}.db.list_tables`, input: {} }, user: adminUser };
+        const listRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), listReq, listRes);
+        assert.deepEqual(listRes.body.result.structuredContent.map(row => row.name), ['widgets']);
+
+        const queryReq = {
+            body: {
+                name: `mcp.${serverId}.db.run_readonly_query`,
+                input: { sql: 'SELECT name, email FROM widgets ORDER BY id', limit: 2 }
+            },
+            user: adminUser
+        };
+        const queryRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), queryReq, queryRes);
+        assert.deepEqual(queryRes.body.result.structuredContent.rows, [
+            { name: 'alpha', email: '[已脱敏]' },
+            { name: 'beta', email: '[已脱敏]' }
+        ]);
+        assert.equal(queryRes.body.result.structuredContent.cost.operation, 'readonly_sql');
+        assert.equal(queryRes.body.result.structuredContent.governance.rowPolicyHint, '仅演示脱敏字段');
+
+        const blockedReq = {
+            body: {
+                name: `mcp.${serverId}.db.run_readonly_query`,
+                input: { sql: 'SELECT token FROM secrets' }
+            },
+            user: adminUser
+        };
+        const blockedRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+        await assert.rejects(
+            runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), blockedReq, blockedRes),
+            /不在允许访问的表白名单/
+        );
+    } finally {
+        if (serverId) {
+            db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_database_connections WHERE mcp_server_id = ?').run(serverId);
+            db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        fs.rmSync(sqlitePath, { force: true });
+    }
+});

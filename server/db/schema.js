@@ -549,6 +549,7 @@ function initSchema() {
             base_url TEXT NOT NULL,
             api_key TEXT,
             description TEXT,
+            config TEXT,
             status TEXT DEFAULT 'active',
             last_error TEXT,
             last_checked_at DATETIME,

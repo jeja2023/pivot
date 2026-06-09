@@ -2,6 +2,7 @@ const { db } = require('../db');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
+const { queryKnowledgeGraph } = require('./knowledge-graph');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { getRunnableModelForUser, getUserRunnableModels } = require('./models');
 const { parsePositiveInt } = require('../number');
@@ -84,6 +85,16 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({
                 limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
             })
+        },
+        {
+            name: 'knowledge.graph.query',
+            title: '知识图谱查询',
+            description: '按问题查询当前用户知识图谱中的实体、关系路径和来源文档，用于回答责任、依赖、归属、影响等关系型问题。',
+            input_schema: asJsonSchema({
+                query: { type: 'string' },
+                entityLimit: { type: 'integer', minimum: 1, maximum: 10, default: 6 },
+                relationLimit: { type: 'integer', minimum: 1, maximum: 20, default: 12 }
+            }, ['query'])
         },
         {
             name: 'viz.build_chart',
@@ -257,6 +268,17 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ?
         `).all(user.id, limit);
+    }
+
+    if (name === 'knowledge.graph.query') {
+        const query = String(input.query || '').trim();
+        if (!query) throw new Error('请填写知识图谱查询问题。');
+        return queryKnowledgeGraph({
+            userId: user.id,
+            query,
+            entityLimit: parsePositiveInt(input.entityLimit, 6, 10),
+            relationLimit: parsePositiveInt(input.relationLimit, 12, 20)
+        });
     }
 
     if (name === 'models.list') {

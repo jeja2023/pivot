@@ -52,6 +52,7 @@
             `起点：${row.source_name || '-'}`,
             `关系：${relationText}${row.relation_type && row.relation_type !== relationText ? `（${row.relation_type}）` : ''}`,
             `终点：${row.target_name || '-'}`,
+            `状态：${row.status || 'active'}`,
             `来源：${row.doc_name || '知识图谱'}`,
             `可信度：${Number(row.confidence || 0).toFixed(2)}`,
             row.description ? `描述：${row.description}` : '',
@@ -64,9 +65,14 @@
         const graphTypeLabel = options.graphTypeLabel || (value => String(value ?? ''));
         const labels = options.labels || {};
         const topTypes = Array.isArray(summary.topTypes) ? summary.topTypes : [];
+        const quality = summary.quality || {};
+        const qualityLevel = ['good', 'warning', 'risk'].includes(String(quality.level || '')) ? quality.level : 'good';
         return `
         <span class="rag-graph-summary-main"><b>${Number(summary.entities || 0)}</b><small>${escapeHtml(labels.entities || '')}</small></span>
         <span class="rag-graph-summary-main"><b>${Number(summary.relations || 0)}</b><small>${escapeHtml(labels.relations || '')}</small></span>
+        <span class="rag-graph-summary-main rag-graph-summary-quality is-${qualityLevel}"><b>${Number(quality.qualityScore ?? 0)}</b><small>${escapeHtml(labels.quality || '')}</small></span>
+        <span><small>${escapeHtml(labels.pending || '')}</small><b>${Number(summary.pendingRelations || quality.pendingRelations || 0)}</b></span>
+        <span><small>${escapeHtml(labels.orphans || '')}</small><b>${Number(quality.orphanEntities || 0)}</b></span>
         <span class="rag-graph-summary-main"><b>${Number(summary.mentions || 0)}</b><small>${escapeHtml(labels.mentions || '')}</small></span>
         ${topTypes.slice(0, 5).map(item => `<span><small>${escapeHtml(graphTypeLabel(item.type))}</small><b>${Number(item.count || 0)}</b></span>`).join('')}
     `;
@@ -176,18 +182,23 @@
         const describeSource = messages.describeSource || (row => row.doc_name || sourceFallback);
         const editLabel = messages.editLabel || '';
         const deleteLabel = messages.deleteLabel || '';
+        const confirmLabel = messages.confirmLabel || '';
+        const statusLabel = messages.statusLabel || (value => String(value || 'active'));
         return relations.map(row => {
             const relationTooltip = buildGraphRelationTooltip(row);
             const sourceText = describeSource(row);
+            const rawStatus = String(row.status || 'active');
+            const status = ['active', 'pending', 'deleted'].includes(rawStatus) ? rawStatus : 'active';
+            const sourceSnippet = String(row.chunk_text || '').trim().slice(0, 180);
             return `
-        <article class="rag-graph-relation ${layout.graphRelationTone(row.relation_type)}" data-relation-id="${row.id}" data-graph-relation-tooltip="${escapeAttr(relationTooltip)}" title="${escapeAttr(relationTooltip)}">
+        <article class="rag-graph-relation ${layout.graphRelationTone(row.relation_type)} is-${escapeAttr(status)}" data-relation-id="${row.id}" data-graph-relation-tooltip="${escapeAttr(relationTooltip)}" title="${escapeAttr(relationTooltip)}">
             <header>
                 <strong>
                     <span title="${escapeAttr(row.source_name || '')}">${escapeHtml(row.source_name)}</span>
                     <b>${escapeHtml(graphRelationLabel(row.relation_type))}</b>
                     <span title="${escapeAttr(row.target_name || '')}">${escapeHtml(row.target_name)}</span>
                 </strong>
-                <span class="rag-graph-confidence">${escapeHtml(formatConfidence(row))}</span>
+                <span class="rag-graph-confidence">${escapeHtml(formatConfidence(row))} · ${escapeHtml(statusLabel(status))}</span>
             </header>
             <div class="rag-graph-relation-foot">
                 <p>
@@ -195,10 +206,12 @@
                     ${row.description ? `<span>${escapeHtml(row.description)}</span>` : ''}
                 </p>
                 <div class="rag-graph-actions">
+                    ${status === 'pending' ? `<button class="btn-secondary rag-graph-confirm-relation-btn" data-relation-id="${row.id}">${escapeHtml(confirmLabel)}</button>` : ''}
                     <button class="btn-secondary rag-graph-edit-relation-btn" data-relation-id="${row.id}">${escapeHtml(editLabel)}</button>
                     <button class="btn-danger rag-graph-delete-relation-btn" data-relation-id="${row.id}">${escapeHtml(deleteLabel)}</button>
                 </div>
             </div>
+            ${sourceSnippet ? `<p class="rag-graph-source-snippet">${escapeHtml(sourceSnippet)}</p>` : ''}
         </article>
     `;
         }).join('') || emptyHtml;
@@ -231,6 +244,45 @@
             ...options,
             getLabel: graphRelationLabel
         });
+    }
+
+    function buildGraphRelationFilterOptionsHtml(options = {}) {
+        const escapeHtml = options.escapeHtml || (value => String(value ?? ''));
+        return [
+            `<option value="">${escapeHtml(options.emptyLabel || '')}</option>`,
+            buildGraphRelationOptionsHtml('', options)
+        ].join('');
+    }
+
+    function buildGraphQueryResultHtml(result = {}, options = {}) {
+        const escapeHtml = options.escapeHtml || (value => String(value ?? ''));
+        const graphRelationLabel = options.graphRelationLabel || (value => String(value ?? ''));
+        const messages = options.messages || {};
+        const entities = Array.isArray(result.entities) ? result.entities : [];
+        const paths = Array.isArray(result.paths) ? result.paths : [];
+        if (!String(result.query || '').trim()) return '';
+        const entityHtml = entities.slice(0, 6)
+            .map(entity => `<span>${escapeHtml(entity.name)}<small>${escapeHtml(entity.type || 'concept')}</small></span>`)
+            .join('');
+        const pathHtml = paths.slice(0, 8)
+            .map(path => `
+                <div class="rag-graph-path">
+                    <strong>${escapeHtml(path.source || '')}</strong>
+                    <b>${escapeHtml(graphRelationLabel(path.relationType))}</b>
+                    <strong>${escapeHtml(path.target || '')}</strong>
+                    <small>${escapeHtml(path.docName || messages.defaultSource || '')} · ${Number(path.confidence || 0).toFixed(2)}</small>
+                </div>
+            `)
+            .join('');
+        return `
+            <div class="rag-graph-query-meta">
+                <span>${escapeHtml(messages.hintLabel || '')}${escapeHtml(result.answerHint || '')}</span>
+                <span>${escapeHtml(messages.entityLabel || '')}${entities.length}</span>
+                <span>${escapeHtml(messages.pathLabel || '')}${paths.length}</span>
+            </div>
+            ${entityHtml ? `<div class="rag-graph-query-entities">${entityHtml}</div>` : ''}
+            ${pathHtml || `<div class="rag-debug-empty">${escapeHtml(messages.emptyPath || '')}</div>`}
+        `;
     }
 
     function buildGraphTypeFilterOptionsHtml(options = {}) {
@@ -305,8 +357,18 @@
                 <div class="rag-graph-toolbar">
                     <input id="rag-graph-search" class="form-input" placeholder="${escapeAttr(messages.searchPlaceholder || '')}">
                     <select id="rag-graph-type" class="form-input">${typeFilterOptionsHtml}</select>
+                    <select id="rag-graph-quality" class="form-input">
+                        <option value="">${escapeHtml(messages.qualityAllLabel || '')}</option>
+                        <option value="orphan">${escapeHtml(messages.qualityOrphanLabel || '')}</option>
+                        <option value="low">${escapeHtml(messages.qualityLowLabel || '')}</option>
+                    </select>
                     <button id="rag-graph-search-btn" class="btn-secondary">${escapeHtml(messages.searchLabel || '')}</button>
                 </div>
+            </div>
+            <div class="rag-graph-query-panel">
+                <input id="rag-graph-query" class="form-input" placeholder="${escapeAttr(messages.queryPlaceholder || '')}">
+                <button id="rag-graph-query-btn" class="btn-secondary">${escapeHtml(messages.queryLabel || '')}</button>
+                <div id="rag-graph-query-results" class="rag-graph-query-results"></div>
             </div>
             <div class="rag-graph-layout">
                 <section class="rag-graph-panel">
@@ -330,6 +392,15 @@
                     <div class="rag-graph-panel-head">
                         <strong>${escapeHtml(messages.relationsTitle || '')}</strong>
                         <span id="rag-graph-relation-count">0</span>
+                    </div>
+                    <div class="rag-graph-filter-row">
+                        <select id="rag-graph-relation-status" class="form-input">
+                            <option value="active">${escapeHtml(messages.statusActiveLabel || '')}</option>
+                            <option value="all">${escapeHtml(messages.statusAllLabel || '')}</option>
+                            <option value="pending">${escapeHtml(messages.statusPendingLabel || '')}</option>
+                        </select>
+                        <select id="rag-graph-relation-type" class="form-input">${options.relationFilterOptionsHtml || ''}</select>
+                        <input id="rag-graph-min-confidence" class="form-input" type="number" min="0" max="1" step="0.05" placeholder="${escapeAttr(messages.minConfidencePlaceholder || '')}">
                     </div>
                     <div id="rag-graph-relations" class="rag-graph-relation-list"></div>
                 </section>
@@ -364,6 +435,8 @@
         buildGraphModalShellHtml,
         buildGraphNodeTooltip,
         buildGraphRelationTooltip,
+        buildGraphQueryResultHtml,
+        buildGraphRelationFilterOptionsHtml,
         buildGraphRelationOptionsHtml,
         buildGraphRelationEditorHtml,
         buildGraphRelationsHtml,

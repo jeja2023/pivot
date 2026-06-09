@@ -41,7 +41,7 @@
 }
 
 .agent-runs-table-wrap {
-    min-width: 1240px;
+    min-width: 1320px;
 }
 
 .agent-runs-table {
@@ -91,54 +91,54 @@
 
 .agent-runs-table th:nth-child(2),
 .agent-runs-table td:nth-child(2) {
-    width: 25%;
+    width: 22%;
 }
 
 .agent-runs-table th:nth-child(3),
 .agent-runs-table td:nth-child(3) {
-    width: 132px;
+    width: 92px;
 }
 
 .agent-runs-table th:nth-child(4),
 .agent-runs-table td:nth-child(4) {
-    width: 98px;
+    width: 132px;
 }
 
 .agent-runs-table th:nth-child(5),
-.agent-runs-table td:nth-child(5),
+.agent-runs-table td:nth-child(5) {
+    width: 98px;
+}
+
 .agent-runs-table th:nth-child(6),
 .agent-runs-table td:nth-child(6),
 .agent-runs-table th:nth-child(7),
 .agent-runs-table td:nth-child(7),
 .agent-runs-table th:nth-child(8),
-.agent-runs-table td:nth-child(8) {
+.agent-runs-table td:nth-child(8),
+.agent-runs-table th:nth-child(9),
+.agent-runs-table td:nth-child(9) {
     width: 72px;
-}
-
-.agent-runs-table th:nth-child(11),
-.agent-runs-table td:nth-child(11) {
-    width: 150px;
 }
 
 .agent-runs-table th:nth-child(12),
 .agent-runs-table td:nth-child(12) {
-    width: 86px;
-}
-
-.agent-runs-table th:nth-child(9),
-.agent-runs-table td:nth-child(9),
-.agent-runs-table th:nth-child(10),
-.agent-runs-table td:nth-child(10) {
-    width: 104px;
-}
-
-.agent-runs-table th:nth-child(8),
-.agent-runs-table td:nth-child(8) {
-    width: 104px;
+    width: 150px;
 }
 
 .agent-runs-table th:nth-child(13),
 .agent-runs-table td:nth-child(13) {
+    width: 86px;
+}
+
+.agent-runs-table th:nth-child(10),
+.agent-runs-table td:nth-child(10),
+.agent-runs-table th:nth-child(11),
+.agent-runs-table td:nth-child(11) {
+    width: 104px;
+}
+
+.agent-runs-table th:nth-child(14),
+.agent-runs-table td:nth-child(14) {
     width: 118px;
     text-align: left;
 }
@@ -198,6 +198,28 @@
 
 .agent-run-title-tooltip.hidden {
     display: none;
+}
+
+.agent-run-type {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid rgba(59, 130, 246, 0.24);
+    border-radius: 999px;
+    background: rgba(239, 246, 255, 0.85);
+    color: #1d4ed8;
+    font-size: 0.68rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.agent-run-type.free {
+    border-color: rgba(16, 185, 129, 0.28);
+    background: rgba(236, 253, 245, 0.9);
+    color: #047857;
 }
 
 .agent-runs-muted {

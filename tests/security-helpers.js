@@ -166,6 +166,7 @@ const {
 } = require('../server/services/rag-config');
 
 const {
+    confirmRelation,
     deleteRelation,
     extractKnowledgeGraph,
     getEntityGraph,
@@ -175,6 +176,8 @@ const {
     listEntities,
     listRelations,
     mergeEntities,
+    queryKnowledgeGraph,
+    suggestDuplicateEntities,
     updateEntity
 } = require('../server/services/knowledge-graph');
 
@@ -330,6 +333,7 @@ const {
 } = require('../server/services/agent-tool-catalog');
 
 const {
+    createWorkflowDraftFromRun,
     getRunDetailForUser,
     getRunProgress,
     getRunForUser,
@@ -668,6 +672,7 @@ module.exports = {
     cleanupOldLogs,
     cleanupSoftDeletedStorage,
     computeNextScheduleRun,
+    confirmRelation,
     contentContainsVisionInput,
     convertChatMessagesToResponsesInput,
     cosineSimilarity,
@@ -745,6 +750,7 @@ module.exports = {
     getRagFeedbackSummary,
     getRagMetricsSnapshot,
     getRealtimeStats,
+    createWorkflowDraftFromRun,
     getRunDetailForUser,
     getRunForUser,
     getRunProgress,
@@ -800,6 +806,7 @@ module.exports = {
     path,
     processKnowledgeDocument,
     publishUserEvent,
+    queryKnowledgeGraph,
     readKnowledgeDocumentFromPath,
     readZipEntries,
     recordHttpRequest,
@@ -833,6 +840,7 @@ module.exports = {
     splitStreamTextForDisplay,
     stmts,
     summarizeRagContextSources,
+    suggestDuplicateEntities,
     streamingTools,
     subscribeUserEvents,
     test,

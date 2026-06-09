@@ -278,6 +278,14 @@
     .rag-graph-relation.is-depend { border-left: 2px solid #7c3aed; }
     .rag-graph-relation.is-contain { border-left: 2px solid #0f766e; }
     .rag-graph-relation.is-affect { border-left: 2px solid #dc2626; }
+    .rag-graph-relation.is-pending {
+        border-color: rgba(245, 158, 11, 0.45);
+        background: #fffbeb;
+    }
+    .rag-graph-relation.is-pending header strong b {
+        background: rgba(245, 158, 11, 0.12);
+        color: #b45309;
+    }
     .rag-graph-relation header {
         align-items: center;
         gap: 6px;
@@ -345,6 +353,19 @@
         font-size: 0.66rem;
         border-radius: 6px;
     }
+    .rag-graph-source-snippet {
+        margin: 5px 0 0;
+        padding-top: 5px;
+        border-top: 1px dashed rgba(148, 163, 184, 0.28);
+        color: #64748b;
+        font-size: 0.68rem;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        white-space: normal;
+    }
     .rag-graph-confidence {
         flex: 0 0 auto;
         color: #64748b;
@@ -400,6 +421,20 @@
         .rag-graph-toolbar,
         .rag-graph-layout,
         .rag-graph-editor-grid { grid-template-columns: 1fr; }
+        .rag-graph-query-panel,
+        .rag-graph-filter-row,
+        .rag-graph-path {
+            grid-template-columns: 1fr;
+        }
+        .rag-graph-query-panel {
+            padding: 0 14px 10px;
+        }
+        .rag-graph-query-results {
+            max-height: 210px;
+        }
+        .rag-graph-path b {
+            justify-self: start;
+        }
         .rag-graph-layout { overflow: auto; }
         .rag-graph-panel { min-height: 280px; }
     }

@@ -17,6 +17,11 @@ const {
     runExpressHandlers,
     test
 } = require('../security-helpers');
+const {
+    filterMcpToolsByCapability,
+    setCapabilityToolGovernance,
+    upsertCapabilityPackage
+} = require('../../server/services/capability-market');
 
 test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
     const generic = buildGenericDatabaseTools([
@@ -84,6 +89,42 @@ test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
         'mcp.202.db.run_readonly_query'
     ]);
     assert.equal(queryTool.input_schema.properties.sql.type, 'string');
+});
+
+test('能力包工具级治理会过滤已停用 MCP 工具', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_tool_gov_${suffix}`, 'hash', 'MCP Tool Governance', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_tool_gov_${suffix}`, role: 'admin', unit: 'QA' };
+    const serverId = 900000 + Math.floor(Math.random() * 10000);
+    try {
+        upsertCapabilityPackage({
+            type: 'database_connection',
+            sourceRef: String(serverId),
+            name: `Governed DB ${suffix}`,
+            scope: 'user',
+            userId: user.id,
+            config: { serverId, serverType: 'database', databaseType: 'sqlite' }
+        });
+        const packageKey = `database_connection:${serverId}`;
+        const updated = setCapabilityToolGovernance(packageKey, user, 'db.run_readonly_query', {
+            enabled: false,
+            riskLevel: 'high',
+            approvalRequired: true,
+            usage: '仅审批后查询'
+        });
+        assert.equal(updated.governance.enabled, false);
+        const filtered = filterMcpToolsByCapability([
+            { serverId, serverType: 'database', name: 'db.list_tables', fullName: `mcp.${serverId}.db.list_tables` },
+            { serverId, serverType: 'database', name: 'db.run_readonly_query', fullName: `mcp.${serverId}.db.run_readonly_query` }
+        ], user);
+        assert.deepEqual(filtered.map(tool => tool.name), ['db.list_tables']);
+    } finally {
+        db.prepare('DELETE FROM capability_packages WHERE package_key = ?').run(`database_connection:${serverId}`);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
 });
 
 test('Agent 工具列表将数据库连接作为参数暴露，并路由通用 DAG 工具', async () => {

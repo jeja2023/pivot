@@ -2,6 +2,7 @@ const { db } = require('../db');
 const { getRunnableModelForUser } = require('./models');
 const { formatToolList } = require('./agent-tool-catalog');
 const { assertWorkflowHasConfiguredLlm, resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { isSuperAdmin } = require('../permissions');
 const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
@@ -11,6 +12,30 @@ const {
     normalizeToolAllowlist,
     normalizeToolPolicy
 } = require('./agent-validators');
+
+function estimatePromptTokens(text) {
+    return Math.max(1, Math.ceil(String(text || '').length / 2));
+}
+
+function clampReadinessScore(value) {
+    const score = Math.round(Number(value) || 0);
+    return Math.max(0, Math.min(score, 100));
+}
+
+function getMcpHealthForPreflight(user) {
+    const superAdmin = isSuperAdmin(user);
+    const scope = superAdmin ? "status != 'deleted'" : "status != 'deleted' AND (user_id IS NULL OR user_id = ?)";
+    const params = superAdmin ? [] : [user.id];
+    return db.prepare(`
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END) AS error,
+            SUM(CASE WHEN last_checked_at IS NULL OR last_checked_at = '' THEN 1 ELSE 0 END) AS unchecked
+        FROM mcp_servers
+        WHERE ${scope}
+    `).get(...params);
+}
 
 function inferDagLlmModelId(dag = {}) {
     const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
@@ -30,6 +55,8 @@ function preflightAgentRun(user, body = {}) {
     const toolList = formatToolList(user, { toolPolicy, toolAllowlist });
     const mcpTools = toolList.filter(tool => tool.source === 'mcp');
     const highRiskTools = mcpTools.filter(tool => tool.requiresApproval || tool.risk === 'high');
+    const mcpHealth = getMcpHealthForPreflight(user) || {};
+    const estimatedInputTokens = estimatePromptTokens(goal) + Math.min(Number(body.contextPreviewTokens || body.context_preview_tokens || 0), 20000);
     const knowledge = db.prepare(`
         SELECT
             COUNT(*) AS total,
@@ -42,6 +69,8 @@ function preflightAgentRun(user, body = {}) {
     const warnings = [];
     const blockers = [];
     let dag = null;
+    if (mcpTools.length > 0 && Number(mcpHealth.error || 0) > 0) warnings.push('能力库存在异常服务，本次任务可能遇到工具调用失败。');
+    if (mcpTools.length > 0 && Number(mcpHealth.unchecked || 0) > 0) warnings.push('能力库存在未刷新动作列表的服务，建议先刷新工具缓存。');
     if (runMode === 'dag') {
         const workflowId = body.workflowId || body.workflow_id;
         if (workflowId) {
@@ -75,7 +104,15 @@ function preflightAgentRun(user, body = {}) {
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
     if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('Token 预算偏低，可能导致任务提前停止。');
+    if (maxTokenBudget > 0 && estimatedInputTokens > maxTokenBudget) warnings.push('预估输入 Token 已超过预算，建议提高预算或缩小任务范围。');
     const status = blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'ready');
+    let readinessScore = 100;
+    readinessScore -= blockers.length * 35;
+    readinessScore -= warnings.length * 8;
+    readinessScore -= Math.min(Number(mcpHealth.error || 0) * 8, 24);
+    readinessScore -= Math.min(Number(knowledge.error || 0) * 6, 18);
+    if (maxTokenBudget > 0 && estimatedInputTokens > maxTokenBudget) readinessScore -= 15;
+    readinessScore = clampReadinessScore(readinessScore);
     return {
         status,
         blockers,
@@ -89,6 +126,13 @@ function preflightAgentRun(user, body = {}) {
             toolCount: toolList.length,
             mcpToolCount: mcpTools.length,
             highRiskToolCount: highRiskTools.length,
+            approvalWaitRisk: highRiskTools.length > 0 && approvalPolicy !== 'approve_all_mcp' ? 'high_risk_only' : (approvalPolicy === 'approve_all_mcp' ? 'all_mcp' : 'none'),
+            estimatedInputTokens,
+            readinessScore,
+            mcpServers: Number(mcpHealth.total || 0),
+            mcpActiveServers: Number(mcpHealth.active || 0),
+            mcpErrorServers: Number(mcpHealth.error || 0),
+            mcpUncheckedServers: Number(mcpHealth.unchecked || 0),
             knowledgeReady: Number(knowledge.ready || 0),
             knowledgeChunks: Number(knowledge.chunks || 0),
             knowledgeErrors: Number(knowledge.error || 0)

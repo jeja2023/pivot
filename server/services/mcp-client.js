@@ -63,6 +63,12 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
 
 function normalizeServerRow(row) {
     if (!row) return null;
+    let config = {};
+    try {
+        config = row.config ? JSON.parse(row.config) : {};
+    } catch (e) {
+        config = {};
+    }
     const databaseConnection = String(row.base_url || '').startsWith('pivot-db://')
         ? getDatabaseConnectionForServer(row.id)
         : null;
@@ -80,6 +86,7 @@ function normalizeServerRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         has_api_key: Boolean(row.api_key),
+        config,
         server_type: databaseConnection ? 'database' : (builtinType || 'external'),
         database_connection: databaseConnection,
         builtin_config: builtinConfig
@@ -137,26 +144,41 @@ async function callMcpJsonRpc(server, method, params = {}, user = null) {
     }
 
     const url = String(server.base_url || '').trim().replace(/\/+$/, '');
+    let config = {};
+    try {
+        config = server.config ? JSON.parse(server.config) : {};
+    } catch (e) {
+        config = {};
+    }
+    const timeoutMs = Math.max(1000, Math.min(Number(config.timeoutMs || config.timeout_ms || MCP_TIMEOUT_MS) || MCP_TIMEOUT_MS, 120000));
+    const authMode = String(config.authMode || config.auth_mode || 'auto').toLowerCase();
     // 调用时再次校验出站地址，拦截 loopback/link-local/云元数据等 SSRF 目标（含 DNS rebinding）。
     await assertSafeMcpOutboundUrl(url, user);
     const agents = createSafeHttpAgentsForUser(user, {
         allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
         allowExplicitLoopbackForAdmin: true
     });
+    const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Pivot-MCP-Client/1.0'
+    };
+    if (server.api_key && authMode !== 'none') {
+        if (authMode === 'bearer') headers.Authorization = `Bearer ${server.api_key}`;
+        else if (authMode === 'x-api-key') headers['x-api-key'] = server.api_key;
+        else {
+            headers.Authorization = `Bearer ${server.api_key}`;
+            headers['x-api-key'] = server.api_key;
+        }
+    }
     const response = await axios.post(url, {
         jsonrpc: '2.0',
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         method,
         params
     }, {
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': server.api_key ? `Bearer ${server.api_key}` : undefined,
-            'x-api-key': server.api_key || undefined,
-            'User-Agent': 'Pivot-MCP-Client/1.0'
-        },
-        timeout: MCP_TIMEOUT_MS,
+        headers,
+        timeout: timeoutMs,
         proxy: false,
         ...agents
     });
@@ -201,7 +223,23 @@ async function refreshMcpTools(server, user = null) {
     try {
         const result = await callMcpJsonRpc(server, 'tools/list', {}, user);
         const tools = Array.isArray(result?.tools) ? result.tools : Array.isArray(result) ? result : [];
-        upsertToolCache(server.id, tools.filter(tool => tool?.name));
+        let config = {};
+        try {
+            config = server.config ? JSON.parse(server.config) : {};
+        } catch (err) {
+            config = {};
+        }
+        const validateSchema = config.validateToolSchema === true || config.validate_tool_schema === true;
+        const normalizedTools = tools.filter(tool => {
+            if (!tool?.name) return false;
+            if (!validateSchema) return true;
+            const schema = tool.inputSchema || tool.input_schema;
+            return schema && typeof schema === 'object' && !Array.isArray(schema) && (schema.type === 'object' || schema.properties);
+        });
+        if (validateSchema && normalizedTools.length !== tools.filter(tool => tool?.name).length) {
+            throw new Error('外部能力服务存在工具 Schema 缺失或格式不正确，请修正后再刷新。');
+        }
+        upsertToolCache(server.id, normalizedTools);
         db.prepare('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
           .run('', getBeijingTimestamp(), getBeijingTimestamp(), server.id);
         return listCachedMcpTools(server.id);
@@ -244,6 +282,9 @@ function formatMcpTool(row) {
     const serverType = serverBaseUrl.startsWith('pivot-db://')
         ? 'database'
         : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
+    const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
+    const { getCapabilityToolGovernance } = require('./capability-market');
+    const governance = getCapabilityToolGovernance(packageType, String(row.server_id || ''), row.name);
     return {
         serverId: row.server_id,
         serverName: row.server_name,
@@ -253,6 +294,7 @@ function formatMcpTool(row) {
         fullName: `mcp.${row.server_id}.${row.name}`,
         description: row.description || '',
         input_schema: schema,
+        governance,
         cached_at: row.cached_at
     };
 }
@@ -262,6 +304,15 @@ async function executeMcpTool(fullName, input, user, options = {}) {
     if (!match) throw new Error('Invalid MCP tool name.');
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
+    const serverType = String(server.base_url || '').startsWith('pivot-db://')
+        ? 'database_connection'
+        : 'mcp_server';
+    const { isToolCapabilityEnabled } = require('./capability-market');
+    if (!isToolCapabilityEnabled(serverType, String(server.id), match[2], user)) {
+        const err = new Error('该工具已在能力治理中停用。');
+        err.status = 403;
+        throw err;
+    }
     if (!isInternalMcpUrl(server.base_url)) {
         validateMcpEndpointUrl(server.base_url);
     }

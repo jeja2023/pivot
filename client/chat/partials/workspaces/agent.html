@@ -4,7 +4,7 @@
             <div class="agent-modal-header">
                 <div>
                     <h3>智能体</h3>
-                    <p>拆解目标、调用工具、追踪步骤，适合处理比单轮对话更完整的工作。</p>
+                    <p>用 AI 执行自由任务，也可将稳定流程编排为工作流并发布、复用和审计。</p>
                 </div>
                 <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
             </div>
@@ -12,15 +12,15 @@
                 <div class="agent-run-panel">
                     <div class="agent-panel-head">
                         <div>
-                            <h3>新任务</h3>
-                            <p>选择模型并设定目标，任务会在后台运行。</p>
+                            <h3>快速任务</h3>
+                            <p>选择模型并设定目标，适合先探索路径，再从任务结果生成工作流草稿。</p>
                         </div>
                         <div class="agent-panel-head-actions">
                             <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
                         </div>
                     </div>
                     <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
-                    <div class="agent-quick-goals" aria-label="常用智能体目标">
+                    <div class="agent-quick-goals" aria-label="常用自由任务目标">
                         <button type="button" data-agent-run-mode="audit" data-agent-mcp="true" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
                         <button type="button" data-agent-run-mode="standard" data-agent-mcp="false" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
                         <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
@@ -50,7 +50,7 @@
                             <strong>高级设置</strong>
                         </div>
                         <div class="agent-policy-controls">
-                            <label class="agent-toggle-field" title="开启后，智能体可以调用已接入的能力库工具。关闭时仅使用系统只读能力。">
+                            <label class="agent-toggle-field" title="开启后，自由任务可以调用已接入的能力库工具。关闭时仅使用系统只读能力。">
                                 <input id="agent-allow-mcp" type="checkbox" checked>
                                 <span>允许能力库工具</span>
                                 <i class="agent-switch-track" aria-hidden="true"></i>
@@ -118,21 +118,21 @@
                     <div id="agent-config-section-store" class="agent-config-section-store">
                     <details class="agent-collapse-section" data-agent-config-section="templates">
                         <summary>
-                            <span>模板与计划</span>
-                            <small>模板、定时、通知</small>
+                            <span>自由任务模板与计划</span>
+                            <small>目标/参数复用、临时计划、通知</small>
                         </summary>
                         <div class="agent-collapse-body">
                             <div class="agent-template-strip">
                                 <div class="agent-tool-section-head compact">
-                                    <strong>模板库</strong>
-                                    <button id="agent-save-template-btn" class="btn-secondary" type="button">保存模板</button>
+                                    <strong>自由任务模板库</strong>
+                                    <button id="agent-save-template-btn" class="btn-secondary" type="button">保存目标模板</button>
                                 </div>
                                 <div id="agent-template-list" class="agent-template-list"></div>
                             </div>
                             <div class="agent-schedule-panel">
                                 <div class="agent-tool-section-head compact">
                                     <strong>计划设置</strong>
-                                    <span>创建一次性或周期任务</span>
+                                    <span>自由任务适合临时计划；生产周期任务建议使用已发布工作流</span>
                                 </div>
                                 <div class="agent-schedule-controls">
                                     <label>
@@ -188,7 +188,7 @@
                             <div id="agent-runtime-status" class="agent-runtime-status"></div>
                             <div class="agent-tool-section-head compact">
                                 <strong>能力清单</strong>
-                                <span>智能体会按目标选择工具</span>
+                                <span>自由任务会按目标选择工具</span>
                             </div>
                             <div id="agent-capability-list" class="agent-capability-list"></div>
                             <div class="agent-tool-section-head compact agent-available-tools-head">
@@ -198,7 +198,7 @@
                             <div id="agent-tool-list" class="agent-tool-list"></div>
                             <div class="agent-tool-section-head compact">
                                 <strong>结果沉淀</strong>
-                                <span>已保存的智能体输出</span>
+                                <span>已保存的自由任务输出</span>
                             </div>
                             <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
                         </div>
@@ -209,7 +209,7 @@
                     <div class="agent-history-head">
                         <div>
                             <h3>任务记录</h3>
-                            <p>查看智能体任务的执行步骤、工具调用和最终结果。</p>
+                            <p>统一查看自由任务与工作流任务；自由任务可沉淀为工作流草稿。</p>
                         </div>
                         <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                     </div>
@@ -224,6 +224,11 @@
                                 <option value="completed">已完成</option>
                                 <option value="error">失败</option>
                                 <option value="cancelled">已停止</option>
+                            </select>
+                            <select id="agent-filter-run-type" class="form-input">
+                                <option value="">全部类型</option>
+                                <option value="free">自由任务</option>
+                                <option value="workflow">工作流任务</option>
                             </select>
                             <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
                         </div>

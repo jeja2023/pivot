@@ -291,6 +291,7 @@ const renderRagQualityReport = (report) => {
     const el = document.getElementById('rag-quality-report');
     if (!el || !report) return;
     const overview = report.overview || {};
+    const signals = report.signals || {};
     const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
     const recommendations = Array.isArray(report.recommendations) ? report.recommendations : [];
     const userTips = [
@@ -301,7 +302,13 @@ const renderRagQualityReport = (report) => {
     el.innerHTML = `
         <div class="governance-head">
             <strong>质量诊断</strong>
-            <span>异常 ${Number(overview.error || 0)} · 停用 ${Number(overview.disabled || 0)} · 空分块 ${Number(overview.emptyReady || 0)}</span>
+            <span>评分 ${Number(signals.score || 0)} · 可用 ${Number(signals.readinessRate || 0)}% · 反馈 ${signals.helpfulRate === null || signals.helpfulRate === undefined ? '暂无' : `${Number(signals.helpfulRate || 0)}%`}</span>
+        </div>
+        <div class="governance-metrics">
+            <span><b>${Number(overview.error || 0)}</b>异常</span>
+            <span><b>${Number(overview.disabled || 0)}</b>停用</span>
+            <span><b>${Number(overview.emptyReady || 0)}</b>空分块</span>
+            <span><b>${Number(signals.graphEntities || 0)}</b>图谱实体</span>
         </div>
         <div class="governance-list">
             ${recommendations.slice(0, 3).map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}

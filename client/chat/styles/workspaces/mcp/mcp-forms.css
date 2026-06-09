@@ -217,6 +217,31 @@
     font-size: 0.78rem;
 }
 
+.mcp-inline-check {
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.mcp-diagnostics-panel {
+    display: none;
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 8px;
+    color: var(--text-muted);
+    background: #eff6ff;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.mcp-diagnostics-panel:not(:empty) {
+    display: block;
+}
+
 .mcp-server-list {
     display: flex;
     flex-direction: column;

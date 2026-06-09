@@ -7,7 +7,7 @@ const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
-const { clearKnowledgeGraphForDocument } = require('./knowledge-graph');
+const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge-graph');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -318,15 +318,62 @@ function getRagFeedbackSummary(userId) {
     return summary;
 }
 
+function clampQualityScore(value) {
+    const score = Math.round(Number(value) || 0);
+    return Math.max(0, Math.min(score, 100));
+}
+
+function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
+    const total = Number(overview.total || 0);
+    const ready = Number(overview.ready || 0);
+    const readyEnabled = Number(overview.readyEnabled || 0);
+    const error = Number(overview.error || 0);
+    const disabled = Number(overview.disabled || 0);
+    const emptyReady = Number(overview.emptyReady || 0);
+    const chunks = Number(overview.chunks || 0);
+    const staleReady = Number(overview.staleReady || 0);
+    const feedbackTotal = Number(feedback.helpful || 0) + Number(feedback.unhelpful || 0);
+    const helpfulRate = feedbackTotal > 0 ? Math.round((Number(feedback.helpful || 0) / feedbackTotal) * 100) : null;
+    const readinessRate = total > 0 ? Math.round((readyEnabled / total) * 100) : 0;
+    const avgChunksPerReadyDoc = ready > 0 ? Math.round((chunks / ready) * 10) / 10 : 0;
+    const graphEntities = Number(graph.entities || 0);
+    const graphRelations = Number(graph.relations || 0);
+
+    let score = total > 0 ? 55 : 0;
+    score += Math.min(readinessRate * 0.25, 25);
+    score += avgChunksPerReadyDoc > 0 ? Math.min(avgChunksPerReadyDoc, 10) : 0;
+    score += graphEntities > 0 || graphRelations > 0 ? 5 : 0;
+    if (helpfulRate !== null) score += helpfulRate >= 70 ? 5 : helpfulRate >= 50 ? 2 : -5;
+    score -= Math.min(error * 12, 30);
+    score -= Math.min(disabled * 4, 16);
+    score -= Math.min(emptyReady * 10, 20);
+    score -= Math.min(staleReady * 2, 10);
+    const normalizedScore = clampQualityScore(score);
+
+    return {
+        score: normalizedScore,
+        level: normalizedScore >= 85 ? 'excellent' : normalizedScore >= 70 ? 'good' : normalizedScore >= 50 ? 'attention' : 'risk',
+        readinessRate,
+        avgChunksPerReadyDoc,
+        feedbackTotal,
+        helpfulRate,
+        staleReady,
+        graphEntities,
+        graphRelations
+    };
+}
+
 function getKnowledgeQualityReport(userId) {
     const overview = db.prepare(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready,
+            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS readyEnabled,
             SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
             SUM(CASE WHEN COALESCE(is_enabled, 1) = 0 THEN 1 ELSE 0 END) AS disabled,
             SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS emptyReady,
+            SUM(CASE WHEN status = 'ready' AND COALESCE(updated_at, processed_at, created_at) < datetime('now', '+8 hours', '-180 days') THEN 1 ELSE 0 END) AS staleReady,
             COALESCE(SUM(chunk_count), 0) AS chunks,
             COALESCE(SUM(source_size), 0) AS sourceSize
         FROM knowledge_docs
@@ -355,10 +402,17 @@ function getKnowledgeQualityReport(userId) {
             COALESCE(d.updated_at, d.created_at) DESC
         LIMIT 12
     `).all(userId);
+    const feedback = getRagFeedbackSummary(userId);
+    const graph = getGraphSummary(userId);
+    const signals = buildKnowledgeQualitySignals({ overview, feedback, graph });
     const recommendations = [];
+    if (Number(overview.total || 0) === 0) recommendations.push('先上传一批高频业务资料，再用召回测试验证真实问题能否命中。');
     if (Number(overview.error || 0) > 0) recommendations.push('存在索引失败文档，建议先使用“重试失败”恢复可用资料。');
     if (Number(overview.disabled || 0) > 0) recommendations.push('存在停用文档，确认是否需要重新启用或移出知识库。');
     if (Number(overview.emptyReady || 0) > 0) recommendations.push('存在已就绪但无分块文档，建议重新上传或重建索引。');
+    if (Number(overview.staleReady || 0) > 0) recommendations.push('部分就绪资料超过 180 天未更新，建议确认时效性后重建索引。');
+    if (signals.helpfulRate !== null && signals.helpfulRate < 50) recommendations.push('召回反馈的有用率偏低，建议优先检查问题样本、文档命名和分块质量。');
+    if (signals.graphEntities === 0 && Number(overview.ready || 0) > 0) recommendations.push('知识图谱尚未形成有效实体，可对关键文档重建图谱以增强关系召回。');
     if (problemDocs.some(doc => Number(doc.unhelpful || 0) > Number(doc.helpful || 0))) {
         recommendations.push('部分文档收到较多负反馈，建议检查内容时效性、命名和切片质量。');
     }
@@ -371,9 +425,14 @@ function getKnowledgeQualityReport(userId) {
             error: Number(overview.error || 0),
             disabled: Number(overview.disabled || 0),
             emptyReady: Number(overview.emptyReady || 0),
+            readyEnabled: Number(overview.readyEnabled || 0),
+            staleReady: Number(overview.staleReady || 0),
             chunks: Number(overview.chunks || 0),
             sourceSize: Number(overview.sourceSize || 0)
         },
+        signals,
+        feedback,
+        graph,
         problemDocs,
         recommendations,
         queue: {

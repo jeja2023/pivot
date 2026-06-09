@@ -8,6 +8,7 @@ const {
     createAgentRun,
     createAgentSchedule,
     createAgentTemplate,
+    createWorkflowDraftFromRun,
     createAgentWorkbenchSandbox,
     createFakeSseResponse,
     db,
@@ -47,6 +48,7 @@ const {
     test,
     assertWorkflowHasConfiguredLlm
 } = require('./security-helpers');
+require('./security-agent/preflight-governance');
 
 function readAgentSourceBundle() {
     return [
@@ -378,7 +380,7 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(editor, /makeButton\('运行发布版'/);
     assert.doesNotMatch(editor, /makeButton\('发布并运行'/);
     assert.match(dagPartial, /id="agent-workflow-current-label"/);
-    assert.match(dagPartial, />已保存工作流</);
+    assert.match(dagPartial, />步骤\/节点模板</);
     assert.match(dagPartial, /id="agent-workflow-lifecycle"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console-status"/);
@@ -443,6 +445,35 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(css, /\.agent-workflow-run-source/);
     assert.doesNotMatch(css, /\.agent-run-workflow-field/);
     assert.doesNotMatch(css, /\.agent-workflow-run-status/);
+});
+
+test('agent free task and workflow positioning is explicit in UI and actions', () => {
+    const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
+    const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const source = readAgentSourceBundle();
+    const css = readAgentCssBundle();
+
+    assert.match(agentPartial, /<h3>自由任务<\/h3>/);
+    assert.match(agentPartial, /快速任务/);
+    assert.match(agentPartial, /生成工作流草稿/);
+    assert.match(agentPartial, /id="agent-filter-run-type"/);
+    assert.match(agentPartial, /<option value="free">自由任务<\/option>/);
+    assert.match(agentPartial, /<option value="workflow">工作流任务<\/option>/);
+    assert.match(agentPartial, /自由任务模板库/);
+    assert.match(agentPartial, /生产周期任务建议使用已发布工作流/);
+    assert.match(dagPartial, /工作流编排/);
+    assert.match(dagPartial, /发布版本、计划运行和审计复用/);
+    assert.match(dagPartial, />步骤\/节点模板</);
+    assert.match(dagPartial, /返回自由任务/);
+    assert.match(source, /window\.createWorkflowDraftFromAgentRun/);
+    assert.match(source, /workflow-draft/);
+    assert.match(source, /data-agent-create-workflow-draft/);
+    assert.match(source, /pendingAgentWorkflowDraft/);
+    assert.match(source, /自由任务已转为工作流草稿/);
+    assert.match(source, /runType/);
+    assert.match(source, /自由任务适合分析、排查和临时处理/);
+    assert.match(css, /\.agent-run-type\s*\{/);
+    assert.match(css, /\.agent-run-type\.free\s*\{/);
 });
 
 test('agent DAG editor and runtime expose first-class LLM workflow node', () => {
@@ -691,6 +722,49 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === previewRun.id), false);
     assert.equal(listRuns(user, { limit: 30, includePreview: true }).data.some(item => item.id === previewRun.id), true);
     assert.equal(listAgentNotifications(user, 50).some(item => item.run_id === previewRun.id), false);
+
+    db.prepare(`
+        INSERT INTO agent_steps (
+            run_id, step_index, type, title, tool_name, input, output, status, duration_ms,
+            started_at, completed_at, created_at
+        ) VALUES (?, 2, 'tool', '工具执行完成：rag.search', 'rag.search', ?, ?, 'success', 12, datetime('now', '+8 hours'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(run.id, JSON.stringify({ query: '项目风险', topK: 3 }), JSON.stringify({ matches: [{ text: '风险 A' }] }));
+    const draft = createWorkflowDraftFromRun(run.id, user);
+    assert.match(draft.name, /由自由任务生成/);
+    assert.equal(draft.summary.toolNodeCount, 1);
+    assert.equal(draft.dagSpec.nodes.length, 2);
+    assert.equal(draft.dagSpec.nodes[0].tool, 'rag.search');
+    assert.equal(draft.dagSpec.nodes[1].tool, 'agent.llm');
+    assert.deepEqual(draft.dagSpec.nodes[1].dependsOn, [draft.dagSpec.nodes[0].id]);
+    assert.match(draft.dagSpec.nodes[1].input.prompt, /\{\{goal\}\}/);
+    assert.match(draft.dagSpec.nodes[1].input.prompt, new RegExp(`\\{\\{nodes\\.${draft.dagSpec.nodes[0].id}\\.output\\}\\}`));
+
+    const workflowRun = createAgentRun({
+        user,
+        goal: '执行生产检查工作流',
+        modelId: Number(modelInfo.lastInsertRowid),
+        runMode: 'dag',
+        toolPolicy: 'builtin_only',
+        dagSpec: {
+            nodes: [{
+                id: 'llm_summary',
+                title: '汇总',
+                tool: 'agent.llm',
+                input: {
+                    model: String(modelInfo.lastInsertRowid),
+                    prompt: '请根据 {{goal}} 输出检查结论。'
+                }
+            }]
+        }
+    });
+    cancelAgentRun(workflowRun.id, user);
+    const freeRuns = listRuns(user, { limit: 30, runType: 'free' }).data;
+    const workflowRuns = listRuns(user, { limit: 30, runType: 'workflow' }).data;
+    assert.equal(freeRuns.some(item => item.id === run.id), true);
+    assert.equal(freeRuns.some(item => item.id === workflowRun.id), false);
+    assert.equal(workflowRuns.some(item => item.id === workflowRun.id), true);
+    assert.equal(workflowRuns.some(item => item.id === run.id), false);
+    assert.throws(() => createWorkflowDraftFromRun(workflowRun.id, user), /已经具备编排结构/);
 
     const rerun = rerunAgentRun(run.id, user);
     assert.equal(rerun.goal, run.goal);

@@ -101,6 +101,7 @@ window.openAgentRun = async function(runId, options = {}) {
     const canCancel = isAgentRunActive(run.status);
     const canRerun = !isPreview && !isAgentRunActive(run.status);
     const canApprove = !isPreview && run.status === 'approval_required';
+    const canCreateWorkflowDraft = !isPreview && run.run_mode !== 'dag';
     const tokenUsage = formatAgentTokenUsage(run);
     const progressPercent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
     const progressLabel = agentProgressLabel(run, progress);
@@ -126,6 +127,7 @@ window.openAgentRun = async function(runId, options = {}) {
                 ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">断点续跑</button>` : ''}
+                ${canCreateWorkflowDraft ? `<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">生成工作流草稿</button>` : ''}
                 ${!isPreview && (run.final_answer || run.error_message) ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
                 ${!isPreview ? `<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>` : ''}
             </div>
@@ -156,6 +158,7 @@ window.openAgentRun = async function(runId, options = {}) {
     detail.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.approveAgentRun(run.id, false));
     detail.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
     detail.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.resumeAgentRun(run.id));
+    detail.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.createWorkflowDraftFromAgentRun(run.id));
     detail.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
         btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });
@@ -197,7 +200,7 @@ function ensureAgentAuditModal() {
         <div class="modal rag-detail-modal agent-audit-modal">
             <div class="rag-detail-header">
                 <div>
-                    <h3>智能体删除审计</h3>
+                    <h3>任务删除审计</h3>
                     <p class="model-modal-desc">仅 admin 权限层级可查看，普通用户移除的任务记录会保留在这里。</p>
                 </div>
                 <button type="button" id="agent-audit-close-btn" class="btn-danger-outline">关闭</button>
@@ -232,7 +235,7 @@ function ensureAgentAuditModal() {
 
 function renderAgentAuditRows(items = []) {
     if (!items.length) {
-        return '<tr><td colspan="8" class="text-center muted-text">暂无已移除的智能体任务记录</td></tr>';
+        return '<tr><td colspan="8" class="text-center muted-text">暂无已移除的任务记录</td></tr>';
     }
     return items.map((item, index) => {
         const userName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;

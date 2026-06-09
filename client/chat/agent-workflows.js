@@ -2,24 +2,39 @@
 // Agent 工作流功能从 agents.js 拆分而来。
 // Split from agents.js.
 /* eslint-disable no-undef */
-window.openAgentDagWorkbench = async function() {
+window.openAgentDagWorkbench = async function(options = {}) {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');
     const requestedWorkflowId = activeAgentWorkflowId || '';
+    const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
     await Promise.all([
         loadAgentModels(),
         agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
         loadAgentWorkflows()
     ]);
-    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(requestedWorkflowId));
-    if (workflow) {
-        activeAgentWorkflowId = String(workflow.id);
-        agentWorkflowDraftName = workflow.name || '';
-        agentWorkflowDraftDescription = workflow.description || '';
-        writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+    if (incomingDraft) {
+        pendingAgentWorkflowDraft = null;
+        newAgentWorkflow({
+            showToast: false,
+            clearSnapshots: true,
+            remount: false,
+            name: incomingDraft.name || '',
+            description: incomingDraft.description || ''
+        });
+        writeAgentWorkflowText(incomingDraft.dagSpec || incomingDraft.dag_spec || { nodes: [] });
         renderAgentWorkflowLibrary();
+        showToast('自由任务已转为工作流草稿，检查节点后可保存、发布或计划运行。', 'success');
     } else {
-        newAgentWorkflow({ showToast: false, clearSnapshots: false, remount: false });
+        const workflow = agentWorkflowsCache.find(item => String(item.id) === String(requestedWorkflowId));
+        if (workflow) {
+            activeAgentWorkflowId = String(workflow.id);
+            agentWorkflowDraftName = workflow.name || '';
+            agentWorkflowDraftDescription = workflow.description || '';
+            writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+            renderAgentWorkflowLibrary();
+        } else {
+            newAgentWorkflow({ showToast: false, clearSnapshots: false, remount: false });
+        }
     }
     mountAgentDagEditor();
     window.refreshAgentDagEditor?.();

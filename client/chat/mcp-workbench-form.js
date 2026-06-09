@@ -9,18 +9,18 @@ function mcpFormEl(name, mode = 'create') {
 const MCP_CONFIG_HELPERS = {
     external: {
         title: '外部能力服务',
-        steps: ['填写服务名称', '粘贴技术同事提供的服务地址', '需要鉴权时填写访问密钥'],
-        note: '普通用户通常先使用系统能力；外部能力服务需要由技术同事提供地址和密钥。'
+        steps: ['填写服务名称', '粘贴服务地址', '配置健康检查和鉴权模式'],
+        note: '外部能力服务建议开启健康检查和工具 Schema 校验，便于上线前发现不可用工具。'
     },
     database: {
         title: '数据库连接',
-        steps: ['选择数据库类型', '填写主机和数据库名', '先点“测试连接”，通过后再保存'],
-        note: '默认只读查询并限制返回行数，不会执行写入 SQL。'
+        steps: ['选择数据库类型', '填写只读账号', '配置表/字段白名单和脱敏字段'],
+        note: '默认只读查询并限制返回行数；生产库建议配置表白名单、字段白名单和敏感字段脱敏。'
     },
     reports: {
         title: '报表文件',
-        steps: ['填写报表目录', '确认允许的文件格式', '保存后查看可用动作'],
-        note: '适合把共享目录里的 Excel、CSV、JSON、Markdown 文件交给模型读取。'
+        steps: ['填写报表目录', '确认允许格式', '保存后做目录诊断'],
+        note: '诊断会检查目录读取权限并预览可读文件，适合共享目录接入前验收。'
     },
     im: {
         title: '消息通知',
@@ -29,8 +29,8 @@ const MCP_CONFIG_HELPERS = {
     },
     visualization: {
         title: '图表生成',
-        steps: ['保存默认名称', '回到能力库查看动作', '聊天中打开能力库后让模型生成图表'],
-        note: '系统内置能力无需额外连接，适合先验证能力库是否可用。'
+        steps: ['保存默认名称', '回到能力库查看动作', '在聊天或智能体中生成图表'],
+        note: '普通用户通常先使用系统能力验证能力库是否可用；系统内置能力无需额外连接。'
     },
     report: {
         title: '报告编排',
@@ -143,8 +143,16 @@ function setValueIfEmpty(id, value, mode = 'create') {
 }
 
 function applyMcpRecommendedDefaults(type, mode = 'create') {
+    if (type === 'external') {
+        setValueIfEmpty('timeout-ms', '20000', mode);
+        const authMode = mcpFormEl('auth-mode', mode);
+        if (authMode && !authMode.value) authMode.value = 'auto';
+    }
     if (type === 'database') {
         setValueIfEmpty('db-max-rows', '200', mode);
+        setValueIfEmpty('db-query-timeout-ms', '20000', mode);
+        const cost = mcpFormEl('db-sql-cost-estimate', mode);
+        if (cost) cost.checked = true;
     }
     if (type === 'reports') {
         setValueIfEmpty('reports-extensions', 'csv,xlsx,xls,json,txt,md', mode);
@@ -172,6 +180,8 @@ function setMcpSourceType(type, mode = 'create') {
     mcpFormEl('reports-fields', mode)?.classList.toggle('hidden', sourceType !== 'reports');
     mcpFormEl('im-fields', mode)?.classList.toggle('hidden', sourceType !== 'im');
     mcpFormEl('test-db-btn', mode)?.classList.toggle('hidden', sourceType !== 'database');
+    mcpFormEl('diagnose-btn', mode)?.classList.toggle('hidden', !['external', 'database', 'reports'].includes(sourceType));
+    mcpFormEl('test-im-btn', mode)?.classList.toggle('hidden', sourceType !== 'im');
     const dbType = mcpFormEl('db-type', mode)?.value || 'postgres';
     const port = mcpFormEl('db-port', mode);
     if (sourceType === 'database' && port && !port.value) port.value = mcpDbDefaultPorts[dbType] || '';
@@ -191,16 +201,26 @@ function updateMcpDbTypeFields(mode = 'create') {
 
 function setMcpFormDefaults(mode = 'create', type = 'external') {
     [
-        'id', 'name', 'url', 'key', 'desc', 'db-host', 'db-port', 'db-name', 'db-user',
-        'db-password', 'db-schema', 'db-max-rows', 'reports-roots', 'reports-extensions',
+        'id', 'name', 'url', 'key', 'health-check-url', 'timeout-ms', 'auth-mode',
+        'example-prompts', 'desc', 'db-host', 'db-port', 'db-name', 'db-user',
+        'db-password', 'db-schema', 'db-max-rows', 'db-table-allowlist',
+        'db-field-allowlist', 'db-sensitive-fields', 'db-row-policy-hint',
+        'db-query-timeout-ms', 'reports-roots', 'reports-extensions',
         'reports-max-file-mb', 'reports-max-rows', 'im-endpoint-url', 'im-auth-header',
-        'im-token', 'im-allowed-targets', 'im-default-target', 'im-max-message-length'
+        'im-token', 'im-allowed-targets', 'im-default-target', 'im-max-message-length',
+        'im-test-target', 'im-test-message'
     ].forEach(field => {
         const el = mcpFormEl(field, mode);
         if (el) el.value = '';
     });
     const dbSsl = mcpFormEl('db-ssl', mode);
     if (dbSsl) dbSsl.checked = false;
+    const dbCost = mcpFormEl('db-sql-cost-estimate', mode);
+    if (dbCost) dbCost.checked = true;
+    const validateSchema = mcpFormEl('validate-tool-schema', mode);
+    if (validateSchema) validateSchema.checked = false;
+    const diagnostics = mcpFormEl('diagnostics', mode);
+    if (diagnostics) diagnostics.textContent = '';
     const imAllowAtAll = mcpFormEl('im-allow-at-all', mode);
     if (imAllowAtAll) imAllowAtAll.checked = false;
     const shared = mcpFormEl('shared', mode);
@@ -231,6 +251,16 @@ function bindMcpFormControls(mode = 'create') {
     if (testButton && testButton.dataset.boundMcpTest !== '1') {
         testButton.dataset.boundMcpTest = '1';
         testButton.addEventListener('click', () => window.testMcpDatabaseConnection(mode));
+    }
+    const diagnoseButton = mcpFormEl('diagnose-btn', mode);
+    if (diagnoseButton && diagnoseButton.dataset.boundMcpDiagnose !== '1') {
+        diagnoseButton.dataset.boundMcpDiagnose = '1';
+        diagnoseButton.addEventListener('click', () => window.diagnoseMcpServer(mode));
+    }
+    const testImButton = mcpFormEl('test-im-btn', mode);
+    if (testImButton && testImButton.dataset.boundMcpImTest !== '1') {
+        testImButton.dataset.boundMcpImTest = '1';
+        testImButton.addEventListener('click', () => window.diagnoseMcpServer(mode, { action: 'test' }));
     }
     updateMcpDbTypeFields(mode);
     updateMcpDatabaseGuidance(mode);
@@ -315,6 +345,7 @@ window.openMcpCreateModal = function(type = 'external') {
 
 function fillMcpForm(server, mode = 'create') {
     const database = server.database_connection || {};
+    const serverConfig = server.config || {};
     const editableTypes = ['database', ...mcpBuiltinServices.map(item => item.type)];
     const serverType = editableTypes.includes(server.server_type) ? server.server_type : 'external';
     setMcpSourceType(serverType, mode);
@@ -323,6 +354,13 @@ function fillMcpForm(server, mode = 'create') {
     mcpFormEl('url', mode).value = server.base_url || '';
     mcpFormEl('key', mode).value = server.has_api_key ? '********' : '';
     mcpFormEl('desc', mode).value = server.description || '';
+    if (serverType === 'external') {
+        mcpFormEl('health-check-url', mode).value = serverConfig.healthCheckUrl || '';
+        mcpFormEl('timeout-ms', mode).value = serverConfig.timeoutMs || '';
+        mcpFormEl('auth-mode', mode).value = serverConfig.authMode || 'auto';
+        mcpFormEl('validate-tool-schema', mode).checked = Boolean(serverConfig.validateToolSchema);
+        mcpFormEl('example-prompts', mode).value = (serverConfig.examplePrompts || []).join('\n');
+    }
     if (server.server_type === 'database') {
         mcpFormEl('db-type', mode).value = database.database_type || 'postgres';
         mcpFormEl('db-host', mode).value = database.host || '';
@@ -333,6 +371,15 @@ function fillMcpForm(server, mode = 'create') {
         mcpFormEl('db-schema', mode).value = database.schema || '';
         mcpFormEl('db-max-rows', mode).value = database.max_rows || '';
         mcpFormEl('db-ssl', mode).checked = Boolean(database.ssl);
+        mcpFormEl('db-table-allowlist', mode).value = (database.table_allowlist || []).join('\n');
+        const fieldAllowlist = database.field_allowlist || {};
+        mcpFormEl('db-field-allowlist', mode).value = Object.entries(fieldAllowlist)
+            .map(([table, fields]) => `${table}: ${(fields || []).join(', ')}`)
+            .join('\n');
+        mcpFormEl('db-sensitive-fields', mode).value = (database.sensitive_fields || []).join('\n');
+        mcpFormEl('db-row-policy-hint', mode).value = database.row_policy_hint || '';
+        mcpFormEl('db-query-timeout-ms', mode).value = database.query_timeout_ms || '';
+        mcpFormEl('db-sql-cost-estimate', mode).checked = database.sql_cost_estimate !== false;
         updateMcpDbTypeFields(mode);
         updateMcpDatabaseGuidance(mode);
         updateMcpConfigHelper(mode);

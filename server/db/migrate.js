@@ -238,6 +238,8 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_knowledge_relations_user_target ON knowledge_relations(user_id, target_entity_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_relations_chunk ON knowledge_relations(source_chunk_id);
     `);
+    ensureColumn('knowledge_entities', 'aliases', "TEXT DEFAULT '[]'");
+    ensureColumn('knowledge_relations', 'status', "TEXT DEFAULT 'active'");
 
     ensureColumn('prompts', 'user_id', 'INTEGER');
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");
@@ -356,6 +358,7 @@ function runMigrations() {
             base_url TEXT NOT NULL,
             api_key TEXT,
             description TEXT,
+            config TEXT,
             status TEXT DEFAULT 'active',
             last_error TEXT,
             last_checked_at DATETIME,
@@ -619,6 +622,7 @@ function runMigrations() {
     ensureColumn('mcp_servers', 'user_id', 'INTEGER');
     ensureColumn('mcp_servers', 'api_key', 'TEXT');
     ensureColumn('mcp_servers', 'description', 'TEXT');
+    ensureColumn('mcp_servers', 'config', 'TEXT');
     ensureColumn('mcp_servers', 'last_error', 'TEXT');
     ensureColumn('mcp_servers', 'last_checked_at', 'DATETIME');
     ensureColumn('mcp_servers', 'updated_at', 'DATETIME');

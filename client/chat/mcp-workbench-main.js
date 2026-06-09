@@ -114,7 +114,12 @@ function enableMcpChatToolFromWorkspace() {
     window.showMainWorkspace?.('chat');
     window.syncChatToolToggles?.();
     document.getElementById('user-input')?.focus();
-    showToast('已打开聊天里的能力库开关', 'success');
+    showToast('已打开当前对话的能力库开关', 'success');
+}
+
+function mcpCssEscape(value) {
+    if (window.CSS?.escape) return CSS.escape(value);
+    return String(value || '').replace(/["\\]/g, '\\$&');
 }
 
 async function runMcpNextStepAction(action, button) {
@@ -215,7 +220,7 @@ window.openMcpSystemConfig = function(type) {
     modal.classList.remove('hidden');
 };
 
-window.openMcpToolsModal = function(serverId) {
+window.openMcpToolsModal = async function(serverId) {
     const server = mcpServersCache.find(item => String(item.id) === String(serverId));
     if (!server) return showToast('未找到能力服务', 'error');
     const modal = document.getElementById('mcp-tools-modal');
@@ -223,7 +228,14 @@ window.openMcpToolsModal = function(serverId) {
     const list = document.getElementById('mcp-tools-list');
     if (!modal || !title || !list) return;
     const fallbackTools = mcpFallbackToolsForServer(server);
-    const tools = mcpToolsForServer(server.id, fallbackTools);
+    let tools = mcpToolsForServer(server.id, fallbackTools);
+    try {
+        const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(server.id)}/tools`);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.tools) && data.tools.length) tools = data.tools;
+    } catch (e) {
+        // 弹窗治理可使用本地缓存兜底；刷新按钮仍可重新拉取工具。
+    }
     title.textContent = `${mcpCleanServiceName(server.name || '能力服务')} 的可用动作`;
     const refreshButton = document.getElementById('mcp-tools-refresh-btn');
     if (refreshButton) {
@@ -231,23 +243,44 @@ window.openMcpToolsModal = function(serverId) {
         refreshButton.disabled = server.status === 'paused';
         refreshButton.textContent = server.status === 'paused' ? '已停用' : '刷新动作';
     }
+    const packageKey = `${server.server_type === 'database' ? 'database_connection' : 'mcp_server'}:${server.id}`;
     list.innerHTML = tools.length ? `
         <div class="mcp-tools-grid">
-            ${tools.map(tool => `
-                <div class="mcp-tool-card">
+            ${tools.map(tool => {
+                const governance = tool.governance || {};
+                const enabled = governance.enabled !== false;
+                return `
+                <div class="mcp-tool-card${enabled ? '' : ' is-disabled'}">
                     <div class="mcp-tool-card-head">
                         <strong>${mcpEscape(mcpToolTitle(tool))}</strong>
+                        <span class="mcp-tool-risk">${mcpEscape(governance.riskLevel || 'medium')}</span>
                     </div>
                     <p>${mcpEscape(mcpToolDescription(tool) || '暂无说明')}</p>
                     <div class="mcp-tool-example">
                         <span>可以这样问：</span>
                         <button type="button" data-mcp-tool-prompt="${mcpEscape(mcpToolPrompt(tool))}">${mcpEscape(mcpToolPrompt(tool))}</button>
                     </div>
+                    <div class="mcp-tool-governance">
+                        <label class="mcp-shared-row">
+                            <input type="checkbox" data-mcp-tool-enabled="${mcpEscape(tool.name)}" ${enabled ? 'checked' : ''}> 启用
+                        </label>
+                        <select class="form-input" data-mcp-tool-risk="${mcpEscape(tool.name)}">
+                            <option value="low" ${(governance.riskLevel || '') === 'low' ? 'selected' : ''}>低风险</option>
+                            <option value="medium" ${(!governance.riskLevel || governance.riskLevel === 'medium') ? 'selected' : ''}>中风险</option>
+                            <option value="high" ${governance.riskLevel === 'high' ? 'selected' : ''}>高风险</option>
+                        </select>
+                        <label class="mcp-shared-row">
+                            <input type="checkbox" data-mcp-tool-approval="${mcpEscape(tool.name)}" ${governance.approvalRequired ? 'checked' : ''}> 需审批
+                        </label>
+                        <input class="form-input" data-mcp-tool-usage="${mcpEscape(tool.name)}" value="${mcpEscape(governance.usage || '')}" placeholder="适用说明">
+                        <button type="button" class="btn-secondary" data-mcp-tool-save="${mcpEscape(tool.name)}">保存治理</button>
+                    </div>
                     <div class="mcp-tool-meta">
                         <span>${mcpEscape(tool.name || tool.fullName || '')}</span>
                     </div>
                 </div>
-            `).join('')}
+            `;
+            }).join('')}
         </div>
     ` : '<div class="mcp-empty-panel compact"><strong>暂无可用动作</strong><span>请先刷新该能力，或确认它已启用并完成连接。</span></div>';
     list.querySelectorAll('[data-mcp-tool-prompt]').forEach(button => {
@@ -268,6 +301,35 @@ window.openMcpToolsModal = function(serverId) {
                 input.focus();
             }
             showToast('已带着示例问题回到聊天，并打开能力库', 'success');
+        });
+    });
+    list.querySelectorAll('[data-mcp-tool-save]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const toolName = button.dataset.mcpToolSave || '';
+            const payload = {
+                enabled: list.querySelector(`[data-mcp-tool-enabled="${mcpCssEscape(toolName)}"]`)?.checked !== false,
+                riskLevel: list.querySelector(`[data-mcp-tool-risk="${mcpCssEscape(toolName)}"]`)?.value || 'medium',
+                approvalRequired: list.querySelector(`[data-mcp-tool-approval="${mcpCssEscape(toolName)}"]`)?.checked || false,
+                usage: list.querySelector(`[data-mcp-tool-usage="${mcpCssEscape(toolName)}"]`)?.value || ''
+            };
+            button.disabled = true;
+            const oldText = button.textContent;
+            button.textContent = '保存中...';
+            try {
+                const res = await apiFetch(`${API_BASE}/capabilities/packages/${encodeURIComponent(packageKey)}/tools/${encodeURIComponent(toolName)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return showToast(data.error || '工具治理保存失败', 'error');
+                showToast('工具治理已保存', 'success');
+                await window.loadMcpWorkbench();
+                window.openMcpToolsModal(serverId);
+            } finally {
+                button.disabled = false;
+                button.textContent = oldText;
+            }
         });
     });
     modal.classList.remove('hidden');
@@ -322,6 +384,7 @@ async function loadMcpGovernance() {
     }
     panel.className = 'workspace-governance-panel mcp-governance-panel';
     const s = gov.summary || {};
+    const health = gov.health || {};
     mcpCallLogsCache = logs.data || [];
     const active = Number(s.active || 0);
     const errors = Number(s.error || 0);
@@ -378,7 +441,7 @@ async function loadMcpGovernance() {
         <div class="mcp-governance-title">
             <div>
                 <strong>能力治理</strong>
-                <span>7 日 ${Number(s.calls7d || 0)} 调用 · ${Number(s.callErrors7d || 0)} 错误 · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
+                <span>健康 ${Number(s.healthScore ?? health.score ?? 0)} · 7 日 ${Number(s.calls7d || 0)} 调用 · ${Number(s.callErrors7d || 0)} 错误 · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
             </div>
             <button id="mcp-refresh-btn" class="btn-secondary" type="button">刷新</button>
         </div>
@@ -387,8 +450,10 @@ async function loadMcpGovernance() {
             <span><b>${errors}</b>需要处理</span>
             <span><b>${unchecked}</b>待刷新</span>
             <span><b>${databaseServers}</b>数据连接</span>
+            <span><b>${Number(s.callErrorRate ?? health.callErrorRate ?? 0)}%</b>调用错误率</span>
         </div>
         <div class="governance-list mcp-safety-notes">
+            ${(Array.isArray(health.recommendations) ? health.recommendations : []).slice(0, 3).map(item => `<span>${mcpEscape(item)}</span>`).join('')}
             <span>系统能力可直接启用，个人连接只对当前用户生效。</span>
             <span>数据库能力默认只读，并限制返回行数，适合查询和分析。</span>
             <span>聊天中需要主动打开能力库按钮，模型才会使用这些动作。</span>
@@ -415,7 +480,13 @@ function collectMcpDatabasePayload(mode = 'create') {
         password: mcpFormEl('db-password', mode)?.value,
         schema: mcpFormEl('db-schema', mode)?.value.trim(),
         max_rows: mcpFormEl('db-max-rows', mode)?.value,
-        ssl: mcpFormEl('db-ssl', mode)?.checked || false
+        ssl: mcpFormEl('db-ssl', mode)?.checked || false,
+        table_allowlist: mcpFormEl('db-table-allowlist', mode)?.value || '',
+        field_allowlist: mcpFormEl('db-field-allowlist', mode)?.value || '',
+        sensitive_fields: mcpFormEl('db-sensitive-fields', mode)?.value || '',
+        row_policy_hint: mcpFormEl('db-row-policy-hint', mode)?.value.trim(),
+        query_timeout_ms: mcpFormEl('db-query-timeout-ms', mode)?.value,
+        sql_cost_estimate: mcpFormEl('db-sql-cost-estimate', mode)?.checked !== false
     };
 }
 
@@ -503,16 +574,101 @@ window.testMcpDatabaseConnection = async function(mode = 'create') {
     }
 };
 
-window.saveMcpServer = async function(mode = 'create') {
-    const id = mcpFormEl('id', mode)?.value;
-    const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
-    let payload = {
+function collectMcpExternalPayload(mode = 'create') {
+    return {
         name: mcpFormEl('name', mode)?.value.trim(),
         base_url: mcpFormEl('url', mode)?.value.trim(),
         api_key: mcpFormEl('key', mode)?.value,
         description: mcpFormEl('desc', mode)?.value.trim(),
-        shared: mcpFormEl('shared', mode)?.checked || false
+        shared: mcpFormEl('shared', mode)?.checked || false,
+        health_check_url: mcpFormEl('health-check-url', mode)?.value.trim(),
+        timeout_ms: mcpFormEl('timeout-ms', mode)?.value,
+        auth_mode: mcpFormEl('auth-mode', mode)?.value || 'auto',
+        validate_tool_schema: mcpFormEl('validate-tool-schema', mode)?.checked || false,
+        example_prompts: mcpFormEl('example-prompts', mode)?.value || ''
     };
+}
+
+function renderMcpDiagnostics(data = {}) {
+    if (data.type === 'reports') {
+        const files = Array.isArray(data.previewFiles) ? data.previewFiles.slice(0, 5) : [];
+        return [
+            `报表目录可读文件：${data.readableFiles || files.length || 0}`,
+            ...files.map(file => `- ${file.path || file.name || file.file || JSON.stringify(file).slice(0, 80)}`),
+            data.diagnostics?.hint || ''
+        ].filter(Boolean).join('\n');
+    }
+    if (data.type === 'im') {
+        const deliveries = Array.isArray(data.recentDeliveries) ? data.recentDeliveries.slice(0, 3) : [];
+        return [
+            data.testResult ? `测试发送：${data.testResult.ok ? '成功' : '已返回结果'}` : 'IM 配置可读取',
+            `可发送目标：${(data.targets?.allowedTargets || []).length || 0}`,
+            ...deliveries.map(item => `- ${item.created_at || ''} ${item.tool_name || ''} ${item.status || ''}${item.error_message ? `：${item.error_message}` : ''}`),
+            data.retryHint || ''
+        ].filter(Boolean).join('\n');
+    }
+    if (data.type === 'database') {
+        return [
+            '数据库连接测试通过',
+            `表白名单：${(data.governance?.tableAllowlist || []).length || 0}`,
+            `敏感字段：${(data.governance?.sensitiveFields || []).length || 0}`,
+            `查询超时：${data.governance?.queryTimeoutMs || 20000}ms`
+        ].join('\n');
+    }
+    if (data.type === 'external') {
+        return `健康检查：HTTP ${data.statusCode || '-'}，耗时 ${data.durationMs || 0}ms`;
+    }
+    return data.message || JSON.stringify(data, null, 2).slice(0, 1000);
+}
+
+window.diagnoseMcpServer = async function(mode = 'edit', options = {}) {
+    const id = mcpFormEl('id', mode)?.value;
+    const panel = mcpFormEl('diagnostics', mode);
+    if (!id) {
+        if (panel) panel.textContent = '请先保存能力服务，再进行配置诊断。';
+        return showToast('请先保存能力服务，再进行配置诊断', 'error');
+    }
+    const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
+    const payload = options.action === 'test'
+        ? {
+            action: 'test',
+            target: mcpFormEl('im-test-target', mode)?.value.trim() || mcpFormEl('im-default-target', mode)?.value.trim(),
+            message: mcpFormEl('im-test-message', mode)?.value.trim()
+        }
+        : { sourceType };
+    const button = options.action === 'test' ? mcpFormEl('test-im-btn', mode) : mcpFormEl('diagnose-btn', mode);
+    const originalText = button?.textContent || '配置诊断';
+    if (button) {
+        button.disabled = true;
+        button.textContent = options.action === 'test' ? '发送中...' : '诊断中...';
+    }
+    if (panel) panel.textContent = '正在诊断...';
+    try {
+        const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/diagnose`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+            const message = data.error || data.message || '配置诊断失败';
+            if (panel) panel.textContent = message;
+            return showToast(message, 'error');
+        }
+        if (panel) panel.textContent = renderMcpDiagnostics(data);
+        showToast(options.action === 'test' ? '测试发送完成' : '配置诊断完成', 'success');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+};
+
+window.saveMcpServer = async function(mode = 'create') {
+    const id = mcpFormEl('id', mode)?.value;
+    const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
+    let payload = collectMcpExternalPayload(mode);
     let endpoint = `${API_BASE}/mcp/servers${id ? `/${encodeURIComponent(id)}` : ''}`;
     if (sourceType === 'database') {
         payload = collectMcpDatabasePayload(mode);

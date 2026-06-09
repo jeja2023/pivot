@@ -6,6 +6,7 @@ const { isSuperAdmin } = require('../permissions');
 
 const PACKAGE_TYPES = new Set(['builtin_tool', 'mcp_server', 'database_connection']);
 const PACKAGE_STATUSES = new Set(['enabled', 'disabled']);
+const TOOL_RISK_LEVELS = new Set(['low', 'medium', 'high']);
 
 function sourceKey(type, ref) {
     return `${type}:${String(ref || '').trim()}`;
@@ -23,10 +24,54 @@ function cleanCapabilityName(name) {
         .trim();
 }
 
+function parsePackageConfig(value) {
+    if (!value) return {};
+    try {
+        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function parseBoolean(value, fallback = false) {
+    if (value === true || value === 'true' || value === 1 || value === '1') return true;
+    if (value === false || value === 'false' || value === 0 || value === '0') return false;
+    return fallback;
+}
+
+function normalizeToolGovernance(value = {}) {
+    const enabled = parseBoolean(value.enabled, value.status !== 'disabled');
+    const riskLevel = TOOL_RISK_LEVELS.has(value.riskLevel || value.risk_level)
+        ? (value.riskLevel || value.risk_level)
+        : 'medium';
+    return {
+        enabled,
+        riskLevel,
+        approvalRequired: parseBoolean(value.approvalRequired ?? value.approval_required, false),
+        usage: String(value.usage || value.applicability || '').slice(0, 500)
+    };
+}
+
+function normalizePackageConfig(config = {}, existing = {}) {
+    const base = parsePackageConfig(config);
+    const previous = parsePackageConfig(existing);
+    return {
+        ...previous,
+        ...base,
+        tools: {
+            ...(previous.tools && typeof previous.tools === 'object' ? previous.tools : {}),
+            ...(base.tools && typeof base.tools === 'object' ? base.tools : {})
+        }
+    };
+}
+
 function upsertCapabilityPackage({ type, sourceRef, name, description = '', scope = 'user', userId = null, status = 'enabled', config = {} }) {
     if (!PACKAGE_TYPES.has(type) || !sourceRef || !name) return null;
     const key = sourceKey(type, sourceRef);
     const now = getBeijingTimestamp();
+    const existing = db.prepare('SELECT config FROM capability_packages WHERE package_key = ?').get(key);
+    const nextConfig = normalizePackageConfig(config, existing?.config);
     db.prepare(`
         INSERT INTO capability_packages (
             package_key, type, source_ref, user_id, scope, name, description, status, config, created_at, updated_at
@@ -50,7 +95,7 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
         cleanCapabilityName(name).slice(0, 120),
         String(description || '').slice(0, 1000),
         normalizeStatus(status),
-        JSON.stringify(config || {}),
+        JSON.stringify(nextConfig),
         now,
         now
     );
@@ -110,9 +155,7 @@ function listCapabilityPackages(user) {
     return rows.map(row => ({
         ...row,
         enabled: row.status !== 'disabled',
-        config: (() => {
-            try { return JSON.parse(row.config || '{}'); } catch (e) { return {}; }
-        })()
+        config: parsePackageConfig(row.config)
     }));
 }
 
@@ -138,25 +181,86 @@ function isCapabilityEnabled(type, sourceRef, user = null) {
     return row.status !== 'disabled';
 }
 
+function getCapabilityToolGovernance(type, sourceRef, toolName, user = null) {
+    const key = sourceKey(type, sourceRef);
+    const row = db.prepare('SELECT status, scope, user_id, config FROM capability_packages WHERE package_key = ?').get(key);
+    if (!row) return normalizeToolGovernance();
+    if (user && !canAccessPackage(row, user)) return { ...normalizeToolGovernance(), enabled: false };
+    if (row.status === 'disabled') return { ...normalizeToolGovernance(), enabled: false };
+    const config = parsePackageConfig(row.config);
+    return normalizeToolGovernance(config.tools?.[toolName] || {});
+}
+
+function isToolCapabilityEnabled(type, sourceRef, toolName, user = null) {
+    return getCapabilityToolGovernance(type, sourceRef, toolName, user).enabled;
+}
+
+function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
+    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    if (!canAccessPackage(row, user)) return null;
+    if (row.scope === 'global' && !isSuperAdmin(user)) {
+        const err = new Error('只有 admin 权限层级可以调整全局能力工具。');
+        err.status = 403;
+        throw err;
+    }
+    const name = String(toolName || '').trim();
+    if (!name) {
+        const err = new Error('请指定工具名称。');
+        err.status = 400;
+        throw err;
+    }
+    const config = parsePackageConfig(row.config);
+    const tools = config.tools && typeof config.tools === 'object' ? config.tools : {};
+    const next = normalizeToolGovernance({
+        ...(tools[name] || {}),
+        ...patch
+    });
+    const nextConfig = {
+        ...config,
+        tools: {
+            ...tools,
+            [name]: next
+        }
+    };
+    db.prepare('UPDATE capability_packages SET config = ?, updated_at = ? WHERE package_key = ?')
+        .run(JSON.stringify(nextConfig), getBeijingTimestamp(), packageKey);
+    return {
+        packageKey,
+        toolName: name,
+        governance: next
+    };
+}
+
 function filterBuiltInToolsByCapability(tools, user) {
-    return tools.filter(tool => isCapabilityEnabled('builtin_tool', tool.name, user));
+    return tools
+        .filter(tool => isCapabilityEnabled('builtin_tool', tool.name, user))
+        .map(tool => ({
+            ...tool,
+            governance: getCapabilityToolGovernance('builtin_tool', tool.name, tool.name, user)
+        }))
+        .filter(tool => tool.governance.enabled);
 }
 
 function filterMcpToolsByCapability(tools, user) {
-    return tools.filter(tool => {
+    return tools.map(tool => {
         const type = tool.serverType === 'database'
             ? 'database_connection'
             : 'mcp_server';
-        return isCapabilityEnabled(type, String(tool.serverId || ''), user);
-    });
+        const sourceRef = String(tool.serverId || '');
+        const governance = getCapabilityToolGovernance(type, sourceRef, tool.name, user);
+        return { ...tool, governance };
+    }).filter(tool => tool.governance.enabled);
 }
 
 module.exports = {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
+    getCapabilityToolGovernance,
     isCapabilityEnabled,
+    isToolCapabilityEnabled,
     listCapabilityPackages,
     setCapabilityPackageStatus,
+    setCapabilityToolGovernance,
     syncCapabilityPackages,
     upsertCapabilityPackage
 };

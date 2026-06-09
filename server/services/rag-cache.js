@@ -7,22 +7,28 @@ function normalizeCacheQuery(query) {
     return String(query || '').trim().replace(/\s+/g, ' ').slice(0, 1000);
 }
 
-function getCacheKey(userId, query, topK) {
-    return `${userId}:${topK}:${normalizeCacheQuery(query)}`;
+function normalizeCacheScope(scope) {
+    return String(scope || '').trim().replace(/\s+/g, ' ').slice(0, 500);
 }
 
-function getFromCache(userId, query, topK) {
+function getCacheKey(userId, query, topK, scope = '') {
+    const normalizedScope = normalizeCacheScope(scope);
+    const scopePart = normalizedScope ? `${normalizedScope}:` : '';
+    return `${userId}:${topK}:${scopePart}${normalizeCacheQuery(query)}`;
+}
+
+function getFromCache(userId, query, topK, scope = '') {
     if (RAG_CACHE_TTL === 0) return null;
-    const key = getCacheKey(userId, query, topK);
+    const key = getCacheKey(userId, query, topK, scope);
     const cached = ragCache.get(key);
     if (cached && Date.now() - cached.at < RAG_CACHE_TTL) return cached.value;
     if (cached) ragCache.delete(key);
     return null;
 }
 
-function setToCache(userId, query, topK, value) {
+function setToCache(userId, query, topK, value, scope = '') {
     if (RAG_CACHE_TTL === 0) return;
-    const key = getCacheKey(userId, query, topK);
+    const key = getCacheKey(userId, query, topK, scope);
     while (ragCache.size >= RAG_CACHE_MAX) {
         const firstKey = ragCache.keys().next().value;
         ragCache.delete(firstKey);
@@ -52,6 +58,7 @@ function getRagCacheSnapshot() {
 
 module.exports = {
     normalizeCacheQuery,
+    normalizeCacheScope,
     getFromCache,
     setToCache,
     clearRagCacheForUser,

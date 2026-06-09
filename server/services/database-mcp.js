@@ -263,9 +263,82 @@ function parseOptions(value) {
     }
 }
 
+function splitPolicyList(value) {
+    if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+    return String(value || '')
+        .split(/[\n,;]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function normalizePolicyIdentifier(value) {
+    return String(value || '')
+        .trim()
+        .split('.')
+        .map(part => part.trim().replace(/^["'`\[]+|["'`\]]+$/g, ''))
+        .filter(Boolean)
+        .join('.')
+        .toLowerCase();
+}
+
+function baseIdentifier(value) {
+    const normalized = normalizePolicyIdentifier(value);
+    const parts = normalized.split('.').filter(Boolean);
+    return parts[parts.length - 1] || normalized;
+}
+
+function normalizePolicyList(value) {
+    return Array.from(new Set(splitPolicyList(value).map(normalizePolicyIdentifier).filter(Boolean)));
+}
+
+function normalizeFieldAllowlist(value) {
+    const result = {};
+    const addField = (table, field) => {
+        const key = normalizePolicyIdentifier(table || '*') || '*';
+        const name = normalizePolicyIdentifier(field);
+        if (!name) return;
+        if (!result[key]) result[key] = [];
+        if (!result[key].includes(name)) result[key].push(name);
+    };
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        Object.entries(value).forEach(([table, fields]) => {
+            splitPolicyList(fields).forEach(field => addField(table, field));
+        });
+        return result;
+    }
+    const raw = String(value || '').trim();
+    if (raw.startsWith('{')) {
+        try {
+            return normalizeFieldAllowlist(JSON.parse(raw));
+        } catch (e) {
+            // Fall through to line parsing.
+        }
+    }
+    splitPolicyList(raw).forEach(item => {
+        if (item.includes(':')) {
+            const [table, fields] = item.split(/:(.+)/);
+            splitPolicyList(fields).forEach(field => addField(table, field));
+            return;
+        }
+        const parts = normalizePolicyIdentifier(item).split('.').filter(Boolean);
+        if (parts.length >= 2) addField(parts.slice(0, -1).join('.'), parts[parts.length - 1]);
+        else addField('*', parts[0] || item);
+    });
+    return result;
+}
+
+function clampTimeoutMs(value, fallback = 20000) {
+    const parsed = Number.parseInt(value || fallback, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1000, Math.min(parsed, 120000));
+}
+
 function normalizeDatabaseConnection(row, { includeSecret = false } = {}) {
     if (!row) return null;
     const options = parseOptions(row.options);
+    const tableAllowlist = normalizePolicyList(options.tableAllowlist || options.table_allowlist || options.allowedTables || options.allowed_tables);
+    const fieldAllowlist = normalizeFieldAllowlist(options.fieldAllowlist || options.field_allowlist || options.allowedFields || options.allowed_fields);
+    const sensitiveFields = normalizePolicyList(options.sensitiveFields || options.sensitive_fields);
     return {
         id: row.id,
         mcp_server_id: row.mcp_server_id,
@@ -280,6 +353,12 @@ function normalizeDatabaseConnection(row, { includeSecret = false } = {}) {
         // 默认校验服务端证书，仅当用户显式开启「信任自签名」时才放行无效证书
         ssl_allow_self_signed: Boolean(options.allowSelfSigned || options.sslAllowSelfSigned),
         max_rows: Number(options.maxRows || 100),
+        table_allowlist: tableAllowlist,
+        field_allowlist: fieldAllowlist,
+        sensitive_fields: sensitiveFields,
+        row_policy_hint: String(options.rowPolicyHint || options.row_policy_hint || '').slice(0, 500),
+        query_timeout_ms: clampTimeoutMs(options.queryTimeoutMs || options.query_timeout_ms || 20000),
+        sql_cost_estimate: options.sqlCostEstimate !== false && options.sql_cost_estimate !== false,
         status: row.status || 'active',
         has_password: Boolean(row.password),
         created_at: row.created_at,
@@ -411,6 +490,229 @@ function applySqlLimit(sql, limit, dialect) {
     return `${sql}\nLIMIT ${limit}`;
 }
 
+function hasTableAllowlist(cfg = {}) {
+    return Array.isArray(cfg.table_allowlist) && cfg.table_allowlist.length > 0;
+}
+
+function hasFieldAllowlist(cfg = {}) {
+    return cfg.field_allowlist && typeof cfg.field_allowlist === 'object' && Object.keys(cfg.field_allowlist).length > 0;
+}
+
+function isTableAllowed(cfg = {}, table = '') {
+    if (!hasTableAllowlist(cfg)) return true;
+    const target = normalizePolicyIdentifier(table);
+    const targetBase = baseIdentifier(table);
+    return cfg.table_allowlist.some(item => item === target || baseIdentifier(item) === targetBase);
+}
+
+function assertTableAllowed(cfg = {}, table = '') {
+    if (!String(table || '').trim()) return;
+    if (!isTableAllowed(cfg, table)) {
+        const err = new Error(`数据表 ${table} 不在允许访问的表白名单内。`);
+        err.status = 403;
+        throw err;
+    }
+}
+
+function allowedFieldsForTable(cfg = {}, table = '') {
+    if (!hasFieldAllowlist(cfg)) return [];
+    const fields = cfg.field_allowlist || {};
+    const key = normalizePolicyIdentifier(table);
+    const base = baseIdentifier(table);
+    return Array.from(new Set([
+        ...(fields['*'] || []),
+        ...(fields[key] || []),
+        ...(fields[base] || [])
+    ].map(normalizePolicyIdentifier).filter(Boolean)));
+}
+
+function assertFieldAllowed(cfg = {}, table = '', field = '') {
+    if (!hasFieldAllowlist(cfg)) return;
+    const allowed = allowedFieldsForTable(cfg, table);
+    const target = normalizePolicyIdentifier(field);
+    if (!allowed.includes(target) && !allowed.includes(baseIdentifier(field))) {
+        const err = new Error(`字段 ${field} 不在 ${table || '当前表'} 的字段白名单内。`);
+        err.status = 403;
+        throw err;
+    }
+}
+
+function getTableNameFromRow(row = {}) {
+    return row.table_name || row.name || row.TABLE_NAME || row.table || '';
+}
+
+function getColumnNameFromRow(row = {}) {
+    return row.column_name || row.name || row.COLUMN_NAME || '';
+}
+
+function filterTableRows(rows = [], cfg = {}) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!hasTableAllowlist(cfg)) return list;
+    return list.filter(row => isTableAllowed(cfg, getTableNameFromRow(row)));
+}
+
+function summarizeTableRows(rows = []) {
+    const grouped = new Map();
+    rows.forEach(row => {
+        const type = String(row.table_type || row.type || row.TABLE_TYPE || 'table');
+        grouped.set(type, (grouped.get(type) || 0) + 1);
+    });
+    const resultRows = Array.from(grouped.entries()).map(([type, total]) => ({ type, total }));
+    return { total: rows.length, rows: resultRows };
+}
+
+function filterDescribeRows(rows = [], cfg = {}, table = '') {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!hasFieldAllowlist(cfg)) return list;
+    const allowed = allowedFieldsForTable(cfg, table);
+    return list.filter(row => {
+        const column = normalizePolicyIdentifier(getColumnNameFromRow(row));
+        return allowed.includes(column) || allowed.includes(baseIdentifier(column));
+    });
+}
+
+function isSensitiveField(cfg = {}, key = '') {
+    const fields = Array.isArray(cfg.sensitive_fields) ? cfg.sensitive_fields : [];
+    if (!fields.length) return false;
+    const target = normalizePolicyIdentifier(key);
+    const targetBase = baseIdentifier(key);
+    return fields.some(field => field === target || baseIdentifier(field) === targetBase);
+}
+
+function maskSensitiveRows(rows, cfg = {}) {
+    if (!Array.isArray(rows) || !(cfg.sensitive_fields || []).length) return rows;
+    return rows.map(row => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+        const masked = {};
+        Object.entries(row).forEach(([key, value]) => {
+            masked[key] = isSensitiveField(cfg, key) ? '[已脱敏]' : value;
+        });
+        return masked;
+    });
+}
+
+function splitTopLevelCsv(text = '') {
+    const parts = [];
+    let current = '';
+    let depth = 0;
+    let quote = '';
+    String(text || '').split('').forEach(ch => {
+        if (quote) {
+            current += ch;
+            if (ch === quote) quote = '';
+            return;
+        }
+        if (['"', "'", '`'].includes(ch)) {
+            quote = ch;
+            current += ch;
+            return;
+        }
+        if (ch === '(') depth += 1;
+        if (ch === ')') depth = Math.max(0, depth - 1);
+        if (ch === ',' && depth === 0) {
+            parts.push(current.trim());
+            current = '';
+            return;
+        }
+        current += ch;
+    });
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+}
+
+function extractSqlTables(sql = '') {
+    const tables = [];
+    const text = String(sql || '').replace(/["'`]/g, '');
+    const pattern = /\b(?:from|join|describe|desc)\s+([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)/ig;
+    let match;
+    while ((match = pattern.exec(text))) {
+        const value = normalizePolicyIdentifier(match[1]);
+        if (value && !tables.includes(value)) tables.push(value);
+    }
+    return tables;
+}
+
+function extractSelectFields(sql = '') {
+    const text = String(sql || '').trim();
+    const match = text.match(/^\s*select\s+(.+?)\s+from\s+/is);
+    if (!match) return [];
+    return splitTopLevelCsv(match[1]).map(item => {
+        const withoutAlias = item
+            .replace(/\s+as\s+[A-Za-z_][\w$]*$/i, '')
+            .replace(/\s+[A-Za-z_][\w$]*$/i, '')
+            .trim();
+        if (withoutAlias === '*') return '*';
+        const identifierMatch = withoutAlias.match(/^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?$/);
+        return identifierMatch ? baseIdentifier(identifierMatch[0]) : '';
+    }).filter(Boolean);
+}
+
+function assertSqlGovernance(sql = '', cfg = {}) {
+    const tables = extractSqlTables(sql);
+    if (hasTableAllowlist(cfg) && /^\s*select\b/i.test(sql) && tables.length === 0) {
+        const err = new Error('表白名单已启用，复杂 SQL 需要改写为能明确识别 FROM/JOIN 表名的查询。');
+        err.status = 403;
+        throw err;
+    }
+    tables.forEach(table => assertTableAllowed(cfg, table));
+    if (hasFieldAllowlist(cfg)) {
+        const fields = extractSelectFields(sql);
+        if (fields.includes('*')) {
+            const err = new Error('字段白名单已启用，请使用明确字段名，不能 SELECT *。');
+            err.status = 403;
+            throw err;
+        }
+        if (/^\s*select\b/i.test(sql) && fields.length === 0) {
+            const err = new Error('字段白名单已启用，复杂 SQL 需要改写为明确列名的 SELECT。');
+            err.status = 403;
+            throw err;
+        }
+        fields.forEach(field => {
+            if (!/^\d+$/.test(field)) {
+                const allowed = tables.length
+                    ? tables.some(table => {
+                        try {
+                            assertFieldAllowed(cfg, table, field);
+                            return true;
+                        } catch (e) {
+                            return false;
+                        }
+                    })
+                    : allowedFieldsForTable(cfg, '*').includes(normalizePolicyIdentifier(field));
+                if (!allowed) {
+                    const err = new Error(`字段 ${field} 不在字段白名单内。`);
+                    err.status = 403;
+                    throw err;
+                }
+            }
+        });
+    }
+    return { tables };
+}
+
+function buildDatabaseCost(cfg = {}, details = {}) {
+    const governance = {
+        tableAllowlistActive: hasTableAllowlist(cfg),
+        fieldAllowlistActive: hasFieldAllowlist(cfg),
+        sensitiveMaskingActive: Array.isArray(cfg.sensitive_fields) && cfg.sensitive_fields.length > 0,
+        rowPolicyHint: cfg.row_policy_hint || '',
+        queryTimeoutMs: cfg.query_timeout_ms || 20000
+    };
+    if (cfg.sql_cost_estimate === false) return { governance };
+    return {
+        governance,
+        cost: {
+            operation: details.operation || 'query',
+            databaseType: cfg.database_type,
+            tables: details.tables || [],
+            fields: details.fields || [],
+            limit: details.limit || cfg.max_rows || 100,
+            boundedByLimit: true,
+            estimate: '轻量估算：实际扫描成本取决于数据库执行计划、索引和过滤条件。'
+        }
+    };
+}
+
 function allowedSqliteRoots() {
     const roots = (process.env.MCP_SQLITE_ROOTS || dataDir)
         .split(',')
@@ -436,7 +738,16 @@ function buildRelationalConnectionConfig(connection) {
         password: connection.password || '',
         schema: connection.schema || options.schema || '',
         ssl: Boolean(connection.ssl || options.ssl),
-        ssl_allow_self_signed: Boolean(connection.ssl_allow_self_signed || options.allowSelfSigned || options.sslAllowSelfSigned)
+        ssl_allow_self_signed: Boolean(connection.ssl_allow_self_signed || options.allowSelfSigned || options.sslAllowSelfSigned),
+        max_rows: Number(connection.max_rows || options.maxRows || 100),
+        table_allowlist: connection.table_allowlist || normalizePolicyList(options.tableAllowlist || options.table_allowlist || options.allowedTables || options.allowed_tables),
+        field_allowlist: connection.field_allowlist || normalizeFieldAllowlist(options.fieldAllowlist || options.field_allowlist || options.allowedFields || options.allowed_fields),
+        sensitive_fields: connection.sensitive_fields || normalizePolicyList(options.sensitiveFields || options.sensitive_fields),
+        row_policy_hint: connection.row_policy_hint || String(options.rowPolicyHint || options.row_policy_hint || '').slice(0, 500),
+        query_timeout_ms: clampTimeoutMs(connection.query_timeout_ms || options.queryTimeoutMs || options.query_timeout_ms || 20000),
+        sql_cost_estimate: connection.sql_cost_estimate !== undefined
+            ? connection.sql_cost_estimate
+            : (options.sqlCostEstimate !== false && options.sql_cost_estimate !== false)
     };
 }
 
@@ -560,34 +871,49 @@ async function executeSqlTool(connection, name, input = {}) {
     const schema = String(input.schema || cfg.schema || '').trim();
     const table = String(input.table || '').trim();
     const limit = clampLimit(input.limit, cfg.max_rows || 100);
+    const decorate = (result, details = {}) => ({
+        ...result,
+        ...buildDatabaseCost(cfg, { limit, ...details })
+    });
 
     if (cfg.database_type === 'sqlite') {
         return withSqlite(cfg, client => {
             if (name === 'db.list_tables') {
-                return client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
+                return filterTableRows(client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all(), cfg);
             }
             if (name === 'db.count_tables') {
-                const rows = client.prepare("SELECT type, COUNT(*) AS total FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' GROUP BY type ORDER BY type").all();
-                const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-                return { total, rows };
+                const rows = filterTableRows(client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all(), cfg);
+                return summarizeTableRows(rows);
             }
             if (name === 'db.describe_table') {
-                return client.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
+                assertTableAllowed(cfg, table);
+                return filterDescribeRows(client.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all(), cfg, table);
             }
             if (name === 'db.run_readonly_query') {
-                const sql = applySqlLimit(assertReadonlySql(input.sql), limit, 'sqlite');
-                return { rows: client.prepare(sql).all(), limit };
+                const readonly = assertReadonlySql(input.sql);
+                const governance = assertSqlGovernance(readonly, cfg);
+                const sql = applySqlLimit(readonly, limit, 'sqlite');
+                return decorate({ rows: maskSensitiveRows(client.prepare(sql).all(), cfg), limit }, {
+                    operation: 'readonly_sql',
+                    tables: governance.tables
+                });
             }
             if (name === 'db.group_count') {
+                assertTableAllowed(cfg, table);
+                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
                 const query = buildGroupCountSql({ ...input, limit }, 'sqlite', schema);
-                return { ...query, rows: client.prepare(query.sql).all() };
+                return decorate({ ...query, rows: maskSensitiveRows(client.prepare(query.sql).all(), cfg) }, {
+                    operation: 'group_count',
+                    tables: [table],
+                    fields: [input.groupBy || input.group_by]
+                });
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
         });
     }
 
     if (cfg.database_type === 'postgres') {
-        return withPostgres(cfg, async client => {
+        return withOperationTimeout(withPostgres(cfg, async client => {
             if (name === 'db.list_tables') {
                 const result = await client.query(`
                     SELECT table_schema, table_name, table_type
@@ -596,44 +922,54 @@ async function executeSqlTool(connection, name, input = {}) {
                       AND ($1::text = '' OR table_schema = $1)
                     ORDER BY table_schema, table_name
                 `, [schema]);
-                return result.rows;
+                return filterTableRows(result.rows, cfg);
             }
             if (name === 'db.count_tables') {
                 const result = await client.query(`
-                    SELECT table_schema, table_type, COUNT(*)::int AS total
+                    SELECT table_schema, table_name, table_type
                     FROM information_schema.tables
                     WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
                       AND ($1::text = '' OR table_schema = $1)
-                    GROUP BY table_schema, table_type
-                    ORDER BY table_schema, table_type
+                    ORDER BY table_schema, table_name
                 `, [schema]);
-                const total = result.rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-                return { total, rows: result.rows };
+                return summarizeTableRows(filterTableRows(result.rows, cfg));
             }
             if (name === 'db.describe_table') {
+                assertTableAllowed(cfg, table);
                 const result = await client.query(`
                     SELECT column_name, data_type, is_nullable, column_default
                     FROM information_schema.columns
                     WHERE table_name = $1 AND ($2::text = '' OR table_schema = $2)
                     ORDER BY ordinal_position
                 `, [table, schema]);
-                return result.rows;
+                return filterDescribeRows(result.rows, cfg, table);
             }
             if (name === 'db.run_readonly_query') {
-                const result = await client.query(applySqlLimit(assertReadonlySql(input.sql), limit, 'postgres'));
-                return { rows: result.rows, limit };
+                const readonly = assertReadonlySql(input.sql);
+                const governance = assertSqlGovernance(readonly, cfg);
+                const result = await client.query(applySqlLimit(readonly, limit, 'postgres'));
+                return decorate({ rows: maskSensitiveRows(result.rows, cfg), limit }, {
+                    operation: 'readonly_sql',
+                    tables: governance.tables
+                });
             }
             if (name === 'db.group_count') {
+                assertTableAllowed(cfg, table);
+                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
                 const query = buildGroupCountSql({ ...input, limit }, 'postgres', schema);
                 const result = await client.query(query.sql);
-                return { ...query, rows: result.rows };
+                return decorate({ ...query, rows: maskSensitiveRows(result.rows, cfg) }, {
+                    operation: 'group_count',
+                    tables: [table],
+                    fields: [input.groupBy || input.group_by]
+                });
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
-        });
+        }), cfg.query_timeout_ms, cfg, 'PostgreSQL database query');
     }
 
     if (cfg.database_type === 'mysql') {
-        return withMysql(cfg, async client => {
+        return withOperationTimeout(withMysql(cfg, async client => {
             if (name === 'db.list_tables') {
                 const [rows] = await client.execute(`
                     SELECT table_schema, table_name, table_type
@@ -641,43 +977,53 @@ async function executeSqlTool(connection, name, input = {}) {
                     WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
                     ORDER BY table_name
                 `, [schema]);
-                return rows;
+                return filterTableRows(rows, cfg);
             }
             if (name === 'db.count_tables') {
                 const [rows] = await client.execute(`
-                    SELECT table_schema, table_type, COUNT(*) AS total
+                    SELECT table_schema, table_name, table_type
                     FROM information_schema.tables
                     WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
-                    GROUP BY table_schema, table_type
-                    ORDER BY table_schema, table_type
+                    ORDER BY table_schema, table_name
                 `, [schema]);
-                const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-                return { total, rows };
+                return summarizeTableRows(filterTableRows(rows, cfg));
             }
             if (name === 'db.describe_table') {
+                assertTableAllowed(cfg, table);
                 const [rows] = await client.execute(`
                     SELECT column_name, data_type, is_nullable, column_default
                     FROM information_schema.columns
                     WHERE table_name = ? AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
                     ORDER BY ordinal_position
                 `, [table, schema]);
-                return rows;
+                return filterDescribeRows(rows, cfg, table);
             }
             if (name === 'db.run_readonly_query') {
-                const [rows] = await client.query(applySqlLimit(assertReadonlySql(input.sql), limit, 'mysql'));
-                return { rows, limit };
+                const readonly = assertReadonlySql(input.sql);
+                const governance = assertSqlGovernance(readonly, cfg);
+                const [rows] = await client.query(applySqlLimit(readonly, limit, 'mysql'));
+                return decorate({ rows: maskSensitiveRows(rows, cfg), limit }, {
+                    operation: 'readonly_sql',
+                    tables: governance.tables
+                });
             }
             if (name === 'db.group_count') {
+                assertTableAllowed(cfg, table);
+                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
                 const query = buildGroupCountSql({ ...input, limit }, 'mysql', schema);
                 const [rows] = await client.query(query.sql);
-                return { ...query, rows };
+                return decorate({ ...query, rows: maskSensitiveRows(rows, cfg) }, {
+                    operation: 'group_count',
+                    tables: [table],
+                    fields: [input.groupBy || input.group_by]
+                });
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
-        });
+        }), cfg.query_timeout_ms, cfg, 'MySQL database query');
     }
 
     if (cfg.database_type === 'sqlserver') {
-        return withSqlServer(cfg, async pool => {
+        return withOperationTimeout(withSqlServer(cfg, async pool => {
             if (name === 'db.list_tables') {
                 const result = await pool.request()
                     .input('schema', schema)
@@ -687,22 +1033,21 @@ async function executeSqlTool(connection, name, input = {}) {
                         WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
                         ORDER BY TABLE_SCHEMA, TABLE_NAME
                     `);
-                return result.recordset;
+                return filterTableRows(result.recordset, cfg);
             }
             if (name === 'db.count_tables') {
                 const result = await pool.request()
                     .input('schema', schema)
                     .query(`
-                        SELECT TABLE_SCHEMA AS table_schema, TABLE_TYPE AS table_type, COUNT(*) AS total
+                        SELECT TABLE_SCHEMA AS table_schema, TABLE_NAME AS table_name, TABLE_TYPE AS table_type
                         FROM INFORMATION_SCHEMA.TABLES
                         WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
-                        GROUP BY TABLE_SCHEMA, TABLE_TYPE
-                        ORDER BY TABLE_SCHEMA, TABLE_TYPE
+                        ORDER BY TABLE_SCHEMA, TABLE_NAME
                     `);
-                const total = result.recordset.reduce((sum, row) => sum + Number(row.total || 0), 0);
-                return { total, rows: result.recordset };
+                return summarizeTableRows(filterTableRows(result.recordset, cfg));
             }
             if (name === 'db.describe_table') {
+                assertTableAllowed(cfg, table);
                 const result = await pool.request()
                     .input('table', table)
                     .input('schema', schema)
@@ -712,19 +1057,30 @@ async function executeSqlTool(connection, name, input = {}) {
                         WHERE TABLE_NAME = @table AND (@schema = '' OR TABLE_SCHEMA = @schema)
                         ORDER BY ORDINAL_POSITION
                     `);
-                return result.recordset;
+                return filterDescribeRows(result.recordset, cfg, table);
             }
             if (name === 'db.run_readonly_query') {
-                const result = await pool.request().query(applySqlLimit(assertReadonlySql(input.sql), limit, 'sqlserver'));
-                return { rows: result.recordset, limit };
+                const readonly = assertReadonlySql(input.sql);
+                const governance = assertSqlGovernance(readonly, cfg);
+                const result = await pool.request().query(applySqlLimit(readonly, limit, 'sqlserver'));
+                return decorate({ rows: maskSensitiveRows(result.recordset, cfg), limit }, {
+                    operation: 'readonly_sql',
+                    tables: governance.tables
+                });
             }
             if (name === 'db.group_count') {
+                assertTableAllowed(cfg, table);
+                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
                 const query = buildGroupCountSql({ ...input, limit }, 'sqlserver', schema);
                 const result = await pool.request().query(query.sql);
-                return { ...query, rows: result.recordset };
+                return decorate({ ...query, rows: maskSensitiveRows(result.recordset, cfg) }, {
+                    operation: 'group_count',
+                    tables: [table],
+                    fields: [input.groupBy || input.group_by]
+                });
             }
             throw new Error(`Unsupported database MCP tool: ${name}`);
-        });
+        }), cfg.query_timeout_ms, cfg, 'SQL Server database query');
     }
 
     throw new Error(`Unsupported database type: ${cfg.database_type}`);
@@ -732,6 +1088,7 @@ async function executeSqlTool(connection, name, input = {}) {
 
 async function executeMongoTool(connection, name, input = {}) {
     const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
+    const cfg = connection;
     const auth = connection.username
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
@@ -745,21 +1102,33 @@ async function executeMongoTool(connection, name, input = {}) {
         connectTimeoutMS: timeoutMs,
         socketTimeoutMS: timeoutMs
     });
-    await client.connect();
-    try {
+    return withOperationTimeout((async () => {
+        await client.connect();
+        try {
         const database = client.db(connection.database_name);
         if (name === 'db.list_collections') {
-            return await database.listCollections({}, { nameOnly: true }).toArray();
+            return filterTableRows(await database.listCollections({}, { nameOnly: true }).toArray(), cfg);
         }
         if (name === 'db.count_collections') {
-            const collections = await database.listCollections({}, { nameOnly: true }).toArray();
+            const collections = filterTableRows(await database.listCollections({}, { nameOnly: true }).toArray(), cfg);
             return { total: collections.length, rows: collections };
         }
         if (name === 'db.sample_collection') {
+            assertTableAllowed(cfg, input.collection);
             const limit = clampLimit(input.limit, 20, 100);
-            return await database.collection(String(input.collection || '')).find({}).limit(limit).toArray();
+            const rows = await database.collection(String(input.collection || '')).find({}).limit(limit).toArray();
+            return {
+                rows: maskSensitiveRows(rows, cfg),
+                limit,
+                ...buildDatabaseCost(cfg, {
+                    operation: 'sample_collection',
+                    tables: [String(input.collection || '')],
+                    limit
+                })
+            };
         }
         if (name === 'db.aggregate') {
+            assertTableAllowed(cfg, input.collection);
             const limit = clampLimit(input.limit, 100);
             const pipeline = Array.isArray(input.pipeline) ? input.pipeline : [];
             const blockedStage = pipeline.some(stage => {
@@ -767,12 +1136,22 @@ async function executeMongoTool(connection, name, input = {}) {
                 return keys.some(key => ['$out', '$merge'].includes(key));
             });
             if (blockedStage) throw new Error('MongoDB aggregation cannot use write stages such as $out or $merge.');
-            return await database.collection(String(input.collection || '')).aggregate([...pipeline, { $limit: limit }]).toArray();
+            const rows = await database.collection(String(input.collection || '')).aggregate([...pipeline, { $limit: limit }]).toArray();
+            return {
+                rows: maskSensitiveRows(rows, cfg),
+                limit,
+                ...buildDatabaseCost(cfg, {
+                    operation: 'aggregate',
+                    tables: [String(input.collection || '')],
+                    limit
+                })
+            };
         }
         throw new Error(`Unsupported database MCP tool: ${name}`);
-    } finally {
-        await client.close();
-    }
+        } finally {
+            await client.close();
+        }
+    })(), cfg.query_timeout_ms || timeoutMs, cfg, 'MongoDB database query');
 }
 
 async function testDatabaseConnection(connection) {
@@ -847,6 +1226,15 @@ function validateDatabaseConnectionPayload(payload, user) {
     const port = parseInt(payload.port || DEFAULT_PORTS[type] || 0, 10) || DEFAULT_PORTS[type] || 0;
     const schema = String(payload.schema || '').trim();
     const maxRows = clampLimit(payload.max_rows || payload.maxRows, 100);
+    const tableAllowlist = normalizePolicyList(payload.table_allowlist || payload.tableAllowlist || payload.allowed_tables || payload.allowedTables);
+    const fieldAllowlist = normalizeFieldAllowlist(payload.field_allowlist || payload.fieldAllowlist || payload.allowed_fields || payload.allowedFields);
+    const sensitiveFields = normalizePolicyList(payload.sensitive_fields || payload.sensitiveFields);
+    const rowPolicyHint = String(payload.row_policy_hint || payload.rowPolicyHint || '').trim().slice(0, 500);
+    const queryTimeoutMs = clampTimeoutMs(payload.query_timeout_ms || payload.queryTimeoutMs || 20000);
+    const sqlCostEstimate = payload.sql_cost_estimate === false || payload.sql_cost_estimate === 'false'
+        || payload.sqlCostEstimate === false || payload.sqlCostEstimate === 'false'
+        ? false
+        : true;
     const ssl = payload.ssl === true || payload.ssl === 'true';
     // 显式「信任自签名证书」开关，默认关闭（即校验证书防 MITM）
     const allowSelfSigned = payload.allow_self_signed === true || payload.allow_self_signed === 'true'
@@ -871,7 +1259,18 @@ function validateDatabaseConnectionPayload(payload, user) {
         database_name: databaseName,
         username,
         password: String(payload.password || ''),
-        options: { schema, ssl, maxRows, allowSelfSigned }
+        options: {
+            schema,
+            ssl,
+            maxRows,
+            allowSelfSigned,
+            tableAllowlist,
+            fieldAllowlist,
+            sensitiveFields,
+            rowPolicyHint,
+            queryTimeoutMs,
+            sqlCostEstimate
+        }
     };
 }
 

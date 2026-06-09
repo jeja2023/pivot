@@ -179,6 +179,11 @@ const mcpToolDisplayMap = {
         description: '执行只读查询，限制返回行数，并阻止写入或管理类语句。',
         prompt: '请用只读查询统计我关心的数据，并给出简短结论。'
     },
+    'db.group_count': {
+        title: '分组统计分布',
+        description: '按指定字段统计数量，适合生成分布表、排行榜和图表前置数据。',
+        prompt: '请按关键字段做数量分布统计，并把结果整理成适合生成图表的数据。'
+    },
     'db.list_collections': {
         title: '列出集合',
         description: '列出 MongoDB 数据库中的集合。',
@@ -205,7 +210,8 @@ const mcpSqlDatabaseFallbackTools = [
     'db.list_tables',
     'db.count_tables',
     'db.describe_table',
-    'db.run_readonly_query'
+    'db.run_readonly_query',
+    'db.group_count'
 ];
 
 const mcpMongoDatabaseFallbackTools = [

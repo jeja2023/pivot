@@ -44,7 +44,7 @@ async function loadAgentModels() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于智能体的模型</div>';
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>';
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -71,7 +71,7 @@ async function _loadAgentModelsLegacy() {
     const select = document.getElementById('agent-model-select');
     if (!select) return;
     const res = await apiFetch(`${API_BASE}/models/available`);
-    if (!res.ok) throw new Error('智能体模型列表加载失败');
+    if (!res.ok) throw new Error('自由任务模型列表加载失败');
     const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
         ? window.isSelectableModelForCurrentUser
         : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
@@ -96,7 +96,7 @@ async function _loadAgentModelsLegacy() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于智能体的模型</div>';
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>';
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -137,7 +137,7 @@ async function loadAgentModelRouters() {
         `).join('');
         select.value = strategies.some(strategy => String(strategy.code) === String(current)) ? current : 'fixed';
     } catch (e) {
-        // 保留 HTML 中的默认策略，避免路由接口异常影响智能体工作台打开。
+        // 保留 HTML 中的默认策略，避免路由接口异常影响自由任务工作台打开。
     }
 }
 
@@ -262,13 +262,22 @@ function renderAgentPreflight(data) {
     const target = document.getElementById('agent-preflight-panel');
     if (!target || !data) return;
     const statusText = data.status === 'blocked' ? '阻断' : data.status === 'warning' ? '有风险' : '可运行';
-    const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || [])].slice(0, 5);
     const summary = data.summary || {};
+    const deploymentTip = summary.runMode === 'dag'
+        ? '工作流适合发布版本、计划运行和审计复用，可作为企业生产任务入口。'
+        : '自由任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
+    const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || []), deploymentTip].slice(0, 5);
     target.className = `workspace-governance-panel agent-preflight-panel ${agentEscape(data.status || 'ready')}`;
     target.innerHTML = `
         <div class="governance-head">
             <strong>任务预检：${agentEscape(statusText)}</strong>
-            <span>工具 ${Number(summary.toolCount || 0)} · 能力库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
+            <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 能力库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
+        </div>
+        <div class="governance-metrics">
+            <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入Token</span>
+            <span><b>${Number(summary.highRiskToolCount || 0)}</b>高风险工具</span>
+            <span><b>${Number(summary.mcpErrorServers || 0)}</b>异常能力</span>
+            <span><b>${Number(summary.mcpUncheckedServers || 0)}</b>待刷新能力</span>
         </div>
         <div class="governance-list">
             ${messages.map(item => `<span>${agentEscape(item)}</span>`).join('') || '<span>预检通过。</span>'}
@@ -306,6 +315,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     const list = document.getElementById('agent-runs-list');
     if (!list) return;
     const status = document.getElementById('agent-filter-status')?.value || '';
+    const runType = document.getElementById('agent-filter-run-type')?.value || '';
     const query = document.getElementById('agent-filter-query')?.value.trim() || '';
     agentRunsPage = Math.max(Number(page) || 1, 1);
     const params = new URLSearchParams({
@@ -313,6 +323,7 @@ async function loadAgentRuns(page = agentRunsPage) {
         limit: String(AGENT_RUNS_PAGE_SIZE)
     });
     if (status) params.set('status', status);
+    if (runType) params.set('runType', runType);
     if (query) params.set('query', query);
     const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`);
     const data = await res.json();
@@ -328,14 +339,14 @@ async function loadAgentRuns(page = agentRunsPage) {
     updateAgentAutoRefresh();
     renderAgentRunsPagination(agentRunsPage, agentRunsTotal, pageSize);
     const displayRuns = agentRunsCache;
-    if (agentRunsTotal === 0 && !status && !query) {
+    if (agentRunsTotal === 0 && !status && !runType && !query) {
         list.innerHTML = '';
         activeAgentRunId = '';
         closeAgentRunDetailModal();
         list.innerHTML = `
             <div class="agent-empty-state agent-empty-hero">
-                <strong>还没有智能体任务</strong>
-                <span>在左侧输入目标并点击运行后，这里会显示任务记录。点击详情可查看执行步骤和最终结果。</span>
+                <strong>还没有自由任务</strong>
+                <span>在左侧输入目标并点击运行后，这里会显示统一任务记录。自由任务可继续生成工作流草稿。</span>
             </div>
         `;
         return;
@@ -353,6 +364,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                     <tr>
                         <th class="text-center">序号</th>
                         <th>任务</th>
+                        <th>类型</th>
                         <th>模型</th>
                         <th>模式</th>
                         <th>步骤</th>
@@ -370,6 +382,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                     ${displayRuns.map((run, index) => {
         const title = agentDisplayTitle(run);
         const mode = agentRunModeLabel(run.run_mode);
+        const runTypeLabel = run.run_mode === 'dag' ? '工作流任务' : '自由任务';
         const tokenTotal = Number(run.total_tokens || 0);
         const inputTokens = Number(run.input_tokens || 0);
         const outputTokens = Number(run.output_tokens || 0);
@@ -384,6 +397,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <td class="agent-runs-title-cell">
                     <strong tabindex="0" aria-label="${agentEscapeAttr(taskTooltip)}" data-agent-run-title-full="${agentEscapeAttr(taskTooltip)}">${agentEscape(title)}</strong>
                 </td>
+                <td><span class="agent-run-type ${run.run_mode === 'dag' ? 'workflow' : 'free'}">${agentEscape(runTypeLabel)}</span></td>
                 <td>
                     <strong class="agent-runs-compact">${agentEscape(run.model_name || '-')}</strong>
                 </td>

@@ -59,7 +59,7 @@ async function loadAgentTemplates() {
 
 async function saveCurrentAgentTemplate() {
     const payload = getAgentRunPayload();
-    if (!payload.goal) return showToast('请先填写任务目标', 'error');
+    if (!payload.goal) return showToast('请先填写自由任务目标', 'error');
     if (payload._invalid) return;
     const name = window.prompt('模板名称', payload.goal.slice(0, 24));
     if (!name) return;
@@ -69,18 +69,18 @@ async function saveCurrentAgentTemplate() {
         body: JSON.stringify({
             name,
             goalTemplate: payload.goal,
-            description: '从智能体工作台保存',
+            description: '从自由任务工作台保存，用于复用目标、参数和上下文设置。',
             ...payload
         })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '保存模板失败', 'error');
-    showToast('模板已保存', 'success');
+    showToast('自由任务模板已保存', 'success');
     await loadAgentTemplates();
 }
 
 function deleteAgentTemplate(templateId) {
-    showConfirm('删除智能体模板', '确定删除这个智能体模板吗？已创建的任务记录不会受影响。', async () => {
+    showConfirm('删除自由任务模板', '确定删除这个自由任务模板吗？已创建的任务记录不会受影响。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除模板失败', 'error');

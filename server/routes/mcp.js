@@ -2,7 +2,13 @@ const express = require('express');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
-const { decryptSecret, encryptSecret, assertSafeMcpOutboundUrl } = require('../security');
+const axios = require('axios');
+const {
+    decryptSecret,
+    encryptSecret,
+    assertSafeMcpOutboundUrl,
+    createSafeHttpAgentsForUser
+} = require('../security');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { debugRetrieveContext } = require('../services/rag-index');
 const {
@@ -17,9 +23,11 @@ const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../services/a
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
+    isToolCapabilityEnabled,
     isCapabilityEnabled,
     listCapabilityPackages,
-    setCapabilityPackageStatus
+    setCapabilityPackageStatus,
+    setCapabilityToolGovernance
 } = require('../services/capability-market');
 const {
     DEFAULT_PORTS,
@@ -29,7 +37,9 @@ const {
 } = require('../services/database-mcp');
 const {
     BUILTIN_MCP_PREFIXES,
+    executeBuiltinMcpTool,
     getBuiltinServiceTypeFromUrl,
+    getBuiltinConfigForServer,
     normalizeBuiltinPayload
 } = require('../services/builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
@@ -100,6 +110,94 @@ function sanitizeDatabaseConnectionForLog(connection, body = {}) {
         port: connection?.port || body?.port || '',
         database_name: connection?.database_name || body?.database_name || body?.databaseName || '',
         username: connection?.username || body?.username || ''
+    };
+}
+
+function parseServerConfig(value) {
+    try {
+        const parsed = typeof value === 'string' ? JSON.parse(value || '{}') : (value || {});
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function splitConfigList(value) {
+    if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+    return String(value || '')
+        .split(/[\n;]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function parseBoolean(value, fallback = false) {
+    if (value === true || value === 'true' || value === 1 || value === '1') return true;
+    if (value === false || value === 'false' || value === 0 || value === '0') return false;
+    return fallback;
+}
+
+function pickConfigValue(payload, current, snakeKey, camelKey, fallback = '') {
+    if (Object.prototype.hasOwnProperty.call(payload, snakeKey)) return payload[snakeKey];
+    if (Object.prototype.hasOwnProperty.call(payload, camelKey)) return payload[camelKey];
+    if (Object.prototype.hasOwnProperty.call(current, camelKey)) return current[camelKey];
+    return fallback;
+}
+
+function normalizeExternalServerConfig(payload = {}) {
+    const current = parseServerConfig(payload.config);
+    const authMode = String(pickConfigValue(payload, current, 'auth_mode', 'authMode', 'auto')).toLowerCase();
+    const allowedAuthMode = ['auto', 'bearer', 'x-api-key', 'none'].includes(authMode) ? authMode : 'auto';
+    const timeoutMs = Math.max(1000, Math.min(Number(pickConfigValue(payload, current, 'timeout_ms', 'timeoutMs', 20000)) || 20000, 120000));
+    return {
+        ...current,
+        healthCheckUrl: String(pickConfigValue(payload, current, 'health_check_url', 'healthCheckUrl', '')).trim(),
+        timeoutMs,
+        authMode: allowedAuthMode,
+        validateToolSchema: parseBoolean(
+            pickConfigValue(payload, current, 'validate_tool_schema', 'validateToolSchema', current.validateToolSchema),
+            false
+        ),
+        examplePrompts: splitConfigList(pickConfigValue(payload, current, 'example_prompts', 'examplePrompts', current.examplePrompts))
+            .slice(0, 12)
+            .map(item => item.slice(0, 300))
+    };
+}
+
+function clampHealthScore(value) {
+    const score = Math.round(Number(value) || 0);
+    return Math.max(0, Math.min(score, 100));
+}
+
+function buildCapabilityHealth(summary = {}, callSummary = {}) {
+    const total = Number(summary.total || 0);
+    const active = Number(summary.active || 0);
+    const error = Number(summary.error || 0);
+    const unchecked = Number(summary.unchecked || 0);
+    const calls7d = Number(callSummary.total || 0);
+    const callErrors7d = Number(callSummary.errors || 0);
+    const avgDurationMs = Number(callSummary.avgDurationMs || 0);
+    const activeRate = total > 0 ? active / total : 0;
+    const callErrorRate = calls7d > 0 ? callErrors7d / calls7d : 0;
+    let score = total > 0 ? 55 + activeRate * 30 : 0;
+    score -= Math.min(error * 14, 35);
+    score -= Math.min(unchecked * 5, 20);
+    score -= Math.min(callErrorRate * 100, 25);
+    if (avgDurationMs > 8000) score -= 10;
+    else if (avgDurationMs > 3000) score -= 5;
+    const healthScore = clampHealthScore(score);
+    const recommendations = [];
+    if (total === 0) recommendations.push('先启用一个系统能力，确认聊天、自由任务和工作流可正常调用工具。');
+    if (error > 0) recommendations.push('存在异常能力，建议优先检查连接配置、密钥和网络可达性。');
+    if (unchecked > 0) recommendations.push('存在未刷新动作列表的能力，建议刷新工具缓存后再交给模型使用。');
+    if (callErrorRate >= 0.2) recommendations.push('近 7 日能力调用错误率偏高，建议查看调用日志定位失败工具。');
+    if (avgDurationMs > 3000) recommendations.push('能力平均耗时较高，建议收紧返回行数或拆分长耗时任务。');
+    if (recommendations.length === 0) recommendations.push('能力库健康状态良好，可继续按任务需要启用工具。');
+    return {
+        score: healthScore,
+        level: healthScore >= 85 ? 'excellent' : healthScore >= 70 ? 'good' : healthScore >= 50 ? 'attention' : 'risk',
+        activeRate: Math.round(activeRate * 100),
+        callErrorRate: Math.round(callErrorRate * 100),
+        recommendations
     };
 }
 
@@ -218,6 +316,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             ORDER BY count DESC
             LIMIT 8
         `).all(...callParams);
+        const health = buildCapabilityHealth(summary, callSummary);
         res.json({
             summary: {
                 total: Number(summary.total || 0),
@@ -231,8 +330,13 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 imServers: Number(summary.imServers || 0),
                 calls7d: Number(callSummary.total || 0),
                 callErrors7d: Number(callSummary.errors || 0),
-                avgDurationMs: Number(callSummary.avgDurationMs || 0)
+                avgDurationMs: Number(callSummary.avgDurationMs || 0),
+                healthScore: health.score,
+                healthLevel: health.level,
+                activeRate: health.activeRate,
+                callErrorRate: health.callErrorRate
             },
+            health,
             topTools
         });
     }));
@@ -264,6 +368,20 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const item = setCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
         if (!item) return res.status(404).json({ error: '能力包不存在。' });
         logAction(req, '更新能力包状态', `${item.package_key}: ${item.status}`);
+        res.json({ success: true, item });
+    }));
+
+    router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, asyncHandler(async (req, res) => {
+        const item = setCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
+            enabled: parseBoolean(req.body?.enabled, true),
+            riskLevel: req.body?.riskLevel || req.body?.risk_level,
+            approvalRequired: req.body?.approvalRequired !== undefined
+                ? req.body.approvalRequired
+                : req.body?.approval_required,
+            usage: req.body?.usage || req.body?.applicability
+        });
+        if (!item) return res.status(404).json({ error: '能力包不存在。' });
+        logAction(req, '更新能力工具治理', `${item.packageKey}: ${item.toolName}`);
         res.json({ success: true, item });
     }));
 
@@ -328,14 +446,16 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const baseUrl = String(req.body?.base_url || req.body?.baseUrl || '').trim();
         const apiKey = String(req.body?.api_key || req.body?.apiKey || '').trim();
         const description = String(req.body?.description || '').trim();
+        const config = normalizeExternalServerConfig(req.body || {});
         const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
         if (!name || !baseUrl) return res.status(400).json({ error: 'Name and Base URL are required.' });
         await assertSafeMcpOutboundUrl(baseUrl, req.user);
+        if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
         const now = getBeijingTimestamp();
         const info = db.prepare(`
-            INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
-        `).run(shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, now, now);
+            INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, config, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        `).run(shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now);
         logAction(req, '新增能力服务', `${name}: ${baseUrl}`);
         res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(info.lastInsertRowid)) });
     }));
@@ -545,16 +665,18 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const baseUrl = String(req.body?.base_url || req.body?.baseUrl || existing.base_url).trim();
         const description = String(req.body?.description ?? existing.description ?? '').trim();
         const status = ['active', 'paused'].includes(req.body?.status) ? req.body.status : existing.status;
+        const config = normalizeExternalServerConfig({ ...parseServerConfig(existing.config), ...(req.body || {}) });
         const apiKeyInput = req.body?.api_key ?? req.body?.apiKey;
         const nextApiKey = apiKeyInput === undefined || apiKeyInput === '********'
             ? encryptSecret(existing.api_key || '')
             : encryptSecret(String(apiKeyInput || '').trim());
         await assertSafeMcpOutboundUrl(baseUrl, req.user);
+        if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
         db.prepare(`
             UPDATE mcp_servers
-            SET name = ?, base_url = ?, api_key = ?, description = ?, status = ?, updated_at = ?
+            SET name = ?, base_url = ?, api_key = ?, description = ?, config = ?, status = ?, updated_at = ?
             WHERE id = ?
-        `).run(name, baseUrl, nextApiKey, description, status, getBeijingTimestamp(), existing.id);
+        `).run(name, baseUrl, nextApiKey, description, JSON.stringify(config), status, getBeijingTimestamp(), existing.id);
         logAction(req, '修改能力服务', `${name}: ${baseUrl}`);
         res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
     }));
@@ -604,6 +726,119 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ success: true, tools });
     }));
 
+    router.post('/mcp/servers/:id/diagnose', authMiddleware, asyncHandler(async (req, res) => {
+        const server = getAccessibleMcpServer(req.params.id, req.user);
+        if (!server) return res.status(404).json({ error: '能力服务不存在。' });
+        const baseUrl = String(server.base_url || '');
+        const builtinType = getBuiltinServiceTypeFromUrl(baseUrl);
+        if (baseUrl.startsWith('pivot-db://')) {
+            const row = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(server.id);
+            if (!row) return res.status(404).json({ error: '数据库连接配置不存在。' });
+            const connection = validateDatabaseConnectionPayload({
+                database_type: row.database_type,
+                host: row.host,
+                port: row.port,
+                database_name: row.database_name,
+                username: row.username,
+                password: decryptExistingDatabasePassword(row),
+                ...(parseServerConfig(row.options))
+            }, req.user);
+            const result = await testDatabaseConnection(connection);
+            return res.json({
+                success: true,
+                type: 'database',
+                result,
+                governance: {
+                    tableAllowlist: connection.options.tableAllowlist || [],
+                    fieldAllowlist: connection.options.fieldAllowlist || {},
+                    sensitiveFields: connection.options.sensitiveFields || [],
+                    rowPolicyHint: connection.options.rowPolicyHint || '',
+                    queryTimeoutMs: connection.options.queryTimeoutMs || 20000,
+                    sqlCostEstimate: connection.options.sqlCostEstimate !== false
+                }
+            });
+        }
+        if (builtinType === 'reports') {
+            const result = await executeBuiltinMcpTool(server, 'reports.list_files', {
+                limit: Math.min(Math.max(Number(req.body?.limit || 8), 1), 20)
+            }, req.user);
+            return res.json({
+                success: true,
+                type: 'reports',
+                readableFiles: Array.isArray(result.files) ? result.files.length : Number(result.count || 0),
+                previewFiles: result.files || result.rows || [],
+                diagnostics: {
+                    roots: getBuiltinConfigForServer(server.id)?.config?.roots || [],
+                    hint: '如果预览为空，请确认 Pivot 服务进程对目录有读取权限。'
+                }
+            });
+        }
+        if (builtinType === 'im') {
+            const action = String(req.body?.action || '').trim();
+            let testResult = null;
+            if (action === 'test') {
+                const target = String(req.body?.target || '').trim();
+                const message = String(req.body?.message || 'Pivot 能力库 IM 通知测试').slice(0, 1000);
+                testResult = await executeBuiltinMcpTool(server, 'im.send_markdown', {
+                    target,
+                    markdown: message
+                }, req.user);
+            }
+            const targets = await executeBuiltinMcpTool(server, 'im.list_allowed_targets', {}, req.user);
+            const recent = db.prepare(`
+                SELECT tool_name, status, duration_ms, error_message, created_at
+                FROM mcp_call_logs
+                WHERE server_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 8
+            `).all(server.id);
+            return res.json({
+                success: true,
+                type: 'im',
+                targets,
+                testResult,
+                recentDeliveries: recent,
+                retryHint: '发送失败时可检查目标白名单、Webhook 地址和认证密钥；修正后可再次测试发送。'
+            });
+        }
+        const config = parseServerConfig(server.config);
+        const healthUrl = String(config.healthCheckUrl || '').trim();
+        if (!healthUrl) {
+            return res.json({
+                success: true,
+                type: builtinType || 'external',
+                status: 'not_configured',
+                message: '未配置健康检查 URL。'
+            });
+        }
+        await assertSafeMcpOutboundUrl(healthUrl, req.user);
+        const agents = createSafeHttpAgentsForUser(req.user, {
+            allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+            allowExplicitLoopbackForAdmin: true
+        });
+        const startedAt = Date.now();
+        const response = await axios.get(healthUrl, {
+            timeout: Math.max(1000, Math.min(Number(config.timeoutMs || 20000) || 20000, 120000)),
+            proxy: false,
+            ...agents,
+            validateStatus: () => true
+        });
+        res.json({
+            success: response.status >= 200 && response.status < 400,
+            type: 'external',
+            statusCode: response.status,
+            durationMs: Date.now() - startedAt,
+            healthCheckUrl: healthUrl
+        });
+    }));
+
+    router.get('/mcp/servers/:id/tools', authMiddleware, asyncHandler(async (req, res) => {
+        const server = getAccessibleMcpServer(req.params.id, req.user);
+        if (!server) return res.status(404).json({ error: '能力服务不存在。' });
+        const allTools = listCachedMcpTools(server.id, req.user);
+        res.json({ tools: allTools });
+    }));
+
     router.get('/mcp/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user) });
     }));
@@ -620,8 +855,13 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             if (sourceRef && !isCapabilityEnabled(type, sourceRef, req.user)) {
                 return res.status(403).json({ error: '该能力包已停用。' });
             }
+            if (sourceRef && !isToolCapabilityEnabled(type, sourceRef, cached?.name || '', req.user)) {
+                return res.status(403).json({ error: '该工具已在能力治理中停用。' });
+            }
         } else if (!isCapabilityEnabled('builtin_tool', name, req.user)) {
             return res.status(403).json({ error: '该系统能力包已停用。' });
+        } else if (!isToolCapabilityEnabled('builtin_tool', name, name, req.user)) {
+            return res.status(403).json({ error: '该系统工具已在能力治理中停用。' });
         }
         const result = name.startsWith('mcp.')
             ? await executeMcpTool(name, req.body?.input || {}, req.user)
@@ -652,6 +892,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             if (method === 'tools/call') {
                 if (!isCapabilityEnabled('builtin_tool', params?.name, req.user)) {
                     throw new Error('该系统能力包已停用。');
+                }
+                if (!isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user)) {
+                    throw new Error('该系统工具已在能力治理中停用。');
                 }
                 const result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
                 return sendJsonRpc(res, id, {

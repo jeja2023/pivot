@@ -48,7 +48,7 @@ function agentNotificationTitle(item) {
     if (!agentLooksLikeCorruptTitle(title)) return title;
     const body = String(item?.body || '').trim();
     if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
-    return '智能体通知';
+    return '任务通知';
 }
 
 function agentNotificationBody(item) {

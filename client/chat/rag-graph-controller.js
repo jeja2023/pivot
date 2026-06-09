@@ -6,6 +6,11 @@ let ragGraphState = {
     selectedEntity: null,
     entities: [],
     relations: [],
+    relationStatus: 'active',
+    relationType: '',
+    minConfidence: '',
+    qualityFilter: '',
+    queryDebug: null,
     mapView: {
         x: 0,
         y: 0,
@@ -95,6 +100,30 @@ const graphTypeFilterOptionsHtml = () => buildGraphTypeFilterOptionsHtml({
     escapeHtml: escapeRagHtml
 });
 
+const graphRelationFilterOptionsHtml = () => buildGraphRelationFilterOptionsHtml({
+    emptyLabel: '全部关系',
+    escapeAttr: escapeRagAttr,
+    escapeHtml: escapeRagHtml
+});
+
+const getGraphRelationFilters = () => {
+    const status = document.getElementById('rag-graph-relation-status')?.value || ragGraphState.relationStatus || 'active';
+    const relationType = document.getElementById('rag-graph-relation-type')?.value || '';
+    const minConfidence = document.getElementById('rag-graph-min-confidence')?.value || '';
+    ragGraphState.relationStatus = status;
+    ragGraphState.relationType = relationType;
+    ragGraphState.minConfidence = minConfidence;
+    return { status, relationType, minConfidence };
+};
+
+const getGraphEntityFilters = () => {
+    const query = document.getElementById('rag-graph-search')?.value?.trim() || '';
+    const type = document.getElementById('rag-graph-type')?.value || '';
+    const quality = document.getElementById('rag-graph-quality')?.value || '';
+    ragGraphState.qualityFilter = quality;
+    return { query, type, quality };
+};
+
 const getGraphMapView = () => ensureGraphMapViewState(ragGraphState);
 
 const resetGraphMapView = () => resetGraphMapViewUi(ragGraphState, GRAPH_UI_OPTIONS);
@@ -134,12 +163,22 @@ const ensureRagGraphModal = () => {
             description: '查看实体关系、来源文档，并校准图谱节点与关系。',
             editEntityLabel: '校准实体',
             entitiesTitle: '实体节点',
+            minConfidencePlaceholder: '最低可信度',
+            qualityAllLabel: '全部质量',
+            qualityLowLabel: '低可信',
+            qualityOrphanLabel: '孤立实体',
+            queryLabel: '查询图谱',
+            queryPlaceholder: '查询职责、依赖、归属或影响路径',
             rebuildDocLabel: '重建本文档图谱',
             relationsTitle: '关系明细',
             searchLabel: '搜索',
             searchPlaceholder: '搜索实体、系统、部门、流程',
+            statusActiveLabel: '已确认',
+            statusAllLabel: '全部状态',
+            statusPendingLabel: '待确认',
             title: '知识图谱'
         },
+        relationFilterOptionsHtml: graphRelationFilterOptionsHtml(),
         typeFilterOptionsHtml: graphTypeFilterOptionsHtml()
     });
     document.body.appendChild(modal);
@@ -182,7 +221,10 @@ const renderGraphSummary = (summary = {}) => {
         labels: {
             entities: '实体',
             relations: '关系',
-            mentions: '提及'
+            mentions: '提及',
+            orphans: '孤立',
+            pending: '待确认',
+            quality: '质量分'
         }
     });
 };
@@ -257,11 +299,13 @@ const renderGraphRelations = (payload = {}) => {
         buildGraphRelationTooltip,
         graphRelationLabel,
         messages: {
+            confirmLabel: '确认',
             deleteLabel: '删除',
             describeSource: (row) => `来源：${row.doc_name || '知识图谱'}`,
             editLabel: '编辑',
             emptyHtml: '<div class="rag-debug-empty">暂无关系</div>',
-            formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`
+            formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`,
+            statusLabel: (value) => ({ active: '已确认', pending: '待确认', deleted: '已删除' })[value] || value
         }
     });
 };
@@ -275,11 +319,11 @@ const loadGraphSummary = async () => {
 };
 
 const loadGraphEntities = async () => {
-    const query = document.getElementById('rag-graph-search')?.value?.trim() || '';
-    const type = document.getElementById('rag-graph-type')?.value || '';
+    const { query, type, quality } = getGraphEntityFilters();
     const params = new URLSearchParams({ limit: '80' });
     if (query) params.set('query', query);
     if (type) params.set('type', type);
+    if (quality) params.set('quality', quality);
     const res = await apiFetch(`${API_BASE}/rag/graph/entities?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '实体加载失败');
@@ -288,13 +332,48 @@ const loadGraphEntities = async () => {
 };
 
 const loadGraphRelations = async (entityId = ragGraphState.selectedEntityId) => {
+    const { status, relationType, minConfidence } = getGraphRelationFilters();
+    const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
     const params = new URLSearchParams({ limit: '100' });
     if (entityId) params.set('entityId', entityId);
+    if (status) params.set('status', status);
+    if (relationType) params.set('relationType', relationType);
+    if (minConfidence) params.set('minConfidence', minConfidence);
+    if (docId) params.set('docId', docId);
     const res = await apiFetch(`${API_BASE}/rag/graph/relations?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系加载失败');
     renderGraphRelations(data);
     return data;
+};
+
+const refreshGraphSearch = async () => {
+    const payload = await loadGraphEntities();
+    const firstEntity = payload.data?.[0];
+    if (firstEntity) await window.selectKnowledgeGraphEntity(firstEntity.id);
+    else {
+        ragGraphState.selectedEntityId = null;
+        ragGraphState.selectedEntity = null;
+        renderGraphCanvas({});
+        renderGraphRelations({ data: [], total: 0 });
+    }
+    return payload;
+};
+
+const renderGraphQueryResult = (result = {}) => {
+    const el = document.getElementById('rag-graph-query-results');
+    if (!el) return;
+    el.innerHTML = buildGraphQueryResultHtml(result, {
+        escapeHtml: escapeRagHtml,
+        graphRelationLabel,
+        messages: {
+            defaultSource: '知识图谱',
+            emptyPath: '暂无路径',
+            entityLabel: '实体 ',
+            hintLabel: '',
+            pathLabel: '路径 '
+        }
+    });
 };
 
 window.openKnowledgeGraph = async (docId = null) => {
@@ -325,8 +404,12 @@ window.selectKnowledgeGraphEntity = async (entityId) => {
     ragGraphState.selectedEntityId = Number(entityId);
     renderGraphEntities({ data: ragGraphState.entities, total: ragGraphState.entities.length });
     try {
+        const { status, relationType } = getGraphRelationFilters();
+        const graphParams = new URLSearchParams({ limit: '120' });
+        if (status) graphParams.set('status', status);
+        if (relationType) graphParams.set('relationType', relationType);
         const [graphRes] = await Promise.all([
-            apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?limit=120`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?${graphParams}`, { headers: authHeaders() }),
             loadGraphRelations(entityId)
         ]);
         const graph = await graphRes.json().catch(() => ({}));
@@ -457,6 +540,16 @@ window.saveKnowledgeGraphRelation = async (relationId) => {
     closeKnowledgeGraphEditorModal();
 };
 
+window.confirmKnowledgeGraphRelation = async (relationId) => {
+    const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}/confirm`, { method: 'POST', headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || '关系确认失败');
+    showToast('关系已确认');
+    await loadGraphSummary();
+    if (ragGraphState.selectedEntityId) await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    else await loadGraphRelations();
+};
+
 window.deleteKnowledgeGraphRelation = async (relationId) => {
     const confirmed = await ragConfirm('删除知识图谱关系', '确定删除该关系吗？');
     if (!confirmed) return;
@@ -475,4 +568,18 @@ window.rebuildKnowledgeGraphForDoc = async () => {
     if (!res.ok || data.error) throw new Error(data.error || '图谱重建失败');
     showToast(`图谱已重建：实体 ${data.entities || 0}，关系 ${data.relations || 0}`);
     await window.openKnowledgeGraph(docId);
+};
+
+window.debugKnowledgeGraphQuery = async () => {
+    const query = document.getElementById('rag-graph-query')?.value?.trim() || '';
+    if (!query) {
+        renderGraphQueryResult({ query: '' });
+        return;
+    }
+    const params = new URLSearchParams({ query, entityLimit: '6', relationLimit: '12' });
+    const res = await apiFetch(`${API_BASE}/rag/graph/query?${params}`, { headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || '图谱查询失败');
+    ragGraphState.queryDebug = data;
+    renderGraphQueryResult(data);
 };

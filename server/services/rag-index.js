@@ -460,6 +460,36 @@ function formatInjectedContext(topChunks) {
     return injectedContext;
 }
 
+function buildRagCacheScope(userId, config = {}) {
+    const docs = db.prepare(`
+        SELECT
+            COUNT(*) AS doc_count,
+            COALESCE(SUM(chunk_count), 0) AS chunk_count,
+            COALESCE(MAX(COALESCE(updated_at, processed_at, created_at)), '') AS doc_version
+        FROM knowledge_docs
+        WHERE user_id = ?
+          AND deleted_at IS NULL
+          AND status = 'ready'
+          AND COALESCE(is_enabled, 1) = 1
+    `).get(userId) || {};
+    const graph = db.prepare(`
+        SELECT
+            COALESCE((SELECT MAX(updated_at) FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL), '') AS entity_version,
+            COALESCE((SELECT MAX(updated_at) FROM knowledge_relations WHERE user_id = ? AND status = 'active'), '') AS relation_version
+    `).get(userId, userId) || {};
+
+    return [
+        `k=${Number(config.topK || 0)}`,
+        `c=${Number(config.candidateLimit || 0)}`,
+        `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
+        `d=${Number(docs.doc_count || 0)}`,
+        `h=${Number(docs.chunk_count || 0)}`,
+        `dv=${docs.doc_version || ''}`,
+        `ge=${graph.entity_version || ''}`,
+        `gr=${graph.relation_version || ''}`
+    ].join('|');
+}
+
 function normalizeRetrievalDebugMatch(match, scoreThreshold) {
     return {
         chunkId: match.chunkId,
@@ -550,6 +580,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
     const config = getRagConfig({ topK }, userId);
+    const cacheScope = buildRagCacheScope(userId, config);
     const recordRetrieval = (payload) => {
         recordRagRetrieval(payload);
         recordSlowRagRetrieval({
@@ -560,7 +591,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         });
     };
 
-    const cachedResult = getFromCache(userId, normalizedQuery, config.topK);
+    const cachedResult = getFromCache(userId, normalizedQuery, config.topK, cacheScope);
     if (cachedResult !== null) {
         const cachedMatches = cachedResult ? Math.max(1, (String(cachedResult).match(/\[引用\s+\d+/g) || []).length) : 0;
         recordRetrieval({
@@ -582,13 +613,13 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         );
 
         if (chunks.length === 0 && !graphContext.context) {
-            setToCache(userId, normalizedQuery, config.topK, '');
+            setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
             recordRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
         }
 
         if (chunks.length === 0 && graphContext.context) {
-            setToCache(userId, normalizedQuery, config.topK, graphContext.context);
+            setToCache(userId, normalizedQuery, config.topK, graphContext.context, cacheScope);
             recordRetrieval({
                 status: 'graph_hit',
                 durationMs: Date.now() - startedAt,
@@ -605,7 +636,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         const topScore = scoredChunks.length > 0 ? scoredChunks[0].score : 0;
 
         if (topChunks.length === 0 && !graphContext.context) {
-            setToCache(userId, normalizedQuery, config.topK, '');
+            setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
             recordRetrieval({
                 status: 'no_match',
                 durationMs: Date.now() - startedAt,
@@ -617,7 +648,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         }
 
         const injectedContext = formatInjectedContext(topChunks) + (graphContext.context || '');
-        setToCache(userId, normalizedQuery, config.topK, injectedContext);
+        setToCache(userId, normalizedQuery, config.topK, injectedContext, cacheScope);
         recordRetrieval({
             status: 'hit',
             durationMs: Date.now() - startedAt,
@@ -724,6 +755,7 @@ module.exports = {
     chunkText,
     buildKeywordCandidates,
     buildFtsOrQuery,
+    buildRagCacheScope,
     buildRagSearchContent,
     buildRagSearchTerms,
     debugRetrieveContext,

@@ -42,6 +42,8 @@ let activeAgentWorkflowPreviewRunId = '';
 
 let agentWorkflowPreviewTimer = null;
 
+let pendingAgentWorkflowDraft = null;
+
 const AGENT_RUNS_PAGE_SIZE = 10;
 
 const AGENT_WORKFLOW_DRAFT_KEY = 'pivot.agent.workflow.draft';
@@ -70,7 +72,7 @@ function agentDisplayTitle(item) {
     const title = String(item?.title || '').trim();
     const goal = String(item?.goal || '').trim();
     if (!agentLooksLikeCorruptTitle(title)) return title;
-    return goal || '智能体任务';
+    return goal || '自由任务';
 }
 
 function agentPreviewDisplayTitle(value) {
@@ -143,7 +145,7 @@ window.bindAgentGoalTemplates = function() {
 };
 
 window.bindAgentFilters = function() {
-    ['agent-filter-status', 'agent-filter-query'].forEach(id => {
+    ['agent-filter-status', 'agent-filter-run-type', 'agent-filter-query'].forEach(id => {
         const el = document.getElementById(id);
         if (!el || el.dataset.boundAgentFilter === '1') return;
         el.dataset.boundAgentFilter = '1';

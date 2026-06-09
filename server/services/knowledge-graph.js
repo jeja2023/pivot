@@ -7,6 +7,10 @@ const MAX_ENTITIES_PER_CHUNK = 12;
 const MAX_RELATIONS_PER_CHUNK = 16;
 const GRAPH_CONTEXT_ENTITY_LIMIT = 6;
 const GRAPH_CONTEXT_RELATION_LIMIT = 12;
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
+const GRAPH_DUPLICATE_PREFIX_MIN = 3;
+const GRAPH_EXTRACTION_MODE = 'rule_heuristic';
+const GRAPH_QUALITY_NOTICE = '知识图谱由规则和启发式抽取生成，适合作为 Graph-RAG 辅助线索；生产问答前建议确认低可信关系、合并重复实体，并结合来源文档校验。';
 
 const ENTITY_SUFFIX_TYPES = [
     ['department', /(部门|中心|小组|团队|委员会|办公室|事业部|分公司|集团|公司)$/],
@@ -29,6 +33,30 @@ function normalizeEntityName(value) {
     return normalizeSearchText(value)
         .replace(/[^\p{L}\p{N}\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff_.-]+/gu, '')
         .trim();
+}
+
+function parseEntityAliases(value) {
+    if (Array.isArray(value)) return value.map(cleanEntityName).filter(Boolean).slice(0, 20);
+    try {
+        const parsed = JSON.parse(String(value || '[]'));
+        return Array.isArray(parsed) ? parsed.map(cleanEntityName).filter(Boolean).slice(0, 20) : [];
+    } catch (_) {
+        return String(value || '')
+            .split(/[,，;；\n]/)
+            .map(cleanEntityName)
+            .filter(Boolean)
+            .slice(0, 20);
+    }
+}
+
+function buildAliasList(...values) {
+    const aliases = new Set();
+    values.flatMap(parseEntityAliases).forEach(alias => aliases.add(alias));
+    return [...aliases].slice(0, 20);
+}
+
+function relationStatusForConfidence(confidence) {
+    return Number(confidence || 0) < LOW_CONFIDENCE_THRESHOLD ? 'pending' : 'active';
 }
 
 function cleanEntityName(value) {
@@ -184,18 +212,23 @@ function recordMention({ userId, entityId, docId, chunkId, snippet = '' }) {
 function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, description = '', confidence = 0.6, sourceDocId = null, sourceChunkId = null }) {
     if (!sourceEntityId || !targetEntityId || sourceEntityId === targetEntityId) return null;
     const now = getBeijingTimestamp();
+    const status = relationStatusForConfidence(confidence);
     db.prepare(`
         INSERT INTO knowledge_relations (
             user_id, source_entity_id, target_entity_id, relation_type, description,
             confidence, source_doc_id, source_chunk_id, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, source_entity_id, target_entity_id, relation_type, source_chunk_id) DO UPDATE SET
             description = CASE WHEN excluded.description != '' THEN excluded.description ELSE knowledge_relations.description END,
             confidence = MAX(knowledge_relations.confidence, excluded.confidence),
-            status = 'active',
+            status = CASE
+                WHEN knowledge_relations.status = 'deleted' THEN excluded.status
+                WHEN knowledge_relations.status = 'active' THEN 'active'
+                ELSE excluded.status
+            END,
             updated_at = excluded.updated_at
-    `).run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, now, now);
+    `).run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now);
 }
 
 function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
@@ -252,7 +285,29 @@ function clearKnowledgeGraphForDocument(docId) {
 function getGraphSummary(userId) {
     const entityCount = db.prepare('SELECT COUNT(*) AS count FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL').get(userId).count;
     const relationCount = db.prepare("SELECT COUNT(*) AS count FROM knowledge_relations WHERE user_id = ? AND status = 'active'").get(userId).count;
+    const pendingRelationCount = db.prepare("SELECT COUNT(*) AS count FROM knowledge_relations WHERE user_id = ? AND status = 'pending'").get(userId).count;
     const mentionCount = db.prepare('SELECT COUNT(*) AS count FROM knowledge_entity_mentions WHERE user_id = ?').get(userId).count;
+    const orphanEntities = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM knowledge_entities e
+        WHERE e.user_id = ? AND e.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM knowledge_relations r
+              WHERE r.user_id = e.user_id
+                AND r.status IN ('active', 'pending')
+                AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
+          )
+    `).get(userId).count;
+    const lowConfidenceRelations = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM knowledge_relations
+        WHERE user_id = ? AND status IN ('active', 'pending') AND confidence < ?
+    `).get(userId, LOW_CONFIDENCE_THRESHOLD).count;
+    const sourceLessRelations = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM knowledge_relations
+        WHERE user_id = ? AND status IN ('active', 'pending') AND source_doc_id IS NULL
+    `).get(userId).count;
     const topTypes = db.prepare(`
         SELECT type, COUNT(*) AS count
         FROM knowledge_entities
@@ -261,10 +316,32 @@ function getGraphSummary(userId) {
         ORDER BY count DESC, type ASC
         LIMIT 12
     `).all(userId);
-    return { entities: entityCount, relations: relationCount, mentions: mentionCount, topTypes };
+    const duplicateSuggestions = suggestDuplicateEntities(userId, 5);
+    const quality = buildGraphQualitySignals({
+        entityCount,
+        relationCount,
+        mentionCount,
+        pendingRelationCount,
+        orphanEntities,
+        lowConfidenceRelations,
+        sourceLessRelations,
+        duplicateSuggestions
+    });
+    return {
+        extractionMode: GRAPH_EXTRACTION_MODE,
+        qualityNotice: GRAPH_QUALITY_NOTICE,
+        entities: entityCount,
+        relations: relationCount,
+        pendingRelations: pendingRelationCount,
+        mentions: mentionCount,
+        topTypes,
+        quality,
+        suggestions: quality.recommendations,
+        duplicateSuggestions
+    };
 }
 
-function listEntities({ userId, query = '', type = '', limit = 50, offset = 0 }) {
+function listEntities({ userId, query = '', type = '', quality = '', limit = 50, offset = 0 }) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const where = ['e.user_id = ?', 'e.deleted_at IS NULL'];
@@ -277,6 +354,18 @@ function listEntities({ userId, query = '', type = '', limit = 50, offset = 0 })
     if (type) {
         where.push('e.type = ?');
         params.push(type);
+    }
+    if (quality === 'orphan') {
+        where.push(`NOT EXISTS (
+            SELECT 1 FROM knowledge_relations r
+            WHERE r.user_id = e.user_id
+              AND r.status IN ('active', 'pending')
+              AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
+        )`);
+    }
+    if (quality === 'low') {
+        where.push('e.confidence < ?');
+        params.push(0.62);
     }
     const whereSql = where.join(' AND ');
     const data = db.prepare(`
@@ -296,10 +385,18 @@ function listEntities({ userId, query = '', type = '', limit = 50, offset = 0 })
     return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
-function getEntityGraph({ userId, entityId, depth = 1, limit = 80 }) {
+function getEntityGraph({ userId, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
     const entity = db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(entityId, userId);
     if (!entity) return null;
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 80, 10), 300);
+    const statusList = normalizeRelationStatusFilter(status);
+    const statusPlaceholders = statusList.map(() => '?').join(',');
+    const relationWhere = ['r.user_id = ?', `r.status IN (${statusPlaceholders})`, '(r.source_entity_id = ? OR r.target_entity_id = ?)'];
+    const params = [userId, ...statusList, entity.id, entity.id];
+    if (relationType) {
+        relationWhere.push('r.relation_type = ?');
+        params.push(String(relationType).trim());
+    }
     const relations = db.prepare(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
                d.name AS doc_name, c.content AS chunk_text
@@ -308,12 +405,10 @@ function getEntityGraph({ userId, entityId, depth = 1, limit = 80 }) {
         JOIN knowledge_entities t ON t.id = r.target_entity_id
         LEFT JOIN knowledge_docs d ON d.id = r.source_doc_id
         LEFT JOIN knowledge_chunks c ON c.id = r.source_chunk_id
-        WHERE r.user_id = ?
-          AND r.status = 'active'
-          AND (r.source_entity_id = ? OR r.target_entity_id = ?)
+        WHERE ${relationWhere.join(' AND ')}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ?
-    `).all(userId, entity.id, entity.id, safeLimit);
+    `).all(...params, safeLimit);
     const nodeMap = new Map([[entity.id, entity]]);
     relations.forEach(row => {
         nodeMap.set(row.source_entity_id, { id: row.source_entity_id, name: row.source_name, type: row.source_type });
@@ -327,11 +422,20 @@ function getEntityGraph({ userId, entityId, depth = 1, limit = 80 }) {
     };
 }
 
-function listRelations({ userId, entityId = null, relationType = '', limit = 100, offset = 0 }) {
+function normalizeRelationStatusFilter(status = 'active') {
+    const raw = String(status || 'active').trim();
+    if (raw === 'all') return ['active', 'pending'];
+    if (raw === 'pending') return ['pending'];
+    if (raw === 'deleted') return ['deleted'];
+    return ['active'];
+}
+
+function listRelations({ userId, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const where = ["r.user_id = ?", "r.status = 'active'"];
-    const params = [userId];
+    const statusList = normalizeRelationStatusFilter(status);
+    const where = ['r.user_id = ?', `r.status IN (${statusList.map(() => '?').join(',')})`];
+    const params = [userId, ...statusList];
     const safeEntityId = Number.parseInt(entityId, 10);
     if (Number.isSafeInteger(safeEntityId) && safeEntityId > 0) {
         where.push('(r.source_entity_id = ? OR r.target_entity_id = ?)');
@@ -341,20 +445,117 @@ function listRelations({ userId, entityId = null, relationType = '', limit = 100
         where.push('r.relation_type = ?');
         params.push(String(relationType).trim());
     }
+    const min = Number(minConfidence);
+    if (Number.isFinite(min)) {
+        where.push('r.confidence >= ?');
+        params.push(Math.min(Math.max(min, 0), 1));
+    }
+    const safeDocId = Number.parseInt(docId, 10);
+    if (Number.isSafeInteger(safeDocId) && safeDocId > 0) {
+        where.push('r.source_doc_id = ?');
+        params.push(safeDocId);
+    }
     const whereSql = where.join(' AND ');
     const data = db.prepare(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
-               d.name AS doc_name
+               d.name AS doc_name, c.content AS chunk_text
         FROM knowledge_relations r
         JOIN knowledge_entities s ON s.id = r.source_entity_id
         JOIN knowledge_entities t ON t.id = r.target_entity_id
         LEFT JOIN knowledge_docs d ON d.id = r.source_doc_id
+        LEFT JOIN knowledge_chunks c ON c.id = r.source_chunk_id
         WHERE ${whereSql}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ? OFFSET ?
     `).all(...params, safeLimit, safeOffset);
     const total = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${whereSql}`).get(...params).count;
     return { data, total, limit: safeLimit, offset: safeOffset };
+}
+
+function buildGraphQualitySignals({
+    entityCount = 0,
+    relationCount = 0,
+    mentionCount = 0,
+    pendingRelationCount = 0,
+    orphanEntities = 0,
+    lowConfidenceRelations = 0,
+    sourceLessRelations = 0,
+    duplicateSuggestions = []
+}) {
+    let score = 100;
+    if (entityCount === 0) score = 0;
+    else {
+        if (relationCount === 0) score -= 30;
+        score -= Math.min(orphanEntities * 3, 24);
+        score -= Math.min(pendingRelationCount * 4, 24);
+        score -= Math.min(lowConfidenceRelations * 3, 18);
+        score -= Math.min(sourceLessRelations * 2, 12);
+        score -= Math.min(duplicateSuggestions.length * 5, 20);
+        if (mentionCount < entityCount) score -= 8;
+    }
+    const qualityScore = Math.max(0, Math.min(100, Math.round(score)));
+    const recommendations = [];
+    if (entityCount === 0) recommendations.push('知识图谱暂无实体，请先上传并索引知识库文档。');
+    if (pendingRelationCount > 0) recommendations.push(`有 ${pendingRelationCount} 条低置信关系待确认，建议先审核后再参与正式图谱。`);
+    if (duplicateSuggestions.length > 0) recommendations.push(`发现 ${duplicateSuggestions.length} 组疑似重复实体，可在校准弹窗中合并。`);
+    if (orphanEntities > 0) recommendations.push(`有 ${orphanEntities} 个孤立实体，建议补充来源资料或清理无效实体。`);
+    if (sourceLessRelations > 0) recommendations.push(`有 ${sourceLessRelations} 条关系缺少来源文档，建议补充来源或降低其使用优先级。`);
+    if (relationCount === 0 && entityCount > 0) recommendations.push('实体已抽取但关系较少，可重建图谱或补充包含责任、依赖、归属的信息。');
+    return {
+        qualityScore,
+        level: qualityScore >= 85 ? 'good' : qualityScore >= 65 ? 'warning' : 'risk',
+        orphanEntities,
+        lowConfidenceRelations,
+        sourceLessRelations,
+        pendingRelations: pendingRelationCount,
+        duplicateGroups: duplicateSuggestions.length,
+        recommendations
+    };
+}
+
+function suggestDuplicateEntities(userId, limit = 20) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
+    const rows = db.prepare(`
+        SELECT id, name, normalized_name, type, aliases, confidence, updated_at
+        FROM knowledge_entities
+        WHERE user_id = ? AND deleted_at IS NULL
+        ORDER BY type ASC, normalized_name ASC
+    `).all(userId);
+    const groups = new Map();
+    rows.forEach(row => {
+        const normalized = String(row.normalized_name || normalizeEntityName(row.name));
+        const prefix = normalized.slice(0, Math.min(Math.max(GRAPH_DUPLICATE_PREFIX_MIN, 1), normalized.length));
+        const aliases = parseEntityAliases(row.aliases).map(normalizeEntityName);
+        const keys = new Set([
+            `${row.type || 'concept'}:${prefix}`,
+            ...aliases.map(alias => `${row.type || 'concept'}:${alias.slice(0, Math.min(GRAPH_DUPLICATE_PREFIX_MIN, alias.length))}`)
+        ].filter(item => item && !item.endsWith(':')));
+        keys.forEach(key => {
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(row);
+        });
+    });
+    const seen = new Set();
+    const suggestions = [];
+    groups.forEach(items => {
+        const unique = [];
+        const localSeen = new Set();
+        items.forEach(item => {
+            if (localSeen.has(item.id)) return;
+            localSeen.add(item.id);
+            unique.push(item);
+        });
+        if (unique.length < 2) return;
+        const signature = unique.map(item => item.id).sort((a, b) => a - b).join(',');
+        if (seen.has(signature)) return;
+        seen.add(signature);
+        suggestions.push({
+            entities: unique.slice(0, 6),
+            reason: '名称前缀或别名相近',
+            suggestedTargetId: unique.slice().sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0].id
+        });
+    });
+    return suggestions.slice(0, safeLimit);
 }
 
 function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT) {
@@ -404,6 +605,36 @@ function getGraphContextForQuery(userId, query, options = {}) {
     };
 }
 
+function queryKnowledgeGraph({ userId, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT }) {
+    const entities = findQueryEntities(userId, query, entityLimit);
+    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit });
+    const paths = graphContext.relations.map(row => ({
+        relationId: row.id,
+        source: row.source_name,
+        relationType: row.relation_type,
+        target: row.target_name,
+        confidence: row.confidence,
+        docName: row.doc_name || '',
+        chunkId: row.source_chunk_id || null,
+        description: row.description || ''
+    }));
+    const sourceDocIds = [...new Set(graphContext.relations.map(row => row.source_doc_id).filter(Boolean))];
+    return {
+        query: String(query || ''),
+        extractionMode: GRAPH_EXTRACTION_MODE,
+        qualityNotice: GRAPH_QUALITY_NOTICE,
+        entities,
+        relations: graphContext.relations,
+        paths,
+        chunkIds: graphContext.chunkIds,
+        sourceDocIds,
+        context: graphContext.context,
+        answerHint: paths.length
+            ? '已找到可解释关系路径，可结合来源文档回答。'
+            : '未找到明确关系路径，建议补充资料或使用文本召回。'
+    };
+}
+
 function formatGraphContext({ entities = [], relations = [] }) {
     if (!entities.length && !relations.length) return '';
     const entityText = entities
@@ -424,9 +655,7 @@ function updateEntity({ userId, entityId, patch }) {
     const normalized = normalizeEntityName(name);
     const type = String(patch.type || current.type || 'concept').slice(0, 40);
     const description = String(patch.description ?? current.description ?? '').slice(0, 1000);
-    const aliases = Array.isArray(patch.aliases)
-        ? JSON.stringify(patch.aliases.map(cleanEntityName).filter(Boolean).slice(0, 20))
-        : current.aliases;
+    const aliases = patch.aliases !== undefined ? JSON.stringify(buildAliasList(patch.aliases)) : current.aliases;
     db.prepare(`
         UPDATE knowledge_entities
         SET name = ?, normalized_name = ?, type = ?, description = ?, aliases = ?, updated_at = ?
@@ -461,16 +690,20 @@ function mergeEntities({ userId, sourceEntityId, targetEntityId }) {
 }
 
 function updateRelation({ userId, relationId, patch }) {
-    const current = db.prepare("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status = 'active'").get(relationId, userId);
+    const current = db.prepare("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status IN ('active', 'pending')").get(relationId, userId);
     if (!current) return null;
+    const nextStatus = ['active', 'pending'].includes(String(patch.status || '').trim())
+        ? String(patch.status).trim()
+        : relationStatusForConfidence(patch.confidence ?? current.confidence);
     db.prepare(`
         UPDATE knowledge_relations
-        SET relation_type = ?, description = ?, confidence = ?, updated_at = ?
+        SET relation_type = ?, description = ?, confidence = ?, status = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
     `).run(
         String(patch.relationType || current.relation_type || 'related_to').slice(0, 60),
         String(patch.description ?? current.description ?? '').slice(0, 1000),
         Math.min(Math.max(Number(patch.confidence ?? current.confidence ?? 0.6), 0), 1),
+        nextStatus,
         getBeijingTimestamp(),
         relationId,
         userId
@@ -481,6 +714,17 @@ function updateRelation({ userId, relationId, patch }) {
 function deleteRelation({ userId, relationId }) {
     return db.prepare("UPDATE knowledge_relations SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?")
         .run(getBeijingTimestamp(), relationId, userId).changes > 0;
+}
+
+function confirmRelation({ userId, relationId }) {
+    const current = db.prepare("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status = 'pending'").get(relationId, userId);
+    if (!current) return null;
+    db.prepare(`
+        UPDATE knowledge_relations
+        SET status = 'active', confidence = MAX(confidence, ?), updated_at = ?
+        WHERE id = ? AND user_id = ?
+    `).run(LOW_CONFIDENCE_THRESHOLD, getBeijingTimestamp(), relationId, userId);
+    return db.prepare('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?').get(relationId, userId);
 }
 
 function rebuildGraphForDocument({ userId, docId }) {
@@ -503,8 +747,11 @@ function safeIndexKnowledgeGraphForChunks(payload) {
 
 module.exports = {
     clearKnowledgeGraphForDocument,
+    confirmRelation,
     deleteRelation,
     extractEntitiesFromText,
+    GRAPH_EXTRACTION_MODE,
+    GRAPH_QUALITY_NOTICE,
     extractKnowledgeGraph,
     extractRelationsFromText,
     findQueryEntities,
@@ -517,7 +764,9 @@ module.exports = {
     listRelations,
     mergeEntities,
     normalizeEntityName,
+    queryKnowledgeGraph,
     rebuildGraphForDocument,
+    suggestDuplicateEntities,
     safeIndexKnowledgeGraphForChunks,
     updateEntity,
     updateRelation,

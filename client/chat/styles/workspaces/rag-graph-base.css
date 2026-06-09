@@ -238,11 +238,11 @@
     .rag-graph-summary b { color: var(--text-main); }
     .rag-graph-toolbar {
         display: grid;
-        grid-template-columns: minmax(240px, 1fr) 190px auto;
+        grid-template-columns: minmax(220px, 1fr) 170px 150px auto;
         gap: 8px;
         align-items: center;
-        flex: 1 1 560px;
-        min-width: min(560px, 100%);
+        flex: 1 1 760px;
+        min-width: min(760px, 100%);
         padding: 0;
         background: transparent;
     }
@@ -261,6 +261,107 @@
         padding: 0 14px;
         font-size: 0.82rem;
         border-radius: 8px;
+        white-space: nowrap;
+    }
+    .rag-graph-query-panel {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) auto minmax(280px, 0.8fr);
+        gap: 8px;
+        align-items: start;
+        flex: 0 0 auto;
+        padding: 0 18px 10px;
+        background: #f8fafc;
+    }
+    .rag-graph-query-panel .form-input {
+        margin: 0;
+        height: 34px;
+        min-height: 34px;
+        padding: 0 11px;
+        font-size: 0.8rem;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .rag-graph-query-panel button {
+        height: 34px;
+        min-height: 34px;
+        padding: 0 12px;
+        font-size: 0.8rem;
+        border-radius: 8px;
+        white-space: nowrap;
+    }
+    .rag-graph-query-results {
+        display: grid;
+        gap: 6px;
+        max-height: 150px;
+        overflow: auto;
+        padding: 7px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 5px 14px rgba(15, 23, 42, 0.04);
+    }
+    .rag-graph-query-results:empty {
+        display: none;
+    }
+    .rag-graph-query-meta,
+    .rag-graph-query-entities {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        color: var(--text-muted);
+        font-size: 0.68rem;
+        line-height: 1.35;
+    }
+    .rag-graph-query-entities span,
+    .rag-graph-query-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        padding: 2px 6px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 999px;
+        background: rgba(248, 250, 252, 0.9);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rag-graph-query-entities small {
+        color: #047857;
+        font-weight: 800;
+    }
+    .rag-graph-path {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        gap: 5px;
+        align-items: center;
+        padding: 5px 6px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 7px;
+        background: #fbfdff;
+        color: var(--text-main);
+        font-size: 0.72rem;
+    }
+    .rag-graph-path strong {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rag-graph-path b {
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.08);
+        color: #1d4ed8;
+        font-size: 0.66rem;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .rag-graph-path small {
+        grid-column: 1 / -1;
+        color: var(--text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
     }
     .rag-graph-layout {
@@ -296,6 +397,24 @@
     .rag-graph-panel-head span {
         color: var(--text-muted);
         font-variant-numeric: tabular-nums;
+    }
+    .rag-graph-filter-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 112px;
+        gap: 6px;
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+        background: #fbfdff;
+        flex: 0 0 auto;
+    }
+    .rag-graph-filter-row .form-input {
+        margin: 0;
+        height: 30px;
+        min-height: 30px;
+        padding: 0 8px;
+        font-size: 0.72rem;
+        border-radius: 7px;
+        background: #fff;
     }
     .rag-graph-panel-actions {
         display: flex;

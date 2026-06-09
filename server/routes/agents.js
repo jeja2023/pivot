@@ -2,6 +2,7 @@ const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
 const {
+    createWorkflowDraftFromRun,
     getRunDetailForUser,
     listDeletedRunsForAdmin,
     listRuns,
@@ -232,6 +233,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             limit: normalizeLimit(req.query.limit, 10, 100),
             status: req.query.status,
             query: req.query.query,
+            runType: req.query.runType || req.query.run_type || req.query.type,
             includePreview: req.query.includePreview || req.query.include_preview
         });
         res.json(result);
@@ -276,6 +278,13 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         const detail = getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
+    }));
+
+    router.post('/agents/runs/:id/workflow-draft', authMiddleware, asyncHandler(async (req, res) => {
+        const draft = createWorkflowDraftFromRun(req.params.id, req.user);
+        if (!draft) return res.status(404).json({ error: '自由任务不存在或无权访问。' });
+        logAction(req, '从自由任务生成工作流草稿', `任务ID: ${req.params.id}，节点数: ${draft.summary?.nodeCount || 0}`);
+        res.json({ success: true, draft });
     }));
 
     router.post('/agents/runs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {

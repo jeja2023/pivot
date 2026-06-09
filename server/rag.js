@@ -33,12 +33,14 @@ const {
 } = require('./services/rag-index');
 const { getEmbeddingConfig } = require('./services/rag-config');
 const {
+    confirmRelation,
     deleteRelation,
     getEntityGraph,
     getGraphSummary,
     listEntities,
     listRelations,
     mergeEntities,
+    queryKnowledgeGraph,
     rebuildGraphForDocument,
     updateEntity,
     updateRelation
@@ -112,6 +114,7 @@ ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
         userId: req.user.id,
         query: req.query.query,
         type: req.query.type,
+        quality: req.query.quality,
         limit: req.query.limit,
         offset: req.query.offset
     }));
@@ -122,8 +125,20 @@ ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
         userId: req.user.id,
         entityId: req.query.entityId,
         relationType: req.query.relationType,
+        status: req.query.status,
+        minConfidence: req.query.minConfidence,
+        docId: req.query.docId,
         limit: req.query.limit,
         offset: req.query.offset
+    }));
+});
+
+ragRouter.get('/graph/query', authMiddleware, (req, res) => {
+    res.json(queryKnowledgeGraph({
+        userId: req.user.id,
+        query: req.query.query,
+        entityLimit: req.query.entityLimit,
+        relationLimit: req.query.relationLimit
     }));
 });
 
@@ -132,6 +147,8 @@ ragRouter.get('/graph/entities/:id', authMiddleware, (req, res) => {
         userId: req.user.id,
         entityId: req.params.id,
         depth: req.query.depth,
+        status: req.query.status,
+        relationType: req.query.relationType,
         limit: req.query.limit
     });
     if (!graph) return res.status(404).json({ error: '实体不存在' });
@@ -165,6 +182,14 @@ ragRouter.put('/graph/relations/:id', authMiddleware, asyncHandler(async (req, r
     if (!relation) return res.status(404).json({ error: '关系不存在' });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识图谱关系更新', { relationId: req.params.id });
+    return res.json({ success: true, relation });
+}));
+
+ragRouter.post('/graph/relations/:id/confirm', authMiddleware, asyncHandler(async (req, res) => {
+    const relation = confirmRelation({ userId: req.user.id, relationId: req.params.id });
+    if (!relation) return res.status(404).json({ error: '关系不存在或不是待确认状态' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱关系确认', { relationId: req.params.id });
     return res.json({ success: true, relation });
 }));
 

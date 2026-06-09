@@ -18,6 +18,8 @@ const {
     buildGraphEntityEditorHtml,
     buildGraphNodeTooltip,
     buildGraphModalShellHtml,
+    buildGraphQueryResultHtml,
+    buildGraphRelationFilterOptionsHtml,
     buildGraphRelationOptionsHtml,
     buildGraphRelationTooltip,
     buildGraphRelationEditorHtml,
@@ -190,16 +192,12 @@ document.addEventListener('click', (event) => {
     }
 
     if (event.target.closest('#rag-graph-search-btn')) {
-        loadGraphEntities().then(payload => {
-            const firstEntity = payload.data?.[0];
-            if (firstEntity) window.selectKnowledgeGraphEntity(firstEntity.id);
-            else {
-                ragGraphState.selectedEntityId = null;
-                ragGraphState.selectedEntity = null;
-                renderGraphCanvas({});
-                renderGraphRelations({ data: [], total: 0 });
-            }
-        }).catch(e => showToast(e.message || '实体搜索失败', 'error'));
+        refreshGraphSearch().catch(e => showToast(e.message || '实体搜索失败', 'error'));
+        return;
+    }
+
+    if (event.target.closest('#rag-graph-query-btn')) {
+        window.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
         return;
     }
 
@@ -246,6 +244,12 @@ document.addEventListener('click', (event) => {
     const saveRelationBtn = event.target.closest('#rag-graph-save-relation-btn');
     if (saveRelationBtn) {
         window.saveKnowledgeGraphRelation(saveRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系保存失败', 'error'));
+        return;
+    }
+
+    const confirmRelationBtn = event.target.closest('.rag-graph-confirm-relation-btn');
+    if (confirmRelationBtn) {
+        window.confirmKnowledgeGraphRelation(confirmRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系确认失败', 'error'));
         return;
     }
 
@@ -373,6 +377,18 @@ document.addEventListener('change', (event) => {
     const enableToggle = event.target.closest?.('.rag-enable-toggle');
     if (enableToggle) {
         window.toggleKnowledgeDocEnabled(enableToggle.dataset.ragId, enableToggle.checked);
+        return;
+    }
+    if (['rag-graph-type', 'rag-graph-quality'].includes(event.target?.id)) {
+        refreshGraphSearch().catch(e => showToast(e.message || '图谱筛选失败', 'error'));
+        return;
+    }
+    if (['rag-graph-relation-status', 'rag-graph-relation-type', 'rag-graph-min-confidence'].includes(event.target?.id)) {
+        if (ragGraphState.selectedEntityId) {
+            window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
+        } else {
+            loadGraphRelations().catch(e => showToast(e.message || '关系筛选失败', 'error'));
+        }
     }
 });
 
@@ -381,9 +397,16 @@ document.addEventListener('keydown', (event) => {
         window.debugRagQuery();
     }
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-search') {
-        loadGraphEntities().then(payload => {
-            const firstEntity = payload.data?.[0];
-            if (firstEntity) window.selectKnowledgeGraphEntity(firstEntity.id);
-        }).catch(e => showToast(e.message || '实体搜索失败', 'error'));
+        refreshGraphSearch().catch(e => showToast(e.message || '实体搜索失败', 'error'));
+    }
+    if (event.key === 'Enter' && event.target?.id === 'rag-graph-query') {
+        window.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
+    }
+    if (event.key === 'Enter' && event.target?.id === 'rag-graph-min-confidence') {
+        if (ragGraphState.selectedEntityId) {
+            window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
+        } else {
+            loadGraphRelations().catch(e => showToast(e.message || '关系筛选失败', 'error'));
+        }
     }
 });

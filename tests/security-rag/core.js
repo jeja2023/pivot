@@ -9,6 +9,7 @@ const {
     buildRagContextMessage,
     buildRagSearchContent,
     chunkText,
+    confirmRelation,
     cosineSimilarity,
     db,
     deleteRelation,
@@ -38,9 +39,11 @@ const {
     normalizeMemoryThreshold,
     recordHttpRequest,
     recordRagRetrieval,
+    queryKnowledgeGraph,
     renderPrometheusMetrics,
     resolveRagQueryContent,
     summarizeRagContextSources,
+    suggestDuplicateEntities,
     test,
     toMemorySettingValue,
     toRagSettingValue,
@@ -127,6 +130,71 @@ test('知识图谱会索引并丰富检索上下文，同时支持整理操作',
             const merged = mergeEntities({ userId, sourceEntityId: pivotAlias.id, targetEntityId: pivot.id });
             assert.ok(merged.center.id === pivot.id);
         }
+    } finally {
+        db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entity_mentions WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entities WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('知识图谱会治理低可信关系并支持确认、质量摘要和图谱查询', () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(`kg_quality_${suffix}`, 'hash', 'KG Quality Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const now = getBeijingTimestamp();
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, `kg_quality_${suffix}.md`, 'ready', 1, 1, 100, now, now);
+    const docId = docInfo.lastInsertRowid;
+    const text = 'Alpha系统负责Beta平台。AlphaSystem BetaSystem close together.';
+    const chunkInfo = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docId, text, buildRagSearchContent(text), JSON.stringify([1, 0]));
+
+    try {
+        const indexed = indexKnowledgeGraphForChunks({
+            userId,
+            docId,
+            chunks: [{ chunkId: chunkInfo.lastInsertRowid, content: text }]
+        });
+        assert.ok(indexed.entities >= 4);
+        assert.ok(indexed.relations >= 2);
+
+        const pendingBefore = listRelations({ userId, status: 'pending' });
+        assert.ok(pendingBefore.data.some(row => row.relation_type === 'related_to'));
+        const summary = getGraphSummary(userId);
+        assert.ok(Number.isInteger(summary.quality.qualityScore));
+        assert.ok(summary.pendingRelations >= 1);
+        assert.ok(Array.isArray(summary.suggestions));
+
+        const confirmed = confirmRelation({ userId, relationId: pendingBefore.data[0].id });
+        assert.equal(confirmed.status, 'active');
+        assert.ok(confirmed.confidence >= 0.6);
+        assert.ok(!confirmRelation({ userId, relationId: pendingBefore.data[0].id }));
+
+        const activeRelations = listRelations({ userId, status: 'active', minConfidence: 0.6, docId });
+        assert.ok(activeRelations.data.some(row => row.id === confirmed.id));
+        assert.ok(activeRelations.data.every(row => row.status === 'active' && row.confidence >= 0.6));
+
+        const beta = listEntities({ userId, query: 'Beta平台' }).data.find(entity => entity.name === 'Beta平台');
+        assert.ok(beta);
+        const filteredGraph = getEntityGraph({ userId, entityId: beta.id, status: 'all', relationType: 'responsible_for' });
+        assert.ok(filteredGraph.relations.every(row => row.relation_type === 'responsible_for'));
+
+        const queryResult = queryKnowledgeGraph({ userId, query: 'Beta平台由谁负责' });
+        assert.ok(queryResult.paths.some(path => path.relationType === 'responsible_for'));
+        assert.ok(queryResult.context.includes('Beta平台'));
+
+        const duplicateSuggestions = suggestDuplicateEntities(userId, 10);
+        assert.ok(Array.isArray(duplicateSuggestions));
     } finally {
         db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
         db.prepare('DELETE FROM knowledge_entity_mentions WHERE user_id = ?').run(userId);
