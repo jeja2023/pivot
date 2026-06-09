@@ -112,7 +112,7 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
             secret: String(payload.secret ?? payload.token ?? payload.api_token ?? '').trim()
         };
     }
-    const err = new Error('不支持的系统能力类型。');
+    const err = new Error('不支持的系统工具类型。');
     err.status = 400;
     throw err;
 }

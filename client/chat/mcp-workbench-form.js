@@ -8,9 +8,9 @@ function mcpFormEl(name, mode = 'create') {
 
 const MCP_CONFIG_HELPERS = {
     external: {
-        title: '外部能力服务',
+        title: '外部工具服务',
         steps: ['填写服务名称', '粘贴服务地址', '配置健康检查和鉴权模式'],
-        note: '外部能力服务建议开启健康检查和工具 Schema 校验，便于上线前发现不可用工具。'
+        note: '外部工具服务建议开启健康检查和工具 Schema 校验，便于上线前发现不可用工具。'
     },
     database: {
         title: '数据库连接',
@@ -29,27 +29,27 @@ const MCP_CONFIG_HELPERS = {
     },
     visualization: {
         title: '图表生成',
-        steps: ['保存默认名称', '回到能力库查看动作', '在聊天或智能体中生成图表'],
-        note: '普通用户通常先使用系统能力验证能力库是否可用；系统内置能力无需额外连接。'
+        steps: ['保存默认名称', '回到工具箱查看工具', '在聊天或智能体中生成图表'],
+        note: '普通用户通常先使用系统工具验证工具箱是否可用；系统内置工具无需额外连接。'
     },
     report: {
         title: '报告编排',
-        steps: ['保存默认名称', '回到能力库查看动作', '把摘要、表格、图表组合成报告'],
+        steps: ['保存默认名称', '回到工具箱查看工具', '把摘要、表格、图表组合成报告'],
         note: '适合日报、周报和固定格式分析报告。'
     },
     documents: {
         title: '文档解析',
-        steps: ['保存默认名称', '回到能力库查看动作', '让模型提取大纲、键值或分段'],
+        steps: ['保存默认名称', '回到工具箱查看工具', '让模型提取大纲、键值或分段'],
         note: '适合合同、制度、说明书等长文档的结构化处理。'
     },
     data: {
         title: '数据处理',
-        steps: ['保存默认名称', '回到能力库查看动作', '让模型做筛选、汇总和字段标准化'],
+        steps: ['保存默认名称', '回到工具箱查看工具', '让模型做筛选、汇总和字段标准化'],
         note: '适合表格行数据的清洗、分组统计和字段画像。'
     },
     format: {
         title: '格式转换',
-        steps: ['保存默认名称', '回到能力库查看动作', '让模型在 JSON、Markdown 表格和文本之间转换'],
+        steps: ['保存默认名称', '回到工具箱查看工具', '让模型在 JSON、Markdown 表格和文本之间转换'],
         note: '适合整理模型输出或把杂乱文本转成结构化格式。'
     }
 };
@@ -307,7 +307,7 @@ window.closeMcpToolsModal = function() {
     document.getElementById('mcp-tools-modal')?.classList.add('hidden');
 };
 
-function setMcpEditTitle(title = '编辑能力') {
+function setMcpEditTitle(title = '编辑工具服务') {
     const heading = document.querySelector('#mcp-edit-modal .mcp-edit-header h3');
     if (heading) heading.textContent = title;
 }
@@ -407,10 +407,10 @@ function fillMcpForm(server, mode = 'create') {
 
 window.openMcpEditModal = function(serverId) {
     const server = mcpServersCache.find(item => String(item.id) === String(serverId));
-    if (!server) return showToast('未找到能力服务', 'error');
+    if (!server) return showToast('未找到工具服务', 'error');
     const modal = document.getElementById('mcp-edit-modal');
     if (!modal) return;
-    setMcpEditTitle('编辑能力');
+    setMcpEditTitle('编辑工具服务');
     bindMcpFormControls('edit');
     fillMcpForm(server, 'edit');
     document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {

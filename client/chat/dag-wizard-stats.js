@@ -13,7 +13,7 @@ function createDagWizardStatsController(ctx) {
         const llmTool = wizardTools.find(tool => toolValue(tool) === 'agent.llm')
             || findPreferredTool(wizardTools, ['agent.llm']);
         if (!connections.length) {
-            window.showToast?.('请先在能力库启用数据库连接，并刷新工具。', 'error');
+            window.showToast?.('请先在工具箱启用数据库连接，并刷新工具。', 'error');
             return;
         }
         if (!chartTool) {

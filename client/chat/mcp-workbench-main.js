@@ -1,10 +1,10 @@
-// 聊天 MCP 工作台数据加载与操作 Chat MCP workbench data loading and actions
+// 聊天工具箱工作台数据加载与操作 Chat MCP workbench data loading and actions
 async function loadMcpServers() {
     const list = document.getElementById('mcp-server-list');
     if (!list) return;
     const res = await apiFetch(`${API_BASE}/mcp/servers`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '能力服务加载失败');
+    if (!res.ok) throw new Error(data.error || '工具服务加载失败');
     mcpServersCache = data.data || [];
     const systemTypes = new Set(mcpSystemServices.map(item => item.type));
     const personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
@@ -25,8 +25,8 @@ async function loadMcpServers() {
     list.innerHTML = `
         <div class="mcp-system-head">
             <div>
-                <strong>个人能力</strong>
-                <span>需要个人连接或个人配置的能力，保存后供当前用户调用。</span>
+                <strong>个人连接</strong>
+                <span>需要个人连接或个人配置的工具，保存后供当前用户调用。</span>
             </div>
         </div>
         <div class="mcp-system-grid">
@@ -37,7 +37,7 @@ async function loadMcpServers() {
                         <em>${mcpEscape(databaseCount ? `${databaseCount} 个` : service.badge)}</em>
                     </div>
                     <p>${mcpEscape(service.description)}</p>
-                    <div class="mcp-card-meta">${mcpEscape(databaseCount ? '可继续添加连接' : '配置后可查看动作')}</div>
+                    <div class="mcp-card-meta">${mcpEscape(databaseCount ? '可继续添加连接' : '配置后可查看工具')}</div>
                     <div class="mcp-system-actions">
                         <button class="btn-secondary" type="button" data-mcp-create="${mcpEscape(service.type)}">${mcpEscape(service.actionLabel)}</button>
                     </div>
@@ -49,8 +49,8 @@ async function loadMcpServers() {
                     service,
                     server,
                     connector: true,
-                    enabledEmptyText: '已配置，刷新后可查看动作',
-                    configMetaText: '配置后可查看动作'
+                    enabledEmptyText: '已配置，刷新后可查看工具',
+                    configMetaText: '配置后可查看工具'
                 });
             }).join('')}
             ${personalConnectionServers.map(server => {
@@ -73,11 +73,11 @@ async function loadMcpServers() {
                 </button>
             </div>
             <div class="mcp-card-meta${server.last_error ? ' error-text' : ''}">
-                ${mcpEscape(server.last_error || mcpToolPreviewText(server.id, mcpFallbackToolsForServer(server), toolCount ? `已接入 ${toolCount} 个动作` : '刷新后显示该服务动作'))}
+                ${mcpEscape(server.last_error || mcpToolPreviewText(server.id, mcpFallbackToolsForServer(server), toolCount ? `已接入 ${toolCount} 个工具` : '刷新后显示该服务工具'))}
             </div>
             <div class="mcp-system-actions mcp-instance-actions">
                 <button class="btn-secondary" data-mcp-edit="${server.id}">编辑</button>
-                <button class="btn-secondary" data-mcp-tools="${server.id}">动作</button>
+                <button class="btn-secondary" data-mcp-tools="${server.id}">工具</button>
                 <button class="btn-danger-outline" data-mcp-delete="${server.id}">删除</button>
             </div>
         </div>
@@ -86,7 +86,7 @@ async function loadMcpServers() {
         </div>
         ${personalConnectionServers.length ? '' : `
             <div class="mcp-empty-panel">
-                <strong>还没有个人能力</strong>
+                <strong>还没有个人连接</strong>
                 <span>可以先配置一个数据库连接。</span>
             </div>
         `}
@@ -105,49 +105,10 @@ async function loadMcpServers() {
     list.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete)));
 }
 
-function enableMcpChatToolFromWorkspace() {
-    try {
-        localStorage.setItem('pivot_chat_mcp_enabled', 'true');
-    } catch (e) {
-        // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
-    }
-    window.showMainWorkspace?.('chat');
-    window.syncChatToolToggles?.();
-    document.getElementById('user-input')?.focus();
-    showToast('已打开当前对话的能力库开关', 'success');
-}
-
-function mcpCssEscape(value) {
-    if (window.CSS?.escape) return CSS.escape(value);
-    return String(value || '').replace(/["\\]/g, '\\$&');
-}
-
-async function runMcpNextStepAction(action, button) {
-    if (action === 'enable-visualization') {
-        await window.ensureMcpSystemService?.('visualization', button);
-        return;
-    }
-    if (action === 'review-errors') {
-        const errorServer = mcpServersCache.find(server => server.last_error);
-        if (errorServer) {
-            window.openMcpEditModal?.(errorServer.id);
-            return;
-        }
-        await window.loadMcpWorkbench?.();
-        return;
-    }
-    if (action === 'refresh-tools') {
-        await window.loadMcpWorkbench?.();
-        showToast('已刷新能力库动作列表', 'success');
-        return;
-    }
-    if (action === 'create-database') {
-        window.openMcpCreateModal?.('database');
-        return;
-    }
-    if (action === 'chat-mcp') {
-        enableMcpChatToolFromWorkspace();
-    }
+function mcpToolRiskLabel(level) {
+    if (level === 'low') return '低风险';
+    if (level === 'high') return '高风险';
+    return '中风险';
 }
 
 function renderMcpSystemServices() {
@@ -159,8 +120,8 @@ function renderMcpSystemServices() {
     box.innerHTML = `
         <div class="mcp-system-head">
             <div>
-                <strong>系统能力</strong>
-                <span>系统能力由系统集成，可直接启用或在卡片里完成必要配置。</span>
+                <strong>系统工具</strong>
+                <span>系统工具由系统集成，可直接启用或在卡片里完成必要配置。</span>
             </div>
         </div>
         <div class="mcp-system-grid">
@@ -186,7 +147,7 @@ function renderMcpSystemServices() {
 
 window.openMcpSystemConfig = function(type) {
     const service = mcpBuiltinServices.find(item => item.type === type);
-    if (!service?.requiresConfig) return showToast('该系统能力不需要额外配置', 'error');
+    if (!service?.requiresConfig) return showToast('该系统工具不需要额外配置', 'error');
     const existing = mcpServersCache.find(server => server.server_type === type);
     if (existing) return window.openMcpEditModal(existing.id);
 
@@ -222,7 +183,7 @@ window.openMcpSystemConfig = function(type) {
 
 window.openMcpToolsModal = async function(serverId) {
     const server = mcpServersCache.find(item => String(item.id) === String(serverId));
-    if (!server) return showToast('未找到能力服务', 'error');
+    if (!server) return showToast('未找到工具服务', 'error');
     const modal = document.getElementById('mcp-tools-modal');
     const title = document.getElementById('mcp-tools-title');
     const list = document.getElementById('mcp-tools-list');
@@ -236,108 +197,44 @@ window.openMcpToolsModal = async function(serverId) {
     } catch (e) {
         // 弹窗治理可使用本地缓存兜底；刷新按钮仍可重新拉取工具。
     }
-    title.textContent = `${mcpCleanServiceName(server.name || '能力服务')} 的可用动作`;
+    title.textContent = `${mcpCleanServiceName(server.name || '工具服务')} 的可用工具`;
     const refreshButton = document.getElementById('mcp-tools-refresh-btn');
     if (refreshButton) {
         refreshButton.dataset.mcpServerId = server.id;
         refreshButton.disabled = server.status === 'paused';
-        refreshButton.textContent = server.status === 'paused' ? '已停用' : '刷新动作';
+        refreshButton.textContent = server.status === 'paused' ? '已停用' : '刷新工具';
     }
-    const packageKey = `${server.server_type === 'database' ? 'database_connection' : 'mcp_server'}:${server.id}`;
     list.innerHTML = tools.length ? `
         <div class="mcp-tools-grid">
             ${tools.map(tool => {
                 const governance = tool.governance || {};
                 const enabled = governance.enabled !== false;
+                const riskLevel = governance.riskLevel || 'medium';
+                const approvalRequired = Boolean(governance.approvalRequired);
+                const toolFullName = tool.name || tool.fullName || '';
                 return `
                 <div class="mcp-tool-card${enabled ? '' : ' is-disabled'}">
                     <div class="mcp-tool-card-head">
                         <strong>${mcpEscape(mcpToolTitle(tool))}</strong>
-                        <span class="mcp-tool-risk">${mcpEscape(governance.riskLevel || 'medium')}</span>
+                        <span class="mcp-tool-state${enabled ? '' : ' is-muted'}">${enabled ? '已启用' : '已停用'}</span>
                     </div>
                     <p>${mcpEscape(mcpToolDescription(tool) || '暂无说明')}</p>
-                    <div class="mcp-tool-example">
-                        <span>可以这样问：</span>
-                        <button type="button" data-mcp-tool-prompt="${mcpEscape(mcpToolPrompt(tool))}">${mcpEscape(mcpToolPrompt(tool))}</button>
-                    </div>
-                    <div class="mcp-tool-governance">
-                        <label class="mcp-shared-row">
-                            <input type="checkbox" data-mcp-tool-enabled="${mcpEscape(tool.name)}" ${enabled ? 'checked' : ''}> 启用
-                        </label>
-                        <select class="form-input" data-mcp-tool-risk="${mcpEscape(tool.name)}">
-                            <option value="low" ${(governance.riskLevel || '') === 'low' ? 'selected' : ''}>低风险</option>
-                            <option value="medium" ${(!governance.riskLevel || governance.riskLevel === 'medium') ? 'selected' : ''}>中风险</option>
-                            <option value="high" ${governance.riskLevel === 'high' ? 'selected' : ''}>高风险</option>
-                        </select>
-                        <label class="mcp-shared-row">
-                            <input type="checkbox" data-mcp-tool-approval="${mcpEscape(tool.name)}" ${governance.approvalRequired ? 'checked' : ''}> 需审批
-                        </label>
-                        <input class="form-input" data-mcp-tool-usage="${mcpEscape(tool.name)}" value="${mcpEscape(governance.usage || '')}" placeholder="适用说明">
-                        <button type="button" class="btn-secondary" data-mcp-tool-save="${mcpEscape(tool.name)}">保存治理</button>
-                    </div>
                     <div class="mcp-tool-meta">
-                        <span>${mcpEscape(tool.name || tool.fullName || '')}</span>
+                        ${toolFullName ? `<span>${mcpEscape(toolFullName)}</span>` : ''}
+                        <span>${mcpEscape(mcpToolRiskLabel(riskLevel))}</span>
+                        ${approvalRequired ? '<span>需审批</span>' : ''}
                     </div>
                 </div>
             `;
             }).join('')}
         </div>
-    ` : '<div class="mcp-empty-panel compact"><strong>暂无可用动作</strong><span>请先刷新该能力，或确认它已启用并完成连接。</span></div>';
-    list.querySelectorAll('[data-mcp-tool-prompt]').forEach(button => {
-        button.addEventListener('click', () => {
-            const prompt = button.dataset.mcpToolPrompt || '';
-            modal.classList.add('hidden');
-            window.showMainWorkspace?.('chat');
-            try {
-                localStorage.setItem('pivot_chat_mcp_enabled', 'true');
-            } catch (e) {
-                // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
-            }
-            window.syncChatToolToggles?.();
-            const input = document.getElementById('user-input');
-            if (input && prompt) {
-                input.value = prompt;
-                window.resizeUserInput?.();
-                input.focus();
-            }
-            showToast('已带着示例问题回到聊天，并打开能力库', 'success');
-        });
-    });
-    list.querySelectorAll('[data-mcp-tool-save]').forEach(button => {
-        button.addEventListener('click', async () => {
-            const toolName = button.dataset.mcpToolSave || '';
-            const payload = {
-                enabled: list.querySelector(`[data-mcp-tool-enabled="${mcpCssEscape(toolName)}"]`)?.checked !== false,
-                riskLevel: list.querySelector(`[data-mcp-tool-risk="${mcpCssEscape(toolName)}"]`)?.value || 'medium',
-                approvalRequired: list.querySelector(`[data-mcp-tool-approval="${mcpCssEscape(toolName)}"]`)?.checked || false,
-                usage: list.querySelector(`[data-mcp-tool-usage="${mcpCssEscape(toolName)}"]`)?.value || ''
-            };
-            button.disabled = true;
-            const oldText = button.textContent;
-            button.textContent = '保存中...';
-            try {
-                const res = await apiFetch(`${API_BASE}/capabilities/packages/${encodeURIComponent(packageKey)}/tools/${encodeURIComponent(toolName)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) return showToast(data.error || '工具治理保存失败', 'error');
-                showToast('工具治理已保存', 'success');
-                await window.loadMcpWorkbench();
-                window.openMcpToolsModal(serverId);
-            } finally {
-                button.disabled = false;
-                button.textContent = oldText;
-            }
-        });
-    });
+    ` : '<div class="mcp-empty-panel compact"><strong>暂无可用工具</strong><span>请先刷新该服务，或确认它已启用并完成连接。</span></div>';
     modal.classList.remove('hidden');
 };
 
 window.ensureMcpSystemService = async function(type, button) {
     const service = mcpBuiltinServices.find(item => item.type === type);
-    if (!service) return showToast('不支持的系统能力', 'error');
+    if (!service) return showToast('不支持的系统工具', 'error');
     const originalText = button?.textContent || '启用';
     if (button) {
         button.disabled = true;
@@ -349,8 +246,8 @@ window.ensureMcpSystemService = async function(type, button) {
             headers: { 'Content-Type': 'application/json' }
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '系统能力启用失败', 'error');
-        showToast(`${service.title} 已可用，刷新到 ${Number(data.tools?.length || 0)} 个动作`, 'success');
+        if (!res.ok) return showToast(data.error || '系统工具启用失败', 'error');
+        showToast(`${service.title} 已可用，刷新到 ${Number(data.tools?.length || 0)} 个工具`, 'success');
         await window.loadMcpWorkbench();
     } finally {
         if (button) {
@@ -364,7 +261,7 @@ async function loadMcpTools() {
     const box = document.getElementById('mcp-tool-cache');
     const res = await apiFetch(`${API_BASE}/mcp/tools`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '动作加载失败');
+    if (!res.ok) throw new Error(data.error || '工具加载失败');
     mcpToolsCache = data.tools || [];
     if (box) box.innerHTML = '';
 }
@@ -390,80 +287,27 @@ async function loadMcpGovernance() {
     const errors = Number(s.error || 0);
     const unchecked = Number(s.unchecked || 0);
     const databaseServers = Number(s.databaseServers || 0);
-    const nextStep = (() => {
-        if (active === 0) {
-            return {
-                title: '先启用一个系统能力',
-                detail: '图表生成、数据处理、格式转换无需外部连接，适合先试用。',
-                action: '一键启用图表生成',
-                actionKey: 'enable-visualization'
-            };
-        }
-        if (errors > 0) {
-            return {
-                title: '有能力需要排查',
-                detail: '异常能力不会稳定使用。打开卡片编辑配置，或查看动作刷新结果。',
-                action: '查看异常能力',
-                actionKey: 'review-errors'
-            };
-        }
-        if (unchecked > 0) {
-            return {
-                title: '建议刷新动作列表',
-                detail: '刷新后聊天和智能体才能看到最新可用动作。',
-                action: '刷新动作列表',
-                actionKey: 'refresh-tools'
-            };
-        }
-        if (databaseServers === 0) {
-            return {
-                title: '可按需连接数据',
-                detail: '需要查业务数据时，再添加数据库连接；系统会限制为只读查询。',
-                action: '配置数据库连接',
-                actionKey: 'create-database'
-            };
-        }
-        return {
-            title: '可以回到聊天使用',
-            detail: '提问时点亮输入框旁的能力库按钮，模型会按需使用已启用动作。',
-            action: '打开聊天能力库',
-            actionKey: 'chat-mcp'
-        };
-    })();
+    const notes = (Array.isArray(health.recommendations) ? health.recommendations : [])
+        .filter(Boolean)
+        .slice(0, 3);
     panel.innerHTML = `
-        <div class="mcp-next-step-card">
-            <div>
-                <strong>${mcpEscape(nextStep.title)}</strong>
-                <span>${mcpEscape(nextStep.detail)}</span>
-            </div>
-            <button class="mcp-next-step-action" type="button" data-mcp-next-step="${mcpEscape(nextStep.actionKey)}">${mcpEscape(nextStep.action)}</button>
-        </div>
         <div class="mcp-governance-title">
             <div>
-                <strong>能力治理</strong>
+                <strong>工具治理</strong>
                 <span>健康 ${Number(s.healthScore ?? health.score ?? 0)} · 7 日 ${Number(s.calls7d || 0)} 调用 · ${Number(s.callErrors7d || 0)} 错误 · 平均 ${Number(s.avgDurationMs || 0)}ms</span>
             </div>
             <button id="mcp-refresh-btn" class="btn-secondary" type="button">刷新</button>
         </div>
         <div class="governance-metrics">
-            <span><b>${active}</b>可用能力</span>
+            <span><b>${active}</b>可用服务</span>
             <span><b>${errors}</b>需要处理</span>
             <span><b>${unchecked}</b>待刷新</span>
             <span><b>${databaseServers}</b>数据连接</span>
             <span><b>${Number(s.callErrorRate ?? health.callErrorRate ?? 0)}%</b>调用错误率</span>
         </div>
-        <div class="governance-list mcp-safety-notes">
-            ${(Array.isArray(health.recommendations) ? health.recommendations : []).slice(0, 3).map(item => `<span>${mcpEscape(item)}</span>`).join('')}
-            <span>系统能力可直接启用，个人连接只对当前用户生效。</span>
-            <span>数据库能力默认只读，并限制返回行数，适合查询和分析。</span>
-            <span>聊天中需要主动打开能力库按钮，模型才会使用这些动作。</span>
-        </div>
+        ${notes.length ? `<div class="governance-list mcp-safety-notes">${notes.map(item => `<span>${mcpEscape(item)}</span>`).join('')}</div>` : ''}
     `;
     panel.querySelector('#mcp-refresh-btn')?.addEventListener('click', () => window.loadMcpWorkbench?.());
-    panel.querySelector('[data-mcp-next-step]')?.addEventListener('click', async (event) => {
-        event.preventDefault();
-        await runMcpNextStepAction(event.currentTarget.dataset.mcpNextStep || '', event.currentTarget);
-    });
 }
 
 function collectMcpDatabasePayload(mode = 'create') {
@@ -625,8 +469,8 @@ window.diagnoseMcpServer = async function(mode = 'edit', options = {}) {
     const id = mcpFormEl('id', mode)?.value;
     const panel = mcpFormEl('diagnostics', mode);
     if (!id) {
-        if (panel) panel.textContent = '请先保存能力服务，再进行配置诊断。';
-        return showToast('请先保存能力服务，再进行配置诊断', 'error');
+        if (panel) panel.textContent = '请先保存工具服务，再进行配置诊断。';
+        return showToast('请先保存工具服务，再进行配置诊断', 'error');
     }
     const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
     const payload = options.action === 'test'
@@ -690,7 +534,7 @@ window.saveMcpServer = async function(mode = 'create') {
     });
     const data = await res.json();
     if (!res.ok) return showToast(formatMcpDatabaseError(data, '保存失败'), 'error');
-    showToast('能力服务已保存', 'success');
+    showToast('工具服务已保存', 'success');
     if (mode === 'edit') {
         window.closeMcpEditModal();
     } else {
@@ -703,14 +547,14 @@ window.refreshMcpTools = async function(id, options = {}) {
     const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '刷新失败', 'error');
-    showToast(`已刷新 ${data.tools.length} 个动作`, 'success');
+    showToast(`已刷新 ${data.tools.length} 个工具`, 'success');
     await window.loadMcpWorkbench();
     if (options.keepToolsModalOpen) window.openMcpToolsModal(id);
 };
 
 window.toggleMcpServerStatus = async function(id, nextStatus = 'paused') {
     const server = mcpServersCache.find(item => String(item.id) === String(id));
-    if (!server) return showToast('未找到能力服务', 'error');
+    if (!server) return showToast('未找到工具服务', 'error');
     const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -718,16 +562,16 @@ window.toggleMcpServerStatus = async function(id, nextStatus = 'paused') {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(formatMcpDatabaseError(data, '状态更新失败'), 'error');
-    showToast(nextStatus === 'paused' ? '能力服务已停用' : '能力服务已启用', 'success');
+    showToast(nextStatus === 'paused' ? '工具服务已停用' : '工具服务已启用', 'success');
     await window.loadMcpWorkbench();
 };
 
 window.deleteMcpServer = function(id) {
-    showConfirm('删除能力服务', '确定删除这个能力服务吗？', async () => {
+    showConfirm('删除工具服务', '确定删除这个工具服务吗？', async () => {
         const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除失败', 'error');
-        showToast('能力服务已删除', 'success');
+        showToast('工具服务已删除', 'success');
         await window.loadMcpWorkbench();
     });
 };

@@ -79,7 +79,7 @@ function agentToolDescription(tool) {
     const shortName = agentToolShortName(tool);
     const description = agentToolDisplayMap[shortName]?.description || tool?.description || '';
     if (String(tool?.name || '').startsWith('mcp.') && tool?.serverName) {
-        return `来自「${tool.serverName}」：${description || '已保存的能力服务，可由智能体任务按需调用。'}`;
+        return `来自「${tool.serverName}」：${description || '已保存的工具服务，可由智能体任务按需调用。'}`;
     }
     return description;
 }
@@ -95,7 +95,7 @@ function agentCleanCapabilityName(name) {
 function agentCapabilityTypeLabel(type) {
     if (type === 'builtin_tool') return '系统工具';
     if (type === 'database_connection') return '数据库连接';
-    return '能力服务';
+    return '工具服务';
 }
 
 function isAdminOnlyAgentTool(tool) {

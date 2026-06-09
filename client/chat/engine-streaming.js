@@ -34,13 +34,13 @@ function getAssistantTraceMcpActionName(event = {}) {
                 fullName: event?.toolFullName || event?.tool || toolName,
                 serverName: event?.serverName || ''
             });
-            if (title && title !== '动作') return title;
+            if (title && title !== '工具') return title;
         } catch (_) {}
     }
     return toolName.split('.').pop().replace(/[_-]+/g, ' ').trim();
 }
 
-function formatAssistantTraceMcpActionText(event = {}, prefix = '正在使用能力库', fallback = '') {
+function formatAssistantTraceMcpActionText(event = {}, prefix = '正在使用工具箱', fallback = '') {
     const serverName = String(event?.serverName || '').trim();
     const actionName = getAssistantTraceMcpActionName(event);
     const target = [serverName, actionName].filter(Boolean).join(' / ');
@@ -93,26 +93,26 @@ function getAssistantTraceEventCopy(event = {}) {
         if (status === 'planning') {
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: 'info',
-                text: '正在判断本轮是否需要使用能力库。'
+                text: '正在判断本轮是否需要使用工具箱。'
             };
         }
         if (status === 'running') {
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: 'info',
-                text: formatAssistantTraceMcpActionText(event, '正在使用能力库', '正在使用能力库动作。')
+                text: formatAssistantTraceMcpActionText(event, '正在使用工具箱', '正在使用工具箱工具。')
             };
         }
         if (status === 'done') {
             const doneText = getAssistantTraceMcpActionName(event)
-                ? formatAssistantTraceMcpActionText(event, '能力库动作已完成').replace(/。$/u, '，正在整理结果回答你。')
-                : (message || '能力库动作已完成，正在整理结果回答你。');
+                ? formatAssistantTraceMcpActionText(event, '工具箱工具已完成').replace(/。$/u, '，正在整理结果回答你。')
+                : (message || '工具箱工具已完成，正在整理结果回答你。');
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: 'ready',
                 text: doneText
             };
@@ -120,39 +120,39 @@ function getAssistantTraceEventCopy(event = {}) {
         if (status === 'empty') {
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: 'warning',
-                text: message || '能力库还没有可用动作。',
+                text: message || '工具箱还没有可用工具。',
                 action: 'mcp',
-                actionLabel: '检查能力库'
+                actionLabel: '检查工具箱'
             };
         }
         if (status === 'skipped') {
             const needsAction = /没有匹配|没有适合|无法完成|没有可用/.test(message);
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: needsAction ? 'warning' : 'quiet',
-                text: message || '本轮不需要调用能力库。',
+                text: message || '本轮不需要调用工具箱。',
                 action: needsAction ? 'mcp' : '',
-                actionLabel: needsAction ? '检查能力库' : ''
+                actionLabel: needsAction ? '检查工具箱' : ''
             };
         }
         if (status === 'error') {
             return {
                 tool: 'mcp',
-                label: '能力库',
+                label: '工具箱',
                 tone: 'error',
-                text: message || '能力库动作调用失败。',
+                text: message || '工具箱工具调用失败。',
                 action: 'mcp',
-                actionLabel: '检查能力库'
+                actionLabel: '检查工具箱'
             };
         }
         return {
             tool: 'mcp',
-            label: '能力库',
+            label: '工具箱',
             tone: 'info',
-            text: message || '能力库正在处理本轮请求。'
+            text: message || '工具箱正在处理本轮请求。'
         };
     }
 

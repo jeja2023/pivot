@@ -532,12 +532,12 @@
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body {
     display: grid;
-    grid-template-columns: minmax(340px, 0.34fr) minmax(360px, 0.36fr) minmax(300px, 0.3fr);
+    grid-template-columns: minmax(420px, 0.58fr) minmax(300px, 0.42fr);
     grid-template-rows: max-content max-content minmax(0, 1fr);
     grid-template-areas:
-        "status status status"
-        "caps-head tools-head art-head"
-        "caps tools art";
+        "status status"
+        "tools-head art-head"
+        "tools art";
     gap: 14px;
     align-items: start;
     padding: 12px;
@@ -551,15 +551,7 @@
 }
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(2) {
-    grid-area: caps-head;
-}
-
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-capability-list {
-    grid-area: caps;
-    min-height: 0;
-    height: 100%;
-    max-height: none;
-    overflow: auto;
+    grid-area: tools-head;
 }
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list {
@@ -576,10 +568,6 @@
     overflow-y: auto;
     padding-right: 4px;
     scrollbar-gutter: stable;
-}
-
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-available-tools-head {
-    grid-area: tools-head;
 }
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list .agent-tool-chip {
@@ -628,7 +616,7 @@
     line-height: 1.25;
 }
 
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(6) {
+#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(4) {
     grid-area: art-head;
 }
 
@@ -691,7 +679,6 @@
         grid-area: auto;
     }
 
-    #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-capability-list,
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list,
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-artifact-list {
         max-height: none;

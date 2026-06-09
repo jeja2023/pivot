@@ -416,9 +416,11 @@
         .rag-graph-editor-modal-head { padding: 14px; }
         .rag-graph-editor-modal-body { padding: 14px; }
         .rag-graph-topbar { align-items: stretch; padding: 10px 14px 12px; }
+        .rag-graph-topbar,
         .rag-graph-summary,
         .rag-graph-toolbar { width: 100%; }
         .rag-graph-toolbar,
+        .rag-graph-topbar,
         .rag-graph-layout,
         .rag-graph-editor-grid { grid-template-columns: 1fr; }
         .rag-graph-query-panel,

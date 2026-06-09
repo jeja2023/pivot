@@ -55,19 +55,9 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
         const summary = await summaryRes.json().catch(() => null);
         const quality = await qualityRes.json().catch(() => null);
         const graphSummary = await graphSummaryRes.json().catch(() => null);
-        renderRagSummary(summary);
+        renderRagSummary(summary, quality, graphSummary);
         renderRagQualityReport(quality);
         updateRagDebugSamples(docs);
-        if (graphSummary && !graphSummary.error) {
-            const summaryEl = document.getElementById('rag-summary');
-            const items = summaryEl?.querySelector('.rag-summary-items');
-            if (items) {
-                items.insertAdjacentHTML('beforeend', `
-                    <span><b>${Number(graphSummary.entities || 0)}</b>实体</span>
-                    <span><b>${Number(graphSummary.relations || 0)}</b>关系</span>
-                `);
-            }
-        }
         
         const body = document.getElementById('rag-docs-body');
         body.innerHTML = docs.map((d, index) => `
@@ -107,7 +97,7 @@ window.openKnowledgeWorkbench = async function() {
         console.error('加载知识库配置脚本失败', e);
         showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
     }
-    bindKnowledgeDropUpload();
+    ensureKnowledgeUploadModal();
     panel.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !isAdminUser());
     });
@@ -129,24 +119,65 @@ window.closeKnowledgeWorkbench = function() {
     window.showMainWorkspace?.('chat');
 };
 
-function bindKnowledgeDropUpload() {
-    const dropZone = document.getElementById('knowledge-drop-zone');
-    if (!dropZone || dropZone.dataset.boundKnowledgeDrop === '1') return;
-    dropZone.dataset.boundKnowledgeDrop = '1';
-    dropZone.addEventListener('click', () => document.getElementById('rag-upload-input')?.click());
+function ensureKnowledgeUploadModal() {
+    let modal = document.getElementById('knowledge-upload-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'knowledge-upload-modal';
+        modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-upload-modal-overlay';
+        modal.innerHTML = `
+            <div class="modal rag-detail-modal knowledge-upload-modal">
+                <div class="rag-detail-header">
+                    <div>
+                        <h3>上传文档</h3>
+                        <p class="model-modal-desc">拖拽文件到下方区域，或点击区域选择文件。上传后系统会自动索引文档内容。</p>
+                    </div>
+                    <button type="button" id="knowledge-upload-close-btn" class="btn-danger-outline">关闭</button>
+                </div>
+                <button id="knowledge-upload-zone" class="knowledge-upload-zone" type="button">
+                    <strong>拖拽文件到这里，或点击选择文件</strong>
+                    <span>支持 PDF、Word、Excel、CSV、Markdown、网页文本。</span>
+                </button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('#knowledge-upload-close-btn')) {
+                window.closeKnowledgeUploadModal?.();
+            }
+        });
+    }
+    bindKnowledgeUploadZone(modal);
+    return modal;
+}
+
+window.openKnowledgeUploadModal = function() {
+    ensureKnowledgeUploadModal().classList.remove('hidden');
+};
+
+window.closeKnowledgeUploadModal = function() {
+    const modal = document.getElementById('knowledge-upload-modal');
+    modal?.classList.add('hidden');
+};
+
+function bindKnowledgeUploadZone(root = document) {
+    const uploadZone = root.querySelector?.('#knowledge-upload-zone') || document.getElementById('knowledge-upload-zone');
+    if (!uploadZone || uploadZone.dataset.boundKnowledgeDrop === '1') return;
+    uploadZone.dataset.boundKnowledgeDrop = '1';
+    uploadZone.addEventListener('click', () => document.getElementById('rag-upload-input')?.click());
     ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, event => {
+        uploadZone.addEventListener(eventName, event => {
             event.preventDefault();
-            dropZone.classList.add('is-dragging');
+            uploadZone.classList.add('is-dragging');
         });
     });
     ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, event => {
+        uploadZone.addEventListener(eventName, event => {
             event.preventDefault();
-            dropZone.classList.remove('is-dragging');
+            uploadZone.classList.remove('is-dragging');
         });
     });
-    dropZone.addEventListener('drop', event => {
+    uploadZone.addEventListener('drop', event => {
         const file = event.dataTransfer?.files?.[0];
         if (!file) return;
         window.uploadKnowledgeDoc(file);
@@ -336,6 +367,7 @@ window.uploadKnowledgeDoc = async (selectedFile = null) => {
         if (data.error) throw new Error(data.error);
         
         showToast(data.message || '文档已加入后台索引队列');
+        window.closeKnowledgeUploadModal?.();
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档上传失败', 'error');

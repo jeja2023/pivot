@@ -1,7 +1,7 @@
 // 聊天 MCP 授权确认与工具自动启用辅助函数 Chat MCP consent and automatic tool activation helpers
 function confirmChatMcpUse() {
-    const title = '允许调用能力库工具';
-    const message = '能力库工具可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
+    const title = '允许调用工具箱工具';
+    const message = '工具箱工具可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
     return new Promise(resolve => {
         if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
         window.showConfirm(title, message, () => resolve(true));

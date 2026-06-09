@@ -23,6 +23,113 @@ const {
     upsertCapabilityPackage
 } = require('../../server/services/capability-market');
 
+test('admin tool policy routes manage only global tool packages', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`tool_policy_${suffix}`, 'hash', 'Tool Policy Admin', 'QA', 'admin', 'active');
+    const managerUser = { id: Number(userInfo.lastInsertRowid), username: `tool_policy_${suffix}`, role: 'admin', unit: 'QA' };
+    const superUser = { id: 1, username: 'admin', role: 'admin', unit: 'HQ' };
+    const now = getBeijingTimestamp();
+    const globalServerInfo = db.prepare(`
+        INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, 'active', ?, ?)
+    `).run(null, `Global Policy MCP ${suffix}`, 'http://127.0.0.1:65530/mcp', 'global policy route test', now, now);
+    const globalServerId = Number(globalServerInfo.lastInsertRowid);
+    const privateServerInfo = db.prepare(`
+        INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, 'active', ?, ?)
+    `).run(managerUser.id, `Private Policy MCP ${suffix}`, 'http://127.0.0.1:65531/mcp', 'private policy route test', now, now);
+    const privateServerId = Number(privateServerInfo.lastInsertRowid);
+    db.prepare(`
+        INSERT INTO mcp_tool_cache (server_id, name, description, input_schema, cached_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(globalServerId, 'external.search', 'search external records', '{"type":"object"}', now);
+    db.prepare(`
+        INSERT INTO mcp_tool_cache (server_id, name, description, input_schema, cached_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(privateServerId, 'private.search', 'search private records', '{"type":"object"}', now);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = req.user || managerUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const packagesRoute = router.stack.find(layer => layer.route?.path === '/capabilities/packages' && layer.route?.methods?.get);
+    const toolsRoute = router.stack.find(layer => layer.route?.path === '/capabilities/packages/:key/tools' && layer.route?.methods?.get);
+    const saveRoute = router.stack.find(layer => layer.route?.path === '/capabilities/packages/:key/tools/:tool' && layer.route?.methods?.put);
+    const globalPackageKey = `mcp_server:${globalServerId}`;
+    const privatePackageKey = `mcp_server:${privateServerId}`;
+    try {
+        const packagesRes = makeRes();
+        await runExpressHandlers(packagesRoute.route.stack.map(layer => layer.handle), { user: managerUser }, packagesRes);
+        assert.equal(packagesRes.statusCode, 200);
+        assert.equal(packagesRes.body.data.some(item => item.package_key === globalPackageKey), true);
+        assert.equal(packagesRes.body.data.some(item => item.package_key === privatePackageKey), false);
+
+        const privateRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
+            params: { key: privatePackageKey },
+            user: managerUser
+        }, privateRes);
+        assert.equal(privateRes.statusCode, 404);
+
+        const listRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
+            params: { key: globalPackageKey },
+            user: managerUser
+        }, listRes);
+        assert.equal(listRes.statusCode, 200);
+        assert.equal(listRes.body.item.package_key, globalPackageKey);
+        assert.equal(listRes.body.tools.length, 1);
+        assert.equal(listRes.body.tools[0].name, 'external.search');
+        assert.equal(listRes.body.tools[0].governance.enabled, true);
+
+        await assert.rejects(
+            runExpressHandlers(saveRoute.route.stack.map(layer => layer.handle), {
+                params: { key: globalPackageKey, tool: 'external.search' },
+                body: { enabled: false },
+                user: managerUser
+            }, makeRes()),
+            err => err?.status === 403
+        );
+
+        const saveRes = makeRes();
+        await runExpressHandlers(saveRoute.route.stack.map(layer => layer.handle), {
+            params: { key: globalPackageKey, tool: 'external.search' },
+            body: {
+                enabled: false,
+                riskLevel: 'high',
+                approvalRequired: true,
+                usage: 'Only after admin approval'
+            },
+            user: superUser
+        }, saveRes);
+        assert.equal(saveRes.statusCode, 200);
+        assert.equal(saveRes.body.item.governance.enabled, false);
+        assert.equal(saveRes.body.item.governance.riskLevel, 'high');
+        assert.equal(saveRes.body.item.governance.approvalRequired, true);
+
+        const rereadRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
+            params: { key: globalPackageKey },
+            user: managerUser
+        }, rereadRes);
+        assert.equal(rereadRes.body.tools[0].governance.enabled, false);
+        assert.equal(rereadRes.body.tools[0].governance.usage, 'Only after admin approval');
+    } finally {
+        db.prepare('DELETE FROM capability_packages WHERE package_key IN (?, ?)').run(globalPackageKey, privatePackageKey);
+        db.prepare('DELETE FROM mcp_tool_cache WHERE server_id IN (?, ?)').run(globalServerId, privateServerId);
+        db.prepare('DELETE FROM mcp_servers WHERE id IN (?, ?)').run(globalServerId, privateServerId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(managerUser.id);
+    }
+});
+
 test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
     const generic = buildGenericDatabaseTools([
         {
@@ -91,7 +198,7 @@ test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
     assert.equal(queryTool.input_schema.properties.sql.type, 'string');
 });
 
-test('能力包工具级治理会过滤已停用 MCP 工具', () => {
+test('工具包工具级治理会过滤已停用 MCP 工具', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)

@@ -41,6 +41,12 @@ function renderModelCapabilityBadges(model) {
     return icons.join('');
 }
 
+function canTestModelConnection(model) {
+    if (!model || !currentUser?.id) return false;
+    if (String(model.user_id) === String(currentUser.id)) return true;
+    return !model.user_id && isAdminUser();
+}
+
 window.loadModels = async function(page = 1) {
     const [modelRes, settingsRes] = await Promise.all([
         apiFetch(`${API_BASE}/models?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() }),
@@ -127,8 +133,12 @@ window.loadModels = async function(page = 1) {
             </td>
         </tr>
     `; }).join('');
+
+    data.filter(model => !canTestModelConnection(model)).forEach(model => {
+        document.querySelector(`#model-row-${model.id} [data-model-action="test"]`)?.remove();
+    });
     
-    data.forEach(m => checkSingleModelStatus(m.id));
+    data.filter(canTestModelConnection).forEach(m => checkSingleModelStatus(m.id));
     renderPagination('models', total, page);
 }
 
@@ -231,6 +241,7 @@ window.prepareEditModel = (model) => {
 };
 
 window.testExistingModel = async (model) => {
+    if (!canTestModelConnection(model)) return showToast('无权测试该模型', 'error');
     if (pendingTests.has(model.id)) return showToast('该模型正在自动检测，请稍后再试', 'info');
     await testConnection(null, null, null, model.id);
 };

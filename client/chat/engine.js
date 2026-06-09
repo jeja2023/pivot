@@ -50,7 +50,7 @@ window.sendMessage = async function(isRegenerate = false) {
         if (!mcpConfirmed) return;
         mcpEnabled = true;
         activateChatMcpToggle();
-        showToast?.('已为本轮启用能力库工具', 'info');
+        showToast?.('已为本轮启用工具箱工具', 'info');
     }
     if (mcpEnabled) {
         mcpConfirmed = mcpConfirmed || await ensureChatMcpConsent();
@@ -254,8 +254,8 @@ window.sendMessage = async function(isRegenerate = false) {
                 }
                 if (data.type === 'mcp') {
                     window.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    updateAssistantStatus(data.message || '正在处理能力库工具');
-                    if (data.status === 'error') showToast(data.message || '能力库工具调用失败', 'warning');
+                    updateAssistantStatus(data.message || '正在处理工具箱工具');
+                    if (data.status === 'error') showToast(data.message || '工具箱工具调用失败', 'warning');
                     return;
                 }
                 if (data.type === 'chart') {

@@ -1,4 +1,4 @@
-// 能力库工作台逻辑
+// 工具箱工作台逻辑
 const mcpEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 let mcpServersCache = [];
 let mcpCallLogsCache = [];
@@ -78,7 +78,7 @@ const mcpPersonalBuiltinServices = [
         type: 'reports',
         title: '报表文件',
         badge: '需配置',
-        description: '连接报表和数据文件目录后，提供查找文件、摘要读取和表格查询能力。',
+        description: '连接报表和数据文件目录后，提供查找文件、摘要读取和表格查询工具。',
         usage: '适合“从共享目录读取 Excel/CSV 报表”。',
         tools: ['reports.list_files', 'reports.read_file_summary', 'reports.query_table', 'reports.compare_files'],
         requiresConfig: true,
@@ -105,20 +105,20 @@ const mcpServiceCatalog = [
         type: 'database',
         title: '数据库连接',
         badge: '手动连接',
-        description: '连接业务数据库后，提供表结构查看、只读查询和集合分析等能力。',
+        description: '连接业务数据库后，提供表结构查看、只读查询和集合分析等工具。',
         usage: '适合“查询业务表、统计数量、生成图表”。默认只读，避免误写数据。',
         actionLabel: '配置',
         defaultName: '数据库连接',
-        defaultDescription: '手动连接数据库后启用查询动作。'
+        defaultDescription: '手动连接数据库后启用查询工具。'
     }
 ];
 
 function renderMcpServiceCard({
     service,
     server = null,
-    enabledEmptyText = '已启用，刷新后可查看动作',
-    disabledMetaText = '启用后可查看动作',
-    configMetaText = '配置后可查看动作',
+    enabledEmptyText = '已启用，刷新后可查看工具',
+    disabledMetaText = '启用后可查看工具',
+    configMetaText = '配置后可查看工具',
     connector = false
 }) {
     const enabled = Boolean(server);
@@ -144,10 +144,9 @@ function renderMcpServiceCard({
                 ${headAction}
             </div>
             <p>${mcpEscape(service.description)}</p>
-            ${service.usage ? `<div class="mcp-card-usage">${mcpEscape(service.usage)}</div>` : ''}
             <div class="mcp-card-meta">${mcpEscape(metaText)}</div>
             <div class="mcp-system-actions">
-                ${enabled ? `<button class="btn-secondary" type="button" data-mcp-tools="${server.id}">动作</button>` : ''}
+                ${enabled ? `<button class="btn-secondary" type="button" data-mcp-tools="${server.id}">工具</button>` : ''}
                 ${service.requiresConfig ? `
                     <button class="btn-secondary" type="button" data-mcp-system-config="${mcpEscape(service.type)}">
                         ${enabled ? '编辑配置' : '配置'}
@@ -356,16 +355,12 @@ function mcpCleanServiceName(name) {
 }
 
 function mcpToolTitle(tool) {
-    const title = mcpToolDisplayMap[tool?.name]?.title || tool?.title || tool?.name || '动作';
-    return mcpCleanToolTitle(title) || '动作';
+    const title = mcpToolDisplayMap[tool?.name]?.title || tool?.title || tool?.name || '工具';
+    return mcpCleanToolTitle(title) || '工具';
 }
 
 function mcpToolDescription(tool) {
     return mcpToolDisplayMap[tool?.name]?.description || tool?.description || tool?.serverName || '';
-}
-
-function mcpToolPrompt(tool) {
-    return mcpToolDisplayMap[tool?.name]?.prompt || `请使用“${mcpToolTitle(tool)}”这个动作帮我完成任务。`;
 }
 
 function mcpToolsForServer(serverId, fallbackToolNames = []) {
@@ -394,8 +389,8 @@ function mcpToolCount(serverId, fallbackToolNames = []) {
     return mcpToolsForServer(serverId, fallbackToolNames).length;
 }
 
-function mcpToolPreviewText(serverId, fallbackToolNames = [], emptyText = '启用并刷新后可查看动作') {
+function mcpToolPreviewText(serverId, fallbackToolNames = [], emptyText = '启用并刷新后可查看工具') {
     const count = mcpToolCount(serverId, fallbackToolNames);
-    return count ? `已接入 ${count} 个动作` : emptyText;
+    return count ? `已接入 ${count} 个工具` : emptyText;
 }
 

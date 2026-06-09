@@ -108,30 +108,6 @@ function enableChatToolFromWorkspace(tool, message) {
     if (message) showToast(message, 'success');
 }
 
-function runRagNextStepAction(action) {
-    if (action === 'upload') {
-        document.getElementById('rag-upload-btn')?.click();
-        return;
-    }
-    if (action === 'refresh') {
-        window.loadKnowledgeDocs?.();
-        showToast('已刷新知识库状态', 'success');
-        return;
-    }
-    if (action === 'retry') {
-        document.getElementById('rag-retry-failed-btn')?.click();
-        return;
-    }
-    if (action === 'debug') {
-        document.getElementById('rag-debug-modal-open-btn')?.click();
-        document.getElementById('rag-debug-query')?.focus();
-        return;
-    }
-    if (action === 'chat-rag') {
-        enableChatToolFromWorkspace('rag', '已打开聊天里的知识库开关');
-    }
-}
-
 const showRagDetailModal = (data) => {
     const modal = ensureRagDetailModal();
     const doc = data.doc || {};
@@ -194,57 +170,14 @@ window.showKnowledgeDocAudit = async () => {
     }
 };
 
-const renderRagSummary = (summary) => {
+const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const el = document.getElementById('rag-summary');
     if (!el || !summary) return;
-    const total = Number(summary.total || 0);
-    const ready = Number(summary.ready || 0);
-    const processing = Number(summary.processing || 0);
-    const errors = Number(summary.error || 0);
-    const retryable = Number(summary.retryableErrors || 0);
-    const disabled = Number(summary.disabled || 0);
-    const nextStep = (() => {
-        if (total === 0) {
-            return {
-                title: '先上传一份文档',
-                detail: '支持 PDF、Word、Excel、CSV、Markdown、网页文本等文件。上传后系统会自动索引文档内容。',
-                action: '上传文档',
-                actionKey: 'upload'
-            };
-        }
-        if (processing > 0) {
-            return {
-                title: '正在索引文档',
-                detail: '文档还在索引中，完成后会自动变成“就绪”。页面会自动刷新。',
-                action: '刷新状态',
-                actionKey: 'refresh'
-            };
-        }
-        if (retryable > 0 || errors > 0) {
-            return {
-                title: '有文档需要处理',
-                detail: '失败文档不会参与回答。可以先重试失败项，再查看详情里的错误原因。',
-                action: retryable > 0 ? '重试失败文档' : '刷新后查看详情',
-                actionKey: retryable > 0 ? 'retry' : 'refresh'
-            };
-        }
-        if (ready === 0) {
-            return {
-                title: '还没有可用文档',
-                detail: '文档可能被停用或尚未索引完成。启用并重新索引后才能被聊天引用。',
-                action: '刷新并检查',
-                actionKey: 'refresh'
-            };
-        }
-        return {
-            title: '可以开始提问',
-            detail: '可以先通过召回测试确认命中效果，也可以直接回到聊天并启用知识库。',
-            action: disabled > 0 ? '启用聊天知识库' : '召回测试',
-            actionKey: disabled > 0 ? 'chat-rag' : 'debug',
-            secondaryAction: disabled > 0 ? '召回测试' : '启用聊天知识库',
-            secondaryActionKey: disabled > 0 ? 'debug' : 'chat-rag'
-        };
-    })();
+    const signals = quality && !quality.error ? (quality.signals || {}) : {};
+    const hasQuality = quality && !quality.error;
+    const hasGraphSummary = graphSummary && !graphSummary.error;
+    const graphEntities = hasGraphSummary ? graphSummary.entities : signals.graphEntities;
+    const graphRelations = hasGraphSummary ? graphSummary.relations : signals.graphRelations;
     const items = [
         ['文档', summary.total || 0],
         ['就绪', summary.ready || 0],
@@ -252,30 +185,23 @@ const renderRagSummary = (summary) => {
         ['失败', summary.error || 0],
         ['分块', summary.chunks || 0],
         ['源文件', formatRagSize(summary.sourceSize || 0)],
-        ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`]
-    ];
+        ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`],
+        ...(hasQuality ? [
+            ['评分', Number(signals.score || 0)],
+            ['反馈', signals.helpfulRate === null || signals.helpfulRate === undefined ? '暂无' : `${Number(signals.helpfulRate || 0)}%`]
+        ] : []),
+        ...(graphEntities === undefined || graphEntities === null ? [] : [['实体', Number(graphEntities || 0)]]),
+        ...(graphRelations === undefined || graphRelations === null ? [] : [['关系', Number(graphRelations || 0)]])
+    ].filter(([, value]) => value !== undefined && value !== null);
     const lastError = summary.lastError?.error_message
         ? `<span class="rag-summary-error" title="${escapeRagHtml(summary.lastError.error_message)}">最近错误：${escapeRagHtml(summary.lastError.name || '文档')}</span>`
         : '';
     el.innerHTML = `
-        <div class="rag-next-step-card">
-            <div>
-                <strong>${escapeRagHtml(nextStep.title)}</strong>
-                <span>${escapeRagHtml(nextStep.detail)}</span>
-            </div>
-            <div class="rag-next-step-actions">
-                <button class="rag-next-step-action" type="button" data-rag-next-step="${escapeRagHtml(nextStep.actionKey)}">${escapeRagHtml(nextStep.action)}</button>
-                ${nextStep.secondaryAction ? `<button class="rag-next-step-action is-secondary" type="button" data-rag-next-step="${escapeRagHtml(nextStep.secondaryActionKey)}">${escapeRagHtml(nextStep.secondaryAction)}</button>` : ''}
-            </div>
-        </div>
         <div class="rag-summary-items">
             ${items.map(([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`).join('')}
         </div>
         ${lastError}
     `;
-    el.querySelectorAll('[data-rag-next-step]').forEach(button => button.addEventListener('click', (event) => {
-        runRagNextStepAction(event.currentTarget.dataset.ragNextStep || '');
-    }));
 
     const retryBtn = document.getElementById('rag-retry-failed-btn');
     if (retryBtn) retryBtn.disabled = !(summary.retryableErrors > 0);
@@ -291,34 +217,36 @@ const renderRagQualityReport = (report) => {
     const el = document.getElementById('rag-quality-report');
     if (!el || !report) return;
     const overview = report.overview || {};
-    const signals = report.signals || {};
     const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
-    const recommendations = Array.isArray(report.recommendations) ? report.recommendations : [];
-    const userTips = [
-        '文档变更后点击“批量重建”或“重新索引”，确保回答引用的是最新内容。',
-        '召回测试结果太少时，换成用户真实会问的问题再测一次。',
-        '聊天时需要先点亮输入框旁的知识库按钮，才会引用这些文档。'
-    ];
+    const visibleProblems = problemDocs.filter(doc => doc.status === 'error' || Number(doc.chunk_count || 0) === 0).slice(0, 3);
+    const issueItems = [
+        ['异常', Number(overview.error || 0)],
+        ['停用', Number(overview.disabled || 0)],
+        ['空分块', Number(overview.emptyReady || 0)]
+    ].filter(([, value]) => value > 0);
+    if (!issueItems.length && !visibleProblems.length) {
+        el.innerHTML = '';
+        return;
+    }
     el.innerHTML = `
         <div class="governance-head">
             <strong>质量诊断</strong>
-            <span>评分 ${Number(signals.score || 0)} · 可用 ${Number(signals.readinessRate || 0)}% · 反馈 ${signals.helpfulRate === null || signals.helpfulRate === undefined ? '暂无' : `${Number(signals.helpfulRate || 0)}%`}</span>
+            <span>${visibleProblems.length ? `发现 ${visibleProblems.length} 个需处理文档` : '存在需关注指标'}</span>
         </div>
-        <div class="governance-metrics">
-            <span><b>${Number(overview.error || 0)}</b>异常</span>
-            <span><b>${Number(overview.disabled || 0)}</b>停用</span>
-            <span><b>${Number(overview.emptyReady || 0)}</b>空分块</span>
-            <span><b>${Number(signals.graphEntities || 0)}</b>图谱实体</span>
-        </div>
-        <div class="governance-list">
-            ${recommendations.slice(0, 3).map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}
-            ${userTips.map(item => `<span>${escapeRagHtml(item)}</span>`).join('')}
-            ${problemDocs.slice(0, 4).map(doc => `
+        ${issueItems.length ? `
+            <div class="governance-metrics">
+                ${issueItems.map(([label, value]) => `<span><b>${Number(value || 0)}</b>${escapeRagHtml(label)}</span>`).join('')}
+            </div>
+        ` : ''}
+        ${visibleProblems.length ? `
+            <div class="governance-list">
+                ${visibleProblems.map(doc => `
                 <span class="${doc.status === 'error' ? 'is-error' : ''}">
                     ${escapeRagHtml(doc.name || '文档')} · ${escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
                 </span>
-            `).join('')}
-        </div>
+                `).join('')}
+            </div>
+        ` : ''}
     `;
 };
 

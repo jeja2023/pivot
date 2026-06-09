@@ -363,11 +363,11 @@
                         <option value="low">${escapeHtml(messages.qualityLowLabel || '')}</option>
                     </select>
                     <button id="rag-graph-search-btn" class="btn-secondary">${escapeHtml(messages.searchLabel || '')}</button>
+                    <input id="rag-graph-query" class="form-input" placeholder="${escapeAttr(messages.queryPlaceholder || '')}">
+                    <button id="rag-graph-query-btn" class="btn-secondary">${escapeHtml(messages.queryLabel || '')}</button>
                 </div>
             </div>
             <div class="rag-graph-query-panel">
-                <input id="rag-graph-query" class="form-input" placeholder="${escapeAttr(messages.queryPlaceholder || '')}">
-                <button id="rag-graph-query-btn" class="btn-secondary">${escapeHtml(messages.queryLabel || '')}</button>
                 <div id="rag-graph-query-results" class="rag-graph-query-results"></div>
             </div>
             <div class="rag-graph-layout">

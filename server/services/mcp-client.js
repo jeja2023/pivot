@@ -237,7 +237,7 @@ async function refreshMcpTools(server, user = null) {
             return schema && typeof schema === 'object' && !Array.isArray(schema) && (schema.type === 'object' || schema.properties);
         });
         if (validateSchema && normalizedTools.length !== tools.filter(tool => tool?.name).length) {
-            throw new Error('外部能力服务存在工具 Schema 缺失或格式不正确，请修正后再刷新。');
+            throw new Error('外部工具服务存在工具 Schema 缺失或格式不正确，请修正后再刷新。');
         }
         upsertToolCache(server.id, normalizedTools);
         db.prepare('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
@@ -309,7 +309,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         : 'mcp_server';
     const { isToolCapabilityEnabled } = require('./capability-market');
     if (!isToolCapabilityEnabled(serverType, String(server.id), match[2], user)) {
-        const err = new Error('该工具已在能力治理中停用。');
+        const err = new Error('该工具已在工具治理中停用。');
         err.status = 403;
         throw err;
     }

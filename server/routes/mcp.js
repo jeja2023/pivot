@@ -23,11 +23,13 @@ const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../services/a
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
+    getCapabilityToolGovernance,
+    getGlobalCapabilityPackage,
     isToolCapabilityEnabled,
     isCapabilityEnabled,
-    listCapabilityPackages,
-    setCapabilityPackageStatus,
-    setCapabilityToolGovernance
+    listGlobalCapabilityPackages,
+    setGlobalCapabilityPackageStatus,
+    setGlobalCapabilityToolGovernance
 } = require('../services/capability-market');
 const {
     DEFAULT_PORTS,
@@ -186,12 +188,11 @@ function buildCapabilityHealth(summary = {}, callSummary = {}) {
     else if (avgDurationMs > 3000) score -= 5;
     const healthScore = clampHealthScore(score);
     const recommendations = [];
-    if (total === 0) recommendations.push('先启用一个系统能力，确认聊天、自由任务和工作流可正常调用工具。');
-    if (error > 0) recommendations.push('存在异常能力，建议优先检查连接配置、密钥和网络可达性。');
-    if (unchecked > 0) recommendations.push('存在未刷新动作列表的能力，建议刷新工具缓存后再交给模型使用。');
+    if (total === 0) recommendations.push('先启用一个系统工具，确认聊天、自由任务和工作流可正常调用工具。');
+    if (error > 0) recommendations.push('存在异常工具服务，建议优先检查连接配置、密钥和网络可达性。');
+    if (unchecked > 0) recommendations.push('存在未刷新工具列表的服务，建议刷新工具缓存后再交给模型使用。');
     if (callErrorRate >= 0.2) recommendations.push('近 7 日能力调用错误率偏高，建议查看调用日志定位失败工具。');
-    if (avgDurationMs > 3000) recommendations.push('能力平均耗时较高，建议收紧返回行数或拆分长耗时任务。');
-    if (recommendations.length === 0) recommendations.push('能力库健康状态良好，可继续按任务需要启用工具。');
+    if (avgDurationMs > 3000) recommendations.push('工具平均耗时较高，建议收紧返回行数或拆分长耗时任务。');
     return {
         score: healthScore,
         level: healthScore >= 85 ? 'excellent' : healthScore >= 70 ? 'good' : healthScore >= 50 ? 'attention' : 'risk',
@@ -218,12 +219,12 @@ function findAccessibleBuiltinService(serviceType, user) {
 function createSystemBuiltinService(serviceType, user) {
     const definition = SYSTEM_MCP_SERVICES[serviceType];
     if (!definition) {
-        const err = new Error('不支持的系统能力。');
+        const err = new Error('不支持的系统工具。');
         err.status = 400;
         throw err;
     }
     if (definition.requiresConfig) {
-        const err = new Error('该系统能力需要配置后才能启用。');
+        const err = new Error('该系统工具需要配置后才能启用。');
         err.status = 400;
         throw err;
     }
@@ -360,19 +361,64 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ data: rows });
     }));
 
-    router.get('/capabilities/packages', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listCapabilityPackages(req.user) });
+    router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listGlobalCapabilityPackages(req.user), scope: 'global' });
     }));
 
-    router.put('/capabilities/packages/:key', authMiddleware, asyncHandler(async (req, res) => {
-        const item = setCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
-        if (!item) return res.status(404).json({ error: '能力包不存在。' });
-        logAction(req, '更新能力包状态', `${item.package_key}: ${item.status}`);
+    router.get('/capabilities/packages/:key/tools', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const item = getGlobalCapabilityPackage(req.params.key, req.user);
+        if (!item) return res.status(404).json({ error: '工具包不存在。' });
+        const config = item.config || {};
+        const storedTools = config.tools && typeof config.tools === 'object' ? config.tools : {};
+        let tools = [];
+        if (item.type === 'builtin_tool') {
+            const definition = getBuiltInToolDefinitions(req.user).find(tool => tool.name === item.source_ref);
+            if (definition) {
+                tools = [{
+                    name: definition.name,
+                    fullName: definition.name,
+                    title: definition.title || definition.name,
+                    description: definition.description || '',
+                    governance: getCapabilityToolGovernance('builtin_tool', definition.name, definition.name, req.user)
+                }];
+            }
+        } else {
+            tools = listCachedMcpTools(item.source_ref, req.user)
+                .filter(tool => item.type === 'database_connection'
+                    ? tool.serverType === 'database'
+                    : tool.serverType !== 'database')
+                .map(tool => ({
+                    name: tool.name,
+                    fullName: tool.fullName,
+                    title: tool.name,
+                    description: tool.description || '',
+                    governance: getCapabilityToolGovernance(item.type, item.source_ref, tool.name, req.user)
+                }));
+        }
+        const known = new Set(tools.map(tool => tool.name));
+        Object.keys(storedTools).forEach(name => {
+            if (known.has(name)) return;
+            tools.push({
+                name,
+                fullName: name,
+                title: name,
+                description: '已保存策略，当前工具缓存中未找到该工具。',
+                stale: true,
+                governance: getCapabilityToolGovernance(item.type, item.source_ref, name, req.user)
+            });
+        });
+        res.json({ item, tools });
+    }));
+
+    router.put('/capabilities/packages/:key', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const item = setGlobalCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
+        if (!item) return res.status(404).json({ error: '工具包不存在。' });
+        logAction(req, '更新工具包状态', `${item.package_key}: ${item.status}`);
         res.json({ success: true, item });
     }));
 
-    router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, asyncHandler(async (req, res) => {
-        const item = setCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
+    router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const item = setGlobalCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
             enabled: parseBoolean(req.body?.enabled, true),
             riskLevel: req.body?.riskLevel || req.body?.risk_level,
             approvalRequired: req.body?.approvalRequired !== undefined
@@ -380,8 +426,8 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 : req.body?.approval_required,
             usage: req.body?.usage || req.body?.applicability
         });
-        if (!item) return res.status(404).json({ error: '能力包不存在。' });
-        logAction(req, '更新能力工具治理', `${item.packageKey}: ${item.toolName}`);
+        if (!item) return res.status(404).json({ error: '工具包不存在。' });
+        logAction(req, '更新工具治理', `${item.packageKey}: ${item.toolName}`);
         res.json({ success: true, item });
     }));
 
@@ -403,9 +449,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         if (serverId) {
             const existing = getAccessibleMcpServer(serverId, req.user);
-            if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
+            if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
             if (!String(existing.base_url || '').startsWith('pivot-db://')) {
-                return res.status(400).json({ error: '该能力服务不是数据库连接。' });
+                return res.status(400).json({ error: '该工具服务不是数据库连接。' });
             }
             const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
             if (!dbConnectionRow) return res.status(404).json({ error: '数据库连接配置不存在。' });
@@ -456,7 +502,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, config, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
         `).run(shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now);
-        logAction(req, '新增能力服务', `${name}: ${baseUrl}`);
+        logAction(req, '新增工具服务', `${name}: ${baseUrl}`);
         res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(info.lastInsertRowid)) });
     }));
 
@@ -497,7 +543,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             return serverId;
         });
         const serverId = tx();
-        logAction(req, '新增数据库能力服务', `${name}: ${connection.database_type}`);
+        logAction(req, '新增数据库工具服务', `${name}: ${connection.database_type}`);
         res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
     }));
 
@@ -505,7 +551,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const name = String(req.body?.name || '').trim();
         const description = String(req.body?.description || '').trim();
         const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
-        if (!name) return res.status(400).json({ error: '请填写能力名称。' });
+        if (!name) return res.status(400).json({ error: '请填写工具名称。' });
 
         const service = normalizeBuiltinPayload(req.body?.service_type || req.body?.serviceType, req.body);
         if (service.serviceType === 'im') {
@@ -537,20 +583,20 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             return serverId;
         });
         const serverId = tx();
-        logAction(req, '新增系统能力服务', `${name}: ${service.serviceType}`);
+        logAction(req, '新增系统工具服务', `${name}: ${service.serviceType}`);
         res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
     }));
 
     router.post('/mcp/system-services/:type/ensure', authMiddleware, asyncHandler(async (req, res) => {
         const serviceType = String(req.params.type || '').trim().toLowerCase();
         if (!SYSTEM_MCP_SERVICES[serviceType]) {
-            return res.status(400).json({ error: '不支持的系统能力。' });
+            return res.status(400).json({ error: '不支持的系统工具。' });
         }
         const existing = findAccessibleBuiltinService(serviceType, req.user);
         const serverId = existing?.id || createSystemBuiltinService(serviceType, req.user);
         const server = getAccessibleMcpServer(serverId, req.user);
         const tools = await refreshMcpTools(server, req.user);
-        logAction(req, existing ? '启用系统能力服务' : '新增系统能力服务', `${SYSTEM_MCP_SERVICES[serviceType].name}: ${tools.length}`);
+        logAction(req, existing ? '启用系统工具服务' : '新增系统工具服务', `${SYSTEM_MCP_SERVICES[serviceType].name}: ${tools.length}`);
         res.status(existing ? 200 : 201).json({
             success: true,
             server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)),
@@ -560,14 +606,14 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/mcp/builtin-services/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
-        if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
+        if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         const serviceType = getBuiltinServiceTypeFromUrl(existing.base_url);
-        if (!serviceType) return res.status(400).json({ error: '该能力服务不是系统预设。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
-        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
+        if (!serviceType) return res.status(400).json({ error: '该工具服务不是系统预设。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
         const configRow = db.prepare('SELECT * FROM mcp_builtin_configs WHERE mcp_server_id = ?').get(existing.id);
-        if (!configRow) return res.status(404).json({ error: '系统能力配置不存在。' });
+        if (!configRow) return res.status(404).json({ error: '系统工具配置不存在。' });
 
         const name = String(req.body?.name || existing.name).trim();
         const description = String(req.body?.description ?? existing.description ?? '').trim();
@@ -602,16 +648,16 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 existing.id
             );
         })();
-        logAction(req, '修改系统能力服务', `${name}: ${service.serviceType}`);
+        logAction(req, '修改系统工具服务', `${name}: ${service.serviceType}`);
         res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
     }));
 
     router.put('/mcp/database-connections/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
-        if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
-        if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该能力服务不是数据库连接。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
-        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
+        if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
+        if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该工具服务不是数据库连接。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
         const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
         if (!dbConnectionRow) return res.status(404).json({ error: '数据库连接配置不存在。' });
@@ -649,17 +695,17 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 existing.id
             );
         })();
-        logAction(req, '修改数据库能力服务', `${name}: ${connection.database_type}`);
+        logAction(req, '修改数据库工具服务', `${name}: ${connection.database_type}`);
         res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
     }));
 
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
-        if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
+        if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '数据库预设请使用数据库连接表单编辑。' });
-        if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统能力预设请使用对应的系统服务表单编辑。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局能力服务。' });
-        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该能力服务。' });
+        if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统工具预设请使用对应的系统服务表单编辑。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
         const name = String(req.body?.name || existing.name).trim();
         const baseUrl = String(req.body?.base_url || req.body?.baseUrl || existing.base_url).trim();
@@ -677,15 +723,15 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             SET name = ?, base_url = ?, api_key = ?, description = ?, config = ?, status = ?, updated_at = ?
             WHERE id = ?
         `).run(name, baseUrl, nextApiKey, description, JSON.stringify(config), status, getBeijingTimestamp(), existing.id);
-        logAction(req, '修改能力服务', `${name}: ${baseUrl}`);
+        logAction(req, '修改工具服务', `${name}: ${baseUrl}`);
         res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
     }));
 
     router.patch('/mcp/servers/:id/status', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
-        if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以管理全局能力服务。' });
-        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权管理该能力服务。' });
+        if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以管理全局工具服务。' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权管理该工具服务。' });
         const status = req.body?.status === 'paused' ? 'paused' : 'active';
         const now = getBeijingTimestamp();
         db.prepare('UPDATE mcp_servers SET status = ?, updated_at = ? WHERE id = ?').run(status, now, existing.id);
@@ -694,41 +740,41 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         } else if (getBuiltinServiceTypeFromUrl(existing.base_url)) {
             db.prepare('UPDATE mcp_builtin_configs SET status = ?, updated_at = ? WHERE mcp_server_id = ?').run(status, now, existing.id);
         }
-        logAction(req, status === 'paused' ? '停用能力服务' : '启用能力服务', existing.name);
+        logAction(req, status === 'paused' ? '停用工具服务' : '启用工具服务', existing.name);
         res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
     }));
 
     router.delete('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
-        if (!existing) return res.status(404).json({ error: '能力服务不存在。' });
-        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以删除全局能力服务。' });
-        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权删除该能力服务。' });
+        if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
+        if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以删除全局工具服务。' });
+        if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权删除该工具服务。' });
         const now = getBeijingTimestamp();
         db.prepare("UPDATE mcp_servers SET status = 'deleted', updated_at = ? WHERE id = ?").run(now, existing.id);
         db.prepare("UPDATE mcp_database_connections SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
         db.prepare("UPDATE mcp_builtin_configs SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
 
-        // 删除能力服务时，同步删除对应的能力包记录
+        // 删除工具服务时，同步删除对应的工具包记录
         const isDatabase = String(existing.base_url || '').startsWith('pivot-db://');
         const packageType = isDatabase ? 'database_connection' : 'mcp_server';
         const packageKey = `${packageType}:${existing.id}`;
         db.prepare("DELETE FROM capability_packages WHERE package_key = ?").run(packageKey);
 
-        logAction(req, '删除能力服务', existing.name);
+        logAction(req, '删除工具服务', existing.name);
         res.json({ success: true });
     }));
 
     router.post('/mcp/servers/:id/refresh', authMiddleware, asyncHandler(async (req, res) => {
         const server = getAccessibleMcpServer(req.params.id, req.user);
-        if (!server) return res.status(404).json({ error: '能力服务不存在。' });
+        if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const tools = await refreshMcpTools(server, req.user);
-        logAction(req, '刷新能力工具', `${server.name}: ${tools.length}`);
+        logAction(req, '刷新工具箱工具', `${server.name}: ${tools.length}`);
         res.json({ success: true, tools });
     }));
 
     router.post('/mcp/servers/:id/diagnose', authMiddleware, asyncHandler(async (req, res) => {
         const server = getAccessibleMcpServer(req.params.id, req.user);
-        if (!server) return res.status(404).json({ error: '能力服务不存在。' });
+        if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const baseUrl = String(server.base_url || '');
         const builtinType = getBuiltinServiceTypeFromUrl(baseUrl);
         if (baseUrl.startsWith('pivot-db://')) {
@@ -778,7 +824,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             let testResult = null;
             if (action === 'test') {
                 const target = String(req.body?.target || '').trim();
-                const message = String(req.body?.message || 'Pivot 能力库 IM 通知测试').slice(0, 1000);
+                const message = String(req.body?.message || 'Pivot 工具箱 IM 通知测试').slice(0, 1000);
                 testResult = await executeBuiltinMcpTool(server, 'im.send_markdown', {
                     target,
                     markdown: message
@@ -834,7 +880,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/servers/:id/tools', authMiddleware, asyncHandler(async (req, res) => {
         const server = getAccessibleMcpServer(req.params.id, req.user);
-        if (!server) return res.status(404).json({ error: '能力服务不存在。' });
+        if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const allTools = listCachedMcpTools(server.id, req.user);
         res.json({ tools: allTools });
     }));
@@ -853,15 +899,15 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 ? 'database_connection'
                 : 'mcp_server';
             if (sourceRef && !isCapabilityEnabled(type, sourceRef, req.user)) {
-                return res.status(403).json({ error: '该能力包已停用。' });
+                return res.status(403).json({ error: '该工具包已停用。' });
             }
             if (sourceRef && !isToolCapabilityEnabled(type, sourceRef, cached?.name || '', req.user)) {
-                return res.status(403).json({ error: '该工具已在能力治理中停用。' });
+                return res.status(403).json({ error: '该工具已在工具治理中停用。' });
             }
         } else if (!isCapabilityEnabled('builtin_tool', name, req.user)) {
-            return res.status(403).json({ error: '该系统能力包已停用。' });
+            return res.status(403).json({ error: '该系统工具包已停用。' });
         } else if (!isToolCapabilityEnabled('builtin_tool', name, name, req.user)) {
-            return res.status(403).json({ error: '该系统工具已在能力治理中停用。' });
+            return res.status(403).json({ error: '该系统工具已在工具治理中停用。' });
         }
         const result = name.startsWith('mcp.')
             ? await executeMcpTool(name, req.body?.input || {}, req.user)
@@ -891,10 +937,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             }
             if (method === 'tools/call') {
                 if (!isCapabilityEnabled('builtin_tool', params?.name, req.user)) {
-                    throw new Error('该系统能力包已停用。');
+                    throw new Error('该系统工具包已停用。');
                 }
                 if (!isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user)) {
-                    throw new Error('该系统工具已在能力治理中停用。');
+                    throw new Error('该系统工具已在工具治理中停用。');
                 }
                 const result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
                 return sendJsonRpc(res, id, {

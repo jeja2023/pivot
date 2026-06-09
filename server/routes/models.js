@@ -23,6 +23,14 @@ const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
 
+function clearModelDefaultReferences(modelId) {
+    const id = String(modelId || '').trim();
+    if (!id) return;
+    db.prepare("UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'default_model_id' AND value = ?")
+        .run(getBeijingTimestamp(), id);
+    db.prepare('UPDATE users SET default_model_id = NULL WHERE default_model_id = ?').run(Number(id) || id);
+}
+
 function canManageModel(model, user) {
     if (!model || !user) return false;
     if (model.user_id === user.id) return true;
@@ -36,16 +44,17 @@ function canUseStoredModelSecret(model, user) {
 function canTestModel(model, user) {
     if (!model || !user) return false;
     if (model.user_id === user.id) return true;
-    return model.user_id === null;
+    return model.user_id === null && isAdmin(user);
 }
 
 function getTestableModel(modelId, user) {
     if (!modelId || !user?.id) return null;
     const isNumeric = /^\d+$/.test(String(modelId));
+    const canTestGlobal = isAdmin(user) ? 1 : 0;
     const sql = isNumeric
-        ? "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id IS NULL OR user_id = ?)"
-        : "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id IS NULL OR user_id = ?)";
-    const params = isNumeric ? [modelId, modelId, user.id] : [modelId, user.id];
+        ? "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))"
+        : "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))";
+    const params = isNumeric ? [modelId, modelId, user.id, canTestGlobal] : [modelId, user.id, canTestGlobal];
     const model = db.prepare(sql).get(...params);
     if (!model) return null;
     if (model.user_id && model.user_id !== user.id) return null;
@@ -381,11 +390,12 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
         let info;
         if (isSuperAdmin(req.user) && existing.user_id === null) {
-            info = db.prepare('DELETE FROM models WHERE id = ?').run(req.params.id);
+            info = db.prepare("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ?").run(req.params.id);
         } else {
-            info = db.prepare('DELETE FROM models WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+            info = db.prepare("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ? AND user_id = ?").run(req.params.id, req.user.id);
         }
         if (info.changes > 0) {
+            clearModelDefaultReferences(req.params.id);
             logAction(req, '删除模型', `删除模型ID: ${req.params.id}`);
             res.json({ success: true });
         } else {

@@ -38,14 +38,14 @@ const CHAT_TOOL_STATUS_COPY = {
         action: '打开知识库'
     },
     mcp: {
-        label: '能力库',
-        ready: '能力库已打开，本轮对话可按需调用已启用工具。',
-        checking: '能力库正在检查可用工具。',
-        empty: '能力库已打开，但还没有可用工具。',
-        loading: '能力库正在检查可用工具。',
-        error: '能力库状态暂时无法确认，请打开能力库检查配置。',
-        offline: '能力库状态暂时无法确认，仍会按当前开关尝试调用。',
-        action: '打开能力库'
+        label: '工具箱',
+        ready: '工具箱已打开，本轮对话可按需调用已启用工具。',
+        checking: '工具箱正在检查可用工具。',
+        empty: '工具箱已打开，但还没有可用工具。',
+        loading: '工具箱正在检查可用工具。',
+        error: '工具箱状态暂时无法确认，请打开工具箱检查配置。',
+        offline: '工具箱状态暂时无法确认，仍会按当前开关尝试调用。',
+        action: '打开工具箱'
     }
 };
 
@@ -144,10 +144,10 @@ async function fetchChatToolReadiness(tool) {
 
     if (tool === 'mcp') {
         const res = await apiFetch(`${API_BASE}/mcp/tools`);
-        if (!res.ok) throw new Error('能力库状态获取失败');
+        if (!res.ok) throw new Error('工具箱状态获取失败');
         const data = await res.json();
         const count = Array.isArray(data.tools) ? data.tools.length : 0;
-        if (count > 0) return { tone: 'ready', text: `能力库已打开，${count} 个工具可按需调用。` };
+        if (count > 0) return { tone: 'ready', text: `工具箱已打开，${count} 个工具可按需调用。` };
         return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.mcp.empty, action: true };
     }
 

@@ -14,8 +14,6 @@ let agentSchedulesCache = [];
 
 let agentArtifactsCache = [];
 
-let capabilityPackagesCache = [];
-
 let agentRealtimeSource = null;
 
 let agentRealtimeConnected = false;
@@ -87,7 +85,6 @@ window.loadAgentWorkbench = async function() {
     try {
         await loadAgentModels();
         await Promise.all([
-            loadCapabilityPackages(),
             loadAgentModelRouters(),
             loadAgentTools(),
             loadAgentRuns(),

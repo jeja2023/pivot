@@ -518,7 +518,7 @@ test('non-root admin creates private chat models and cannot delete global models
     }
 });
 
-test('visible global models can be tested by admins and users without exposing ownership controls', async () => {
+test('visible global models can be tested by admins but not regular users', async () => {
     const suffix = Date.now().toString(36);
     const axios = require('axios');
     const originalGet = axios.get;
@@ -557,25 +557,31 @@ test('visible global models can be tested by admins and users without exposing o
             return { data: { data: [{ id: 'global-visible-chat' }] }, status: 200 };
         };
 
-        for (const user of [adminUser, normalUser]) {
-            const router = makeRouter(user);
-            const testRoute = router.stack.find(layer => layer.route?.path === '/models/test');
-            const res = makeRes();
-            await runExpressHandlers(testRoute.route.stack.map(layer => layer.handle), {
-                body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
-                user,
-                log: { debug() {}, info() {}, error() {}, warn() {} }
-            }, res);
-            assert.equal(res.statusCode, 200);
-            assert.equal(res.body.success, true);
-        }
+        const adminRouter = makeRouter(adminUser);
+        const adminTestRoute = adminRouter.stack.find(layer => layer.route?.path === '/models/test');
+        const adminTestRes = makeRes();
+        await runExpressHandlers(adminTestRoute.route.stack.map(layer => layer.handle), {
+            body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
+            user: adminUser,
+            log: { debug() {}, info() {}, error() {}, warn() {} }
+        }, adminTestRes);
+        assert.equal(adminTestRes.statusCode, 200);
+        assert.equal(adminTestRes.body.success, true);
+
+        const userRouter = makeRouter(normalUser);
+        const userTestRoute = userRouter.stack.find(layer => layer.route?.path === '/models/test');
+        const userTestRes = makeRes();
+        await runExpressHandlers(userTestRoute.route.stack.map(layer => layer.handle), {
+            body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
+            user: normalUser,
+            log: { debug() {}, info() {}, error() {}, warn() {} }
+        }, userTestRes);
+        assert.equal(userTestRes.statusCode, 403);
 
         assert.deepEqual(seenAuthHeaders, [
-            `Bearer global-secret-${suffix}`,
             `Bearer global-secret-${suffix}`
         ]);
 
-        const userRouter = makeRouter(normalUser);
         const keyRoute = userRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
         const keyRes = makeRes();
         await runExpressHandlers(keyRoute.route.stack.map(layer => layer.handle), {
@@ -624,6 +630,7 @@ test('model ownership boundaries protect personal model secrets from admins', as
         const deleteRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.delete);
         const keyRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
         const updateRoute = superRouter.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.put);
+        const testRoute = superRouter.stack.find(layer => layer.route?.path === '/models/test');
 
         const keyRes = makeRes();
         await runExpressHandlers(keyRoute.route.stack.map(layer => layer.handle), {
@@ -654,6 +661,14 @@ test('model ownership boundaries protect personal model secrets from admins', as
         }, updateRes);
         assert.equal(updateRes.statusCode, 403);
 
+        const testRes = makeRes();
+        await runExpressHandlers(testRoute.route.stack.map(layer => layer.handle), {
+            body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
+            user: superAdmin,
+            log: { debug() {}, info() {}, error() {}, warn() {} }
+        }, testRes);
+        assert.equal(testRes.statusCode, 403);
+
         const ownerRouter = makeRouter(owner);
         const ownerKeyRoute = ownerRouter.stack.find(layer => layer.route?.path === '/models/:id/key');
         const ownerKeyRes = makeRes();
@@ -667,6 +682,59 @@ test('model ownership boundaries protect personal model secrets from admins', as
     } finally {
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(owner.id);
+    }
+});
+
+test('model deletion soft deletes referenced models without breaking history', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`model_delete_${suffix}`, 'hash', 'Model Delete Owner', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `model_delete_${suffix}`, role: 'admin', unit: 'QA' };
+    const sessionId = `model-delete-${suffix}`;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, api_key, model_name, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(user.id, `Delete Referenced ${suffix}`, 'https://delete-model.example/v1', encryptSecret(`secret-${suffix}`), 'delete-chat');
+    const modelId = Number(modelInfo.lastInsertRowid);
+    const router = createModelsRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        probeLimiter: (_req, _res, next) => next(),
+        logAction: () => {},
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100)
+    });
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/models/:id' && layer.route?.methods?.delete);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    try {
+        db.prepare('INSERT INTO sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')
+            .run(sessionId, user.id, 'Referenced model session');
+        db.prepare('INSERT INTO messages (session_id, user_id, role, content, model_id, created_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\', \'+8 hours\'))')
+            .run(sessionId, user.id, 'assistant', 'history keeps model id', modelId);
+        db.prepare('UPDATE users SET default_model_id = ? WHERE id = ?').run(modelId, user.id);
+
+        const res = makeRes();
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(modelId) },
+            user
+        }, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.success, true);
+        const model = db.prepare('SELECT status, is_default FROM models WHERE id = ?').get(modelId);
+        assert.equal(model.status, 'deleted');
+        assert.equal(model.is_default, 0);
+        assert.equal(db.prepare('SELECT default_model_id FROM users WHERE id = ?').get(user.id).default_model_id, null);
+        assert.equal(db.prepare('SELECT model_id FROM messages WHERE session_id = ?').get(sessionId).model_id, modelId);
+    } finally {
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
     }
 });
 

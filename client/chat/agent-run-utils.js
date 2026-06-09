@@ -79,7 +79,7 @@ function agentRunModeLabel(mode) {
 }
 
 function agentToolPolicyLabel(policy) {
-    return policy === 'builtin_only' ? '仅系统工具' : '系统 + 能力库';
+    return policy === 'builtin_only' ? '仅系统工具' : '系统 + 工具箱';
 }
 
 function agentDownload(url) {

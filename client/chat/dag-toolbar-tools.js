@@ -137,8 +137,8 @@ function renderSelectedToolMeta(tool) {
         const source = tool.source === 'builtin'
             ? '系统内置'
             : tool.serverName
-                ? `能力库 · ${tool.serverName}`
-                : '能力库';
+                ? `工具箱 · ${tool.serverName}`
+                : '工具箱';
         const badges = [
             toolGroupLabel(tool),
             source,

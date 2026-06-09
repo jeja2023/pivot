@@ -2,7 +2,7 @@ const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { getBuiltInToolDefinitions } = require('./agent-tools');
 const { listMcpServers } = require('./mcp-client');
-const { isSuperAdmin } = require('../permissions');
+const { isAdmin, isSuperAdmin } = require('../permissions');
 
 const PACKAGE_TYPES = new Set(['builtin_tool', 'mcp_server', 'database_connection']);
 const PACKAGE_STATUSES = new Set(['enabled', 'disabled']);
@@ -141,6 +141,16 @@ function canAccessPackage(row, user) {
     return !row.user_id || row.user_id === user.id;
 }
 
+function isGlobalPolicyPackage(row) {
+    return Boolean(row && !row.user_id && (row.scope === 'global' || row.scope === 'admin'));
+}
+
+function canAccessGlobalPolicyPackage(row, user) {
+    if (!row || !isAdmin(user) || !isGlobalPolicyPackage(row)) return false;
+    if (row.scope === 'admin' && !isSuperAdmin(user)) return false;
+    return true;
+}
+
 function listCapabilityPackages(user) {
     syncCapabilityPackages(user);
     const rows = db.prepare(`
@@ -159,11 +169,67 @@ function listCapabilityPackages(user) {
     }));
 }
 
+function listGlobalCapabilityPackages(user) {
+    syncCapabilityPackages(user);
+    if (!isAdmin(user)) return [];
+    const rows = db.prepare(`
+        SELECT *
+        FROM capability_packages
+        WHERE user_id IS NULL
+          AND scope IN ('global', 'admin')
+          AND (? = 1 OR scope != 'admin')
+        ORDER BY
+            CASE type WHEN 'builtin_tool' THEN 1 WHEN 'database_connection' THEN 2 ELSE 3 END,
+            name ASC
+    `).all(isSuperAdmin(user) ? 1 : 0);
+    return rows.map(row => ({
+        ...row,
+        enabled: row.status !== 'disabled',
+        config: parsePackageConfig(row.config)
+    }));
+}
+
+function getCapabilityPackage(packageKey, user) {
+    syncCapabilityPackages(user);
+    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    if (!canAccessPackage(row, user)) return null;
+    return {
+        ...row,
+        enabled: row.status !== 'disabled',
+        config: parsePackageConfig(row.config)
+    };
+}
+
+function getGlobalCapabilityPackage(packageKey, user) {
+    syncCapabilityPackages(user);
+    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    if (!canAccessGlobalPolicyPackage(row, user)) return null;
+    return {
+        ...row,
+        enabled: row.status !== 'disabled',
+        config: parsePackageConfig(row.config)
+    };
+}
+
 function setCapabilityPackageStatus(packageKey, user, status = 'enabled') {
     const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
     if (!canAccessPackage(row, user)) return null;
     if (row.scope === 'global' && !isSuperAdmin(user)) {
         const err = new Error('只有 admin 权限层级可以启停全局能力包。');
+        err.status = 403;
+        throw err;
+    }
+    const nextStatus = normalizeStatus(status);
+    db.prepare('UPDATE capability_packages SET status = ?, updated_at = ? WHERE package_key = ?')
+        .run(nextStatus, getBeijingTimestamp(), packageKey);
+    return db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+}
+
+function setGlobalCapabilityPackageStatus(packageKey, user, status = 'enabled') {
+    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    if (!canAccessGlobalPolicyPackage(row, user)) return null;
+    if (!isSuperAdmin(user)) {
+        const err = new Error('只有系统管理员可以调整全局工具策略。');
         err.status = 403;
         throw err;
     }
@@ -231,6 +297,17 @@ function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
     };
 }
 
+function setGlobalCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
+    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    if (!canAccessGlobalPolicyPackage(row, user)) return null;
+    if (!isSuperAdmin(user)) {
+        const err = new Error('只有系统管理员可以调整全局工具策略。');
+        err.status = 403;
+        throw err;
+    }
+    return setCapabilityToolGovernance(packageKey, user, toolName, patch);
+}
+
 function filterBuiltInToolsByCapability(tools, user) {
     return tools
         .filter(tool => isCapabilityEnabled('builtin_tool', tool.name, user))
@@ -255,12 +332,17 @@ function filterMcpToolsByCapability(tools, user) {
 module.exports = {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
+    getCapabilityPackage,
+    getGlobalCapabilityPackage,
     getCapabilityToolGovernance,
     isCapabilityEnabled,
     isToolCapabilityEnabled,
     listCapabilityPackages,
+    listGlobalCapabilityPackages,
     setCapabilityPackageStatus,
+    setGlobalCapabilityPackageStatus,
     setCapabilityToolGovernance,
+    setGlobalCapabilityToolGovernance,
     syncCapabilityPackages,
     upsertCapabilityPackage
 };

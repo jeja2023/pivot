@@ -205,10 +205,10 @@
         box-shadow: none;
     }
     .rag-graph-topbar {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: auto minmax(260px, 1fr);
         align-items: center;
-        gap: 8px 12px;
+        gap: 8px 10px;
         flex: 0 0 auto;
         padding: 10px 18px 12px;
         background: #f8fafc;
@@ -220,7 +220,7 @@
         align-items: center;
         color: var(--text-muted);
         font-size: 0.72rem;
-        flex: 0 1 auto;
+        flex: 0 0 auto;
         min-width: 0;
         padding: 0;
     }
@@ -238,11 +238,10 @@
     .rag-graph-summary b { color: var(--text-main); }
     .rag-graph-toolbar {
         display: grid;
-        grid-template-columns: minmax(220px, 1fr) 170px 150px auto;
+        grid-template-columns: minmax(220px, 1.15fr) 170px 150px auto minmax(240px, 0.95fr) auto;
         gap: 8px;
         align-items: center;
-        flex: 1 1 760px;
-        min-width: min(760px, 100%);
+        min-width: 0;
         padding: 0;
         background: transparent;
     }
@@ -264,30 +263,10 @@
         white-space: nowrap;
     }
     .rag-graph-query-panel {
-        display: grid;
-        grid-template-columns: minmax(260px, 1fr) auto minmax(280px, 0.8fr);
-        gap: 8px;
-        align-items: start;
+        display: block;
         flex: 0 0 auto;
         padding: 0 18px 10px;
         background: #f8fafc;
-    }
-    .rag-graph-query-panel .form-input {
-        margin: 0;
-        height: 34px;
-        min-height: 34px;
-        padding: 0 11px;
-        font-size: 0.8rem;
-        border-radius: 8px;
-        background: #fff;
-    }
-    .rag-graph-query-panel button {
-        height: 34px;
-        min-height: 34px;
-        padding: 0 12px;
-        font-size: 0.8rem;
-        border-radius: 8px;
-        white-space: nowrap;
     }
     .rag-graph-query-results {
         display: grid;

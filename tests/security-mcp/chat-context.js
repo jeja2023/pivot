@@ -87,10 +87,10 @@ test('聊天 MCP 上下文会为明确能力请求报告缺少匹配工具', asy
     });
 
     assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['skipped']);
-    assert.match(events[0].message, /没有匹配用户请求的能力库工具/);
-    assert.match(context, /需要能力库工具/);
-    assert.match(context, /没有匹配的能力库工具/);
-    assert.doesNotMatch(context, /本轮不需要调用能力库工具/);
+    assert.match(events[0].message, /没有匹配用户请求的工具箱工具/);
+    assert.match(context, /需要工具箱工具/);
+    assert.match(context, /没有匹配的工具箱工具/);
+    assert.doesNotMatch(context, /本轮不需要调用工具箱工具/);
 });
 
 test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户对话使用', async () => {
@@ -143,7 +143,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
             } else if (requestText.includes('数据表的数量')) {
                 plannerContent = {
                     action: 'none',
-                    reason: '不需要能力库'
+                    reason: '不需要工具箱'
                 };
             } else {
                 plannerContent = {

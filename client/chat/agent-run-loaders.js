@@ -168,7 +168,7 @@ async function loadAgentTools() {
             const description = agentToolDescription(tool);
             const tags = [
                 isAdminOnlyAgentTool(tool) ? '管理员' : '',
-                tool.source === 'mcp' ? '能力库' : '系统',
+                tool.source === 'mcp' ? '工具箱' : '系统',
                 tool.requiresApproval ? '需审批' : ''
             ].filter(Boolean);
             const tooltip = [
@@ -188,41 +188,6 @@ async function loadAgentTools() {
         `;
         }).join('') || '<div class="empty-state">暂无可用能力</div>'}
     `;
-}
-
-async function loadCapabilityPackages() {
-    const list = document.getElementById('agent-capability-list');
-    if (!list) return;
-    const res = await apiFetch(`${API_BASE}/capabilities/packages`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || '能力市场加载失败');
-    capabilityPackagesCache = data.data || [];
-    const visible = capabilityPackagesCache.slice(0, 12);
-    list.innerHTML = visible.length ? visible.map(item => `
-        <label class="agent-capability-item ${item.enabled ? 'enabled' : 'disabled'}">
-            <input type="checkbox" data-capability-key="${agentEscape(item.package_key)}" ${item.enabled ? 'checked' : ''}>
-            <span>
-                <strong>${agentEscape(agentCleanCapabilityName(item.name))}</strong>
-                <small>${agentEscape(agentCapabilityTypeLabel(item.type))}</small>
-            </span>
-        </label>
-    `).join('') : '<div class="empty-state compact">暂无能力包</div>';
-    list.querySelectorAll('[data-capability-key]').forEach(input => {
-        input.addEventListener('change', async () => {
-            const res = await apiFetch(`${API_BASE}/capabilities/packages/${encodeURIComponent(input.dataset.capabilityKey)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: input.checked })
-            });
-            const result = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                input.checked = !input.checked;
-                return showToast(result.error || '能力包状态更新失败', 'error');
-            }
-            showToast(input.checked ? '能力包已启用' : '能力包已停用', 'success');
-            await loadAgentTools();
-        });
-    });
 }
 
 async function loadAgentRuntimeStatus() {
@@ -271,7 +236,7 @@ function renderAgentPreflight(data) {
     target.innerHTML = `
         <div class="governance-head">
             <strong>任务预检：${agentEscape(statusText)}</strong>
-            <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 能力库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
+            <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具箱 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
         </div>
         <div class="governance-metrics">
             <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入Token</span>
