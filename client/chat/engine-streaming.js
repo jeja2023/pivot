@@ -55,18 +55,22 @@ function getAssistantTraceEventCopy(event = {}) {
     const sources = Array.isArray(event?.sources)
         ? event.sources.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
         : [];
-    const citationCount = Number(event?.citationCount || event?.sourceCount || sources.length || 0);
+    const sourceCount = Number(event?.sourceCount || sources.length || 0);
+    const citationCount = Number(event?.citationCount || 0);
 
     if (type === 'rag') {
         if (status === 'hit') {
             const sourceText = sources.length ? `：${sources.join('、')}` : '';
+            const scopeText = event?.scoped ? '当前范围' : '';
+            const hitPrefix = scopeText ? `知识库${scopeText}已命中` : '知识库已命中';
+            const citationText = citationCount > sourceCount ? `（${citationCount} 条引用片段）` : '';
             return {
                 tool: 'rag',
                 label: '知识库',
                 tone: 'ready',
-                text: citationCount > 0
-                    ? `知识库已命中 ${citationCount} 条可引用文档${sourceText}，会优先依据知识库回答。`
-                    : '知识库已命中相关文档，会优先依据知识库回答。'
+                text: sourceCount > 0
+                    ? `${hitPrefix} ${sourceCount} 份可引用文档${sourceText}${citationText}，会优先依据知识库回答。`
+                    : `${hitPrefix}相关文档，会优先依据知识库回答。`
             };
         }
         if (status === 'empty') {

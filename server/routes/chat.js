@@ -176,6 +176,17 @@ function applyChatLanguageInstruction(history = []) {
     ];
 }
 
+function hasRagScopeFilter(scope = {}) {
+    if (!scope || typeof scope !== 'object') return false;
+    const hasCollection = Array.isArray(scope.collectionIds)
+        ? scope.collectionIds.some(Boolean)
+        : Boolean(scope.collectionId);
+    const hasTag = Array.isArray(scope.tagNames)
+        ? scope.tagNames.some(Boolean)
+        : Boolean(scope.tagName || scope.tag);
+    return hasCollection || hasTag;
+}
+
 function createChatRouter({
     authMiddleware,
     chatLimiter,
@@ -197,6 +208,7 @@ function createChatRouter({
         const regenerate = normalizeRegenerateFlag(req.body.regenerate);
         const mcpEnabled = Boolean(req.body.mcpEnabled) && Boolean(req.body.mcpConfirmed);
         const ragEnabled = req.body.ragEnabled !== false;
+        const ragScope = req.body.ragScope && typeof req.body.ragScope === 'object' ? req.body.ragScope : {};
         const sessionId = String(req.body.sessionId || '').trim();
         const modelId = req.body.modelId ? parseInt(req.body.modelId) : null;
         const userId = req.user.id;
@@ -422,25 +434,34 @@ function createChatRouter({
         let history = await getContext(sessionId, userId, modelCfg);
         const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
-            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user }) : null;
+            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : null;
+            const ragScoped = hasRagScopeFilter(ragScope);
+            const ragScopeText = ragScoped ? '（当前选择范围）' : '';
             if (ragContext) {
                 const ragSourceSummary = summarizeRagContextSources(ragContext);
+                const sourceCount = Number(ragSourceSummary.sourceCount || 0);
+                const citationCount = Number(ragSourceSummary.citationCount || 0);
+                const ragHitCountText = sourceCount > 0
+                    ? `${sourceCount} 份可引用文档${citationCount > sourceCount ? `（${citationCount} 条引用片段）` : ''}`
+                    : `${citationCount} 条资料`;
                 history = injectRagContextBeforeLatestUser(history, ragContext);
                 writeSse(JSON.stringify({
                     type: 'rag',
                     status: 'hit',
                     message: ragSourceSummary.sourceCount > 0
-                        ? `知识库已找到 ${ragSourceSummary.citationCount || ragSourceSummary.sourceCount} 条资料，正在基于来源生成回答`
-                        : '知识库已找到相关资料，正在基于资料生成回答',
+                        ? `知识库${ragScopeText}已找到 ${ragHitCountText}，正在基于来源生成回答`
+                        : `知识库${ragScopeText}已找到相关资料，正在基于资料生成回答`,
                     citationCount: ragSourceSummary.citationCount,
                     sourceCount: ragSourceSummary.sourceCount,
-                    sources: ragSourceSummary.sources
+                    sources: ragSourceSummary.sources,
+                    scoped: ragScoped
                 }));
             } else {
                 writeSse(JSON.stringify({
                     type: 'rag',
                     status: 'empty',
-                    message: '知识库未检索到足够相关内容，将按普通对话继续'
+                    message: `知识库${ragScopeText}未检索到足够相关内容，将按普通对话继续`,
+                    scoped: ragScoped
                 }));
             }
         }

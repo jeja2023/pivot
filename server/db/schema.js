@@ -1,6 +1,16 @@
 const { db } = require('./connection');
 
+function ensureLegacyColumnBeforeSchema(table, column, definition) {
+    const tableRow = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    if (!tableRow) return;
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (columns.some(col => col.name === column)) return;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 function initSchema() {
+    ensureLegacyColumnBeforeSchema('knowledge_docs', 'collection_id', 'INTEGER');
+
     db.exec(`
         CREATE TABLE IF NOT EXISTS app_meta (
             key TEXT PRIMARY KEY,
@@ -119,9 +129,21 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS knowledge_docs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
+            collection_id INTEGER,
             name TEXT NOT NULL,
             status TEXT DEFAULT 'processing',
             is_enabled INTEGER DEFAULT 1,
@@ -136,7 +158,8 @@ function initSchema() {
             deleted_at DATETIME,
             deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -146,6 +169,28 @@ function initSchema() {
             search_content TEXT,
             embedding TEXT,
             FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_doc_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            doc_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(user_id, doc_id, tag),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            UNIQUE(user_id, tag),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS rag_feedback (
@@ -690,8 +735,12 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_prompts_scope_user ON prompts(scope, user_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_user_session ON attachments(user_id, session_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_token ON attachments(access_token);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_user_tag ON knowledge_doc_tags(user_id, tag);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_doc ON knowledge_doc_tags(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_tags_user ON knowledge_tags(user_id, deleted_at, tag);
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);

@@ -145,6 +145,20 @@ function runMigrations() {
     `);
     db.prepare("UPDATE app_settings SET value = 'http' WHERE key = 'rag_embedding_mode' AND value != 'http'").run();
     db.prepare("DELETE FROM app_settings WHERE key = 'rag_embedding_model_path'").run();
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);
+    `);
+    ensureColumn('knowledge_docs', 'collection_id', 'INTEGER');
     ensureColumn('knowledge_docs', 'chunk_count', 'INTEGER DEFAULT 0');
     ensureColumn('knowledge_docs', 'indexed_chunks', 'INTEGER DEFAULT 0');
     ensureColumn('knowledge_docs', 'progress', 'INTEGER DEFAULT 0');
@@ -161,6 +175,34 @@ function runMigrations() {
     db.prepare('UPDATE knowledge_docs SET indexed_chunks = chunk_count WHERE indexed_chunks IS NULL OR indexed_chunks = 0').run();
     ensureColumn('knowledge_chunks', 'search_content', 'TEXT');
     db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_doc_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            doc_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(user_id, doc_id, tag),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_user_tag ON knowledge_doc_tags(user_id, tag);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_doc ON knowledge_doc_tags(doc_id);
+        CREATE TABLE IF NOT EXISTS knowledge_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            UNIQUE(user_id, tag),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_tags_user ON knowledge_tags(user_id, deleted_at, tag);
+        INSERT OR IGNORE INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at)
+        SELECT user_id, tag, COALESCE(MIN(created_at), datetime('now', '+8 hours')), datetime('now', '+8 hours'), NULL
+        FROM knowledge_doc_tags
+        WHERE tag IS NOT NULL AND tag != ''
+        GROUP BY user_id, tag;
         CREATE TABLE IF NOT EXISTS rag_feedback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -176,6 +218,7 @@ function runMigrations() {
         );
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_enabled ON knowledge_docs(user_id, is_enabled, status);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_docs_collection ON knowledge_docs(user_id, collection_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_deleted ON knowledge_docs(deleted_at);
     `);
     db.exec(`

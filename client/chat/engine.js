@@ -112,6 +112,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 modelId,
                 regenerate: shouldRegenerate,
                 ragEnabled,
+                ragScope: window.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
                 mcpConfirmed
             }),

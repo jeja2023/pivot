@@ -53,11 +53,12 @@ window.showAuth = () => {
     window.loadLoginAnnouncements?.();
 };
 
-window.showApp = () => {
+window.showApp = (options = {}) => {
     if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    if (window.restoreMainWorkspaceAfterLogin) {
+    const restoreWorkspace = options.restoreWorkspace !== false;
+    if (restoreWorkspace && window.restoreMainWorkspaceAfterLogin) {
         Promise.resolve(window.restoreMainWorkspaceAfterLogin()).catch(err => {
             console.error('Workspace restore failed:', err);
             window.showMainWorkspace?.('chat');
@@ -155,7 +156,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
             setCsrfToken(data.csrfToken || '');
             currentUser = data.user;
             localStorage.removeItem('pivot_token');
-            showApp();
+            showApp({ restoreWorkspace: false });
         } else {
             showToast('注册成功，请登录');
             document.getElementById('auth-toggle').click();

@@ -178,6 +178,24 @@
 .chat-tool-toggle[aria-pressed="true"] .chat-tool-icon {
     transform: scale(1.04);
 }
+.chat-rag-scope {
+    width: 132px;
+    height: 30px;
+    margin: 0;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+}
+.chat-rag-scope.hidden,
+body:not(.chat-rag-scope-open) .chat-rag-scope {
+    display: none !important;
+}
+#chat-rag-enabled[aria-pressed="false"] ~ .chat-rag-scope,
+#chat-rag-enabled:not(.is-active):not([aria-pressed="true"]) ~ .chat-rag-scope {
+    display: none !important;
+}
 .chat-tool-toggle::after,
 .has-tooltip::after {
     content: attr(data-tooltip);

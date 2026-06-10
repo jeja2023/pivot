@@ -11,8 +11,12 @@ const { clearRagCacheForUser } = require('./services/rag-cache');
 const {
     batchDeleteKnowledgeDocuments,
     batchReindexKnowledgeDocuments,
+    createKnowledgeCollection,
+    createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     deleteKnowledgeDocument,
+    listKnowledgeCollections,
+    listKnowledgeTags,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentDetail,
     getKnowledgeDocumentForUser,
@@ -22,6 +26,8 @@ const {
     recordRagFeedback,
     scheduleFailedKnowledgeDocumentsForUser,
     scheduleKnowledgeDocumentIndexing,
+    setKnowledgeDocumentCollection,
+    setKnowledgeDocumentTags,
     setKnowledgeDocumentEnabled
 } = require('./services/rag-documents');
 const {
@@ -79,10 +85,67 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
     const offset = (page - 1) * limit;
-    const total = db.prepare('SELECT COUNT(*) AS total FROM knowledge_docs WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id)?.total || 0;
-    const docs = db.prepare('SELECT * FROM knowledge_docs WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?').all(req.user.id, limit, offset);
+    const collectionId = Number.parseInt(req.query.collectionId, 10);
+    const tag = String(req.query.tag || '').trim().replace(/^#+/, '').slice(0, 40);
+    const filters = ['d.user_id = ?', 'd.deleted_at IS NULL'];
+    const params = [req.user.id];
+    if (Number.isSafeInteger(collectionId) && collectionId > 0) {
+        filters.push('d.collection_id = ?');
+        params.push(collectionId);
+    }
+    if (tag) {
+        filters.push('EXISTS (SELECT 1 FROM knowledge_doc_tags ft WHERE ft.doc_id = d.id AND ft.user_id = d.user_id AND ft.tag = ?)');
+        params.push(tag);
+    }
+    const whereSql = filters.join(' AND ');
+    const total = db.prepare(`SELECT COUNT(*) AS total FROM knowledge_docs d WHERE ${whereSql}`)
+        .get(...params)?.total || 0;
+    const docs = db.prepare(`
+        SELECT
+            d.*,
+            c.name AS collection_name,
+            COALESCE((
+                SELECT GROUP_CONCAT(t.tag, ',')
+                FROM knowledge_doc_tags t
+                WHERE t.doc_id = d.id AND t.user_id = d.user_id
+            ), '') AS tags
+        FROM knowledge_docs d
+        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.user_id = d.user_id AND c.deleted_at IS NULL
+        WHERE ${whereSql}
+        ORDER BY d.created_at DESC
+        LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
     res.json({ data: docs, total, page, limit });
 });
+
+ragRouter.get('/collections', authMiddleware, (req, res) => {
+    res.json({ data: listKnowledgeCollections(req.user.id) });
+});
+
+ragRouter.get('/tags', authMiddleware, (req, res) => {
+    res.json({ data: listKnowledgeTags(req.user.id, { collectionId: req.query.collectionId }) });
+});
+
+ragRouter.post('/collections', authMiddleware, asyncHandler(async (req, res) => {
+    const collection = createKnowledgeCollection({
+        userId: req.user.id,
+        name: req.body?.name,
+        description: req.body?.description
+    });
+    if (!collection) return res.status(400).json({ error: '集合名称不能为空' });
+    auditRagAction(req, '知识库集合创建', { collectionId: collection.id, name: collection.name });
+    return res.json({ success: true, collection });
+}));
+
+ragRouter.post('/tags', authMiddleware, asyncHandler(async (req, res) => {
+    const tag = createKnowledgeTag({
+        userId: req.user.id,
+        tag: req.body?.tag || req.body?.name
+    });
+    if (!tag) return res.status(400).json({ error: '标签名称不能为空' });
+    auditRagAction(req, '知识库标签创建', { tag: tag.tag });
+    return res.json({ success: true, tag });
+}));
 
 ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
     if (!isSuperAdmin(req.user)) {
@@ -96,7 +159,11 @@ ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
 });
 
 ragRouter.get('/summary', authMiddleware, (req, res) => {
-    const summary = getKnowledgeDocumentSummaryForUser(req.user.id);
+    const summary = getKnowledgeDocumentSummaryForUser(req.user.id, {
+        collectionId: req.query.collectionId,
+        tag: req.query.tag || req.query.tagName,
+        tagNames: req.query.tagNames
+    });
     summary.feedback = getRagFeedbackSummary(req.user.id);
     res.json(summary);
 });
@@ -229,6 +296,29 @@ ragRouter.put('/docs/:id/enabled', authMiddleware, asyncHandler(async (req, res)
     return res.json({ success: true });
 }));
 
+ragRouter.put('/docs/:id/collection', authMiddleware, asyncHandler(async (req, res) => {
+    const doc = setKnowledgeDocumentCollection({
+        docId: req.params.id,
+        userId: req.user.id,
+        collectionId: req.body?.collectionId,
+        collectionName: req.body?.collectionName
+    });
+    if (!doc) return res.status(404).json({ error: '文档不存在或集合无效' });
+    auditRagAction(req, '知识库文档集合更新', { docId: req.params.id, collectionId: doc.collection_id || null });
+    return res.json({ success: true, doc });
+}));
+
+ragRouter.put('/docs/:id/tags', authMiddleware, asyncHandler(async (req, res) => {
+    const tags = setKnowledgeDocumentTags({
+        docId: req.params.id,
+        userId: req.user.id,
+        tags: req.body?.tags
+    });
+    if (!tags) return res.status(404).json({ error: '文档不存在' });
+    auditRagAction(req, '知识库文档标签更新', { docId: req.params.id, tags });
+    return res.json({ success: true, tags });
+}));
+
 ragRouter.delete('/docs/:id', authMiddleware, (req, res) => {
     const deleted = deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
     auditRagAction(req, '知识库文档删除', { docId: req.params.id, deleted });
@@ -255,10 +345,16 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), asyncHandler(as
 
     req.file.originalname = normalizeUploadedOriginalName(req.file.originalname);
 
-    const { docId } = createKnowledgeDocumentFromUpload({ userId: req.user.id, file: req.file });
+    const { docId, collectionId } = createKnowledgeDocumentFromUpload({
+        userId: req.user.id,
+        file: req.file,
+        collectionId: req.body?.collectionId,
+        collectionName: req.body?.collectionName,
+        tags: req.body?.tags
+    });
     scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id, user: req.user });
-    auditRagAction(req, '知识库文档上传', { docId, name: req.file.originalname });
-    req.log?.info({ docId, name: req.file.originalname }, 'RAG 文档上传');
+    auditRagAction(req, '知识库文档上传', { docId, collectionId, name: req.file.originalname });
+    req.log?.info({ docId, collectionId, name: req.file.originalname }, 'RAG 文档上传');
     res.json({ success: true, docId, message: '后台处理中' });
 }));
 
@@ -296,6 +392,7 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
         topK: req.body?.topK,
         candidateLimit: req.body?.candidateLimit,
         scoreThreshold: req.body?.scoreThreshold,
+        scope: req.body?.ragScope || req.body?.scope || { collectionId: req.body?.collectionId },
         user: req.user
     });
     // 把检索耗时回填，给前端"检索可视化"展示用

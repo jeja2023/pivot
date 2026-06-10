@@ -143,17 +143,24 @@ const {
 
 const {
     getKnowledgeSourcePath,
+    createKnowledgeCollection,
+    createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     deleteKnowledgeDocument,
+    listKnowledgeCollections,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentSummaryForUser,
     getKnowledgeDocumentDetail,
+    getKnowledgeDocumentTags,
     getRagFeedbackSummary,
+    listKnowledgeTags,
     processKnowledgeDocument,
     readKnowledgeDocumentFromPath,
     recordRagFeedback,
     recoverStaleKnowledgeDocumentIndexes,
-    scheduleFailedKnowledgeDocumentsForUser
+    scheduleFailedKnowledgeDocumentsForUser,
+    setKnowledgeDocumentCollection,
+    setKnowledgeDocumentTags
 } = require('../server/services/rag-documents');
 
 const {
@@ -688,6 +695,8 @@ module.exports = {
     createChatRenderSandbox,
     createChatRouter,
     createFakeSseResponse,
+    createKnowledgeCollection,
+    createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     createMcpRouter,
     createModelsRouter,
@@ -734,6 +743,7 @@ module.exports = {
     getHttpMetricsSnapshot,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentDetail,
+    getKnowledgeDocumentTags,
     getKnowledgeDocumentSummaryForUser,
     getKnowledgeSourcePath,
     getLocalHostnames,
@@ -772,6 +782,8 @@ module.exports = {
     listAgentSchedules,
     listAgentTemplates,
     listCachedMcpTools,
+    listKnowledgeCollections,
+    listKnowledgeTags,
     listDeletedRunsForAdmin,
     listEntities,
     listRelations,
@@ -833,6 +845,8 @@ module.exports = {
     saveAssistantMessage,
     saveUserMessage,
     scheduleFailedKnowledgeDocumentsForUser,
+    setKnowledgeDocumentCollection,
+    setKnowledgeDocumentTags,
     shouldPauseForApproval,
     shouldUseResponsesApi,
     softDeleteAgentRun,

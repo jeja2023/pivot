@@ -16,6 +16,7 @@ const {
     getMaintenanceStatus,
     getModelDailyUsage,
     getSystemHealthSnapshot,
+    http,
     isDockerInternalServiceHost,
     isLocalModelHost,
     messagesContainVisionInput,
@@ -357,6 +358,94 @@ test('OpenAI 模型发现会排除内置工具伪模型', async () => {
         assert.ok(res.body?.data?.some(item => item.id === `chat-model-${suffix}`));
         assert.equal(res.body.data.some(item => item.id === 'pivot-tools'), false);
     } finally {
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('OpenAI 聊天补全兼容 prompt 风格的代码补全请求', async () => {
+    const suffix = Date.now().toString(36);
+    let capturedPayload = null;
+    const upstream = http.createServer((req, res) => {
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            capturedPayload = JSON.parse(body);
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({
+                choices: [{ message: { role: 'assistant', content: 'return a + b' }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 }
+            }));
+        });
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`openai_autocomplete_${suffix}`, 'hash', 'OpenAI Autocomplete User', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `openai_autocomplete_${suffix}`, role: 'admin', unit: 'QA' };
+    const modelName = `autocomplete-model-${suffix}`;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Autocomplete Model', `http://127.0.0.1:${upstream.address().port}/v1`, modelName);
+    const router = createOpenAIRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = user;
+            next();
+        },
+        embeddingLimiter: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/chat/completions');
+    assert.ok(route);
+
+    try {
+        const req = {
+            body: {
+                model: modelName,
+                messages: [],
+                prompt: 'function add(a, b) {\n  ',
+                suffix: ';\n}',
+                language: 'javascript',
+                filepath: 'src/math.js',
+                max_tokens: 32,
+                stop: ['\n\n'],
+                stream: false
+            },
+            headers: {},
+            ip: '127.0.0.1'
+        };
+        const res = {
+            statusCode: 200,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body) {
+                this.body = body;
+                return this;
+            }
+        };
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body?.choices?.[0]?.message?.content, 'return a + b');
+        assert.equal(capturedPayload.model, modelName);
+        assert.equal(capturedPayload.max_tokens, 32);
+        assert.deepEqual(capturedPayload.stop, ['\n\n']);
+        assert.equal(capturedPayload.messages.length, 1);
+        assert.equal(capturedPayload.messages[0].role, 'user');
+        assert.match(capturedPayload.messages[0].content, /Complete the code at the cursor/);
+        assert.match(capturedPayload.messages[0].content, /Language: javascript/);
+        assert.match(capturedPayload.messages[0].content, /File path: src\/math\.js/);
+        assert.match(capturedPayload.messages[0].content, /function add/);
+        assert.match(capturedPayload.messages[0].content, /Code after cursor/);
+    } finally {
+        await new Promise(resolve => upstream.close(resolve));
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
     }

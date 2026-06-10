@@ -41,6 +41,7 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     const ragCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag.js'), 'utf8');
     const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
     const appCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'app.js'), 'utf8');
+    const authCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'auth.js'), 'utf8');
     const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
     const toolPolicy = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'tool-policy.js'), 'utf8');
     const mcpCommon = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'mcp-workbench-common.js'), 'utf8');
@@ -75,6 +76,9 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     assert.match(adminCore, /window\.ensureAdminSettingsScript/);
     assert.match(adminCore, /'tool-policy'/);
     assert.match(adminCore, /window\.loadToolPolicy/);
+    assert.match(authCore, /window\.showApp = \(options = \{\}\)/);
+    assert.match(authCore, /options\.restoreWorkspace !== false/);
+    assert.match(authCore, /showApp\(\{ restoreWorkspace: false \}\)/);
     assert.match(appCore, /'tool-policy'/);
     assert.match(settingsPartial, /partials\/settings\/tool-policy\.html/);
     assert.match(settingsShellStart, /tab-tool-policy/);
@@ -85,6 +89,8 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     assert.match(toolPolicy, /data-tool-policy-save/);
     assert.match(toolPolicy, /toolPolicyCanEditPackage/);
     assert.match(toolPolicy, /toolPolicyIsGlobalPackage/);
+    assert.ok(toolPolicy.includes('${editable ? `<button type="button" class="btn-secondary" data-tool-policy-edit='));
+    assert.doesNotMatch(toolPolicy, /data-tool-policy-edit="[^"]+"\s+\$\{editable \? '' : 'disabled'\}/);
     assert.match(chatCss, /admin-tool-policy\.css/);
     assert.doesNotMatch(agentPartial, /agent-capability-list/);
     assert.doesNotMatch(agentRunLoaders, /loadCapabilityPackages/);

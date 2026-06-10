@@ -1,4 +1,11 @@
 // 从 security-rag.test.js 拆出；仍由父级入口统一加载。
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const Module = require('node:module');
+const vm = require('node:vm');
+const Sqlite = require('better-sqlite3');
+
 const {
     ContextLengthExceededError,
     MEMORY_CONFIG_KEYS,
@@ -51,6 +58,32 @@ const {
     updateEntity
 } = require('../security-helpers');
 
+function loadDbModuleWithConnection(relativePath, database) {
+    const filename = path.resolve(__dirname, '../..', relativePath);
+    const source = fs.readFileSync(filename, 'utf8');
+    const module = { exports: {} };
+    const localRequire = Module.createRequire(filename);
+    const requireWithMock = (request) => {
+        if (request === './connection') return { db: database };
+        return localRequire(request);
+    };
+    vm.runInNewContext(source, {
+        require: requireWithMock,
+        module,
+        exports: module.exports,
+        __dirname: path.dirname(filename),
+        __filename: filename,
+        console,
+        process,
+        Buffer,
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval
+    }, { filename });
+    return module.exports;
+}
+
 test('RAG 辅助函数生成安全 FTS 查询和确定性分块', () => {
     assert.equal(buildFtsOrQuery(['hello', 'a"b']), '"hello" OR "a""b"');
     assert.ok(buildKeywordCandidates('权限配置流程').includes('权限'));
@@ -59,6 +92,50 @@ test('RAG 辅助函数生成安全 FTS 查询和确定性分块', () => {
     assert.deepEqual(chunkText('abcdef', 4, 2), ['abcd', 'cdef', 'ef']);
     assert.equal(cosineSimilarity([1, 0], [1, 0]), 1);
     assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
+});
+
+test('旧版知识库文档表缺少 collection_id 时数据库初始化可完成迁移', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-legacy-rag-db-'));
+    const dbPath = path.join(dir, 'chat.db');
+    const legacyDb = new Sqlite(dbPath);
+    legacyDb.exec(`
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password_hash TEXT,
+            role TEXT,
+            status TEXT,
+            created_at DATETIME
+        );
+        CREATE TABLE app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE knowledge_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT NOT NULL,
+            status TEXT,
+            created_at DATETIME
+        );
+    `);
+    try {
+        const { initSchema } = loadDbModuleWithConnection('server/db/schema.js', legacyDb);
+        assert.doesNotThrow(() => initSchema());
+        assert.equal(
+            legacyDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_knowledge_docs_collection'").get(),
+            undefined
+        );
+
+        const { runMigrations } = loadDbModuleWithConnection('server/db/migrate.js', legacyDb);
+        assert.doesNotThrow(() => runMigrations());
+        const cols = legacyDb.prepare('PRAGMA table_info(knowledge_docs)').all().map(col => col.name);
+        const indexRow = legacyDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_knowledge_docs_collection'").get();
+        assert.equal(cols.includes('collection_id'), true);
+        assert.ok(indexRow);
+    } finally {
+        legacyDb.close();
+    }
 });
 
 test('知识图谱会从 RAG 分块提取实体和类型化关系', () => {

@@ -143,6 +143,46 @@ function buildEmbeddingModelItem(config) {
     };
 }
 
+function normalizeCompletionText(value) {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+        return value.map(normalizeCompletionText).filter(Boolean).join('\n');
+    }
+    if (value && typeof value === 'object') {
+        if (typeof value.text === 'string') return value.text;
+        if (typeof value.content === 'string') return value.content;
+    }
+    return '';
+}
+
+function buildPromptStyleCompletionMessage(body = {}) {
+    const beforeCursor = normalizeCompletionText(body.prompt ?? body.input ?? body.prefix).trimEnd();
+    const afterCursor = normalizeCompletionText(body.suffix).trimStart();
+    const language = String(body.language || '').trim();
+    const filePath = String(body.filepath || body.filePath || body.filename || '').trim();
+
+    if (!beforeCursor && !afterCursor) return '';
+
+    const sections = [
+        'Complete the code at the cursor. Return only the code that should be inserted, without markdown fences or explanations.'
+    ];
+    if (language) sections.push(`Language: ${language}`);
+    if (filePath) sections.push(`File path: ${filePath}`);
+    if (beforeCursor) sections.push(`Code before cursor:\n${beforeCursor}`);
+    if (afterCursor) sections.push(`Code after cursor:\n${afterCursor}`);
+    return sections.join('\n\n');
+}
+
+function normalizeChatCompletionMessages(body = {}) {
+    if (Array.isArray(body.messages) && body.messages.length > 0) {
+        return body.messages;
+    }
+
+    const prompt = buildPromptStyleCompletionMessage(body);
+    if (!prompt) return [];
+    return [{ role: 'user', content: prompt }];
+}
+
 function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens = 0 } = {}) {
     const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens });
     if (!req.isApiKey || !req.apiKeyId || usage.totalTokens <= 0) return;
@@ -301,10 +341,23 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
 
     // 2. 聊天补全接口
     router.post('/chat/completions', authMiddleware, asyncHandler(async (req, res) => {
-        const { model, messages, stream, temperature, max_tokens, tool_choice } = req.body;
+        const {
+            model,
+            stream,
+            temperature,
+            max_tokens,
+            max_completion_tokens,
+            tool_choice,
+            stop,
+            top_p,
+            presence_penalty,
+            frequency_penalty
+        } = req.body;
+        const messages = normalizeChatCompletionMessages(req.body);
         const userId = req.user.id;
+        const requestedMaxTokens = max_tokens ?? max_completion_tokens;
 
-        if (!Array.isArray(messages) || messages.length === 0) {
+        if (messages.length === 0) {
             return res.status(400).json({ error: { message: 'messages must be a non-empty array.', type: 'invalid_request_error' } });
         }
 
@@ -394,7 +447,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         let upstreamMessages = messages;
         try {
             const budgetResult = fitMessagesToContextBudget(messages, modelCfg, {
-                maxOutputTokens: max_tokens ?? modelCfg.max_tokens ?? 2000
+                maxOutputTokens: requestedMaxTokens ?? modelCfg.max_tokens ?? 2000
             });
             upstreamMessages = budgetResult.messages;
             if (budgetResult.metadata.adjusted) {
@@ -482,8 +535,12 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             messages: upstreamMessages,
             stream: !!stream,
             temperature: temperature ?? modelCfg.temperature ?? 0.7,
-            max_tokens: max_tokens ?? modelCfg.max_tokens ?? 2000
+            max_tokens: requestedMaxTokens ?? modelCfg.max_tokens ?? 2000
         };
+        if (stop !== undefined) payload.stop = stop;
+        if (top_p !== undefined) payload.top_p = top_p;
+        if (presence_penalty !== undefined) payload.presence_penalty = presence_penalty;
+        if (frequency_penalty !== undefined) payload.frequency_penalty = frequency_penalty;
         if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
             payload.max_input_tokens = modelCfg.max_input_tokens;
         }

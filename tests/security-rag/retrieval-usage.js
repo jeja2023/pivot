@@ -235,21 +235,36 @@ test('RAG cache scope changes when knowledge version changes', () => {
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`rag_scope_${suffix}`, 'hash', 'RAG Scope Test', 'QA', 'user', 'active');
     const userId = Number(userInfo.lastInsertRowid);
+    const collectionInfo = db.prepare(`
+        INSERT INTO knowledge_collections (user_id, name, created_at, updated_at)
+        VALUES (?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, `scope-collection-${suffix}`);
     const docInfo = db.prepare(`
         INSERT INTO knowledge_docs (
-            user_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at, processed_at
-        ) VALUES (?, ?, 'ready', 1, 2, 2, 100, ?, ?, ?)
-    `).run(userId, `scope-${suffix}.md`, '2026-01-01 00:00:00', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+            user_id, collection_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at, processed_at
+        ) VALUES (?, ?, ?, 'ready', 1, 2, 2, 100, ?, ?, ?)
+    `).run(userId, collectionInfo.lastInsertRowid, `scope-${suffix}.md`, '2026-01-01 00:00:00', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+    db.prepare(`
+        INSERT INTO knowledge_doc_tags (user_id, doc_id, tag, created_at)
+        VALUES (?, ?, ?, datetime('now', '+8 hours'))
+    `).run(userId, docInfo.lastInsertRowid, 'scope-tag');
 
     try {
         const first = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
+        const scoped = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { collectionId: collectionInfo.lastInsertRowid });
+        assert.notEqual(first, scoped);
+        assert.match(scoped, new RegExp(`scope=collections:${collectionInfo.lastInsertRowid}`));
+        const tagged = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { tagNames: ['scope-tag'] });
+        assert.match(tagged, /scope=tags:scope-tag/);
         db.prepare('UPDATE knowledge_docs SET updated_at = ? WHERE id = ?').run('2026-01-02 00:00:00', docInfo.lastInsertRowid);
         const second = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
         assert.notEqual(first, second);
         assert.match(second, /d=1/);
         assert.match(second, /h=2/);
     } finally {
+        db.prepare('DELETE FROM knowledge_doc_tags WHERE user_id = ?').run(userId);
         db.prepare('DELETE FROM knowledge_docs WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_collections WHERE user_id = ?').run(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });

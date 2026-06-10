@@ -35,6 +35,240 @@ function normalizeKnowledgeDocId(value) {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function normalizeKnowledgeCollectionName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function normalizeKnowledgeCollectionDescription(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 300);
+}
+
+function normalizeKnowledgeTag(value) {
+    return String(value || '')
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 40);
+}
+
+function parseKnowledgeTags(value) {
+    const values = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[,，;；\s\n]+/);
+    return [...new Set(values.map(normalizeKnowledgeTag).filter(Boolean))].slice(0, 20);
+}
+
+function upsertKnowledgeTags(userId, tags, now = getBeijingTimestamp()) {
+    const safeTags = parseKnowledgeTags(tags);
+    if (!safeTags.length) return [];
+    const upsert = db.prepare(`
+        INSERT INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT(user_id, tag) DO UPDATE SET
+            deleted_at = NULL,
+            updated_at = excluded.updated_at
+    `);
+    safeTags.forEach(tag => upsert.run(userId, tag, now, now));
+    return safeTags;
+}
+
+function normalizeKnowledgeCollectionId(value) {
+    return normalizeKnowledgeDocId(value);
+}
+
+function getKnowledgeCollectionForUser(collectionId, userId) {
+    const normalizedId = normalizeKnowledgeCollectionId(collectionId);
+    if (!normalizedId) return null;
+    return db.prepare(`
+        SELECT *
+        FROM knowledge_collections
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).get(normalizedId, userId) || null;
+}
+
+function resolveKnowledgeCollectionId({ userId, collectionId = null } = {}) {
+    const normalizedId = normalizeKnowledgeCollectionId(collectionId);
+    if (normalizedId) {
+        const collection = getKnowledgeCollectionForUser(normalizedId, userId);
+        return collection ? collection.id : null;
+    }
+    return null;
+}
+
+function listKnowledgeCollections(userId) {
+    return db.prepare(`
+        SELECT
+            c.id,
+            c.name,
+            c.description,
+            c.created_at,
+            c.updated_at,
+            COUNT(d.id) AS doc_count,
+            COALESCE(SUM(CASE WHEN d.status = 'ready' THEN 1 ELSE 0 END), 0) AS ready_count,
+            COALESCE(SUM(CASE WHEN d.status = 'ready' AND COALESCE(d.is_enabled, 1) = 1 THEN d.chunk_count ELSE 0 END), 0) AS chunk_count
+        FROM knowledge_collections c
+        LEFT JOIN knowledge_docs d
+          ON d.collection_id = c.id
+         AND d.user_id = c.user_id
+         AND d.deleted_at IS NULL
+        WHERE c.user_id = ? AND c.deleted_at IS NULL
+        GROUP BY c.id
+        ORDER BY c.updated_at DESC, c.created_at DESC, c.id DESC
+    `).all(userId).map(row => ({
+        ...row,
+        doc_count: Number(row.doc_count || 0),
+        ready_count: Number(row.ready_count || 0),
+        chunk_count: Number(row.chunk_count || 0)
+    }));
+}
+
+function createKnowledgeCollection({ userId, name, description = '' }) {
+    const normalizedName = normalizeKnowledgeCollectionName(name);
+    if (!normalizedName) return null;
+    const existing = db.prepare(`
+        SELECT *
+        FROM knowledge_collections
+        WHERE user_id = ? AND deleted_at IS NULL AND lower(name) = lower(?)
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+    `).get(userId, normalizedName);
+    if (existing) return existing;
+
+    const now = getBeijingTimestamp();
+    const info = db.prepare(`
+        INSERT INTO knowledge_collections (user_id, name, description, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now);
+    return getKnowledgeCollectionForUser(info.lastInsertRowid, userId);
+}
+
+function createKnowledgeTag({ userId, tag }) {
+    const safeTags = upsertKnowledgeTags(userId, [tag]);
+    if (!safeTags.length) return null;
+    return listKnowledgeTags(userId).find(item => item.tag === safeTags[0]) || { tag: safeTags[0], doc_count: 0 };
+}
+
+function filterExistingKnowledgeTags(userId, tags = []) {
+    const safeTags = parseKnowledgeTags(tags);
+    if (!safeTags.length) return [];
+    const rows = db.prepare(`
+        SELECT tag
+        FROM knowledge_tags
+        WHERE user_id = ?
+          AND deleted_at IS NULL
+          AND tag IN (${safeTags.map(() => '?').join(',')})
+    `).all(userId, ...safeTags);
+    const existing = new Set(rows.map(row => row.tag));
+    return safeTags.filter(tag => existing.has(tag));
+}
+
+function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
+    const normalizedDocId = normalizeKnowledgeDocId(docId);
+    if (!normalizedDocId) return null;
+    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    if (!doc) return null;
+    const safeTags = filterExistingKnowledgeTags(userId, tags);
+    const now = getBeijingTimestamp();
+    const transaction = db.transaction(() => {
+        db.prepare('DELETE FROM knowledge_doc_tags WHERE doc_id = ? AND user_id = ?').run(normalizedDocId, userId);
+        const insert = db.prepare(`
+            INSERT OR IGNORE INTO knowledge_doc_tags (user_id, doc_id, tag, created_at)
+            VALUES (?, ?, ?, ?)
+        `);
+        safeTags.forEach(tag => insert.run(userId, normalizedDocId, tag, now));
+        db.prepare('UPDATE knowledge_docs SET updated_at = ? WHERE id = ? AND user_id = ?')
+            .run(now, normalizedDocId, userId);
+    });
+    transaction();
+    clearRagCacheForUser(userId);
+    return safeTags;
+}
+
+function getKnowledgeDocumentTags({ docId, userId }) {
+    const normalizedDocId = normalizeKnowledgeDocId(docId);
+    if (!normalizedDocId) return [];
+    return db.prepare(`
+        SELECT tag
+        FROM knowledge_doc_tags
+        WHERE doc_id = ? AND user_id = ?
+        ORDER BY tag COLLATE NOCASE ASC
+    `).all(normalizedDocId, userId).map(row => row.tag);
+}
+
+function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_docs') {
+    const raw = scope && typeof scope === 'object' ? scope : {};
+    const collectionId = normalizeKnowledgeCollectionId(raw.collectionId);
+    const tagNames = parseKnowledgeTags(raw.tagNames ?? raw.tagName ?? raw.tag);
+    const clauses = [];
+    const params = [];
+    if (collectionId) {
+        clauses.push(`${docAlias}.collection_id = ?`);
+        params.push(collectionId);
+    }
+    if (tagNames.length) {
+        clauses.push(`EXISTS (
+            SELECT 1
+            FROM knowledge_doc_tags tag_scope
+            WHERE tag_scope.doc_id = ${docAlias}.id
+              AND tag_scope.user_id = ${docAlias}.user_id
+              AND tag_scope.tag IN (${tagNames.map(() => '?').join(',')})
+        )`);
+        params.push(...tagNames);
+    }
+    return {
+        sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '',
+        params
+    };
+}
+
+function listKnowledgeTags(userId, { collectionId = null } = {}) {
+    const normalizedCollectionId = normalizeKnowledgeCollectionId(collectionId);
+    if (normalizedCollectionId) {
+        const collection = getKnowledgeCollectionForUser(normalizedCollectionId, userId);
+        if (!collection) return [];
+        return db.prepare(`
+            SELECT t.tag, COUNT(DISTINCT t.doc_id) AS doc_count
+            FROM knowledge_doc_tags t
+            JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
+            WHERE t.user_id = ?
+              AND d.deleted_at IS NULL
+              AND d.collection_id = ?
+            GROUP BY t.tag
+            ORDER BY doc_count DESC, t.tag COLLATE NOCASE ASC
+        `).all(userId, normalizedCollectionId).map(row => ({
+            tag: row.tag,
+            doc_count: Number(row.doc_count || 0)
+        }));
+    }
+
+    return db.prepare(`
+        WITH tag_names AS (
+            SELECT tag
+            FROM knowledge_tags
+            WHERE user_id = ? AND deleted_at IS NULL
+            UNION
+            SELECT t.tag
+            FROM knowledge_doc_tags t
+            JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
+            WHERE t.user_id = ? AND d.deleted_at IS NULL
+        ),
+        tag_counts AS (
+            SELECT t.tag, COUNT(DISTINCT t.doc_id) AS doc_count
+            FROM knowledge_doc_tags t
+            JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
+            WHERE t.user_id = ? AND d.deleted_at IS NULL
+            GROUP BY t.tag
+        )
+        SELECT tag_names.tag, COALESCE(tag_counts.doc_count, 0) AS doc_count
+        FROM tag_names
+        LEFT JOIN tag_counts ON tag_counts.tag = tag_names.tag
+        ORDER BY doc_count DESC, tag_names.tag COLLATE NOCASE ASC
+    `).all(userId, userId, userId).map(row => ({
+        tag: row.tag,
+        doc_count: Number(row.doc_count || 0)
+    }));
+}
+
 function getSafeKnowledgeExtension(filename) {
     const ext = path.extname(String(filename || '')).toLowerCase();
     return allowedExtensions.has(ext) ? ext : '.txt';
@@ -74,15 +308,18 @@ async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
     return truncateExtractedText(text, 300000);
 }
 
-function createKnowledgeDocumentFromUpload({ userId, file }) {
+function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {
     const now = getBeijingTimestamp();
+    const resolvedCollectionId = resolveKnowledgeCollectionId({ userId, collectionId });
     const fileInfo = db.prepare(`
         INSERT INTO knowledge_docs (
-            user_id, name, status, chunk_count, indexed_chunks, progress, error_message, created_at, updated_at
+            user_id, collection_id, name, status, chunk_count, indexed_chunks, progress, error_message, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, file.originalname, 'processing', 0, 0, 0, '', now, now);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, resolvedCollectionId, file.originalname, 'processing', 0, 0, 0, '', now, now);
     const docId = fileInfo.lastInsertRowid;
+    const safeTags = parseKnowledgeTags(tags);
+    const assignedTags = safeTags.length ? setKnowledgeDocumentTags({ docId, userId, tags: safeTags }) : [];
 
     try {
         const savedFile = persistUploadedKnowledgeFile(file, userId, docId);
@@ -92,7 +329,7 @@ function createKnowledgeDocumentFromUpload({ userId, file }) {
             WHERE id = ? AND user_id = ?
         `).run(savedFile.sourcePath, savedFile.sourceSize, getBeijingTimestamp(), docId, userId);
         clearRagCacheForUser(userId);
-        return { docId, ...savedFile };
+        return { docId, collectionId: resolvedCollectionId, tags: assignedTags, ...savedFile };
     } catch (e) {
         markKnowledgeDocumentError({ docId, userId, error: e });
         throw e;
@@ -228,7 +465,7 @@ function getKnowledgeDocumentDetail({ docId, userId, limit = 20, offset = 0 }) {
     `).all(normalizedDocId, safeLimit, safeOffset);
     const totalChunks = db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?')
         .get(normalizedDocId).count;
-    return { doc, chunks, totalChunks, limit: safeLimit, offset: safeOffset };
+    return { doc: { ...doc, tags: getKnowledgeDocumentTags({ docId: normalizedDocId, userId }) }, chunks, totalChunks, limit: safeLimit, offset: safeOffset };
 }
 
 function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
@@ -316,6 +553,27 @@ function getRagFeedbackSummary(userId) {
     }
     summary.byDoc = Array.from(byDoc.values()).sort((a, b) => b.unhelpful - a.unhelpful).slice(0, 10);
     return summary;
+}
+
+function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) {
+    const normalizedDocId = normalizeKnowledgeDocId(docId);
+    if (!normalizedDocId) return null;
+    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    if (!doc) return null;
+    const resolvedCollectionId = resolveKnowledgeCollectionId({ userId, collectionId });
+    const now = getBeijingTimestamp();
+    const changed = db.prepare(`
+        UPDATE knowledge_docs
+        SET collection_id = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(resolvedCollectionId, now, normalizedDocId, userId).changes > 0;
+    if (!changed) return null;
+    if (resolvedCollectionId) {
+        db.prepare('UPDATE knowledge_collections SET updated_at = ? WHERE id = ? AND user_id = ?')
+            .run(now, resolvedCollectionId, userId);
+    }
+    clearRagCacheForUser(userId);
+    return getKnowledgeDocumentForUser(normalizedDocId, userId);
 }
 
 function clampQualityScore(value) {
@@ -477,7 +735,8 @@ function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null }) {
     return { started: true };
 }
 
-function getKnowledgeDocumentSummaryForUser(userId) {
+function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
+    const scopeFilter = buildKnowledgeDocumentScopeFilter(scope, 'knowledge_docs');
     const rows = db.prepare(`
         SELECT
             status,
@@ -487,8 +746,9 @@ function getKnowledgeDocumentSummaryForUser(userId) {
         FROM knowledge_docs
         WHERE user_id = ?
           AND deleted_at IS NULL
+          ${scopeFilter.sql}
         GROUP BY status
-    `).all(userId);
+    `).all(userId, ...scopeFilter.params);
     const retryableErrors = db.prepare(`
         SELECT COUNT(*) AS count
         FROM knowledge_docs
@@ -497,7 +757,17 @@ function getKnowledgeDocumentSummaryForUser(userId) {
           AND status = 'error'
           AND source_path IS NOT NULL
           AND source_path != ''
-    `).get(userId).count;
+          ${scopeFilter.sql}
+    `).get(userId, ...scopeFilter.params).count;
+    const readyEnabled = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM knowledge_docs
+        WHERE user_id = ?
+          AND deleted_at IS NULL
+          AND status = 'ready'
+          AND COALESCE(is_enabled, 1) = 1
+          ${scopeFilter.sql}
+    `).get(userId, ...scopeFilter.params).count;
     const lastError = db.prepare(`
         SELECT id, name, error_message, updated_at
         FROM knowledge_docs
@@ -506,13 +776,15 @@ function getKnowledgeDocumentSummaryForUser(userId) {
           AND status = 'error'
           AND error_message IS NOT NULL
           AND error_message != ''
+          ${scopeFilter.sql}
         ORDER BY COALESCE(updated_at, processed_at, created_at) DESC
         LIMIT 1
-    `).get(userId) || null;
+    `).get(userId, ...scopeFilter.params) || null;
 
     const summary = {
         total: 0,
         ready: 0,
+        readyEnabled,
         processing: 0,
         error: 0,
         chunks: 0,
@@ -617,15 +889,21 @@ function deleteKnowledgeDocument({ docId, userId }) {
     return changed;
 }
 module.exports = {
+    createKnowledgeCollection,
+    createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     deleteKnowledgeDocument,
+    getKnowledgeCollectionForUser,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentForUser,
     getKnowledgeDocumentDetail,
+    getKnowledgeDocumentTags,
     getKnowledgeSourcePath,
     getKnowledgeDocumentSummaryForUser,
     getKnowledgeQualityReport,
     getRagFeedbackSummary,
+    listKnowledgeCollections,
+    listKnowledgeTags,
     markKnowledgeDocumentError,
     markKnowledgeDocumentProcessing,
     markKnowledgeDocumentReady,
@@ -636,6 +914,8 @@ module.exports = {
     batchReindexKnowledgeDocuments,
     recordRagFeedback,
     scheduleFailedKnowledgeDocumentsForUser,
+    setKnowledgeDocumentCollection,
+    setKnowledgeDocumentTags,
     setKnowledgeDocumentEnabled,
     scheduleKnowledgeDocumentIndexing
 };

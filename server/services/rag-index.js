@@ -343,10 +343,67 @@ function buildFtsOrQuery(keywords) {
         .join(' OR ');
 }
 
-function selectFtsCandidates(userId, keywords, limit) {
+function normalizeScopeIdList(value, max = 50) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values
+        .map(item => Number.parseInt(item, 10))
+        .filter(item => Number.isSafeInteger(item) && item > 0))]
+        .slice(0, max);
+}
+
+function normalizeScopeTagList(value, max = 20) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values
+        .flatMap(item => String(item || '').split(/[,，;；\s\n]+/))
+        .map(item => item.trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40))
+        .filter(Boolean))]
+        .slice(0, max);
+}
+
+function normalizeRetrievalScope(scope = {}) {
+    const raw = scope && typeof scope === 'object' ? scope : {};
+    const collectionIds = normalizeScopeIdList(raw.collectionIds ?? raw.collectionId);
+    const tagNames = normalizeScopeTagList(raw.tagNames ?? raw.tagName ?? raw.tag);
+    const parts = [];
+    if (collectionIds.length) parts.push(`collections:${collectionIds.join(',')}`);
+    if (tagNames.length) parts.push(`tags:${tagNames.join(',')}`);
+    return {
+        collectionIds,
+        tagNames,
+        cacheKey: parts.length ? parts.join(';') : 'all'
+    };
+}
+
+function buildRetrievalScopeSql(scope, docAlias = 'd') {
+    const normalized = normalizeRetrievalScope(scope);
+    const clauses = [];
+    const params = [];
+    if (normalized.collectionIds.length) {
+        clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
+        params.push(...normalized.collectionIds);
+    }
+    if (normalized.tagNames.length) {
+        clauses.push(`EXISTS (
+            SELECT 1
+            FROM knowledge_doc_tags tag_scope
+            WHERE tag_scope.doc_id = ${docAlias}.id
+              AND tag_scope.user_id = ${docAlias}.user_id
+              AND tag_scope.tag IN (${normalized.tagNames.map(() => '?').join(',')})
+        )`);
+        params.push(...normalized.tagNames);
+    }
+    return {
+        sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '',
+        params,
+        normalized
+    };
+}
+
+function selectFtsCandidates(userId, keywords, limit, scope = {}) {
     if (keywords.length === 0) return [];
     const ftsQuery = buildFtsOrQuery(keywords);
     if (!ftsQuery) return [];
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
 
     try {
         return db.prepare(`
@@ -359,61 +416,65 @@ function selectFtsCandidates(userId, keywords, limit) {
               AND d.status = 'ready'
               AND d.deleted_at IS NULL
               AND COALESCE(d.is_enabled, 1) = 1
+              ${scopeFilter.sql}
             ORDER BY bm25(knowledge_chunks_fts)
             LIMIT ?
-        `).all(ftsQuery, userId, limit);
+        `).all(ftsQuery, userId, ...scopeFilter.params, limit);
     } catch (e) {
         logger.warn({ err: e.message }, 'RAG FTS 候选召回失败，已回退到 LIKE 扫描');
         return [];
     }
 }
 
-function selectLikeCandidates(userId, keywords, limit) {
+function selectLikeCandidates(userId, keywords, limit, scope = {}) {
     if (keywords.length === 0) return [];
     const keywordWhere = keywords.map(() => 'LOWER(c.content) LIKE ?').join(' OR ');
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1 AND (${keywordWhere})
+        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql} AND (${keywordWhere})
         ORDER BY c.id DESC
         LIMIT ?
-    `).all(userId, ...keywords.map(k => `%${k}%`), limit);
+    `).all(userId, ...scopeFilter.params, ...keywords.map(k => `%${k}%`), limit);
 }
 
-function selectRecentCandidates(userId, limit) {
+function selectRecentCandidates(userId, limit, scope = {}) {
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1
+        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}
         ORDER BY c.id DESC
         LIMIT ?
-    `).all(userId, limit);
+    `).all(userId, ...scopeFilter.params, limit);
 }
 
-function selectRetrievalCandidates(userId, query, topK, candidateLimit) {
+function selectRetrievalCandidates(userId, query, topK, candidateLimit, scope = {}) {
     const keywords = buildKeywordCandidates(query);
-    let chunks = selectFtsCandidates(userId, keywords, candidateLimit);
+    let chunks = selectFtsCandidates(userId, keywords, candidateLimit, scope);
     if (chunks.length < topK) {
         const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit)
+        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope)
             .filter(chunk => !existingIds.has(chunk.id));
         chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
     }
     if (chunks.length < topK) {
         const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const recentChunks = selectRecentCandidates(userId, candidateLimit)
+        const recentChunks = selectRecentCandidates(userId, candidateLimit, scope)
             .filter(chunk => !existingIds.has(chunk.id));
         chunks = chunks.concat(recentChunks).slice(0, candidateLimit);
     }
     return chunks;
 }
 
-function selectChunksByIds(userId, chunkIds, limit) {
+function selectChunksByIds(userId, chunkIds, limit, scope = {}) {
     const ids = [...new Set((chunkIds || []).map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0))];
     if (ids.length === 0) return [];
     const placeholders = ids.slice(0, limit).map(() => '?').join(',');
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
@@ -423,13 +484,14 @@ function selectChunksByIds(userId, chunkIds, limit) {
           AND d.status = 'ready'
           AND d.deleted_at IS NULL
           AND COALESCE(d.is_enabled, 1) = 1
+          ${scopeFilter.sql}
         LIMIT ?
-    `).all(...ids.slice(0, limit), userId, limit);
+    `).all(...ids.slice(0, limit), userId, ...scopeFilter.params, limit);
 }
 
-function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit) {
+function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit, scope = {}) {
     const existingIds = new Set(candidates.map(chunk => chunk.id));
-    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit)
+    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit, scope)
         .filter(chunk => !existingIds.has(chunk.id));
     return candidates.concat(graphChunks).slice(0, candidateLimit);
 }
@@ -484,7 +546,8 @@ function formatInjectedContext(topChunks) {
     return injectedContext;
 }
 
-function buildRagCacheScope(userId, config = {}) {
+function buildRagCacheScope(userId, config = {}, scope = {}) {
+    const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs');
     const docs = db.prepare(`
         SELECT
             COUNT(*) AS doc_count,
@@ -495,7 +558,8 @@ function buildRagCacheScope(userId, config = {}) {
           AND deleted_at IS NULL
           AND status = 'ready'
           AND COALESCE(is_enabled, 1) = 1
-    `).get(userId) || {};
+          ${scopeFilter.sql}
+    `).get(userId, ...scopeFilter.params) || {};
     const graph = db.prepare(`
         SELECT
             COALESCE((SELECT MAX(updated_at) FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL), '') AS entity_version,
@@ -506,6 +570,7 @@ function buildRagCacheScope(userId, config = {}) {
         `k=${Number(config.topK || 0)}`,
         `c=${Number(config.candidateLimit || 0)}`,
         `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
+        `scope=${scopeFilter.normalized.cacheKey}`,
         `d=${Number(docs.doc_count || 0)}`,
         `h=${Number(docs.chunk_count || 0)}`,
         `dv=${docs.doc_version || ''}`,
@@ -529,6 +594,7 @@ async function debugRetrieveContext(userId, query, {
     candidateLimit = null,
     scoreThreshold = null,
     queryVector = null,
+    scope = {},
     user = null
 } = {}) {
     const config = getRagConfig({ topK, candidateLimit, scoreThreshold }, userId);
@@ -546,13 +612,15 @@ async function debugRetrieveContext(userId, query, {
 
     const safeTopK = config.topK;
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
+    const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const graphContext = getGraphContextForQuery(userId, normalizedQuery);
+    const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope });
     const candidates = mergeRetrievalCandidates(
-        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit).slice(0, safeCandidateLimit),
+        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit, normalizedScope).slice(0, safeCandidateLimit),
         graphContext.chunkIds,
         userId,
-        safeCandidateLimit
+        safeCandidateLimit,
+        normalizedScope
     );
     if (candidates.length === 0) {
         return {
@@ -563,6 +631,7 @@ async function debugRetrieveContext(userId, query, {
             candidateCount: 0,
             matches: [],
             graph: graphContext,
+            scope: normalizedScope,
             injectedContext: formatInjectedContext([])
         };
     }
@@ -601,6 +670,7 @@ async function debugRetrieveContext(userId, query, {
         candidateCount: candidates.length,
         matches,
         graph: graphContext,
+        scope: normalizedScope,
         injectedContext: formatInjectedContext(
             scoredChunks.filter(chunk => chunk.score > config.scoreThreshold).slice(0, safeTopK)
         ) + (graphContext.context || '')
@@ -612,7 +682,8 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
     const config = getRagConfig({ topK }, userId);
-    const cacheScope = buildRagCacheScope(userId, config);
+    const retrievalScope = normalizeRetrievalScope(options.scope || {});
+    const cacheScope = buildRagCacheScope(userId, config, retrievalScope);
     const recordRetrieval = (payload) => {
         recordRagRetrieval(payload);
         recordSlowRagRetrieval({
@@ -636,12 +707,13 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     }
 
     try {
-        const graphContext = getGraphContextForQuery(userId, normalizedQuery);
+        const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope });
         const chunks = mergeRetrievalCandidates(
-            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit),
+            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit, retrievalScope),
             graphContext.chunkIds,
             userId,
-            config.candidateLimit
+            config.candidateLimit,
+            retrievalScope
         );
 
         if (chunks.length === 0 && !graphContext.context) {
@@ -807,6 +879,7 @@ module.exports = {
     chunkText,
     buildKeywordCandidates,
     buildFtsOrQuery,
+    normalizeRetrievalScope,
     buildRagCacheScope,
     buildRagSearchContent,
     buildRagSearchTerms,

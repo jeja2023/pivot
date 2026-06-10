@@ -3,6 +3,8 @@ const {
     assert,
     buildRagSearchContent,
     cleanupSoftDeletedStorage,
+    createKnowledgeCollection,
+    createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     db,
     debugRetrieveContext,
@@ -12,7 +14,10 @@ const {
     getKnowledgeDocumentDetail,
     getKnowledgeDocumentSummaryForUser,
     getKnowledgeSourcePath,
+    getKnowledgeDocumentTags,
     getRagFeedbackSummary,
+    listKnowledgeCollections,
+    listKnowledgeTags,
     normalizeUploadedOriginalName,
     path,
     processKnowledgeDocument,
@@ -22,6 +27,8 @@ const {
     removeTestPath,
     retrieveContext,
     scheduleFailedKnowledgeDocumentsForUser,
+    setKnowledgeDocumentCollection,
+    setKnowledgeDocumentTags,
     test,
     toProjectRelativePath,
     uploadRoot
@@ -506,6 +513,186 @@ test('RAG 调试检索无需外部嵌入也会返回带分数的分块', async (
         db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(matched.lastInsertRowid, other.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('RAG collection scope limits debug retrieval candidates', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_collection_${suffix}`, 'hash', 'RAG Collection Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const collectionA = createKnowledgeCollection({ userId, name: `制度专题 ${suffix}` });
+    const collectionB = createKnowledgeCollection({ userId, name: `项目专题 ${suffix}` });
+    const docA = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, collectionA.id, `policy-${suffix}.txt`);
+    const docB = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, collectionB.id, `project-${suffix}.txt`);
+    const insertChunk = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `);
+    const contentA = `alpha-${suffix} 审批范围按照制度专题执行`;
+    const contentB = `alpha-${suffix} 审批范围按照项目专题执行`;
+    const chunkA = insertChunk.run(docA.lastInsertRowid, contentA, buildRagSearchContent(contentA), JSON.stringify([1, 0]));
+    const chunkB = insertChunk.run(docB.lastInsertRowid, contentB, buildRagSearchContent(contentB), JSON.stringify([0.5, 0.5]));
+
+    try {
+        const scoped = await debugRetrieveContext(userId, `alpha-${suffix} 审批范围`, {
+            queryVector: [1, 0],
+            topK: 5,
+            candidateLimit: 10,
+            scoreThreshold: 0,
+            scope: { collectionId: collectionA.id }
+        });
+        assert.equal(scoped.scope.cacheKey, `collections:${collectionA.id}`);
+        assert.deepEqual(scoped.matches.map(item => item.chunkId), [chunkA.lastInsertRowid]);
+
+        const all = await debugRetrieveContext(userId, `alpha-${suffix} 审批范围`, {
+            queryVector: [1, 0],
+            topK: 5,
+            candidateLimit: 10,
+            scoreThreshold: 0
+        });
+        const allIds = all.matches.map(item => item.chunkId);
+        assert.equal(allIds.includes(chunkA.lastInsertRowid), true);
+        assert.equal(allIds.includes(chunkB.lastInsertRowid), true);
+
+        const moved = setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: collectionA.id });
+        assert.equal(moved.collection_id, collectionA.id);
+        const collections = listKnowledgeCollections(userId);
+        const updatedA = collections.find(item => item.id === collectionA.id);
+        assert.equal(updatedA.doc_count, 2);
+    } finally {
+        db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(chunkA.lastInsertRowid, chunkB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(docA.lastInsertRowid, docB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_collections WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('RAG collection scope limits chat retrieval context', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_chat_scope_${suffix}`, 'hash', 'RAG Chat Scope Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const collectionA = createKnowledgeCollection({ userId, name: `Chat Scope A ${suffix}` });
+    const collectionB = createKnowledgeCollection({ userId, name: `Chat Scope B ${suffix}` });
+    const docAName = `chat-scope-a-${suffix}.txt`;
+    const docBName = `chat-scope-b-${suffix}.txt`;
+    const docA = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, collectionA.id, docAName);
+    const docB = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, collectionB.id, docBName);
+    const insertChunk = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `);
+    const contentA = `chat-scope-${suffix} approval answer from collection A only`;
+    const contentB = `chat-scope-${suffix} approval answer from collection B should not leak`;
+    const chunkA = insertChunk.run(docA.lastInsertRowid, contentA, buildRagSearchContent(contentA), null);
+    const chunkB = insertChunk.run(docB.lastInsertRowid, contentB, buildRagSearchContent(contentB), null);
+
+    try {
+        const query = `chat-scope-${suffix} approval`;
+        const scoped = await retrieveContext(userId, query, null, { scope: { collectionId: collectionA.id } });
+        assert.equal(scoped.includes(docAName), true);
+        assert.equal(scoped.includes(docBName), false);
+
+        const all = await retrieveContext(userId, query);
+        assert.equal(all.includes(docAName), true);
+        assert.equal(all.includes(docBName), true);
+    } finally {
+        db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(chunkA.lastInsertRowid, chunkB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(docA.lastInsertRowid, docB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_collections WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('RAG tag scope limits debug retrieval candidates', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_tag_${suffix}`, 'hash', 'RAG Tag Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const financeCollection = createKnowledgeCollection({ userId, name: `财务专题-${suffix}` });
+    const opsCollection = createKnowledgeCollection({ userId, name: `运维专题-${suffix}` });
+    const docA = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, `finance-${suffix}.txt`);
+    const docB = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, `ops-${suffix}.txt`);
+    const insertChunk = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `);
+    const contentA = `beta-${suffix} 合同付款审批按照财务标签执行`;
+    const contentB = `beta-${suffix} 合同付款审批按照运维标签执行`;
+    const chunkA = insertChunk.run(docA.lastInsertRowid, contentA, buildRagSearchContent(contentA), JSON.stringify([1, 0]));
+    const chunkB = insertChunk.run(docB.lastInsertRowid, contentB, buildRagSearchContent(contentB), JSON.stringify([0.5, 0.5]));
+
+    try {
+        assert.ok(setKnowledgeDocumentCollection({ docId: docA.lastInsertRowid, userId, collectionId: financeCollection.id }));
+        assert.ok(setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: opsCollection.id }));
+        ['财务', '合同', '2026', '运维'].forEach(tag => createKnowledgeTag({ userId, tag }));
+        assert.deepEqual(setKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId, tags: ['财务', '合同', '2026'] }), ['财务', '合同', '2026']);
+        assert.deepEqual(setKnowledgeDocumentTags({ docId: docB.lastInsertRowid, userId, tags: ['运维', '合同'] }), ['运维', '合同']);
+        assert.deepEqual(getKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId }), ['2026', '合同', '财务']);
+        const standaloneTag = createKnowledgeTag({ userId, tag: `待分配-${suffix}` });
+        assert.equal(standaloneTag.tag, `待分配-${suffix}`);
+        assert.equal(standaloneTag.doc_count, 0);
+        const tagSummary = listKnowledgeTags(userId);
+        assert.equal(tagSummary.find(item => item.tag === '合同')?.doc_count, 2);
+        assert.equal(tagSummary.find(item => item.tag === '财务')?.doc_count, 1);
+        assert.equal(tagSummary.find(item => item.tag === `待分配-${suffix}`)?.doc_count, 0);
+        const financeTags = listKnowledgeTags(userId, { collectionId: financeCollection.id });
+        assert.equal(financeTags.find(item => item.tag === '合同')?.doc_count, 1);
+        assert.equal(financeTags.find(item => item.tag === '财务')?.doc_count, 1);
+        assert.equal(financeTags.some(item => item.tag === '运维'), false);
+        assert.equal(financeTags.some(item => item.tag === `待分配-${suffix}`), false);
+
+        const scoped = await debugRetrieveContext(userId, `beta-${suffix} 合同付款`, {
+            queryVector: [1, 0],
+            topK: 5,
+            candidateLimit: 10,
+            scoreThreshold: 0,
+            scope: { tagNames: ['财务'] }
+        });
+        assert.equal(scoped.scope.cacheKey, 'tags:财务');
+        assert.deepEqual(scoped.matches.map(item => item.chunkId), [chunkA.lastInsertRowid]);
+
+        const all = await debugRetrieveContext(userId, `beta-${suffix} 合同付款`, {
+            queryVector: [1, 0],
+            topK: 5,
+            candidateLimit: 10,
+            scoreThreshold: 0
+        });
+        const allIds = all.matches.map(item => item.chunkId);
+        assert.equal(allIds.includes(chunkA.lastInsertRowid), true);
+        assert.equal(allIds.includes(chunkB.lastInsertRowid), true);
+    } finally {
+        db.prepare('DELETE FROM knowledge_doc_tags WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_tags WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(chunkA.lastInsertRowid, chunkB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(docA.lastInsertRowid, docB.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_collections WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });
 

@@ -12,6 +12,102 @@ const GRAPH_DUPLICATE_PREFIX_MIN = 3;
 const GRAPH_EXTRACTION_MODE = 'rule_heuristic';
 const GRAPH_QUALITY_NOTICE = '知识图谱由规则和启发式抽取生成，适合作为 Graph-RAG 辅助线索；生产问答前建议确认低可信关系、合并重复实体，并结合来源文档校验。';
 
+function normalizeGraphScopeIds(value, max = 50) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values
+        .map(item => Number.parseInt(item, 10))
+        .filter(item => Number.isSafeInteger(item) && item > 0))]
+        .slice(0, max);
+}
+
+function normalizeGraphScopeTags(value, max = 20) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values
+        .flatMap(item => String(item || '').split(/[,，;；\s\n]+/))
+        .map(item => item.trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40))
+        .filter(Boolean))]
+        .slice(0, max);
+}
+
+function normalizeGraphScope(scope = {}) {
+    const raw = scope && typeof scope === 'object' ? scope : {};
+    return {
+        collectionIds: normalizeGraphScopeIds(raw.collectionIds ?? raw.collectionId),
+        tagNames: normalizeGraphScopeTags(raw.tagNames ?? raw.tagName ?? raw.tag)
+    };
+}
+
+function buildGraphDocScopeClauses(normalized, docAlias) {
+    const clauses = [`${docAlias}.user_id = e.user_id`, `${docAlias}.deleted_at IS NULL`];
+    const params = [];
+    if (normalized.collectionIds.length) {
+        clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
+        params.push(...normalized.collectionIds);
+    }
+    if (normalized.tagNames.length) {
+        clauses.push(`EXISTS (
+            SELECT 1
+            FROM knowledge_doc_tags tag_scope
+            WHERE tag_scope.doc_id = ${docAlias}.id
+              AND tag_scope.user_id = ${docAlias}.user_id
+              AND tag_scope.tag IN (${normalized.tagNames.map(() => '?').join(',')})
+        )`);
+        params.push(...normalized.tagNames);
+    }
+    return { clauses, params };
+}
+
+function buildGraphEntityScopeSql(scope) {
+    const normalized = normalizeGraphScope(scope);
+    if (!normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    const mentionDocScope = buildGraphDocScopeClauses(normalized, 'd_scope');
+    const sourceDocScope = buildGraphDocScopeClauses(normalized, 'sd_scope');
+    return {
+        sql: `
+          AND (
+              EXISTS (
+                  SELECT 1
+                  FROM knowledge_entity_mentions m_scope
+                  JOIN knowledge_docs d_scope ON d_scope.id = m_scope.doc_id
+                  WHERE m_scope.entity_id = e.id
+                    AND ${mentionDocScope.clauses.join(' AND ')}
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM knowledge_docs sd_scope
+                  WHERE sd_scope.id = e.source_doc_id
+                    AND ${sourceDocScope.clauses.join(' AND ')}
+              )
+          )`,
+        params: [...mentionDocScope.params, ...sourceDocScope.params]
+    };
+}
+
+function buildGraphRelationScopeSql(scope, docAlias = 'd') {
+    const normalized = normalizeGraphScope(scope);
+    if (!normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    const clauses = [];
+    const params = [];
+    if (normalized.collectionIds.length) {
+        clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
+        params.push(...normalized.collectionIds);
+    }
+    if (normalized.tagNames.length) {
+        clauses.push(`EXISTS (
+            SELECT 1
+            FROM knowledge_doc_tags tag_scope
+            WHERE tag_scope.doc_id = ${docAlias}.id
+              AND tag_scope.user_id = ${docAlias}.user_id
+              AND tag_scope.tag IN (${normalized.tagNames.map(() => '?').join(',')})
+        )`);
+        params.push(...normalized.tagNames);
+    }
+    return {
+        sql: ` AND ${clauses.join(' AND ')}`,
+        params
+    };
+}
+
 const ENTITY_SUFFIX_TYPES = [
     ['department', /(部门|中心|小组|团队|委员会|办公室|事业部|分公司|集团|公司)$/],
     ['system', /(系统|平台|服务|数据库|网关|接口|API|模型|知识库|控制台|门户)$/i],
@@ -558,16 +654,18 @@ function suggestDuplicateEntities(userId, limit = 20) {
     return suggestions.slice(0, safeLimit);
 }
 
-function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT) {
+function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, options = {}) {
     const terms = buildRagSearchTerms(query, 20);
     if (terms.length === 0) return [];
+    const scopeFilter = buildGraphEntityScopeSql(options.scope);
     const rows = db.prepare(`
         SELECT e.*, COUNT(m.id) AS mention_count
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
         WHERE e.user_id = ? AND e.deleted_at IS NULL
+        ${scopeFilter.sql}
         GROUP BY e.id
-    `).all(userId);
+    `).all(userId, ...scopeFilter.params);
     return rows
         .map(row => {
             const haystack = `${row.name} ${row.normalized_name} ${row.aliases || ''}`.toLowerCase();
@@ -580,10 +678,11 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT) {
 }
 
 function getGraphContextForQuery(userId, query, options = {}) {
-    const entities = findQueryEntities(userId, query, options.entityLimit || GRAPH_CONTEXT_ENTITY_LIMIT);
+    const entities = findQueryEntities(userId, query, options.entityLimit || GRAPH_CONTEXT_ENTITY_LIMIT, options);
     if (entities.length === 0) return { entities: [], relations: [], chunkIds: [], context: '' };
     const entityIds = entities.map(entity => entity.id);
     const placeholders = entityIds.map(() => '?').join(',');
+    const relationScope = buildGraphRelationScopeSql(options.scope, 'd');
     const relations = db.prepare(`
         SELECT r.*, s.name AS source_name, t.name AS target_name, d.name AS doc_name
         FROM knowledge_relations r
@@ -593,9 +692,10 @@ function getGraphContextForQuery(userId, query, options = {}) {
         WHERE r.user_id = ?
           AND r.status = 'active'
           AND (r.source_entity_id IN (${placeholders}) OR r.target_entity_id IN (${placeholders}))
+          ${relationScope.sql}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ?
-    `).all(userId, ...entityIds, ...entityIds, options.relationLimit || GRAPH_CONTEXT_RELATION_LIMIT);
+    `).all(userId, ...entityIds, ...entityIds, ...relationScope.params, options.relationLimit || GRAPH_CONTEXT_RELATION_LIMIT);
     const chunkIds = [...new Set(relations.map(row => row.source_chunk_id).filter(Boolean))];
     return {
         entities,
@@ -605,9 +705,9 @@ function getGraphContextForQuery(userId, query, options = {}) {
     };
 }
 
-function queryKnowledgeGraph({ userId, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT }) {
-    const entities = findQueryEntities(userId, query, entityLimit);
-    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit });
+function queryKnowledgeGraph({ userId, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT, scope = {} }) {
+    const entities = findQueryEntities(userId, query, entityLimit, { scope });
+    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit, scope });
     const paths = graphContext.relations.map(row => ({
         relationId: row.id,
         source: row.source_name,

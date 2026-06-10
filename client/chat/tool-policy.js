@@ -239,7 +239,7 @@ function renderToolPolicyTools() {
                     <span class="tool-policy-chip risk-${toolPolicyEscape(riskLevel)}">${toolPolicyEscape(toolPolicyRiskLabel(riskLevel))}</span>
                     <span class="tool-policy-chip${approvalRequired ? ' approval-on' : ''}">${approvalRequired ? '需审批' : '免审批'}</span>
                     ${packageEnabled ? '' : '<span class="tool-policy-chip package-off">包停用</span>'}
-                    <button type="button" class="btn-secondary" data-tool-policy-edit="${toolPolicyEscape(key)}" ${editable ? '' : 'disabled'}>编辑</button>
+                    ${editable ? `<button type="button" class="btn-secondary" data-tool-policy-edit="${toolPolicyEscape(key)}">编辑</button>` : ''}
                 </footer>
             </article>
         `;

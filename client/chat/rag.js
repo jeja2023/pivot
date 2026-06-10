@@ -76,6 +76,7 @@ const getRagStatusLabel = (status) => {
 const renderRagActions = (doc) => {
     const buttons = [];
     buttons.push(`<button class="btn-secondary rag-detail-btn" data-rag-id="${doc.id}">详情</button>`);
+    buttons.push(`<button class="btn-secondary rag-doc-meta-btn" data-rag-id="${doc.id}">整理</button>`);
     if (Number(doc.chunk_count || 0) > 0) {
         buttons.push(`<button class="btn-secondary rag-doc-graph-btn" data-rag-id="${doc.id}">图谱</button>`);
     }
@@ -129,7 +130,7 @@ const ragConfirm = (title, message) => new Promise((resolve) => {
     resolve(false);
 });
 
-document.addEventListener('click', (event) => {
+document.addEventListener('click', async (event) => {
     const reindexBtn = event.target.closest('.rag-reindex-btn');
     if (reindexBtn) {
         window.reindexKnowledgeDoc(reindexBtn.dataset.ragId);
@@ -139,6 +140,12 @@ document.addEventListener('click', (event) => {
     const detailBtn = event.target.closest('.rag-detail-btn');
     if (detailBtn) {
         window.showKnowledgeDocDetail(detailBtn.dataset.ragId);
+        return;
+    }
+
+    const metaBtn = event.target.closest('.rag-doc-meta-btn');
+    if (metaBtn) {
+        window.openKnowledgeDocMetaModal?.(metaBtn.dataset.ragId);
         return;
     }
 
@@ -164,6 +171,7 @@ document.addEventListener('click', (event) => {
         } catch (e) {
             // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
         }
+        await window.applyRagDebugScopeToChat?.();
         window.syncChatToolToggles?.();
         const input = document.getElementById('user-input');
         if (input && query) {
@@ -183,6 +191,16 @@ document.addEventListener('click', (event) => {
 
     if (event.target.closest('#rag-refresh-btn')) {
         window.loadKnowledgeDocs();
+        return;
+    }
+
+    if (event.target.closest('#rag-create-collection-btn')) {
+        window.createKnowledgeCollectionFromPrompt?.();
+        return;
+    }
+
+    if (event.target.closest('#rag-create-tag-btn')) {
+        window.createKnowledgeTagFromPrompt?.();
         return;
     }
 
@@ -369,9 +387,21 @@ document.addEventListener('focusout', (event) => {
     if (event.target.closest?.('.rag-graph-map-node, .rag-graph-relation')) hideGraphNodeTooltip();
 });
 
-document.addEventListener('change', (event) => {
+document.addEventListener('change', async (event) => {
     if (event.target?.id === 'rag-select-all') {
         document.querySelectorAll('.rag-doc-check').forEach(input => { input.checked = event.target.checked; });
+        return;
+    }
+    if (event.target?.id === 'rag-collection-filter') {
+        if (typeof window.handleRagCollectionScopeChange === 'function') {
+            await window.handleRagCollectionScopeChange('docs');
+        } else {
+            window.loadKnowledgeDocs(1);
+        }
+        return;
+    }
+    if (event.target?.id === 'rag-tag-filter') {
+        window.loadKnowledgeDocs(1);
         return;
     }
     const enableToggle = event.target.closest?.('.rag-enable-toggle');

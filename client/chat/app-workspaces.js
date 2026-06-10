@@ -68,8 +68,28 @@ function getChatToolName(button) {
     return '';
 }
 
+function syncChatRagScopeControls() {
+    const ragButton = document.getElementById('chat-rag-enabled') || document.querySelector('[data-chat-tool-toggle="rag"]');
+    const pressed = ragButton?.getAttribute('aria-pressed');
+    const enabled = Boolean(ragButton) && (
+        pressed === 'true'
+        || (pressed !== 'false' && (
+            ragButton.dataset.enabled === 'true'
+            || ragButton.classList.contains('is-active')
+            || ragButton.checked === true
+        ))
+    );
+    document.body?.classList.toggle('chat-rag-scope-open', enabled);
+    document.querySelectorAll('#chat-rag-collection-scope, #chat-rag-tag-scope').forEach(select => {
+        select.classList.toggle('hidden', !enabled);
+        select.disabled = !enabled;
+        select.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+    });
+}
+
 function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {}) {
     if (!button) return;
+    const tool = getChatToolName(button);
     const target = button.matches?.('.chat-tool-toggle') ? button : button.closest?.('.chat-tool-toggle') || button;
     const nestedInput = target.querySelector?.('input[type="checkbox"][id^="chat-"]');
     if ('checked' in button) button.checked = enabled;
@@ -81,6 +101,7 @@ function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {
     button.dataset.enabled = enabled ? 'true' : 'false';
     button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
     button.classList.toggle('is-active', enabled);
+    if (tool === 'rag') syncChatRagScopeControls();
     if (refreshReadiness && typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
 }
 
@@ -90,6 +111,7 @@ function syncChatToolToggles() {
         const storageKey = CHAT_TOOL_TOGGLE_STORAGE[tool];
         setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true', { refreshReadiness: false });
     });
+    syncChatRagScopeControls();
     if (typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
 }
 
@@ -107,6 +129,7 @@ function buildChatToolStatusItem({ tool, tone, text, action }) {
     label.textContent = CHAT_TOOL_STATUS_COPY[tool]?.label || tool;
     const message = document.createElement('span');
     message.textContent = text;
+    message.title = text;
     item.append(label, message);
     if (action) {
         const button = document.createElement('button');
@@ -128,15 +151,47 @@ function renderChatToolStatus(items = []) {
     items.forEach(item => status.appendChild(buildChatToolStatusItem(item)));
 }
 
+function getSelectedOptionCleanLabel(select) {
+    if (!select || !select.value) return '';
+    const option = select.selectedOptions?.[0];
+    return String(option?.textContent || '')
+        .replace(/\s*\(\d+\)\s*$/, '')
+        .trim();
+}
+
+function getChatRagScopeLabel() {
+    const labels = [
+        getSelectedOptionCleanLabel(document.getElementById('chat-rag-collection-scope')),
+        getSelectedOptionCleanLabel(document.getElementById('chat-rag-tag-scope'))
+    ].filter(Boolean);
+    return labels.join(' / ');
+}
+
+function buildChatRagSummaryUrl() {
+    const scope = window.getRagScopeSelection?.('chat') || {};
+    const params = new URLSearchParams();
+    if (scope.collectionId) params.set('collectionId', String(scope.collectionId));
+    const tag = Array.isArray(scope.tagNames) ? scope.tagNames[0] : '';
+    if (tag) params.set('tag', tag);
+    const query = params.toString();
+    return `${API_BASE}/rag/summary${query ? `?${query}` : ''}`;
+}
+
+function formatChatRagReadinessText(count) {
+    const prefix = getChatRagScopeLabel();
+    const text = `${count} \u4efd\u8d44\u6599\u53ef\u7528`;
+    return prefix ? `${prefix}\uff1a${text}` : text;
+}
+
 async function fetchChatToolReadiness(tool) {
     if (tool === 'rag') {
-        const res = await apiFetch(`${API_BASE}/rag/summary`);
+        const res = await apiFetch(buildChatRagSummaryUrl());
         if (!res.ok) throw new Error('知识库状态获取失败');
         const summary = await res.json();
-        const ready = Number(summary.ready || 0);
+        const ready = Number(summary.readyEnabled ?? summary.ready ?? 0);
         const processing = Number(summary.processing || 0);
         const error = Number(summary.error || 0);
-        if (ready > 0) return { tone: 'ready', text: `${ready} 份资料可用` };
+        if (ready > 0) return { tone: 'ready', text: formatChatRagReadinessText(ready) };
         if (processing > 0) return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.loading, action: true };
         if (error > 0) return { tone: 'error', text: CHAT_TOOL_STATUS_COPY.rag.error, action: true };
         return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.rag.empty, action: true };
@@ -233,8 +288,21 @@ document.addEventListener('click', (event) => {
     if (tool === 'rag') window.openKnowledgeWorkbench?.();
     if (tool === 'mcp') window.openMcpWorkbench?.();
 });
+document.addEventListener('change', async (event) => {
+    if (event.target?.id === 'chat-rag-collection-scope') {
+        if (typeof window.handleRagCollectionScopeChange === 'function') {
+            await window.handleRagCollectionScopeChange('chat');
+        } else {
+            window.updateChatToolReadiness?.({ silent: true });
+        }
+        return;
+    }
+    if (event.target?.id !== 'chat-rag-tag-scope') return;
+    window.updateChatToolReadiness?.({ silent: true });
+});
 window.setChatToolToggleState = setChatToolToggleState;
 window.syncChatToolToggles = syncChatToolToggles;
+window.syncChatRagScopeControls = syncChatRagScopeControls;
 window.updateChatToolReadiness = updateChatToolReadiness;
 updateChatToolReadiness({ silent: true });
 

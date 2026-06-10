@@ -1,6 +1,360 @@
 // RAG 文档列表与操作 RAG document list and actions
 // RAG 文档功能从 rag.js 拆分而来。
 /* eslint-disable no-undef */
+let ragCollections = [];
+let ragTags = [];
+let ragDocsCache = [];
+const ragTagsByCollection = new Map();
+
+function normalizeRagCollectionId(value) {
+    const id = Number.parseInt(value, 10);
+    return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
+}
+
+function normalizeRagTag(value) {
+    return String(value || '').trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40);
+}
+
+function parseRagTags(value) {
+    const values = Array.isArray(value) ? value : String(value || '').split(/[,，;；\s\n]+/);
+    return [...new Set(values.map(normalizeRagTag).filter(Boolean))].slice(0, 20);
+}
+
+function getRagTagCacheKey(collectionId = '') {
+    return normalizeRagCollectionId(collectionId);
+}
+
+function setRagTagsForCollection(collectionId = '', tags = []) {
+    const key = getRagTagCacheKey(collectionId);
+    const safeTags = Array.isArray(tags) ? tags : [];
+    ragTagsByCollection.set(key, safeTags);
+    if (!key) ragTags = safeTags;
+    return safeTags;
+}
+
+function getRagTagsForCollection(collectionId = '') {
+    const key = getRagTagCacheKey(collectionId);
+    if (ragTagsByCollection.has(key)) return ragTagsByCollection.get(key);
+    return key ? [] : ragTags;
+}
+
+function invalidateRagTagCache() {
+    ragTags = [];
+    ragTagsByCollection.clear();
+}
+
+function getRagDocTags(doc = {}) {
+    return parseRagTags(Array.isArray(doc.tags) ? doc.tags : String(doc.tags || '').split(','));
+}
+
+function getSelectedRagTagCheckboxes(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    return parseRagTags(Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(input => input.value));
+}
+
+function renderRagTagCheckboxes(selectedTags = [], collectionId = '') {
+    const selected = new Set(parseRagTags(selectedTags));
+    const tags = getRagTagsForCollection(collectionId);
+    if (!tags.length) {
+        return '<div class="knowledge-tag-picker-empty">暂无标签，请先新建标签</div>';
+    }
+    return tags.map((item, index) => {
+        const tag = normalizeRagTag(item.tag || item);
+        if (!tag) return '';
+        const id = `knowledge-tag-check-${index}-${tag.replace(/[^\w-]+/g, '-')}`;
+        const count = Number(item.doc_count || 0);
+        const label = `${tag}${count > 0 ? ` (${count})` : ''}`;
+        return `
+            <label class="knowledge-tag-check" for="${escapeRagAttr(id)}" title="${escapeRagAttr(label)}">
+                <input id="${escapeRagAttr(id)}" type="checkbox" value="${escapeRagAttr(tag)}" ${selected.has(tag) ? 'checked' : ''}>
+                <span>${escapeRagHtml(label)}</span>
+            </label>
+        `;
+    }).join('');
+}
+
+function setRagTagCheckboxes(container, selectedTags = [], collectionId = '') {
+    if (!container) return;
+    container.innerHTML = renderRagTagCheckboxes(selectedTags, collectionId);
+}
+
+function refreshRagTagCheckboxControls() {
+    const uploadTags = document.getElementById('knowledge-upload-tags-list');
+    const uploadCollectionId = normalizeRagCollectionId(document.getElementById('knowledge-upload-collection')?.value);
+    if (uploadTags) setRagTagCheckboxes(uploadTags, getSelectedRagTagCheckboxes('knowledge-upload-tags-list'), uploadCollectionId);
+    const metaTags = document.getElementById('knowledge-doc-meta-tags-list');
+    const metaCollectionId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-collection')?.value);
+    if (metaTags) setRagTagCheckboxes(metaTags, getSelectedRagTagCheckboxes('knowledge-doc-meta-tags-list'), metaCollectionId);
+}
+
+function renderRagCollectionCell(doc = {}) {
+    const name = String(doc.collection_name || '').trim();
+    const label = name || '未归类';
+    return `<span class="knowledge-collection-pill ${name ? '' : 'is-muted'}" title="${escapeRagAttr(label)}">${escapeRagHtml(label)}</span>`;
+}
+
+function renderRagTagsCell(doc = {}) {
+    const tags = getRagDocTags(doc);
+    if (!tags.length) return '<span class="knowledge-empty-meta">-</span>';
+    return `<div class="knowledge-tag-list">${tags.map(tag => `<span class="knowledge-tag-pill" title="${escapeRagAttr(tag)}">${escapeRagHtml(tag)}</span>`).join('')}</div>`;
+}
+
+function getCachedKnowledgeDoc(id) {
+    const docId = Number.parseInt(id, 10);
+    if (!Number.isSafeInteger(docId) || docId <= 0) return null;
+    return ragDocsCache.find(doc => Number(doc.id) === docId) || null;
+}
+
+function getRagCollectionOptionsHtml(selectedId = '', {
+    includeAll = false,
+    allLabel = '全部知识库',
+    unassignedLabel = '未归类'
+} = {}) {
+    const selected = normalizeRagCollectionId(selectedId);
+    const options = [];
+    if (includeAll) {
+        options.push(`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(allLabel)}</option>`);
+    } else {
+        options.push(`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(unassignedLabel)}</option>`);
+    }
+    ragCollections.forEach(collection => {
+        const id = normalizeRagCollectionId(collection.id);
+        if (!id) return;
+        const count = Number(collection.doc_count || 0);
+        const label = `${collection.name || '专题库'}${count > 0 ? ` (${count})` : ''}`;
+        options.push(`<option value="${escapeRagAttr(id)}" ${id === selected ? 'selected' : ''}>${escapeRagHtml(label)}</option>`);
+    });
+    return options.join('');
+}
+
+function setSelectOptions(select, html, fallback = '') {
+    if (!select) return;
+    const previous = select.value || fallback || '';
+    select.innerHTML = html;
+    select.value = Array.from(select.options).some(option => option.value === previous) ? previous : fallback;
+}
+
+function getRagTagOptionsHtml(selectedTag = '', {
+    includeAll = true,
+    allLabel = '全部标签',
+    collectionId = ''
+} = {}) {
+    const selected = normalizeRagTag(selectedTag);
+    const options = includeAll ? [`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(allLabel)}</option>`] : [];
+    getRagTagsForCollection(collectionId).forEach(item => {
+        const tag = normalizeRagTag(item.tag || item);
+        if (!tag) return;
+        const count = Number(item.doc_count || 0);
+        const label = `${tag}${count > 0 ? ` (${count})` : ''}`;
+        options.push(`<option value="${escapeRagAttr(tag)}" ${tag === selected ? 'selected' : ''}>${escapeRagHtml(label)}</option>`);
+    });
+    return options.join('');
+}
+
+function getLinkedRagCollectionId(source = '') {
+    const idMap = {
+        docs: 'rag-collection-filter',
+        debug: 'rag-debug-collection',
+        chat: 'chat-rag-collection-scope',
+        upload: 'knowledge-upload-collection',
+        meta: 'knowledge-doc-meta-collection'
+    };
+    return normalizeRagCollectionId(document.getElementById(idMap[source])?.value);
+}
+
+function updateRagTagSelect(selectId, collectionId = '', allLabel = '全部标签') {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    setSelectOptions(
+        select,
+        getRagTagOptionsHtml(select.value, { includeAll: true, allLabel, collectionId })
+    );
+}
+
+function updateRagCollectionControls() {
+    setSelectOptions(
+        document.getElementById('rag-collection-filter'),
+        getRagCollectionOptionsHtml('', { includeAll: true, allLabel: '全部专题库' })
+    );
+    setSelectOptions(
+        document.getElementById('knowledge-upload-collection'),
+        getRagCollectionOptionsHtml('', { includeAll: false, unassignedLabel: '不归类' })
+    );
+    setSelectOptions(
+        document.getElementById('knowledge-doc-meta-collection'),
+        getRagCollectionOptionsHtml('', { includeAll: false, unassignedLabel: '不归类' })
+    );
+    setSelectOptions(
+        document.getElementById('rag-debug-collection'),
+        getRagCollectionOptionsHtml('', { includeAll: true, allLabel: '全部知识库' })
+    );
+    setSelectOptions(
+        document.getElementById('chat-rag-collection-scope'),
+        getRagCollectionOptionsHtml('', { includeAll: true, allLabel: '全部知识库' })
+    );
+}
+
+function updateRagTagControls() {
+    updateRagTagSelect('rag-tag-filter', getLinkedRagCollectionId('docs'));
+    updateRagTagSelect('rag-debug-tag', getLinkedRagCollectionId('debug'));
+    updateRagTagSelect('chat-rag-tag-scope', getLinkedRagCollectionId('chat'));
+    refreshRagTagCheckboxControls();
+}
+
+window.getRagScopeSelection = function(source = 'chat') {
+    const idMap = {
+        chat: 'chat-rag-collection-scope',
+        debug: 'rag-debug-collection',
+        docs: 'rag-collection-filter',
+        upload: 'knowledge-upload-collection'
+    };
+    const value = normalizeRagCollectionId(document.getElementById(idMap[source] || idMap.chat)?.value);
+    const tagIdMap = {
+        chat: 'chat-rag-tag-scope',
+        debug: 'rag-debug-tag',
+        docs: 'rag-tag-filter'
+    };
+    const tag = normalizeRagTag(document.getElementById(tagIdMap[source] || tagIdMap.chat)?.value);
+    return {
+        ...(value ? { collectionId: Number(value) } : {}),
+        ...(tag ? { tagNames: [tag] } : {})
+    };
+};
+
+window.applyRagDebugScopeToChat = async function() {
+    const debugValue = normalizeRagCollectionId(document.getElementById('rag-debug-collection')?.value);
+    const debugTag = normalizeRagTag(document.getElementById('rag-debug-tag')?.value);
+    const chatSelect = document.getElementById('chat-rag-collection-scope');
+    const chatTagSelect = document.getElementById('chat-rag-tag-scope');
+    if (chatSelect) chatSelect.value = debugValue;
+    await window.loadKnowledgeTags?.(debugValue, { updateControls: false });
+    updateRagTagControls();
+    if (chatTagSelect) {
+        chatTagSelect.value = Array.from(chatTagSelect.options).some(option => option.value === debugTag) ? debugTag : '';
+    }
+    window.updateChatToolReadiness?.({ silent: true });
+};
+
+window.loadKnowledgeCollections = async function() {
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/collections`, { headers: authHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '专题库加载失败');
+        ragCollections = Array.isArray(data.data) ? data.data : [];
+        updateRagCollectionControls();
+        window.updateChatToolReadiness?.({ silent: true });
+        return ragCollections;
+    } catch (e) {
+        console.error('加载知识库专题失败', e);
+        return ragCollections;
+    }
+};
+
+function getRagTagCollectionIdsInUse() {
+    return [...new Set([
+        '',
+        getLinkedRagCollectionId('docs'),
+        getLinkedRagCollectionId('debug'),
+        getLinkedRagCollectionId('chat'),
+        getLinkedRagCollectionId('upload'),
+        getLinkedRagCollectionId('meta')
+    ].map(getRagTagCacheKey))];
+}
+
+window.loadKnowledgeTags = async function(collectionId = '', { updateControls = true, force = false } = {}) {
+    const key = getRagTagCacheKey(collectionId);
+    if (!force && ragTagsByCollection.has(key)) {
+        if (updateControls) updateRagTagControls();
+        return getRagTagsForCollection(key);
+    }
+    try {
+        const query = key ? `?collectionId=${encodeURIComponent(key)}` : '';
+        const res = await apiFetch(`${API_BASE}/rag/tags${query}`, { headers: authHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '标签加载失败');
+        setRagTagsForCollection(key, data.data);
+        if (updateControls) updateRagTagControls();
+        window.updateChatToolReadiness?.({ silent: true });
+        return getRagTagsForCollection(key);
+    } catch (e) {
+        console.error('加载知识库标签失败', e);
+        return getRagTagsForCollection(key);
+    }
+};
+
+window.refreshRagTagControlsForSelectedCollections = async function({ force = false } = {}) {
+    const ids = getRagTagCollectionIdsInUse();
+    await Promise.all(ids.map(id => window.loadKnowledgeTags(id, { updateControls: false, force })));
+    updateRagTagControls();
+    window.updateChatToolReadiness?.({ silent: true });
+};
+
+window.handleRagCollectionScopeChange = async function(source = '') {
+    await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+    if (source === 'docs') {
+        window.loadKnowledgeDocs(1);
+    } else if (source === 'chat') {
+        window.updateChatToolReadiness?.({ silent: true });
+    }
+};
+
+window.createKnowledgeCollectionFromPrompt = async function() {
+    const name = await window.showInputPrompt?.({
+        title: '新建专题库',
+        message: '专题库用于把知识库文档按业务、项目或制度范围归类。',
+        placeholder: '例如：制度规范',
+        requiredMessage: '请输入专题库名称'
+    });
+    if (!name) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/collections`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '专题库创建失败');
+        await window.loadKnowledgeCollections?.();
+        const collectionId = normalizeRagCollectionId(data.collection?.id);
+        const filter = document.getElementById('rag-collection-filter');
+        if (filter && collectionId) filter.value = collectionId;
+        showToast('专题库已创建');
+        window.loadKnowledgeDocs(1);
+    } catch (e) {
+        showToast(e.message || '专题库创建失败', 'error');
+    }
+};
+
+window.createKnowledgeTagFromPrompt = async function() {
+    const tag = await window.showInputPrompt?.({
+        title: '新建标签',
+        message: '标签用于在专题库之外补充细粒度检索范围。',
+        placeholder: '例如：合同 / 财务 / 运维',
+        requiredMessage: '请输入标签名称'
+    });
+    if (!tag) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/tags`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '标签创建失败');
+        invalidateRagTagCache();
+        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+        const safeTag = normalizeRagTag(data.tag?.tag || tag);
+        const filter = document.getElementById('rag-tag-filter');
+        if (filter && safeTag && Array.from(filter.options).some(option => option.value === safeTag)) filter.value = safeTag;
+        showToast('标签已创建');
+        window.loadKnowledgeDocs(1);
+    } catch (e) {
+        showToast(e.message || '标签创建失败', 'error');
+    }
+};
+
 function renderRagDocsPagination(total, page, limit) {
     window.renderWorkspacePagination?.('pagination-ragDocs', {
         total,
@@ -41,14 +395,25 @@ function updateRagDebugSamples(docs = []) {
 window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     try {
         ragDocsPage = Math.max(Number(page) || 1, 1);
+        await window.loadKnowledgeCollections?.();
+        await window.refreshRagTagControlsForSelectedCollections?.();
+        const activeCollectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
+        const activeTag = normalizeRagTag(document.getElementById('rag-tag-filter')?.value);
+        const collectionQuery = activeCollectionId ? `&collectionId=${encodeURIComponent(activeCollectionId)}` : '';
+        const tagQuery = activeTag ? `&tag=${encodeURIComponent(activeTag)}` : '';
+        const summaryQuery = new URLSearchParams();
+        if (activeCollectionId) summaryQuery.set('collectionId', activeCollectionId);
+        if (activeTag) summaryQuery.set('tag', activeTag);
+        const summaryUrl = `${API_BASE}/rag/summary${summaryQuery.toString() ? `?${summaryQuery.toString()}` : ''}`;
         const [res, summaryRes, qualityRes, graphSummaryRes] = await Promise.all([
-            apiFetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}`, { headers: authHeaders() }),
-            apiFetch(`${API_BASE}/rag/summary`, { headers: authHeaders() }),
+            apiFetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}${collectionQuery}${tagQuery}`, { headers: authHeaders() }),
+            apiFetch(summaryUrl, { headers: authHeaders() }),
             apiFetch(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
             apiFetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
         ]);
         const payload = await res.json();
         const docs = Array.isArray(payload) ? payload : (payload.data || []);
+        ragDocsCache = docs;
         const total = Array.isArray(payload) ? docs.length : Number(payload.total || docs.length);
         const pageSize = Array.isArray(payload) ? RAG_DOCS_PAGE_SIZE : Number(payload.limit || RAG_DOCS_PAGE_SIZE);
         const pageNo = Array.isArray(payload) ? ragDocsPage : Number(payload.page || ragDocsPage);
@@ -65,6 +430,8 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
                 <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
                 <td class="text-center">${(pageNo - 1) * pageSize + index + 1}</td>
                 <td title="${escapeRagHtml(d.name)}">${escapeRagHtml(d.name)}</td>
+                <td>${renderRagCollectionCell(d)}</td>
+                <td>${renderRagTagsCell(d)}</td>
                 <td class="text-center">
                     <span class="status-badge ${escapeRagHtml(d.status)}" title="${escapeRagHtml(d.error_message || '')}">${getRagStatusLabel(d.status)}</span>
                 </td>
@@ -79,7 +446,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="10" class="text-center">暂无知识库文档</td></tr>';
+        `).join('') || '<tr><td colspan="12" class="text-center">暂无知识库文档</td></tr>';
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
     } catch (e) {
@@ -134,6 +501,12 @@ function ensureKnowledgeUploadModal() {
                     </div>
                     <button type="button" id="knowledge-upload-close-btn" class="btn-danger-outline">关闭</button>
                 </div>
+                <div class="knowledge-upload-meta">
+                    <select id="knowledge-upload-collection" class="form-input knowledge-upload-collection" title="上传到专题库">
+                        <option value="">不归类</option>
+                    </select>
+                    <div id="knowledge-upload-tags-list" class="knowledge-tag-picker" aria-label="上传标签"></div>
+                </div>
                 <button id="knowledge-upload-zone" class="knowledge-upload-zone" type="button">
                     <strong>拖拽文件到这里，或点击选择文件</strong>
                     <span>支持 PDF、Word、Excel、CSV、Markdown、网页文本。</span>
@@ -148,16 +521,126 @@ function ensureKnowledgeUploadModal() {
         });
     }
     bindKnowledgeUploadZone(modal);
+    updateRagCollectionControls();
+    updateRagTagControls();
     return modal;
 }
 
-window.openKnowledgeUploadModal = function() {
-    ensureKnowledgeUploadModal().classList.remove('hidden');
+window.openKnowledgeUploadModal = async function() {
+    const modal = ensureKnowledgeUploadModal();
+    const collectionId = getLinkedRagCollectionId('upload');
+    await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
+    updateRagTagControls();
+    modal.classList.remove('hidden');
 };
 
 window.closeKnowledgeUploadModal = function() {
     const modal = document.getElementById('knowledge-upload-modal');
     modal?.classList.add('hidden');
+};
+
+function ensureKnowledgeDocMetaModal() {
+    let modal = document.getElementById('knowledge-doc-meta-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'knowledge-doc-meta-modal';
+        modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-doc-meta-modal-overlay';
+        modal.innerHTML = `
+            <div class="modal model-modal knowledge-doc-meta-modal">
+                <div class="model-modal-header">
+                    <h3>整理文档</h3>
+                    <p id="knowledge-doc-meta-name" class="model-modal-desc"></p>
+                </div>
+                <div class="model-form">
+                    <input type="hidden" id="knowledge-doc-meta-id">
+                    <div class="form-item">
+                        <label for="knowledge-doc-meta-collection">专题库</label>
+                        <select id="knowledge-doc-meta-collection" class="form-input" title="专题库">
+                            <option value="">不归类</option>
+                        </select>
+                    </div>
+                    <div class="form-item">
+                        <label>标签</label>
+                        <div id="knowledge-doc-meta-tags-list" class="knowledge-tag-picker" aria-label="文档标签"></div>
+                    </div>
+                </div>
+                <div class="model-modal-actions">
+                    <button type="button" id="knowledge-doc-meta-cancel-btn" class="btn-secondary">取消</button>
+                    <button type="button" id="knowledge-doc-meta-save-btn" class="btn-primary">保存</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('#knowledge-doc-meta-close-btn') || event.target.closest('#knowledge-doc-meta-cancel-btn')) {
+                window.closeKnowledgeDocMetaModal?.();
+                return;
+            }
+            if (event.target.closest('#knowledge-doc-meta-save-btn')) {
+                window.saveKnowledgeDocMeta?.();
+            }
+        });
+    }
+    updateRagCollectionControls();
+    updateRagTagControls();
+    return modal;
+}
+
+window.openKnowledgeDocMetaModal = async function(id) {
+    const doc = getCachedKnowledgeDoc(id);
+    if (!doc) return showToast('未找到文档，请刷新后重试', 'error');
+    const modal = ensureKnowledgeDocMetaModal();
+    const idInput = document.getElementById('knowledge-doc-meta-id');
+    const nameEl = document.getElementById('knowledge-doc-meta-name');
+    const collectionSelect = document.getElementById('knowledge-doc-meta-collection');
+    const tagsList = document.getElementById('knowledge-doc-meta-tags-list');
+    if (idInput) idInput.value = String(doc.id);
+    if (nameEl) nameEl.innerText = doc.name || '';
+    if (collectionSelect) {
+        collectionSelect.innerHTML = getRagCollectionOptionsHtml(doc.collection_id, { includeAll: false, unassignedLabel: '不归类' });
+        collectionSelect.value = normalizeRagCollectionId(doc.collection_id);
+    }
+    const collectionId = normalizeRagCollectionId(doc.collection_id);
+    await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
+    setRagTagCheckboxes(tagsList, getRagDocTags(doc), collectionId);
+    modal.classList.remove('hidden');
+};
+
+window.closeKnowledgeDocMetaModal = function() {
+    document.getElementById('knowledge-doc-meta-modal')?.classList.add('hidden');
+};
+
+window.saveKnowledgeDocMeta = async function() {
+    const docId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-id')?.value);
+    if (!docId) return showToast('未找到文档，请刷新后重试', 'error');
+    const collectionId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-collection')?.value);
+    const tags = getSelectedRagTagCheckboxes('knowledge-doc-meta-tags-list');
+    try {
+        const [collectionRes, tagsRes] = await Promise.all([
+            apiFetch(`${API_BASE}/rag/docs/${docId}/collection`, {
+                method: 'PUT',
+                headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ collectionId: collectionId || null })
+            }),
+            apiFetch(`${API_BASE}/rag/docs/${docId}/tags`, {
+                method: 'PUT',
+                headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags })
+            })
+        ]);
+        const collectionData = await collectionRes.json().catch(() => ({}));
+        const tagsData = await tagsRes.json().catch(() => ({}));
+        if (!collectionRes.ok || collectionData.error) throw new Error(collectionData.error || '专题库更新失败');
+        if (!tagsRes.ok || tagsData.error) throw new Error(tagsData.error || '标签更新失败');
+        window.closeKnowledgeDocMetaModal?.();
+        invalidateRagTagCache();
+        await window.loadKnowledgeCollections?.();
+        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+        showToast('文档整理信息已更新');
+        window.loadKnowledgeDocs();
+    } catch (e) {
+        showToast(e.message || '文档整理失败', 'error');
+    }
 };
 
 function bindKnowledgeUploadZone(root = document) {
@@ -309,6 +792,7 @@ window.debugRagQuery = async () => {
             },
             body: JSON.stringify({
                 query,
+                ragScope: window.getRagScopeSelection?.('debug') || {},
                 scoreThreshold: document.getElementById('rag-debug-score-threshold')?.value,
                 topK: document.getElementById('rag-debug-top-k')?.value,
                 candidateLimit: document.getElementById('rag-debug-candidate-limit')?.value
@@ -353,6 +837,10 @@ window.uploadKnowledgeDoc = async (selectedFile = null) => {
     
     const formData = new FormData();
     formData.append('file', file);
+    const selectedCollectionId = normalizeRagCollectionId(document.getElementById('knowledge-upload-collection')?.value);
+    const uploadTags = getSelectedRagTagCheckboxes('knowledge-upload-tags-list');
+    if (selectedCollectionId) formData.append('collectionId', selectedCollectionId);
+    if (uploadTags.length) formData.append('tags', uploadTags.join(','));
 
     showToast('正在上传并向量化文档，请稍候...', 'info');
     if (fileInput) fileInput.value = ''; // 重置 input
@@ -367,7 +855,11 @@ window.uploadKnowledgeDoc = async (selectedFile = null) => {
         if (data.error) throw new Error(data.error);
         
         showToast(data.message || '文档已加入后台索引队列');
+        document.querySelectorAll('#knowledge-upload-tags-list input[type="checkbox"]').forEach(input => { input.checked = false; });
         window.closeKnowledgeUploadModal?.();
+        invalidateRagTagCache();
+        await window.loadKnowledgeCollections?.();
+        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档上传失败', 'error');
@@ -406,3 +898,23 @@ window.deleteKnowledgeDoc = async (id) => {
         showToast('删除失败', 'error');
     }
 };
+
+document.addEventListener('change', async (event) => {
+    const id = event.target?.id;
+    if (id === 'rag-debug-collection') {
+        await window.handleRagCollectionScopeChange?.('debug');
+        return;
+    }
+    if (id === 'knowledge-upload-collection') {
+        await window.handleRagCollectionScopeChange?.('upload');
+        return;
+    }
+    if (id === 'knowledge-doc-meta-collection') {
+        await window.handleRagCollectionScopeChange?.('meta');
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    window.loadKnowledgeCollections?.();
+    window.refreshRagTagControlsForSelectedCollections?.();
+});
