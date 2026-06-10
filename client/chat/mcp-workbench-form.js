@@ -199,6 +199,23 @@ function updateMcpDbTypeFields(mode = 'create') {
     mcpFormEl('db-password', mode)?.classList.toggle('hidden', dbType === 'sqlite');
 }
 
+function setMcpDbAdvancedOpen(open = false, mode = 'create') {
+    const details = mcpFormEl('db-advanced', mode);
+    if (details) details.open = Boolean(open);
+}
+
+function hasMcpDbAdvancedConfig(database = {}) {
+    const fieldAllowlist = database.field_allowlist || {};
+    return Boolean(
+        (database.table_allowlist || []).length
+        || Object.keys(fieldAllowlist).length
+        || (database.sensitive_fields || []).length
+        || String(database.row_policy_hint || '').trim()
+        || database.sql_cost_estimate === false
+        || (database.query_timeout_ms && Number(database.query_timeout_ms) !== 20000)
+    );
+}
+
 function setMcpFormDefaults(mode = 'create', type = 'external') {
     [
         'id', 'name', 'url', 'key', 'health-check-url', 'timeout-ms', 'auth-mode',
@@ -221,6 +238,7 @@ function setMcpFormDefaults(mode = 'create', type = 'external') {
     if (validateSchema) validateSchema.checked = false;
     const diagnostics = mcpFormEl('diagnostics', mode);
     if (diagnostics) diagnostics.textContent = '';
+    setMcpDbAdvancedOpen(false, mode);
     const imAllowAtAll = mcpFormEl('im-allow-at-all', mode);
     if (imAllowAtAll) imAllowAtAll.checked = false;
     const shared = mcpFormEl('shared', mode);
@@ -380,6 +398,7 @@ function fillMcpForm(server, mode = 'create') {
         mcpFormEl('db-row-policy-hint', mode).value = database.row_policy_hint || '';
         mcpFormEl('db-query-timeout-ms', mode).value = database.query_timeout_ms || '';
         mcpFormEl('db-sql-cost-estimate', mode).checked = database.sql_cost_estimate !== false;
+        setMcpDbAdvancedOpen(hasMcpDbAdvancedConfig(database), mode);
         updateMcpDbTypeFields(mode);
         updateMcpDatabaseGuidance(mode);
         updateMcpConfigHelper(mode);

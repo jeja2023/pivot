@@ -31,6 +31,28 @@
         justify-content: flex-start;
     }
 
+    .mcp-edit-modal {
+        width: min(560px, calc(100vw - 24px));
+    }
+
+    .mcp-form-row,
+    .mcp-db-advanced-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-db-advanced summary {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 10px;
+    }
+
+    .mcp-db-advanced summary::after {
+        position: absolute;
+        right: 10px;
+        top: 9px;
+    }
+
 }
 
 @media (min-width: 1280px) {

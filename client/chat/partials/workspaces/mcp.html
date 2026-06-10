@@ -59,7 +59,7 @@
                     </div>
                     <textarea id="mcp-edit-example-prompts" class="form-input" placeholder="示例提示词，每行一个，帮助使用者理解何时调用该服务"></textarea>
                 </div>
-                <div id="mcp-edit-db-fields" class="mcp-field-group hidden">
+                <div id="mcp-edit-db-fields" class="mcp-field-group mcp-db-field-group hidden">
                     <div class="mcp-form-row">
                         <select id="mcp-edit-db-type" class="form-input">
                             <option value="postgres">PostgreSQL</option>
@@ -80,19 +80,27 @@
                         <input id="mcp-edit-db-schema" class="form-input" placeholder="数据分组/Schema，可选；不确定就留空">
                         <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
                     </div>
-                    <label class="mcp-shared-row">
+                    <label class="mcp-shared-row mcp-db-inline-option">
                         <input type="checkbox" id="mcp-edit-db-ssl"> 启用 SSL / TLS
                     </label>
-                    <textarea id="mcp-edit-db-table-allowlist" class="form-input" placeholder="允许访问的表/集合白名单，每行一个；留空表示不限制"></textarea>
-                    <textarea id="mcp-edit-db-field-allowlist" class="form-input" placeholder="字段白名单，可写 users:id,name 或 users.id；启用后 SQL 需显式列名"></textarea>
-                    <textarea id="mcp-edit-db-sensitive-fields" class="form-input" placeholder="敏感字段，每行一个，例如 phone、email、id_card，返回结果会脱敏"></textarea>
-                    <div class="mcp-form-row">
-                        <input id="mcp-edit-db-row-policy-hint" class="form-input" placeholder="行级权限提示，例如 仅查询当前部门数据">
-                        <input id="mcp-edit-db-query-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="查询超时 ms，默认 20000">
-                    </div>
-                    <label class="mcp-shared-row">
-                        <input type="checkbox" id="mcp-edit-db-sql-cost-estimate" checked> 返回 SQL 成本估计提示
-                    </label>
+                    <details id="mcp-edit-db-advanced" class="mcp-db-advanced">
+                        <summary>
+                            <span>高级查询与安全策略</span>
+                            <small>表白名单、字段白名单、脱敏与超时</small>
+                        </summary>
+                        <div class="mcp-db-advanced-grid">
+                            <textarea id="mcp-edit-db-table-allowlist" class="form-input" placeholder="允许访问的表/集合白名单，每行一个；留空表示不限制"></textarea>
+                            <textarea id="mcp-edit-db-field-allowlist" class="form-input" placeholder="字段白名单，可写 users:id,name 或 users.id；启用后 SQL 需显式列名"></textarea>
+                            <textarea id="mcp-edit-db-sensitive-fields" class="form-input" placeholder="敏感字段，每行一个，例如 phone、email、id_card，返回结果会脱敏"></textarea>
+                            <div class="mcp-form-row">
+                                <input id="mcp-edit-db-row-policy-hint" class="form-input" placeholder="行级权限提示，例如 仅查询当前部门数据">
+                                <input id="mcp-edit-db-query-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="查询超时 ms，默认 20000">
+                            </div>
+                            <label class="mcp-shared-row">
+                                <input type="checkbox" id="mcp-edit-db-sql-cost-estimate" checked> 返回 SQL 成本估计提示
+                            </label>
+                        </div>
+                    </details>
                 </div>
                 <div id="mcp-edit-reports-fields" class="mcp-field-group hidden">
                     <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="报表/数据文件目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>

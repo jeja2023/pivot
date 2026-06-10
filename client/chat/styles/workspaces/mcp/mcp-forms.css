@@ -39,7 +39,7 @@
 }
 
 .mcp-edit-modal {
-    width: min(560px, calc(100vw - 32px));
+    width: min(720px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     padding: 0;
     overflow: hidden;
@@ -63,9 +63,9 @@
 .mcp-edit-form {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     max-height: calc(100vh - 106px);
-    padding: 14px 16px 16px;
+    padding: 12px 16px 14px;
     overflow: auto;
 }
 
@@ -78,7 +78,7 @@
 }
 
 .mcp-edit-form textarea {
-    min-height: 82px;
+    min-height: 72px;
     resize: vertical;
 }
 
@@ -143,6 +143,88 @@
     gap: 8px;
     color: var(--text-muted);
     font-size: 0.78rem;
+}
+
+.mcp-db-field-group {
+    gap: 7px;
+}
+
+.mcp-db-inline-option {
+    min-height: 26px;
+}
+
+.mcp-db-advanced {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.mcp-db-advanced summary {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 36px;
+    padding: 0 10px;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 800;
+    list-style: none;
+}
+
+.mcp-db-advanced summary::-webkit-details-marker {
+    display: none;
+}
+
+.mcp-db-advanced summary::after {
+    content: "+";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    line-height: 1;
+}
+
+.mcp-db-advanced[open] summary::after {
+    content: "-";
+}
+
+.mcp-db-advanced summary small {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-db-advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+    border-top: 1px solid var(--border);
+    background: #fbfdff;
+}
+
+.mcp-db-advanced-grid textarea {
+    min-height: 64px;
+}
+
+.mcp-db-advanced-grid textarea:nth-of-type(3),
+.mcp-db-advanced-grid .mcp-form-row,
+.mcp-db-advanced-grid .mcp-shared-row {
+    grid-column: 1 / -1;
 }
 
 .mcp-inline-check {
