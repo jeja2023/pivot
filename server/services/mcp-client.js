@@ -61,6 +61,37 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
     }
 }
 
+function formatMcpOwner(row = {}) {
+    const rawUserId = row.user_id ?? row.owner_id;
+    const userId = rawUserId === null || rawUserId === undefined || rawUserId === ''
+        ? null
+        : Number(rawUserId);
+    if (!userId) {
+        return {
+            id: null,
+            username: '',
+            nickname: '全局',
+            unit: '',
+            role: '',
+            displayName: '全局',
+            scope: 'global'
+        };
+    }
+    const username = String(row.owner_username || row.username || '').trim();
+    const nickname = String(row.owner_nickname || row.nickname || '').trim();
+    const unit = String(row.owner_unit || row.unit || '').trim();
+    const role = String(row.owner_role || row.role || '').trim();
+    return {
+        id: userId,
+        username,
+        nickname,
+        unit,
+        role,
+        displayName: nickname || username || `用户 ${userId}`,
+        scope: 'user'
+    };
+}
+
 function normalizeServerRow(row) {
     if (!row) return null;
     let config = {};
@@ -86,6 +117,7 @@ function normalizeServerRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         has_api_key: Boolean(row.api_key),
+        owner: formatMcpOwner(row),
         config,
         server_type: databaseConnection ? 'database' : (builtinType || 'external'),
         database_connection: databaseConnection,
@@ -105,10 +137,13 @@ function getAccessibleMcpServer(serverId, user) {
 
 function listMcpServers(user) {
     const rows = db.prepare(`
-        SELECT * FROM mcp_servers
-        WHERE status != 'deleted'
-          AND (user_id IS NULL OR user_id = ? OR ? = 1)
-        ORDER BY user_id IS NOT NULL, name ASC
+        SELECT s.*, u.username AS owner_username, u.nickname AS owner_nickname,
+               u.unit AS owner_unit, u.role AS owner_role
+        FROM mcp_servers s
+        LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.status != 'deleted'
+          AND (s.user_id IS NULL OR s.user_id = ? OR ? = 1)
+        ORDER BY s.user_id IS NOT NULL, s.name ASC
     `).all(user.id, isSuperAdmin(user) ? 1 : 0);
     return rows.map(normalizeServerRow);
 }
@@ -253,18 +288,24 @@ async function refreshMcpTools(server, user = null) {
 function listCachedMcpTools(serverId = null, user = null) {
     if (serverId) {
         return db.prepare(`
-            SELECT t.*, s.name AS server_name, s.base_url AS server_base_url, c.database_type
+            SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+                   u.username AS owner_username, u.nickname AS owner_nickname,
+                   u.unit AS owner_unit, u.role AS owner_role, c.database_type
             FROM mcp_tool_cache t
             JOIN mcp_servers s ON s.id = t.server_id
+            LEFT JOIN users u ON u.id = s.user_id
             LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
             WHERE t.server_id = ?
             ORDER BY t.name ASC
         `).all(serverId).map(formatMcpTool);
     }
     const rows = db.prepare(`
-        SELECT t.*, s.name AS server_name, s.base_url AS server_base_url, c.database_type
+        SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+               u.username AS owner_username, u.nickname AS owner_nickname,
+               u.unit AS owner_unit, u.role AS owner_role, c.database_type
         FROM mcp_tool_cache t
         JOIN mcp_servers s ON s.id = t.server_id
+        LEFT JOIN users u ON u.id = s.user_id
         LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
         WHERE s.status = 'active'
           AND (? IS NULL OR s.user_id IS NULL OR s.user_id = ? OR ? = 1)
@@ -290,6 +331,7 @@ function formatMcpTool(row) {
         serverName: row.server_name,
         serverType,
         databaseType: row.database_type || '',
+        owner: formatMcpOwner(row),
         name: row.name,
         fullName: `mcp.${row.server_id}.${row.name}`,
         description: row.description || '',

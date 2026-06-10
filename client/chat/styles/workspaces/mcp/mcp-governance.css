@@ -310,6 +310,7 @@
 .mcp-tool-meta {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 5px;
     min-width: 0;
 }
@@ -332,4 +333,11 @@
     overflow-wrap: anywhere;
     white-space: normal;
     word-break: break-word;
+}
+
+.mcp-tool-meta .mcp-tool-owner {
+    border-color: rgba(100, 116, 139, 0.18);
+    color: #475569;
+    background: #ffffff;
+    font-family: inherit;
 }

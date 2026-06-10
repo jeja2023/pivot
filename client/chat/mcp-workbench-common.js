@@ -363,14 +363,30 @@ function mcpToolDescription(tool) {
     return mcpToolDisplayMap[tool?.name]?.description || tool?.description || tool?.serverName || '';
 }
 
+function mcpOwnerLabel(item = {}) {
+    const owner = item.owner || {};
+    if (owner.scope === 'global' || owner.id === null || item.user_id === null) return '全局';
+    return owner.displayName || owner.nickname || owner.username || (item.user_id ? `用户 ${item.user_id}` : '');
+}
+
+function mcpShouldShowOwner(item = {}) {
+    const owner = item.owner || {};
+    if (owner.scope === 'global' || owner.id === null || item.user_id === null) return true;
+    return Boolean(owner.id && String(owner.id) !== String(currentUser?.id || ''));
+}
+
 function mcpToolsForServer(serverId, fallbackToolNames = []) {
     const tools = mcpToolsCache.filter(tool => String(tool.serverId || tool.server_id || '') === String(serverId || ''));
     if (tools.length || !fallbackToolNames.length) return tools;
+    const server = mcpServersCache.find(item => String(item.id) === String(serverId || ''));
     return fallbackToolNames.map(name => ({
         name,
         fullName: name,
         description: mcpToolDisplayMap[name]?.description || '',
-        serverId
+        serverId,
+        serverName: server?.name || '',
+        owner: server?.owner || null,
+        user_id: server?.user_id ?? null
     }));
 }
 

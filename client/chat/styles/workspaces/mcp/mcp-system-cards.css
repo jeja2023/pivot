@@ -191,6 +191,14 @@
     min-width: 0;
 }
 
+.mcp-instance-title > span {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
 .mcp-instance-title strong {
     font-size: 0.86rem;
     font-weight: 800;
@@ -212,6 +220,16 @@
     line-height: 16px;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.mcp-instance-title .mcp-owner-badge {
+    border-color: rgba(100, 116, 139, 0.18);
+    color: #475569;
+    background: #f8fafc;
+}
+
+.mcp-system-card.is-enabled .mcp-instance-title .mcp-owner-badge::before {
+    content: none;
 }
 
 .mcp-instance-actions {

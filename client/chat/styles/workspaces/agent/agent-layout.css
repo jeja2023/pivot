@@ -616,6 +616,18 @@
     line-height: 1.25;
 }
 
+#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list .agent-tool-chip small.agent-tool-owner {
+    display: block;
+    grid-column: 2;
+    margin-top: 2px;
+    overflow: hidden;
+    color: #64748b;
+    font-size: 0.56rem;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(4) {
     grid-area: art-head;
 }

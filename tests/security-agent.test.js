@@ -339,6 +339,48 @@ test('agent quick task exposes save template action without opening templates pa
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
 });
 
+test('role and policy library serves chat free task and workflow entry points', () => {
+    const chatPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
+    const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
+    const settingsNav = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'shell-start.html'), 'utf8');
+    const settingsPrompts = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'prompts.html'), 'utf8');
+    const preAppModals = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'app.js'), 'utf8');
+    const extra = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'extra.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'sessions-prompts.css'), 'utf8');
+
+    assert.match(settingsNav, />角色与规范库<\/button>/);
+    assert.match(settingsPrompts, /id="prompt-type-filter"/);
+    assert.match(settingsPrompts, /id="prompt-surface-filter"/);
+    assert.match(settingsPrompts, /<option value="workflow">工作流<\/option>/);
+    assert.match(preAppModals, /id="p-type"/);
+    assert.match(preAppModals, /name="p-target-surfaces" value="chat"/);
+    assert.match(preAppModals, /name="p-target-surfaces" value="agent"/);
+    assert.match(preAppModals, /name="p-target-surfaces" value="workflow"/);
+    assert.match(preAppModals, /id="prompt-apply-modal-container"/);
+
+    assert.match(chatPartial, /id="chat-prompt-library-btn"/);
+    assert.doesNotMatch(chatPartial, /id="chat-prompt-library-btn" class="[^"]*chat-tool-toggle/);
+    assert.match(agentPartial, /id="agent-prompt-library-btn"/);
+    assert.match(dagPartial, /id="agent-dag-prompt-library-btn"/);
+    assert.match(app, /bind\('chat-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('chat'\)/);
+    assert.match(app, /bind\('agent-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('agent'\)/);
+    assert.match(app, /bind\('agent-dag-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('workflow'\)/);
+
+    assert.match(extra, /const PROMPT_TARGETS = \['chat', 'agent', 'workflow'\]/);
+    assert.match(extra, /targetSurfaces: getPromptTargetChecks\(\)/);
+    assert.match(extra, /function renderPromptSurfaceActions/);
+    assert.match(extra, /async function applyPromptToAgent/);
+    assert.match(extra, /agent-context-notes/);
+    assert.match(extra, /async function applyPromptToWorkflow/);
+    assert.match(extra, /agent\.llm/);
+    assert.match(extra, /llmNode\.input\.systemPrompt/);
+    assert.match(extra, /llmNode\.input\.prompt/);
+    assert.match(css, /\.prompt-library-toolbar\s*\{/);
+    assert.match(css, /\.prompt-apply-modal\s*\{/);
+});
+
 test('agent stats chart wizard explains optional database schema field', () => {
     const source = readDagEditorSourceBundle();
     assert.match(source, /Schema \/ 命名空间（可选）/);

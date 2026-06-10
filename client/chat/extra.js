@@ -1,73 +1,383 @@
 // --- 扩展功能模块 Extra Features ---
+const PROMPT_TYPE_LABELS = {
+    role: '角色',
+    output: '输出规范',
+    method: '任务方法',
+    workflow: '工作流节点'
+};
+const PROMPT_TARGET_LABELS = {
+    chat: '聊天',
+    agent: '自由任务',
+    workflow: '工作流'
+};
+const PROMPT_TARGETS = ['chat', 'agent', 'workflow'];
+let promptLibraryCache = [];
+let promptApplyTarget = 'chat';
+
+function normalizePromptType(value) {
+    return PROMPT_TYPE_LABELS[value] ? value : 'role';
+}
+
+function normalizePromptTargets(value) {
+    const raw = Array.isArray(value) ? value : String(value || 'chat,agent,workflow').split(',');
+    const list = [...new Set(raw.map(item => String(item || '').trim()).filter(item => PROMPT_TARGETS.includes(item)))];
+    return list.length ? list : [...PROMPT_TARGETS];
+}
+
+function normalizePromptItem(item = {}) {
+    const targetSurfaces = normalizePromptTargets(item.targetSurfaces || item.target_surfaces);
+    return {
+        ...item,
+        type: normalizePromptType(item.type),
+        description: item.description || '',
+        targetSurfaces,
+        target_surfaces: targetSurfaces.join(',')
+    };
+}
+
+function promptTypeLabel(type) {
+    return PROMPT_TYPE_LABELS[normalizePromptType(type)] || '角色';
+}
+
+function promptTargetLabel(target) {
+    return PROMPT_TARGET_LABELS[target] || target;
+}
+
+function getPromptById(id) {
+    return promptLibraryCache.find(item => String(item.id) === String(id)) || null;
+}
+
+function promptMatchesFilters(prompt, { type = '', target = '', query = '' } = {}) {
+    if (type && prompt.type !== type) return false;
+    if (target && !prompt.targetSurfaces.includes(target)) return false;
+    const keyword = String(query || '').trim().toLowerCase();
+    if (!keyword) return true;
+    return [prompt.name, prompt.category, prompt.description, prompt.content]
+        .some(value => String(value || '').toLowerCase().includes(keyword));
+}
+
+function renderPromptChips(prompt) {
+    const chips = [
+        promptTypeLabel(prompt.type),
+        prompt.category || '通用',
+        ...(prompt.targetSurfaces || []).map(promptTargetLabel)
+    ];
+    return chips.map(item => `<span class="prompt-chip">${escapeHtml(item)}</span>`).join('');
+}
+
+function renderPromptSurfaceActions(prompt) {
+    return PROMPT_TARGETS
+        .filter(target => prompt.targetSurfaces.includes(target))
+        .map(target => `<button type="button" class="btn-secondary" data-prompt-action="apply-target" data-prompt-target="${target}" data-prompt-id="${prompt.id}">${escapeHtml(promptTargetLabel(target))}</button>`)
+        .join('');
+}
+
+function renderPromptGrid() {
+    const grid = document.getElementById('prompt-grid');
+    if (!grid) return;
+    const filters = {
+        type: document.getElementById('prompt-type-filter')?.value || '',
+        target: document.getElementById('prompt-surface-filter')?.value || '',
+        query: document.getElementById('prompt-search-input')?.value || ''
+    };
+    const prompts = promptLibraryCache.filter(prompt => promptMatchesFilters(prompt, filters));
+    grid.innerHTML = prompts.length ? prompts.map(prompt => `
+        <div class="prompt-card">
+            <div class="prompt-card-head">
+                <h4 title="${escapeHtml(prompt.name)}">${escapeHtml(prompt.name)}</h4>
+                <span>${escapeHtml(prompt.scope === 'global' ? '全局' : '个人')}</span>
+            </div>
+            <div class="prompt-chip-row">${renderPromptChips(prompt)}</div>
+            ${prompt.description ? `<div class="prompt-card-desc">${escapeHtml(prompt.description)}</div>` : ''}
+            <p>${escapeHtml(prompt.content)}</p>
+            <div class="prompt-actions prompt-actions-targets">
+                ${renderPromptSurfaceActions(prompt)}
+                ${(prompt.scope !== 'global' || isSuperAdminUser()) ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt-id="${prompt.id}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${prompt.id}">删除</button>` : ''}
+            </div>
+        </div>
+    `).join('') : '<div class="prompt-empty-state">暂无可用角色与规范</div>';
+}
+
 window.loadPrompts = async function() {
     const res = await apiFetch(`${API_BASE}/prompts`, { headers: authHeaders() });
     const data = await res.json();
-    const grid = document.getElementById('prompt-grid');
-    if (!grid) return;
-    grid.innerHTML = data.length ? data.map(p => `
-        <div class="prompt-card">
-            <div class="prompt-card-head">
-                <h4>${escapeHtml(p.name)}</h4>
-                <span>${escapeHtml(p.scope === 'global' ? '全局' : '个人')}</span>
-            </div>
-            <p>${escapeHtml(p.content)}</p>
-            <div class="prompt-actions">
-                <button type="button" class="btn-secondary" data-prompt-action="apply" data-prompt="${encodeActionArg(p)}">应用</button>
-                ${(p.scope !== 'global' || isSuperAdminUser()) ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt="${encodeActionArg(p)}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${p.id}">删除</button>` : ''}
-            </div>
-        </div>
-    `).join('') : '<div class="prompt-empty-state">暂无指令模板</div>';
+    promptLibraryCache = Array.isArray(data) ? data.map(normalizePromptItem) : [];
+    renderPromptGrid();
+    renderPromptApplyList();
+    return promptLibraryCache;
+};
+
+async function ensurePromptLibraryLoaded() {
+    if (!promptLibraryCache.length) await window.loadPrompts();
+    return promptLibraryCache;
 }
+
+function promptBlock(prompt) {
+    return `【${promptTypeLabel(prompt.type)}：${prompt.name}】\n${prompt.content}`.trim();
+}
+
+function appendTextBlock(current, block) {
+    const existing = String(current || '').trim();
+    const addition = String(block || '').trim();
+    if (!addition) return existing;
+    if (existing.includes(addition)) return existing;
+    return existing ? `${existing}\n\n${addition}` : addition;
+}
+
+async function applyPromptToChat(prompt) {
+    if (!currentSessionId) return showToast('请先选择或新建一个对话', 'error');
+    showConfirm('套用到聊天', '确定将这条角色与规范应用到当前对话的系统提示词吗？', async () => {
+        try {
+            const res = await apiFetch(`${API_BASE}/sessions/${currentSessionId}/system-prompt`, {
+                method: 'PUT',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ systemPrompt: prompt.content })
+            });
+            if (!res.ok) throw new Error('应用失败');
+            window.closePromptLibrary();
+            showToast('已应用到当前聊天');
+            window.showMainWorkspace?.('chat');
+        } catch (e) {
+            showToast(e.message || '应用失败', 'error');
+        }
+    });
+}
+
+async function applyPromptToAgent(prompt) {
+    if (document.body?.dataset.activeWorkspace !== 'agent' && typeof window.openAgentWorkbench === 'function') {
+        await window.openAgentWorkbench();
+    } else if (!document.getElementById('agent-context-notes') && typeof window.openAgentWorkbench === 'function') {
+        await window.openAgentWorkbench();
+    } else if (typeof window.showMainWorkspace === 'function') {
+        window.showMainWorkspace('agent');
+    }
+    const notes = document.getElementById('agent-context-notes');
+    if (!notes) return showToast('请先打开自由任务工作台', 'error');
+    notes.value = appendTextBlock(notes.value, promptBlock(prompt));
+    const contextMode = document.getElementById('agent-context-mode');
+    if (contextMode) contextMode.value = 'custom';
+    notes.dispatchEvent(new Event('input', { bubbles: true }));
+    window.closePromptLibrary();
+    showToast('已加入自由任务补充说明');
+    window.showMainWorkspace?.('agent');
+}
+
+function createPromptLlmNode(nodes, prompt) {
+    const input = typeof defaultLlmInput === 'function' ? defaultLlmInput() : {};
+    return {
+        id: typeof uniqueId === 'function' ? uniqueId(nodes.map(node => node.id), 'llm') : `llm_${nodes.length + 1}`,
+        title: `${promptTypeLabel(prompt.type)}处理`,
+        tool: 'agent.llm',
+        input,
+        dependsOn: [],
+        condition: 'success',
+        retryLimit: 0,
+        timeoutMs: 0,
+        onError: 'skip_dependents'
+    };
+}
+
+async function applyPromptToWorkflow(prompt) {
+    if (document.body?.dataset.activeWorkspace !== 'agent-dag' && typeof window.openAgentDagWorkbench === 'function') {
+        await window.openAgentDagWorkbench();
+    } else if (typeof window.showMainWorkspace === 'function') {
+        window.showMainWorkspace('agent-dag');
+    }
+    const textarea = document.getElementById('agent-dag-spec');
+    if (!textarea) return showToast('请先打开工作流编排', 'error');
+    let spec;
+    try {
+        spec = typeof parseAgentWorkflowText === 'function' ? parseAgentWorkflowText() : JSON.parse(textarea.value || '{"nodes":[]}');
+    } catch (e) {
+        return showToast('工作流 JSON 需要先修正后再套用规范', 'error');
+    }
+    const normalized = Array.isArray(spec) ? { nodes: spec } : (spec && typeof spec === 'object' ? spec : { nodes: [] });
+    const nodes = Array.isArray(normalized.nodes) ? normalized.nodes : [];
+    let llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    if (!llmNode) {
+        llmNode = createPromptLlmNode(nodes, prompt);
+        nodes.push(llmNode);
+    }
+    llmNode.input = llmNode.input && typeof llmNode.input === 'object' ? llmNode.input : {};
+    if (prompt.type === 'role') {
+        llmNode.input.systemPrompt = appendTextBlock(llmNode.input.systemPrompt, promptBlock(prompt));
+    } else {
+        llmNode.input.prompt = appendTextBlock(llmNode.input.prompt || '请根据本次工作流目标完成分析：\n{{goal}}', promptBlock(prompt));
+    }
+    const nextSpec = { ...normalized, nodes };
+    if (typeof writeAgentWorkflowText === 'function') {
+        writeAgentWorkflowText(nextSpec);
+    } else {
+        textarea.value = JSON.stringify(nextSpec, null, 2);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    window.refreshAgentDagEditor?.();
+    window.closePromptLibrary();
+    showToast('已套用到工作流大模型节点');
+    window.showMainWorkspace?.('agent-dag');
+}
+
+async function applyPromptToTarget(prompt, target = promptApplyTarget) {
+    const surface = PROMPT_TARGETS.includes(target) ? target : 'chat';
+    if (!prompt.targetSurfaces.includes(surface)) {
+        return showToast('这条规范未配置到当前入口', 'error');
+    }
+    if (surface === 'chat') return applyPromptToChat(prompt);
+    if (surface === 'agent') return applyPromptToAgent(prompt);
+    if (surface === 'workflow') return applyPromptToWorkflow(prompt);
+    return null;
+}
+
+function renderPromptApplyList() {
+    const list = document.getElementById('prompt-apply-list');
+    if (!list) return;
+    const query = document.getElementById('prompt-apply-search')?.value || '';
+    const type = document.getElementById('prompt-apply-type-filter')?.value || '';
+    const prompts = promptLibraryCache.filter(prompt => promptMatchesFilters(prompt, { target: promptApplyTarget, query, type }));
+    list.innerHTML = prompts.length ? prompts.map(prompt => `
+        <button type="button" class="prompt-apply-item" data-prompt-apply-id="${prompt.id}">
+            <span class="prompt-apply-main">
+                <strong>${escapeHtml(prompt.name)}</strong>
+                <small>${escapeHtml(prompt.description || prompt.content)}</small>
+            </span>
+            <span class="prompt-apply-side">
+                <em>${escapeHtml(promptTypeLabel(prompt.type))}</em>
+                <small>${escapeHtml(prompt.category || '通用')}</small>
+            </span>
+        </button>
+    `).join('') : '<div class="prompt-empty-state">当前入口暂无可用角色与规范</div>';
+    const status = document.getElementById('prompt-apply-status');
+    if (status) status.textContent = `${promptTargetLabel(promptApplyTarget)} · ${prompts.length} 条可用`;
+}
+
+window.openPromptLibrary = async function(target = 'chat') {
+    promptApplyTarget = PROMPT_TARGETS.includes(target) ? target : 'chat';
+    await ensurePromptLibraryLoaded();
+    const title = document.getElementById('prompt-apply-title');
+    const desc = document.getElementById('prompt-apply-desc');
+    if (title) title.textContent = `套用到${promptTargetLabel(promptApplyTarget)}`;
+    if (desc) desc.textContent = '选择一条角色与规范应用到当前入口。';
+    const search = document.getElementById('prompt-apply-search');
+    const typeFilter = document.getElementById('prompt-apply-type-filter');
+    if (search) search.value = '';
+    if (typeFilter) typeFilter.value = '';
+    renderPromptApplyList();
+    document.getElementById('prompt-apply-modal-container')?.classList.remove('hidden');
+    setTimeout(() => search?.focus?.({ preventScroll: true }), 0);
+};
+
+window.closePromptLibrary = () => document.getElementById('prompt-apply-modal-container')?.classList.add('hidden');
+
+window.applyPrompt = async (content) => applyPromptToChat(normalizePromptItem({ name: '当前规范', content, type: 'role', targetSurfaces: ['chat'] }));
+
+function setPromptTargetChecks(targets) {
+    const allowed = normalizePromptTargets(targets);
+    document.querySelectorAll('input[name="p-target-surfaces"]').forEach(input => {
+        input.checked = allowed.includes(input.value);
+    });
+}
+
+function getPromptTargetChecks() {
+    return [...document.querySelectorAll('input[name="p-target-surfaces"]:checked')].map(input => input.value);
+}
+
+window.openPromptModal = () => {
+    resetPromptForm();
+    document.getElementById('prompt-modal-title').innerText = '新增规范';
+    document.getElementById('p-scope').disabled = !isSuperAdminUser();
+    document.getElementById('prompt-modal-container').classList.remove('hidden');
+};
+window.closePromptModal = () => document.getElementById('prompt-modal-container').classList.add('hidden');
+window.resetPromptForm = () => {
+    document.getElementById('p-id').value = '';
+    document.getElementById('p-name').value = '';
+    document.getElementById('p-category').value = '通用';
+    document.getElementById('p-description').value = '';
+    document.getElementById('p-type').value = 'role';
+    document.getElementById('p-scope').value = isSuperAdminUser() ? 'global' : 'personal';
+    document.getElementById('p-content').value = '';
+    setPromptTargetChecks(PROMPT_TARGETS);
+};
+
+window.prepareEditPrompt = (prompt) => {
+    const p = normalizePromptItem(prompt);
+    document.getElementById('p-id').value = p.id;
+    document.getElementById('p-name').value = p.name;
+    document.getElementById('p-category').value = p.category || '通用';
+    document.getElementById('p-description').value = p.description || '';
+    document.getElementById('p-type').value = p.type || 'role';
+    document.getElementById('p-scope').value = p.scope || 'personal';
+    document.getElementById('p-scope').disabled = !isSuperAdminUser() || p.scope === 'global';
+    document.getElementById('p-content').value = p.content;
+    setPromptTargetChecks(p.targetSurfaces);
+    document.getElementById('prompt-modal-title').innerText = '编辑规范';
+    document.getElementById('prompt-modal-container').classList.remove('hidden');
+};
+
+window.savePrompt = async () => {
+    const id = document.getElementById('p-id').value;
+    const payload = {
+        name: document.getElementById('p-name').value,
+        category: document.getElementById('p-category').value,
+        description: document.getElementById('p-description').value,
+        type: document.getElementById('p-type').value,
+        targetSurfaces: getPromptTargetChecks(),
+        scope: document.getElementById('p-scope').value,
+        content: document.getElementById('p-content').value
+    };
+    const res = await apiFetch(API_BASE + (id ? `/prompts/${id}` : '/prompts'), {
+        method: id ? 'PUT' : 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+        const data = await res.json();
+        return showToast(data.error || '保存失败', 'error');
+    }
+    window.closePromptModal();
+    await window.loadPrompts();
+    showToast('角色与规范已保存');
+};
+
+window.deletePrompt = (id) => {
+    showConfirm('删除角色与规范', '确定删除这条角色与规范吗？', async () => {
+        const res = await apiFetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
+        if (res.ok) {
+            showToast('角色与规范已删除');
+            await window.loadPrompts();
+        }
+    });
+};
 
 document.getElementById('prompt-grid')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-prompt-action]');
     if (!button) return;
     const action = button.dataset.promptAction;
-    const prompt = button.dataset.prompt ? JSON.parse(decodeURIComponent(button.dataset.prompt)) : null;
-    if (action === 'apply' && prompt) return window.applyPrompt(prompt.content);
+    const prompt = getPromptById(button.dataset.promptId);
+    if (action === 'apply-target' && prompt) return applyPromptToTarget(prompt, button.dataset.promptTarget);
     if (action === 'edit' && prompt) return window.prepareEditPrompt(prompt);
     if (action === 'delete' && button.dataset.promptId) return window.deletePrompt(button.dataset.promptId);
+    return null;
 });
 
-window.applyPrompt = async (content) => {
-    if (!currentSessionId) return showToast('请先选择一个对话', 'error');
-    showConfirm('切换 AI 角色', '确定要将该角色指令应用到当前对话吗？', async () => {
-        try {
-            const res = await apiFetch(`${API_BASE}/sessions/${currentSessionId}/system-prompt`, {
-                method: 'PUT',
-                headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ systemPrompt: content })
-            });
-            if (res.ok) { showToast('AI 角色切换成功'); closeModal(); }
-        } catch (e) { showToast('应用失败', 'error'); }
-    });
-};
-
-window.openPromptModal = () => { resetPromptForm(); document.getElementById('prompt-modal-title').innerText = '添加指令'; document.getElementById('p-scope').disabled = !isSuperAdminUser(); document.getElementById('prompt-modal-container').classList.remove('hidden'); };
-window.closePromptModal = () => document.getElementById('prompt-modal-container').classList.add('hidden');
-window.resetPromptForm = () => { document.getElementById('p-id').value = ''; document.getElementById('p-name').value = ''; document.getElementById('p-category').value = '通用'; document.getElementById('p-scope').value = isSuperAdminUser() ? 'global' : 'personal'; document.getElementById('p-content').value = ''; };
-
-window.prepareEditPrompt = (p) => {
-    document.getElementById('p-id').value = p.id; document.getElementById('p-name').value = p.name;
-    document.getElementById('p-category').value = p.category || '通用'; document.getElementById('p-scope').value = p.scope || 'personal';
-    document.getElementById('p-scope').disabled = !isSuperAdminUser() || p.scope === 'global'; document.getElementById('p-content').value = p.content;
-    document.getElementById('prompt-modal-title').innerText = '编辑指令'; document.getElementById('prompt-modal-container').classList.remove('hidden');
-};
-
-window.savePrompt = async () => {
-    const id = document.getElementById('p-id').value;
-    const payload = { name: document.getElementById('p-name').value, category: document.getElementById('p-category').value, scope: document.getElementById('p-scope').value, content: document.getElementById('p-content').value };
-    const res = await apiFetch(API_BASE + (id ? `/prompts/${id}` : '/prompts'), { method: id ? 'PUT' : 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
-    if (!res.ok) { const data = await res.json(); return showToast(data.error || '保存失败', 'error'); }
-    closePromptModal(); loadPrompts(); showToast('指令已保存');
-};
-
-window.deletePrompt = (id) => {
-    showConfirm('删除指令', '确定删除该指令模板吗？', async () => {
-        const res = await apiFetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
-        if (res.ok) { showToast('指令已删除'); loadPrompts(); }
-    });
-};
+['prompt-search-input', 'prompt-type-filter', 'prompt-surface-filter'].forEach(id => {
+    const eventName = id.endsWith('input') ? 'input' : 'change';
+    document.getElementById(id)?.addEventListener(eventName, renderPromptGrid);
+});
+['prompt-apply-search', 'prompt-apply-type-filter'].forEach(id => {
+    const eventName = id.endsWith('search') ? 'input' : 'change';
+    document.getElementById(id)?.addEventListener(eventName, renderPromptApplyList);
+});
+document.getElementById('prompt-apply-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-prompt-apply-id]');
+    if (!button) return;
+    const prompt = getPromptById(button.dataset.promptApplyId);
+    if (prompt) applyPromptToTarget(prompt, promptApplyTarget);
+});
+document.getElementById('prompt-apply-close')?.addEventListener('click', () => window.closePromptLibrary());
+document.getElementById('prompt-apply-modal-container')?.addEventListener('click', (event) => {
+    if (event.target.id === 'prompt-apply-modal-container') window.closePromptLibrary();
+});
 
 const MIME_TYPE_MAP = {
     'application/pdf': 'PDF 文档',

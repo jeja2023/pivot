@@ -47,7 +47,8 @@ function formatToolList(user, options = {}) {
             source: 'mcp',
             risk: 'high',
             requiresApproval: true,
-            serverName: tool.serverName
+            serverName: tool.serverName,
+            owner: tool.owner || null
         }))
         .filter(tool => isAllowed(tool.name, 'mcp'));
     return [...builtIns, ...databaseTools, ...mcpTools];
@@ -108,7 +109,8 @@ function buildGenericDatabaseTools(tools = []) {
             connectionId: String(tool.serverId || ''),
             serverName: tool.serverName || `Database ${tool.serverId}`,
             databaseType: tool.databaseType || '',
-            fullName: tool.fullName
+            fullName: tool.fullName,
+            owner: tool.owner || null
         })).filter(item => item.serverId);
         return {
             name,

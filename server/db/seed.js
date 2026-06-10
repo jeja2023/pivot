@@ -74,16 +74,16 @@ function ensureBuiltInAdminAccount() {
 }
 
 function runSeeds() {
-    // 预置一些常用指令
+    // 预置一些常用角色与规范
     const promptCount = db.prepare('SELECT COUNT(*) as count FROM prompts').get().count;
     if (promptCount === 0) {
         const defaultPrompts = [
-            ['中英文翻译官', '你是一个精通中英文翻译的助手，能够地道、准确地在两种语言间切换，并保持原有的语气。', '翻译'],
-            ['代码助手', '你是一个资深的软件工程师，擅长编写简洁、高效、安全的代码，并能给出详尽的注释和优化建议。', '编程'],
-            ['周报专家', '你擅长总结工作成果，能将零散的任务描述转化为结构清晰、重点突出的专业周报。', '办公'],
-            ['文案润色', '你是一个文字大师，能对给出的文本进行修辞优化、逻辑理顺，使其更具感染力和专业性。', '创作']
+            ['中英文翻译官', '你是一个精通中英文翻译的助手，能够地道、准确地在两种语言间切换，并保持原有的语气。', '翻译', 'role', 'chat,agent,workflow', '适合需要固定翻译角色的对话、任务和工作流节点。'],
+            ['代码助手', '你是一个资深的软件工程师，擅长编写简洁、高效、安全的代码，并能给出详尽的注释和优化建议。', '编程', 'role', 'chat,agent,workflow', '用于代码审阅、实现建议和工程说明。'],
+            ['周报专家', '你擅长总结工作成果，能将零散的任务描述转化为结构清晰、重点突出的专业周报。', '办公', 'output', 'chat,agent,workflow', '规定输出为清晰、可复用的周报结构。'],
+            ['文案润色', '你是一个文字编辑专家，能对给出的文本进行修辞优化、逻辑理顺，使其更具感染力和专业性。', '创作', 'method', 'chat,agent,workflow', '适合把写作风格和润色标准沉淀为规范。']
         ];
-        const stmt = db.prepare('INSERT INTO prompts (name, content, category) VALUES (?, ?, ?)');
+        const stmt = db.prepare('INSERT INTO prompts (name, content, category, type, target_surfaces, description) VALUES (?, ?, ?, ?, ?, ?)');
         defaultPrompts.forEach(p => stmt.run(...p));
     }
 

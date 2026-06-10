@@ -58,6 +58,8 @@ async function loadMcpServers() {
         const typeLabel = server.server_type === 'database'
             ? (mcpDbToolLabels[database.database_type] || '数据库')
             : (mcpBuiltinToolLabels[server.server_type] || '外部服务');
+        const ownerLabel = mcpOwnerLabel(server);
+        const showOwner = mcpShouldShowOwner(server);
         const serverTools = mcpToolsForServer(server.id, mcpFallbackToolsForServer(server));
         const isPaused = server.status === 'paused';
         const toolCount = serverTools.length;
@@ -66,7 +68,10 @@ async function loadMcpServers() {
             <div class="mcp-system-card-head mcp-instance-head">
                 <div class="mcp-instance-title">
                     <strong>${mcpEscape(mcpCleanServiceName(server.name))}</strong>
-                    <em>${mcpEscape(typeLabel)}</em>
+                    <span>
+                        <em>${mcpEscape(typeLabel)}</em>
+                        ${showOwner && ownerLabel ? `<em class="mcp-owner-badge" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</em>` : ''}
+                    </span>
                 </div>
                 <button class="mcp-status-toggle${isPaused ? '' : ' is-on'}" type="button" data-mcp-toggle="${server.id}" data-next-status="${isPaused ? 'active' : 'paused'}" aria-label="${isPaused ? '启用服务' : '停用服务'}" title="${isPaused ? '启用服务' : '停用服务'}">
                     <span></span>
@@ -212,6 +217,8 @@ window.openMcpToolsModal = async function(serverId) {
                 const riskLevel = governance.riskLevel || 'medium';
                 const approvalRequired = Boolean(governance.approvalRequired);
                 const toolFullName = tool.name || tool.fullName || '';
+                const ownerLabel = mcpOwnerLabel(tool) || mcpOwnerLabel(server);
+                const showOwner = mcpShouldShowOwner(tool) || mcpShouldShowOwner(server);
                 return `
                 <div class="mcp-tool-card${enabled ? '' : ' is-disabled'}">
                     <div class="mcp-tool-card-head">
@@ -221,6 +228,7 @@ window.openMcpToolsModal = async function(serverId) {
                     <p>${mcpEscape(mcpToolDescription(tool) || '暂无说明')}</p>
                     <div class="mcp-tool-meta">
                         ${toolFullName ? `<span>${mcpEscape(toolFullName)}</span>` : ''}
+                        ${showOwner && ownerLabel ? `<span class="mcp-tool-owner" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</span>` : ''}
                         <span>${mcpEscape(mcpToolRiskLabel(riskLevel))}</span>
                         ${approvalRequired ? '<span>需审批</span>' : ''}
                     </div>

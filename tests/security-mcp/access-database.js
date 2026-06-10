@@ -68,11 +68,20 @@ test('非 root 管理员不能创建全局提示词或共享 MCP 服务', async 
         logAction: () => {}
     });
     const promptRoute = promptRouter.stack.find(layer => layer.route?.path === '/prompts' && layer.route?.methods?.post);
+    const promptListRoute = promptRouter.stack.find(layer => layer.route?.path === '/prompts' && layer.route?.methods?.get);
     const mcpRoute = mcpRouter.stack.find(layer => layer.route?.path === '/mcp/servers' && layer.route?.methods?.post);
 
     try {
         const promptReq = {
-            body: { name: `Prompt ${suffix}`, content: 'test prompt', scope: 'global' },
+            body: {
+                name: `Prompt ${suffix}`,
+                content: 'test prompt',
+                category: '治理',
+                description: '规范库字段测试',
+                type: 'method',
+                targetSurfaces: ['agent', 'workflow'],
+                scope: 'global'
+            },
             user: adminUser
         };
         const promptRes = { json(body) { this.body = body; return this; }, status(code) { this.statusCode = code; return this; } };
@@ -80,6 +89,20 @@ test('非 root 管理员不能创建全局提示词或共享 MCP 服务', async 
         const prompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(promptRes.body.id);
         assert.equal(prompt.scope, 'personal');
         assert.equal(prompt.user_id, adminUser.id);
+        assert.equal(prompt.type, 'method');
+        assert.equal(prompt.target_surfaces, 'agent,workflow');
+        assert.equal(prompt.description, '规范库字段测试');
+
+        const promptListReq = {
+            query: { surface: 'workflow', type: 'method', q: '规范库字段' },
+            user: adminUser
+        };
+        const promptListRes = { json(body) { this.body = body; return this; }, status(code) { this.statusCode = code; return this; } };
+        await runExpressHandlers(promptListRoute.route.stack.map(layer => layer.handle), promptListReq, promptListRes);
+        const listedPrompt = promptListRes.body.find(item => item.id === promptRes.body.id);
+        assert.ok(listedPrompt, 'created role policy asset should be returned by type/surface filter');
+        assert.deepEqual(listedPrompt.targetSurfaces, ['agent', 'workflow']);
+        assert.equal(listedPrompt.type, 'method');
 
         const mcpReq = {
             body: {

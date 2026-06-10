@@ -273,6 +273,10 @@ bind('clear-input-btn', () => {
         userInput.focus();
     }
 });
+bind('chat-prompt-library-btn', async () => {
+    await window.ensureAdminFeatureScripts?.();
+    window.openPromptLibrary?.('chat');
+});
 bind('context-usage-pill', () => window.compactCurrentSessionContext?.());
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
 bind('session-active-filter', () => window.setArchiveFilter(false));
@@ -354,6 +358,14 @@ bind('m-scope', () => window.updateModelScopeControls?.(), 'change');
 bind('agent-refresh-btn', () => window.loadAgentWorkbench?.());
 bind('agent-run-btn', () => window.createAgentRun?.());
 bind('agent-audit-btn', () => window.showAgentRunAudit?.());
+bind('agent-prompt-library-btn', async () => {
+    await window.ensureAdminFeatureScripts?.();
+    window.openPromptLibrary?.('agent');
+});
+bind('agent-dag-prompt-library-btn', async () => {
+    await window.ensureAdminFeatureScripts?.();
+    window.openPromptLibrary?.('workflow');
+});
 window.bindAgentGoalTemplates?.();
 window.bindAgentFilters?.();
 bind('mcp-refresh-btn', () => window.loadMcpWorkbench?.());

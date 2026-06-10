@@ -287,7 +287,15 @@ function runMigrations() {
     ensureColumn('prompts', 'user_id', 'INTEGER');
     ensureColumn('prompts', 'scope', "TEXT DEFAULT 'global'");
     ensureColumn('prompts', 'created_at', 'DATETIME');
+    ensureColumn('prompts', 'updated_at', 'DATETIME');
+    ensureColumn('prompts', 'description', "TEXT DEFAULT ''");
+    ensureColumn('prompts', 'type', "TEXT DEFAULT 'role'");
+    ensureColumn('prompts', 'target_surfaces', "TEXT DEFAULT 'chat,agent,workflow'");
     db.prepare('UPDATE prompts SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
+    db.prepare("UPDATE prompts SET type = 'role' WHERE type IS NULL OR type = ''").run();
+    db.prepare("UPDATE prompts SET target_surfaces = 'chat,agent,workflow' WHERE target_surfaces IS NULL OR target_surfaces = ''").run();
+    db.prepare("UPDATE prompts SET description = '' WHERE description IS NULL").run();
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prompts_type ON prompts(type, category);');
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS api_keys (

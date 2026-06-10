@@ -10,6 +10,13 @@ function ensureLegacyColumnBeforeSchema(table, column, definition) {
 
 function initSchema() {
     ensureLegacyColumnBeforeSchema('knowledge_docs', 'collection_id', 'INTEGER');
+    ensureLegacyColumnBeforeSchema('prompts', 'user_id', 'INTEGER');
+    ensureLegacyColumnBeforeSchema('prompts', 'scope', "TEXT DEFAULT 'global'");
+    ensureLegacyColumnBeforeSchema('prompts', 'created_at', 'DATETIME');
+    ensureLegacyColumnBeforeSchema('prompts', 'updated_at', 'DATETIME');
+    ensureLegacyColumnBeforeSchema('prompts', 'description', "TEXT DEFAULT ''");
+    ensureLegacyColumnBeforeSchema('prompts', 'type', "TEXT DEFAULT 'role'");
+    ensureLegacyColumnBeforeSchema('prompts', 'target_surfaces', "TEXT DEFAULT 'chat,agent,workflow'");
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS app_meta (
@@ -283,9 +290,13 @@ function initSchema() {
             name TEXT NOT NULL,
             content TEXT NOT NULL,
             category TEXT,
+            description TEXT DEFAULT '',
+            type TEXT DEFAULT 'role',
+            target_surfaces TEXT DEFAULT 'chat,agent,workflow',
             user_id INTEGER,
             scope TEXT DEFAULT 'global',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
@@ -733,6 +744,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);
         CREATE INDEX IF NOT EXISTS idx_prompts_scope_user ON prompts(scope, user_id);
+        CREATE INDEX IF NOT EXISTS idx_prompts_type ON prompts(type, category);
         CREATE INDEX IF NOT EXISTS idx_attachments_user_session ON attachments(user_id, session_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_token ON attachments(access_token);
         CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);

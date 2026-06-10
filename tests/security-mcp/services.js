@@ -688,6 +688,61 @@ test('系统 MCP 服务无需用户填写名称即可启用', async () => {
     }
 });
 
+test('超级管理员查看其他用户工具时返回所属用户信息', async () => {
+    const suffix = Date.now().toString(36);
+    const ownerInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_owner_${suffix}`, 'hash', '工具负责人', '数据部', 'user', 'active');
+    const ownerUser = { id: Number(ownerInfo.lastInsertRowid), username: `mcp_owner_${suffix}`, role: 'user', unit: '数据部' };
+    const superUser = { id: 1, username: 'admin', role: 'admin', unit: 'HQ' };
+    const now = getBeijingTimestamp();
+    const serverInfo = db.prepare(`
+        INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, 'active', ?, ?)
+    `).run(ownerUser.id, `Owner MCP ${suffix}`, 'http://127.0.0.1:65532/mcp', 'owner metadata test', now, now);
+    const serverId = Number(serverInfo.lastInsertRowid);
+    db.prepare(`
+        INSERT INTO mcp_tool_cache (server_id, name, description, input_schema, cached_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(serverId, 'owner.lookup', 'look up owner scoped data', '{"type":"object"}', now);
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = req.user || superUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const serversRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers' && layer.route?.methods?.get);
+    const toolsRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools' && layer.route?.methods?.get);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    try {
+        const serversRes = makeRes();
+        await runExpressHandlers(serversRoute.route.stack.map(layer => layer.handle), { user: superUser }, serversRes);
+        const listedServer = serversRes.body.data.find(item => item.id === serverId);
+        assert.equal(listedServer.owner.displayName, '工具负责人');
+        assert.equal(listedServer.owner.username, ownerUser.username);
+        assert.equal(listedServer.owner.unit, '数据部');
+
+        const toolsRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), { user: superUser }, toolsRes);
+        const listedTool = toolsRes.body.tools.find(item => item.fullName === `mcp.${serverId}.owner.lookup`);
+        assert.equal(listedTool.owner.displayName, '工具负责人');
+        assert.equal(listedTool.owner.username, ownerUser.username);
+
+        const agentTool = formatToolList(superUser).find(item => item.name === `mcp.${serverId}.owner.lookup`);
+        assert.equal(agentTool.owner.displayName, '工具负责人');
+        assert.equal(agentTool.owner.unit, '数据部');
+    } finally {
+        db.prepare('DELETE FROM capability_packages WHERE package_key = ?').run(`mcp_server:${serverId}`);
+        db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+        db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(ownerUser.id);
+    }
+});
+
 test('系统工具 MCP 服务暴露文档、数据和格式化工具', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

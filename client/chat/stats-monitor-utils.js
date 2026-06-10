@@ -166,9 +166,9 @@ const ROUTE_NAME_MAP = {
     '/api/rag/query': '知识库语义检索测试',
     '/api/rag/status': 'RAG 引擎状态检测',
     
-    // 提示词模板
-    '/api/prompts': '提示词模板库管理',
-    '/api/prompts/:id': '更新/删除提示词模板',
+    // 角色与规范库
+    '/api/prompts': '角色与规范库管理',
+    '/api/prompts/:id': '更新/删除角色与规范',
     
     // OpenAI 兼容网关 (v1)
     '/v1/chat/completions': 'OpenAI 接口兼容补全',
@@ -258,7 +258,7 @@ const ROUTE_NAME_MAP = {
     '/chat/styles/workspaces.css': '工作区样式入口',
     '/chat/styles/workspaces/agent.css': '智能体工作区样式入口',
     '/chat/styles/workspaces/mcp.css': 'MCP 工作区样式入口',
-    '/chat/styles/sessions-prompts.css': '会话与提示词样式入口',
+    '/chat/styles/sessions-prompts.css': '会话与角色规范样式入口',
     '/chat.css': '界面主样式表',
     '/common/styles/theme.css': '全局主题样式',
     '/common/styles/layout.css': '通用布局样式',

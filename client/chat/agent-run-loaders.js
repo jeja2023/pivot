@@ -166,9 +166,12 @@ async function loadAgentTools() {
         ${visibleTools.map(tool => {
             const title = agentToolTitle(tool);
             const description = agentToolDescription(tool);
+            const ownerLabel = agentToolOwnerLabel(tool);
+            const showOwner = agentShouldShowToolOwner(tool);
             const tags = [
                 isAdminOnlyAgentTool(tool) ? '管理员' : '',
                 tool.source === 'mcp' ? '工具箱' : '系统',
+                showOwner && ownerLabel ? `所属：${ownerLabel}` : '',
                 tool.requiresApproval ? '需审批' : ''
             ].filter(Boolean);
             const tooltip = [
@@ -184,6 +187,7 @@ async function loadAgentTools() {
                     ${tags.map(tag => `<em>${agentEscape(tag)}</em>`).join('')}
                 </strong>
                 <span>${agentEscape(description)}</span>
+                ${showOwner && ownerLabel ? `<small class="agent-tool-owner">所属：${agentEscape(ownerLabel)}</small>` : ''}
             </label>
         `;
         }).join('') || '<div class="empty-state">暂无可用能力</div>'}

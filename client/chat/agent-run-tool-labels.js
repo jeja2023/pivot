@@ -84,6 +84,38 @@ function agentToolDescription(tool) {
     return description;
 }
 
+function agentToolOwnerDisplayName(owner = {}) {
+    if (owner.scope === 'global' || owner.id === null) return '全局';
+    return owner.displayName || owner.nickname || owner.username || (owner.id ? `用户 ${owner.id}` : '');
+}
+
+function agentToolOwnerLabel(tool = {}) {
+    const owners = [];
+    const addOwner = (owner) => {
+        if (!owner) return;
+        const label = agentToolOwnerDisplayName(owner);
+        if (label && !owners.includes(label)) owners.push(label);
+    };
+    if (tool.owner) addOwner(tool.owner);
+    (tool.databaseConnections || []).forEach(connection => addOwner(connection.owner));
+    if (!owners.length) return '';
+    if (owners.length === 1) return owners[0];
+    return `${owners[0]}等 ${owners.length} 人`;
+}
+
+function agentShouldShowToolOwner(tool = {}) {
+    const owner = tool.owner || {};
+    if (owner.scope === 'global' || owner.id === null) return true;
+    if (owner.id && String(owner.id) !== String(currentUser?.id || '')) return true;
+    const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
+    return connections.some(connection => {
+        const connectionOwner = connection.owner || {};
+        return connectionOwner.scope === 'global'
+            || connectionOwner.id === null
+            || (connectionOwner.id && String(connectionOwner.id) !== String(currentUser?.id || ''));
+    });
+}
+
 function agentCleanCapabilityName(name) {
     return String(name || '')
         .replace(/^内置\s*/u, '')

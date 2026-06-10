@@ -180,7 +180,7 @@ window.openAdminPanel = async (options = {}) => {
     if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
     if (descEl) descEl.innerText = isAdmin
         ? '集中管理模型、用户、审计、监控、用量、API 接入与账号安全。'
-        : '管理你的模型、指令、附件、用量、API 接入与账号安全。';
+        : '管理你的模型、角色与规范、附件、用量、API 接入与账号安全。';
     
     if (isAdmin) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
@@ -224,7 +224,7 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
     if (tab === 'stats' && window.loadStats) loadStats();
     if (tab === 'report' && window.loadReport) loadReport();
-    if (tab === 'prompts' && window.loadPrompts) loadPrompts();
+    if (tab === 'prompts' && window.loadPrompts) window.loadPrompts();
     if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
     if (tab === 'announcements' && window.loadAnnouncementsAdmin) window.loadAnnouncementsAdmin(page);
     if (tab === 'tool-policy' && window.loadToolPolicy) window.loadToolPolicy();
