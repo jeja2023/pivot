@@ -5,6 +5,7 @@ const sessionMenuData = new Map();
 const selectedSessionIds = new Set();
 let sessionBatchMode = false;
 let sessionSearchArchived = false;
+// 共享全局：搜索框输入防抖计时器，由后加载的 sidebar.js 使用（两文件共享全局作用域，勿删）
 let sessionSearchTimer = null;
 
 function sessionEscapeHtml(value) {

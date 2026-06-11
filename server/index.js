@@ -554,10 +554,13 @@ app.use((err, req, res, _next) => {
         }
     }
 
+    // 错误响应：4xx 客户端错误的提示对用户有意义，原样返回；
+    // 5xx 服务端错误默认返回通用消息，避免泄漏 SQL 错误、内部路径或堆栈，
+    // 不依赖 NODE_ENV（运维若漏设环境变量也不会泄漏）。503 保留原始提示以传递可重试信息。
+    // 个别需要透出的 5xx 可在抛出时显式标记 err.expose = true。
+    const exposeMessage = isClientError || status === 503 || err.expose === true;
     res.status(status).json({
-        error: (process.env.NODE_ENV === 'production' && status >= 500 && status !== 503) 
-            ? '服务器内部错误，请联系管理员' 
-            : err.message
+        error: exposeMessage ? err.message : '服务器内部错误，请联系管理员'
     });
 });
 

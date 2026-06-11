@@ -1,5 +1,30 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.106] - 2026-06-11
+### 统计查询合并、错误响应收口、数据库标识符加固与工程化基线
+
+本版本在 `v0.0.105` 后端性能与依赖优化的基础上，继续推进 P1/P2/P3 三档优化：合并运维统计端点的多次数据库往返、并行化模型主机解析；对前端拖拽与轮询做节流与生命周期收口；统一服务端错误响应避免泄漏内部细节；为数据库 MCP 的标识符拼接增加字符级防御；并补齐 ESLint 规则、`engines` 声明与持续集成基线。
+
+#### 后端性能（P1）
+- **运维统计查询合并**：`/api/admin/ops-summary` 将原先 8-12 个独立 `COUNT`/`SUM` 查询合并为单条标量子查询（超级管理员与个人维度各一条），减少 SQLite 往返与锁争用；目录大小等异步文件操作保持并行。
+- **模型主机解析并行化**：模型端点概览原先在 `for` 循环中串行 `await` 主机本地性判定，改为 `Promise.all` 并行解析后按原顺序聚合，避免 DNS 解析延迟累加，同时保持本地/远程列表顺序与未知计数语义不变。
+
+#### 前端体验（P1）
+- **DAG 编辑器拖拽节流**：智能体 DAG 编辑器的 `pointermove` 接入 `Pivot.rafThrottle`，将每帧数十次的指针移动合并到每帧最多一次，降低拖拽时的重复计算与重排；销毁时正确解绑节流后的处理器。
+- **公告轮询生命周期收口**：公告 60 秒轮询新增 `stopAnnouncements()` 清理钩子，并在登出流程中调用，避免轮询在无需时继续运行。
+
+#### 安全加固（P2）
+- **错误响应统一收口**：全局错误中间件对 5xx 服务端错误默认返回通用提示，不再依赖 `NODE_ENV` 判断（运维漏设环境变量也不会泄漏）；4xx 客户端提示与 503 可重试信息保持原样，个别需透出的 5xx 可显式标记 `err.expose`，避免 SQL 错误、内部路径与堆栈泄漏到响应。
+- **数据库标识符字符校验**：数据库 MCP 的 `quoteIdentifier`/`quoteSqlIdentifierPart` 在引号转义之外新增 `assertSafeIdentifier`，拒绝包含控制字符（换行、回车、制表、null 字节等）与超长的表名/字段名，作为 `PRAGMA table_info` 等标识符拼接场景的防御纵深。
+
+#### 工程化基线（P3）
+- **ESLint 规则补齐**：在既有 `no-undef`/`no-unused-vars` 基础上，前后端配置统一新增 `no-cond-assign`、`no-dupe-keys`、`no-dupe-args`、`no-unreachable`、`no-constant-condition`、`no-func-assign`、`use-isnan`、`valid-typeof`、`no-self-assign`、`no-unsafe-negation` 等低误报、抓真实 bug 的规则，现有代码零新增告警。
+- **运行时版本声明**：`package.json` 新增 `engines.node >= 20`，与 Dockerfile 使用的 Node 22 对齐。
+- **持续集成基线**：新增 `.github/workflows/ci.yml`，在 push/PR 到 `main` 时于 Ubuntu + Node 22 上执行 `npm ci`、生产依赖审计、文本完整性、语法检查、聊天资产校验、Lint 与安全测试。
+
+#### 验证
+- **回归验证通过**：`npm run check`（215 个 JS 文件）、`npm run lint`（含新增规则）与安全测试 `189/189` 均已通过；`require('./server/db')` 加载成功并确认 6 个知识图谱索引在真实库中创建；标识符字符校验与合并查询逻辑均已实测确认。
+
 ## [v0.0.105] - 2026-06-11
 ### 知识图谱索引补齐、xlsx 依赖镜像化与 uuid 漏洞清零
 

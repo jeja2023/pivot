@@ -412,15 +412,33 @@ function assertReadonlySql(sql) {
     return withoutTrailingSemicolon;
 }
 
+// 标识符合法性校验：阻断控制字符（换行、回车、制表、null 字节等）进入 SQL，
+// 作为引号转义之外的防御纵深，降低标识符拼接被滥用的风险。
+function assertSafeIdentifier(value) {
+    if (/[\u0000-\u001F\u007F]/.test(value)) {
+        const err = new Error('数据表或字段名包含非法字符。');
+        err.status = 400;
+        throw err;
+    }
+    if (value.length > 256) {
+        const err = new Error('数据表或字段名超出长度限制。');
+        err.status = 400;
+        throw err;
+    }
+    return value;
+}
+
 function quoteIdentifier(identifier, quote = '"') {
     const value = String(identifier || '').trim();
     if (!value) throw new Error('Identifier is required.');
+    assertSafeIdentifier(value);
     return `${quote}${value.replace(new RegExp(quote, 'g'), quote + quote)}${quote}`;
 }
 
 function quoteSqlIdentifierPart(identifier, dialect) {
     const value = String(identifier || '').trim();
     if (!value) throw new Error('Identifier is required.');
+    assertSafeIdentifier(value);
     if (dialect === 'mysql') return `\`${value.replace(/`/g, '``')}\``;
     if (dialect === 'sqlserver') return `[${value.replace(/]/g, ']]')}]`;
     return quoteIdentifier(value, '"');

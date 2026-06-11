@@ -166,6 +166,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
 
 window.logout = () => {
     if (window.closeAgentRealtime) window.closeAgentRealtime();
+    if (window.stopAnnouncements) window.stopAnnouncements();
     apiFetch(API_BASE + '/auth/logout', {
         method: 'POST'
     }).catch(() => {});

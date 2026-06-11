@@ -286,6 +286,14 @@
         }
         loadActiveAnnouncements();
     };
+    // 提供可停止的清理钩子（如登出时调用），避免轮询在不需要时继续运行
+    window.stopAnnouncements = function () {
+        if (state.polling) {
+            window.clearInterval(state.polling);
+            state.polling = null;
+        }
+        state.initialized = false;
+    };
     window.loadLoginAnnouncements = loadLoginAnnouncements;
     window.PivotAnnouncements = {
         state,

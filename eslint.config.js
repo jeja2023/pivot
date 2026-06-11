@@ -352,7 +352,19 @@ module.exports = [
                 argsIgnorePattern: '^_',
                 caughtErrors: 'none',
                 varsIgnorePattern: '^_'
-            }]
+            }],
+            // 抓真实 bug 的低误报规则
+            'no-cond-assign': 'error',
+            'no-dupe-keys': 'error',
+            'no-dupe-args': 'error',
+            'no-unreachable': 'error',
+            'no-constant-condition': ['error', { checkLoops: false }],
+            'no-func-assign': 'error',
+            'use-isnan': 'error',
+            'valid-typeof': 'error',
+            'no-self-assign': 'error',
+            'no-unsafe-negation': 'error',
+            'require-atomic-updates': 'off'
         }
     },
     {
@@ -372,7 +384,18 @@ module.exports = [
                 caughtErrors: 'none',
                 vars: 'local',
                 varsIgnorePattern: '^_'
-            }]
+            }],
+            // 抓真实 bug 的低误报规则
+            'no-cond-assign': 'error',
+            'no-dupe-keys': 'error',
+            'no-dupe-args': 'error',
+            'no-unreachable': 'error',
+            'no-constant-condition': ['error', { checkLoops: false }],
+            'no-func-assign': 'error',
+            'use-isnan': 'error',
+            'valid-typeof': 'error',
+            'no-self-assign': 'error',
+            'no-unsafe-negation': 'error'
         }
     }
 ];

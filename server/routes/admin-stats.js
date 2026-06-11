@@ -206,12 +206,13 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
         localModels: []
     };
 
-    for (const row of rows) {
+    // 并行解析各模型主机是否为本地，避免串行 await 累加 DNS 解析延迟；再按原顺序聚合以保持稳定输出
+    const resolved = await Promise.all(rows.map(async (row) => {
         try {
             const parsed = new URL(String(row.url || '').trim());
             const host = parsed.hostname.toLowerCase();
             const isLocal = await isLocalModelHostAsync(host, localNames);
-            const item = {
+            return {
                 id: row.id,
                 name: row.name,
                 host,
@@ -219,15 +220,22 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
                 monitor_url: row.monitor_url || '',
                 max_concurrent: row.max_concurrent || 0
             };
-            if (isLocal) {
-                summary.localCount += 1;
-                summary.localModels.push(item);
-            } else {
-                summary.remoteCount += 1;
-                summary.remoteModels.push(item);
-            }
         } catch (e) {
+            return null;
+        }
+    }));
+
+    for (const item of resolved) {
+        if (!item) {
             summary.unknownCount += 1;
+            continue;
+        }
+        if (item.isLocal) {
+            summary.localCount += 1;
+            summary.localModels.push(item);
+        } else {
+            summary.remoteCount += 1;
+            summary.remoteModels.push(item);
         }
     }
 
@@ -557,37 +565,53 @@ function createAdminStatsRouter({
         if (canViewAll) {
             const uploadDir = path.resolve(__dirname, '../../uploads');
             const dataDir = path.resolve(__dirname, '../../data');
-            const summary = {
-                users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
-                activeUsers: db.prepare("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled' AND deleted_at IS NULL").get().count,
-                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
-                messages: db.prepare('SELECT COUNT(*) AS count FROM messages').get().count,
-                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,
-                models: db.prepare('SELECT COUNT(*) AS count FROM models').get().count,
-                tokens: db.prepare(`
-                    SELECT COALESCE(SUM(token_count), 0) AS total
-                    FROM (${tokenUsageSubquery()}) usage
-                `).get().total,
-                uploadsSize: await getCachedDirSize(uploadDir),
-                dataSize: await getCachedDirSize(dataDir),
-                auditToday: db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')").get().count,
+            // 合并多个 COUNT 为单条标量子查询，减少往返与锁争用；目录大小为异步文件操作，保持并行
+            const [counts, uploadsSize, dataSize] = await Promise.all([
+                Promise.resolve(db.prepare(`
+                    SELECT
+                        (SELECT COUNT(*) FROM users) AS users,
+                        (SELECT COUNT(*) FROM users WHERE status != 'disabled' AND deleted_at IS NULL) AS activeUsers,
+                        (SELECT COUNT(*) FROM sessions) AS sessions,
+                        (SELECT COUNT(*) FROM messages) AS messages,
+                        (SELECT COUNT(*) FROM attachments) AS attachments,
+                        (SELECT COUNT(*) FROM models) AS models,
+                        (SELECT COALESCE(SUM(token_count), 0) FROM (${tokenUsageSubquery()}) usage) AS tokens,
+                        (SELECT COUNT(*) FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')) AS auditToday
+                `).get()),
+                getCachedDirSize(uploadDir),
+                getCachedDirSize(dataDir)
+            ]);
+            res.json({
+                users: counts.users,
+                activeUsers: counts.activeUsers,
+                sessions: counts.sessions,
+                messages: counts.messages,
+                attachments: counts.attachments,
+                models: counts.models,
+                tokens: counts.tokens,
+                uploadsSize,
+                dataSize,
+                auditToday: counts.auditToday,
                 isPersonal: false
-            };
-            res.json(summary);
+            });
         } else {
-            const summary = {
-                sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
-                messages: db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
-                attachments: db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ? AND deleted_at IS NULL').get(req.user.id).count,
-                models: db.prepare("SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?").get(req.user.id).count,
-                tokens: db.prepare(`
-                    SELECT COALESCE(SUM(token_count), 0) AS total
-                    FROM (${tokenUsageSubquery()}) usage
-                    WHERE user_id = ?
-                `).get(req.user.id).total,
+            // 合并个人维度的多个 COUNT 为单条查询
+            const counts = db.prepare(`
+                SELECT
+                    (SELECT COUNT(*) FROM sessions WHERE user_id = @uid AND deleted_at IS NULL) AS sessions,
+                    (SELECT COUNT(*) FROM messages WHERE user_id = @uid AND deleted_at IS NULL) AS messages,
+                    (SELECT COUNT(*) FROM attachments WHERE user_id = @uid AND deleted_at IS NULL) AS attachments,
+                    (SELECT COUNT(*) FROM models WHERE user_id IS NULL OR user_id = @uid) AS models,
+                    (SELECT COALESCE(SUM(token_count), 0) FROM (${tokenUsageSubquery()}) usage WHERE user_id = @uid) AS tokens
+            `).get({ uid: req.user.id });
+            res.json({
+                sessions: counts.sessions,
+                messages: counts.messages,
+                attachments: counts.attachments,
+                models: counts.models,
+                tokens: counts.tokens,
                 isPersonal: true
-            };
-            res.json(summary);
+            });
         }
     }));
 

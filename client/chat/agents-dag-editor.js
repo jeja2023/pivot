@@ -423,8 +423,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('pointerdown', closeToolbarDropdowns);
 
+        // pointermove 每帧可触发数十次，用 rafThrottle 合并到每帧最多一次，降低拖拽时的重复计算与重排
+        const rafThrottle = window.Pivot?.rafThrottle;
+        const throttledPointerMove = typeof rafThrottle === 'function' ? rafThrottle(onPointerMove) : onPointerMove;
         root.addEventListener('pointerdown', onPointerDown);
-        root.addEventListener('pointermove', onPointerMove);
+        root.addEventListener('pointermove', throttledPointerMove);
         root.addEventListener('pointerup', onPointerUp);
         root.addEventListener('pointercancel', onPointerUp);
         root.addEventListener('dblclick', onDoubleClick);
@@ -460,7 +463,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             document.removeEventListener('keydown', onKeyDown);
             document.removeEventListener('pointerdown', closeToolbarDropdowns);
             root.removeEventListener('pointerdown', onPointerDown);
-            root.removeEventListener('pointermove', onPointerMove);
+            root.removeEventListener('pointermove', throttledPointerMove);
             root.removeEventListener('pointerup', onPointerUp);
             root.removeEventListener('pointercancel', onPointerUp);
             root.removeEventListener('dblclick', onDoubleClick);
