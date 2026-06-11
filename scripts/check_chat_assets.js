@@ -24,6 +24,11 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
 [
     'id="app"',
     'id="auth-container"',
+    'id="apps-workbench-modal"',
+    'id="official-writing-source"',
+    'id="official-writing-draft"',
+    'id="official-writing-comments-list"',
+    'id="official-writing-diff-result"',
     'id="agent-workbench-modal"',
     'id="knowledge-workbench-modal"',
     'id="mcp-workbench-modal"',
@@ -33,9 +38,11 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="print-frame"',
     'id="rag-debug-modal"',
     'id="manual-link-btn"',
+    'data-workspace-view="apps"',
     'data-workspace-view="manual"',
     'data-src="/manual?embed=1"',
     'src="/common/vendor/echarts.min.js"',
+    'src="/chat/apps-workbench.js?v=__APP_VERSION__"',
     'src="/chat/app.js?v=__APP_VERSION__"'
 ].forEach(needle => {
     if (!html.includes(needle)) fail(`assembled chat template is missing ${needle}`);
@@ -106,6 +113,7 @@ imports.forEach(({ cssFile, importPath }) => {
 
 const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.css'), 'utf8');
 [
+    '.chat-container[data-active-workspace="apps"]',
     '.chat-container[data-active-workspace="print"]',
     '.print-workspace-body',
     '.print-frame'

@@ -5,7 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const {
     getRequiredBuiltinConfig,
     isPathInside,

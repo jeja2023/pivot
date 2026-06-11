@@ -753,6 +753,14 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_user_tag ON knowledge_doc_tags(user_id, tag);
         CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_doc ON knowledge_doc_tags(doc_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_tags_user ON knowledge_tags(user_id, deleted_at, tag);
+        -- 知识图谱：mentions.entity_id 已由 UNIQUE(entity_id,chunk_id) 前缀覆盖，仅补充按用户统计与按 chunk 级联删除的查询
+        CREATE INDEX IF NOT EXISTS idx_kg_mentions_user ON knowledge_entity_mentions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_mentions_chunk ON knowledge_entity_mentions(chunk_id);
+        -- 知识图谱关系：覆盖 user_id+status 统计/过滤、按 source/target 实体的关系展开、按 chunk 删除
+        CREATE INDEX IF NOT EXISTS idx_kg_relations_user_status ON knowledge_relations(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_kg_relations_source_entity ON knowledge_relations(source_entity_id, status);
+        CREATE INDEX IF NOT EXISTS idx_kg_relations_target_entity ON knowledge_relations(target_entity_id, status);
+        CREATE INDEX IF NOT EXISTS idx_kg_relations_source_chunk ON knowledge_relations(source_chunk_id);
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);

@@ -310,7 +310,7 @@ const MAIN_WORKSPACE_STORAGE_KEY = 'pivot_active_workspace';
 const SETTINGS_TAB_STORAGE_KEY = 'pivot_settings_tab';
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'pivot_active_chat_session';
 const PRINT_WORKSPACE_SESSION_KEY = 'pivot_print_session';
-const RESTORABLE_WORKSPACES = new Set(['chat', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
+const RESTORABLE_WORKSPACES = new Set(['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
 
 function getStoredSessionValue(key) {
     try {
@@ -369,11 +369,12 @@ window.getStoredPrintWorkspaceSession = function() {
 };
 
 window.showMainWorkspace = function(view = 'chat') {
-    const target = ['chat', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
+    const target = ['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {
         chat: 'chat-workspace-view',
+        apps: 'apps-workbench-modal',
         agent: 'agent-workbench-modal',
         'agent-dag': 'agent-dag-workbench-modal',
         knowledge: 'knowledge-workbench-modal',
@@ -468,6 +469,7 @@ window.addEventListener('resize', () => {
 window.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.getStoredMainWorkspace?.() || 'chat';
     if (view === 'settings' && window.openAdminPanel) return window.openAdminPanel({ restore: true });
+    if (view === 'apps' && window.openAppsWorkbench) return window.openAppsWorkbench();
     if (view === 'knowledge' && window.openKnowledgeWorkbench) return window.openKnowledgeWorkbench();
     if (view === 'mcp' && window.openMcpWorkbench) return window.openMcpWorkbench();
     if (view === 'agent-dag' && window.openAgentDagWorkbench) return window.openAgentDagWorkbench();

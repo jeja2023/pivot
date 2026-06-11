@@ -4,7 +4,7 @@ const zlib = require('zlib');
 
 const pdfParse = require('pdf-parse');
 const WordExtractor = require('word-extractor');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 
 const TEXT_EXTENSIONS = new Set([
     '.txt', '.md', '.csv', '.json', '.js', '.ts', '.py', '.java', '.cpp',

@@ -302,6 +302,7 @@ bind('pw-update-btn', () => window.updatePassword());
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
+bind('apps-workbench-btn', () => window.openAppsWorkbench?.());
 bind('admin-panel-btn', () => window.openAdminPanel());
 bind('agent-workbench-btn', () => window.openAgentWorkbench?.());
 bind('agent-modal-close', () => window.closeAgentWorkbench?.());

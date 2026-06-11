@@ -18,6 +18,7 @@
 @import url("./workspaces/agent/agent-dag-minimap.css");
 @import url("./workspaces/agent-runtime.css");
 @import url("./workspaces/shared.css");
+@import url("./workspaces/apps.css");
 @import url("./workspaces/knowledge.css");
 @import url("./workspaces/rag-graph-base.css");
 @import url("./workspaces/rag-graph-map.css");

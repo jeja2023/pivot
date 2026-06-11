@@ -165,7 +165,7 @@ test('RAG 文档上传会保存修复后的中文文件名', () => {
 });
 
 test('RAG 文档读取器支持 Office、数据和网页文本格式', async () => {
-    const XLSX = require('xlsx');
+    const XLSX = require('@e965/xlsx');
     const suffix = Date.now().toString(36);
     const tempDir = path.join(uploadRoot, 'rag-format-test');
     fs.mkdirSync(tempDir, { recursive: true });
