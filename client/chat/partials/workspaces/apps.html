@@ -78,15 +78,22 @@
                                     <button class="btn-secondary" type="button" data-official-writing-run-mode="rewrite_section">局改</button>
                                     <button class="btn-secondary" type="button" data-official-writing-run-mode="review">审校</button>
                                 </div>
+                                <span id="official-writing-ai-indicator" class="official-writing-ai-indicator hidden" role="status" aria-live="polite"></span>
+                                <button id="official-writing-undo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="撤销" title="撤销 (Ctrl+Z)" disabled>撤销</button>
+                                <button id="official-writing-redo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="重做" title="重做 (Ctrl+Y)" disabled>重做</button>
                                 <button id="official-writing-save-version-top-btn" class="btn-secondary official-writing-command-action" type="button">保存版本</button>
                                 <details id="official-writing-command-more-menu" class="official-writing-command-menu">
                                     <summary class="btn-secondary official-writing-command-action official-writing-command-more-trigger" aria-label="展开更多操作">更多</summary>
                                     <div class="official-writing-command-menu-panel" role="menu" aria-label="更多操作">
-                                        <button id="official-writing-copy-draft-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出文本</button>
+                                        <button id="official-writing-export-text-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出文本</button>
                                         <button id="official-writing-copy-btn" class="btn-secondary official-writing-command-menu-item" type="button">复制提示词</button>
                                         <button id="official-writing-chat-btn" class="btn-secondary official-writing-command-menu-item" type="button">带入聊天</button>
                                         <button id="official-writing-export-doc-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="doc">导出 DOCX</button>
+                                        <button id="official-writing-export-redhead-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="red-header">导出红头 DOCX</button>
+                                        <button id="official-writing-export-md-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="markdown">导出 Markdown</button>
+                                        <button id="official-writing-export-fmt-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="formatted-text">导出版式文本</button>
                                         <button id="official-writing-export-pdf-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="pdf">导出 PDF</button>
+                                        <button id="official-writing-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出备份</button>
                                         <button id="official-writing-drawer-open-btn" class="btn-secondary official-writing-command-menu-item" type="button">审改中心</button>
                                         <button id="official-writing-toggle-right-btn" class="btn-secondary official-writing-command-menu-item" type="button">隐藏审改栏</button>
                                         <button class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-flow-version="送审版">送审版</button>
@@ -100,6 +107,13 @@
 
                         <div class="official-writing-workbench">
                             <aside id="official-writing-left-rail" class="official-writing-left-rail">
+                                <div class="official-writing-doc-library">
+                                    <div class="official-writing-rail-head official-writing-doc-library-head">
+                                        <strong>我的公文 <span id="official-writing-doc-count" class="official-writing-doc-count">0 篇</span></strong>
+                                        <button id="official-writing-new-doc-btn" class="btn-secondary" type="button">新建公文</button>
+                                    </div>
+                                    <div id="official-writing-doc-list" class="official-writing-doc-list" role="list" aria-label="公文列表"></div>
+                                </div>
                                 <div class="official-writing-rail-head">
                                     <strong>资料库</strong>
                                 </div>
@@ -124,9 +138,31 @@
                                         <button class="official-writing-material-action" type="button" data-official-writing-drawer-tab="references">查看材料引用</button>
                                     </section>
                                     <section id="official-writing-history-panel" class="official-writing-material-panel hidden">
+                                        <div class="official-writing-kb-search">
+                                            <div class="official-writing-kb-search-row">
+                                                <input id="official-writing-kb-history-query" class="form-input" placeholder="检索历史公文 / 知识库">
+                                                <button id="official-writing-kb-history-search-btn" class="btn-secondary" type="button">检索</button>
+                                            </div>
+                                            <select id="official-writing-kb-history-collection" class="form-input" aria-label="知识库范围">
+                                                <option value="">全部专题库</option>
+                                            </select>
+                                            <div id="official-writing-kb-history-results" class="official-writing-kb-results"></div>
+                                        </div>
+                                        <div class="official-writing-kb-divider">本地历史稿件</div>
                                         <div id="official-writing-history-list" class="official-writing-history-list"></div>
                                     </section>
                                     <section id="official-writing-standards-panel" class="official-writing-material-panel hidden">
+                                        <div class="official-writing-kb-search">
+                                            <div class="official-writing-kb-search-row">
+                                                <input id="official-writing-kb-standards-query" class="form-input" placeholder="检索规范条文 / 制度">
+                                                <button id="official-writing-kb-standards-search-btn" class="btn-secondary" type="button">检索</button>
+                                            </div>
+                                            <select id="official-writing-kb-standards-collection" class="form-input" aria-label="知识库范围">
+                                                <option value="">全部专题库</option>
+                                            </select>
+                                            <div id="official-writing-kb-standards-results" class="official-writing-kb-results"></div>
+                                        </div>
+                                        <div class="official-writing-kb-divider">常用规范要求</div>
                                         <button class="official-writing-standard-item" type="button" data-official-writing-requirement="标题、主送机关、正文、落款和日期应完整，层级清晰。">基础结构完整</button>
                                         <button class="official-writing-standard-item" type="button" data-official-writing-requirement="语言应准确、庄重、克制，避免口语化和绝对化表述。">公文语体稳健</button>
                                         <button class="official-writing-standard-item" type="button" data-official-writing-requirement="涉及单位、时间、数据、政策依据时不得编造，缺失信息用【待补充】标注。">事实依据可追溯</button>
@@ -143,22 +179,34 @@
 
                             <div class="official-writing-shell">
                                 <main class="official-writing-editor-area">
-                                    <div class="official-writing-editor-toolbar">
+                            <div class="official-writing-editor-toolbar">
+                                <div>
+                                    <strong id="official-writing-editor-title">正文编辑</strong>
+                                    <span id="official-writing-editor-subtitle">单页公文编辑器，优先保留正文空间。</span>
+                                </div>
+                                <div class="official-writing-editor-tools">
+                                    <button id="official-writing-sync-btn" class="btn-secondary" type="button">同步原文</button>
+                                    <button id="official-writing-source-selection-btn" class="btn-secondary" type="button">引用原文选区</button>
+                                    <button id="official-writing-draft-selection-btn" class="btn-secondary" type="button">引用正文选区</button>
+                                </div>
+                            </div>
+                            <div class="official-writing-status-bar" aria-live="polite">
+                                <div class="official-writing-status-main">
+                                    <strong id="official-writing-status-title">待起草</strong>
+                                    <span id="official-writing-status-detail">先粘贴原文材料或直接起草正文。</span>
+                                </div>
+                                <div class="official-writing-status-metrics" aria-label="公文状态指标">
+                                    <span class="official-writing-status-pill">风险 <b id="official-writing-status-risk">0</b></span>
+                                    <span class="official-writing-status-pill">建议 <b id="official-writing-status-pending">0</b></span>
+                                    <span class="official-writing-status-pill">引用 <b id="official-writing-status-reference">0</b></span>
+                                    <span class="official-writing-status-pill">版本 <b id="official-writing-status-version">0</b></span>
+                                </div>
+                            </div>
+                            <div id="official-writing-editor-grid" class="official-writing-editor-grid">
+                                <section class="official-writing-editor-pane official-writing-source-pane">
+                                    <div class="official-writing-pane-head">
                                         <div>
-                                            <strong id="official-writing-editor-title">正文编辑</strong>
-                                            <span id="official-writing-editor-subtitle">单页公文编辑器，优先保留正文空间。</span>
-                                        </div>
-                                        <div class="official-writing-editor-tools">
-                                            <button id="official-writing-sync-btn" class="btn-secondary" type="button">同步原文</button>
-                                            <button id="official-writing-source-selection-btn" class="btn-secondary" type="button">引用原文选区</button>
-                                            <button id="official-writing-draft-selection-btn" class="btn-secondary" type="button">引用正文选区</button>
-                                        </div>
-                                    </div>
-                                    <div id="official-writing-editor-grid" class="official-writing-editor-grid">
-                                        <section class="official-writing-editor-pane official-writing-source-pane">
-                                            <div class="official-writing-pane-head">
-                                                <div>
-                                                    <h4>原文</h4>
+                                            <h4>原文</h4>
                                                     <span id="official-writing-source-count">0 字</span>
                                                 </div>
                                             </div>
@@ -176,16 +224,17 @@
                                             </div>
                                         </section>
                                     </div>
-                                    <div id="official-writing-selection-toolbar" class="official-writing-selection-toolbar hidden" aria-hidden="true">
+                                    <div id="official-writing-selection-toolbar" class="official-writing-selection-toolbar hidden" role="toolbar" aria-label="选区操作" aria-hidden="true">
                                         <button type="button" data-official-writing-selection-action="polish">润色</button>
                                         <button type="button" data-official-writing-selection-action="compress">压缩</button>
                                         <button type="button" data-official-writing-selection-action="expand">扩写</button>
                                         <button type="button" data-official-writing-selection-action="formal">公文语气</button>
+                                        <button type="button" data-official-writing-selection-action="rewrite-diff">逐句改写</button>
                                         <button type="button" data-official-writing-selection-action="comment">批注</button>
                                     </div>
                                 </main>
 
-                                <aside id="official-writing-drawer" class="official-writing-drawer" aria-hidden="false">
+                                <aside id="official-writing-drawer" class="official-writing-drawer" role="region" aria-label="审改栏" aria-hidden="false">
                                     <div class="official-writing-drawer-head">
                                         <div>
                                             <h4 id="official-writing-drawer-title">修改建议</h4>
@@ -194,13 +243,15 @@
                                         <button id="official-writing-drawer-close" class="btn-secondary" type="button">收起</button>
                                     </div>
                                     <div class="official-writing-drawer-tabs" role="tablist" aria-label="审改面板">
-                                        <button id="official-writing-suggestions-toggle-btn" class="official-writing-drawer-tab active" type="button" data-official-writing-drawer-tab="suggestions">修改建议 <span id="official-writing-suggestion-badge">0</span></button>
-                                        <button id="official-writing-comments-toggle-btn" class="official-writing-drawer-tab" type="button" data-official-writing-drawer-tab="comments">批注 <span id="official-writing-comment-badge">0</span></button>
-                                        <button id="official-writing-versions-toggle-btn" class="official-writing-drawer-tab" type="button" data-official-writing-drawer-tab="versions">版本 <span id="official-writing-version-badge">0</span></button>
-                                        <button id="official-writing-compliance-toggle-btn" class="official-writing-drawer-tab" type="button" data-official-writing-drawer-tab="compliance">规范检查</button>
-                                        <button id="official-writing-references-toggle-btn" class="official-writing-drawer-tab" type="button" data-official-writing-drawer-tab="references">材料引用</button>
+                                        <button id="official-writing-suggestions-toggle-btn" class="official-writing-drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="official-writing-suggestions-drawer" data-official-writing-drawer-tab="suggestions">修改建议 <span id="official-writing-suggestion-badge">0</span></button>
+                                        <button id="official-writing-elements-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-elements-drawer" data-official-writing-drawer-tab="elements">发文要素</button>
+                                        <button id="official-writing-comments-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-comments-drawer" data-official-writing-drawer-tab="comments">批注 <span id="official-writing-comment-badge">0</span></button>
+                                        <button id="official-writing-versions-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-versions-drawer" data-official-writing-drawer-tab="versions">版本 <span id="official-writing-version-badge">0</span></button>
+                                        <button id="official-writing-compliance-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-compliance-drawer" data-official-writing-drawer-tab="compliance">规范检查</button>
+                                        <button id="official-writing-proofread-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-proofread-drawer" data-official-writing-drawer-tab="proofread">校对 <span id="official-writing-proofread-badge">0</span></button>
+                                        <button id="official-writing-references-toggle-btn" class="official-writing-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="official-writing-references-drawer" data-official-writing-drawer-tab="references">材料引用</button>
                                     </div>
-                                    <div id="official-writing-suggestions-drawer" class="official-writing-drawer-section">
+                                    <div id="official-writing-suggestions-drawer" class="official-writing-drawer-section" role="tabpanel" aria-labelledby="official-writing-suggestions-toggle-btn">
                                         <section class="official-writing-subpanel official-writing-suggestions-panel">
                                             <div class="official-writing-subpanel-head">
                                                 <div>
@@ -212,7 +263,45 @@
                                             <div id="official-writing-suggestion-list" class="official-writing-suggestion-list"></div>
                                         </section>
                                     </div>
-                                    <div id="official-writing-comments-drawer" class="official-writing-drawer-section hidden">
+                                    <div id="official-writing-elements-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-elements-toggle-btn">
+                                        <section class="official-writing-subpanel official-writing-elements-panel">
+                                            <div class="official-writing-subpanel-head">
+                                                <div>
+                                                    <h4>发文要素</h4>
+                                                    <span>版头与版记，导出时自动排版</span>
+                                                </div>
+                                            </div>
+                                            <div class="official-writing-elements-form">
+                                                <fieldset class="official-writing-elements-group">
+                                                    <legend>版头</legend>
+                                                    <label for="official-writing-meta-secrecy">密级与保密期限</label>
+                                                    <input id="official-writing-meta-secrecy" class="form-input" placeholder="如：秘密★1年（无则留空）">
+                                                    <label for="official-writing-meta-urgency">紧急程度</label>
+                                                    <select id="official-writing-meta-urgency" class="form-input">
+                                                        <option value="">（无）</option>
+                                                        <option value="特急">特急</option>
+                                                        <option value="加急">加急</option>
+                                                        <option value="平急">平急</option>
+                                                    </select>
+                                                    <label for="official-writing-meta-issue-number">发文字号</label>
+                                                    <input id="official-writing-meta-issue-number" class="form-input" placeholder="如：XX发〔2026〕5号">
+                                                    <label for="official-writing-meta-issuer">签发人</label>
+                                                    <input id="official-writing-meta-issuer" class="form-input" placeholder="上行文需标注，如：张三">
+                                                </fieldset>
+                                                <fieldset class="official-writing-elements-group">
+                                                    <legend>版记</legend>
+                                                    <label for="official-writing-meta-cc">抄送机关</label>
+                                                    <input id="official-writing-meta-cc" class="form-input" placeholder="如：各科室、下属单位">
+                                                    <label for="official-writing-meta-printer">印发机关</label>
+                                                    <input id="official-writing-meta-printer" class="form-input" placeholder="如：XX办公室">
+                                                    <label for="official-writing-meta-print-date">印发日期</label>
+                                                    <input id="official-writing-meta-print-date" class="form-input" placeholder="如：2026年6月12日">
+                                                </fieldset>
+                                                <p class="official-writing-elements-note">发文要素仅在导出 DOCX / 红头模板 / 带版式文本时自动排版，不影响正文编辑区。</p>
+                                            </div>
+                                        </section>
+                                    </div>
+                                    <div id="official-writing-comments-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-comments-toggle-btn">
                                         <section class="official-writing-subpanel official-writing-comments-panel">
                                             <div class="official-writing-subpanel-head">
                                                 <div>
@@ -233,7 +322,7 @@
                                             <div id="official-writing-comments-list" class="official-writing-comments-list"></div>
                                         </section>
                                     </div>
-                                    <div id="official-writing-versions-drawer" class="official-writing-drawer-section hidden">
+                                    <div id="official-writing-versions-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-versions-toggle-btn">
                                         <section class="official-writing-subpanel official-writing-versions-panel">
                                             <div class="official-writing-subpanel-head">
                                                 <div>
@@ -259,7 +348,7 @@
                                             </div>
                                         </section>
                                     </div>
-                                    <div id="official-writing-compliance-drawer" class="official-writing-drawer-section hidden">
+                                    <div id="official-writing-compliance-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-compliance-toggle-btn">
                                         <section class="official-writing-subpanel official-writing-compliance-panel">
                                             <div class="official-writing-subpanel-head">
                                                 <div>
@@ -270,7 +359,19 @@
                                             <div id="official-writing-compliance-list" class="official-writing-compliance-list"></div>
                                         </section>
                                     </div>
-                                    <div id="official-writing-references-drawer" class="official-writing-drawer-section hidden">
+                                    <div id="official-writing-proofread-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-proofread-toggle-btn">
+                                        <section class="official-writing-subpanel official-writing-proofread-panel">
+                                            <div class="official-writing-subpanel-head">
+                                                <div>
+                                                    <h4>校对检查</h4>
+                                                    <span id="official-writing-proofread-count">0 项</span>
+                                                </div>
+                                                <button id="official-writing-proofread-btn" class="btn-secondary" type="button">重新检查</button>
+                                            </div>
+                                            <div id="official-writing-proofread-list" class="official-writing-proofread-list"></div>
+                                        </section>
+                                    </div>
+                                    <div id="official-writing-references-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-references-toggle-btn">
                                         <section class="official-writing-subpanel official-writing-references-panel">
                                             <div class="official-writing-subpanel-head">
                                                 <div>
@@ -282,6 +383,32 @@
                                         </section>
                                     </div>
                                 </aside>
+                            </div>
+                        </div>
+                        <div id="official-writing-diff-modal" class="official-writing-diff-modal hidden" role="dialog" aria-modal="true" aria-label="逐句改写对比" aria-hidden="true">
+                            <div class="official-writing-diff-dialog">
+                                <div class="official-writing-diff-head">
+                                    <div>
+                                        <h4>逐句改写对比</h4>
+                                        <span id="official-writing-diff-stat">正在生成改写…</span>
+                                    </div>
+                                    <button id="official-writing-diff-close" class="btn-secondary" type="button">关闭</button>
+                                </div>
+                                <div id="official-writing-diff-stream" class="official-writing-diff-stream">
+                                    <p class="official-writing-diff-stream-hint">AI 正在流式改写，完成后将逐句对比：</p>
+                                    <pre id="official-writing-diff-stream-preview" class="official-writing-diff-stream-preview"></pre>
+                                </div>
+                                <div id="official-writing-diff-review" class="official-writing-diff-review hidden">
+                                    <div class="official-writing-diff-review-tools">
+                                        <button id="official-writing-diff-accept-all" class="btn-secondary" type="button">全部接受</button>
+                                        <button id="official-writing-diff-reject-all" class="btn-secondary" type="button">全部保留原文</button>
+                                    </div>
+                                    <div id="official-writing-diff-rows" class="official-writing-diff-rows"></div>
+                                    <div class="official-writing-diff-foot">
+                                        <button id="official-writing-diff-cancel" class="btn-secondary" type="button">取消</button>
+                                        <button id="official-writing-diff-apply" class="btn-primary" type="button">应用所选</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -27,6 +27,9 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'id="apps-workbench-modal"',
     'id="official-writing-source"',
     'id="official-writing-draft"',
+    'id="official-writing-export-text-btn"',
+    'id="official-writing-base-version"',
+    'id="official-writing-target-version"',
     'id="official-writing-comments-list"',
     'id="official-writing-diff-result"',
     'id="agent-workbench-modal"',
@@ -119,6 +122,16 @@ const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.cs
     '.print-frame'
 ].forEach(needle => {
     if (!chatShellCss.includes(needle)) fail(`print workspace layout style is missing ${needle}`);
+});
+
+const appsWorkbenchJs = fs.readFileSync(path.join(chatDir, 'apps-workbench.js'), 'utf8');
+[
+    'function createOfficialWritingState',
+    'exportOfficialWritingText',
+    'Array.from(base.options).some(option => option.value === currentBaseValue)',
+    'setOfficialWritingMaterialSource(officialWritingState.materialSource'
+].forEach(needle => {
+    if (!appsWorkbenchJs.includes(needle)) fail(`apps workbench official writing guard is missing ${needle}`);
 });
 
 function createMarkdownRenderSandbox() {
