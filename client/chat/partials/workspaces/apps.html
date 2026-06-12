@@ -35,15 +35,6 @@
                                     <option value="其他公文">其他公文</option>
                                 </select>
                             </div>
-                            <div class="official-writing-field official-writing-mode-field">
-                                <label for="official-writing-mode">处理方式</label>
-                                <select id="official-writing-mode" class="form-input">
-                                    <option value="draft">起草正文</option>
-                                    <option value="polish">润色优化</option>
-                                    <option value="rewrite_section">局部修改</option>
-                                    <option value="review">格式与表达审校</option>
-                                </select>
-                            </div>
                             <div class="official-writing-field official-writing-standard-field">
                                 <label for="official-writing-standard">规范库</label>
                                 <select id="official-writing-standard" class="form-input">
@@ -67,21 +58,27 @@
                                 <button id="official-writing-compare-mode-btn" class="official-writing-mode-toggle" type="button" data-official-writing-view-mode="compare">对照模式</button>
                             </div>
                             <div class="official-writing-field official-writing-requirements-field">
-                                <label for="official-writing-requirements">修改要求</label>
-                                <input id="official-writing-requirements" class="form-input" placeholder="语气、结构、字数、重点或限制">
+                                <label for="official-writing-requirements">AI指令</label>
+                                <input id="official-writing-requirements" class="form-input" placeholder="请输入起草要求、结构、字数或重点">
                             </div>
                             <div class="official-writing-command-row" aria-label="公文写作命令栏">
-                                <div class="official-writing-command-group" aria-label="AI 操作">
-                                    <span>AI</span>
-                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="draft">起草</button>
-                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="polish">润色</button>
-                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="rewrite_section">局改</button>
-                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="review">审校</button>
+                                <div class="official-writing-command-group official-writing-ai-command-group" aria-label="全文 AI 操作">
+                                    <span>全文AI</span>
+                                    <button class="btn-secondary active" type="button" data-official-writing-run-mode="draft" aria-pressed="true">起草</button>
+                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="polish" aria-pressed="false">润色</button>
+                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="rewrite_section" aria-pressed="false">改写</button>
+                                    <button class="btn-secondary" type="button" data-official-writing-run-mode="review" aria-pressed="false">审校</button>
                                 </div>
                                 <span id="official-writing-ai-indicator" class="official-writing-ai-indicator hidden" role="status" aria-live="polite"></span>
-                                <button id="official-writing-undo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="撤销" title="撤销 (Ctrl+Z)" disabled>撤销</button>
-                                <button id="official-writing-redo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="重做" title="重做 (Ctrl+Y)" disabled>重做</button>
-                                <button id="official-writing-save-version-top-btn" class="btn-secondary official-writing-command-action" type="button">保存版本</button>
+                                <div class="official-writing-command-group official-writing-edit-group" aria-label="编辑操作">
+                                    <button id="official-writing-undo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="撤销" title="撤销 (Ctrl+Z)" disabled>撤销</button>
+                                    <button id="official-writing-redo-btn" class="btn-secondary official-writing-command-action" type="button" aria-label="重做" title="重做 (Ctrl+Y)" disabled>重做</button>
+                                </div>
+                                <div class="official-writing-command-group official-writing-layout-group" aria-label="工作区面板">
+                                    <span>面板</span>
+                                    <button id="official-writing-toggle-left-btn" class="btn-secondary official-writing-command-action active" type="button" aria-pressed="true" title="隐藏资料栏">资料栏</button>
+                                    <button id="official-writing-toggle-right-btn" class="btn-secondary official-writing-command-action active" type="button" aria-pressed="true" title="隐藏审改栏">审改栏</button>
+                                </div>
                                 <details id="official-writing-command-more-menu" class="official-writing-command-menu">
                                     <summary class="btn-secondary official-writing-command-action official-writing-command-more-trigger" aria-label="展开更多操作">更多</summary>
                                     <div class="official-writing-command-menu-panel" role="menu" aria-label="更多操作">
@@ -94,8 +91,6 @@
                                         <button id="official-writing-export-fmt-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="formatted-text">导出版式文本</button>
                                         <button id="official-writing-export-pdf-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-export="pdf">导出 PDF</button>
                                         <button id="official-writing-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出备份</button>
-                                        <button id="official-writing-drawer-open-btn" class="btn-secondary official-writing-command-menu-item" type="button">审改中心</button>
-                                        <button id="official-writing-toggle-right-btn" class="btn-secondary official-writing-command-menu-item" type="button">隐藏审改栏</button>
                                         <button class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-flow-version="送审版">送审版</button>
                                         <button class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-flow-version="领导修改版">领导修改版</button>
                                         <button class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-flow-version="定稿版">定稿版</button>
@@ -140,7 +135,7 @@
                                     <section id="official-writing-history-panel" class="official-writing-material-panel hidden">
                                         <div class="official-writing-kb-search">
                                             <div class="official-writing-kb-search-row">
-                                                <input id="official-writing-kb-history-query" class="form-input" placeholder="检索历史公文 / 知识库">
+                                                <input id="official-writing-kb-history-query" class="form-input" placeholder="检索历史/知识库">
                                                 <button id="official-writing-kb-history-search-btn" class="btn-secondary" type="button">检索</button>
                                             </div>
                                             <select id="official-writing-kb-history-collection" class="form-input" aria-label="知识库范围">
@@ -154,7 +149,7 @@
                                     <section id="official-writing-standards-panel" class="official-writing-material-panel hidden">
                                         <div class="official-writing-kb-search">
                                             <div class="official-writing-kb-search-row">
-                                                <input id="official-writing-kb-standards-query" class="form-input" placeholder="检索规范条文 / 制度">
+                                                <input id="official-writing-kb-standards-query" class="form-input" placeholder="检索规范/制度">
                                                 <button id="official-writing-kb-standards-search-btn" class="btn-secondary" type="button">检索</button>
                                             </div>
                                             <select id="official-writing-kb-standards-collection" class="form-input" aria-label="知识库范围">
@@ -179,27 +174,27 @@
 
                             <div class="official-writing-shell">
                                 <main class="official-writing-editor-area">
-                            <div class="official-writing-editor-toolbar">
-                                <div>
-                                    <strong id="official-writing-editor-title">正文编辑</strong>
-                                    <span id="official-writing-editor-subtitle">单页公文编辑器，优先保留正文空间。</span>
-                                </div>
-                                <div class="official-writing-editor-tools">
-                                    <button id="official-writing-sync-btn" class="btn-secondary" type="button">同步原文</button>
-                                    <button id="official-writing-source-selection-btn" class="btn-secondary" type="button">引用原文选区</button>
-                                    <button id="official-writing-draft-selection-btn" class="btn-secondary" type="button">引用正文选区</button>
-                                </div>
-                            </div>
-                            <div class="official-writing-status-bar" aria-live="polite">
+                            <div class="official-writing-editor-toolbar" aria-live="polite">
                                 <div class="official-writing-status-main">
-                                    <strong id="official-writing-status-title">待起草</strong>
+                                    <div class="official-writing-editor-heading">
+                                        <strong id="official-writing-status-title">待起草</strong>
+                                        <span id="official-writing-editor-title">正文编辑</span>
+                                    </div>
                                     <span id="official-writing-status-detail">先粘贴原文材料或直接起草正文。</span>
+                                    <span id="official-writing-editor-subtitle" class="hidden">单页公文编辑器，优先保留正文空间。</span>
                                 </div>
-                                <div class="official-writing-status-metrics" aria-label="公文状态指标">
-                                    <span class="official-writing-status-pill">风险 <b id="official-writing-status-risk">0</b></span>
-                                    <span class="official-writing-status-pill">建议 <b id="official-writing-status-pending">0</b></span>
-                                    <span class="official-writing-status-pill">引用 <b id="official-writing-status-reference">0</b></span>
-                                    <span class="official-writing-status-pill">版本 <b id="official-writing-status-version">0</b></span>
+                                <div class="official-writing-editor-toolbar-actions">
+                                    <div class="official-writing-status-metrics" aria-label="公文状态指标">
+                                        <span class="official-writing-status-pill">风险 <b id="official-writing-status-risk">0</b></span>
+                                        <span class="official-writing-status-pill">建议 <b id="official-writing-status-pending">0</b></span>
+                                        <span class="official-writing-status-pill">引用 <b id="official-writing-status-reference">0</b></span>
+                                        <span class="official-writing-status-pill">版本 <b id="official-writing-status-version">0</b></span>
+                                    </div>
+                                    <div class="official-writing-editor-tools">
+                                        <button id="official-writing-sync-btn" class="btn-secondary" type="button">同步原文</button>
+                                        <button id="official-writing-source-selection-btn" class="btn-secondary" type="button">引用原文选区</button>
+                                        <button id="official-writing-draft-selection-btn" class="btn-secondary" type="button">引用正文选区</button>
+                                    </div>
                                 </div>
                             </div>
                             <div id="official-writing-editor-grid" class="official-writing-editor-grid">
@@ -210,7 +205,10 @@
                                                     <span id="official-writing-source-count">0 字</span>
                                                 </div>
                                             </div>
-                                            <textarea id="official-writing-source" class="form-input official-writing-editor" placeholder="粘贴原文、材料或待处理段落。"></textarea>
+                                    <div class="official-writing-editor-stack official-writing-source-stack">
+                                        <div id="official-writing-source-surface" class="official-writing-document-surface official-writing-editable-surface" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-official-writing-surface="source" data-placeholder="粘贴原文、材料或待处理段落。"></div>
+                                        <textarea id="official-writing-source" class="form-input official-writing-editor official-writing-raw-editor" placeholder="粘贴原文、材料或待处理段落。" aria-hidden="true" tabindex="-1"></textarea>
+                                    </div>
                                         </section>
                                         <section class="official-writing-editor-pane official-writing-draft-pane">
                                             <div class="official-writing-pane-head">
@@ -220,17 +218,20 @@
                                                 </div>
                                             </div>
                                             <div class="official-writing-page-wrap">
-                                                <textarea id="official-writing-draft" class="form-input official-writing-editor" placeholder="粘贴或编辑正式公文正文。"></textarea>
+                                                <div class="official-writing-editor-stack official-writing-draft-stack">
+                                                    <div id="official-writing-draft-surface" class="official-writing-document-surface official-writing-editable-surface" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-official-writing-surface="draft" data-placeholder="粘贴或编辑正式公文正文。"></div>
+                                                    <textarea id="official-writing-draft" class="form-input official-writing-editor official-writing-raw-editor" placeholder="粘贴或编辑正式公文正文。" aria-hidden="true" tabindex="-1"></textarea>
+                                                </div>
                                             </div>
                                         </section>
                                     </div>
                                     <div id="official-writing-selection-toolbar" class="official-writing-selection-toolbar hidden" role="toolbar" aria-label="选区操作" aria-hidden="true">
                                         <button type="button" data-official-writing-selection-action="polish">润色</button>
-                                        <button type="button" data-official-writing-selection-action="compress">压缩</button>
-                                        <button type="button" data-official-writing-selection-action="expand">扩写</button>
-                                        <button type="button" data-official-writing-selection-action="formal">公文语气</button>
-                                        <button type="button" data-official-writing-selection-action="rewrite-diff">逐句改写</button>
-                                        <button type="button" data-official-writing-selection-action="comment">批注</button>
+                                    <button type="button" data-official-writing-selection-action="compress">压缩</button>
+                                    <button type="button" data-official-writing-selection-action="expand">扩写</button>
+                                    <button type="button" data-official-writing-selection-action="formal">公文语气</button>
+                                    <button type="button" data-official-writing-selection-action="rewrite-diff">逐句改写</button>
+                                    <button type="button" data-official-writing-selection-action="comment">批注</button>
                                     </div>
                                 </main>
 
@@ -240,7 +241,6 @@
                                             <h4 id="official-writing-drawer-title">修改建议</h4>
                                             <span id="official-writing-drawer-desc">生成可接受、拒绝、替换、插入或转批注的审改建议。</span>
                                         </div>
-                                        <button id="official-writing-drawer-close" class="btn-secondary" type="button">收起</button>
                                     </div>
                                     <div class="official-writing-drawer-tabs" role="tablist" aria-label="审改面板">
                                         <button id="official-writing-suggestions-toggle-btn" class="official-writing-drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="official-writing-suggestions-drawer" data-official-writing-drawer-tab="suggestions">修改建议 <span id="official-writing-suggestion-badge">0</span></button>

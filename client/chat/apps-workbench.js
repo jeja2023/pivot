@@ -14,7 +14,7 @@ const PIVOT_APP_REGISTRY = [
 const OFFICIAL_WRITING_MODES = {
     draft: '起草正文',
     polish: '润色优化',
-    rewrite_section: '局部修改',
+    rewrite_section: '全文改写',
     review: '格式与表达审校'
 };
 const OFFICIAL_WRITING_DRAWER_META = {
@@ -87,6 +87,17 @@ const OFFICIAL_WRITING_DEFAULT_FORM_STATE = {
     materialSource: '粘贴材料',
     requirements: ''
 };
+const OFFICIAL_WRITING_REQUIREMENT_PLACEHOLDERS = {
+    draft: '起草要求、结构、字数或重点',
+    polish: '全文润色方向，如更正式、更精炼',
+    rewrite_section: '全文改写要求，如调整结构、压缩篇幅',
+    review: '审校重点，如格式、表达、规范性'
+};
+
+function normalizeOfficialWritingMode(mode) {
+    const key = String(mode || '');
+    return OFFICIAL_WRITING_MODES[key] ? key : OFFICIAL_WRITING_DEFAULT_FORM_STATE.mode;
+}
 
 // 发文要素（版头 + 版记）默认值。版头：密级、紧急程度、发文字号、签发人；版记：抄送、印发机关、印发日期。
 const OFFICIAL_WRITING_DEFAULT_META = {
@@ -236,10 +247,12 @@ let officialWritingUiState = {
     viewMode: 'document',
     drawerTab: 'suggestions',
     materialTab: 'outline',
+    leftCollapsed: false,
     rightCollapsed: false,
     lastSelection: null
 };
 let officialWritingAiBusy = false;
+let officialWritingProgrammaticTextUpdate = false;
 const OFFICIAL_WRITING_HISTORY_LIMIT = 50;
 const officialWritingUndoStack = [];
 const officialWritingRedoStack = [];
@@ -342,7 +355,12 @@ function showOfficialWritingApp() {
     hydrateOfficialWritingForm();
     setOfficialWritingMaterialSource(officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource);
     applyOfficialWritingViewMode(officialWritingUiState.viewMode);
-    openOfficialWritingDrawer(officialWritingUiState.drawerTab);
+    applyOfficialWritingLeftRailState();
+    if (officialWritingUiState.rightCollapsed) {
+        closeOfficialWritingDrawer();
+    } else {
+        openOfficialWritingDrawer(officialWritingUiState.drawerTab);
+    }
     updateOfficialWritingUndoRedoButtons();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
@@ -554,13 +572,19 @@ function createOfficialWritingDoc() {
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
     if (typeof showToast === 'function') showToast('已新建公文');
-    document.getElementById('official-writing-draft')?.focus();
+    getOfficialWritingSurface('draft')?.focus();
 }
 
-function renameOfficialWritingDoc(docId) {
+async function renameOfficialWritingDoc(docId) {
     const doc = officialWritingLibrary.docs.find(item => item.id === docId);
     if (!doc) return;
-    const next = window.prompt('重命名公文', doc.title || '');
+    const next = await window.showInputPrompt?.({
+        title: '重命名公文',
+        message: '请输入新的公文标题：',
+        placeholder: '新公文',
+        value: doc.title || '',
+        requiredMessage: '公文标题不能为空'
+    });
     if (next === null) return;
     const trimmed = next.trim();
     if (!trimmed) return;
@@ -604,21 +628,33 @@ function deleteOfficialWritingDoc(docId) {
 }
 
 function hydrateOfficialWritingForm() {
-    const source = document.getElementById('official-writing-source');
-    const draft = document.getElementById('official-writing-draft');
     const type = document.getElementById('official-writing-type');
-    const mode = document.getElementById('official-writing-mode');
     const standard = document.getElementById('official-writing-standard');
     const materialSource = document.getElementById('official-writing-material-source');
     const requirements = document.getElementById('official-writing-requirements');
-    if (source) source.value = officialWritingState.source || '';
-    if (draft) draft.value = officialWritingState.draft || '';
+    setOfficialWritingTextareaValue('source', officialWritingState.source || '');
+    setOfficialWritingTextareaValue('draft', officialWritingState.draft || '');
     if (type) type.value = officialWritingState.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType;
-    if (mode) mode.value = officialWritingState.mode || OFFICIAL_WRITING_DEFAULT_FORM_STATE.mode;
     if (standard) standard.value = officialWritingState.standard || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard;
     if (materialSource) materialSource.value = officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource;
     if (requirements) requirements.value = officialWritingState.requirements || '';
     hydrateOfficialWritingMetaForm();
+    updateOfficialWritingModeControls();
+    renderOfficialWritingSurfaces({ force: true });
+}
+
+function updateOfficialWritingModeControls() {
+    const mode = normalizeOfficialWritingMode(officialWritingState.mode);
+    officialWritingState.mode = mode;
+    document.querySelectorAll('[data-official-writing-run-mode]').forEach(button => {
+        const active = button.dataset.officialWritingRunMode === mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const requirements = document.getElementById('official-writing-requirements');
+    if (requirements) {
+        requirements.placeholder = OFFICIAL_WRITING_REQUIREMENT_PLACEHOLDERS[mode] || OFFICIAL_WRITING_REQUIREMENT_PLACEHOLDERS.draft;
+    }
 }
 
 // 发文要素表单（版头 + 版记）字段 id 与 state.meta 键的映射。
@@ -652,7 +688,240 @@ function syncOfficialWritingMetaFromInputs() {
 }
 
 function getOfficialWritingText(field) {
+    if (officialWritingProgrammaticTextUpdate) return document.getElementById(field)?.value || '';
+    if (field === 'official-writing-source' && isOfficialWritingSurfaceActive('source')) {
+        syncOfficialWritingSurfaceToTextarea('source');
+    }
+    if (field === 'official-writing-draft' && isOfficialWritingSurfaceActive('draft')) {
+        syncOfficialWritingSurfaceToTextarea('draft');
+    }
     return document.getElementById(field)?.value || '';
+}
+
+function getOfficialWritingSurface(target = 'draft') {
+    return document.getElementById(target === 'source' ? 'official-writing-source-surface' : 'official-writing-draft-surface');
+}
+
+function getOfficialWritingRawEditor(target = 'draft') {
+    return document.getElementById(target === 'source' ? 'official-writing-source' : 'official-writing-draft');
+}
+
+function getOfficialWritingSurfaceText(text) {
+    return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function isOfficialWritingSurfaceActive(target) {
+    const surface = getOfficialWritingSurface(target);
+    return Boolean(surface && (document.activeElement === surface || surface.contains(document.activeElement)));
+}
+
+function getOfficialWritingParagraphLines(text) {
+    return getOfficialWritingSurfaceText(text)
+        .split('\n')
+        .map(line => line.trimEnd());
+}
+
+function isOfficialWritingDateLine(line) {
+    return /^(【日期】|【成文日期】|(?:【待补充】|[0-9０-９]{4}|[一二三四五六七八九十〇零]{4})年(?:【待补充】|[0-9０-９]{1,2}|[一二三四五六七八九十〇零]{1,3})月(?:【待补充】|[0-9０-９]{1,2}|[一二三四五六七八九十〇零]{1,3})日)$/.test(String(line || '').trim());
+}
+
+function isOfficialWritingClosingLine(line) {
+    return /^(此致|敬礼|谨此|特此|专此|此复|特此函达|特此报告)/.test(String(line || '').trim());
+}
+
+function isOfficialWritingFooterLabelLine(line) {
+    return /^(附件|抄送|联系人|联系电话|邮编|地址|电话|传真)[:：]/.test(String(line || '').trim());
+}
+
+function isOfficialWritingSignatureLine(line, index = 0, lines = []) {
+    const text = String(line || '').trim();
+    if (/^(【发文单位】|【日期】|【成文日期】)$/.test(text) || isOfficialWritingDateLine(text)) return true;
+    const nonEmptyIndexes = lines
+        .map((item, itemIndex) => String(item || '').trim() ? itemIndex : -1)
+        .filter(itemIndex => itemIndex >= 0);
+    const tailIndexes = nonEmptyIndexes.slice(-2);
+    const lastIndex = tailIndexes[tailIndexes.length - 1];
+    return tailIndexes[0] === index
+        && lastIndex !== undefined
+        && isOfficialWritingDateLine(lines[lastIndex])
+        && !isOfficialWritingNumberedHeading(text)
+        && !isOfficialWritingSubHeading(text)
+        && !isOfficialWritingRecipientLine(text)
+        && !isOfficialWritingClosingLine(text)
+        && !isOfficialWritingFooterLabelLine(text)
+        && text.length <= 28;
+}
+
+function isOfficialWritingRecipientLine(line) {
+    return /[:：]$/.test(line) || /^(【主送机关】|主送机关[:：]|各有关单位[:：]?|各部门[:：]?|各单位[:：]?)/.test(line);
+}
+
+function isOfficialWritingNumberedHeading(line) {
+    return /^[一二三四五六七八九十]+[、.．]/.test(line);
+}
+
+function isOfficialWritingSubHeading(line) {
+    return /^[（(][一二三四五六七八九十0-9一二三四五六七八九十]+[）)]/.test(line) || /^\d+[、.．]/.test(line);
+}
+
+function isOfficialWritingIndentedItem(line) {
+    return /^[（(][一二三四五六七八九十0-9]+[）)]/.test(String(line || '').trim());
+}
+
+function classifyOfficialWritingLine(line, index, lines) {
+    const text = String(line || '').trim();
+    if (!text) return { type: 'blank', text: '' };
+    const firstNonEmptyIndex = lines.findIndex(item => String(item || '').trim());
+    if (index === firstNonEmptyIndex) {
+        if (/^[【\[]/.test(text) || /通知|通报|请示|报告|意见|函|纪要|决定|公告|批复|通知$/.test(text)) {
+            return { type: 'title', text };
+        }
+    }
+    if (isOfficialWritingSignatureLine(text, index, lines)) return { type: 'signature', text };
+    if (isOfficialWritingFooterLabelLine(text)) return { type: 'label', text };
+    if (isOfficialWritingRecipientLine(text)) return { type: 'recipient', text };
+    if (isOfficialWritingClosingLine(text)) {
+        return { type: 'closing', text };
+    }
+    if (isOfficialWritingNumberedHeading(text)) {
+        return { type: 'major-heading', text };
+    }
+    if (isOfficialWritingIndentedItem(text)) {
+        return { type: 'indented-item', text };
+    }
+    if (/^\d+[、.．]/.test(text)) {
+        return { type: 'minor-heading', text };
+    }
+    if (/^[一二三四五六七八九十]+、/.test(text) || /^[-—]/.test(text)) {
+        return { type: 'paragraph-heading', text };
+    }
+    if (/^【.*】[:：]?$/.test(text)) {
+        return { type: 'label', text };
+    }
+    return { type: 'paragraph', text };
+}
+
+function renderOfficialWritingSurface(target = 'draft', { force = false } = {}) {
+    const surface = getOfficialWritingSurface(target);
+    const textarea = getOfficialWritingRawEditor(target);
+    if (!surface || !textarea) return;
+    if (!force && surface === document.activeElement) return;
+    const value = getOfficialWritingSurfaceText(textarea.value || '');
+    const lines = getOfficialWritingParagraphLines(value);
+    const activeClass = surface.classList.contains('is-active') ? ' is-active' : '';
+    const hiddenClass = surface.classList.contains('is-document-hidden') ? ' is-document-hidden' : '';
+    surface.className = `official-writing-document-surface official-writing-editable-surface official-writing-surface-${target}${activeClass}${hiddenClass}`;
+    surface.innerHTML = '';
+    if (!value.trim()) {
+        surface.dataset.empty = 'true';
+        surface.dataset.placeholder = textarea.placeholder || surface.dataset.placeholder || '请输入正文';
+        return;
+    }
+    delete surface.dataset.empty;
+    let paragraphIndex = 0;
+    let cursor = 0;
+    let previousContentType = '';
+    lines.forEach((line, index) => {
+        const rawLine = String(line || '');
+        const lineStart = cursor;
+        const lineEnd = cursor + rawLine.length;
+        const kind = classifyOfficialWritingLine(line, index, lines);
+        cursor = lineEnd + (index < lines.length - 1 ? 1 : 0);
+        if (kind.type === 'blank') {
+            const gap = document.createElement('div');
+            gap.className = 'official-writing-surface-blank';
+            gap.dataset.textStart = String(lineStart);
+            gap.dataset.textEnd = String(lineEnd);
+            surface.appendChild(gap);
+            paragraphIndex += 1;
+            return;
+        }
+        const block = document.createElement('div');
+        block.className = `official-writing-surface-line official-writing-surface-${kind.type}`;
+        if (kind.type === 'signature') {
+            block.classList.add(previousContentType === 'signature'
+                ? 'official-writing-surface-signature-continuation'
+                : 'official-writing-surface-signature-start');
+        }
+        block.dataset.paragraphIndex = String(paragraphIndex);
+        block.dataset.textStart = String(lineStart);
+        block.dataset.textEnd = String(lineEnd);
+        const textSpan = document.createElement('span');
+        textSpan.className = 'official-writing-surface-text';
+        textSpan.textContent = kind.text;
+        block.appendChild(textSpan);
+        surface.appendChild(block);
+        if (kind.type !== 'minor-heading' && kind.type !== 'major-heading') {
+            paragraphIndex += 1;
+        }
+        previousContentType = kind.type;
+    });
+}
+
+function renderOfficialWritingSurfaces({ force = false } = {}) {
+    renderOfficialWritingSurface('source', { force });
+    renderOfficialWritingSurface('draft', { force });
+}
+
+function syncOfficialWritingSurfaceToTextarea(target = 'draft') {
+    const surface = getOfficialWritingSurface(target);
+    const textarea = getOfficialWritingRawEditor(target);
+    if (!surface || !textarea) return;
+    if (surface.dataset.syncing === '1') return;
+    surface.dataset.syncing = '1';
+    textarea.value = normalizeOfficialWritingSurfaceText(surface.innerText || surface.textContent || '');
+    delete surface.dataset.syncing;
+}
+
+function handleOfficialWritingSurfaceInput(event) {
+    const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
+    const selection = getOfficialWritingSurfaceSelection(target);
+    syncOfficialWritingSurfaceToTextarea(target);
+    syncOfficialWritingStateFromInputs();
+    renderOfficialWritingSurface(target, { force: true });
+    if (selection) {
+        const textarea = getOfficialWritingTextarea(target);
+        const point = Math.min(selection.end, textarea?.value.length || 0);
+        setOfficialWritingSurfaceSelection(target, point, point);
+    }
+    renderOfficialWritingWorkspace();
+}
+
+function handleOfficialWritingSurfaceBlur(event) {
+    const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
+    syncOfficialWritingSurfaceToTextarea(target);
+    renderOfficialWritingSurface(target);
+}
+
+function handleOfficialWritingSurfacePaste(event) {
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text/plain') || '';
+    document.execCommand?.('insertText', false, text);
+}
+
+function handleOfficialWritingSurfaceKeydown(event) {
+    if (event.key === 'Tab') {
+        event.preventDefault();
+        document.execCommand?.('insertText', false, '    ');
+    }
+}
+
+function updateOfficialWritingSurfaceVisibility() {
+    const panel = document.querySelector('.official-writing-panel');
+    if (!panel) return;
+    const mode = panel.dataset.writingViewMode || 'document';
+    ['source', 'draft'].forEach(target => {
+        const surface = getOfficialWritingSurface(target);
+        const textarea = getOfficialWritingRawEditor(target);
+        if (!surface || !textarea) return;
+        surface.classList.toggle('is-active', true);
+        textarea.classList.toggle('is-active-editor', false);
+        if (mode === 'document' && target === 'source') {
+            surface.classList.add('is-document-hidden');
+        } else {
+            surface.classList.remove('is-document-hidden');
+        }
+    });
 }
 
 function syncOfficialWritingStateFromInputs() {
@@ -664,6 +933,9 @@ function syncOfficialWritingStateFromInputs() {
     officialWritingState.source = getOfficialWritingText('official-writing-source');
     officialWritingState.draft = getOfficialWritingText('official-writing-draft');
     syncOfficialWritingMetaFromInputs();
+    updateOfficialWritingModeControls();
+    if (!isOfficialWritingSurfaceActive('source')) renderOfficialWritingSurface('source');
+    if (!isOfficialWritingSurfaceActive('draft')) renderOfficialWritingSurface('draft');
     recordOfficialWritingAutoSave();
     saveOfficialWritingState();
 }
@@ -733,7 +1005,7 @@ function getOfficialWritingDocType() {
 }
 
 function getOfficialWritingMode() {
-    return document.getElementById('official-writing-mode')?.value || 'draft';
+    return normalizeOfficialWritingMode(officialWritingState.mode);
 }
 
 function getOfficialWritingStandard() {
@@ -787,12 +1059,146 @@ function getOfficialWritingTextarea(target = 'draft') {
     return document.getElementById(target === 'source' ? 'official-writing-source' : 'official-writing-draft');
 }
 
+function getOfficialWritingTargetFromTextarea(textarea) {
+    return textarea?.id === 'official-writing-source' ? 'source' : 'draft';
+}
+
+function normalizeOfficialWritingSurfaceText(text) {
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\u00a0/g, ' ')
+        .trimEnd();
+}
+
+function getOfficialWritingSurfaceSelection(target) {
+    const surface = getOfficialWritingSurface(target);
+    const selection = window.getSelection?.();
+    if (!surface || !selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!surface.contains(range.startContainer) && surface !== range.startContainer) return null;
+    if (!surface.contains(range.endContainer) && surface !== range.endContainer) return null;
+    let startPoint = getOfficialWritingOffsetFromSurfacePoint(surface, range.startContainer, range.startOffset);
+    let endPoint = getOfficialWritingOffsetFromSurfacePoint(surface, range.endContainer, range.endOffset);
+    if (startPoint == null || endPoint == null) {
+        const before = range.cloneRange();
+        before.selectNodeContents(surface);
+        before.setEnd(range.startContainer, range.startOffset);
+        startPoint = normalizeOfficialWritingSurfaceText(before.toString()).length;
+        endPoint = startPoint + normalizeOfficialWritingSurfaceText(range.toString()).length;
+    }
+    const start = Math.min(startPoint, endPoint);
+    const end = Math.max(startPoint, endPoint);
+    const textarea = getOfficialWritingTextarea(target);
+    return {
+        target,
+        start,
+        end,
+        text: textarea?.value?.slice(start, end) || normalizeOfficialWritingSurfaceText(range.toString())
+    };
+}
+
+function getActiveOfficialWritingSurfaceSelection() {
+    const selection = window.getSelection?.();
+    if (!selection || selection.rangeCount === 0) return null;
+    return ['source', 'draft']
+        .map(target => ({ target, surface: getOfficialWritingSurface(target) }))
+        .filter(item => item.surface)
+        .map(item => {
+            const range = selection.getRangeAt(0);
+            const active = document.activeElement === item.surface
+                || item.surface.contains(range.startContainer)
+                || item.surface.contains(range.endContainer);
+            return active ? getOfficialWritingSurfaceSelection(item.target) : null;
+        })
+        .find(Boolean) || null;
+}
+
+function getOfficialWritingTextOffsetWithinLine(line, node, offset) {
+    if (!line) return 0;
+    if (node === line) return Math.min(offset, line.textContent?.length || 0);
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.setEnd(node, offset);
+    return range.toString().length;
+}
+
+function getOfficialWritingOffsetFromSurfacePoint(surface, node, offset) {
+    const elementNode = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    const line = elementNode?.closest?.('.official-writing-surface-line');
+    if (!line || !surface.contains(line)) return null;
+    const lineStart = Number(line.dataset.textStart || 0);
+    const lineEnd = Number(line.dataset.textEnd || lineStart);
+    const relative = getOfficialWritingTextOffsetWithinLine(line, node, offset);
+    return Math.max(lineStart, Math.min(lineEnd, lineStart + relative));
+}
+
+function findOfficialWritingTextPoint(node, offset) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let currentOffset = Math.max(0, offset);
+    let lastText = null;
+    while (walker.nextNode()) {
+        const textNode = walker.currentNode;
+        lastText = textNode;
+        const length = textNode.nodeValue?.length || 0;
+        if (currentOffset <= length) return { node: textNode, offset: currentOffset };
+        currentOffset -= length;
+    }
+    if (lastText) return { node: lastText, offset: lastText.nodeValue?.length || 0 };
+    return { node, offset: Math.min(node.childNodes.length, 0) };
+}
+
+function getOfficialWritingSurfacePoint(target, offset) {
+    const surface = getOfficialWritingSurface(target);
+    if (!surface) return null;
+    const lines = Array.from(surface.querySelectorAll('.official-writing-surface-line'));
+    if (!lines.length) return { node: surface, offset: 0 };
+    const safeOffset = Math.max(0, offset);
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const start = Number(line.dataset.textStart || 0);
+        const end = Number(line.dataset.textEnd || start);
+        if (safeOffset <= end) return findOfficialWritingTextPoint(line, safeOffset - start);
+    }
+    const lastLine = lines[lines.length - 1];
+    return findOfficialWritingTextPoint(lastLine, lastLine.textContent?.length || 0);
+}
+
+function setOfficialWritingSurfaceSelection(target, start, end = start) {
+    const surface = getOfficialWritingSurface(target);
+    const startPoint = getOfficialWritingSurfacePoint(target, start);
+    const endPoint = getOfficialWritingSurfacePoint(target, end);
+    if (!surface || !startPoint || !endPoint) return;
+    const range = document.createRange();
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+    const selection = window.getSelection?.();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    surface.focus();
+}
+
 function setTextareaSelection(textarea, start, end = start) {
     if (!textarea) return;
     const safeStart = Math.max(0, Math.min(textarea.value.length, start));
     const safeEnd = Math.max(safeStart, Math.min(textarea.value.length, end));
-    textarea.focus();
     textarea.setSelectionRange(safeStart, safeEnd);
+    const target = getOfficialWritingTargetFromTextarea(textarea);
+    renderOfficialWritingSurface(target);
+    setOfficialWritingSurfaceSelection(target, safeStart, safeEnd);
+}
+
+function setOfficialWritingTextareaValue(target, value) {
+    const textarea = getOfficialWritingTextarea(target);
+    if (!textarea) return;
+    officialWritingProgrammaticTextUpdate = true;
+    try {
+        textarea.value = String(value || '');
+        renderOfficialWritingSurface(target, { force: true });
+    } finally {
+        officialWritingProgrammaticTextUpdate = false;
+    }
 }
 
 // 撤销/重做：仅快照正文与原文文本，覆盖破坏性操作（建议替换/插入、模板套用、载入版本、同步原文）。
@@ -814,10 +1220,8 @@ function pushOfficialWritingUndoSnapshot() {
 }
 
 function applyOfficialWritingSnapshot(snapshot) {
-    const source = document.getElementById('official-writing-source');
-    const draft = document.getElementById('official-writing-draft');
-    if (source) source.value = snapshot.source || '';
-    if (draft) draft.value = snapshot.draft || '';
+    setOfficialWritingTextareaValue('source', snapshot.source || '');
+    setOfficialWritingTextareaValue('draft', snapshot.draft || '');
     syncOfficialWritingStateFromInputs();
     renderOfficialWritingWorkspace();
 }
@@ -852,12 +1256,27 @@ function replaceTextareaRange(textarea, start, end, replacement, { skipSnapshot 
     if (!skipSnapshot) pushOfficialWritingUndoSnapshot();
     const before = textarea.value.slice(0, start);
     const after = textarea.value.slice(end);
-    textarea.value = `${before}${replacement}${after}`;
-    setTextareaSelection(textarea, start, start + replacement.length);
+    officialWritingProgrammaticTextUpdate = true;
+    try {
+        textarea.value = `${before}${replacement}${after}`;
+        setTextareaSelection(textarea, start, start + replacement.length);
+    } finally {
+        officialWritingProgrammaticTextUpdate = false;
+    }
     syncOfficialWritingStateFromInputs();
+    renderOfficialWritingSurface(getOfficialWritingTargetFromTextarea(textarea), { force: true });
 }
 
 function getCurrentOfficialWritingSelection() {
+    const surfaceSelection = getActiveOfficialWritingSurfaceSelection();
+    if (surfaceSelection) {
+        const textarea = getOfficialWritingTextarea(surfaceSelection.target);
+        if (textarea) {
+            textarea.selectionStart = surfaceSelection.start;
+            textarea.selectionEnd = surfaceSelection.end;
+        }
+        return surfaceSelection;
+    }
     const source = getOfficialWritingTextarea('source');
     const draft = getOfficialWritingTextarea('draft');
     const active = document.activeElement === source ? source : draft;
@@ -881,6 +1300,13 @@ function getBestOfficialWritingSelection() {
         return live;
     }
     return officialWritingUiState.lastSelection || live;
+}
+
+function getOfficialWritingInsertionPoint(target = 'draft') {
+    const surfaceSelection = getOfficialWritingSurfaceSelection(target);
+    if (surfaceSelection) return surfaceSelection.end;
+    const textarea = getOfficialWritingTextarea(target);
+    return textarea?.selectionEnd || textarea?.value.length || 0;
 }
 
 function getOfficialWritingMaterialSegments() {
@@ -1128,7 +1554,7 @@ function renderOfficialWritingSuggestions() {
                 <button type="button" class="btn-secondary" data-suggestion-action="reject">拒绝</button>
             </div>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部 AI 操作或选区工具生成。</div>';
+    `).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>';
 }
 
 function renderOfficialWritingReferences() {
@@ -1152,7 +1578,7 @@ function renderOfficialWritingMaterials() {
     if (outline) {
         const paragraphs = splitOfficialWritingParagraphs(officialWritingState.draft);
         outline.innerHTML = paragraphs.map((item, index) => `
-            <button type="button" class="official-writing-outline-item" data-official-writing-jump="${item.start}" data-official-writing-target="draft">
+            <button type="button" class="official-writing-outline-item" data-official-writing-jump="${item.start}" data-official-writing-target="draft" title="${escapeAppsHtml(item.text)}" data-full-text="${escapeAppsHtml(item.text)}">
                 <span>${index + 1}</span>
                 <strong>${escapeAppsHtml(compactTextPreview(item.text, 52))}</strong>
             </button>
@@ -1187,6 +1613,8 @@ function renderOfficialWritingMaterials() {
 
 function renderOfficialWritingWorkspace() {
     syncOfficialWritingStateFromInputs();
+    updateOfficialWritingSurfaceVisibility();
+    resizeOfficialWritingDraftPage();
     renderOfficialWritingStats();
     renderOfficialWritingComments();
     renderOfficialWritingVersions();
@@ -1195,6 +1623,20 @@ function renderOfficialWritingWorkspace() {
     renderOfficialWritingReferences();
     renderOfficialWritingMaterials();
     renderOfficialWritingProofread();
+}
+
+function resizeOfficialWritingDraftPage() {
+    const editorStack = document.querySelector('.official-writing-draft-stack');
+    const surface = getOfficialWritingSurface('draft');
+    const panel = document.querySelector('.official-writing-panel');
+    if (!editorStack || !surface || !panel) return;
+    if (panel.dataset.writingViewMode !== 'document') {
+        editorStack.style.height = '';
+        return;
+    }
+    editorStack.style.height = 'auto';
+    const minHeight = Number.parseFloat(getComputedStyle(editorStack).minHeight) || 0;
+    editorStack.style.height = `${Math.max(minHeight, surface.scrollHeight + 168)}px`;
 }
 
 // ===== 公文校对检查（敏感词 / 易错字 / 标点规范 / 标题文种一致性）=====
@@ -1373,6 +1815,10 @@ function applyOfficialWritingViewMode(mode = 'document') {
             ? '左侧原文、右侧正文稿，适合审改和差异核对。'
             : '单页公文编辑器，优先保留正文空间。';
     }
+    applyOfficialWritingLeftRailState();
+    updateOfficialWritingSurfaceVisibility();
+    renderOfficialWritingSurfaces({ force: true });
+    resizeOfficialWritingDraftPage();
     renderOfficialWritingStats();
 }
 
@@ -1406,6 +1852,7 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     renderOfficialWritingReferences();
     renderOfficialWritingProofread();
     if (tab === 'elements') hydrateOfficialWritingMetaForm();
+    resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
 }
 
@@ -1421,6 +1868,7 @@ function closeOfficialWritingDrawer() {
         button.classList.remove('active');
         button.setAttribute('aria-selected', 'false');
     });
+    resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
 }
 
@@ -1436,7 +1884,32 @@ function toggleOfficialWritingDrawer() {
 }
 
 function updateOfficialWritingDrawerToggleLabel() {
-    setText('official-writing-toggle-right-btn', officialWritingUiState.rightCollapsed ? '显示审改栏' : '隐藏审改栏');
+    const button = document.getElementById('official-writing-toggle-right-btn');
+    if (!button) return;
+    const visible = !officialWritingUiState.rightCollapsed;
+    button.textContent = '审改栏';
+    button.classList.toggle('active', visible);
+    button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+    button.title = visible ? '隐藏审改栏' : '显示审改栏';
+}
+
+function applyOfficialWritingLeftRailState() {
+    const workbench = document.querySelector('.official-writing-workbench');
+    const button = document.getElementById('official-writing-toggle-left-btn');
+    const collapsed = Boolean(officialWritingUiState.leftCollapsed);
+    workbench?.classList.toggle('is-left-rail-hidden', collapsed);
+    if (button) {
+        button.textContent = '资料栏';
+        button.classList.toggle('active', !collapsed);
+        button.setAttribute('aria-pressed', collapsed ? 'false' : 'true');
+        button.title = collapsed ? '显示资料栏' : '隐藏资料栏';
+    }
+    resizeOfficialWritingDraftPage();
+}
+
+function toggleOfficialWritingLeftRail() {
+    officialWritingUiState.leftCollapsed = !officialWritingUiState.leftCollapsed;
+    applyOfficialWritingLeftRailState();
 }
 
 function closeOfficialWritingCommandMenu() {
@@ -1468,6 +1941,9 @@ function setOfficialWritingMaterialSource(source) {
 
 function getSelectionFromTextarea(textarea) {
     if (!textarea) return '';
+    const target = getOfficialWritingTargetFromTextarea(textarea);
+    const surfaceSelection = getOfficialWritingSurfaceSelection(target);
+    if (surfaceSelection?.text) return surfaceSelection.text.trim();
     const start = Number(textarea.selectionStart || 0);
     const end = Number(textarea.selectionEnd || 0);
     return start === end ? '' : textarea.value.slice(start, end).trim();
@@ -1543,8 +2019,7 @@ function loadOfficialWritingVersion(versionId) {
     const version = [...officialWritingState.versions, ...(officialWritingState.autoSaves || [])].find(item => item.id === versionId);
     if (!version) return;
     pushOfficialWritingUndoSnapshot();
-    const draft = document.getElementById('official-writing-draft');
-    if (draft) draft.value = version.draft || '';
+    setOfficialWritingTextareaValue('draft', version.draft || '');
     syncOfficialWritingStateFromInputs();
     renderOfficialWritingWorkspace();
     showToast('已载入版本到正文稿');
@@ -1870,7 +2345,7 @@ function buildOfficialWritingPrompt() {
         '- 不编造单位、时间、数据和事实；缺失信息请用【待补充】标注。',
         '- 优先保留原有事实信息，优化结构、语气和表达。'
     ];
-    if (mode === 'rewrite_section') lines.push('- 重点处理用户标注或批注涉及的局部内容。');
+    if (mode === 'rewrite_section') lines.push('- 对当前正文稿进行整体改写，保留事实信息和必要结构。');
     if (mode === 'review') lines.push('- 按“问题 / 建议 / 示例修改”输出审校意见。');
     if (requirements) lines.push(`- 用户补充要求：${requirements}`);
     lines.push('', '原文：', officialWritingState.source || '【暂无原文】', '', '当前正文稿：', officialWritingState.draft || '【暂无正文稿】');
@@ -1943,7 +2418,7 @@ async function callOfficialWritingModel(messages, { maxTokens } = {}) {
         return null;
     }
     try {
-        const res = await apiFetch(`${API_BASE}/chat/completions`, {
+        const res = await apiFetch('/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1986,7 +2461,7 @@ async function streamOfficialWritingModel(messages, { maxTokens, onDelta } = {})
     }
     let full = '';
     try {
-        const response = await apiFetch(`${API_BASE}/chat/completions`, {
+        const response = await apiFetch('/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
             body: JSON.stringify({ model: modelId, messages, stream: true, temperature: 0.4, max_tokens: maxTokens || 2000 })
@@ -2181,13 +2656,12 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
 
 async function generateOfficialWritingSuggestion(mode = getOfficialWritingMode()) {
     syncOfficialWritingStateFromInputs();
-    const selection = getBestOfficialWritingSelection();
-    const baseText = selection.text.trim() || officialWritingState.draft.trim();
+    const baseText = officialWritingState.draft.trim();
     if (!baseText && mode !== 'draft') {
-        showToast('请先输入正文或选中一段文字', 'warning');
+        showToast('请先输入正文，或选中文字后使用选区工具', 'warning');
         return;
     }
-    await runOfficialWritingAiTask(mode, { selection });
+    await runOfficialWritingAiTask(mode);
 }
 
 function applySuggestionAction(suggestionId, action) {
@@ -2614,8 +3088,7 @@ function hasOfficialWritingDirtyState() {
 function syncOfficialWritingSourceToDraft() {
     pushOfficialWritingUndoSnapshot();
     const source = document.getElementById('official-writing-source')?.value || '';
-    const draft = document.getElementById('official-writing-draft');
-    if (draft) draft.value = source;
+    setOfficialWritingTextareaValue('draft', source);
     syncOfficialWritingStateFromInputs();
     renderOfficialWritingWorkspace();
 }
@@ -2625,23 +3098,21 @@ function resetOfficialWritingForm() {
         return;
     }
     const ids = [
-        'official-writing-source',
-        'official-writing-draft',
         'official-writing-requirements',
         'official-writing-comment-anchor',
         'official-writing-comment-text',
         'official-writing-version-name'
     ];
+    setOfficialWritingTextareaValue('source', '');
+    setOfficialWritingTextareaValue('draft', '');
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
     const type = document.getElementById('official-writing-type');
-    const mode = document.getElementById('official-writing-mode');
     const standard = document.getElementById('official-writing-standard');
     const materialSource = document.getElementById('official-writing-material-source');
     if (type) type.value = '通知';
-    if (mode) mode.value = 'draft';
     if (standard) standard.value = '通用公文规范';
     if (materialSource) materialSource.value = '粘贴材料';
     officialWritingState = createOfficialWritingState();
@@ -2659,16 +3130,16 @@ function resetOfficialWritingForm() {
 }
 
 function runOfficialWritingMode(mode) {
-    const select = document.getElementById('official-writing-mode');
-    if (select && OFFICIAL_WRITING_MODES[mode]) select.value = mode;
+    const nextMode = normalizeOfficialWritingMode(mode);
+    officialWritingState.mode = nextMode;
     syncOfficialWritingStateFromInputs();
-    if (mode === 'review') {
+    if (nextMode === 'review') {
         // 规范检查（本地、规范库驱动）始终刷新展示，同时调用 AI 生成审校建议。
         renderOfficialWritingWorkspace();
         const risks = getOfficialWritingComplianceRisks();
         if (risks.length) showToast(`本地规范检查发现 ${risks.length} 项风险，AI 审校进行中…`);
     }
-    generateOfficialWritingSuggestion(mode);
+    generateOfficialWritingSuggestion(nextMode);
 }
 
 // ===== 知识库 / 历史公文检索接入 =====
@@ -2776,7 +3247,7 @@ function insertOfficialWritingRagMatch(index, scopeKey) {
     const text = String(match.text || '').trim();
     if (!text) return;
     const insert = `\n\n据${match.source ? `《${match.source}》` : '相关材料'}，${text}`;
-    const start = draft?.selectionEnd || draft?.value.length || 0;
+    const start = getOfficialWritingInsertionPoint('draft');
     replaceTextareaRange(draft, start, start, insert);
     renderOfficialWritingWorkspace();
     showToast('已引用到正文');
@@ -2794,7 +3265,7 @@ function appendOfficialWritingRequirement(text) {
     const value = input.value.trim();
     input.value = value ? `${value}；${text}` : text;
     renderOfficialWritingWorkspace();
-    showToast('已加入修改要求');
+    showToast('已加入 AI 指令');
 }
 
 function applyOfficialWritingTemplate(templateId) {
@@ -2802,13 +3273,10 @@ function applyOfficialWritingTemplate(templateId) {
     if (!template) return;
     pushOfficialWritingUndoSnapshot();
     const type = document.getElementById('official-writing-type');
-    const draft = document.getElementById('official-writing-draft');
+    const draft = getOfficialWritingTextarea('draft');
     if (type) type.value = template.type;
-    if (draft && !draft.value.trim()) {
-        draft.value = template.text;
-    } else if (draft) {
-        draft.value = `${draft.value.trim()}\n\n${template.text}`;
-    }
+    const currentDraft = draft?.value || '';
+    setOfficialWritingTextareaValue('draft', currentDraft.trim() ? `${currentDraft.trim()}\n\n${template.text}` : template.text);
     syncOfficialWritingStateFromInputs();
     applyOfficialWritingViewMode('document');
     renderOfficialWritingWorkspace();
@@ -2817,8 +3285,7 @@ function applyOfficialWritingTemplate(templateId) {
 
 function focusOfficialWritingSource() {
     applyOfficialWritingViewMode('compare');
-    const source = document.getElementById('official-writing-source');
-    source?.focus();
+    getOfficialWritingSurface('source')?.focus();
 }
 
 function handleOfficialWritingMaterialAction(materialId, action) {
@@ -2827,7 +3294,7 @@ function handleOfficialWritingMaterialAction(materialId, action) {
     const draft = getOfficialWritingTextarea('draft');
     if (action === 'insert') {
         const insert = `\n\n据材料显示，${segment.text}`;
-        const start = draft?.selectionEnd || draft?.value.length || 0;
+        const start = getOfficialWritingInsertionPoint('draft');
         replaceTextareaRange(draft, start, start, insert);
         showToast('已引用到正文');
     } else if (action === 'basis') {
@@ -2863,9 +3330,8 @@ function bindAppsWorkbenchEvents() {
     panel.dataset.appsBound = '1';
     document.getElementById('apps-back-btn')?.addEventListener('click', showAppsHome);
     document.getElementById('apps-modal-close')?.addEventListener('click', () => window.closeAppsWorkbench?.());
-    document.getElementById('official-writing-drawer-close')?.addEventListener('click', closeOfficialWritingDrawer);
-    document.getElementById('official-writing-drawer-open-btn')?.addEventListener('click', () => {
-        openOfficialWritingDrawer(officialWritingUiState.drawerTab || 'suggestions');
+    document.getElementById('official-writing-toggle-left-btn')?.addEventListener('click', () => {
+        toggleOfficialWritingLeftRail();
         closeOfficialWritingCommandMenu();
     });
     document.getElementById('official-writing-toggle-right-btn')?.addEventListener('click', () => {
@@ -2877,7 +3343,6 @@ function bindAppsWorkbenchEvents() {
         resetOfficialWritingForm();
         closeOfficialWritingCommandMenu();
     });
-    document.getElementById('official-writing-save-version-top-btn')?.addEventListener('click', saveOfficialWritingVersion);
     document.getElementById('official-writing-undo-btn')?.addEventListener('click', undoOfficialWriting);
     document.getElementById('official-writing-redo-btn')?.addEventListener('click', redoOfficialWriting);
     document.getElementById('official-writing-backup-btn')?.addEventListener('click', () => {
@@ -2921,7 +3386,6 @@ function bindAppsWorkbenchEvents() {
         renderOfficialWritingWorkspace();
     });
     document.getElementById('official-writing-standard')?.addEventListener('change', renderOfficialWritingWorkspace);
-    document.getElementById('official-writing-mode')?.addEventListener('change', renderOfficialWritingWorkspace);
     document.getElementById('official-writing-type')?.addEventListener('change', renderOfficialWritingWorkspace);
     document.getElementById('official-writing-requirements')?.addEventListener('input', renderOfficialWritingWorkspace);
     document.getElementById('official-writing-new-doc-btn')?.addEventListener('click', createOfficialWritingDoc);
@@ -2971,6 +3435,16 @@ function bindAppsWorkbenchEvents() {
         editor?.addEventListener('select', handleOfficialWritingSelectionChange);
         editor?.addEventListener('mouseup', handleOfficialWritingSelectionChange);
         editor?.addEventListener('keyup', handleOfficialWritingSelectionChange);
+    });
+    ['source', 'draft'].forEach(target => {
+        const surface = getOfficialWritingSurface(target);
+        surface?.addEventListener('input', handleOfficialWritingSurfaceInput);
+        surface?.addEventListener('blur', handleOfficialWritingSurfaceBlur);
+        surface?.addEventListener('paste', handleOfficialWritingSurfacePaste);
+        surface?.addEventListener('keydown', handleOfficialWritingSurfaceKeydown);
+        surface?.addEventListener('mouseup', handleOfficialWritingSelectionChange);
+        surface?.addEventListener('keyup', handleOfficialWritingSelectionChange);
+        surface?.addEventListener('select', handleOfficialWritingSelectionChange);
     });
     panel.addEventListener('click', event => {
         const commandMenu = event.target.closest('#official-writing-command-more-menu');
