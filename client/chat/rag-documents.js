@@ -913,8 +913,3 @@ document.addEventListener('change', async (event) => {
         await window.handleRagCollectionScopeChange?.('meta');
     }
 });
-
-document.addEventListener('DOMContentLoaded', () => {
-    window.loadKnowledgeCollections?.();
-    window.refreshRagTagControlsForSelectedCollections?.();
-});

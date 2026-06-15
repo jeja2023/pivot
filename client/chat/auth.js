@@ -99,6 +99,8 @@ window.showApp = (options = {}) => {
     if (window.refreshModelSelector) window.refreshModelSelector();
     if (window.initAgentRealtime) window.initAgentRealtime();
     if (window.initAnnouncements) window.initAnnouncements();
+    if (window.loadKnowledgeCollections) window.loadKnowledgeCollections();
+    if (window.refreshRagTagControlsForSelectedCollections) window.refreshRagTagControlsForSelectedCollections();
 };
 
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
