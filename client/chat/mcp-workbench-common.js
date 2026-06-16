@@ -128,7 +128,7 @@ function renderMcpServiceCard({
         : (service.requiresConfig ? configMetaText : disabledMetaText);
     const headAction = enabled
         ? `
-            <button class="mcp-status-toggle${isPaused ? '' : ' is-on'}" type="button" data-mcp-toggle="${server.id}" data-next-status="${isPaused ? 'active' : 'paused'}" aria-label="${isPaused ? '启用服务' : '停用服务'}" title="${isPaused ? '启用服务' : '停用服务'}">
+            <button class="mcp-status-toggle${isPaused ? '' : ' is-on'}" type="button" data-mcp-toggle="${mcpEscape(server.id)}" data-next-status="${isPaused ? 'active' : 'paused'}" aria-label="${isPaused ? '启用服务' : '停用服务'}" title="${isPaused ? '启用服务' : '停用服务'}">
                 <span></span>
             </button>
         `
@@ -146,7 +146,7 @@ function renderMcpServiceCard({
             <p>${mcpEscape(service.description)}</p>
             <div class="mcp-card-meta">${mcpEscape(metaText)}</div>
             <div class="mcp-system-actions">
-                ${enabled ? `<button class="btn-secondary" type="button" data-mcp-tools="${server.id}">工具</button>` : ''}
+                ${enabled ? `<button class="btn-secondary" type="button" data-mcp-tools="${mcpEscape(server.id)}">工具</button>` : ''}
                 ${service.requiresConfig ? `
                     <button class="btn-secondary" type="button" data-mcp-system-config="${mcpEscape(service.type)}">
                         ${enabled ? '编辑配置' : '配置'}

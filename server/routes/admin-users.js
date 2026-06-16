@@ -1,5 +1,6 @@
 /* 管理员用户管理路由 Admin User Management Routes */
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const { db } = require('../db');
@@ -304,15 +305,17 @@ function createAdminUsersRouter({
         const lines = content.split('\n').slice(1);
         let count = 0;
         let skipped = 0;
-        const defaultPassword = process.env.DEFAULT_IMPORTED_PASSWORD || 'ChangeMe123';
-        const hash = bcrypt.hashSync(defaultPassword, 10);
+        // 收集被跳过的行及原因，供前端展示。出于安全考虑不回显生成的随机密码。
+        const skippedRows = [];
+        // 用户名校验规则与 register() 保持一致：3-32 位字母、数字、点、下划线或短横线。
+        const usernamePattern = /^[a-zA-Z0-9_.-]{3,32}$/;
 
-        lines.forEach(line => {
+        lines.forEach((line, index) => {
             const cleanLine = line.trim();
             if (!cleanLine) return;
             const parts = parseCsvLine(cleanLine);
             let username, password, nickname, unit, role, status;
-            
+
             const hasIdColumn = /^\d+$/.test(parts[0] || '');
             if (hasIdColumn) {
                 username = parts[1];
@@ -327,21 +330,49 @@ function createAdminUsersRouter({
                 unit = parts[3];
                 role = parts[4];
             }
-            
-            if (username && username !== 'username' && username !== '用户名') {
+
+            // 跳过表头行
+            if (!username || username === 'username' || username === '用户名') return;
+
+            const cleanUsername = String(username).trim();
+            // 用户名格式校验：不符合规则的行直接跳过并记录，避免绕过 register() 的约束。
+            if (!usernamePattern.test(cleanUsername)) {
+                skipped++;
+                skippedRows.push({ line: index + 2, username: cleanUsername, reason: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
+                return;
+            }
+
+            let userHash;
+            if (password) {
+                // 显式提供密码时，套用与注册一致的强度校验，弱密码跳过。
                 try {
-                    const userHash = password ? bcrypt.hashSync(String(password), 10) : hash;
-                    db.prepare('INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                      .run(username, nickname || username, unit || '', (role === 'admin' && isSuperAdmin(req.user)) ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp());
-                    count++;
+                    validatePassword(String(password));
                 } catch (e) {
                     skipped++;
+                    skippedRows.push({ line: index + 2, username: cleanUsername, reason: '密码强度不足：至少 8 位且同时包含字母和数字' });
+                    return;
                 }
+                userHash = bcrypt.hashSync(String(password), 10);
+            } else {
+                // 无密码行：生成每行随机强密码（含字母+数字，满足强度规则）。
+                // 当前 users 表无「强制改密」字段，故不能标记首次登录强制改密；
+                // 改用随机密码，需管理员后续通过重置密码下发，避免固定默认口令风险。
+                const randomPassword = `Pv${crypto.randomBytes(12).toString('hex')}9`;
+                userHash = bcrypt.hashSync(randomPassword, 10);
+            }
+
+            try {
+                db.prepare('INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                  .run(cleanUsername, nickname || cleanUsername, unit || '', (role === 'admin' && isSuperAdmin(req.user)) ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp());
+                count++;
+            } catch (e) {
+                skipped++;
+                skippedRows.push({ line: index + 2, username: cleanUsername, reason: '插入失败（可能用户名已存在）' });
             }
         });
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
-        res.json({ success: true, count, skipped });
+        res.json({ success: true, count, skipped, skippedRows });
     }));
 
     router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {

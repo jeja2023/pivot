@@ -247,6 +247,9 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         total = estimateMessagesTokens(working);
     }
 
+    // Maintain a running `total` decremented by each removed message's estimated
+    // token count (using the same per-message estimator) instead of re-summing all
+    // remaining messages after every splice, which was O(n^2).
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
         const message = working[i];
         const pinned = message.__originIndex === lastUserOriginIndex
@@ -257,9 +260,9 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
             i += 1;
             continue;
         }
+        total -= estimateMessageTokens(message);
         working.splice(i, 1);
         metadata.droppedMessages += 1;
-        total = estimateMessagesTokens(working);
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
@@ -267,9 +270,9 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
             i += 1;
             continue;
         }
+        total -= estimateMessageTokens(working[i]);
         working.splice(i, 1);
         metadata.droppedRagContexts += 1;
-        total = estimateMessagesTokens(working);
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
@@ -277,9 +280,9 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
             i += 1;
             continue;
         }
+        total -= estimateMessageTokens(working[i]);
         working.splice(i, 1);
         metadata.droppedMcpContexts += 1;
-        total = estimateMessagesTokens(working);
     }
 
     if (total > budget.inputBudget) {

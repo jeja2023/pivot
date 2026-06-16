@@ -88,8 +88,8 @@ function renderPromptGrid() {
                 <span>${escapeHtml(prompt.scope === 'global' ? '全局' : '个人')}</span>
             </div>
             <div class="prompt-chip-row">${renderPromptChips(prompt)}</div>
-            ${prompt.description ? `<div class="prompt-card-desc">${escapeHtml(prompt.description)}</div>` : ''}
-            <p>${escapeHtml(prompt.content)}</p>
+            ${prompt.description ? `<div class="prompt-card-desc" title="${escapeHtml(prompt.description)}">${escapeHtml(prompt.description)}</div>` : ''}
+            <p title="${escapeHtml(prompt.content)}">${escapeHtml(prompt.content)}</p>
             <div class="prompt-actions prompt-actions-targets">
                 ${renderPromptSurfaceActions(prompt)}
                 ${(prompt.scope !== 'global' || isSuperAdminUser()) ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt-id="${prompt.id}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${prompt.id}">删除</button>` : ''}

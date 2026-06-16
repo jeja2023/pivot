@@ -283,9 +283,37 @@ function polishEchartsLayoutOption(option) {
     };
 }
 
+function disposePivotEchart(block) {
+    if (!block) return;
+    if (typeof block._pivotEchartResize === 'function') {
+        window.removeEventListener('resize', block._pivotEchartResize);
+        block._pivotEchartResize = null;
+    }
+    if (block._pivotEchart) {
+        try { block._pivotEchart.dispose(); } catch (_error) { /* noop */ }
+        block._pivotEchart = null;
+    }
+    // Safety net: dispose any echarts instance still bound to the mount node.
+    if (window.echarts) {
+        const mount = block.querySelector?.('.pivot-echart-canvas');
+        if (mount) {
+            const existing = window.echarts.getInstanceByDom?.(mount);
+            if (existing) {
+                try { existing.dispose(); } catch (_error) { /* noop */ }
+            }
+        }
+    }
+}
+
+function teardownPivotCharts(root = document) {
+    root.querySelectorAll?.('.pivot-echart-block').forEach(disposePivotEchart);
+}
+
 function renderEcharts(block, spec) {
     const mount = block.querySelector('.pivot-echart-canvas');
     if (!mount || !window.echarts) return false;
+    // Dispose any prior instance/listener bound to this block before re-initializing.
+    disposePivotEchart(block);
     mount.hidden = false;
     mount.style.height = '340px';
     mount.innerHTML = '';
@@ -548,6 +576,7 @@ function renderPivotCharts(root = document) {
 }
 
 window.renderPivotCharts = renderPivotCharts;
+window.teardownPivotCharts = teardownPivotCharts;
 
 function compactChartErrorText(raw) {
     const text = String(raw || '').trim();

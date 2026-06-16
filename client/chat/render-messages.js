@@ -103,8 +103,11 @@ function buildAssistantStatsHtml(stats = {}) {
     return `<div class="message-stats"${modelName ? ` data-model-name="${escapeAttrValue(modelName)}"` : ''}>${items.join('')}</div>`;
 }
 
-function appendMessage(role, content, id = null, stats = null) {
-    const container = document.getElementById('message-container');
+function appendMessage(role, content, id = null, stats = null, mountOptions = null) {
+    // mountOptions lets callers batch-append (e.g. session switch): provide a
+    // target container/fragment and defer the per-message chart render + scroll.
+    const target = mountOptions?.target || document.getElementById('message-container');
+    const deferRender = Boolean(mountOptions?.deferRender);
     const div = document.createElement('div');
     div.className = `message ${role}`;
     if (id) div.dataset.messageId = String(id);
@@ -140,11 +143,13 @@ function appendMessage(role, content, id = null, stats = null) {
             </div>
         </div>
     `;
-    container.appendChild(div);
+    target.appendChild(div);
     attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
-    if (role === 'assistant') renderPivotCharts(div);
-    window.scrollMessagesToBottom?.();
+    if (!deferRender) {
+        if (role === 'assistant') renderPivotCharts(div);
+        window.scrollMessagesToBottom?.();
+    }
     return div.querySelector('.message-content');
 }
 

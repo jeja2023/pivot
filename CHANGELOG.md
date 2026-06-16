@@ -1,5 +1,61 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.113] - 2026-06-16
+### 全栈深度体检：安全收口、性能优化、稳定性加固与数据库 MCP 重构
+
+本版本对全项目（服务端 ~29k 行、客户端 ~29k 行）做了一次系统性深度检查，并对查出的问题进行全面修复与优化。改动覆盖安全、性能、服务端稳定性、客户端内存与错误处理四大方向，并完成数据库 MCP 多方言分发逻辑的去重重构。涉及 `server/services/database-mcp.js`、`server/routes/admin-users.js`、`server/index.js`、`server/db/migrate.js`、`server/db/schema.js`、`server/services/agent-runtime.js`、`server/routes/mcp.js`、`server/routes/admin-stats.js`、`server/metrics.js`、`server/services/rag-index.js`、`server/services/knowledge-graph.js`、`server/services/context-budget.js`、`client/chat/render-charts.js`、`client/chat/engine.js`、`client/chat/engine-sessions.js`、`client/chat/render-messages.js`、`client/chat/apps-workbench.js`、`client/chat/engine-mcp-tools.js`、`client/chat/mcp-workbench-main.js`、`client/chat/mcp-workbench-common.js` 等。
+
+#### 安全收口
+- **数据库 MCP 连接 SSRF 防护**：外部数据库（PostgreSQL/MySQL/SQL Server/MongoDB）在**连接时**统一经 `assertSafeDatabaseHost`/`databaseSafeLookup` 做 DNS 解析后 IP 校验，PostgreSQL 通过驱动 `lookup` 钩子在握手阶段复核解析 IP，其余方言在连接前重解析校验，拦截把内网/本机/云元数据地址藏在域名背后的 SSRF 与 DNS rebinding；配置态保留同步的字面量私网快速拦截。
+- **用户 CSV 导入校验**：导入路径套用与 `register()` 一致的用户名正则（`^[a-zA-Z0-9_.-]{3,32}$`）与密码强度校验，非法行跳过并在响应中回报 `skippedRows`；无密码行改为每行随机强密码，取代固定默认口令。
+
+#### 性能优化
+- **统计查询谓词下推**：`tokenUsageSubquery` 把日期/用户过滤条件下推进 `messages`/`model_usage_events` 联合查询的各分支内部，避免外层过滤导致两表全量物化；`monitor-summary`、`trend`、`report`、`details`、`model-costs` 及 `metrics.js` 的「当日/近 N 天/近 15 分钟」谓词由 `date()/datetime()` 包裹列改写为裸列半开区间，使 `created_at`/`timestamp` 索引生效。
+- **监控快照与主机名缓存**：`/monitor-summary` 整体响应加 5 秒 TTL 缓存，本地主机名 DNS 解析加 60 秒缓存，降低仪表盘轮询开销。
+- **RAG 向量检索提速**：嵌入向量解析结果与 L2 模长加入带界缓存（重建索引时失效），余弦相似度改为复用预存模长、每次查询仅计算一次查询向量模长，消除热路径上的重复 `JSON.parse` 与重复归一化。
+- **知识图谱检索与摄取优化**：`findQueryEntities` 增加候选实体 SQL 预过滤与 `LIMIT`，不再每条消息全表扫描；图谱摄取的 upsert 语句提升到模块级复用，并以 `RETURNING` 取代回查 SELECT，减少每实体一次往返。
+- **上下文裁剪复杂度优化**：`context-budget` 消息裁剪由每次重算全量 token（O(n²)）改为维护运行总数递减（O(n)）。
+
+#### 服务端稳定性
+- **未捕获 Promise 不再杀进程**：`unhandledRejection` 由直接 `process.exit(1)` 改为记录日志后继续运行，`uncaughtException` 行为保持不变，避免单个游离 Promise 拖垮服务。
+- **目录体积统计加固**：`getDirSizeAsync` 增加 32 层递归深度上限并跳过符号链接，防止深层嵌套或环路导致栈溢出/挂起。
+- **迁移簿记修正**：移除 `runMigrations` 末尾会把命令式 schema 误标为「已应用迁移」的无条件 `recordSchemaMigration` 调用，使迁移状态如实反映。
+- **智能体重试身份与查询收口**：失败重试合并 `retry_limit`/`retry_count` 为单次查询，并用 `getRunUser(runId)` 重取用户身份，避免以过期/已禁用身份重试。
+- **新增索引与去重**：补充 `idx_rag_feedback_user_doc(user_id, doc_name)` 索引；收敛 `mcp.js` 中 `SYSTEM_MCP_SERVICES` 的重复声明。
+
+#### 客户端内存与错误处理
+- **ECharts 实例泄漏修复**：新增 `disposePivotEchart`/`teardownPivotCharts`，流式重渲染替换消息 DOM 前先 `dispose()` 旧图表实例并移除 `window` resize 监听，消除长会话下图表实例与监听的无界累积。
+- **流读取器与流后错误隔离**：聊天流在 `finally` 中可靠 `cancel()`/`releaseLock()` 读取器；流式成功后的统计上报失败不再误报为对话错误。
+- **会话切换渲染优化**：`createSession`/`selectSession` 增加 `res.ok` 前置检查与 try/catch，并以 `DocumentFragment` 一次性挂载历史消息、统一渲染图表与滚动，消除逐条 reflow。
+- **公文写作工作台修复**：RAG 集合加载标志位仅在成功后置位（修复首次失败后永不重载）；按键管线对保存/分析/列表重建做 250ms 防抖（输入即时、blur/导出前 flush）；评论与建议数组限长，避免无界增长。
+- **监听器与转义收口**：MCP 同意弹窗改用共享 settle 显式清理双监听，避免确认后残留累积；MCP 工作台 `data-*` 中的 `server.id` 统一转义。
+
+#### 数据库 MCP 重构
+- **多方言分发去重**：将 `executeSqlTool` 中 sqlite/postgres/mysql/sqlserver 四套近乎重复的五工具分发（约 218 行）重构为「方言适配器表 `RELATIONAL_DIALECTS` + 单一共享分发器 `runRelationalTool`」，把连接包装、取行调用、元数据 SQL 与方言/参数风格收敛到适配器，治理与脱敏逻辑只写一份；`withSqlite` 改为 `async` 以正确等待异步分发完成后再关闭句柄。行为与原实现保持等价。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.113`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **回归验证通过**：`npm test`（`check` + `lint` + `node tests/security.test.js`）全量 **192/192** 通过，ESLint **0 错误**。
+
+## [v0.0.112] - 2026-06-16
+### 智能体工作台布局优化、角色与规范库弹窗及卡片体验收口
+
+本版本主要围绕智能体工作台排版、角色与规范库小屏幕布局兼容，以及套用弹窗交互细节进行多处细节体验收口。改动集中在 `client/chat/partials/workspaces/agent.html`、`client/chat/styles/workspaces/agent/agent-layout.css`、`client/chat/styles/sessions-prompts.css`、`client/chat/partials/pre-app-modals.html` 和 `client/chat/extra.js`。
+
+#### 智能体工作台布局优化
+- **快速任务头部减重**：将快速任务标题与右侧的操作按钮组置于同一行两端对齐，而将折行率较高的说明段落移至下方并占据完整宽度，从而消除此前因文字过窄折行导致的头部高度过度拉高问题。
+
+#### 角色与规范库卡片体验
+- **折行与防截断收口**：卡片底部操作按钮容器开启 `flex-wrap: wrap` 并微调按钮内边距和最小宽度，以防在窄屏和小显示器下按钮溢出截断；同时去掉卡片说明文案与提示词主体的 2 行截断显示限制，允许内容较长时弹性撑开高度完整显示。
+- **全局悬停提示**：为卡片说明文字与提示词主体内容新增原生 `title` 属性，鼠标悬停时会浮出气泡框提示最完整的原始文本。
+
+#### 套用规范弹窗优化
+- **关闭按钮右上角化**：将“套用角色与规范”弹窗的关闭按钮定位从原先的标题下方移动到弹窗右上角，并改用全局统一的 `.btn-danger-outline` 红色线框字样样式。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.112`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **回归验证通过**：通过 `npm run check` 校验及 `node tests/security-agent.test.js` 全量 35 个安全回归测试。
+
 ## [v0.0.111] - 2026-06-16
 ### API 接入总开关与管理员控制收口
 

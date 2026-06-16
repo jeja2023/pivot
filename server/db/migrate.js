@@ -217,6 +217,8 @@ function runMigrations() {
             FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
+        -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描
+        CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_doc ON rag_feedback(user_id, doc_name);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_enabled ON knowledge_docs(user_id, is_enabled, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_collection ON knowledge_docs(user_id, collection_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_deleted ON knowledge_docs(deleted_at);
@@ -910,11 +912,11 @@ function runMigrations() {
         logger.error({ err: e.message }, '全文搜索索引初始化失败');
     }
 
-    recordSchemaMigration('20260516_schema_migrations_v1', 'Track applied schema migrations in a dedicated table.');
-    recordSchemaMigration('20260516_agent_queue_locks_v1', 'Add database-backed agent queue lock fields and indexes.');
-    recordSchemaMigration('20260516_branch_artifact_observability_capabilities_v1', 'Add conversation forks, artifact versions, DAG nodes, capability packages, and observability events.');
-    recordSchemaMigration('20260517_mcp_call_logs_v1', 'Track MCP tool calls for audit and health governance.');
-    recordSchemaMigration('20260601_announcements_v1', 'Add system announcements and per-user read acknowledgement state.');
+    // 以上各项 schema 均由本函数前面的 ensureColumn / db.exec 命令式语句创建，
+    // 并非通过 runSchemaMigration(id, ...) 守卫执行。这些 ID 没有任何对应的
+    // runSchemaMigration 闭包（已全仓库 grep 确认），因此此前在此处无条件
+    // recordSchemaMigration 只会把它们伪标记为“已应用”，没有任何实际作用，
+    // 反而容易让人误以为存在受守卫保护的迁移。现已移除这些无效记账。
 }
 
 module.exports = { runMigrations, recordMigration, recordSchemaMigration, runSchemaMigration };

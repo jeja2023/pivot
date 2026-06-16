@@ -303,6 +303,75 @@ function cosineSimilarity(vecA, vecB) {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// Bounded cache for parsed chunk embeddings on the chat hot path: re-parsing the
+// same TEXT-JSON vectors (and recomputing their L2 norm) on every query is costly.
+// Keyed by knowledge_chunks.id -> { vec: Float64Array, norm }. Chunk ids come from
+// an AUTOINCREMENT PK and are never reused, and embeddings are never UPDATEd in
+// place (reindex = DELETE + re-INSERT with fresh ids), so a cached id can never map
+// to a different embedding. Cache is still invalidated on reindex for defensiveness.
+const CHUNK_EMBEDDING_CACHE_MAX = 2000;
+const chunkEmbeddingCache = new Map();
+
+// Parse + norm a chunk's embedding, caching the result. Returns null when the
+// embedding is missing/invalid or its dimension does not match the expected length.
+function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
+    if (chunkId != null) {
+        const cached = chunkEmbeddingCache.get(chunkId);
+        if (cached) {
+            return cached.vec.length === expectedLength ? cached : null;
+        }
+    }
+    if (!rawEmbedding) return null;
+    let parsed;
+    try {
+        parsed = JSON.parse(rawEmbedding);
+    } catch (e) {
+        return null;
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const vec = new Float64Array(parsed.length);
+    let norm = 0;
+    for (let i = 0; i < parsed.length; i += 1) {
+        const value = Number(parsed[i]);
+        if (!Number.isFinite(value)) return null;
+        vec[i] = value;
+        norm += value * value;
+    }
+    const entry = { vec, norm: Math.sqrt(norm) };
+    if (chunkId != null) {
+        if (chunkEmbeddingCache.size >= CHUNK_EMBEDDING_CACHE_MAX) {
+            // Evict oldest (Map preserves insertion order).
+            const oldestKey = chunkEmbeddingCache.keys().next().value;
+            chunkEmbeddingCache.delete(oldestKey);
+        }
+        chunkEmbeddingCache.set(chunkId, entry);
+    }
+    return entry.vec.length === expectedLength ? entry : null;
+}
+
+// Cosine similarity against a cached chunk vector using a precomputed query norm.
+function cosineSimilarityCached(queryVector, queryNorm, chunkEntry) {
+    if (queryNorm === 0 || chunkEntry.norm === 0) return 0;
+    const vec = chunkEntry.vec;
+    let dotProduct = 0;
+    for (let i = 0; i < queryVector.length; i += 1) {
+        dotProduct += queryVector[i] * vec[i];
+    }
+    return dotProduct / (queryNorm * chunkEntry.norm);
+}
+
+function computeVectorNorm(vector) {
+    let norm = 0;
+    for (let i = 0; i < vector.length; i += 1) {
+        norm += vector[i] * vector[i];
+    }
+    return Math.sqrt(norm);
+}
+
+function clearChunkEmbeddingCache() {
+    chunkEmbeddingCache.clear();
+}
+
 function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source }) {
     if (!userId) return;
     try {
@@ -497,15 +566,16 @@ function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLi
 }
 
 function scoreChunks(chunks, queryVector) {
+    // Compute the query vector's norm once, then reuse cached chunk vectors/norms.
+    const queryNorm = computeVectorNorm(queryVector);
     return chunks.map(chunk => {
         try {
-            if (!chunk.embedding) return null;
-            const docVec = JSON.parse(chunk.embedding);
-            if (!Array.isArray(docVec) || docVec.length !== queryVector.length) return null;
+            const chunkEntry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
+            if (!chunkEntry) return null;
             return {
                 text: chunk.content,
                 source: chunk.name,
-                score: cosineSimilarity(queryVector, docVec)
+                score: cosineSimilarityCached(queryVector, queryNorm, chunkEntry)
             };
         } catch (e) {
             logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 向量解析失败，已跳过分片');
@@ -638,16 +708,17 @@ async function debugRetrieveContext(userId, query, {
     let scoredChunks = [];
     try {
         const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
+        // Compute the query vector's norm once, then reuse cached chunk vectors/norms.
+        const queryNorm = computeVectorNorm(vector);
         scoredChunks = candidates.map(chunk => {
             try {
-                if (!chunk.embedding) return null;
-                const docVec = JSON.parse(chunk.embedding);
-                if (!Array.isArray(docVec) || docVec.length !== vector.length) return null;
+                const chunkEntry = getChunkEmbedding(chunk.id, chunk.embedding, vector.length);
+                if (!chunkEntry) return null;
                 return {
                     chunkId: chunk.id,
                     text: chunk.content,
                     source: chunk.name,
-                    score: cosineSimilarity(vector, docVec)
+                    score: cosineSimilarityCached(vector, queryNorm, chunkEntry)
                 };
             } catch (e) {
                 logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 调试向量解析失败，已跳过分片');
@@ -790,6 +861,10 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         if (chunks.length === 0) {
             throw new Error('文档未解析出可索引文本，请检查文件内容后重新上传。');
         }
+        // A (re)index for this doc may have deleted/replaced chunk rows elsewhere
+        // (rag-documents delete path). Clear the embedding cache so no stale entry
+        // can be served; correctness over precision (a full clear is cheap here).
+        clearChunkEmbeddingCache();
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
             let vectors = null;

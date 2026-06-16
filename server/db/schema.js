@@ -762,6 +762,8 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_kg_relations_target_entity ON knowledge_relations(target_entity_id, status);
         CREATE INDEX IF NOT EXISTS idx_kg_relations_source_chunk ON knowledge_relations(source_chunk_id);
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
+        -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描
+        CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_doc ON rag_feedback(user_id, doc_name);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
         CREATE INDEX IF NOT EXISTS idx_model_usage_created ON model_usage_events(created_at);
@@ -793,6 +795,9 @@ function initSchema() {
         );
 
         -- 触发器：同步消息到全文索引
+        -- 注意：这些触发器不区分软删除（deleted_at），被软删除的消息仍保留在 messages_fts 中。
+        -- 因此全文搜索查询必须在 SQL 层显式过滤 m.deleted_at IS NULL（参见 routes/sessions.js 搜索路由），
+        -- 不要依赖 FTS 索引本身排除已删除消息。
         CREATE TRIGGER IF NOT EXISTS trg_messages_insert AFTER INSERT ON messages BEGIN
             INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
         END;

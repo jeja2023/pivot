@@ -96,6 +96,7 @@ window.sendMessage = async function(isRegenerate = false) {
     let renderTimer = null;
     let localReplayTimer = null;
     let pendingStreamChunks = [];
+    let reader = null;
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -131,7 +132,7 @@ window.sendMessage = async function(isRegenerate = false) {
             return;
         }
 
-        const reader = response.body.getReader();
+        reader = response.body.getReader();
         const decoder = new TextDecoder();
         const statsEl = aiMsgEl.querySelector('.message-stats') || document.createElement('div');
         statsEl.className = 'message-stats';
@@ -232,6 +233,8 @@ window.sendMessage = async function(isRegenerate = false) {
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             hasRenderedPersistedAssistantContent = true;
             if (textBody && isRequestMessageVisible()) {
+                // Dispose any echarts instances/listeners under the node before we replace its DOM.
+                window.teardownPivotCharts?.(textBody);
                 textBody.innerHTML = renderAiMessage(fullAiContent, false);
                 window.renderPivotCharts?.(textBody);
             }
@@ -354,12 +357,17 @@ window.sendMessage = async function(isRegenerate = false) {
 
         const finalElapsed = (Date.now() - startTime) / 1000;
         const finalTps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
-        await apiFetch(API_BASE + '/chat/stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
-        });
-        await window.refreshCurrentContextUsage?.(requestSessionId);
+        // Post-success bookkeeping must not surface as a chat error if it fails.
+        try {
+            await apiFetch(API_BASE + '/chat/stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
+            });
+            await window.refreshCurrentContextUsage?.(requestSessionId);
+        } catch (statsError) {
+            console.warn('更新会话统计失败', statsError);
+        }
 
         if (isViewingRequestSession() && (!isMessageContentInDocument(aiMsgEl) || (!shouldRegenerate && !isMessageContentInDocument(userMsgEl)))) {
             await selectSession(requestSessionId);
@@ -398,6 +406,11 @@ window.sendMessage = async function(isRegenerate = false) {
             showToast(e.message, 'error');
         }
     } finally {
+        if (reader) {
+            try { await reader.cancel(); } catch (_e) { /* reader already closed */ }
+            try { reader.releaseLock(); } catch (_e) { /* lock already released */ }
+            reader = null;
+        }
         document.getElementById('stop-btn').classList.add('hidden');
         document.getElementById('send-btn').classList.remove('hidden');
         currentAbortController = null;

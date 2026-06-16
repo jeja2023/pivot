@@ -4,6 +4,19 @@ const { aiSemaphore } = require('./services/concurrency');
 const { getGpuMonitorStatus } = require('./services/gpu-monitor');
 const { getMaintenanceStatus } = require('./services/maintenance');
 const { getSystemHealthSnapshot } = require('./services/system-health');
+const { getBeijingTimestamp } = require('./time');
+
+// 计算"北京当日"半开区间边界 [start, nextStart)，避免在 SQL 中对 created_at 套 date() 而失去索引。
+// created_at 以北京本地时间字符串 'YYYY-MM-DD HH:MM:SS' 存储，字典序比较等价于 date(col) = date('now','+8 hours')。
+// 用 UTC 算术做日期进位，避免本地时区/夏令时影响。
+function getBeijingDayBounds(date = new Date()) {
+    const day = getBeijingTimestamp(date).slice(0, 10); // YYYY-MM-DD（北京当日）
+    const start = `${day} 00:00:00`;
+    const next = new Date(`${day}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStart = `${next.toISOString().slice(0, 10)} 00:00:00`;
+    return { start, nextStart };
+}
 
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const routeStats = new Map();
@@ -207,6 +220,8 @@ function getTokenRows() {
 }
 
 function getTodayTokenRows() {
+    // 把 date(col) = date('now','+8 hours') 改写为 JS 预计算的北京当日半开区间裸列范围，命中 created_at 索引。
+    const { start, nextStart } = getBeijingDayBounds();
     return db.prepare(`
         SELECT model_id, model_name, role, SUM(tokens) AS tokens
         FROM (
@@ -217,7 +232,7 @@ function getTodayTokenRows() {
                 COALESCE(SUM(m.token_count), 0) AS tokens
             FROM messages m
             LEFT JOIN models md ON md.id = m.model_id
-            WHERE date(m.created_at) = date('now', '+8 hours')
+            WHERE m.created_at >= @dayStart AND m.created_at < @dayNext
             GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
             UNION ALL
             SELECT
@@ -227,11 +242,11 @@ function getTodayTokenRows() {
                 COALESCE(SUM(e.token_count), 0) AS tokens
             FROM model_usage_events e
             LEFT JOIN models md ON md.id = e.model_id
-            WHERE date(e.created_at) = date('now', '+8 hours')
+            WHERE e.created_at >= @dayStart AND e.created_at < @dayNext
             GROUP BY COALESCE(e.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(e.source, 'api')
         )
         GROUP BY model_id, model_name, role
-    `).all();
+    `).all({ dayStart: start, dayNext: nextStart });
 }
 
 function renderPrometheusMetrics() {

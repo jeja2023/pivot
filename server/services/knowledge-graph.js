@@ -281,11 +281,21 @@ function extractKnowledgeGraph(text) {
     return { entities, relations };
 }
 
+// Prepared statements hoisted out of the per-entity/per-relation indexing loops
+// (indexKnowledgeGraphForChunks). Prepared lazily once and reused across calls so
+// each chunk no longer re-compiles the same SQL. db is a module-level constant, but
+// lazy init keeps this robust against require-time ordering.
+let upsertEntityStmt = null;
+let recordMentionStmt = null;
+let upsertRelationStmt = null;
+
 function upsertEntity({ userId, name, type = 'concept', confidence = 0.7, sourceDocId = null, description = '' }) {
     const normalized = normalizeEntityName(name);
     if (!normalized) return null;
     const now = getBeijingTimestamp();
-    db.prepare(`
+    // ON CONFLICT DO UPDATE + RETURNING id resolves the row id in a single round-trip
+    // on both the insert and the update path (SQLite RETURNING fires for both).
+    upsertEntityStmt ||= db.prepare(`
         INSERT INTO knowledge_entities (user_id, name, normalized_name, type, description, confidence, source_doc_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, normalized_name) DO UPDATE SET
@@ -294,22 +304,24 @@ function upsertEntity({ userId, name, type = 'concept', confidence = 0.7, source
             confidence = MAX(knowledge_entities.confidence, excluded.confidence),
             updated_at = excluded.updated_at,
             deleted_at = NULL
-    `).run(userId, cleanEntityName(name), normalized, type, description, confidence, sourceDocId, now, now);
-    return db.prepare('SELECT * FROM knowledge_entities WHERE user_id = ? AND normalized_name = ?').get(userId, normalized);
+        RETURNING *
+    `);
+    return upsertEntityStmt.get(userId, cleanEntityName(name), normalized, type, description, confidence, sourceDocId, now, now);
 }
 
 function recordMention({ userId, entityId, docId, chunkId, snippet = '' }) {
-    db.prepare(`
+    recordMentionStmt ||= db.prepare(`
         INSERT OR IGNORE INTO knowledge_entity_mentions (user_id, entity_id, doc_id, chunk_id, snippet, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, entityId, docId, chunkId, String(snippet || '').slice(0, 500), getBeijingTimestamp());
+    `);
+    recordMentionStmt.run(userId, entityId, docId, chunkId, String(snippet || '').slice(0, 500), getBeijingTimestamp());
 }
 
 function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, description = '', confidence = 0.6, sourceDocId = null, sourceChunkId = null }) {
     if (!sourceEntityId || !targetEntityId || sourceEntityId === targetEntityId) return null;
     const now = getBeijingTimestamp();
     const status = relationStatusForConfidence(confidence);
-    db.prepare(`
+    upsertRelationStmt ||= db.prepare(`
         INSERT INTO knowledge_relations (
             user_id, source_entity_id, target_entity_id, relation_type, description,
             confidence, source_doc_id, source_chunk_id, status, created_at, updated_at
@@ -324,7 +336,8 @@ function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, 
                 ELSE excluded.status
             END,
             updated_at = excluded.updated_at
-    `).run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now);
+    `);
+    upsertRelationStmt.run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now);
 }
 
 function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
@@ -654,18 +667,34 @@ function suggestDuplicateEntities(userId, limit = 20) {
     return suggestions.slice(0, safeLimit);
 }
 
+// Pull at most this many candidate entities from SQL before scoring in JS.
+const QUERY_ENTITY_CANDIDATE_LIMIT = 200;
+
 function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, options = {}) {
     const terms = buildRagSearchTerms(query, 20);
+    // No usable query tokens: preserve the original empty result (no full scan).
     if (terms.length === 0) return [];
     const scopeFilter = buildGraphEntityScopeSql(options.scope);
+    // Pre-filter candidates in SQL so we no longer pull a user's entire entity set
+    // on every RAG query. Each token must appear (substring) in one of the scored
+    // columns, mirroring the JS scoring below so ranking over matches is unchanged.
+    const tokenClauses = [];
+    const tokenParams = [];
+    terms.forEach(term => {
+        const like = `%${String(term).toLowerCase()}%`;
+        tokenClauses.push('(LOWER(e.normalized_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(COALESCE(e.aliases, \'\')) LIKE ?)');
+        tokenParams.push(like, like, like);
+    });
     const rows = db.prepare(`
         SELECT e.*, COUNT(m.id) AS mention_count
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
         WHERE e.user_id = ? AND e.deleted_at IS NULL
+          AND (${tokenClauses.join(' OR ')})
         ${scopeFilter.sql}
         GROUP BY e.id
-    `).all(userId, ...scopeFilter.params);
+        LIMIT ?
+    `).all(userId, ...tokenParams, ...scopeFilter.params, QUERY_ENTITY_CANDIDATE_LIMIT);
     return rows
         .map(row => {
             const haystack = `${row.name} ${row.normalized_name} ${row.aliases || ''}`.toLowerCase();

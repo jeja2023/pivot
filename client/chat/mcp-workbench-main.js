@@ -73,7 +73,7 @@ async function loadMcpServers() {
                         ${showOwner && ownerLabel ? `<em class="mcp-owner-badge" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</em>` : ''}
                     </span>
                 </div>
-                <button class="mcp-status-toggle${isPaused ? '' : ' is-on'}" type="button" data-mcp-toggle="${server.id}" data-next-status="${isPaused ? 'active' : 'paused'}" aria-label="${isPaused ? '启用服务' : '停用服务'}" title="${isPaused ? '启用服务' : '停用服务'}">
+                <button class="mcp-status-toggle${isPaused ? '' : ' is-on'}" type="button" data-mcp-toggle="${mcpEscape(server.id)}" data-next-status="${isPaused ? 'active' : 'paused'}" aria-label="${isPaused ? '启用服务' : '停用服务'}" title="${isPaused ? '启用服务' : '停用服务'}">
                     <span></span>
                 </button>
             </div>
@@ -81,9 +81,9 @@ async function loadMcpServers() {
                 ${mcpEscape(server.last_error || mcpToolPreviewText(server.id, mcpFallbackToolsForServer(server), toolCount ? `已接入 ${toolCount} 个工具` : '刷新后显示该服务工具'))}
             </div>
             <div class="mcp-system-actions mcp-instance-actions">
-                <button class="btn-secondary" data-mcp-edit="${server.id}">编辑</button>
-                <button class="btn-secondary" data-mcp-tools="${server.id}">工具</button>
-                <button class="btn-danger-outline" data-mcp-delete="${server.id}">删除</button>
+                <button class="btn-secondary" data-mcp-edit="${mcpEscape(server.id)}">编辑</button>
+                <button class="btn-secondary" data-mcp-tools="${mcpEscape(server.id)}">工具</button>
+                <button class="btn-danger-outline" data-mcp-delete="${mcpEscape(server.id)}">删除</button>
             </div>
         </div>
     `;

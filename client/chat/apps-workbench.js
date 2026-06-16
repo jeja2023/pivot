@@ -254,8 +254,35 @@ let officialWritingUiState = {
 let officialWritingAiBusy = false;
 let officialWritingProgrammaticTextUpdate = false;
 const OFFICIAL_WRITING_HISTORY_LIMIT = 50;
+// 批注 / 修改建议为只增不减的 unshift 列表，配额裁剪不会触及它们，
+// 这里按“保留最近 N 条”封顶，与 autoSaves / versions 的裁剪策略保持一致。
+const OFFICIAL_WRITING_COMMENT_LIMIT = 200;
+const OFFICIAL_WRITING_SUGGESTION_LIMIT = 200;
 const officialWritingUndoStack = [];
 const officialWritingRedoStack = [];
+
+// 键入时仅即时更新可编辑文本，重活（整库持久化 + 校对/合规扫描 + 列表重建 + 强制回流）
+// 统一去抖 250ms，避免每次按键都触发 JSON.stringify 整库与多处 innerHTML 重建。
+const OFFICIAL_WRITING_ANALYSIS_DEBOUNCE_MS = 250;
+let officialWritingAnalysisDebounceTimer = null;
+
+function scheduleOfficialWritingAnalysis() {
+    if (officialWritingAnalysisDebounceTimer) clearTimeout(officialWritingAnalysisDebounceTimer);
+    officialWritingAnalysisDebounceTimer = setTimeout(() => {
+        officialWritingAnalysisDebounceTimer = null;
+        syncOfficialWritingStateFromInputs();
+        renderOfficialWritingWorkspace();
+    }, OFFICIAL_WRITING_ANALYSIS_DEBOUNCE_MS);
+}
+
+// 在失焦 / 导出 / 持久化等动作前立即冲刷待执行的去抖任务，确保不丢数据。
+function flushOfficialWritingAnalysis() {
+    if (!officialWritingAnalysisDebounceTimer) return;
+    clearTimeout(officialWritingAnalysisDebounceTimer);
+    officialWritingAnalysisDebounceTimer = null;
+    syncOfficialWritingStateFromInputs();
+    renderOfficialWritingWorkspace();
+}
 
 function escapeAppsHtml(value) {
     return String(value ?? '')
@@ -876,21 +903,24 @@ function syncOfficialWritingSurfaceToTextarea(target = 'draft') {
 function handleOfficialWritingSurfaceInput(event) {
     const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
     const selection = getOfficialWritingSurfaceSelection(target);
+    // 即时部分：保持文本与光标同步，让键入手感不卡顿。
     syncOfficialWritingSurfaceToTextarea(target);
-    syncOfficialWritingStateFromInputs();
     renderOfficialWritingSurface(target, { force: true });
     if (selection) {
         const textarea = getOfficialWritingTextarea(target);
         const point = Math.min(selection.end, textarea?.value.length || 0);
         setOfficialWritingSurfaceSelection(target, point, point);
     }
-    renderOfficialWritingWorkspace();
+    // 重活（整库持久化 + 校对/合规 + 列表重建 + 回流）去抖执行。
+    scheduleOfficialWritingAnalysis();
 }
 
 function handleOfficialWritingSurfaceBlur(event) {
     const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
     syncOfficialWritingSurfaceToTextarea(target);
     renderOfficialWritingSurface(target);
+    // 失焦时立即冲刷待执行的去抖任务，避免离开输入框时丢失最近一次保存。
+    flushOfficialWritingAnalysis();
 }
 
 function handleOfficialWritingSurfacePaste(event) {
@@ -925,6 +955,11 @@ function updateOfficialWritingSurfaceVisibility() {
 }
 
 function syncOfficialWritingStateFromInputs() {
+    // 同步即包含整库持久化，使任何待执行的去抖任务变为冗余，清掉以免重复触发。
+    if (officialWritingAnalysisDebounceTimer) {
+        clearTimeout(officialWritingAnalysisDebounceTimer);
+        officialWritingAnalysisDebounceTimer = null;
+    }
     officialWritingState.docType = getOfficialWritingDocType();
     officialWritingState.mode = getOfficialWritingMode();
     officialWritingState.standard = getOfficialWritingStandard();
@@ -1969,6 +2004,9 @@ function addOfficialWritingComment() {
         text,
         createdAt: new Date().toISOString()
     });
+    if (officialWritingState.comments.length > OFFICIAL_WRITING_COMMENT_LIMIT) {
+        officialWritingState.comments = officialWritingState.comments.slice(0, OFFICIAL_WRITING_COMMENT_LIMIT);
+    }
     if (textEl) textEl.value = '';
     saveOfficialWritingState();
     renderOfficialWritingWorkspace();
@@ -1987,6 +2025,9 @@ function addOfficialWritingSuggestion(payload) {
         createdAt: new Date().toISOString(),
         ...payload
     });
+    if (officialWritingState.suggestions.length > OFFICIAL_WRITING_SUGGESTION_LIMIT) {
+        officialWritingState.suggestions = officialWritingState.suggestions.slice(0, OFFICIAL_WRITING_SUGGESTION_LIMIT);
+    }
     saveOfficialWritingState();
     openOfficialWritingDrawer('suggestions');
     renderOfficialWritingWorkspace();
@@ -3150,15 +3191,17 @@ let officialWritingRagCollectionsLoaded = false;
 
 async function ensureOfficialWritingRagCollections() {
     if (officialWritingRagCollectionsLoaded) return;
-    officialWritingRagCollectionsLoaded = true;
     if (typeof window.loadKnowledgeCollections !== 'function') return;
     let collections = [];
     try {
         collections = await window.loadKnowledgeCollections();
     } catch (e) {
+        // Leave the flag false so a later call retries the load.
         return;
     }
     if (!Array.isArray(collections)) return;
+    // Mark as loaded only after a successful fetch so failures can retry.
+    officialWritingRagCollectionsLoaded = true;
     ['official-writing-kb-history-collection', 'official-writing-kb-standards-collection'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
@@ -3429,9 +3472,10 @@ function bindAppsWorkbenchEvents() {
     ['official-writing-source', 'official-writing-draft'].forEach(id => {
         const editor = document.getElementById(id);
         editor?.addEventListener('input', () => {
-            syncOfficialWritingStateFromInputs();
-            renderOfficialWritingWorkspace();
+            // 去抖整库持久化与校对/合规分析，避免每次按键都触发重活。
+            scheduleOfficialWritingAnalysis();
         });
+        editor?.addEventListener('blur', () => flushOfficialWritingAnalysis());
         editor?.addEventListener('select', handleOfficialWritingSelectionChange);
         editor?.addEventListener('mouseup', handleOfficialWritingSelectionChange);
         editor?.addEventListener('keyup', handleOfficialWritingSelectionChange);

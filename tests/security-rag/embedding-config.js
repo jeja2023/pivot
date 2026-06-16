@@ -499,7 +499,6 @@ test('RAG FTS 会索引生成的中文 ngram 词元', () => {
 });
 
 test('api access setting can be read and updated by admin settings', async () => {
-    const suffix = Date.now().toString(36);
     const adminUser = db.prepare('SELECT id, username, role, unit FROM users WHERE username = ?').get('admin');
     const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get('api_access_enabled');
     const previousValue = getApiAccessSetting();

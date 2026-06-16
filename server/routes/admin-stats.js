@@ -184,9 +184,22 @@ function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_U
     return names;
 }
 
+// 已解析的本地主机名集合缓存（DNS 解析较慢且很少变化），按请求主机集合分键，带 TTL 失效。
+const RESOLVED_HOSTNAMES_TTL_MS = 60 * 1000;
+const resolvedHostnamesCache = new Map(); // key -> { value: Set, expires: number }
+
 async function getResolvedLocalHostnames(options = {}) {
+    const { requestHosts = [], publicUrl = '' } = options;
+    const cacheKey = `${publicUrl}|${Array.isArray(requestHosts) ? requestHosts.slice().sort().join(',') : ''}`;
+    const now = Date.now();
+    const cached = resolvedHostnamesCache.get(cacheKey);
+    if (cached && cached.expires > now) {
+        return cached.value;
+    }
     const names = getLocalHostnames(options);
-    return addResolvedHostAliases(names);
+    const resolved = await addResolvedHostAliases(names);
+    resolvedHostnamesCache.set(cacheKey, { value: resolved, expires: now + RESOLVED_HOSTNAMES_TTL_MS });
+    return resolved;
 }
 
 async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
@@ -248,19 +261,63 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
     return summary;
 }
 
-function tokenUsageSubquery() {
+// 计算"北京当日"的半开区间边界 [start, nextStart)，避免在 SQL 中对 created_at 套 date() 而失去索引。
+// created_at 以北京本地时间字符串 'YYYY-MM-DD HH:MM:SS' 存储，可直接做字典序比较，等价于原 date(col) = date('now','+8 hours')。
+function getBeijingDayBounds(date = new Date()) {
+    const day = getBeijingTimestamp(date).slice(0, 10); // YYYY-MM-DD（北京当日）
+    const start = `${day} 00:00:00`;
+    // 下一日 00:00:00 作为排他上界。用 UTC 算术避免本地时区/夏令时影响日期进位。
+    const next = new Date(`${day}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStart = `${next.toISOString().slice(0, 10)} 00:00:00`;
+    return { start, nextStart };
+}
+
+// 将一个 'YYYY-MM-DD' 日期字符串按 UTC 算术偏移 deltaDays 天，返回 'YYYY-MM-DD'。
+// 仅做日期进位运算，不涉及时区换算（输入/输出均为纯日期）。
+function shiftDayString(day, deltaDays) {
+    const d = new Date(`${day}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + deltaDays);
+    return d.toISOString().slice(0, 10);
+}
+
+// "最近 N 天"的起始边界（含今天，向前 N-? 与原 SQL 对齐）：等价于 date('now','+8 hours','-N days')。
+// 原 SQL 的 date('now','+8 hours','-N days') 取北京当日的日期再减 N 天，得到一个 'YYYY-MM-DD' 边界（与 created_at 比较时按 00:00:00 起算）。
+function getBeijingDaysAgoStart(days, date = new Date()) {
+    const today = getBeijingTimestamp(date).slice(0, 10);
+    return `${shiftDayString(today, -Math.abs(days))} 00:00:00`;
+}
+
+// 某个北京日期（'YYYY-MM-DD'）的次日 00:00:00，用作"截止日期（含当日）"的排他上界。
+function getBeijingDateExclusiveEnd(day) {
+    return `${shiftDayString(day, 1)} 00:00:00`;
+}
+
+// "当前北京时刻向前 N 分钟"的时间戳 'YYYY-MM-DD HH:MM:SS'，用于把 datetime('now','+8 hours','-N minutes') 改写为裸列范围。
+function getBeijingMinutesAgoTimestamp(minutes, date = new Date()) {
+    return getBeijingTimestamp(new Date(date.getTime() - minutes * 60 * 1000));
+}
+
+// 谓词下推：将过滤条件注入 UNION 两个分支内部（而非在派生表外部过滤），
+// 使 messages / model_usage_events 各自的 created_at / user_id 等索引可用，避免对两表全量物化。
+// innerWhere 中引用的列须在两表均存在（created_at / user_id / model_id / token_count）。
+// 使用命名参数（@name），可在多分支/多处复用同一参数。
+function tokenUsageSubquery(innerWhere = '') {
+    const whereClause = innerWhere ? `WHERE ${innerWhere}` : '';
     return `
         SELECT id, user_id, model_id, role, token_count,
                CASE WHEN role = 'user' THEN token_count ELSE 0 END AS input_tokens,
                CASE WHEN role != 'user' THEN token_count ELSE 0 END AS output_tokens,
                created_at, 'message' AS usage_source
         FROM messages
+        ${whereClause}
         UNION ALL
         SELECT id, user_id, model_id, COALESCE(source, 'api') AS role, token_count,
                COALESCE(input_tokens, 0) AS input_tokens,
                COALESCE(output_tokens, 0) AS output_tokens,
                created_at, 'api' AS usage_source
         FROM model_usage_events
+        ${whereClause}
     `;
 }
 
@@ -298,7 +355,16 @@ function createAdminStatsRouter({
 }) {
     const router = express.Router();
 
+    // /monitor-summary 整体快照缓存：该处理器每次都执行较重的 SQL + DNS 解析，且仪表盘会高频轮询。
+    // 用 5s TTL 缓存装配好的成功响应对象，命中时直接返回，显著降低重复开销。错误响应不缓存。
+    const MONITOR_SUMMARY_CACHE_TTL_MS = 5000;
+    let monitorSummaryCache = { data: null, expires: 0 };
+
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const cacheNow = Date.now();
+        if (monitorSummaryCache.data && monitorSummaryCache.expires > cacheNow) {
+            return res.json(monitorSummaryCache.data);
+        }
         const httpMetrics = getHttpMetricsSnapshot();
         const ragMetrics = {
             ...getRagMetricsSnapshot(),
@@ -314,12 +380,14 @@ function createAdminStatsRouter({
         const memory = process.memoryUsage();
         const cpu = process.cpuUsage();
         
-        // 统计 15 分钟内活跃用户
+        // 统计 15 分钟内活跃用户：把 datetime('now','+8 hours','-15 minutes') 改写为 JS 预计算的北京时间戳裸列比较，
+        // 使 idx_audit_logs_timestamp 可用（timestamp 同样以北京本地时间字符串存储）。
+        const activeUsersSince = getBeijingMinutesAgoTimestamp(15);
         const activeUsersCount = db.prepare(`
-            SELECT COUNT(DISTINCT user_id) AS count 
-            FROM audit_logs 
-            WHERE timestamp >= datetime('now', '+8 hours', '-15 minutes')
-        `).get().count || 0;
+            SELECT COUNT(DISTINCT user_id) AS count
+            FROM audit_logs
+            WHERE timestamp >= ?
+        `).get(activeUsersSince).count || 0;
 
         // 获取存储统计
         const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '../../data');
@@ -339,25 +407,29 @@ function createAdminStatsRouter({
             uploadsSize = await getCachedDirSize(uploadsDir);
         } catch(e) {}
 
+        // 北京当日半开区间 [start, nextStart)，谓词下推到 UNION 各分支内部，命中 created_at 索引。
+        const dayBounds = getBeijingDayBounds();
+        const dayParams = { dayStart: dayBounds.start, dayNext: dayBounds.nextStart };
+        const todayDateRange = 'created_at >= @dayStart AND created_at < @dayNext';
         const todayTokens = db.prepare(`
             SELECT COALESCE(SUM(token_count), 0) AS total
-            FROM (${tokenUsageSubquery()}) usage
-            WHERE date(created_at) = date('now', '+8 hours')
-        `).get().total || 0;
+            FROM (${tokenUsageSubquery(todayDateRange)}) usage
+        `).get(dayParams).total || 0;
         const totalTokens = db.prepare(`
             SELECT COALESCE(SUM(token_count), 0) AS total
             FROM (${tokenUsageSubquery()}) usage
         `).get().total || 0;
-        const todayMessages = db.prepare("SELECT COUNT(*) AS count FROM messages WHERE date(created_at) = date('now', '+8 hours')").get().count || 0;
+        const todayMessages = db.prepare(
+            'SELECT COUNT(*) AS count FROM messages WHERE created_at >= @dayStart AND created_at < @dayNext'
+        ).get(dayParams).count || 0;
         const tokenByModel = db.prepare(`
             SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
-            FROM (${tokenUsageSubquery()}) usage
+            FROM (${tokenUsageSubquery(todayDateRange)}) usage
             LEFT JOIN models md ON md.id = usage.model_id
-            WHERE date(usage.created_at) = date('now', '+8 hours')
             GROUP BY COALESCE(md.name, '未知模型')
             ORDER BY tokens DESC
             LIMIT 8
-        `).all();
+        `).all(dayParams);
 
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
@@ -376,7 +448,7 @@ function createAdminStatsRouter({
             }));
         }
 
-        res.json({
+        const payload = {
             updatedAt: getBeijingTimestamp(),
             tokens: {
                 today: todayTokens,
@@ -436,7 +508,10 @@ function createAdminStatsRouter({
                 total: dbSize + uploadsSize
             },
             activeUsers: activeUsersCount
-        });
+        };
+        // 仅缓存成功装配的快照（错误路径会在上游 asyncHandler 抛出，不会走到这里）。
+        monitorSummaryCache = { data: payload, expires: Date.now() + MONITOR_SUMMARY_CACHE_TTL_MS };
+        res.json(payload);
     }));
 
     router.get('/observability/events', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -491,68 +566,82 @@ function createAdminStatsRouter({
 
     router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
+        // 把"最近 30 天"日期范围与可选的个人过滤下推到 UNION 各分支内部，命中 created_at / user_id 索引。
+        // date('now','+8 hours','-30 days') 在 JS 端预计算为北京日期边界 '<YYYY-MM-DD> 00:00:00'。
+        const inner = ['created_at >= @startTs'];
+        const params = { startTs: getBeijingDaysAgoStart(30) };
+        if (!canViewAll) {
+            inner.push('user_id = @userId');
+            params.userId = req.user.id;
+        }
+        // 外层 SELECT/GROUP BY 中的 date(created_at) 仅用于按日分桶，不影响内部范围谓词命中索引。
         const query = `
             SELECT date(created_at) as day, SUM(token_count) as tokens
-            FROM (${tokenUsageSubquery()}) usage
-            WHERE created_at >= date('now', '+8 hours', '-30 days')
-            ${canViewAll ? '' : 'AND user_id = ?'}
+            FROM (${tokenUsageSubquery(inner.join(' AND '))}) usage
             GROUP BY day
             ORDER BY day
         `;
-        const trend = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
+        const trend = db.prepare(query).all(params);
         res.json(trend);
     }));
 
     router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const { unit, username, days = 30, start, end } = req.query;
-        let conditions = [];
-        let params = [];
+        // 日期范围谓词下推到 UNION 内部（裸列范围，命中 created_at 索引）；用户表过滤（unit/username）
+        // 引用 JOIN 后的 users 列，必须留在外层 WHERE。内/外均使用命名参数，避免分支重复绑定的脆弱性。
+        const innerConditions = [];
+        const outerConditions = [];
+        const params = {};
         if (start || end) {
             if (start) {
-                conditions.push("date(usage.created_at) >= date(?)");
-                params.push(String(start));
+                // date(usage.created_at) >= date(start) → created_at >= '<start> 00:00:00'
+                innerConditions.push('created_at >= @startTs');
+                params.startTs = `${String(start)} 00:00:00`;
             }
             if (end) {
-                conditions.push("date(usage.created_at) <= date(?)");
-                params.push(String(end));
+                // date(usage.created_at) <= date(end)（含当日）→ created_at < '<end+1天> 00:00:00'
+                innerConditions.push('created_at < @endTs');
+                params.endTs = getBeijingDateExclusiveEnd(String(end));
             }
         } else {
             const safeDays = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
-            conditions.push("usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')");
-            params.push(safeDays);
+            // usage.created_at >= date('now','+8 hours','-N days') → JS 预计算的北京日期边界
+            innerConditions.push('created_at >= @startTs');
+            params.startTs = getBeijingDaysAgoStart(safeDays);
         }
 
         if (unit) {
-            conditions.push("u.unit = ?");
-            params.push(unit);
+            outerConditions.push('u.unit = @unit');
+            params.unit = unit;
         }
         if (username) {
-            conditions.push("u.username LIKE ?");
-            params.push(`%${username}%`);
+            outerConditions.push('u.username LIKE @username');
+            params.username = `%${username}%`;
         }
 
-        const whereClause = 'WHERE ' + conditions.join(' AND ');
+        const innerWhere = innerConditions.join(' AND ');
+        const outerWhere = outerConditions.length ? `WHERE ${outerConditions.join(' AND ')}` : '';
 
         const trend = db.prepare(`
             SELECT date(usage.created_at) as day, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
-            ${whereClause}
+            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+            ${outerWhere}
             GROUP BY day ORDER BY day
-        `).all(...params);
+        `).all(params);
 
         const byUser = db.prepare(`
             SELECT u.username, u.nickname, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
-            ${whereClause}
+            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+            ${outerWhere}
             GROUP BY u.id ORDER BY tokens DESC LIMIT 10
-        `).all(...params);
+        `).all(params);
 
         const byUnit = db.prepare(`
             SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery()}) usage JOIN users u ON usage.user_id = u.id
-            ${whereClause}
+            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+            ${outerWhere}
             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC
-        `).all(...params);
+        `).all(params);
 
         // Filter out options for select dropdowns
         const units = db.prepare("SELECT DISTINCT unit FROM users WHERE unit IS NOT NULL AND unit != ''").all().map(r => r.unit);
@@ -576,8 +665,8 @@ function createAdminStatsRouter({
                         (SELECT COUNT(*) FROM attachments) AS attachments,
                         (SELECT COUNT(*) FROM models) AS models,
                         (SELECT COALESCE(SUM(token_count), 0) FROM (${tokenUsageSubquery()}) usage) AS tokens,
-                        (SELECT COUNT(*) FROM audit_logs WHERE date(timestamp) = date('now', '+8 hours')) AS auditToday
-                `).get()),
+                        (SELECT COUNT(*) FROM audit_logs WHERE timestamp >= @dayStart AND timestamp < @dayNext) AS auditToday
+                `).get((() => { const b = getBeijingDayBounds(); return { dayStart: b.start, dayNext: b.nextStart }; })())),
                 getCachedDirSize(uploadDir),
                 getCachedDirSize(dataDir)
             ]);
@@ -621,6 +710,8 @@ function createAdminStatsRouter({
         const limit = parseInt(req.query.limit, 10) || 20;
         const offset = (page - 1) * limit;
 
+        // 个人维度过滤下推到 UNION 内部（user_id 命中索引）；分页参数同用命名参数（better-sqlite3 不允许命名与匿名混用）。
+        const innerWhere = canViewAll ? '' : 'user_id = @userId';
         const query = `
             SELECT usage.id, usage.created_at, u.username, u.nickname, md.name as model_name,
                    usage.role, usage.token_count,
@@ -629,17 +720,17 @@ function createAdminStatsRouter({
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
                    COALESCE(md.price_currency, 'CNY') AS price_currency,
                    usage.usage_source
-            FROM (${tokenUsageSubquery()}) usage
+            FROM (${tokenUsageSubquery(innerWhere)}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
-            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
             ORDER BY usage.created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT @limit OFFSET @offset
         `;
-        const details = canViewAll ? db.prepare(query).all(limit, offset) : db.prepare(query).all(req.user.id, limit, offset);
+        const queryParams = canViewAll ? { limit, offset } : { limit, offset, userId: req.user.id };
+        const details = db.prepare(query).all(queryParams);
 
-        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery()}) usage ${canViewAll ? '' : 'WHERE user_id = ?'}`;
-        const total = canViewAll ? db.prepare(countQuery).get().count : db.prepare(countQuery).get(req.user.id).count;
+        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery(innerWhere)}) usage`;
+        const total = canViewAll ? db.prepare(countQuery).get().count : db.prepare(countQuery).get({ userId: req.user.id }).count;
         res.json({ data: details, total });
     }));
 
@@ -653,13 +744,12 @@ function createAdminStatsRouter({
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
                    COALESCE(md.price_currency, 'CNY') AS price_currency,
                    usage.usage_source
-            FROM (${tokenUsageSubquery()}) usage
+            FROM (${tokenUsageSubquery(canViewAll ? '' : 'user_id = @userId')}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
-            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
             ORDER BY usage.created_at DESC LIMIT 10000
         `;
-        const details = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
+        const details = canViewAll ? db.prepare(query).all() : db.prepare(query).all({ userId: req.user.id });
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,输入Token,输出Token,总Token\n';
         details.forEach(d => {
             const roleLabel = formatUsageRoleLabel(d.role);
@@ -676,25 +766,30 @@ function createAdminStatsRouter({
         const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
         const start = String(req.query.start || '').trim();
         const end = String(req.query.end || '').trim();
-        const conditions = [];
-        const params = [];
+        // 日期范围与可选的个人过滤全部下推到 UNION 内部（裸列范围 + user_id，命中索引）。
+        // 外层仅按 model_id 聚合并 LEFT JOIN models，不再持有 usage.created_at / usage.user_id 谓词。
+        const innerConditions = [];
+        const params = {};
         if (start) {
-            conditions.push('date(usage.created_at) >= date(?)');
-            params.push(start);
+            // date(usage.created_at) >= date(start) → created_at >= '<start> 00:00:00'
+            innerConditions.push('created_at >= @startTs');
+            params.startTs = `${start} 00:00:00`;
         }
         if (end) {
-            conditions.push('date(usage.created_at) <= date(?)');
-            params.push(end);
+            // date(usage.created_at) <= date(end)（含当日）→ created_at < '<end+1天> 00:00:00'
+            innerConditions.push('created_at < @endTs');
+            params.endTs = getBeijingDateExclusiveEnd(end);
         }
         if (!start && !end) {
-            conditions.push("usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')");
-            params.push(days);
+            // usage.created_at >= date('now','+8 hours','-N days') → JS 预计算的北京日期边界
+            innerConditions.push('created_at >= @startTs');
+            params.startTs = getBeijingDaysAgoStart(days);
         }
         if (!canViewAll) {
-            conditions.push('usage.user_id = ?');
-            params.push(req.user.id);
+            innerConditions.push('user_id = @userId');
+            params.userId = req.user.id;
         }
-        const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const innerWhere = innerConditions.join(' AND ');
         const rows = db.prepare(`
             SELECT md.id AS model_id, COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
@@ -708,12 +803,11 @@ function createAdminStatsRouter({
                    COALESCE(SUM(${usageCostSql('usage', 'md')}), 0) AS estimated_cost,
                    MIN(usage.created_at) AS first_used_at,
                    MAX(usage.created_at) AS last_used_at
-            FROM (${tokenUsageSubquery()}) usage
+            FROM (${tokenUsageSubquery(innerWhere)}) usage
             LEFT JOIN models md ON md.id = usage.model_id
-            ${whereClause}
             GROUP BY usage.model_id
             ORDER BY estimated_cost DESC, total_tokens DESC
-        `).all(...params);
+        `).all(params);
         const totals = rows.reduce((acc, row) => {
             acc.input_tokens += Number(row.input_tokens || 0);
             acc.output_tokens += Number(row.output_tokens || 0);
@@ -728,12 +822,14 @@ function createAdminStatsRouter({
     router.get('/model-costs/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
-        const conditions = ["usage.created_at >= date('now', '+8 hours', '-' || ? || ' days')"];
-        const params = [days];
+        // "最近 N 天"与可选个人过滤下推到 UNION 内部（裸列范围 + user_id）。
+        const innerConditions = ['created_at >= @startTs'];
+        const params = { startTs: getBeijingDaysAgoStart(days) };
         if (!canViewAll) {
-            conditions.push('usage.user_id = ?');
-            params.push(req.user.id);
+            innerConditions.push('user_id = @userId');
+            params.userId = req.user.id;
         }
+        const innerWhere = innerConditions.join(' AND ');
         const rows = db.prepare(`
             SELECT COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
@@ -744,12 +840,11 @@ function createAdminStatsRouter({
                    COALESCE(SUM(${balancedOutputSql('usage')}), 0) AS output_tokens,
                    COALESCE(SUM(usage.token_count), 0) AS total_tokens,
                    COALESCE(SUM(${usageCostSql('usage', 'md')}), 0) AS estimated_cost
-            FROM (${tokenUsageSubquery()}) usage
+            FROM (${tokenUsageSubquery(innerWhere)}) usage
             LEFT JOIN models md ON md.id = usage.model_id
-            WHERE ${conditions.join(' AND ')}
             GROUP BY usage.model_id
             ORDER BY estimated_cost DESC, total_tokens DESC
-        `).all(...params);
+        `).all(params);
         let csv = '\uFEFFModel,Upstream Model,Currency,Input Price / 1M,Output Price / 1M,Input Tokens,Output Tokens,Total Tokens,Estimated Cost\n';
         rows.forEach(row => {
             csv += [

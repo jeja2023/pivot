@@ -857,8 +857,9 @@ async function runAgent(runId, user) {
             return;
         }
         logger.error({ err: e.message, runId }, 'Agent run failed');
-        const retryLimit = normalizePositiveInt(db.prepare('SELECT retry_limit FROM agent_runs WHERE id = ?').get(runId)?.retry_limit, 0, 0, 5);
-        const retryCount = normalizePositiveInt(db.prepare('SELECT retry_count FROM agent_runs WHERE id = ?').get(runId)?.retry_count, 0, 0, 99);
+        const retryRow = db.prepare('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?').get(runId);
+        const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
+        const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
             updateRun(runId, {
                 status: 'queued',
@@ -871,7 +872,8 @@ async function runAgent(runId, user) {
                 title: `任务失败重试：${retryCount + 1}/${retryLimit}`,
                 output: { error: e.message }
             });
-            enqueueAgentRun(runId, user);
+            // 重新拉取用户，避免复用运行开始时捕获的过期用户对象（运行中用户可能被禁用或修改）
+            enqueueAgentRun(runId, getRunUser(runId) || user);
             return;
         }
         updateRun(runId, {

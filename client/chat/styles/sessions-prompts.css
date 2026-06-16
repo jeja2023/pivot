@@ -432,10 +432,7 @@
     color: var(--text-muted);
     line-height: 1.45;
     text-align: left;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    word-break: break-all;
 }
 .prompt-card-head {
     display: flex;
@@ -480,28 +477,24 @@
     font-weight: 700;
     line-height: 1.45;
     text-align: left;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    word-break: break-all;
 }
 .prompt-actions {
     display: flex;
     align-items: center;
-    gap: 5px;
-    flex-wrap: nowrap;
+    gap: 4px 5px;
+    flex-wrap: wrap;
     margin-top: auto;
     padding-top: 10px;
-    overflow: hidden;
 }
 .prompt-actions-targets {
-    gap: 5px;
+    gap: 4px 5px;
 }
 .prompt-actions button {
     flex: 0 0 auto;
-    min-width: 42px;
+    min-width: 40px;
     height: 26px;
-    padding: 0 8px;
+    padding: 0 6px;
     font-size: 0.72rem;
     border-radius: 6px;
     white-space: nowrap;
@@ -552,6 +545,10 @@
     border-radius: 12px;
 }
 .prompt-apply-modal .model-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
     margin-bottom: 0;
 }
 .prompt-apply-controls {

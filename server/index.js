@@ -47,7 +47,10 @@ process.on('uncaughtException', (err) => {
     fatalExit('未捕获的异常 (Uncaught Exception)', err);
 });
 process.on('unhandledRejection', (reason) => {
-    fatalExit('未处理的 Promise 拒绝 (Unhandled Rejection)', reason);
+    // 仅记录并继续运行：未处理的 Promise 拒绝不应直接终止进程，
+    // 否则单个被忽略的 Promise 会拖垮整个服务。uncaughtException 仍保留退出行为。
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    logger.error({ err }, '未处理的 Promise 拒绝 (Unhandled Rejection)');
 });
 const { stmts } = require('./db');
 const { authMiddleware, csrfMiddleware } = require('./auth');
@@ -130,15 +133,25 @@ const logAction = (req, action, details) => {
 
 // 移除冗余的分页格式化函数，已由 http.js 提供
 const isPublicRegistrationEnabled = () => getPublicRegistrationSetting();
-async function getDirSizeAsync(dir) {
+const DIR_SIZE_MAX_DEPTH = 32;
+async function getDirSizeAsync(dir, depth = 0) {
     if (!fs.existsSync(dir)) return 0;
+    // 限制递归深度，避免异常深或循环的目录结构导致栈溢出；
+    // 跳过符号链接目录，避免顺着软链接进入死循环。
+    if (depth >= DIR_SIZE_MAX_DEPTH) {
+        logger.warn({ dir, depth }, '目录统计已达最大深度，停止下探');
+        return 0;
+    }
     let total = 0;
     try {
         const entries = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
             const fullPath = path.join(dir, entry.name);
+            if (entry.isSymbolicLink()) {
+                continue;
+            }
             if (entry.isDirectory()) {
-                total += await getDirSizeAsync(fullPath);
+                total += await getDirSizeAsync(fullPath, depth + 1);
             } else if (entry.isFile()) {
                 const stats = await fs.promises.stat(fullPath);
                 total += stats.size;

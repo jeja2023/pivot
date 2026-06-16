@@ -4,14 +4,26 @@ function confirmChatMcpUse() {
     const message = '工具箱工具可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
     return new Promise(resolve => {
         if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
-        window.showConfirm(title, message, () => resolve(true));
         const cancelBtn = document.getElementById('modal-confirm-cancel');
         const overlay = document.getElementById('confirm-container');
-        const settleCancel = () => resolve(false);
-        cancelBtn?.addEventListener('click', settleCancel, { once: true });
-        overlay?.addEventListener('click', (event) => {
-            if (event.target === overlay) settleCancel();
-        }, { once: true });
+        let settled = false;
+        // 确认弹层是常驻节点，复用于多次授权。{once:true} 只在监听器触发时移除，
+        // 因此“确认”这条路径不会清理取消监听器，会跨多次授权累积。这里用共享 settle
+        // 在任一结果（确认 / 取消）都显式移除两个取消监听器。
+        const onOverlayClick = (event) => {
+            if (event.target === overlay) settle(false);
+        };
+        const settle = (result) => {
+            if (settled) return;
+            settled = true;
+            cancelBtn?.removeEventListener('click', onCancelClick);
+            overlay?.removeEventListener('click', onOverlayClick);
+            resolve(result);
+        };
+        const onCancelClick = () => settle(false);
+        window.showConfirm(title, message, () => settle(true));
+        cancelBtn?.addEventListener('click', onCancelClick);
+        overlay?.addEventListener('click', onOverlayClick);
     });
 }
 

@@ -47,22 +47,6 @@ const {
 const { isSuperAdmin } = require('../permissions');
 
 const SYSTEM_MCP_SERVICES = {
-    visualization: {
-        name: '图表生成',
-        description: '系统集成的图表生成与表格展示能力。'
-    },
-    report: {
-        name: '报告编排',
-        description: '系统集成的报告章节编排能力。'
-    },
-    im: {
-        name: 'IM 通知',
-        description: '系统集成的局域网消息通知能力。',
-        requiresConfig: true
-    }
-};
-
-Object.assign(SYSTEM_MCP_SERVICES, {
     reports: {
         name: '报表文件',
         description: '系统集成的报表和数据文件访问能力。',
@@ -93,7 +77,7 @@ Object.assign(SYSTEM_MCP_SERVICES, {
         description: '系统集成的局域网消息通知能力。',
         requiresConfig: true
     }
-});
+};
 
 function getDatabaseTestErrorStatus(err) {
     if (err?.normalizedStatus) return err.normalizedStatus;

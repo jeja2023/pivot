@@ -1,8 +1,58 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 const { db, dataDir } = require('../db');
-const { decryptSecret, isPrivateHost } = require('../security');
+const {
+    decryptSecret,
+    isPrivateHost,
+    assertSafeOutboundHost,
+    createSafeLookup,
+    getSafeOutboundOptionsForUser
+} = require('../security');
 const { isAdmin } = require('../permissions');
+
+// 数据库出站 SSRF 守卫：解析 DNS 后校验真实 IP，拦截 loopback / link-local / 云元数据等敏感目标，
+// 默认仅管理员可连接内网（RFC1918）数据库（受 MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN 控制）。
+function databaseOutboundOptions(user) {
+    const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
+    if (!restrictPrivateHostsToAdmin) {
+        // 关闭内网限制后，仍需拦截 loopback / link-local / 云元数据等敏感目标。
+        return { blockPrivate: false, allowExplicitLoopback: false };
+    }
+    return getSafeOutboundOptionsForUser(user, {
+        allowPrivateEnv: 'ALLOW_PRIVATE_DATABASE_HOSTS',
+        allowExplicitLoopbackForAdmin: false
+    });
+}
+
+// 连接前再次解析并校验主机，缓解 TOCTOU / DNS rebinding。校验失败抛出 403 风格错误。
+async function assertSafeDatabaseHost(host, user) {
+    try {
+        await assertSafeOutboundHost(host, databaseOutboundOptions(user));
+    } catch (e) {
+        const err = new Error('当前用户不允许连接内网、本机或云元数据数据库地址。');
+        err.code = 'MCP_PRIVATE_HOST_RESTRICTED';
+        err.status = 403;
+        throw err;
+    }
+}
+
+// 为关系型驱动构造安全 lookup 钩子，连接握手阶段对解析出的 IP 再次校验，阻断 DNS rebinding。
+function databaseSafeLookup(user) {
+    return createSafeLookup(databaseOutboundOptions(user));
+}
+
+// 连接执行阶段无法获取请求用户，按连接归属者（user_id）的管理员身份套用同一内网放行策略，
+// 与配置入库时的校验语义保持一致；查不到归属者时按普通用户（不放行内网）处理。
+function getConnectionOwner(connection = {}) {
+    // 测试连接路径无 user_id，可直接附带已校验的请求用户（_owner）。
+    if (connection._owner) return connection._owner;
+    if (!connection.user_id) return null;
+    try {
+        return db.prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
+    } catch (e) {
+        return null;
+    }
+}
 
 const DEFAULT_PORTS = {
     postgres: 5432,
@@ -750,7 +800,9 @@ function resolveSafeSqlitePath(databaseName) {
 }
 
 function buildRelationalConnectionConfig(connection) {
-    const options = parseOptions(db.prepare('SELECT options FROM mcp_database_connections WHERE id = ?').get(connection.id)?.options);
+    // 归一化后的 connection 已包含全部治理字段（来自 normalizeDatabaseConnection），
+    // 无需再次按 id 回查 options，直接复用调用方传入的值即可。
+    const options = connection.options || {};
     return {
         ...connection,
         password: connection.password || '',
@@ -811,6 +863,9 @@ function withOperationTimeout(promise, timeoutMs, connection, phase) {
 async function withPostgres(connection, handler) {
     const { Client } = optionalRequire('pg', 'Install it with npm install pg.');
     const timeoutMs = getConnectionTimeoutMs(connection);
+    const owner = getConnectionOwner(connection);
+    // 连接前再次解析校验，缓解配置入库后 DNS 被改写（rebinding）的 SSRF。
+    await assertSafeDatabaseHost(connection.host, owner);
     const client = new Client({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.postgres,
@@ -819,19 +874,31 @@ async function withPostgres(connection, handler) {
         password: connection.password,
         // 默认校验证书防止 MITM；仅当用户显式信任自签名时才放行
         ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : false,
-        connectionTimeoutMillis: timeoutMs
+        connectionTimeoutMillis: timeoutMs,
+        // 握手阶段对解析出的 IP 再次校验，关闭 DNS rebinding。
+        lookup: databaseSafeLookup(owner)
     });
-    await client.connect();
+    let connected = false;
     try {
+        await client.connect();
+        connected = true;
         return await handler(client);
     } finally {
-        await client.end();
+        // 即使超时先于 connect 完成（race 失败），也确保底层连接被关闭，避免句柄泄漏。
+        try {
+            await client.end();
+        } catch (e) {
+            if (connected) throw e;
+        }
     }
 }
 
 async function withMysql(connection, handler) {
     const mysql = optionalRequire('mysql2/promise', 'Install it with npm install mysql2.');
     const timeoutMs = getConnectionTimeoutMs(connection);
+    const owner = getConnectionOwner(connection);
+    // mysql2 不支持自定义 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
+    await assertSafeDatabaseHost(connection.host, owner);
     const client = await mysql.createConnection({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.mysql,
@@ -845,13 +912,21 @@ async function withMysql(connection, handler) {
     try {
         return await handler(client);
     } finally {
-        await client.end();
+        // 确保连接句柄在超时胜出时也被释放。
+        try {
+            await client.end();
+        } catch (e) {
+            // 忽略关闭阶段的异常，避免掩盖原始（如超时）错误。
+        }
     }
 }
 
 async function withSqlServer(connection, handler) {
     const sql = optionalRequire('mssql', 'Install it with npm install mssql.');
     const timeoutMs = getConnectionTimeoutMs(connection);
+    const owner = getConnectionOwner(connection);
+    // mssql/tedious 不便注入 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
+    await assertSafeDatabaseHost(connection.host, owner);
     const pool = new sql.ConnectionPool({
         server: connection.host,
         port: connection.port || DEFAULT_PORTS.sqlserver,
@@ -866,26 +941,183 @@ async function withSqlServer(connection, handler) {
         connectionTimeout: timeoutMs,
         requestTimeout: timeoutMs
     });
-    await pool.connect();
+    let connected = false;
     try {
+        await pool.connect();
+        connected = true;
         return await handler(pool);
     } finally {
-        await pool.close();
+        // 即使超时先于 connect 完成（race 失败），也确保连接池被关闭，避免句柄泄漏。
+        try {
+            await pool.close();
+        } catch (e) {
+            if (connected) throw e;
+        }
     }
 }
 
-function withSqlite(connection, handler) {
+async function withSqlite(connection, handler) {
     const sqlitePath = resolveSafeSqlitePath(connection.database_name);
     const client = new Database(sqlitePath, { readonly: true, fileMustExist: true });
     try {
-        return handler(client);
+        // better-sqlite3 为同步驱动，但统一 await 句柄以便共享分发器（runRelationalTool）
+        // 在异步处理完成后再关闭连接，避免在结果落地前提前 close。
+        return await handler(client);
     } finally {
         client.close();
     }
 }
 
+// 关系型方言适配器：把四种数据库（sqlite/postgres/mysql/sqlserver）的差异收敛为
+//  - withConnection：连接包装器（含 SSRF 复核、超时、句柄清理）
+//  - timeoutPhase：用于 withOperationTimeout 的阶段名；sqlite 为本地同步驱动，无需外层超时
+//  - dialect：传给 applySqlLimit / buildGroupCountSql 的方言串
+//  - runQuery(client, sql, params)：执行 SQL 并归一化为「行数组」
+//  - listTablesSql(schema) / describeTableSql(table, schema)：元数据查询的 { sql, params }
+// 这样 5 个工具（list_tables/count_tables/describe_table/run_readonly_query/group_count）
+// 的治理（allowlist/只读校验/SQL 治理）与脱敏逻辑只需在 runRelationalTool 里写一份。
+const RELATIONAL_DIALECTS = {
+    sqlite: {
+        dialect: 'sqlite',
+        timeoutPhase: null,
+        withConnection: withSqlite,
+        runQuery: (client, sql, params = []) => client.prepare(sql).all(...params),
+        listTablesSql: () => ({
+            sql: "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name",
+            params: []
+        }),
+        describeTableSql: (table) => ({
+            sql: `PRAGMA table_info(${quoteIdentifier(table)})`,
+            params: []
+        })
+    },
+    postgres: {
+        dialect: 'postgres',
+        timeoutPhase: 'PostgreSQL database query',
+        withConnection: withPostgres,
+        runQuery: async (client, sql, params = []) => (await client.query(sql, params)).rows,
+        listTablesSql: (schema) => ({
+            sql: `
+                SELECT table_schema, table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                  AND ($1::text = '' OR table_schema = $1)
+                ORDER BY table_schema, table_name
+            `,
+            params: [schema]
+        }),
+        describeTableSql: (table, schema) => ({
+            sql: `
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_name = $1 AND ($2::text = '' OR table_schema = $2)
+                ORDER BY ordinal_position
+            `,
+            params: [table, schema]
+        })
+    },
+    mysql: {
+        dialect: 'mysql',
+        timeoutPhase: 'MySQL database query',
+        withConnection: withMysql,
+        runQuery: async (client, sql, params = []) => {
+            const [rows] = await client.query(sql, params);
+            return rows;
+        },
+        listTablesSql: (schema) => ({
+            sql: `
+                SELECT table_schema, table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+                ORDER BY table_schema, table_name
+            `,
+            params: [schema]
+        }),
+        describeTableSql: (table, schema) => ({
+            sql: `
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_name = ? AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+                ORDER BY ordinal_position
+            `,
+            params: [table, schema]
+        })
+    },
+    sqlserver: {
+        dialect: 'sqlserver',
+        timeoutPhase: 'SQL Server database query',
+        withConnection: withSqlServer,
+        // sqlserver 使用具名参数 @name，params 形如 [{ name, value }]。
+        runQuery: async (pool, sql, params = []) => {
+            const request = pool.request();
+            for (const { name: paramName, value } of params) request.input(paramName, value);
+            return (await request.query(sql)).recordset;
+        },
+        listTablesSql: (schema) => ({
+            sql: `
+                SELECT TABLE_SCHEMA AS table_schema, TABLE_NAME AS table_name, TABLE_TYPE AS table_type
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
+                ORDER BY TABLE_SCHEMA, TABLE_NAME
+            `,
+            params: [{ name: 'schema', value: schema }]
+        }),
+        describeTableSql: (table, schema) => ({
+            sql: `
+                SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, IS_NULLABLE AS is_nullable, COLUMN_DEFAULT AS column_default
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = @table AND (@schema = '' OR TABLE_SCHEMA = @schema)
+                ORDER BY ORDINAL_POSITION
+            `,
+            params: [{ name: 'table', value: table }, { name: 'schema', value: schema }]
+        })
+    }
+};
+
+// 5 个关系型工具的统一分发：治理 + 取行 + 脱敏 + 成本装饰只写一份，方言差异全部走 adapter。
+async function runRelationalTool(adapter, client, name, ctx) {
+    const { cfg, schema, table, limit, input, decorate } = ctx;
+
+    if (name === 'db.list_tables') {
+        const { sql, params } = adapter.listTablesSql(schema);
+        return filterTableRows(await adapter.runQuery(client, sql, params), cfg);
+    }
+    if (name === 'db.count_tables') {
+        const { sql, params } = adapter.listTablesSql(schema);
+        return summarizeTableRows(filterTableRows(await adapter.runQuery(client, sql, params), cfg));
+    }
+    if (name === 'db.describe_table') {
+        assertTableAllowed(cfg, table);
+        const { sql, params } = adapter.describeTableSql(table, schema);
+        return filterDescribeRows(await adapter.runQuery(client, sql, params), cfg, table);
+    }
+    if (name === 'db.run_readonly_query') {
+        const readonly = assertReadonlySql(input.sql);
+        const governance = assertSqlGovernance(readonly, cfg);
+        const sql = applySqlLimit(readonly, limit, adapter.dialect);
+        return decorate({ rows: maskSensitiveRows(await adapter.runQuery(client, sql), cfg), limit }, {
+            operation: 'readonly_sql',
+            tables: governance.tables
+        });
+    }
+    if (name === 'db.group_count') {
+        assertTableAllowed(cfg, table);
+        assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
+        const query = buildGroupCountSql({ ...input, limit }, adapter.dialect, schema);
+        return decorate({ ...query, rows: maskSensitiveRows(await adapter.runQuery(client, query.sql), cfg) }, {
+            operation: 'group_count',
+            tables: [table],
+            fields: [input.groupBy || input.group_by]
+        });
+    }
+    throw new Error(`Unsupported database MCP tool: ${name}`);
+}
+
 async function executeSqlTool(connection, name, input = {}) {
     const cfg = buildRelationalConnectionConfig(connection);
+    const adapter = RELATIONAL_DIALECTS[cfg.database_type];
+    if (!adapter) throw new Error(`Unsupported database type: ${cfg.database_type}`);
+
     const schema = String(input.schema || cfg.schema || '').trim();
     const table = String(input.table || '').trim();
     const limit = clampLimit(input.limit, cfg.max_rows || 100);
@@ -893,220 +1125,19 @@ async function executeSqlTool(connection, name, input = {}) {
         ...result,
         ...buildDatabaseCost(cfg, { limit, ...details })
     });
+    const ctx = { cfg, schema, table, limit, input, decorate };
 
-    if (cfg.database_type === 'sqlite') {
-        return withSqlite(cfg, client => {
-            if (name === 'db.list_tables') {
-                return filterTableRows(client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all(), cfg);
-            }
-            if (name === 'db.count_tables') {
-                const rows = filterTableRows(client.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all(), cfg);
-                return summarizeTableRows(rows);
-            }
-            if (name === 'db.describe_table') {
-                assertTableAllowed(cfg, table);
-                return filterDescribeRows(client.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all(), cfg, table);
-            }
-            if (name === 'db.run_readonly_query') {
-                const readonly = assertReadonlySql(input.sql);
-                const governance = assertSqlGovernance(readonly, cfg);
-                const sql = applySqlLimit(readonly, limit, 'sqlite');
-                return decorate({ rows: maskSensitiveRows(client.prepare(sql).all(), cfg), limit }, {
-                    operation: 'readonly_sql',
-                    tables: governance.tables
-                });
-            }
-            if (name === 'db.group_count') {
-                assertTableAllowed(cfg, table);
-                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
-                const query = buildGroupCountSql({ ...input, limit }, 'sqlite', schema);
-                return decorate({ ...query, rows: maskSensitiveRows(client.prepare(query.sql).all(), cfg) }, {
-                    operation: 'group_count',
-                    tables: [table],
-                    fields: [input.groupBy || input.group_by]
-                });
-            }
-            throw new Error(`Unsupported database MCP tool: ${name}`);
-        });
-    }
-
-    if (cfg.database_type === 'postgres') {
-        return withOperationTimeout(withPostgres(cfg, async client => {
-            if (name === 'db.list_tables') {
-                const result = await client.query(`
-                    SELECT table_schema, table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-                      AND ($1::text = '' OR table_schema = $1)
-                    ORDER BY table_schema, table_name
-                `, [schema]);
-                return filterTableRows(result.rows, cfg);
-            }
-            if (name === 'db.count_tables') {
-                const result = await client.query(`
-                    SELECT table_schema, table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-                      AND ($1::text = '' OR table_schema = $1)
-                    ORDER BY table_schema, table_name
-                `, [schema]);
-                return summarizeTableRows(filterTableRows(result.rows, cfg));
-            }
-            if (name === 'db.describe_table') {
-                assertTableAllowed(cfg, table);
-                const result = await client.query(`
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = $1 AND ($2::text = '' OR table_schema = $2)
-                    ORDER BY ordinal_position
-                `, [table, schema]);
-                return filterDescribeRows(result.rows, cfg, table);
-            }
-            if (name === 'db.run_readonly_query') {
-                const readonly = assertReadonlySql(input.sql);
-                const governance = assertSqlGovernance(readonly, cfg);
-                const result = await client.query(applySqlLimit(readonly, limit, 'postgres'));
-                return decorate({ rows: maskSensitiveRows(result.rows, cfg), limit }, {
-                    operation: 'readonly_sql',
-                    tables: governance.tables
-                });
-            }
-            if (name === 'db.group_count') {
-                assertTableAllowed(cfg, table);
-                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
-                const query = buildGroupCountSql({ ...input, limit }, 'postgres', schema);
-                const result = await client.query(query.sql);
-                return decorate({ ...query, rows: maskSensitiveRows(result.rows, cfg) }, {
-                    operation: 'group_count',
-                    tables: [table],
-                    fields: [input.groupBy || input.group_by]
-                });
-            }
-            throw new Error(`Unsupported database MCP tool: ${name}`);
-        }), cfg.query_timeout_ms, cfg, 'PostgreSQL database query');
-    }
-
-    if (cfg.database_type === 'mysql') {
-        return withOperationTimeout(withMysql(cfg, async client => {
-            if (name === 'db.list_tables') {
-                const [rows] = await client.execute(`
-                    SELECT table_schema, table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
-                    ORDER BY table_name
-                `, [schema]);
-                return filterTableRows(rows, cfg);
-            }
-            if (name === 'db.count_tables') {
-                const [rows] = await client.execute(`
-                    SELECT table_schema, table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema = COALESCE(NULLIF(?, ''), DATABASE())
-                    ORDER BY table_schema, table_name
-                `, [schema]);
-                return summarizeTableRows(filterTableRows(rows, cfg));
-            }
-            if (name === 'db.describe_table') {
-                assertTableAllowed(cfg, table);
-                const [rows] = await client.execute(`
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = ? AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
-                    ORDER BY ordinal_position
-                `, [table, schema]);
-                return filterDescribeRows(rows, cfg, table);
-            }
-            if (name === 'db.run_readonly_query') {
-                const readonly = assertReadonlySql(input.sql);
-                const governance = assertSqlGovernance(readonly, cfg);
-                const [rows] = await client.query(applySqlLimit(readonly, limit, 'mysql'));
-                return decorate({ rows: maskSensitiveRows(rows, cfg), limit }, {
-                    operation: 'readonly_sql',
-                    tables: governance.tables
-                });
-            }
-            if (name === 'db.group_count') {
-                assertTableAllowed(cfg, table);
-                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
-                const query = buildGroupCountSql({ ...input, limit }, 'mysql', schema);
-                const [rows] = await client.query(query.sql);
-                return decorate({ ...query, rows: maskSensitiveRows(rows, cfg) }, {
-                    operation: 'group_count',
-                    tables: [table],
-                    fields: [input.groupBy || input.group_by]
-                });
-            }
-            throw new Error(`Unsupported database MCP tool: ${name}`);
-        }), cfg.query_timeout_ms, cfg, 'MySQL database query');
-    }
-
-    if (cfg.database_type === 'sqlserver') {
-        return withOperationTimeout(withSqlServer(cfg, async pool => {
-            if (name === 'db.list_tables') {
-                const result = await pool.request()
-                    .input('schema', schema)
-                    .query(`
-                        SELECT TABLE_SCHEMA AS table_schema, TABLE_NAME AS table_name, TABLE_TYPE AS table_type
-                        FROM INFORMATION_SCHEMA.TABLES
-                        WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
-                        ORDER BY TABLE_SCHEMA, TABLE_NAME
-                    `);
-                return filterTableRows(result.recordset, cfg);
-            }
-            if (name === 'db.count_tables') {
-                const result = await pool.request()
-                    .input('schema', schema)
-                    .query(`
-                        SELECT TABLE_SCHEMA AS table_schema, TABLE_NAME AS table_name, TABLE_TYPE AS table_type
-                        FROM INFORMATION_SCHEMA.TABLES
-                        WHERE (@schema = '' OR TABLE_SCHEMA = @schema)
-                        ORDER BY TABLE_SCHEMA, TABLE_NAME
-                    `);
-                return summarizeTableRows(filterTableRows(result.recordset, cfg));
-            }
-            if (name === 'db.describe_table') {
-                assertTableAllowed(cfg, table);
-                const result = await pool.request()
-                    .input('table', table)
-                    .input('schema', schema)
-                    .query(`
-                        SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, IS_NULLABLE AS is_nullable, COLUMN_DEFAULT AS column_default
-                        FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = @table AND (@schema = '' OR TABLE_SCHEMA = @schema)
-                        ORDER BY ORDINAL_POSITION
-                    `);
-                return filterDescribeRows(result.recordset, cfg, table);
-            }
-            if (name === 'db.run_readonly_query') {
-                const readonly = assertReadonlySql(input.sql);
-                const governance = assertSqlGovernance(readonly, cfg);
-                const result = await pool.request().query(applySqlLimit(readonly, limit, 'sqlserver'));
-                return decorate({ rows: maskSensitiveRows(result.recordset, cfg), limit }, {
-                    operation: 'readonly_sql',
-                    tables: governance.tables
-                });
-            }
-            if (name === 'db.group_count') {
-                assertTableAllowed(cfg, table);
-                assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
-                const query = buildGroupCountSql({ ...input, limit }, 'sqlserver', schema);
-                const result = await pool.request().query(query.sql);
-                return decorate({ ...query, rows: maskSensitiveRows(result.recordset, cfg) }, {
-                    operation: 'group_count',
-                    tables: [table],
-                    fields: [input.groupBy || input.group_by]
-                });
-            }
-            throw new Error(`Unsupported database MCP tool: ${name}`);
-        }), cfg.query_timeout_ms, cfg, 'SQL Server database query');
-    }
-
-    throw new Error(`Unsupported database type: ${cfg.database_type}`);
+    const run = adapter.withConnection(cfg, client => runRelationalTool(adapter, client, name, ctx));
+    return adapter.timeoutPhase
+        ? withOperationTimeout(run, cfg.query_timeout_ms, cfg, adapter.timeoutPhase)
+        : run;
 }
 
 async function executeMongoTool(connection, name, input = {}) {
     const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
     const cfg = connection;
+    // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
+    await assertSafeDatabaseHost(connection.host, getConnectionOwner(connection));
     const auth = connection.username
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
@@ -1176,10 +1207,11 @@ async function testDatabaseConnection(connection) {
     const timeoutMs = getDatabaseTestTimeoutMs();
     const testConnection = buildDatabaseTestConnectionConfig(connection);
     if (testConnection.database_type === 'sqlite') {
-        return withSqlite(testConnection, client => {
+        // better-sqlite3 为同步驱动，仍包一层超时以与其他方言保持一致并防止极端阻塞。
+        return withOperationTimeout(Promise.resolve().then(() => withSqlite(testConnection, client => {
             client.prepare('SELECT 1 AS ok').get();
             return { database_type: testConnection.database_type };
-        });
+        })), timeoutMs, testConnection, 'SQLite connection test');
     }
     if (testConnection.database_type === 'postgres') {
         return withOperationTimeout(withPostgres(testConnection, async client => {
@@ -1201,6 +1233,8 @@ async function testDatabaseConnection(connection) {
     }
     if (testConnection.database_type === 'mongodb') {
         const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
+        // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
+        await assertSafeDatabaseHost(testConnection.host, getConnectionOwner(testConnection));
         const auth = testConnection.username
             ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';
@@ -1265,6 +1299,9 @@ function validateDatabaseConnectionPayload(payload, user) {
         if (!host || !databaseName) throw createDatabaseMcpError('请填写数据库主机和数据库名。', 'DB_HOST_OR_NAME_REQUIRED', 400);
         if (!username && type !== 'mongodb') throw createDatabaseMcpError('请填写数据库用户名。', 'DB_USERNAME_REQUIRED', 400);
         const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
+        // 字面量主机名的快速拦截（无需 DNS、同步）：普通用户禁配内网/本机地址。
+        // 真正的 DNS 解析后 IP 校验（防把内网/loopback/云元数据藏在域名背后的 SSRF，并防 TOCTOU/DNS-rebinding）
+        // 在连接时由各驱动助手统一执行（assertSafeDatabaseHost / databaseSafeLookup），此处保持同步契约。
         if (restrictPrivateHostsToAdmin && isPrivateHost(host) && !isAdmin(user)) {
             throw createDatabaseMcpError('普通用户不能配置内网或本机数据库地址。', 'MCP_PRIVATE_HOST_RESTRICTED', 403);
         }
@@ -1277,6 +1314,9 @@ function validateDatabaseConnectionPayload(payload, user) {
         database_name: databaseName,
         username,
         password: String(payload.password || ''),
+        // 携带已校验的请求用户，供测试连接（testDatabaseConnection）阶段沿用同一内网放行策略；
+        // 该字段不会被持久化（入库仅取明确字段），仅在内存对象中传递。
+        _owner: user || null,
         options: {
             schema,
             ssl,
