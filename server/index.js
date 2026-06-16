@@ -71,6 +71,7 @@ const { createAdminUsersRouter } = require('./routes/admin-users');
 const { createAdminStatsRouter } = require('./routes/admin-stats');
 const { createSettingsRouter } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
+const { createAppsRouter } = require('./routes/apps');
 const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
@@ -545,6 +546,12 @@ app.use('/v1', createOpenAIRouter({
     authMiddleware,
     logAction,
     embeddingLimiter: app.locals.embeddingLimiter
+}));
+
+// --- 应用中心接口（公文写作 AI 等） ---
+app.use('/api', createAppsRouter({
+    authMiddleware,
+    logAction
 }));
 
 // --- API 404 处理器 (确保 API 请求永远返回 JSON) ---

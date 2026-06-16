@@ -1,5 +1,28 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.114] - 2026-06-16
+### 公文写作 AI 调用收口到后端专用接口
+
+本版本把“公文写作”的 AI 调用从前端直连 OpenAI 兼容补全接口，重构为后端专用接口 `POST /api/apps/official-writing/ai`：前端只传结构化参数（`mode`/`action`/`docType`/`standard`/`source`/`draft`/`requirements`/`comments`/`selection`），由后端统一组装提示词、做模型权限/配额/上下文预算检查、上游转发、用量统计与审计标签。涉及新增 `server/services/official-writing.js`、`server/routes/apps.js`，改动 `server/index.js`、`client/chat/apps-workbench.js`、`tests/security-chat.test.js`（新增 `tests/security-chat/official-writing.js`）、`README.md`。
+
+#### AI 调用封装（后端专用接口）
+- **提示词组装移到后端**：起草、润色、全文改写、审校、选区处理与逐句流式改写的系统/用户提示词统一在 `server/services/official-writing.js` 的 `buildOfficialWritingMessages()` 中构建，前端不再手写 prompt；选区动作（润色/压缩/扩写/公文语气）指令也由后端维护，消除前后端重复。
+- **统一鉴权与策略口径**：新接口复用 `getAccessibleModel`、`fitMessagesToContextBudget`、并发信号量与端点槽位、`recordModelTokenUsage` 等既有能力，与聊天/`/v1` 接口同一套权限、配额、预算与并发保护；调用统一打 `公文写作 AI` 审计标签，记录操作模式、动作与模型。
+- **流式与非流式归一**：逐句改写走 SSE 流式转发，其余模式走一次性补全；前端新增共享方法 `requestOfficialWritingAi()` 取代此前重复的 `callOfficialWritingModel()` 与 `streamOfficialWritingModel()`，错误处理、超时与流式解析只维护一份。
+
+#### 模型选择兜底
+- **默认模型回退**：公文写作不再强制要求先在聊天页选模型。后端按“显式选择 → 个人默认模型（`users.default_model_id`）→ 系统默认模型（`is_default`）”顺序解析，均无可用模型时返回清晰提示，体验不再被“请先在聊天页选择模型”打断。
+
+#### 审校结果更稳健
+- **JSON 解析收口到后端**：审校模式的 JSON 数组提取与字段校验改在后端完成（兼容代码块包裹、前后说明，过滤脏数据并规整字段），前端直接消费结构化条目；无有效条目时仍退回整体审校意见，避免结果丢失。
+
+#### 文档口径
+- **接口口径以最新版为准**：公文写作 AI 当前统一走后端专用接口 `/api/apps/official-writing/ai`，不再由前端直连 `/v1/chat/completions`；历史版本摘要中出现的 `/api/chat/completions`、`/v1/chat/completions` 为各自版本的当时实现记录，排障时以本版说明为准。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.114`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **回归验证通过**：`npm run check` 全量通过；新增公文写作服务单测 6 项；`node tests/security.test.js` 全量 **192/192** 通过，ESLint **0 错误**。
+
 ## [v0.0.113] - 2026-06-16
 ### 全栈深度体检：安全收口、性能优化、稳定性加固与数据库 MCP 重构
 

@@ -5,3 +5,4 @@ require('./security-chat/sessions-routes');
 require('./security-chat/ops-models');
 require('./security-chat/cache-secrets');
 require('./security-chat/token-tools');
+require('./security-chat/official-writing');

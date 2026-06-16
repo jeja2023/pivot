@@ -2447,81 +2447,47 @@ function setOfficialWritingAiBusy(busy, label) {
     }
 }
 
-// 调用项目现有的 OpenAI 兼容补全接口，返回模型文本；失败时返回 null 并提示。
-async function callOfficialWritingModel(messages, { maxTokens } = {}) {
-    const modelId = getOfficialWritingSelectedModelId();
-    if (!modelId) {
-        showToast('请先在聊天页选择一个模型后再使用 AI 功能', 'warning');
-        return null;
-    }
+// 统一调用后端公文写作 AI 接口：提示词组装、模型权限/配额/上下文预算与审计均在后端完成，
+// 前端只传结构化参数（mode/action/source/draft/requirements/selection 等）。
+// 非流式返回解析后的对象（{ content, items? }）；流式经 onDelta 回调累积文本并返回 { content }。
+// 失败时返回 null 并提示。模型取聊天页选择器，未选时由后端回退到默认模型。
+async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}) {
     if (typeof apiFetch !== 'function') {
         showToast('当前环境不支持调用模型', 'error');
         return null;
     }
+    // 环境不支持流式解析时退回为一次性请求。
+    const useStream = stream && typeof createBrowserSseParser === 'function';
+    const payload = {
+        ...params,
+        model: getOfficialWritingSelectedModelId() || undefined,
+        stream: useStream
+    };
+    let full = '';
     try {
-        const res = await apiFetch('/v1/chat/completions', {
+        const res = await apiFetch('/api/apps/official-writing/ai', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: modelId,
-                messages,
-                stream: false,
-                temperature: 0.4,
-                max_tokens: maxTokens || 2000
-            })
+            headers: { 'Content-Type': 'application/json', ...(useStream ? { Accept: 'text/event-stream' } : {}) },
+            body: JSON.stringify(payload)
         });
-        if (!res.ok) {
+        if (!res.ok || (useStream && !res.body)) {
             const data = await res.clone().json().catch(() => ({}));
             showToast(data?.error?.message || `AI 请求失败（${res.status}）`, 'error');
             return null;
         }
-        const data = await res.json();
-        const content = data?.choices?.[0]?.message?.content;
-        const text = Array.isArray(content)
-            ? content.map(part => (typeof part === 'string' ? part : part?.text || '')).join('')
-            : String(content || '');
-        return text.trim();
-    } catch (e) {
-        showToast('AI 请求异常，请稍后重试', 'error');
-        return null;
-    }
-}
-
-// 流式调用模型：逐块回调 onDelta(累积文本)，复用聊天端的 SSE 解析。返回最终完整文本或 null。
-async function streamOfficialWritingModel(messages, { maxTokens, onDelta } = {}) {
-    const modelId = getOfficialWritingSelectedModelId();
-    if (!modelId) {
-        showToast('请先在聊天页选择一个模型后再使用 AI 功能', 'warning');
-        return null;
-    }
-    if (typeof apiFetch !== 'function' || typeof createBrowserSseParser !== 'function') {
-        // 环境不支持流式时退回为一次性请求。
-        const text = await callOfficialWritingModel(messages, { maxTokens });
-        if (text && typeof onDelta === 'function') onDelta(text);
-        return text;
-    }
-    let full = '';
-    try {
-        const response = await apiFetch('/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-            body: JSON.stringify({ model: modelId, messages, stream: true, temperature: 0.4, max_tokens: maxTokens || 2000 })
-        });
-        if (!response.ok || !response.body) {
-            const data = await response.clone().json().catch(() => ({}));
-            showToast(data?.error?.message || `AI 请求失败（${response.status}）`, 'error');
-            return null;
+        if (!useStream) {
+            const data = await res.json().catch(() => null);
+            if (stream && data && typeof onDelta === 'function' && data.content) onDelta(data.content);
+            return data || null;
         }
-        const reader = response.body.getReader();
+        const reader = res.body.getReader();
         const decoder = new TextDecoder();
         const parser = createBrowserSseParser({
-            onData(payload) {
+            onData(p) {
                 let data = null;
-                try { data = JSON.parse(payload); } catch (e) { return; }
-                // 服务端把上游 OpenAI delta 归一化为 {content:"..."}；同时容错原始 delta 形态。
-                const chunk = data?.content
-                    ?? data?.choices?.[0]?.delta?.content
-                    ?? '';
+                try { data = JSON.parse(p); } catch (e) { return; }
+                // 服务端转发上游 OpenAI delta；同时容错归一化后的 {content:"..."} 形态。
+                const chunk = data?.content ?? data?.choices?.[0]?.delta?.content ?? '';
                 if (chunk) {
                     full += chunk;
                     if (typeof onDelta === 'function') onDelta(full);
@@ -2537,43 +2503,17 @@ async function streamOfficialWritingModel(messages, { maxTokens, onDelta } = {})
             }
             parser.write(decoder.decode(value, { stream: true }));
         }
-        return full.trim();
+        return { content: full.trim() };
     } catch (e) {
-        showToast('AI 流式请求异常，请稍后重试', 'error');
-        return full.trim() || null;
+        showToast(useStream ? 'AI 流式请求异常，请稍后重试' : 'AI 请求异常，请稍后重试', 'error');
+        return useStream && full.trim() ? { content: full.trim() } : null;
     }
-}
-
-function buildOfficialWritingSystemPrompt() {
-    return [
-        '你是资深公文写作助手，熟悉中文党政机关与企事业单位公文规范。',
-        `当前遵循的规范库：${getOfficialWritingStandard()}。`,
-        '务必使用规范、准确、庄重、克制的公文语体，不编造单位、时间、数据和事实；缺失信息用【待补充】标注。',
-        '严格只输出被要求的内容，不要附加解释、寒暄或额外说明。'
-    ].join('');
 }
 
 function buildOfficialWritingComments() {
     return officialWritingState.comments
         .map(comment => `- [${comment.target === 'draft' ? '正文稿' : '原文'} / ${comment.anchor || '全文'}] ${comment.text}`)
         .join('\n');
-}
-
-// 解析审校模式下模型返回的 JSON 数组；兼容包裹在代码块或带前后说明的情况。
-function parseOfficialWritingReviewJson(text) {
-    if (!text) return [];
-    let cleaned = text.replace(/```(?:json)?/gi, '').trim();
-    const firstBracket = cleaned.indexOf('[');
-    const lastBracket = cleaned.lastIndexOf(']');
-    if (firstBracket >= 0 && lastBracket > firstBracket) {
-        cleaned = cleaned.slice(firstBracket, lastBracket + 1);
-    }
-    try {
-        const parsed = JSON.parse(cleaned);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-        return [];
-    }
 }
 
 async function runOfficialWritingAiTask(mode, { selection } = {}) {
@@ -2583,49 +2523,29 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
     const comments = buildOfficialWritingComments();
     const baseText = (selection?.text || '').trim() || officialWritingState.draft.trim();
     const modeLabel = OFFICIAL_WRITING_MODES[mode] || '处理';
-    const system = buildOfficialWritingSystemPrompt();
-    const userLines = [];
-
-    if (mode === 'draft') {
-        userLines.push(`请基于以下材料和要求，起草一篇规范的「${docType}」，包含标题、主送机关、正文、落款单位和成文日期。`);
-        userLines.push('只输出公文正文本身，不要输出任何说明。');
-        if (requirements) userLines.push(`补充要求：${requirements}`);
-        userLines.push('', '材料：', officialWritingState.source || '【暂无材料，请基于文种结构生成规范初稿，未知信息用【待补充】标注】');
-    } else if (mode === 'review') {
-        userLines.push(`请审校以下「${docType}」的格式与表达，逐项指出问题。`);
-        userLines.push('以 JSON 数组输出，数组每一项为对象，字段为：title（问题简述）、original（涉及的原文片段，可为空字符串）、suggestion（具体修改建议）。');
-        userLines.push('只输出 JSON，不要输出其它内容。');
-        if (requirements) userLines.push(`额外关注：${requirements}`);
-        userLines.push('', '正文稿：', officialWritingState.draft || '【暂无正文稿】');
-    } else {
-        const verb = mode === 'rewrite_section' ? '改写为规范的公文语体' : '润色优化';
-        userLines.push(`请将以下「${docType}」文本${verb}，保持事实信息不变，使其更规范、准确、克制。`);
-        userLines.push('只输出处理后的文本，不要输出任何说明。');
-        if (requirements) userLines.push(`补充要求：${requirements}`);
-        userLines.push('', '待处理文本：', baseText);
-    }
-    if (comments && mode !== 'draft') {
-        userLines.push('', '相关批注（请一并参考）：', comments);
-    }
 
     setOfficialWritingAiBusy(true, `AI ${modeLabel}中…`);
     try {
-        const result = await callOfficialWritingModel(
-            [
-                { role: 'system', content: system },
-                { role: 'user', content: userLines.join('\n') }
-            ],
-            { maxTokens: mode === 'draft' ? 2600 : 2000 }
-        );
+        const result = await requestOfficialWritingAi({
+            mode,
+            docType,
+            standard: getOfficialWritingStandard(),
+            requirements,
+            comments,
+            source: officialWritingState.source || '',
+            draft: officialWritingState.draft || '',
+            selection: selection?.text ? { text: selection.text } : null
+        });
         if (result == null) return;
-        if (!result) {
-            showToast('AI 未返回有效内容，请调整要求后重试', 'warning');
-            return;
-        }
+        const text = String(result.content || '').trim();
         if (mode === 'review') {
-            const items = parseOfficialWritingReviewJson(result);
+            // 审校结果由后端完成 JSON 提取与校验；无结构化条目时退回整体意见。
+            const items = Array.isArray(result.items) ? result.items : [];
             if (!items.length) {
-                // 模型未按 JSON 输出时，退回为整体审校意见，避免丢失结果。
+                if (!text) {
+                    showToast('AI 未返回有效内容，请调整要求后重试', 'warning');
+                    return;
+                }
                 addOfficialWritingSuggestion({
                     type: '审校',
                     title: 'AI 审校意见',
@@ -2633,7 +2553,7 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
                     start: 0,
                     end: 0,
                     original: '',
-                    replacement: result,
+                    replacement: text,
                     detail: 'AI 生成的整体审校意见。'
                 });
                 showToast('已生成 AI 审校意见');
@@ -2664,6 +2584,10 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
             showToast(`AI 已生成 ${Math.min(items.length, 20)} 条审校建议`);
             return;
         }
+        if (!text) {
+            showToast('AI 未返回有效内容，请调整要求后重试', 'warning');
+            return;
+        }
         if (mode === 'draft') {
             const insertionPoint = selection?.text ? selection.start : officialWritingState.draft.length;
             addOfficialWritingSuggestion({
@@ -2673,7 +2597,7 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
                 start: insertionPoint,
                 end: selection?.text ? selection.end : insertionPoint,
                 original: selection?.text || '',
-                replacement: result,
+                replacement: text,
                 detail: 'AI 基于材料和文种生成的规范初稿。'
             });
             showToast('AI 初稿已生成，可在审改栏接受或调整');
@@ -2686,7 +2610,7 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
             start: selection?.text ? selection.start : 0,
             end: selection?.text ? selection.end : officialWritingState.draft.length,
             original: baseText,
-            replacement: result,
+            replacement: text,
             detail: 'AI 生成，可替换、插入、转为批注或保存为新版本。'
         });
         showToast(`AI ${modeLabel}建议已生成`);
@@ -2746,46 +2670,45 @@ function applySuggestionAction(suggestionId, action) {
     renderOfficialWritingWorkspace();
 }
 
-const OFFICIAL_WRITING_SELECTION_ACTION_META = {
-    polish: { label: '润色', instruction: '对以下公文片段进行润色，使表达更规范、准确、流畅，保持原意和事实不变。' },
-    compress: { label: '压缩', instruction: '在保留关键信息和事实的前提下，精炼压缩以下公文片段，使其更简洁。' },
-    expand: { label: '扩写', instruction: '在不编造事实的前提下，对以下公文片段进行合理扩写，补充必要的表述和逻辑衔接。' },
-    formal: { label: '公文语气', instruction: '将以下片段改写为规范、庄重、克制的公文语体，保持事实信息不变。' }
+// 选区动作标签（具体指令由后端统一维护，避免前后端重复）。
+const OFFICIAL_WRITING_SELECTION_ACTION_LABELS = {
+    polish: '润色',
+    compress: '压缩',
+    expand: '扩写',
+    formal: '公文语气'
 };
 
 async function runOfficialWritingSelectionAi(action, selection) {
     if (officialWritingAiBusy) return;
-    const meta = OFFICIAL_WRITING_SELECTION_ACTION_META[action];
-    if (!meta) return;
-    const requirements = getOfficialWritingRequirements();
-    const userLines = [
-        meta.instruction,
-        '只输出处理后的文本，不要输出任何说明。'
-    ];
-    if (requirements) userLines.push(`补充要求：${requirements}`);
-    userLines.push('', '待处理片段：', selection.text);
-    setOfficialWritingAiBusy(true, `AI ${meta.label}中…`);
+    const label = OFFICIAL_WRITING_SELECTION_ACTION_LABELS[action];
+    if (!label) return;
+    setOfficialWritingAiBusy(true, `AI ${label}中…`);
     try {
-        const result = await callOfficialWritingModel([
-            { role: 'system', content: buildOfficialWritingSystemPrompt() },
-            { role: 'user', content: userLines.join('\n') }
-        ]);
+        const result = await requestOfficialWritingAi({
+            mode: 'selection',
+            action,
+            docType: getOfficialWritingDocType(),
+            standard: getOfficialWritingStandard(),
+            requirements: getOfficialWritingRequirements(),
+            selection: { text: selection.text }
+        });
         if (result == null) return;
-        if (!result) {
+        const text = String(result.content || '').trim();
+        if (!text) {
             showToast('AI 未返回有效内容，请重试', 'warning');
             return;
         }
         addOfficialWritingSuggestion({
             type: '选区修改',
-            title: `选区${meta.label}建议`,
+            title: `选区${label}建议`,
             target: selection.target,
             start: selection.start,
             end: selection.end,
             original: selection.text,
-            replacement: result,
-            detail: `来自选区浮动工具条的 AI ${meta.label}。`
+            replacement: text,
+            detail: `来自选区浮动工具条的 AI ${label}。`
         });
-        showToast(`AI ${meta.label}建议已生成`);
+        showToast(`AI ${label}建议已生成`);
     } finally {
         setOfficialWritingAiBusy(false);
     }
@@ -2863,26 +2786,22 @@ let officialWritingDiffState = null;
 
 async function runOfficialWritingStreamRewrite(selection) {
     if (officialWritingAiBusy) return;
-    const requirements = getOfficialWritingRequirements();
-    const userLines = [
-        '请将以下公文片段改写为更规范、准确、克制的公文语体，保持事实信息不变。',
-        '逐句改写，尽量与原文句子一一对应，只输出改写后的文本，不要输出说明。'
-    ];
-    if (requirements) userLines.push(`补充要求：${requirements}`);
-    userLines.push('', '待改写片段：', selection.text);
 
     openOfficialWritingDiffModal(selection);
     setOfficialWritingDiffStreaming(true);
     setOfficialWritingAiBusy(true, 'AI 流式改写中…');
     try {
         const preview = document.getElementById('official-writing-diff-stream-preview');
-        const result = await streamOfficialWritingModel(
-            [
-                { role: 'system', content: buildOfficialWritingSystemPrompt() },
-                { role: 'user', content: userLines.join('\n') }
-            ],
+        const result = await requestOfficialWritingAi(
             {
-                maxTokens: 2200,
+                mode: 'rewrite_stream',
+                docType: getOfficialWritingDocType(),
+                standard: getOfficialWritingStandard(),
+                requirements: getOfficialWritingRequirements(),
+                selection: { text: selection.text }
+            },
+            {
+                stream: true,
                 onDelta(full) {
                     if (preview) preview.textContent = full;
                 }
@@ -2892,18 +2811,19 @@ async function runOfficialWritingStreamRewrite(selection) {
             closeOfficialWritingDiffModal();
             return;
         }
-        if (!result) {
+        const rewritten = String(result.content || '').trim();
+        if (!rewritten) {
             showToast('AI 未返回有效内容，请重试', 'warning');
             closeOfficialWritingDiffModal();
             return;
         }
-        const rows = buildOfficialWritingSentenceDiff(selection.text, result).map((row, index) => ({
+        const rows = buildOfficialWritingSentenceDiff(selection.text, rewritten).map((row, index) => ({
             ...row,
             id: `diff-${index}`,
             // 默认：改写/新增句默认接受新版，相同句保留，删除句默认接受删除。
             accepted: row.type !== 'removed'
         }));
-        officialWritingDiffState = { selection, rows, rewritten: result };
+        officialWritingDiffState = { selection, rows, rewritten };
         setOfficialWritingDiffStreaming(false);
         renderOfficialWritingDiffRows();
     } finally {
