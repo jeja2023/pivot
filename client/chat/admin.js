@@ -124,38 +124,30 @@ const adminFeatureScripts = [
     '/chat/models-actions.js',
     '/chat/users.js',
     '/chat/stats.js',
+    '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
     '/chat/admin-settings.js',
+    '/chat/announcements-admin.js',
+    '/chat/tool-policy.js',
     '/chat/extra.js'
 ];
 
 let adminFeatureLoadPromise = null;
 
-const loadScriptOnce = (src) => new Promise((resolve, reject) => {
-    const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
-    const versionTag = appVersionTag && appVersionTag !== '__APP_VERSION__' ? `?v=${encodeURIComponent(appVersionTag)}` : '';
-    const versionedSrc = `${src}${versionTag}`;
-    const existing = Array.from(document.scripts).find(script => {
-        const current = script.getAttribute('src') || '';
-        return current === src || current === versionedSrc || current.startsWith(`${src}?`);
-    });
-    if (existing) {
-        resolve();
-        return;
-    }
-    const script = document.createElement('script');
-    script.src = versionedSrc;
-    script.async = false;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`加载脚本失败: ${src}`));
-    document.head.appendChild(script);
-});
+const loadScriptOnce = (src) => {
+    if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
+    return Promise.reject(new Error(`脚本加载器不可用: ${src}`));
+};
 
 window.ensureAdminSettingsScript = () => loadScriptOnce('/chat/admin-settings.js');
 
 window.ensureAdminFeatureScripts = async () => {
     if (adminFeatureLoadPromise) return adminFeatureLoadPromise;
     adminFeatureLoadPromise = (async () => {
+        if (window.Pivot?.loadScripts) {
+            await window.Pivot.loadScripts(adminFeatureScripts);
+            return;
+        }
         for (const src of adminFeatureScripts) {
             await loadScriptOnce(src);
         }

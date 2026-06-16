@@ -35,6 +35,11 @@
             .replace(/'/g, '&#039;');
     };
 
+    const escapeRagAttr = (value) => {
+        if (window.PivotSafeHtml?.escapeAttr) return window.PivotSafeHtml.escapeAttr(value);
+        return escapeRagHtml(value).replace(/"/g, '&quot;');
+    };
+
     const formatRagSize = (bytes) => {
         const value = Number(bytes || 0);
         if (value < 1024) return `${value} B`;
@@ -46,8 +51,14 @@
     window.Pivot = window.Pivot || {};
     window.Pivot.ragFormat = {
         RAG_ICONS,
+        escapeRagAttr,
         escapeRagHtml,
         formatRagDateToCN,
         formatRagSize
     };
+    window.RAG_ICONS = window.RAG_ICONS || RAG_ICONS;
+    window.escapeRagHtml = window.escapeRagHtml || escapeRagHtml;
+    window.escapeRagAttr = window.escapeRagAttr || escapeRagAttr;
+    window.formatRagDateToCN = window.formatRagDateToCN || formatRagDateToCN;
+    window.formatRagSize = window.formatRagSize || formatRagSize;
 })();

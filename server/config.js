@@ -16,6 +16,14 @@ const parsePort = (value) => {
     return port;
 };
 
+const parseNonNegativeInteger = (name, value, fallback) => {
+    const parsed = parseInt(value || String(fallback), 10);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error(`${name} 必须是 0 或正整数`);
+    }
+    return parsed;
+};
+
 function validateSecret(name, value, { required = true } = {}) {
     if (!value) {
         if (required) throw new Error(`${name} 未配置`);
@@ -47,6 +55,7 @@ function validateConfig() {
         staticMaxAge: process.env.STATIC_MAX_AGE || '1d',
         vendorMaxAge: process.env.VENDOR_STATIC_MAX_AGE || '30d',
         directorySizeCacheMs: Math.max(parseInt(process.env.DIR_SIZE_CACHE_MS || '60000', 10), 0),
+        maintenanceStartDelayMs: parseNonNegativeInteger('MAINTENANCE_START_DELAY_MS', process.env.MAINTENANCE_START_DELAY_MS, 10000),
         instanceId: crypto.randomUUID().slice(0, 8),
         publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, '')
     };

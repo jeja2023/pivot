@@ -144,6 +144,64 @@
         return () => target.removeEventListener(event, handler, options);
     }
 
+    const scriptLoadPromises = existingPivot._scriptLoadPromises || new Map();
+
+    function versionedAssetUrl(src) {
+        const text = String(src || '').trim();
+        if (!text) return '';
+        if (/^(?:https?:)?\/\//i.test(text) || text.startsWith('data:') || text.startsWith('blob:')) return text;
+        const appVersionTag = document.documentElement?.dataset?.appVersion || window.APP_VERSION_TAG || '';
+        if (!appVersionTag || appVersionTag === '__APP_VERSION__' || /[?&]v=/.test(text)) return text;
+        const separator = text.includes('?') ? '&' : '?';
+        return `${text}${separator}v=${encodeURIComponent(appVersionTag)}`;
+    }
+
+    function scriptMatches(existingSrc, rawSrc, nextSrc) {
+        if (!existingSrc) return false;
+        return existingSrc === rawSrc
+            || existingSrc === nextSrc
+            || existingSrc.endsWith(rawSrc)
+            || existingSrc.includes(`${rawSrc}?`);
+    }
+
+    function loadScriptOnce(src) {
+        const rawSrc = String(src || '').trim();
+        if (!rawSrc) return Promise.resolve();
+        const nextSrc = versionedAssetUrl(rawSrc);
+        const key = nextSrc;
+        if (scriptLoadPromises.has(key)) return scriptLoadPromises.get(key);
+        const existing = Array.from(document.scripts).find(script => {
+            const current = script.getAttribute('src') || '';
+            return scriptMatches(current, rawSrc, nextSrc);
+        });
+        if (existing && existing.dataset.loaded !== 'false') return Promise.resolve();
+        const promise = new Promise((resolve, reject) => {
+            const script = existing || document.createElement('script');
+            script.async = false;
+            script.dataset.loaded = 'false';
+            script.onload = () => {
+                script.dataset.loaded = 'true';
+                resolve();
+            };
+            script.onerror = () => {
+                scriptLoadPromises.delete(key);
+                reject(new Error(`Failed to load script: ${rawSrc}`));
+            };
+            if (!existing) {
+                script.src = nextSrc;
+                document.head.appendChild(script);
+            }
+        });
+        scriptLoadPromises.set(key, promise);
+        return promise;
+    }
+
+    async function loadScripts(scripts = []) {
+        for (const src of scripts) {
+            await loadScriptOnce(src);
+        }
+    }
+
     // 流式渲染节流策略：根据已积累内容长度自适应间隔
     // 思路：内容越长，每帧 marked.parse 越贵，应该降低刷新频率
     function chooseStreamInterval(contentLength) {
@@ -162,6 +220,10 @@
     existingPivot.createLruCache = createLruCache;
     existingPivot.clearChildren = clearChildren;
     existingPivot.on = on;
+    existingPivot.versionedAssetUrl = versionedAssetUrl;
+    existingPivot.loadScriptOnce = loadScriptOnce;
+    existingPivot.loadScripts = loadScripts;
+    existingPivot._scriptLoadPromises = scriptLoadPromises;
     existingPivot.chooseStreamInterval = chooseStreamInterval;
     existingPivot.html = window.PivotSafeHtml || existingPivot.html || null;
     window.Pivot = existingPivot;

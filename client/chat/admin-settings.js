@@ -15,11 +15,60 @@ async function loadSettings() {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
         if (memoryThresholdInput) memoryThresholdInput.value = formatTokenInputValue(data.memoryConfig?.thresholdTokens || 12000);
+        updateApiAccessState(data.apiAccessEnabled === true);
         updateEmbeddingSettingsForm(data.embeddingConfig);
     } catch (e) {
         showToast(e.message || '系统设置加载失败', 'error');
     }
 }
+
+function updateApiAccessState(enabled) {
+    const isEnabled = enabled === true;
+    window.apiAccessEnabled = isEnabled;
+    const toggle = document.getElementById('api-access-toggle');
+    const badge = document.getElementById('api-access-status-badge');
+    const hint = document.getElementById('api-access-disabled-hint');
+    const createBtn = document.getElementById('create-key-btn');
+    const guide = document.getElementById('api-access-guide');
+    if (toggle) toggle.checked = isEnabled;
+    if (badge) {
+        badge.textContent = isEnabled ? '已开启' : '已关闭';
+        badge.classList.toggle('is-off', !isEnabled);
+    }
+    if (hint) hint.classList.toggle('hidden', isEnabled);
+    if (createBtn) {
+        createBtn.disabled = !isEnabled;
+        createBtn.title = isEnabled ? '' : 'API 接入已关闭，暂不能新建密钥';
+    }
+    if (guide) guide.classList.toggle('is-disabled', !isEnabled);
+}
+
+window.updateApiAccessState = updateApiAccessState;
+
+window.updateApiAccessSetting = async function() {
+    if (!isSuperAdminUser()) return;
+    const toggle = document.getElementById('api-access-toggle');
+    if (!toggle) return;
+    const enabled = toggle.checked === true;
+    toggle.disabled = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/admin/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_access_enabled: enabled })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'API 接入设置保存失败');
+        updateApiAccessState(data.apiAccessEnabled === true);
+        window.loadApiKeys?.();
+        showToast(data.apiAccessEnabled ? 'API 接入已开启' : 'API 接入已关闭');
+    } catch (e) {
+        updateApiAccessState(!enabled);
+        showToast(e.message || 'API 接入设置保存失败', 'error');
+    } finally {
+        toggle.disabled = false;
+    }
+};
 
 function getEmbeddingModelValue() {
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');

@@ -17,6 +17,7 @@ const { asyncHandler } = require('../http');
 const { db, stmts } = require('../db');
 const crypto = require('crypto');
 const { hashApiKey, previewApiKey } = require('../auth');
+const { getApiAccessSetting } = require('../services/api-access-settings');
 
 function createAuthRouter({
     authMiddleware,
@@ -146,10 +147,16 @@ function createAuthRouter({
             WHERE user_id = ?
             ORDER BY created_at DESC
         `).all(req.user.id);
-        res.json(keys.map(k => ({ ...k, key: k.key_preview || 'sk-****' })));
+        res.json({
+            apiAccessEnabled: getApiAccessSetting(),
+            keys: keys.map(k => ({ ...k, key: k.key_preview || 'sk-****' }))
+        });
     }));
 
     router.post('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
+        if (!getApiAccessSetting()) {
+            return res.status(403).json({ error: 'API 接入已由管理员关闭，暂不能创建新密钥' });
+        }
         const { name } = req.body;
         const key = 'sk-' + crypto.randomBytes(24).toString('hex');
         db.prepare('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key) VALUES (?, ?, ?, ?, NULL)')

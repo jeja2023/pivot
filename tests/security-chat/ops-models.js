@@ -14,6 +14,7 @@ const {
     fs,
     getLocalHostnames,
     getMaintenanceStatus,
+    getApiAccessSetting,
     getModelDailyUsage,
     getSystemHealthSnapshot,
     http,
@@ -28,6 +29,7 @@ const {
     path,
     recordModelTokenUsage,
     runExpressHandlers,
+    setApiAccessSetting,
     test
 } = require('../security-helpers');
 
@@ -448,5 +450,73 @@ test('OpenAI 聊天补全兼容 prompt 风格的代码补全请求', async () =>
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('api access disabled blocks openai router at the router level', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`openai_block_${suffix}`, 'hash', 'OpenAI Block User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `openai_block_${suffix}`, role: 'user', unit: 'QA' };
+    const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get('api_access_enabled');
+    const previousValue = getApiAccessSetting();
+    const router = createOpenAIRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        embeddingLimiter: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/models');
+    const req = {
+        method: 'GET',
+        url: '/models',
+        originalUrl: '/models',
+        headers: {},
+        user
+    };
+    const res = {
+        statusCode: 200,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+
+    try {
+        setApiAccessSetting(false, user.id);
+        await new Promise((resolve, reject) => {
+            const originalJson = res.json.bind(res);
+            res.json = (body) => {
+                originalJson(body);
+                resolve();
+                return res;
+            };
+            router.handle(req, res, err => {
+                if (err) reject(err);
+            });
+        });
+        assert.equal(res.statusCode, 403);
+        assert.match(res.body.error, /API/);
+        assert.ok(route);
+    } finally {
+        if (previousRow) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previousRow.key, previousRow.value, previousRow.updated_at, previousRow.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        assert.equal(getApiAccessSetting(), previousValue);
     }
 });

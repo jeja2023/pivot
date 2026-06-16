@@ -8,6 +8,7 @@ const {
     assertSafeOutboundUrl,
     createAdminUsersRouter,
     createAttachmentsRouter,
+    createAuthRouter,
     createModelsRouter,
     createSafeLookup,
     createSessionsRouter,
@@ -19,6 +20,7 @@ const {
     fs,
     getClientIp,
     getCookie,
+    getApiAccessSetting,
     getPermissionLabel,
     getPermissionTier,
     isAdmin,
@@ -31,6 +33,7 @@ const {
     resolveUploadUrlPath,
     runExpressHandlers,
     test,
+    setApiAccessSetting,
     toProjectRelativePath,
     uploadRoot,
     withPermissionFlags
@@ -845,5 +848,56 @@ test('session tag summary and batch operations are scoped to current user', asyn
     } finally {
         db.prepare('DELETE FROM sessions WHERE id IN (?, ?, ?)').run(sessionA, sessionB, sessionOther);
         db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(userId, otherId);
+    }
+});
+
+test('api access disabled blocks api key creation', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`api_key_user_${suffix}`, 'hash', 'API Key User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `api_key_user_${suffix}`, role: 'user', unit: 'QA' };
+    const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get('api_access_enabled');
+    const previousValue = getApiAccessSetting();
+    const router = createAuthRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        loginLimiter: (_req, _res, next) => next(),
+        isPublicRegistrationEnabled: () => true,
+        logAction: () => {},
+        publicUrl: 'http://localhost'
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/auth/keys' && layer.route?.methods?.post);
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+
+    try {
+        setApiAccessSetting(false, user.id);
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body: { name: 'blocked-key' },
+            user
+        }, res);
+        assert.equal(res.statusCode, 403);
+        assert.match(res.body.error, /API/);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM api_keys WHERE user_id = ?').get(user.id).count, 0);
+    } finally {
+        if (previousRow) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previousRow.key, previousRow.value, previousRow.updated_at, previousRow.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
+        }
+        db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        assert.equal(getApiAccessSetting(), previousValue);
     }
 });

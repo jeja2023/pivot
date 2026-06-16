@@ -13,6 +13,7 @@ const {
     db,
     extractEmbeddingModelIds,
     getEmbeddingConfig,
+    getApiAccessSetting,
     getPublicEmbeddingConfig,
     indexDocumentChunks,
     normalizeEmbeddingInputs,
@@ -21,6 +22,7 @@ const {
     resolveEmbeddingUrl,
     runExpressHandlers,
     test,
+    setApiAccessSetting,
     toRagSettingValue
 } = require('../security-helpers');
 
@@ -493,5 +495,58 @@ test('RAG FTS 会索引生成的中文 ngram 词元', () => {
         db.prepare('DELETE FROM knowledge_chunks WHERE id = ?').run(chunkInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('api access setting can be read and updated by admin settings', async () => {
+    const suffix = Date.now().toString(36);
+    const adminUser = db.prepare('SELECT id, username, role, unit FROM users WHERE username = ?').get('admin');
+    const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get('api_access_enabled');
+    const previousValue = getApiAccessSetting();
+    const router = createSettingsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const settingsRoute = router.stack.find(layer => layer.route?.path === '/settings' && layer.route?.methods?.get);
+    const adminSettingsRoute = router.stack.find(layer => layer.route?.path === '/admin/settings' && layer.route?.methods?.put);
+
+    try {
+        setApiAccessSetting(false, adminUser.id);
+
+        const readRes = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(settingsRoute.route.stack.map(layer => layer.handle), { headers: {}, user: adminUser }, readRes);
+        assert.equal(readRes.body.apiAccessEnabled, false);
+
+        const writeRes = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { this.body = body; return this; }
+        };
+        await runExpressHandlers(adminSettingsRoute.route.stack.map(layer => layer.handle), {
+            body: { api_access_enabled: true },
+            user: adminUser
+        }, writeRes);
+        assert.equal(writeRes.statusCode, 200);
+        assert.equal(writeRes.body.apiAccessEnabled, true);
+        assert.equal(getApiAccessSetting(), true);
+    } finally {
+        if (previousRow) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previousRow.key, previousRow.value, previousRow.updated_at, previousRow.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
+        }
+        assert.equal(getApiAccessSetting(), previousValue);
     }
 });

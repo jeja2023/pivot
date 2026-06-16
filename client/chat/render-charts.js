@@ -304,6 +304,19 @@ function renderEcharts(block, spec) {
     }
 }
 
+let echartsLoadPromise = null;
+
+function ensureEchartsLazyLoaded() {
+    if (window.echarts) return Promise.resolve(true);
+    if (!window.Pivot?.loadScriptOnce) return Promise.resolve(false);
+    if (!echartsLoadPromise) {
+        echartsLoadPromise = window.Pivot.loadScriptOnce('/common/vendor/echarts.min.js')
+            .then(() => Boolean(window.echarts))
+            .catch(() => false);
+    }
+    return echartsLoadPromise;
+}
+
 function drawPivotChart(canvas, spec) {
     const ctx = canvas?.getContext?.('2d');
     if (!ctx || !spec) return;
@@ -521,6 +534,14 @@ function renderPivotCharts(root = document) {
         if (!rendered) {
             if (echartMount) echartMount.hidden = true;
             drawPivotChart(canvas, spec);
+            ensureEchartsLazyLoaded().then((ready) => {
+                if (!ready || block.dataset.renderedEcharts === '1') return;
+                const upgraded = renderEcharts(block, spec);
+                if (!upgraded) return;
+                canvas.hidden = true;
+                if (title) title.hidden = true;
+                block.dataset.renderedEcharts = '1';
+            });
         }
         block.dataset.rendered = '1';
     });

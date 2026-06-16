@@ -6,6 +6,7 @@ const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
 const { normalizeRole, withPermissionFlags } = require('./permissions');
+const { getApiAccessSetting } = require('./services/api-access-settings');
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -137,6 +138,10 @@ function resolveAuthenticatedUser(req) {
         }
     }
 
+    if (String(token || '').startsWith('sk-') && !getApiAccessSetting()) {
+        return { user: null, token, code: 'API_ACCESS_DISABLED' };
+    }
+
     const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(hashApiKey(token));
     if (apiKeyData) {
         const user = stmts.getUserById.get(apiKeyData.user_id);
@@ -232,6 +237,10 @@ function authMiddleware(req, res, next) {
 
     if (auth.code === 'TOKEN_EXPIRED') {
         return res.status(401).json({ error: 'Token 已过期', code: 'TOKEN_EXPIRED' });
+    }
+
+    if (auth.code === 'API_ACCESS_DISABLED') {
+        return res.status(403).json({ error: 'API 接入已由管理员关闭' });
     }
 
     if (auth.user) {

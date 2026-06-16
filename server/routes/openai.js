@@ -31,6 +31,7 @@ const {
     assertSafeModelRuntimeUrl,
     createSafeModelHttpAgents
 } = require('../services/model-adapter');
+const { createApiAccessGuard } = require('../services/api-access-settings');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { requestEmbeddings, getEmbeddingRuntimeGuardUser } = require('../services/rag-index');
 const { executeBuiltInTool, getBuiltInToolDefinitions } = require('../services/agent-tools');
@@ -192,6 +193,7 @@ function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens
 
 function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_req, _res, next) => next() }) {
     const router = express.Router();
+    router.use(createApiAccessGuard({ logAction }));
 
     // 1. 获取模型列表 (OpenAI 兼容)
     router.get('/models', authMiddleware, asyncHandler(async (req, res) => {

@@ -86,6 +86,46 @@
     padding: 20px !important;
     text-align: left;
 }
+.api-access-global-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--text-main);
+}
+.api-access-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #047857;
+    background: rgba(5, 150, 105, 0.1);
+}
+.api-access-status-badge.is-off {
+    color: #64748b;
+    background: rgba(100, 116, 139, 0.12);
+}
+.api-access-disabled-hint {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    color: #b91c1c;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+.api-access-guide.is-disabled,
+.api-access-models.is-disabled {
+    opacity: 0.7;
+}
 .api-access-card-head {
     display: flex;
     align-items: flex-start;

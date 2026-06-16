@@ -83,8 +83,23 @@ const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { startMaintenanceTasks } = require('./services/maintenance');
 const { getSystemHealthSnapshot } = require('./services/system-health');
 const { recoverAgentRuns, startAgentScheduleRunner } = require('./services/agent-runtime');
-// 启动后台维护任务
-startMaintenanceTasks();
+
+function scheduleMaintenanceTasks() {
+    const delayMs = appConfig.maintenanceStartDelayMs;
+    const start = () => {
+        try {
+            startMaintenanceTasks();
+        } catch (err) {
+            logger.error({ err }, '后台维护任务启动失败');
+        }
+    };
+    if (delayMs <= 0) {
+        start();
+        return;
+    }
+    logger.info({ delayMs }, '后台维护任务将在服务就绪后延迟启动');
+    setTimeout(start, delayMs).unref();
+}
 
 // 启动 GPU 监控 (非阻塞)，确保失败也能在日志中追踪
 startGpuMonitor().catch(err => {
@@ -566,6 +581,7 @@ app.use((err, req, res, _next) => {
 
 const server = app.listen(PORT, () => {
     logger.info({ port: PORT, url: `http://localhost:${PORT}`, version: appVersion }, 'Pivot AI (智枢) 服务已启动');
+    scheduleMaintenanceTasks();
 });
 
 const gracefulShutdown = (signal) => {

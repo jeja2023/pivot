@@ -88,9 +88,20 @@
                                 <h3>API 接入管理</h3>
                                 <p>生成和管理外部调用密钥，查看调用记录、可用模型和接入地址。</p>
                             </div>
+                            <label class="api-access-global-toggle super-admin-only hidden" title="关闭后所有 /v1 外部 API 调用都会被拒绝">
+                                <span>API 接入</span>
+                                <span id="api-access-status-badge" class="api-access-status-badge">已开启</span>
+                                <span class="switch">
+                                    <input type="checkbox" id="api-access-toggle" checked>
+                                    <span class="switch-slider"></span>
+                                </span>
+                            </label>
                         </div>
                         <div class="settings-list api-access-wrap">
                             <div class="stat-card api-access-card">
+                                <div id="api-access-disabled-hint" class="api-access-disabled-hint hidden">
+                                    API 接入当前已关闭，第三方应用无法通过 /v1 接口调用模型，已有 API Key 也会被拒绝。
+                                </div>
                                 <div class="api-access-card-head">
                                     <div class="api-access-heading">
                                         <h4 class="api-access-title">
@@ -146,7 +157,7 @@
                                         </tbody>
                                     </table>
                                 </div>
-                                <div class="api-access-guide">
+                                <div id="api-access-guide" class="api-access-guide">
                                     <h5>接入指南</h5>
                                     <code>
                                         API Base URL: <span id="api-base-url-display"></span><br>

@@ -173,6 +173,12 @@ const {
 } = require('../server/services/rag-config');
 
 const {
+    createApiAccessGuard,
+    getApiAccessSetting,
+    setApiAccessSetting
+} = require('../server/services/api-access-settings');
+
+const {
     confirmRelation,
     deleteRelation,
     extractKnowledgeGraph,
@@ -236,6 +242,8 @@ const {
 const { createAdminUsersRouter } = require('../server/routes/admin-users');
 
 const { createAttachmentsRouter } = require('../server/routes/attachments');
+
+const { createAuthRouter } = require('../server/routes/auth');
 
 const { createModelsRouter } = require('../server/routes/models');
 
@@ -691,6 +699,7 @@ module.exports = {
     createAgentWorkbenchSandbox,
     createAnnouncementsRouter,
     createAttachmentsRouter,
+    createAuthRouter,
     createChartSseCapture,
     createChatRenderSandbox,
     createChatRouter,
@@ -757,6 +766,9 @@ module.exports = {
     getPermissionTier,
     getPublicEmbeddingConfig,
     getRagConfig,
+    createApiAccessGuard,
+    getApiAccessSetting,
+    setApiAccessSetting,
     getRagFeedbackSummary,
     getRagMetricsSnapshot,
     getRealtimeStats,

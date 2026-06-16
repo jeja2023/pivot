@@ -312,6 +312,76 @@ const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'pivot_active_chat_session';
 const PRINT_WORKSPACE_SESSION_KEY = 'pivot_print_session';
 const RESTORABLE_WORKSPACES = new Set(['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
 
+const WORKSPACE_SCRIPT_GROUPS = {
+    apps: [
+        '/chat/apps-workbench.js'
+    ],
+    agent: [
+        '/chat/dag-core.js',
+        '/chat/dag-render.js',
+        '/chat/dag-interaction.js',
+        '/chat/dag-toolbar-tools.js',
+        '/chat/dag-toolbar-db.js',
+        '/chat/dag-toolbar.js',
+        '/chat/dag-toolbar-field-overrides.js',
+        '/chat/dag-toolbar-fields.js',
+        '/chat/dag-wizard-db.js',
+        '/chat/dag-wizard-input.js',
+        '/chat/dag-wizard-fields.js',
+        '/chat/dag-wizard-stats.js',
+        '/chat/dag-wizard.js',
+        '/chat/dag-inspector.js',
+        '/chat/agents-dag-editor.js',
+        '/chat/agents.js',
+        '/chat/agent-run-renderers.js',
+        '/chat/agent-run-utils.js',
+        '/chat/agent-run-tool-labels.js',
+        '/chat/agent-run-step-renderers.js',
+        '/chat/agent-run-visuals.js',
+        '/chat/agent-run-loaders.js',
+        '/chat/agent-run-detail.js',
+        '/chat/agent-run-realtime.js',
+        '/chat/agent-run-actions.js',
+        '/chat/agent-runs-list.js',
+        '/chat/agent-workflow-library.js',
+        '/chat/agent-workflow-versions.js',
+        '/chat/agent-workflow-editor.js',
+        '/chat/agent-workflow-core.js',
+        '/chat/agent-workflow-runners.js',
+        '/chat/agent-workflows.js',
+        '/chat/agent-templates.js',
+        '/chat/agent-schedules.js',
+        '/chat/agent-artifacts.js'
+    ],
+    knowledge: [
+        '/chat/rag-graph-layout.js',
+        '/chat/rag-graph-render.js',
+        '/chat/rag-graph-ui.js',
+        '/chat/rag.js',
+        '/chat/rag-graph-controller.js'
+    ],
+    mcp: [
+        '/chat/tool-policy.js',
+        '/chat/mcp-workbench-common.js',
+        '/chat/mcp-workbench-form.js',
+        '/chat/mcp-workbench-main.js'
+    ]
+};
+
+const workspaceLoadPromises = {};
+
+async function ensureWorkspaceScripts(name) {
+    if (!WORKSPACE_SCRIPT_GROUPS[name]) return;
+    if (!workspaceLoadPromises[name]) {
+        workspaceLoadPromises[name] = window.Pivot?.loadScripts
+            ? window.Pivot.loadScripts(WORKSPACE_SCRIPT_GROUPS[name])
+            : Promise.reject(new Error(`无法加载 ${name} 工作区脚本`));
+    }
+    return workspaceLoadPromises[name];
+}
+
+window.ensureWorkspaceScripts = ensureWorkspaceScripts;
+
 function getStoredSessionValue(key) {
     try {
         return sessionStorage.getItem(key) || '';
@@ -465,6 +535,36 @@ window.addEventListener('resize', () => {
         window.scheduleSettingsWorkspaceScale?.();
     }
 });
+
+function createLazyWorkspaceEntrypoint(group, functionName) {
+    const loadedImplementation = typeof window[functionName] === 'function' ? window[functionName] : null;
+    const lazyEntrypoint = async (...args) => {
+        await ensureWorkspaceScripts(group);
+        const entrypoint = window[functionName];
+        const implementation = entrypoint === lazyEntrypoint ? loadedImplementation : entrypoint;
+        if (typeof implementation !== 'function') {
+            throw new Error(`${group} 工作区入口未就绪`);
+        }
+        return implementation(...args);
+    };
+    return lazyEntrypoint;
+}
+
+window.openAppsWorkbench = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
+window.openAgentWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
+window.openAgentDagWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
+window.openKnowledgeWorkbench = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
+window.openMcpWorkbench = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
+
+window.closeAgentWorkbench = () => {
+    if (document.body?.dataset.activeWorkspace === 'agent') window.showMainWorkspace?.('chat');
+};
+window.closeKnowledgeWorkbench = () => {
+    if (document.body?.dataset.activeWorkspace === 'knowledge') window.showMainWorkspace?.('chat');
+};
+window.closeMcpWorkbench = () => {
+    if (document.body?.dataset.activeWorkspace === 'mcp') window.showMainWorkspace?.('chat');
+};
 
 window.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.getStoredMainWorkspace?.() || 'chat';

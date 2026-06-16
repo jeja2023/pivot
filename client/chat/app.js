@@ -388,6 +388,7 @@ bind('user-import-btn', () => document.getElementById('user-import-input').click
 bind('user-import-input', () => window.importUsers(), 'change');
 bind('user-export-btn', () => window.exportUsers());
 bind('public-registration-toggle', () => window.updatePublicRegistrationSetting?.(), 'change');
+bind('api-access-toggle', () => window.updateApiAccessSetting?.(), 'change');
 
 // 审计与导出
 bind('logs-export-btn', () => window.exportLogs());

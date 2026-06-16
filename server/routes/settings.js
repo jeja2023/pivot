@@ -18,10 +18,15 @@ const {
     getMemoryConfig,
     toMemorySettingValue
 } = require('../services/memory-config');
+const {
+    API_ACCESS_SETTING_KEY,
+    getApiAccessSetting
+} = require('../services/api-access-settings');
 const { isSuperAdmin } = require('../permissions');
 
 const allowedSettings = new Set([
     'default_model_id',
+    API_ACCESS_SETTING_KEY,
     MEMORY_CONFIG_KEYS.threshold,
     RAG_CONFIG_KEYS.scoreThreshold,
     RAG_CONFIG_KEYS.topK,
@@ -84,6 +89,9 @@ const toSettingValue = (key, value) => {
     if (Object.values(MEMORY_CONFIG_KEYS).includes(key)) {
         return toMemorySettingValue(key, value);
     }
+    if (key === API_ACCESS_SETTING_KEY) {
+        return value === true || String(value || '').trim().toLowerCase() === 'true' ? 'true' : 'false';
+    }
     return String(value);
 };
 
@@ -140,6 +148,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
             memoryConfig: getMemoryConfig(settings),
+            apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
@@ -254,6 +263,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({
             success: true,
             memoryConfig: getMemoryConfig(settings),
+            apiAccessEnabled: getApiAccessSetting(),
             settings
         });
     }));
@@ -303,6 +313,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             ragEnabled: true,
             ragConfig: getRagConfig(),
             memoryConfig: getMemoryConfig(settings),
+            apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,

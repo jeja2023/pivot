@@ -1,5 +1,45 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.111] - 2026-06-16
+### API 接入总开关与管理员控制收口
+
+本版本为第三方 API 接入补上全局总开关，并把后台控制、API Key 鉴权和 OpenAI-compatible `/v1` 路由一起收口到管理员设置。改动覆盖 `server/services/api-access-settings.js`、`server/db/index.js`、`server/auth.js`、`server/routes/settings.js`、`server/routes/auth.js`、`server/routes/openai.js`、`client/chat/admin-settings.js`、`client/chat/auth.js`、`client/chat/app.js`、`client/chat/partials/settings/usage-api-account.html`、`client/chat/styles/admin/admin-account-api.css` 以及相关安全回归测试。
+#### 全局 API 接入开关
+- **系统级开关落库**：新增 `api_access_enabled` 系统设置，启动时写入默认值，管理员可在系统设置中统一启停。
+- **前后端联动**：API 账号页新增总开关、状态提示和关闭文案，开关关闭后会同步禁用创建入口、模型列表和相关按钮。
+- **鉴权与路由拦截**：API Key 登录、`/auth/keys` 创建和 OpenAI-compatible `/v1` 路由在开关关闭时直接拒绝访问，避免仅靠前端隐藏。
+- **安全回归补齐**：补充 API Key 创建阻断、设置读写和路由级拦截测试，覆盖开关主链路。
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.111`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **验证通过**：`node tests/security.test.js` 已通过，新增回归用例覆盖总开关场景。
+
+## [v0.0.110] - 2026-06-16
+### 聊天首屏资源瘦身、RAG 运行时兼容与启动调度优化
+
+本版本围绕首屏性能、RAG 运行时兼容、未授权访问容错与服务启动稳定性收口。改动集中在 `client/chat/pivot-core.js`、`client/chat/app-workspaces.js`、`client/chat/partials/scripts.html`、`client/chat/render-charts.js`、`client/chat/admin.js`、`client/chat/rag-format.js`、`client/chat/rag-documents.js`、`server/config.js`、`server/index.js`、`scripts/check_chat_assets.js` 与 `tests/security-chat/rendering-streams.js`，并同步补齐版本与文档说明。
+
+#### 首屏脚本与大 vendor 按需加载
+- **首屏脚本清单精简**：将工作区、管理后台、知识库和图表相关脚本从首屏拆出，`partials/scripts.html` 只保留轻量核心脚本，首屏初始资源明显收缩。
+- **通用脚本加载器**：在 `pivot-core.js` 中新增版本化资源地址与一次性脚本加载缓存，统一提供 `loadScriptOnce` / `loadScripts`。
+- **工作区按需进入**：`app-workspaces.js` 只在实际打开 Apps、Agent、Knowledge、MCP 工作台时再加载对应脚本组，减少首页常驻负担。
+- **大 vendor 懒加载**：`echarts.min.js` 改为图表渲染时按需拉取，首屏不再强制带上大体积 vendor。
+- **管理后台收口**：管理员相关统计、公告、工具策略等脚本全部改为进入对应功能后再加载。
+
+#### RAG 运行时修复
+- **兼容导出补回**：`rag-format.js` 恢复 `escapeRagHtml`、`escapeRagAttr`、`formatRagDateToCN`、`formatRagSize` 等兼容导出，修复 `escapeRagHtml is not defined`。
+- **未授权静默处理**：`rag-documents.js` 对知识库专题与标签接口的 401 做统一处理，未登录或无权限时直接回退缓存并静默退出，避免控制台刷错。
+- **工作台依赖补齐**：进入知识工作台时显式等待知识库脚本组就绪，避免专题/标签控件在资源未加载完毕时失效。
+
+#### 服务启动与配置治理
+- **维护任务延迟启动**：后台维护任务不再在模块加载时抢跑，改为服务监听成功后再调度，默认延迟 10 秒启动。
+- **环境变量对齐**：`.env.example` 补充维护任务启动延迟说明，`.env` 同步补齐缺失的运行参数。
+
+#### 验证
+- **回归验证通过**：`npm run check`、`npm run lint` 已通过；此前完整 `npm test` 189/189 通过。
+- **首屏实测收敛**：首屏 HTML 实测不再加载 `apps-workbench`、`agent-workflow`、`tool-policy`、`rag-graph` 和 `echarts`。
+- **RAG 报错消失**：专题与标签接口在无权限场景下不再抛出未捕获错误，复现日志已收敛。
+- **版本号启用**：应用版本升级至 `v0.0.110`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
 ## [v0.0.109] - 2026-06-12
 ### 公文写作工作台版式、布局与 AI 操作边界深度优化
 

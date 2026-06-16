@@ -20,6 +20,16 @@ function parseRagTags(value) {
     return [...new Set(values.map(normalizeRagTag).filter(Boolean))].slice(0, 20);
 }
 
+function hasRagAuthContext() {
+    return typeof currentUser !== 'undefined' && Boolean(currentUser);
+}
+
+function handleRagUnauthorizedResponse(res) {
+    if (res?.status !== 401) return false;
+    if (typeof handleUnauthorized === 'function') handleUnauthorized();
+    return true;
+}
+
 function getRagTagCacheKey(collectionId = '') {
     return normalizeRagCollectionId(collectionId);
 }
@@ -238,9 +248,11 @@ window.applyRagDebugScopeToChat = async function() {
 };
 
 window.loadKnowledgeCollections = async function() {
+    if (!hasRagAuthContext()) return ragCollections;
     try {
         const res = await apiFetch(`${API_BASE}/rag/collections`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
+        if (handleRagUnauthorizedResponse(res)) return ragCollections;
         if (!res.ok || data.error) throw new Error(data.error || '专题库加载失败');
         ragCollections = Array.isArray(data.data) ? data.data : [];
         updateRagCollectionControls();
@@ -265,6 +277,7 @@ function getRagTagCollectionIdsInUse() {
 
 window.loadKnowledgeTags = async function(collectionId = '', { updateControls = true, force = false } = {}) {
     const key = getRagTagCacheKey(collectionId);
+    if (!hasRagAuthContext()) return getRagTagsForCollection(key);
     if (!force && ragTagsByCollection.has(key)) {
         if (updateControls) updateRagTagControls();
         return getRagTagsForCollection(key);
@@ -273,6 +286,7 @@ window.loadKnowledgeTags = async function(collectionId = '', { updateControls = 
         const query = key ? `?collectionId=${encodeURIComponent(key)}` : '';
         const res = await apiFetch(`${API_BASE}/rag/tags${query}`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
+        if (handleRagUnauthorizedResponse(res)) return getRagTagsForCollection(key);
         if (!res.ok || data.error) throw new Error(data.error || '标签加载失败');
         setRagTagsForCollection(key, data.data);
         if (updateControls) updateRagTagControls();
@@ -455,6 +469,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
 };
 
 window.openKnowledgeWorkbench = async function() {
+    await window.ensureWorkspaceScripts?.('knowledge');
     window.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;

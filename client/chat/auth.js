@@ -204,11 +204,13 @@ window.loadApiKeys = async function() {
         const res = await apiFetch(`${API_BASE}/auth/keys`);
         if (!res.ok) throw new Error('加载 API Key 失败');
         const data = await res.json();
+        const keys = Array.isArray(data) ? data : (data.keys || []);
+        window.updateApiAccessState?.(data.apiAccessEnabled === true);
         const body = document.getElementById('api-keys-body');
-        if (data.length === 0) {
+        if (keys.length === 0) {
             renderTableMessage(body, 9, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
         } else {
-            body.innerHTML = data.map((k, index) => `
+            body.innerHTML = keys.map((k, index) => `
                 <tr>
                     <td class="text-center">${index + 1}</td>
                     <td>${escapeHtml(k.name)}</td>
@@ -293,6 +295,10 @@ window.loadApiCallLogs = async function(page = 1) {
 window.loadAvailableModels = async function() {
     const listEl = document.getElementById('available-models-list');
     if (!listEl) return;
+    if (window.apiAccessEnabled === false) {
+        listEl.innerHTML = '<span style="color: var(--text-muted);">API 接入已关闭，暂无外部调用模型</span>';
+        return;
+    }
     try {
         const res = await apiFetch(`${API_BASE}/models/available`);
         if (!res.ok) throw new Error('加载可用模型失败');
@@ -334,6 +340,10 @@ window.loadAvailableModels = async function() {
 }
 
 window.createApiKey = function() {
+    if (window.apiAccessEnabled === false) {
+        showToast('API 接入已关闭，暂不能新建密钥', 'error');
+        return;
+    }
     document.getElementById('new-key-name').value = '我的第三方密钥';
     document.getElementById('key-input-view').classList.remove('hidden');
     document.getElementById('key-result-view').classList.add('hidden');

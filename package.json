@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.109",
+  "version": "0.0.111",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "server/index.js",
   "engines": {

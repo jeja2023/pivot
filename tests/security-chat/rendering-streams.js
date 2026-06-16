@@ -83,7 +83,11 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     assert.match(settingsPartial, /partials\/settings\/tool-policy\.html/);
     assert.match(settingsShellStart, /tab-tool-policy/);
     assert.match(settingsToolPolicy, /tool-policy-tool-body/);
-    assert.match(scriptsPartial, /\/chat\/tool-policy\.js/);
+    assert.match(scriptsPartial, /\/chat\/app-workspaces\.js/);
+    assert.doesNotMatch(scriptsPartial, /\/chat\/tool-policy\.js/);
+    assert.match(appWorkspaces, /WORKSPACE_SCRIPT_GROUPS/);
+    assert.match(appWorkspaces, /\/chat\/tool-policy\.js/);
+    assert.match(appWorkspaces, /ensureWorkspaceScripts/);
     assert.match(toolPolicy, /\/capabilities\/packages/);
     assert.match(toolPolicy, /data-tool-policy-package-enabled/);
     assert.match(toolPolicy, /data-tool-policy-save/);
