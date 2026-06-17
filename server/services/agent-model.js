@@ -19,6 +19,15 @@ const {
 const { createSseEventParser } = require('../streaming');
 const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./streaming-tools');
 
+// Agent 调用的输出上限：优先调用方显式值，其次模型配置的 max_tokens，最后回退 1200。
+// 与 chat/openai/apps 一致地尊重模型配置，避免推理型模型（如 Qwen3）被 1200 写死后思考耗尽、正文为空。
+const AGENT_DEFAULT_MAX_TOKENS = 1200;
+function resolveAgentMaxTokens(modelCfg, options = {}) {
+    if (typeof options.maxTokens === 'number') return options.maxTokens;
+    const configured = Number(modelCfg?.max_tokens);
+    return Number.isFinite(configured) && configured > 0 ? configured : AGENT_DEFAULT_MAX_TOKENS;
+}
+
 async function withAgentModelConcurrency(modelCfg, operation) {
     let globalAcquired = false;
     let endpointRelease = null;
@@ -45,7 +54,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
         await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
         const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
-        const maxTokens = typeof options.maxTokens === 'number' ? options.maxTokens : 1200;
+        const maxTokens = resolveAgentMaxTokens(modelCfg, options);
         const response = await axios.post(targetUrl, {
             model: modelCfg.model_name || modelCfg.name,
             messages,
@@ -85,7 +94,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             messages,
             stream: true,
             temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
-            max_tokens: typeof options.maxTokens === 'number' ? options.maxTokens : 1200
+            max_tokens: resolveAgentMaxTokens(modelCfg, options)
         };
         const toolsPayload = buildOpenAiToolsPayload(tools);
         if (toolsPayload.length > 0) {
@@ -168,5 +177,6 @@ module.exports = {
     callModelText,
     callModelStreamingWithTools,
     recordAgentModelUsage,
-    withAgentModelConcurrency
+    withAgentModelConcurrency,
+    resolveAgentMaxTokens
 };

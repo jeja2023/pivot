@@ -6,6 +6,30 @@ const SAFETY_MARGIN_TOKENS = 256;
 const IMAGE_INPUT_TOKEN_ESTIMATE = 1024;
 const UNBOUNDED_CONTEXT_BUDGET = Number.MAX_SAFE_INTEGER;
 
+// 当模型既未配置 max_input_tokens / context_window_tokens、也没有全局上下文环境变量时，
+// 上下文预算为“无界”——请求时不会做任何裁剪，仅靠记忆压缩兜底。大输入时节流告警一次，
+// 提醒管理员为该模型补配上下文窗口，避免无感知地把超长上下文直接转发给上游。
+const UNBOUNDED_WARN_INPUT_TOKENS = 16000;
+const UNBOUNDED_WARN_INTERVAL_MS = 300000;
+let lastUnboundedWarnAt = 0;
+
+function warnUnboundedContextBudget(modelCfg, inputTokens) {
+    if (inputTokens < UNBOUNDED_WARN_INPUT_TOKENS) return;
+    const now = Date.now();
+    if (now - lastUnboundedWarnAt < UNBOUNDED_WARN_INTERVAL_MS) return;
+    lastUnboundedWarnAt = now;
+    try {
+        const { logger } = require('../logger');
+        logger.warn({
+            model: modelCfg?.name,
+            modelName: modelCfg?.model_name,
+            inputTokens
+        }, '模型未配置上下文窗口（max_input_tokens / context_window_tokens 均为空），本次大输入未经预算裁剪直接转发');
+    } catch (_err) {
+        // logger 不可用时静默，不影响主流程
+    }
+}
+
 class ContextLengthExceededError extends Error {
     constructor(message, metadata = {}) {
         super(message);
@@ -230,6 +254,7 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
     }
 
     let total = metadata.inputTokensBefore;
+    if (budget.unbounded) warnUnboundedContextBudget(modelCfg, total);
     if (total <= budget.inputBudget) {
         metadata.inputTokensAfter = total;
         return {

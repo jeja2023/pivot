@@ -52,7 +52,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 });
             };
             const result = await deps.withTimeout(
-                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, maxTokens: 1200, onDelta: emitDelta, user }),
+                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, onDelta: emitDelta, user }),
                 Math.min(180000, Math.max(deadline - Date.now(), 1000)),
                 '流式工具规划'
             );

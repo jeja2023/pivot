@@ -103,6 +103,7 @@ function runMigrations() {
     ensureColumn('models', 'temperature', 'REAL');
     ensureColumn('models', 'max_input_tokens', 'INTEGER');
     ensureColumn('models', 'max_tokens', 'INTEGER');
+    ensureColumn('models', 'context_window_tokens', 'INTEGER');
     ensureColumn('models', 'monitor_url', 'TEXT');
     ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_vision', 'INTEGER DEFAULT 0');

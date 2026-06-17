@@ -8,8 +8,10 @@ const { estimateTokens } = require('../llm');
 const {
     getAccessibleModel,
     getModelDailyUsage,
-    recordModelTokenUsage
+    recordModelTokenUsage,
+    modelSupportsReasoning
 } = require('../services/models');
+const { extractModelText } = require('../services/chat-route-helpers');
 const { aiSemaphore } = require('../services/concurrency');
 const {
     acquireModelSlot,
@@ -33,13 +35,38 @@ const {
     OFFICIAL_WRITING_MODE_LABELS
 } = require('../services/official-writing');
 
-// 解析非流式补全响应中的文本内容（兼容字符串与多段数组形态）。
+// 剥离推理型模型可能内联在正文里的思考块（<think>…</think>）。
+// 兼容未闭合的 <think>（被 max_tokens 截断时只剩开标签）情形。
+function stripThinkTags(text) {
+    return String(text || '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*$/i, '')
+        .trim();
+}
+
+// 解析非流式补全响应中的正文：复用聊天侧的健壮解析（兼容字符串/数组 content、
+// Responses 风格 output_text/output[]），再剥离思考块。
+// 不把 reasoning_content 当作正文返回——它是思考过程而非成稿，空正文交由上层给出明确提示。
 function extractCompletionContent(data) {
-    const content = data?.choices?.[0]?.message?.content;
-    if (Array.isArray(content)) {
-        return content.map(part => (typeof part === 'string' ? part : part?.text || '')).join('');
-    }
-    return String(content || '');
+    return stripThinkTags(extractModelText(data));
+}
+
+// 判断是否应为该模型关闭“思考”模式：公文起草/润色/审校属工具型任务，无需思维链。
+// 依据管理员设置的 supports_reasoning，或常见推理型模型名（Qwen3 / QwQ / DeepSeek-R1）兜底识别。
+function shouldDisableThinking(modelCfg) {
+    if (modelSupportsReasoning(modelCfg)) return true;
+    const name = String(modelCfg?.model_name || modelCfg?.name || '');
+    return /qwen-?3|qwq|deepseek-?r1/i.test(name);
+}
+
+// 对推理型模型在最后一条 user 消息追加 /no_think 软开关（Qwen3 等的 chat template 原生支持）。
+function applyNoThinkSoftSwitch(messages) {
+    const lastUserIndex = messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserIndex < 0) return messages;
+    return messages.map((message, index) => {
+        if (index !== lastUserIndex || typeof message.content !== 'string') return message;
+        return { ...message, content: `${message.content}\n/no_think` };
+    });
 }
 
 // 解析公文写作可用模型：优先显式选择，其次个人默认模型，最后系统默认模型。
@@ -85,12 +112,16 @@ function createAppsRouter({ authMiddleware, logAction }) {
         }
 
         const userId = req.user.id;
-        const maxTokens = built.maxTokens;
+        // 输出上限：不再写死，取任务基线与模型配置的较大值，让管理员调高“最大输出 Token”能生效。
+        const maxTokens = Math.max(built.maxTokens, Number(modelCfg.max_tokens) || 0);
+        // 推理型模型：公文工具任务关闭思考，避免思考耗尽 token 导致正文为空（Qwen3 等）。
+        const disableThinking = shouldDisableThinking(modelCfg);
+        const requestMessages = disableThinking ? applyNoThinkSoftSwitch(built.messages) : built.messages;
 
         // 上下文预算检查（与聊天/OpenAI 兼容接口同一套口径）。
-        let upstreamMessages = built.messages;
+        let upstreamMessages = requestMessages;
         try {
-            const budgetResult = fitMessagesToContextBudget(built.messages, modelCfg, { maxOutputTokens: maxTokens });
+            const budgetResult = fitMessagesToContextBudget(requestMessages, modelCfg, { maxOutputTokens: maxTokens });
             upstreamMessages = budgetResult.messages;
             if (budgetResult.metadata?.adjusted) {
                 logger.warn({ userId, model: modelCfg.name, contextBudget: budgetResult.metadata }, '公文写作请求上下文已裁剪');
@@ -208,6 +239,8 @@ function createAppsRouter({ authMiddleware, logAction }) {
                     releaseSemaphore();
                 });
             } else {
+                const choice = response.data?.choices?.[0];
+                const finishReason = choice?.finish_reason || null;
                 const content = extractCompletionContent(response.data);
                 const usage = normalizeTokenUsage({
                     inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
@@ -218,7 +251,21 @@ function createAppsRouter({ authMiddleware, logAction }) {
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 releaseSemaphore();
 
-                const result = { content: content.trim(), model: modelCfg.model_name };
+                // 空正文诊断：记录 finish_reason / usage / 是否含 reasoning_content，便于定位“返回 200 但无正文”。
+                if (!content) {
+                    logger.warn({
+                        model: modelCfg.name,
+                        modelName: modelCfg.model_name,
+                        mode,
+                        finishReason,
+                        hasReasoningContent: !!choice?.message?.reasoning_content,
+                        disableThinking,
+                        maxTokens,
+                        usage: response.data?.usage || null
+                    }, '公文写作 AI 返回空正文');
+                }
+
+                const result = { content, model: modelCfg.model_name, finish_reason: finishReason };
                 // 审校模式在后端完成 JSON 提取与校验，前端直接使用结构化结果。
                 if (mode === 'review') result.items = parseOfficialWritingReviewItems(content);
                 res.json(result);
@@ -239,4 +286,11 @@ function createAppsRouter({ authMiddleware, logAction }) {
     return router;
 }
 
-module.exports = { createAppsRouter };
+module.exports = {
+    createAppsRouter,
+    // 导出纯函数便于单测
+    stripThinkTags,
+    extractCompletionContent,
+    shouldDisableThinking,
+    applyNoThinkSoftSwitch
+};

@@ -18,6 +18,50 @@ function normalizeBooleanFlag(value) {
     return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
 }
 
+// 单个 token 上限字段的范围校验：留空 -> null（不限）；其余必须是 0~上限 的整数。
+// 0 视为”不设”（与上下文预算把 0 当无界一致）。非法值返回 { error }，由路由转 400。
+// 严格数字校验：拒绝 “123abc” 等部分数字（与前端 parseTokenAmount 的宽松解析拉齐后端防护标准）。
+const MAX_MODEL_TOKEN_LIMIT = 20000000;
+function normalizeModelTokenLimit(raw, label) {
+    if (raw === undefined || raw === null || raw === '') return { value: null };
+    const parsed = Number.parseInt(raw, 10);
+    // 严格校验：parseInt(“123abc”)=123 但我们要求纯数字，所以加 String(parsed) !== String(raw).trim() 防御
+    if (!Number.isFinite(parsed) || String(parsed) !== String(raw).trim()) {
+        return { error: `${label}必须是数字` };
+    }
+    if (parsed < 0) return { error: `${label}不能为负数` };
+    if (parsed === 0) return { value: null };
+    if (parsed > MAX_MODEL_TOKEN_LIMIT) return { error: `${label}超出允许范围（最大 ${MAX_MODEL_TOKEN_LIMIT}）` };
+    return { value: parsed };
+}
+
+// 统一校验模型的三项 token 设置，含范围与相互关系（输入/输出上限须小于上下文窗口）。
+// 返回 { values: { maxInputTokens, maxTokens, contextWindowTokens } } 或 { error }。
+function validateModelTokenSettings(body = {}) {
+    const input = normalizeModelTokenLimit(body.max_input_tokens, '输入 Token 上限');
+    if (input.error) return { error: input.error };
+    const output = normalizeModelTokenLimit(body.max_tokens, '输出 Token 上限');
+    if (output.error) return { error: output.error };
+    const window = normalizeModelTokenLimit(body.context_window_tokens, '上下文窗口');
+    if (window.error) return { error: window.error };
+
+    if (window.value !== null) {
+        if (input.value !== null && input.value >= window.value) {
+            return { error: '输入 Token 上限应小于上下文窗口' };
+        }
+        if (output.value !== null && output.value >= window.value) {
+            return { error: '输出 Token 上限应小于上下文窗口' };
+        }
+    }
+    return {
+        values: {
+            maxInputTokens: input.value,
+            maxTokens: output.value,
+            contextWindowTokens: window.value
+        }
+    };
+}
+
 function modelSupportsVision(model) {
     return normalizeBooleanFlag(model?.supports_vision) === 1;
 }
@@ -199,6 +243,9 @@ module.exports = {
     modelListFields,
     normalizeTags,
     normalizeBooleanFlag,
+    normalizeModelTokenLimit,
+    validateModelTokenSettings,
+    MAX_MODEL_TOKEN_LIMIT,
     normalizePriceCurrency,
     normalizePriceValue,
     modelSupportsVision,

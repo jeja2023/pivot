@@ -1,5 +1,96 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.119] - 2026-06-17
+### 模型上下文设置全面修复与完善
+
+依据上一轮对"模型上下文设置"的全项目检查，修复并完善了 9 处缺口与不一致。涉及 `server/db/schema.js`、`server/db/migrate.js`、`server/routes/models.js`、`server/services/models.js`、`server/services/context-budget.js`、`server/services/agent-model.js`、`server/services/agent-streaming-runtime.js`、`server/routes/chat.js`、`server/llm.js`、`client/chat/partials/pre-app-modals.html`、`client/chat/models-actions.js`、`client/chat/models.js`，新增 `tests/security-chat/context-settings.js`、`tests/security-chat/context-thought.js`。
+
+#### 新增「上下文窗口」配置（修复死字段）
+- **补齐 `context_window_tokens` 列**：`getModelContextBudget` 早已读取 `modelCfg.context_window_tokens`，但 `models` 表此前没有该列（永远 `undefined`，是死代码路径）。本版补齐 schema 列与迁移 `ensureColumn`，并在模型管理弹窗新增「上下文窗口 (Token)」字段（占位："模型实际总上下文，如 32K；留空按输入上限推导"），打通创建/编辑/回显。管理员现在可直接按离线模型实际 `n_ctx` 设定上下文窗口，无需再用「输入上限 + 预留」反推。
+- **弹窗状态重置补齐**：`resetModelForm()` 现在会同步清空 `m-context-window-tokens`，避免编辑过带上下文窗口的模型后，新建模型时字段残留并被误保存。
+- **无界预算告警**：当模型既未配 `max_input_tokens`/`context_window_tokens`、也无全局上下文环境变量时，请求预算为"无界"（不裁剪）。现对大输入（≥16K token）节流告警（5 分钟一次），提醒管理员补配上下文窗口，避免超长上下文无感知直发上游。
+
+#### 输出上限口径统一
+- **Agent 调用尊重模型配置**：`agent-model.js` 的 `callModelJson`/`callModelStreamingWithTools` 原先把 `max_tokens` 写死 1200、完全无视模型配置。改为 `显式值 → modelCfg.max_tokens → 1200`（新增 `resolveAgentMaxTokens`），与 chat/openai/apps 口径一致，避免推理型模型（Qwen3 等）被 1200 截断后正文为空。
+- **流式 Agent 不再覆盖模型配置**：`agent-streaming-runtime.js` 移除显式传入的 `maxTokens: 1200`，让流式工具规划同样走 `resolveAgentMaxTokens`，避免开启 `AGENT_STREAMING_TOOLS=true` 时仍被固定输出上限截断。
+- **网页聊天空 max_tokens 注释为刻意设计**：chat 接口在模型未配 `max_tokens` 时有意不下发输出上限（让上游用自身默认、不人为截断交互式回复），补注释说明与 openai/apps 的 2000 兜底差异，避免被误判为遗漏。
+
+#### 压缩阈值随模型上下文收紧
+- **模型感知的压缩触发**：`getContext` 的记忆压缩触发阈值改为 `min(全局阈值, 模型输入预算)`——仅在模型配置的输入预算小于全局阈值时**提前**压缩，避免请求时只能硬丢历史；未配置上下文的模型预算无界，行为不变（仅下调、绝不上调，零意外）。
+
+#### 思考过程不回灌上下文
+- **助手思考块剥离后再发送给模型**：聊天记录仍保存并展示 `<thought>`/`<thinking>`/`<think>` 思考块，但 `getContext` 在组装下一轮模型输入前会只对 assistant 历史消息剥离这些思考块，用户原文中的同名标签保持不变。
+- **上下文用量不再统计思考块**：`buildContextMeta` 对 assistant 历史按剥离后的正文估算上下文 token，避免长思考内容把上下文用量条、压缩触发和后续预算判断虚高；消息自身 `token_count` 仍保留上游实际输出/用量语义。
+- **记忆压缩不总结思考链**：后台记忆压缩摘要使用同一套上下文正文提取逻辑，避免早期 assistant 思考内容被摘要化后重新进入长期记忆。
+
+#### 模型 token 设置范围/关系校验（防异常值入库与转发）
+- **统一范围校验**：模型创建/更新接口此前对 `max_input_tokens`/`max_tokens`/`context_window_tokens` 只做裸 `parseInt`，负数/超大/非数字可直接入库，且负的 `max_tokens` 会被 chat、openai 接口原样转发给上游模型服务。新增 `validateModelTokenSettings`/`normalizeModelTokenLimit`（`server/services/models.js`），统一校验：留空/0 视为不限，负数、非数字、超过 2000 万上限一律拒绝（400）。
+- **严格数字校验**：后端不再接受 `123abc` 这类会被 `parseInt` 部分解析的值；前端仍支持 `8K`、`32K` 等短单位输入，并在提交前转换为规范整数。
+- **关系校验**：当设置了上下文窗口时，要求「输入 Token 上限」「输出 Token 上限」均小于窗口，避免相互矛盾的配置；前端提交前也做同样的轻量校验即时反馈，后端仍为权威。
+- **`daily_token_limit` 维持原有 `Math.max(…,0)` 钳制**，本次将同等防护扩展到三项上下文 token 字段。
+
+#### 验证
+- 新增上下文相关单测 10 项（`context_window_tokens` 生效、与 `max_input_tokens` 取小、无界判定、Agent 输出上限解析、token 范围校验、关系校验、assistant 思考块剥离、上下文用量排除思考 token）。
+- `npm run check`、`npm run lint`（0 错误）与 `node tests/security-chat.test.js`（**77/77**）通过；此前完整安全回归 `node tests/security.test.js`（**214/214**）保持记录。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.119`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
+## [v0.0.118] - 2026-06-17
+### 修复公文写作对推理型模型（Qwen3 等）返回空正文
+
+修复生产环境用 Qwen3 等"思考(reasoning)型"模型时，公文写作全文润色/起草/审校等**非流式**操作弹出"AI 未返回有效内容"的问题（Qwen2.5 等非思考模型不受影响）。根因：思考型模型默认先输出大段思考，公文写作专用接口把输出上限**写死 2000**、且非流式解析**只读 `message.content`**，导致思考耗尽 token 后正文为空、却返回 200 无报错。涉及改动 `server/routes/apps.js`、`client/chat/apps-workbench-ai.js`，新增 `tests/security-chat/official-writing-ai.js`。
+
+#### 修复内容
+- **关闭工具任务的思考**：公文起草/润色/审校属工具型任务、无需思维链。对推理型模型（按管理员 `supports_reasoning` 标志，或 Qwen3 / QwQ / DeepSeek-R1 等模型名兜底识别）在最后一条 user 消息追加 `/no_think` 软开关（Qwen3 chat template 原生支持，llama.cpp 等通用）。
+- **输出上限不再写死**：`max_tokens` 由固定 2000 改为 `max(任务基线, 模型配置 max_tokens)`，管理员在"模型管理"调高最大输出即可生效。
+- **加厚非流式解析**：复用聊天侧 `extractModelText`（兼容字符串/数组 content、Responses 风格 `output_text`/`output[]`），并剥离内联 `<think>…</think>` 思考块；不把 `reasoning_content` 当成稿返回。
+- **空正文诊断与明确提示**：后端在返回空正文时记录 `finish_reason`/`usage`/是否含 `reasoning_content` 等诊断日志，并把 `finish_reason` 透传前端；被截断（`length`）时前端提示"输出被截断，请调高最大输出 Token 或缩短正文"，不再是笼统的"未返回有效内容"。
+
+#### 验证
+- 新增 AI 路由纯函数单测 5 项（思考块剥离、多形态正文解析、仅 reasoning_content 返回空、推理模型识别、`/no_think` 软开关不改原数组）。
+- `npm run check`、`npm run lint`（0 错误）与 `node tests/security.test.js`（**206/206**）通过。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.118`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
+## [v0.0.117] - 2026-06-17
+### 公文写作导出功能抽为独立 apps-workbench-export.js
+
+在上一版按工作流拆分的基础上，把分散在 `apps-workbench-proofread.js` 与 `apps-workbench-rewrite.js` 的文件导出逻辑集中抽到新文件 `client/chat/apps-workbench-export.js`，使"导出"成为单一内聚关注点。与上一版同样是**纯结构搬移、函数实现零改动**，被搬移函数体经哈希比对前后完全一致。涉及新增 `apps-workbench-export.js`，改动 `apps-workbench-proofread.js`、`apps-workbench-rewrite.js`、`app-workspaces.js`、`stats-monitor-utils.js`、`scripts/check_chat_assets.js`。
+
+#### 导出模块抽取
+- **集中导出关注点**：DOCX/红头 DOCX（含 ZIP 底层 `buildZip`/`crc32String`/`encodeZipText` 与段落 XML、`buildOfficialWritingDocxBlob`/`buildOfficialWritingRedHeaderXml`）、Markdown（`buildOfficialWritingMarkdown`）、带版式文本（`buildOfficialWritingFormattedText`）、打印 PDF 用 HTML（`buildOfficialWritingExportHtml`）、纯文本（`exportOfficialWritingText`）、下载工具（`downloadOfficialWritingFile`/`downloadOfficialWritingBlob`）与统一入口 `exportOfficialWriting(type)` 共 20 个函数集中到 `apps-workbench-export.js`。
+- **就近关注点保留**：剪贴板与"带入聊天"相关的 `copyAppsText`、`buildOfficialWritingPrompt`、`copyOfficialWritingPrompt`、`sendOfficialWritingToChat` 不属于文件导出，保留在 proofread 切片。
+- **口径澄清**：导出入口的 `pdf` 类型并非生成 PDF，而是打开打印窗口由用户"另存为 PDF"；红头 DOCX 需先在发文要素填写印发机关。
+
+#### 安全性与验证
+- **零逻辑漂移**：被搬移的 20 个函数按整函数边界切割，前后函数体哈希一致；7 个切片顶层声明总数仍为 226，无重复声明、无遗漏，切缝处无半截函数。
+- **加载顺序**：`app-workspaces.js` 在 rewrite 之后、rag 之前加载 export 切片；导出函数仅在用户点击时运行，无加载时依赖。
+- **回归验证**：隔离上下文拼接执行 7 切片无加载时报错且入口正常注册；服务启动确认 7 切片均 200、旧路径 404；`npm run check`、`npm run lint`（0 错误）与 `node tests/security.test.js`（**201/201**）通过。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.117`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
+## [v0.0.116] - 2026-06-17
+### 公文写作工作台脚本按工作流安全拆分
+
+本版本把单文件 `client/chat/apps-workbench.js`（3612 行 / ~166KB）按工作流拆分为 6 个全局脚本，沿用项目既有的 `dag-*`/`mcp-*` 多文件顺序加载范式，降低单文件维护成本。拆分为纯结构调整，**不改动任何函数实现**，逐切片与原文件按字节比对一致。涉及删除 `client/chat/apps-workbench.js`，新增 6 个切片文件，改动 `client/chat/app-workspaces.js`、`client/chat/stats-monitor-utils.js`、`scripts/check_chat_assets.js`、`eslint.config.js`。
+
+#### 脚本拆分
+- **按工作流切分 6 个文件**：`apps-workbench-core.js`（注册/共享状态/库读写/首页）、`-editor.js`（多文档管理/表单/版式渲染/编辑选区撤销）、`-proofread.js`（校对检查/抽屉视图/批注/版本/ZIP·DOCX·HTML 导出）、`-ai.js`（模型选择/`requestOfficialWritingAi`/全文与选区 AI）、`-rewrite.js`（流式改写+逐句对比/Markdown 与格式化导出/重置）、`-rag.js`（知识库检索/素材动作/事件绑定与 `window.*` 入口）。
+- **顺序加载保证**：`app-workspaces.js` 的 `WORKSPACE_SCRIPT_GROUPS.apps` 按 core→editor→proofread→ai→rewrite→rag 顺序列出，`Pivot.loadScripts` 以 `await` 串行且 `script.async=false` 注入，保证唯一的加载时调用（`createOfficialWritingState()`）的依赖已就绪。
+- **实现零改动**：6 个切片按原文件行边界切割，拼接后与原 `apps-workbench.js` 逐字节一致；跨文件共享的 226 个顶层声明仍在同一全局作用域，无重复声明、无函数重排。
+
+#### 配套校验
+- **ESLint 全局登记**：新增 `appsWorkbenchGlobals`，登记 129 个跨切片引用的标识符（7 个可变状态标 `writable`，122 个函数/常量标 `readonly`），与 `chatBundleGlobals` 同一机制；`npm run lint` 全量 0 错误。
+- **资产守卫适配**：`scripts/check_chat_assets.js` 改为读取并合并 6 个切片后再校验关键守卫片段，并逐个确认切片存在；监控脚本标签表补齐 6 个新路径。
+- **加载与服务验证**：在隔离全局上下文中拼接执行 6 个切片，确认无加载时报错且 `window.openAppsWorkbench`/`closeAppsWorkbench`/`PIVOT_APP_REGISTRY` 正常注册；启动服务确认 6 个切片均 200、旧路径 `apps-workbench.js` 返回 404。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.116`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **回归验证通过**：`npm run check`、`npm run lint`（0 错误）与 `node tests/security.test.js`（**201/201**）全部通过。
+
 ## [v0.0.115] - 2026-06-17
 ### 模型补全转发收口到统一 forwardChatCompletion 服务
 

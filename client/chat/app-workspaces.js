@@ -314,7 +314,13 @@ const RESTORABLE_WORKSPACES = new Set(['chat', 'apps', 'agent', 'agent-dag', 'kn
 
 const WORKSPACE_SCRIPT_GROUPS = {
     apps: [
-        '/chat/apps-workbench.js'
+        '/chat/apps-workbench-core.js',
+        '/chat/apps-workbench-editor.js',
+        '/chat/apps-workbench-proofread.js',
+        '/chat/apps-workbench-ai.js',
+        '/chat/apps-workbench-rewrite.js',
+        '/chat/apps-workbench-export.js',
+        '/chat/apps-workbench-rag.js'
     ],
     agent: [
         '/chat/dag-core.js',

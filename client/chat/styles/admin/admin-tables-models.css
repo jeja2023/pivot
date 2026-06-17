@@ -222,6 +222,12 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px 12px;
 }
+.model-config-modal .model-context-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
+}
 .model-config-modal .form-item {
     min-width: 0;
 }
@@ -346,6 +352,7 @@
     .model-config-modal .model-form-scroll,
     .model-config-modal .model-scope-units-row,
     .model-config-modal .model-cost-row,
+    .model-config-modal .model-context-row,
     .model-form-row {
         grid-template-columns: 1fr;
     }

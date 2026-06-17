@@ -221,6 +221,8 @@ window.prepareEditModel = (model) => {
     if (maxTokensEl) maxTokensEl.value = formatTokenInputValue(model.max_tokens);
     const maxInputTokensEl = document.getElementById('m-max-input-tokens');
     if (maxInputTokensEl) maxInputTokensEl.value = formatTokenInputValue(model.max_input_tokens);
+    const contextWindowTokensEl = document.getElementById('m-context-window-tokens');
+    if (contextWindowTokensEl) contextWindowTokensEl.value = formatTokenInputValue(model.context_window_tokens);
     const maxConcurrentEl = document.getElementById('m-max-concurrent');
     if (maxConcurrentEl) maxConcurrentEl.value = model.max_concurrent || '';
     const monitorUrlEl = document.getElementById('m-monitor-url');
@@ -273,7 +275,7 @@ async function testConnection(url, api_key, model_name, id = null) {
 // refreshModelSelector 已在 ui.js 中定义
 window.resetModelForm = () => {
     ensureModelCostFields();
-    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-max-concurrent', 'm-monitor-url', 'm-input-price', 'm-output-price'].forEach(id => {
+    ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-context-window-tokens', 'm-max-concurrent', 'm-monitor-url', 'm-input-price', 'm-output-price'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });

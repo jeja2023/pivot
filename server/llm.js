@@ -64,6 +64,118 @@ function estimateTokens(text) {
     return Math.ceil(chineseChars * 2 + otherChars * 0.5);
 }
 
+const THOUGHT_BLOCK_PATTERNS = [
+    /<thought\b[^>]*>[\s\S]*?<\/thought>/gi,
+    /<thought\b[^>]*>[\s\S]*$/gi,
+    /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi,
+    /<thinking\b[^>]*>[\s\S]*$/gi,
+    /<think\b[^>]*>[\s\S]*?<\/think>/gi,
+    /<think\b[^>]*>[\s\S]*$/gi
+];
+
+function stripThoughtContent(text = '') {
+    let value = String(text || '');
+    THOUGHT_BLOCK_PATTERNS.forEach(pattern => {
+        value = value.replace(pattern, '\n');
+    });
+    return value.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripThoughtContentFromContent(content) {
+    if (typeof content === 'string') return stripThoughtContent(content);
+    if (Array.isArray(content)) {
+        return content
+            .map(part => {
+                if (typeof part === 'string') return stripThoughtContent(part);
+                if (!part || typeof part !== 'object') return part;
+                const next = { ...part };
+                if (typeof next.text === 'string') {
+                    next.text = stripThoughtContent(next.text);
+                }
+                if (typeof next.content === 'string') {
+                    next.content = stripThoughtContent(next.content);
+                } else if (Array.isArray(next.content)) {
+                    next.content = stripThoughtContentFromContent(next.content);
+                }
+                return next;
+            })
+            .filter(part => {
+                if (typeof part === 'string') return part.trim().length > 0;
+                if (!part || typeof part !== 'object') return true;
+                if (part.type === 'text' && typeof part.text === 'string') {
+                    return part.text.trim().length > 0;
+                }
+                return true;
+            });
+    }
+    if (content && typeof content === 'object') {
+        const next = { ...content };
+        if (typeof next.text === 'string') {
+            next.text = stripThoughtContent(next.text);
+        }
+        if (typeof next.content === 'string') {
+            next.content = stripThoughtContent(next.content);
+        } else if (Array.isArray(next.content)) {
+            next.content = stripThoughtContentFromContent(next.content);
+        }
+        return next;
+    }
+    return content;
+}
+
+function contentHasContextValue(content) {
+    if (typeof content === 'string') return content.trim().length > 0;
+    if (Array.isArray(content)) {
+        return content.some(part => {
+            if (typeof part === 'string') return part.trim().length > 0;
+            if (!part || typeof part !== 'object') return false;
+            if (typeof part.text === 'string' && part.text.trim()) return true;
+            if (typeof part.content === 'string' && part.content.trim()) return true;
+            if (Array.isArray(part.content)) return contentHasContextValue(part.content);
+            return Boolean(part.image_url || part.type === 'image_url' || part.type === 'input_image');
+        });
+    }
+    if (content && typeof content === 'object') {
+        if (typeof content.text === 'string') return content.text.trim().length > 0;
+        if (typeof content.content === 'string') return content.content.trim().length > 0;
+        if (Array.isArray(content.content)) return contentHasContextValue(content.content);
+        return Boolean(content.image_url || content.type === 'image_url' || content.type === 'input_image');
+    }
+    return false;
+}
+
+function getMessageContentForContext(message = {}) {
+    const content = message.content ?? '';
+    return message.role === 'assistant' ? stripThoughtContentFromContent(content) : content;
+}
+
+function getMessageTextForContext(message = {}) {
+    const content = getMessageContentForContext(message);
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content
+            .map(part => {
+                if (typeof part === 'string') return part;
+                if (!part || typeof part !== 'object') return '';
+                if (typeof part.text === 'string') return part.text;
+                if (typeof part.content === 'string') return part.content;
+                if (Array.isArray(part.content)) return getMessageTextForContext({ ...message, content: part.content });
+                return '';
+            })
+            .filter(Boolean)
+            .join('\n');
+    }
+    return content ? JSON.stringify(content) : '';
+}
+
+function getStoredMessageContextTokens(message = {}) {
+    if (message.role === 'assistant') {
+        return estimateTokens(getMessageTextForContext(message));
+    }
+    const storedTokens = Number(message.token_count || 0);
+    return storedTokens > 0 ? storedTokens : estimateTokens(String(message.content || ''));
+}
+
 function getMemoryThreshold() {
     try {
         const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(MEMORY_CONFIG_KEYS.threshold);
@@ -91,8 +203,8 @@ function buildContextMeta(messages = []) {
     const activeMessages = messages.filter(m => !Number(m.context_archived) && !Number(m.is_summary));
     const summaryMessages = messages.filter(m => Number(m.is_summary) && !Number(m.context_archived));
     const archivedCount = messages.filter(m => Number(m.context_archived)).length;
-    const activeTokens = activeMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
-    const summaryTokens = summaryMessages.reduce((sum, m) => sum + Number(m.token_count || 0), 0);
+    const activeTokens = activeMessages.reduce((sum, m) => sum + getStoredMessageContextTokens(m), 0);
+    const summaryTokens = summaryMessages.reduce((sum, m) => sum + getStoredMessageContextTokens(m), 0);
     const threshold = getMemoryThreshold();
     const ratio = threshold > 0 ? activeTokens / threshold : 0;
 
@@ -195,9 +307,9 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
         finalContent.push({ type: 'text', text: content.slice(lastIndex) });
     }
     if (finalContent.length === 1 && finalContent[0].type === 'text') {
-        return finalContent[0].text;
+        return getMessageContentForContext({ ...message, content: finalContent[0].text });
     }
-    return finalContent.length > 0 ? finalContent : content;
+    return getMessageContentForContext({ ...message, content: finalContent.length > 0 ? finalContent : content });
 }
 
 async function getContext(sessionId, userId, modelCfg) {
@@ -208,7 +320,20 @@ async function getContext(sessionId, userId, modelCfg) {
     let contextMeta = buildContextMeta(messages);
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
-    if (contextMeta.activeTokens > contextMeta.threshold && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
+    // 压缩触发阈值按模型上下文收紧（仅下调、不上调）：当模型配置的输入预算小于全局阈值时，
+    // 提前压缩，避免请求时上下文预算只能硬丢历史。未配置上下文的模型预算无界，此处不改变行为。
+    let compactionThreshold = contextMeta.threshold;
+    try {
+        const { getModelContextBudget } = require('./services/context-budget');
+        const budget = getModelContextBudget(modelCfg);
+        if (!budget.unbounded && budget.inputBudget > 0) {
+            compactionThreshold = Math.min(compactionThreshold, budget.inputBudget);
+        }
+    } catch (_err) {
+        // 预算计算不可用时退回全局阈值
+    }
+
+    if (contextMeta.activeTokens > compactionThreshold && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
         try {
             const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
             if (result?.skipped) {
@@ -225,10 +350,14 @@ async function getContext(sessionId, userId, modelCfg) {
 
     const totalImageCounter = { count: 0 };
     const contextMessages = orderMessagesForContext(messages);
-    const history = await Promise.all(contextMessages.map(async m => ({
+    const hydratedHistory = await Promise.all(contextMessages.map(async m => ({
         role: m.role,
         content: await hydrateMessageContent(m, userId, sessionId, totalImageCounter, logger)
     })));
+    const history = hydratedHistory.filter(message => {
+        if (message.role !== 'assistant') return true;
+        return contentHasContextValue(message.content);
+    });
 
     if (session && session.system_prompt) {
         history.unshift({ role: 'system', content: session.system_prompt });
@@ -269,7 +398,7 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
     }
 
     const summaryPrompt = '你是一个记忆压缩专家。请将以下对话内容提炼为一段极简的摘要（300字以内），保留所有关键事实、决定和背景信息。输出必须直接开始摘要内容：\n\n'
-        + toSummarize.map(m => `${m.role}: ${m.content}`).join('\n');
+        + toSummarize.map(m => `${m.role}: ${getMessageTextForContext(m)}`).join('\n');
 
     try {
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
@@ -313,4 +442,12 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
     }
 }
 
-module.exports = { compactSessionMemory, estimateTokens, getContext, THRESHOLD, getMemoryThreshold, buildContextMeta };
+module.exports = {
+    buildContextMeta,
+    compactSessionMemory,
+    estimateTokens,
+    getContext,
+    getMemoryThreshold,
+    stripThoughtContent,
+    THRESHOLD
+};

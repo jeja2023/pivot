@@ -127,7 +127,21 @@ const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.cs
     if (!chatShellCss.includes(needle)) fail(`print workspace layout style is missing ${needle}`);
 });
 
-const appsWorkbenchJs = fs.readFileSync(path.join(chatDir, 'apps-workbench.js'), 'utf8');
+// apps-workbench 已按工作流拆分为多个全局脚本；逐个确认存在后合并校验关键守卫片段。
+const appsWorkbenchSlices = [
+    'apps-workbench-core.js',
+    'apps-workbench-editor.js',
+    'apps-workbench-proofread.js',
+    'apps-workbench-ai.js',
+    'apps-workbench-rewrite.js',
+    'apps-workbench-export.js',
+    'apps-workbench-rag.js'
+];
+const appsWorkbenchJs = appsWorkbenchSlices.map(name => {
+    const filePath = path.join(chatDir, name);
+    if (!fs.existsSync(filePath)) fail(`apps workbench slice is missing ${name}`);
+    return fs.readFileSync(filePath, 'utf8');
+}).join('\n');
 [
     'function createOfficialWritingState',
     'exportOfficialWritingText',

@@ -115,6 +115,7 @@ function initSchema() {
             temperature REAL,
             max_input_tokens INTEGER,
             max_tokens INTEGER,
+            context_window_tokens INTEGER,
             monitor_url TEXT,
             max_concurrent INTEGER DEFAULT 0,
             supports_vision INTEGER DEFAULT 0,

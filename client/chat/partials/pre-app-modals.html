@@ -167,7 +167,7 @@
                                 placeholder="留空使用默认">
                         </div>
                     </div>
-                    <div class="model-form-row">
+                    <div class="model-form-row model-context-row">
                         <div class="form-item">
                             <label>输入 Token 上限</label>
                             <input type="text" id="m-max-input-tokens" class="form-input"
@@ -177,6 +177,12 @@
                             <label>输出 Token 上限</label>
                             <input type="text" id="m-max-tokens" class="form-input"
                                 placeholder="留空使用默认，可填 8K">
+                        </div>
+                        <div class="form-item">
+                            <label>上下文窗口 (Token)</label>
+                            <input type="text" id="m-context-window-tokens" class="form-input"
+                                placeholder="如 32K；留空自动推导"
+                                title="模型实际总上下文窗口，例如 32K；留空时按输入 Token 上限推导">
                         </div>
                     </div>
                     <div class="model-form-row">

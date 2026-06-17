@@ -595,6 +595,8 @@ function createChatRouter({
             if (modelCfg.temperature !== null && modelCfg.temperature !== undefined) {
                 requestData.temperature = modelCfg.temperature;
             }
+            // 网页聊天有意不强制 max_tokens 兜底：未配置时不下发输出上限，让上游用自身默认，
+            // 避免把交互式回复人为截断在某个固定值（与 openai/apps 接口的 2000 兜底口径不同，属刻意设计）。
             if (modelCfg.max_tokens !== null && modelCfg.max_tokens !== undefined) {
                 requestData.max_completion_tokens = modelCfg.max_tokens;
                 requestData.max_tokens = modelCfg.max_tokens; // Some APIs use this instead

@@ -62,6 +62,7 @@ window.addModel = async () => {
         temperature: document.getElementById('m-temp') ? document.getElementById('m-temp').value : undefined,
         max_input_tokens: document.getElementById('m-max-input-tokens') ? parseTokenAmount(document.getElementById('m-max-input-tokens').value) || undefined : undefined,
         max_tokens: document.getElementById('m-max-tokens') ? parseTokenAmount(document.getElementById('m-max-tokens').value) || undefined : undefined,
+        context_window_tokens: document.getElementById('m-context-window-tokens') ? parseTokenAmount(document.getElementById('m-context-window-tokens').value) || undefined : undefined,
         max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
@@ -72,6 +73,15 @@ window.addModel = async () => {
         scope: isSuperAdminUser() ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
+    // 上下文关系校验（后端仍会权威校验）：输入/输出上限须小于上下文窗口。
+    if (payload.context_window_tokens) {
+        if (payload.max_input_tokens && payload.max_input_tokens >= payload.context_window_tokens) {
+            return showToast('输入 Token 上限应小于上下文窗口', 'error');
+        }
+        if (payload.max_tokens && payload.max_tokens >= payload.context_window_tokens) {
+            return showToast('输出 Token 上限应小于上下文窗口', 'error');
+        }
+    }
     const btn = document.getElementById('m-submit-btn');
     const oldText = btn.innerText;
     btn.disabled = true;
