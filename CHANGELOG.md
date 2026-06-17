@@ -1,5 +1,19 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.115] - 2026-06-17
+### 模型补全转发收口到统一 forwardChatCompletion 服务
+
+本版本把分散在三处的“上游模型 axios 转发”收口到单一服务 `server/services/model-forwarder.js` 的 `forwardChatCompletion()`：聊天链路（`/api/chat`，含 Responses API 与降级到 Chat Completions 的两次调用）、OpenAI 兼容接口（`/v1/chat/completions`）与应用中心公文写作（`/api/apps/official-writing/ai`）共用同一套出站安全校验与请求装配。涉及新增 `server/services/model-forwarder.js`，改动 `server/routes/chat.js`、`server/routes/openai.js`、`server/routes/apps.js`，新增 `tests/security-chat/model-forwarder.js`。
+
+#### 转发逻辑去重
+- **单一转发入口**：原本在三个路由里重复出现的 `assertSafeModelRuntimeUrl` → `createSafeModelHttpAgents` → `axios({...proxy:false})` 五处样板（聊天链路占其中三处：Responses、降级、常规）统一为 `forwardChatCompletion({ modelCfg, user, url, data, headers, stream, timeout })` 一次调用，各路由不再各自 `require('axios')` 与安全适配器。
+- **安全口径不可绕过**：SSRF/出网主机校验与受限 HTTP agent 现在内聚在服务内部，任何走该入口的转发都会先校验再发起，杜绝某处遗漏安全检查；禁用系统代理（`proxy:false`）与超时口径集中维护（默认 180s，聊天常规/降级调用按需传入 300s）。
+- **行为等价**：仅抽取“发起请求并返回 axios 响应”这一层，URL 构建、payload 组装、流式/非流式响应消费仍由各路由自行处理，聊天的 Responses→Chat Completions 自动降级、图表流捕获与原始回放等专有逻辑保持不变。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.115`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+- **回归验证通过**：新增转发服务契约单测 3 项；`node tests/security.test.js` 全量 **201/201** 通过，ESLint **0 错误**，`npm run check` 通过。
+
 ## [v0.0.114] - 2026-06-16
 ### 公文写作 AI 调用收口到后端专用接口
 

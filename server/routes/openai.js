@@ -22,15 +22,13 @@ const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
 } = require('../capabilities');
-const axios = require('axios');
 const { createSseEventParser, createStreamAccumulator } = require('../streaming');
 const { getBeijingTimestamp } = require('../time');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    buildModelHeaders
 } = require('../services/model-adapter');
+const { forwardChatCompletion } = require('../services/model-forwarder');
 const { createApiAccessGuard } = require('../services/api-access-settings');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { requestEmbeddings, getEmbeddingRuntimeGuardUser } = require('../services/rag-index');
@@ -550,17 +548,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         const headers = buildModelHeaders(modelCfg);
 
         try {
-            await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
-            const agents = createSafeModelHttpAgents(modelCfg, req.user);
-            const response = await axios({
-                method: 'post',
+            const response = await forwardChatCompletion({
+                modelCfg,
+                user: req.user,
                 url: targetUrl,
                 data: payload,
-                headers: headers,
-                responseType: stream ? 'stream' : 'json',
-                timeout: 180000,
-                proxy: false,
-                ...agents
+                headers,
+                stream: !!stream
             });
 
             if (stream) {

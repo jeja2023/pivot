@@ -2,7 +2,6 @@
 // 前端只传结构化参数（mode/action/source/draft/requirements/selection 等），
 // 由后端负责提示词组装、模型权限/配额/上下文预算、上游转发、用量统计与审计标签。
 const express = require('express');
-const axios = require('axios');
 const { asyncHandler } = require('../http');
 const { logger } = require('../logger');
 const { estimateTokens } = require('../llm');
@@ -20,10 +19,9 @@ const {
 const { createSseEventParser, createStreamAccumulator } = require('../streaming');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    buildModelHeaders
 } = require('../services/model-adapter');
+const { forwardChatCompletion } = require('../services/model-forwarder');
 const { normalizeTokenUsage } = require('../services/token-accounting');
 const {
     ContextLengthExceededError,
@@ -164,17 +162,13 @@ function createAppsRouter({ authMiddleware, logAction }) {
         const headers = buildModelHeaders(modelCfg);
 
         try {
-            await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
-            const agents = createSafeModelHttpAgents(modelCfg, req.user);
-            const response = await axios({
-                method: 'post',
+            const response = await forwardChatCompletion({
+                modelCfg,
+                user: req.user,
                 url: targetUrl,
                 data: payload,
                 headers,
-                responseType: wantStream ? 'stream' : 'json',
-                timeout: 180000,
-                proxy: false,
-                ...agents
+                stream: wantStream
             });
 
             if (wantStream) {

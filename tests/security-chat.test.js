@@ -6,3 +6,4 @@ require('./security-chat/ops-models');
 require('./security-chat/cache-secrets');
 require('./security-chat/token-tools');
 require('./security-chat/official-writing');
+require('./security-chat/model-forwarder');

@@ -1,5 +1,4 @@
 /* 对话接口路由 Chat API Routes */
-const axios = require('axios');
 const express = require('express');
 const { asyncHandler } = require('../http');
 const { db } = require('../db');
@@ -27,10 +26,9 @@ const {
     buildChatCompletionsUrl,
     convertChatMessagesToResponsesInput,
     normalizeModelBaseUrl,
-    shouldUseResponsesApi,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    shouldUseResponsesApi
 } = require('../services/model-adapter');
+const { forwardChatCompletion } = require('../services/model-forwarder');
 const {
     extractModelTextFromRawResponse,
     getRequestOrigin,
@@ -621,13 +619,9 @@ function createChatRouter({
                 req.log.info({ inputSummary }, '请求体结构');
                 try {
                     requestData.input = responsesHistory;
-                    await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
-                    const agents = createSafeModelHttpAgents(modelCfg, req.user);
-                    response = await axios({
-                        method: 'post', url: targetUrl, headers,
-                        data: requestData,
-                        responseType: 'stream', timeout: 180000, proxy: false,
-                        ...agents
+                    response = await forwardChatCompletion({
+                        modelCfg, user: req.user, url: targetUrl, headers,
+                        data: requestData, stream: true, timeout: 180000
                     });
                     req.log.info('连接成功 (Responses API)');
                 } catch (err) {
@@ -638,14 +632,10 @@ function createChatRouter({
                         
                         delete requestData.input;
                         requestData.messages = visionHistory;
-                        
-                        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
-                        const agents = createSafeModelHttpAgents(modelCfg, req.user);
-                        response = await axios({
-                            method: 'post', url: targetUrl, headers,
-                            data: requestData,
-                            responseType: 'stream', timeout: 300000, proxy: false,
-                            ...agents
+
+                        response = await forwardChatCompletion({
+                            modelCfg, user: req.user, url: targetUrl, headers,
+                            data: requestData, stream: true, timeout: 300000
                         });
                         req.log.info('降级连接成功 (Chat Completions)');
                     } else {
@@ -655,13 +645,9 @@ function createChatRouter({
             } else {
                 req.log.info('正在建立连接 (Chat Completions API, 流式)');
                 requestData.messages = visionHistory;
-                await assertSafeModelRuntimeUrl(modelCfg, targetUrl, req.user);
-                const agents = createSafeModelHttpAgents(modelCfg, req.user);
-                response = await axios({
-                    method: 'post', url: targetUrl, headers,
-                    data: requestData,
-                    responseType: 'stream', timeout: 300000, proxy: false,
-                    ...agents
+                response = await forwardChatCompletion({
+                    modelCfg, user: req.user, url: targetUrl, headers,
+                    data: requestData, stream: true, timeout: 300000
                 });
                 req.log.info('连接成功');
             }
