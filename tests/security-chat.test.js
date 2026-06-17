@@ -10,3 +10,4 @@ require('./security-chat/official-writing-ai');
 require('./security-chat/model-forwarder');
 require('./security-chat/context-settings');
 require('./security-chat/context-thought');
+require('./security-chat/chat-no-think');

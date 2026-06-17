@@ -210,6 +210,16 @@
                         </div>
                         <div class="form-item model-capability-row">
                             <div>
+                                <label>聊天中关闭思考</label>
+                                <small>仅对思考模型生效；普通聊天会追加 /no_think，减少本轮思考 Token 消耗。</small>
+                            </div>
+                            <label class="switch" title="聊天中关闭思考">
+                                <input type="checkbox" id="m-disable-chat-thinking">
+                                <span class="switch-slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-item model-capability-row">
+                            <div>
                                 <label>视觉输入（图片/扫描件）</label>
                                 <small>开启后，图片附件和扫描件兜底图片会发送给视觉模型；普通文档会先抽取文本。</small>
                             </div>

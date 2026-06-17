@@ -108,6 +108,7 @@ function runMigrations() {
     ensureColumn('models', 'max_concurrent', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_vision', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'supports_reasoning', 'INTEGER DEFAULT 0');
+    ensureColumn('models', 'disable_chat_thinking', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'input_price_per_million', 'REAL DEFAULT 0');
     ensureColumn('models', 'output_price_per_million', 'REAL DEFAULT 0');
     ensureColumn('models', 'price_currency', "TEXT DEFAULT 'CNY'");

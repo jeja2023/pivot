@@ -11,6 +11,7 @@ const {
     getAccessibleModel,
     getModelDailyUsage,
     modelSupportsVision,
+    shouldDisableChatThinking,
     contentContainsVisionInput
 } = require('../services/models');
 const { aiSemaphore } = require('../services/concurrency');
@@ -172,6 +173,56 @@ function applyChatLanguageInstruction(history = []) {
         { role: 'system', content: CHAT_LANGUAGE_SYSTEM_PROMPT },
         ...messages
     ];
+}
+
+const NO_THINK_DIRECTIVE = '/no_think';
+
+function appendNoThinkDirective(text) {
+    const source = String(text ?? '');
+    if (/\/no_think\s*$/i.test(source.trimEnd())) return source;
+    const trimmed = source.trimEnd();
+    return trimmed ? `${trimmed}\n${NO_THINK_DIRECTIVE}` : NO_THINK_DIRECTIVE;
+}
+
+function appendNoThinkToContent(content) {
+    if (typeof content === 'string') return appendNoThinkDirective(content);
+    if (!Array.isArray(content)) return content;
+
+    let applied = false;
+    const nextContent = content.map(part => {
+        if (applied) return part;
+        if (typeof part === 'string') {
+            applied = true;
+            return appendNoThinkDirective(part);
+        }
+        if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') {
+            applied = true;
+            return { ...part, text: appendNoThinkDirective(part.text) };
+        }
+        return part;
+    });
+
+    if (!applied) nextContent.push({ type: 'text', text: NO_THINK_DIRECTIVE });
+    return nextContent;
+}
+
+function applyChatNoThinkSoftSwitch(history = [], modelCfg = {}) {
+    const messages = Array.isArray(history) ? history : [];
+    if (!shouldDisableChatThinking(modelCfg)) return messages;
+
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i]?.role === 'user') {
+            lastUserIndex = i;
+            break;
+        }
+    }
+    if (lastUserIndex < 0) return messages;
+
+    return messages.map((message, index) => {
+        if (index !== lastUserIndex) return message;
+        return { ...message, content: appendNoThinkToContent(message.content) };
+    });
 }
 
 function hasRagScopeFilter(scope = {}) {
@@ -512,6 +563,8 @@ function createChatRouter({
             }
         }
 
+        visionHistory = applyChatNoThinkSoftSwitch(visionHistory, modelCfg);
+
         try {
             const budgetResult = fitMessagesToContextBudget(visionHistory, modelCfg);
             visionHistory = budgetResult.messages;
@@ -828,6 +881,7 @@ function createChatRouter({
 module.exports = {
     appendStreamedChartsToAssistantContent,
     applyChatLanguageInstruction,
+    applyChatNoThinkSoftSwitch,
     buildFallbackDataQueryInput,
     buildPersistedChatErrorContent,
     buildRagContextMessage,

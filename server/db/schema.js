@@ -120,6 +120,7 @@ function initSchema() {
             max_concurrent INTEGER DEFAULT 0,
             supports_vision INTEGER DEFAULT 0,
             supports_reasoning INTEGER DEFAULT 0,
+            disable_chat_thinking INTEGER DEFAULT 0,
             input_price_per_million REAL DEFAULT 0,
             output_price_per_million REAL DEFAULT 0,
             price_currency TEXT DEFAULT 'CNY',

@@ -1,5 +1,27 @@
 # 更新日志 (CHANGELOG)
 
+## [v0.0.120] - 2026-06-17
+### 普通聊天思考模型可配置关闭思考
+
+采纳“模型配置里标记思考模型后，再提供聊天中关闭思考开关”的方案：普通聊天不做全局强制关闭，而是按模型配置选择是否在聊天请求中追加 `/no_think`。公文/工具型任务仍保持原有专用策略，普通聊天可按模型与场景单独控制。
+
+#### 配置闭环
+- **新增模型字段**：`models` 表新增 `disable_chat_thinking INTEGER DEFAULT 0`，新库 schema 与旧库迁移均已补齐；模型列表快捷查询、后台模型列表、可用模型接口均返回该字段。
+- **模型管理弹窗新增开关**：在“思考模型”配置旁新增“聊天中关闭思考”开关，保存 payload、编辑回填、表单重置均已接入；该开关仅对已标记 `supports_reasoning` 的模型生效。
+- **后端统一判定**：新增 `shouldDisableChatThinking(model)`，只有 `supports_reasoning=1` 且 `disable_chat_thinking=1` 时才启用聊天关闭思考，避免普通模型误触发。
+
+#### 聊天链路
+- **普通聊天按模型追加 `/no_think`**：`/api/chat` 在 RAG、视觉消息、MCP 上下文注入之后，并在 `fitMessagesToContextBudget` 预算裁剪之前，对最后一条用户消息追加 `/no_think`，让预算逻辑也统计这几个 token。
+- **不污染历史消息**：追加逻辑只作用于本次发给上游模型的消息副本，不改已入库的用户原文；如果用户已经手动写了 `/no_think`，不会重复追加。
+- **多模态兼容**：当最后一条用户消息是文本+图片数组时，仅在第一个文本 part 追加 `/no_think`，图片 part 保持不变。
+
+#### 验证
+- 新增 `tests/security-chat/chat-no-think.js`，覆盖“仅思考模型生效”“只追加最后一条 user”“不重复追加”“不修改原数组”“多模态消息保留图片 part”等场景。
+- 已按要求未打开浏览器验证；命令行验证通过：`node tests/security-chat.test.js`（79/79）、`npm run lint`、`npm run check`。
+
+#### 文档与版本
+- **版本号启用**：应用版本升级至 `v0.0.120`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
 ## [v0.0.119] - 2026-06-17
 ### 模型上下文设置全面修复与完善
 

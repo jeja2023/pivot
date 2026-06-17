@@ -67,6 +67,7 @@ window.addModel = async () => {
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
         supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
+        disable_chat_thinking: document.getElementById('m-disable-chat-thinking')?.checked ? 1 : 0,
         input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
         output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
         price_currency: (document.getElementById('m-price-currency')?.value || 'CNY').trim(),

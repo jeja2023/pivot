@@ -231,6 +231,8 @@ window.prepareEditModel = (model) => {
     if (supportsVisionEl) supportsVisionEl.checked = Number(model.supports_vision || 0) === 1;
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
     if (supportsReasoningEl) supportsReasoningEl.checked = Number(model.supports_reasoning || 0) === 1;
+    const disableChatThinkingEl = document.getElementById('m-disable-chat-thinking');
+    if (disableChatThinkingEl) disableChatThinkingEl.checked = Number(model.disable_chat_thinking || 0) === 1;
     const inputPriceEl = document.getElementById('m-input-price');
     if (inputPriceEl) inputPriceEl.value = model.input_price_per_million || '';
     const outputPriceEl = document.getElementById('m-output-price');
@@ -287,6 +289,8 @@ window.resetModelForm = () => {
     if (supportsVisionEl) supportsVisionEl.checked = false;
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
     if (supportsReasoningEl) supportsReasoningEl.checked = false;
+    const disableChatThinkingEl = document.getElementById('m-disable-chat-thinking');
+    if (disableChatThinkingEl) disableChatThinkingEl.checked = false;
     const keyInput = document.getElementById('m-key');
     if (keyInput) keyInput.type = 'password';
 };

@@ -85,7 +85,9 @@ const {
     recordModelTokenUsage,
     contentContainsVisionInput,
     messagesContainVisionInput,
-    modelSupportsVision
+    modelSupportsVision,
+    modelSupportsReasoning,
+    shouldDisableChatThinking
 } = require('../server/services/models');
 
 const {
@@ -258,6 +260,7 @@ const { createAnnouncementsRouter } = require('../server/routes/announcements');
 const {
     appendStreamedChartsToAssistantContent,
     applyChatLanguageInstruction,
+    applyChatNoThinkSoftSwitch,
     buildFallbackDataQueryInput,
     buildRagContextMessage,
     createChartSseCapture,
@@ -653,6 +656,7 @@ module.exports = {
     aiSemaphore,
     appendStreamedChartsToAssistantContent,
     applyChatLanguageInstruction,
+    applyChatNoThinkSoftSwitch,
     assert,
     assertSafeMcpOutboundUrl,
     assertSafeOutboundUrl,
@@ -807,7 +811,9 @@ module.exports = {
     mergeEntities,
     messagesContainVisionInput,
     modelRouter,
+    modelSupportsReasoning,
     modelSupportsVision,
+    shouldDisableChatThinking,
     normalizeAgentGoal,
     normalizeApprovalPolicy,
     normalizeAuditAction,
