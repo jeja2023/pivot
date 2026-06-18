@@ -1,0 +1,153 @@
+                    <section id="tab-content-global-params" class="admin-tab-content admin-only hidden global-params-tab">
+                        <div class="settings-page-head">
+                            <div>
+                                <h3>全局参数</h3>
+                                <p>运行时调整上下文、并发、上传、图片与知识库检索参数，无需修改 .env 或重启服务。</p>
+                            </div>
+                            <div class="settings-page-actions">
+                                <button type="button" id="runtime-settings-page-refresh" class="btn-secondary">刷新</button>
+                                <button type="button" id="runtime-settings-page-save" class="btn-primary super-admin-only hidden">保存参数</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-list global-params-list">
+                            <section class="stat-card global-params-section">
+                                <h4>请求与队列</h4>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>AI 并发请求数</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_concurrent_ai_requests">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>AI 队列长度</label>
+                                            <input type="number" class="form-input" min="0" step="1" data-runtime-key="max_ai_queue_size">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>AI 队列超时 (ms)</label>
+                                            <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="ai_queue_timeout_ms">
+                                        </div>
+                                    </div>
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>端点默认并发</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="model_endpoint_default_concurrency">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>端点队列长度</label>
+                                            <input type="number" class="form-input" min="0" step="1" data-runtime-key="model_endpoint_queue_size">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>端点队列超时 (ms)</label>
+                                            <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="model_endpoint_queue_timeout_ms">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="stat-card global-params-section">
+                                <h4>上下文窗口</h4>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>全局上下文窗口 (Token)</label>
+                                            <input type="text" class="form-input" placeholder="0 表示不设全局默认，可填 128K" data-runtime-key="model_context_window_tokens">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>预留输出 (Token)</label>
+                                            <input type="text" class="form-input" placeholder="如 4K / 8K" data-runtime-key="context_reserved_output_tokens">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>附件注入字符上限</label>
+                                            <input type="text" class="form-input" placeholder="如 80K" data-runtime-key="attachment_context_max_chars">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="stat-card global-params-section">
+                                <h4>上传与图片</h4>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>聊天附件上传字节</label>
+                                            <input type="text" class="form-input" placeholder="如 64M" data-runtime-key="upload_attachment_max_bytes">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>知识库上传字节</label>
+                                            <input type="text" class="form-input" placeholder="如 128M" data-runtime-key="knowledge_upload_max_bytes">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>图片上传字节</label>
+                                            <input type="text" class="form-input" placeholder="如 32M" data-runtime-key="image_upload_max_bytes">
+                                        </div>
+                                    </div>
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>图片上下文字节</label>
+                                            <input type="text" class="form-input" placeholder="如 8M" data-runtime-key="image_context_max_bytes">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>单次图片数量</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_images_per_message">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="stat-card global-params-section">
+                                <h4>知识库与 RAG</h4>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>RAG 引用数量上限</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_top_k_max">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>RAG 候选片段上限</label>
+                                            <input type="text" class="form-input" placeholder="如 5K" data-runtime-key="rag_candidate_limit_max">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>RAG 切片字符上限</label>
+                                            <input type="text" class="form-input" placeholder="如 4K" data-runtime-key="rag_chunk_size_max">
+                                        </div>
+                                    </div>
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>RAG 上下文预算占比 (%)</label>
+                                            <input type="number" class="form-input" min="5" max="70" step="1" data-runtime-key="rag_context_budget_percent">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>知识库抽取字符上限</label>
+                                            <input type="text" class="form-input" placeholder="如 600K" data-runtime-key="knowledge_extract_max_chars">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>知识库索引并发</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_index_max_concurrent">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="stat-card global-params-section">
+                                <h4>智能体与后台</h4>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row">
+                                        <div class="form-item">
+                                            <label>智能体任务并发</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_max_concurrent_runs">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>工作流节点并发</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_dag_node_concurrency">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>记忆压缩并发</label>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="memory_compression_max_concurrent">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                        <p class="model-modal-desc runtime-settings-status" data-runtime-status></p>
+                    </section>

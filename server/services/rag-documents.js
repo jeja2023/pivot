@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { extractDocumentText, truncateExtractedText } = require('../document-text');
+const { getKnowledgeLimits } = require('./resource-limits');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -309,7 +310,7 @@ function persistUploadedKnowledgeFile(file, userId, docId) {
 
 async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
     const text = await extractDocumentText(filePath, '', originalName || filePath);
-    return truncateExtractedText(text, 300000);
+    return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 
 function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {

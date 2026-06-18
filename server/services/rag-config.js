@@ -1,5 +1,6 @@
 const { db } = require('../db');
 const { decryptSecret, encryptSecret } = require('../security');
+const { getRagLimits } = require('./resource-limits');
 
 const RAG_CONFIG_KEYS = {
     scoreThreshold: 'rag_score_threshold',
@@ -96,10 +97,11 @@ function getPublicEmbeddingConfig(userId = null) {
 }
 
 function getRagConfig(overrides = {}, userId = null) {
+    const ragLimits = getRagLimits();
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
-    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, 10);
-    const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, 1000);
-    const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, 2000);
+    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, ragLimits.topKMax || 10);
+    const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, ragLimits.candidateLimitMax || 1000);
+    const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, ragLimits.chunkSizeMax || 2000);
     const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
 
     const scoreThreshold = clampNumber(
@@ -112,19 +114,19 @@ function getRagConfig(overrides = {}, userId = null) {
         overrides.topK ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.topK) ?? getSettingValue(RAG_CONFIG_KEYS.topK),
         defaultTopK,
         1,
-        10
+        ragLimits.topKMax || 10
     );
     const candidateLimit = clampInteger(
         overrides.candidateLimit ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.candidateLimit) ?? getSettingValue(RAG_CONFIG_KEYS.candidateLimit),
         defaultCandidateLimit,
         Math.max(topK, 20),
-        1000
+        ragLimits.candidateLimitMax || 1000
     );
     const chunkSize = clampInteger(
         overrides.chunkSize ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
         defaultChunkSize,
         200,
-        2000
+        ragLimits.chunkSizeMax || 2000
     );
     const chunkOverlap = clampInteger(
         overrides.chunkOverlap ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkOverlap) ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
@@ -143,20 +145,21 @@ function getRagConfig(overrides = {}, userId = null) {
 }
 
 function toRagSettingValue(key, value) {
+    const ragLimits = getRagLimits();
     if (key === RAG_CONFIG_KEYS.scoreThreshold) {
         return String(clampNumber(value, 0.4, 0, 1));
     }
     if (key === RAG_CONFIG_KEYS.topK) {
-        return String(clampInteger(value, 3, 1, 10));
+        return String(clampInteger(value, 3, 1, ragLimits.topKMax || 10));
     }
     if (key === RAG_CONFIG_KEYS.candidateLimit) {
-        return String(clampInteger(value, 300, 20, 1000));
+        return String(clampInteger(value, 300, 20, ragLimits.candidateLimitMax || 1000));
     }
     if (key === RAG_CONFIG_KEYS.chunkSize) {
-        return String(clampInteger(value, 500, 200, 2000));
+        return String(clampInteger(value, 500, 200, ragLimits.chunkSizeMax || 2000));
     }
     if (key === RAG_CONFIG_KEYS.chunkOverlap) {
-        return String(clampInteger(value, 100, 0, 1000));
+        return String(clampInteger(value, 100, 0, Math.max(1000, Math.floor((ragLimits.chunkSizeMax || 2000) / 2))));
     }
     if (key === RAG_CONFIG_KEYS.embeddingMode) {
         return normalizeEmbeddingMode(value);

@@ -126,15 +126,51 @@ function getGlobalContextRuntimeConfig() {
     };
 }
 
+function getUploadRuntimeConfig() {
+    return {
+        attachmentMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes),
+        knowledgeMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.knowledgeUploadMaxBytes),
+        imageUploadMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.imageUploadMaxBytes),
+        imageContextMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.imageContextMaxBytes),
+        maxImagesPerMessage: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.maxImagesPerMessage)
+    };
+}
+
+function getAttachmentRuntimeConfig() {
+    return {
+        contextMaxChars: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.attachmentContextMaxChars)
+    };
+}
+
+function getKnowledgeRuntimeConfig() {
+    return {
+        uploadMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.knowledgeUploadMaxBytes),
+        extractMaxChars: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.knowledgeExtractMaxChars)
+    };
+}
+
+function getRagRuntimeConfig() {
+    return {
+        topKMax: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.ragTopKMax),
+        candidateLimitMax: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.ragCandidateLimitMax),
+        chunkSizeMax: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.ragChunkSizeMax),
+        contextBudgetPercent: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.ragContextBudgetPercent)
+    };
+}
+
 module.exports = {
     RUNTIME_SETTING_DEFINITIONS,
     RUNTIME_SETTING_KEYS,
     buildRuntimeConfigSnapshot,
+    getAttachmentRuntimeConfig,
     getAgentConcurrencyConfig,
     getBackgroundRuntimeConfig,
     getGlobalAiConcurrencyConfig,
     getGlobalContextRuntimeConfig,
+    getKnowledgeRuntimeConfig,
     getModelEndpointRuntimeConfig,
+    getRagRuntimeConfig,
     getRuntimeSettingValue,
+    getUploadRuntimeConfig,
     saveRuntimeConfig
 };

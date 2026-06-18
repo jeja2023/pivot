@@ -12,6 +12,7 @@ const { logger } = require('../logger');
 const { normalizeUploadedOriginalName } = require('../upload');
 const { encodeAttachmentUrl, toProjectRelativePath } = require('../security');
 const { isSuperAdmin } = require('../permissions');
+const { getAttachmentContextLimit } = require('../services/resource-limits');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -150,7 +151,10 @@ function createAttachmentsRouter({
                 removeLocalFile(req.file.path);
             } else {
                 try {
-                    extractedText = truncateExtractedText(await extractDocumentText(req.file.path, mimeType, originalName, { password }));
+                    extractedText = truncateExtractedText(
+                        await extractDocumentText(req.file.path, mimeType, originalName, { password }),
+                        getAttachmentContextLimit()
+                    );
                 } catch (readErr) {
                     logger.error({ err: readErr.message, path: req.file.path, originalName }, 'Read attachment text failed');
                     if (isPasswordError(readErr) || readErr.code === 'PASSWORD_UNSUPPORTED') {

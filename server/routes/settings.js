@@ -31,7 +31,7 @@ const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 const { syncAgentRuntimeConcurrency } = require('../services/agent-runtime');
 const { syncKnowledgeDocumentIndexConcurrency } = require('../services/rag-documents');
 const { syncMemoryCompressionConcurrency } = require('../llm');
-const { isSuperAdmin } = require('../permissions');
+const { isAdmin, isSuperAdmin } = require('../permissions');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -153,17 +153,20 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/settings', authMiddleware, (req, res) => {
         const settings = getSettings();
-        res.json({
+        const payload = {
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
             memoryConfig: getMemoryConfig(settings),
-            runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings
-        });
+        };
+        if (isAdmin(req.user)) {
+            payload.runtimeConfig = buildRuntimeConfigSnapshot();
+        }
+        res.json(payload);
     });
 
     router.post('/settings/embedding-models', authMiddleware, asyncHandler(async (req, res) => {
@@ -280,6 +283,9 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.put('/admin/settings/runtime', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有 admin 权限层级可以修改全局参数。' });
+        }
         const result = saveRuntimeConfig(req.body || {}, req.user?.id || null);
         if (result.error) return res.status(400).json({ error: result.error });
 

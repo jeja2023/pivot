@@ -1,5 +1,6 @@
 const { estimateTokens } = require('../llm');
 const { getGlobalContextRuntimeConfig } = require('./runtime-settings');
+const { getRagLimits } = require('./resource-limits');
 
 const DEFAULT_RESERVED_OUTPUT_TOKENS = 2048;
 const MIN_RESERVED_OUTPUT_TOKENS = 512;
@@ -264,7 +265,8 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         };
     }
 
-    const ragCap = Math.max(512, Math.floor(budget.inputBudget * 0.18));
+    const ragBudgetPercent = Math.max(5, Math.min(70, getRagLimits().contextBudgetPercent || 25));
+    const ragCap = Math.max(512, Math.floor(budget.inputBudget * (ragBudgetPercent / 100)));
     const mcpCap = Math.max(768, Math.floor(budget.inputBudget * 0.20));
     if (trimGeneratedContextMessages(working, isRagMessage, ragCap, 'trimmedRagContexts', metadata)) {
         total = estimateMessagesTokens(working);

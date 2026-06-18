@@ -3,7 +3,7 @@ const fs = require('fs');
 const { db } = require('./db');
 const { getBeijingTimestamp } = require('./time');
 const { extractDocumentText, truncateExtractedText } = require('./document-text');
-const { imageFileToDataUrl, MAX_IMAGES_PER_MESSAGE } = require('./image-safety');
+const { imageFileToDataUrl, getMaxImagesPerMessage } = require('./image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('./security');
 const { withTimeout, KeyedConcurrencyGuard } = require('./services/concurrency');
 const {
@@ -18,6 +18,7 @@ const {
     normalizeMemoryThreshold
 } = require('./services/memory-config');
 const { getBackgroundRuntimeConfig } = require('./services/runtime-settings');
+const { getAttachmentContextLimit } = require('./services/resource-limits');
 
 const THRESHOLD = DEFAULT_MEMORY_THRESHOLD;
 const SUMMARY_KEEP_COUNT = Math.max(1, parseInt(process.env.MEMORY_SUMMARY_KEEP_COUNT, 10) || 6);
@@ -411,6 +412,8 @@ function buildContextMeta(messages = []) {
 
 async function hydrateMessageContent(message, userId, sessionId, totalImageCounter, logger) {
     const content = String(message.content || '');
+    const maxImagesPerMessage = Math.max(1, Number.parseInt(getMaxImagesPerMessage(), 10) || 1);
+    const attachmentContextMaxChars = Math.max(1, Number.parseInt(getAttachmentContextLimit(), 10) || 80000);
     const uploadUrlPattern = String.raw`\/uploads\/(?:[^()]|\([^)]*\))+`;
     const imgRegex = new RegExp(String.raw`!\[.*?\]\((${uploadUrlPattern})\)`, 'g');
     const fileRegex = new RegExp(String.raw`\[附件:\s*([^\]]+)\]\((${uploadUrlPattern})\)`, 'g');
@@ -423,7 +426,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
         if (match.index > lastIndex) {
             finalContent.push({ type: 'text', text: content.slice(lastIndex, match.index) });
         }
-        if (imageCount >= MAX_IMAGES_PER_MESSAGE) {
+        if (imageCount >= maxImagesPerMessage) {
             finalContent.push({ type: 'text', text: '[图片已跳过：数量超过限制]' });
             lastIndex = imgRegex.lastIndex;
             continue;
@@ -432,15 +435,15 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
         const localPath = resolveOwnedAttachmentPath(match[1], userId, sessionId);
         if (localPath) {
             const imageUrl = await imageFileToDataUrl(localPath);
-            if (imageUrl && totalImageCounter.count < MAX_IMAGES_PER_MESSAGE) {
+            if (imageUrl && totalImageCounter.count < maxImagesPerMessage) {
                 finalContent.push({ type: 'image_url', image_url: { url: imageUrl } });
                 imageCount += 1;
                 totalImageCounter.count += 1;
             } else {
                 finalContent.push({
                     type: 'text',
-                    text: totalImageCounter.count >= MAX_IMAGES_PER_MESSAGE
-                        ? '[图片已跳过：当前模型一次只支持解析 1 张图片]'
+                    text: totalImageCounter.count >= maxImagesPerMessage
+                        ? `[图片已跳过：当前单次最多解析 ${maxImagesPerMessage} 张图片]`
                         : '[图片已跳过：文件过大或格式不支持]'
                 });
             }
@@ -464,7 +467,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
 
             if (localPath) {
                 try {
-                    const text = truncateExtractedText(await extractDocumentText(localPath, '', fileName), 20000);
+                    const text = truncateExtractedText(await extractDocumentText(localPath, '', fileName), attachmentContextMaxChars);
                     fileFinalContent.push({
                         type: 'text',
                         text: text

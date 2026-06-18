@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
+const { bytesToMb, getImageLimits } = require('./services/resource-limits');
 
 const MAX_IMAGE_UPLOAD_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGE_INPUT_PIXELS = 40 * 1000 * 1000;
@@ -17,10 +18,24 @@ function isImagePath(filePath = '') {
     return ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(path.extname(filePath).toLowerCase());
 }
 
+function getRuntimeImageLimits() {
+    const limits = getImageLimits();
+    return {
+        uploadMaxBytes: limits.uploadMaxBytes || MAX_IMAGE_UPLOAD_BYTES,
+        contextMaxBytes: limits.contextMaxBytes || MAX_IMAGE_CONTEXT_BYTES,
+        maxImagesPerMessage: limits.maxImagesPerMessage || MAX_IMAGES_PER_MESSAGE
+    };
+}
+
+function getMaxImagesPerMessage() {
+    return getRuntimeImageLimits().maxImagesPerMessage;
+}
+
 async function normalizeUploadedImage(inputPath, outputPath) {
+    const limits = getRuntimeImageLimits();
     const stats = await fs.promises.stat(inputPath);
-    if (stats.size > MAX_IMAGE_UPLOAD_BYTES) {
-        const err = new Error(`Image file is too large. Maximum is ${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1024 / 1024)}MB.`);
+    if (stats.size > limits.uploadMaxBytes) {
+        const err = new Error(`Image file is too large. Maximum is ${bytesToMb(limits.uploadMaxBytes)}MB.`);
         err.status = 413;
         throw err;
     }
@@ -70,8 +85,9 @@ async function normalizeUploadedImage(inputPath, outputPath) {
 }
 
 async function imageFileToDataUrl(filePath) {
+    const limits = getRuntimeImageLimits();
     const stats = await fs.promises.stat(filePath);
-    if (stats.size > MAX_IMAGE_CONTEXT_BYTES) return null;
+    if (stats.size > limits.contextMaxBytes) return null;
 
     const ext = path.extname(filePath).toLowerCase();
     const mime = {
@@ -94,6 +110,7 @@ module.exports = {
     MAX_IMAGE_OUTPUT_BYTES,
     MAX_IMAGE_UPLOAD_BYTES,
     MAX_IMAGES_PER_MESSAGE,
+    getMaxImagesPerMessage,
     imageFileToDataUrl,
     isImagePath,
     isLikelyImageMime,

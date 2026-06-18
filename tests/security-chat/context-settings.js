@@ -12,6 +12,20 @@ const {
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
 const { syncAgentRuntimeConcurrency } = require('../../server/services/agent-runtime');
 
+function createJsonResponse() {
+    return {
+        statusCode: 200,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+}
+
 test('context_window_tokens 直接决定上下文窗口与输入预算', () => {
     const b = getModelContextBudget({ context_window_tokens: 32768, max_tokens: 2000 });
     assert.equal(b.unbounded, false);
@@ -112,6 +126,51 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
     }
 });
 
+test('设置接口仅向管理员返回全局运行参数', async () => {
+    const router = createSettingsRouter({
+        authMiddleware: (_req, _res, next) => next(),
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/settings' && layer.route?.methods?.get);
+    assert.ok(route);
+
+    const normalReq = { user: { id: 42, username: 'alice', role: 'user', unit: 'QA' }, headers: {} };
+    const normalRes = createJsonResponse();
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), normalReq, normalRes);
+    assert.equal(normalRes.statusCode, 200);
+    assert.equal(Object.prototype.hasOwnProperty.call(normalRes.body, 'runtimeConfig'), false);
+
+    const adminReq = { user: { id: 2, username: 'manager', role: 'admin', unit: 'QA' }, headers: {} };
+    const adminRes = createJsonResponse();
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), adminReq, adminRes);
+    assert.equal(adminRes.statusCode, 200);
+    assert.ok(adminRes.body.runtimeConfig?.items?.length > 0);
+});
+
+test('非内置 admin 管理员不能修改全局运行参数', async () => {
+    const managerUser = { id: 2, username: 'manager', role: 'admin', unit: 'QA' };
+    const router = createSettingsRouter({
+        authMiddleware: (req, _res, next) => { req.user = managerUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/admin/settings/runtime' && layer.route?.methods?.put);
+    assert.ok(route);
+
+    const req = {
+        body: { max_concurrent_ai_requests: 3 },
+        headers: {},
+        user: managerUser,
+        log: { warn: () => {} }
+    };
+    const res = createJsonResponse();
+
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body.error, /admin 权限层级/);
+});
+
 test('管理员运行时设置接口可保存并发配置', async () => {
     const adminUser = { id: 1, username: 'admin', role: 'admin', unit: 'QA' };
     const keys = [
@@ -154,6 +213,73 @@ test('管理员运行时设置接口可保存并发配置', async () => {
         assert.equal(res.body.success, true);
         assert.equal(res.body.runtimeConfig.values.maxConcurrentAiRequests, 3);
         assert.equal(res.body.runtimeConfig.values.agentDagNodeConcurrency, 5);
+    } finally {
+        keys.forEach((key, index) => {
+            const row = previousRows[index];
+            if (row) {
+                db.prepare(`
+                    INSERT INTO app_settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by
+                `).run(row.key, row.value, row.updated_at, row.updated_by);
+            } else {
+                db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+            }
+        });
+        syncGlobalAiConcurrencySettings();
+        syncAgentRuntimeConcurrency();
+    }
+});
+
+test('全局运行时资源参数可通过设置接口保存', async () => {
+    const adminUser = { id: 1, username: 'admin', role: 'admin', unit: 'QA' };
+    const keys = [
+        RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes,
+        RUNTIME_SETTING_KEYS.maxImagesPerMessage,
+        RUNTIME_SETTING_KEYS.attachmentContextMaxChars,
+        RUNTIME_SETTING_KEYS.ragTopKMax
+    ];
+    const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
+    const router = createSettingsRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/admin/settings/runtime' && layer.route?.methods?.put);
+    const req = {
+        body: {
+            upload_attachment_max_bytes: '96M',
+            max_images_per_message: 6,
+            attachment_context_max_chars: '120K',
+            rag_top_k_max: 80
+        },
+        headers: {},
+        user: adminUser,
+        log: { warn: () => {} }
+    };
+    const res = {
+        statusCode: 200,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+
+    try {
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.success, true);
+        assert.equal(res.body.runtimeConfig.values.uploadAttachmentMaxBytes, 96000000);
+        assert.equal(res.body.runtimeConfig.values.maxImagesPerMessage, 6);
+        assert.equal(res.body.runtimeConfig.values.attachmentContextMaxChars, 120000);
+        assert.equal(res.body.runtimeConfig.values.ragTopKMax, 80);
     } finally {
         keys.forEach((key, index) => {
             const row = previousRows[index];

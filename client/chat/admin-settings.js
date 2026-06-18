@@ -29,8 +29,40 @@ function runtimeItemsByKey(runtimeConfig = {}) {
     return map;
 }
 
-function isRuntimeTokenKey(key) {
-    return key === 'model_context_window_tokens' || key === 'context_reserved_output_tokens';
+function isRuntimeHumanIntKey(key) {
+    return new Set([
+        'model_context_window_tokens',
+        'context_reserved_output_tokens',
+        'upload_attachment_max_bytes',
+        'knowledge_upload_max_bytes',
+        'image_upload_max_bytes',
+        'image_context_max_bytes',
+        'attachment_context_max_chars',
+        'knowledge_extract_max_chars',
+        'rag_candidate_limit_max',
+        'rag_chunk_size_max'
+    ]).has(key);
+}
+
+function updateRuntimeStatusMirrors(text = '') {
+    document.querySelectorAll('[data-runtime-status]').forEach(el => {
+        el.innerText = text;
+    });
+}
+
+function updateRuntimeEditState() {
+    const canEdit = isSuperAdminUser();
+    document.querySelectorAll('[data-runtime-key]').forEach(input => {
+        input.disabled = !canEdit;
+    });
+    [
+        document.getElementById('runtime-settings-save'),
+        document.getElementById('runtime-settings-page-save')
+    ].filter(Boolean).forEach(btn => {
+        btn.classList.toggle('hidden', !canEdit);
+        btn.disabled = !canEdit;
+        btn.title = canEdit ? '' : '只有 admin 权限层级可以修改全局参数';
+    });
 }
 
 function updateRuntimeSettingsForm(runtimeConfig = {}) {
@@ -42,14 +74,14 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
         if (!item) return;
         input.min = item.min ?? input.min;
         input.max = item.max ?? input.max;
-        input.value = isRuntimeTokenKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
+        input.value = isRuntimeHumanIntKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
         input.title = `${item.label}，范围 ${item.min} - ${item.max}`;
     });
-    const status = document.getElementById('runtime-settings-status');
-    if (status) {
-        const updated = (runtimeConfig.items || []).map(item => item.updatedAt).filter(Boolean).sort().pop();
-        status.innerText = updated ? `最近保存：${updated}` : '';
-    }
+    const updated = (runtimeConfig.items || []).map(item => item.updatedAt).filter(Boolean).sort().pop();
+    updateRuntimeEditState();
+    const readOnlyHint = !isSuperAdminUser() && runtimeConfig?.items?.length ? '仅 admin 权限层级可修改' : '';
+    const updatedText = updated ? `最近保存：${updated}` : '';
+    updateRuntimeStatusMirrors([updatedText, readOnlyHint].filter(Boolean).join(' · '));
 }
 
 window.openRuntimeSettingsModal = async function() {
@@ -66,19 +98,32 @@ window.closeRuntimeSettingsModal = function() {
 };
 
 window.saveRuntimeSettings = async function() {
-    const saveBtn = document.getElementById('runtime-settings-save');
-    const status = document.getElementById('runtime-settings-status');
-    const inputs = Array.from(document.querySelectorAll('[data-runtime-key]'));
+    if (!isSuperAdminUser()) {
+        const message = '只有 admin 权限层级可以修改全局参数';
+        updateRuntimeStatusMirrors(message);
+        showToast(message, 'error');
+        return;
+    }
+    const saveButtons = [
+        document.getElementById('runtime-settings-save'),
+        document.getElementById('runtime-settings-page-save')
+    ].filter(Boolean);
+    const oldTexts = new Map(saveButtons.map(btn => [btn, btn.innerText]));
+    const allRuntimeInputs = Array.from(document.querySelectorAll('[data-runtime-key]'));
+    const visibleRuntimeInputs = allRuntimeInputs.filter(input => input.offsetParent !== null);
+    const inputs = [...visibleRuntimeInputs, ...allRuntimeInputs];
     const payload = {};
     inputs.forEach(input => {
         const key = input.dataset.runtimeKey;
+        if (Object.prototype.hasOwnProperty.call(payload, key)) return;
         const rawValue = String(input.value || '').trim();
-        payload[key] = isRuntimeTokenKey(key) ? parseTokenAmount(rawValue) : Number(rawValue);
+        payload[key] = isRuntimeHumanIntKey(key) ? parseTokenAmount(rawValue) : Number(rawValue);
     });
-    if (saveBtn) saveBtn.disabled = true;
-    const oldText = saveBtn?.innerText || '';
-    if (saveBtn) saveBtn.innerText = '正在保存...';
-    if (status) status.innerText = '';
+    saveButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.innerText = '正在保存...';
+    });
+    updateRuntimeStatusMirrors('');
     try {
         const res = await apiFetch(`${API_BASE}/admin/settings/runtime`, {
             method: 'PUT',
@@ -92,11 +137,14 @@ window.saveRuntimeSettings = async function() {
         window.refreshMonitorSummary?.();
         window.closeRuntimeSettingsModal();
     } catch (e) {
-        if (status) status.innerText = e.message || '运行时配置保存失败';
-        showToast(e.message || '运行时配置保存失败', 'error');
+        const message = e.message || '运行时配置保存失败';
+        updateRuntimeStatusMirrors(message);
+        showToast(message, 'error');
     } finally {
-        if (saveBtn) saveBtn.innerText = oldText || '保存配置';
-        if (saveBtn) saveBtn.disabled = false;
+        saveButtons.forEach(btn => {
+            btn.innerText = oldTexts.get(btn) || '保存配置';
+            btn.disabled = false;
+        });
     }
 };
 
@@ -154,9 +202,10 @@ function getEmbeddingModelValue() {
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
 
-document.getElementById('runtime-settings-open-btn')?.addEventListener('click', () => window.openRuntimeSettingsModal?.());
 document.getElementById('runtime-settings-cancel')?.addEventListener('click', () => window.closeRuntimeSettingsModal?.());
 document.getElementById('runtime-settings-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
+document.getElementById('runtime-settings-page-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
+document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => loadSettings());
 document.getElementById('runtime-settings-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'runtime-settings-modal') window.closeRuntimeSettingsModal?.();
 });

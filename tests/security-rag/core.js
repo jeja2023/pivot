@@ -359,7 +359,7 @@ test('监控知识分块数只包含当前可用的已索引分块', () => {
 test('RAG 配置会限制不安全检索参数', () => {
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.scoreThreshold, 1.5), '1');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.scoreThreshold, -1), '0');
-    assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.topK, 99), '10');
+    assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.topK, 99), '50');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.candidateLimit, 1), '20');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.chunkSize, 99), '200');
     assert.equal(toRagSettingValue(RAG_CONFIG_KEYS.chunkOverlap, -1), '0');

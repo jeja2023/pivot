@@ -312,6 +312,60 @@
     background: #fff;
     box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.035);
 }
+.global-params-tab .global-params-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    max-width: none;
+    padding-bottom: 16px;
+}
+.global-params-tab .global-params-section {
+    padding: 12px 14px !important;
+}
+.global-params-tab .global-params-section h4 {
+    margin: 0 0 9px !important;
+    padding-bottom: 7px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    font-size: 0.84rem !important;
+    font-weight: 800;
+    color: var(--text-main);
+    text-align: left;
+}
+.global-params-tab .global-params-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.global-params-tab .global-params-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 10px;
+}
+.global-params-tab .form-item {
+    min-width: 0;
+}
+.global-params-tab .form-item label {
+    display: block;
+    margin-bottom: 5px;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: left;
+}
+.global-params-tab .form-input {
+    height: 34px;
+    margin-bottom: 0;
+}
+.global-params-tab .form-input:disabled {
+    background: #f8fafc;
+    color: #64748b;
+    cursor: not-allowed;
+}
+.global-params-tab .runtime-settings-status {
+    margin: 8px 0 0;
+    min-height: 18px;
+    text-align: center;
+}
 .settings-workspace-view .btn-primary,
 .settings-workspace-view .btn-secondary,
 .settings-workspace-view .btn-danger,
@@ -539,6 +593,10 @@
 }
 
 @media (max-width: 760px) {
+    .global-params-tab .global-params-list,
+    .global-params-tab .global-params-row {
+        grid-template-columns: 1fr;
+    }
     .model-modal.runtime-settings-modal .runtime-settings-grid,
     .model-modal.runtime-settings-modal .runtime-settings-group {
         grid-template-columns: 1fr;

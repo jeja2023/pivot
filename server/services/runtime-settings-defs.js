@@ -10,7 +10,18 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     ragIndexMaxConcurrent: 'rag_index_max_concurrent',
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
     modelContextWindowTokens: 'model_context_window_tokens',
-    contextReservedOutputTokens: 'context_reserved_output_tokens'
+    contextReservedOutputTokens: 'context_reserved_output_tokens',
+    uploadAttachmentMaxBytes: 'upload_attachment_max_bytes',
+    knowledgeUploadMaxBytes: 'knowledge_upload_max_bytes',
+    imageUploadMaxBytes: 'image_upload_max_bytes',
+    imageContextMaxBytes: 'image_context_max_bytes',
+    maxImagesPerMessage: 'max_images_per_message',
+    attachmentContextMaxChars: 'attachment_context_max_chars',
+    knowledgeExtractMaxChars: 'knowledge_extract_max_chars',
+    ragTopKMax: 'rag_top_k_max',
+    ragCandidateLimitMax: 'rag_candidate_limit_max',
+    ragChunkSizeMax: 'rag_chunk_size_max',
+    ragContextBudgetPercent: 'rag_context_budget_percent'
 });
 
 const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
@@ -27,7 +38,7 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     {
         key: RUNTIME_SETTING_KEYS.maxAiQueueSize,
         prop: 'maxAiQueueSize',
-        label: '全局 AI 排队长度',
+        label: '全局 AI 队列长度',
         env: 'MAX_AI_QUEUE_SIZE',
         defaultValue: 20,
         min: 0,
@@ -37,7 +48,7 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     {
         key: RUNTIME_SETTING_KEYS.aiQueueTimeoutMs,
         prop: 'aiQueueTimeoutMs',
-        label: '全局 AI 排队超时',
+        label: '全局 AI 队列超时',
         env: 'AI_QUEUE_TIMEOUT_MS',
         defaultValue: 300000,
         min: 1000,
@@ -58,7 +69,7 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     {
         key: RUNTIME_SETTING_KEYS.modelEndpointQueueSize,
         prop: 'modelEndpointQueueSize',
-        label: '模型端点排队长度',
+        label: '模型端点队列长度',
         env: 'MODEL_ENDPOINT_QUEUE_SIZE',
         defaultValue: 20,
         min: 0,
@@ -68,7 +79,7 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     {
         key: RUNTIME_SETTING_KEYS.modelEndpointQueueTimeoutMs,
         prop: 'modelEndpointQueueTimeoutMs',
-        label: '模型端点排队超时',
+        label: '模型端点队列超时',
         env: 'MODEL_ENDPOINT_QUEUE_TIMEOUT_MS',
         defaultValue: 300000,
         min: 1000,
@@ -137,6 +148,124 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         max: 10000000,
         group: 'context',
         unit: 'tokens'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes,
+        prop: 'uploadAttachmentMaxBytes',
+        label: '聊天附件上传大小',
+        env: 'UPLOAD_ATTACHMENT_MAX_BYTES',
+        defaultValue: 64 * 1024 * 1024,
+        min: 1 * 1024 * 1024,
+        max: 1024 * 1024 * 1024,
+        group: 'upload',
+        unit: 'bytes'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.knowledgeUploadMaxBytes,
+        prop: 'knowledgeUploadMaxBytes',
+        label: '知识库上传大小',
+        env: 'KNOWLEDGE_UPLOAD_MAX_BYTES',
+        defaultValue: 128 * 1024 * 1024,
+        min: 1 * 1024 * 1024,
+        max: 2 * 1024 * 1024 * 1024,
+        group: 'upload',
+        unit: 'bytes'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.imageUploadMaxBytes,
+        prop: 'imageUploadMaxBytes',
+        label: '图片上传大小',
+        env: 'IMAGE_UPLOAD_MAX_BYTES',
+        defaultValue: 32 * 1024 * 1024,
+        min: 1 * 1024 * 1024,
+        max: 512 * 1024 * 1024,
+        group: 'upload',
+        unit: 'bytes'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.imageContextMaxBytes,
+        prop: 'imageContextMaxBytes',
+        label: '图片上下文大小',
+        env: 'IMAGE_CONTEXT_MAX_BYTES',
+        defaultValue: 8 * 1024 * 1024,
+        min: 512 * 1024,
+        max: 128 * 1024 * 1024,
+        group: 'upload',
+        unit: 'bytes'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.maxImagesPerMessage,
+        prop: 'maxImagesPerMessage',
+        label: '单次图片数量',
+        env: 'MAX_IMAGES_PER_MESSAGE',
+        defaultValue: 4,
+        min: 1,
+        max: 16,
+        group: 'upload'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.attachmentContextMaxChars,
+        prop: 'attachmentContextMaxChars',
+        label: '附件注入字符上限',
+        env: 'ATTACHMENT_CONTEXT_MAX_CHARS',
+        defaultValue: 80000,
+        min: 20000,
+        max: 2000000,
+        group: 'context',
+        unit: 'chars'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.knowledgeExtractMaxChars,
+        prop: 'knowledgeExtractMaxChars',
+        label: '知识库抽取字符上限',
+        env: 'KNOWLEDGE_EXTRACT_MAX_CHARS',
+        defaultValue: 600000,
+        min: 100000,
+        max: 10000000,
+        group: 'rag',
+        unit: 'chars'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.ragTopKMax,
+        prop: 'ragTopKMax',
+        label: 'RAG 引用数量上限',
+        env: 'RAG_TOP_K_MAX',
+        defaultValue: 50,
+        min: 1,
+        max: 200,
+        group: 'rag'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.ragCandidateLimitMax,
+        prop: 'ragCandidateLimitMax',
+        label: 'RAG 候选片段上限',
+        env: 'RAG_CANDIDATE_LIMIT_MAX',
+        defaultValue: 5000,
+        min: 20,
+        max: 50000,
+        group: 'rag'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.ragChunkSizeMax,
+        prop: 'ragChunkSizeMax',
+        label: 'RAG 切片字符上限',
+        env: 'RAG_CHUNK_SIZE_MAX',
+        defaultValue: 4000,
+        min: 500,
+        max: 20000,
+        group: 'rag',
+        unit: 'chars'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.ragContextBudgetPercent,
+        prop: 'ragContextBudgetPercent',
+        label: 'RAG 上下文预算占比',
+        env: 'RAG_CONTEXT_BUDGET_PERCENT',
+        defaultValue: 25,
+        min: 5,
+        max: 70,
+        group: 'rag',
+        unit: 'percent'
     }
 ]);
 
@@ -150,7 +279,7 @@ const RUNTIME_SETTING_DEFINITION_BY_KEY = Object.freeze(
 function parseHumanInt(value) {
     const text = String(value ?? '').trim();
     if (!text) return NaN;
-    const match = text.replace(/,/g, '').match(/^(\d+(?:\.\d+)?)\s*([kKmMbB万亿]?)\s*(?:tokens?)?$/);
+    const match = text.replace(/,/g, '').match(/^(\d+(?:\.\d+)?)\s*([kKmMbB万亿]?)\s*(?:tokens?|bytes?|chars?|percent)?$/);
     if (!match) return Number.parseInt(text.replace(/[^\d]/g, ''), 10);
     const amount = Number(match[1]) || 0;
     const unit = match[2].toLowerCase();
