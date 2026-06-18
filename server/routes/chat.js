@@ -51,7 +51,8 @@ const {
     ContextLengthExceededError,
     buildContextLengthExceededPayload,
     estimateMessagesTokens,
-    fitMessagesToContextBudget
+    fitMessagesToContextBudget,
+    getModelContextBudget
 } = require('../services/context-budget');
 const { maybeGenerateTitle } = require('../services/chat-title');
 const {
@@ -73,6 +74,12 @@ const {
     filterMcpToolsForPlanner,
     maybeBuildMcpChatContext
 } = require('../services/chat-mcp-context');
+const {
+    buildLongTermMemoryContextMessage,
+    injectLongTermMemoryBeforeLatestUser,
+    retrieveLongTermMemories,
+    scheduleMemoryExtraction
+} = require('../services/long-term-memory');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const CHAT_LANGUAGE_SYSTEM_PROMPT = [
@@ -387,10 +394,12 @@ function createChatRouter({
             }
         }
 
+        let userMessageId = null;
         if (!regenerate) {
             try {
                 const userMessageResult = saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
                 userMessagePersisted = true;
+                userMessageId = Number(userMessageResult.lastInsertRowid || 0) || null;
                 writeSse(JSON.stringify({
                     type: 'message_saved',
                     role: 'user',
@@ -410,6 +419,13 @@ function createChatRouter({
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
             const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+            scheduleMemoryExtraction({
+                userId,
+                sessionId,
+                messageIds: [userMessageId, Number(assistantMessageResult.lastInsertRowid || 0)].filter(Boolean),
+                user: req.user,
+                modelCfg
+            });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
@@ -428,6 +444,13 @@ function createChatRouter({
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
             const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+            scheduleMemoryExtraction({
+                userId,
+                sessionId,
+                messageIds: [userMessageId, Number(assistantMessageResult.lastInsertRowid || 0)].filter(Boolean),
+                user: req.user,
+                modelCfg
+            });
 
             maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
@@ -516,6 +539,26 @@ function createChatRouter({
         let history = await getContext(sessionId, userId, modelCfg);
         const disableChatThinking = shouldDisableChatThinking(modelCfg);
         const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
+        const memoryQuery = effectiveUserPrompt || modelContent;
+        if (memoryQuery) {
+            try {
+                const memoryMatches = await retrieveLongTermMemories(userId, memoryQuery, { user: req.user });
+                const memoryMessage = buildLongTermMemoryContextMessage(memoryMatches, {
+                    inputBudget: getModelContextBudget(modelCfg).inputBudget
+                });
+                if (memoryMessage) {
+                    history = injectLongTermMemoryBeforeLatestUser(history, memoryMessage);
+                    writeSse(JSON.stringify({
+                        type: 'memory',
+                        status: 'hit',
+                        message: `已检索到 ${memoryMatches.length} 条相关长期记忆`,
+                        memoryCount: memoryMatches.length
+                    }));
+                }
+            } catch (err) {
+                req.log.warn({ sessionId, userId, err: err.message }, '长期记忆检索失败，已按普通上下文继续');
+            }
+        }
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
             const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : null;
             const ragScoped = hasRagScopeFilter(ragScope);
@@ -835,9 +878,17 @@ function createChatRouter({
                     assistantContent = stats.assistantContent;
                     const assistantTokens = stats.assistantTokens;
                     const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+                    const assistantMessageId = Number(assistantMessageResult.lastInsertRowid || 0) || null;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
                     updateLastAssistantStats({ sessionId, userId, costTime, tps: tokensPerSec });
+                    scheduleMemoryExtraction({
+                        userId,
+                        sessionId,
+                        messageIds: [userMessageId, assistantMessageId].filter(Boolean),
+                        user: req.user,
+                        modelCfg
+                    });
 
                     maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
 

@@ -167,7 +167,7 @@
     background: #f8fafc;
 }
 
-/* 会话搜索与角色规范库样式 */
+/* 会话搜索与提示词库样式 */
 .session-search-modal {
     background: rgba(15, 23, 42, 0.42);
     backdrop-filter: blur(8px);

@@ -76,6 +76,7 @@ const { createAgentsRouter } = require('./routes/agents');
 const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
+const { createMemoriesRouter } = require('./routes/memories');
 const { ragRouter, retrieveContext } = require('./rag');
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const {
@@ -520,6 +521,11 @@ app.use('/api', createSessionsRouter({
 }));
 
 app.use('/api', createPromptsRouter({
+    authMiddleware,
+    logAction
+}));
+
+app.use('/api', createMemoriesRouter({
     authMiddleware,
     logAction
 }));

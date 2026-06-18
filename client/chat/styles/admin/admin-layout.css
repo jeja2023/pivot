@@ -245,6 +245,9 @@
     justify-content: flex-end;
     flex-wrap: wrap;
 }
+.global-params-tab .settings-page-actions {
+    align-items: center;
+}
 .model-modal.runtime-settings-modal {
     width: min(900px, calc(100vw - 36px));
     max-height: min(820px, calc(100vh - 36px));
@@ -362,9 +365,17 @@
     cursor: not-allowed;
 }
 .global-params-tab .runtime-settings-status {
-    margin: 8px 0 0;
-    min-height: 18px;
-    text-align: center;
+    margin: 0 6px 0 0;
+    min-height: 0;
+    padding: 0;
+    max-width: 320px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.2;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .settings-workspace-view .btn-primary,
 .settings-workspace-view .btn-secondary,
@@ -582,6 +593,331 @@
 .settings-workspace-view #tab-content-ops .trend-card canvas {
     min-height: 240px;
 }
+.settings-workspace-view .memory-governance-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.settings-workspace-view .memory-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.settings-workspace-view .memory-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 7px;
+    background: #fff;
+    color: #334155;
+    font-size: 0.82rem;
+    font-weight: 700;
+    box-shadow: 0 1px 1px rgba(15, 23, 42, 0.02);
+}
+.settings-workspace-view .memory-metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 8px;
+}
+.settings-workspace-view .memory-summary-grid {
+    display: contents;
+}
+.settings-workspace-view .memory-summary-card {
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+    display: grid;
+    align-content: center;
+    gap: 3px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
+}
+.settings-workspace-view .memory-summary-card span {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.05;
+}
+.settings-workspace-view .memory-summary-card strong {
+    color: var(--text-main);
+    font-size: 0.86rem;
+    line-height: 1.1;
+}
+.settings-workspace-view .memory-summary-card:first-child strong {
+    color: var(--primary);
+}
+.settings-workspace-view .memory-quality-panel {
+    display: contents;
+}
+.settings-workspace-view .memory-quality-card {
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #fff;
+    display: grid;
+    align-content: center;
+    gap: 3px;
+}
+.settings-workspace-view .memory-quality-card span {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.05;
+}
+.settings-workspace-view .memory-quality-card strong {
+    color: var(--text-main);
+    font-size: 0.86rem;
+    line-height: 1.15;
+}
+.settings-workspace-view .memory-quality-card:first-child strong {
+    color: var(--primary);
+}
+.settings-workspace-view .memory-control-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #fff;
+}
+.settings-workspace-view .memory-filter-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.settings-workspace-view .memory-filter-fields {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(220px, 1.6fr) minmax(120px, 0.8fr) minmax(140px, 0.9fr);
+    gap: 8px;
+    align-items: center;
+}
+.settings-workspace-view .memory-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    align-items: center;
+}
+.settings-workspace-view .memory-filter-bar .form-input,
+.settings-workspace-view .memory-filter-actions .btn-secondary,
+.settings-workspace-view .memory-filter-actions .btn-danger-outline,
+.settings-workspace-view .memory-jobs-line .btn-secondary {
+    height: 34px;
+    min-height: 34px;
+    box-sizing: border-box;
+}
+.settings-workspace-view .memory-filter-bar .form-input {
+    min-width: 0;
+    margin: 0;
+    display: block;
+    line-height: 1.2;
+}
+.settings-workspace-view .memory-filter-actions .btn-secondary,
+.settings-workspace-view .memory-filter-actions .btn-danger-outline,
+.settings-workspace-view .memory-jobs-line .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    line-height: 1;
+    white-space: nowrap;
+}
+.settings-workspace-view .memory-merge-panel {
+    margin: 0;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+.settings-workspace-view .memory-jobs-panel {
+    margin: 0;
+    min-width: 0;
+}
+.settings-workspace-view .memory-jobs-line {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #475569;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+.settings-workspace-view .memory-jobs-line span {
+    color: var(--text-muted);
+    font-weight: 700;
+}
+.settings-workspace-view .memory-jobs-line strong {
+    color: var(--text-main);
+    font-weight: 800;
+}
+.settings-workspace-view .memory-jobs-line .btn-secondary {
+    justify-self: end;
+}
+.settings-workspace-view .memory-type-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: #eef6f3;
+    color: #047857;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.settings-workspace-view .memory-content-cell {
+    max-width: 520px;
+    white-space: normal;
+    line-height: 1.5;
+}
+.settings-workspace-view .memories-table td {
+    vertical-align: top;
+}
+.settings-workspace-view .memory-action-cell {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.settings-workspace-view .memory-source-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.settings-workspace-view .memory-merge-empty {
+    padding: 12px 14px;
+    color: #64748b;
+    font-size: 0.84rem;
+}
+.settings-workspace-view .memory-merge-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-top: 1px solid #edf2f7;
+}
+.settings-workspace-view .memory-merge-row:first-child {
+    border-top: 0;
+}
+.settings-workspace-view .memory-merge-copy {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+.settings-workspace-view .memory-merge-copy span,
+.settings-workspace-view .memory-merge-copy strong {
+    font-size: 0.72rem;
+    color: #047857;
+    white-space: nowrap;
+}
+.settings-workspace-view .memory-merge-copy p {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: #334155;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+.settings-workspace-view .memory-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(780px, calc(100vh - 40px));
+    padding: 0;
+    overflow: hidden;
+}
+.settings-workspace-view .memory-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.settings-workspace-view .memory-modal-header h3 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1rem;
+    font-weight: 800;
+}
+.settings-workspace-view .memory-edit-form,
+.settings-workspace-view .memory-source-body {
+    padding: 16px 18px 18px;
+}
+.settings-workspace-view .memory-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.settings-workspace-view .memory-edit-content textarea {
+    min-height: 140px;
+    resize: vertical;
+}
+.settings-workspace-view .memory-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+.settings-workspace-view .memory-source-modal {
+    width: min(820px, calc(100vw - 32px));
+}
+.settings-workspace-view .memory-source-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    color: #64748b;
+    font-size: 0.78rem;
+}
+.settings-workspace-view .memory-source-meta strong {
+    color: #0f172a;
+    font-size: 0.9rem;
+}
+.settings-workspace-view .memory-source-list {
+    display: grid;
+    gap: 10px;
+    max-height: 560px;
+    overflow: auto;
+}
+.settings-workspace-view .memory-source-message {
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.settings-workspace-view .memory-source-message div {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: #64748b;
+    font-size: 0.75rem;
+    margin-bottom: 6px;
+}
+.settings-workspace-view .memory-source-message pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #334155;
+    font-family: inherit;
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
 .settings-workspace-view .pagination {
     margin-top: 10px;
     padding-top: 10px;
@@ -592,10 +928,22 @@
     padding-top: 10px;
 }
 
+@media (max-width: 1280px) {
+    .settings-workspace-view .memory-control-bar {
+        grid-template-columns: 1fr;
+    }
+    .settings-workspace-view .memory-jobs-line {
+        justify-content: space-between;
+    }
+}
+
 @media (max-width: 760px) {
     .global-params-tab .global-params-list,
     .global-params-tab .global-params-row {
         grid-template-columns: 1fr;
+    }
+    .settings-workspace-view .memory-metrics-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .model-modal.runtime-settings-modal .runtime-settings-grid,
     .model-modal.runtime-settings-modal .runtime-settings-group {
@@ -612,5 +960,29 @@
     }
     .model-modal.runtime-settings-modal .model-modal-actions {
         padding: 10px 16px 12px;
+    }
+    .settings-workspace-view .memory-edit-grid,
+    .settings-workspace-view .memory-merge-row,
+    .settings-workspace-view .memory-merge-copy,
+    .settings-workspace-view .memory-filter-bar {
+        grid-template-columns: 1fr;
+    }
+    .settings-workspace-view .memory-filter-fields,
+    .settings-workspace-view .memory-filter-actions {
+        width: 100%;
+        grid-template-columns: 1fr;
+    }
+    .settings-workspace-view .memory-filter-actions {
+        justify-content: stretch;
+    }
+    .settings-workspace-view .memory-filter-actions .btn-secondary,
+    .settings-workspace-view .memory-filter-actions .btn-danger-outline {
+        width: 100%;
+    }
+    .settings-workspace-view .memory-jobs-line {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: flex-start;
+        white-space: normal;
     }
 }

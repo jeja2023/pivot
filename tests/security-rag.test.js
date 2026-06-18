@@ -3,4 +3,5 @@
 require('./security-rag/core');
 require('./security-rag/embedding-config');
 require('./security-rag/documents');
+require('./security-rag/memories');
 require('./security-rag/retrieval-usage');

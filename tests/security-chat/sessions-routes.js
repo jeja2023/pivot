@@ -69,7 +69,7 @@ test('getContext 返回模型上下文前会压缩超过阈值的历史', async 
         });
         const rows = db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC').all(sessionId, userId);
         const meta = buildContextMeta(rows);
-        const summaryIndex = history.findIndex(message => String(message.content || '').includes('长期记忆摘要'));
+        const summaryIndex = history.findIndex(message => String(message.content || '').includes('短期会话记忆摘要'));
         const recentIndex = history.findIndex(message => String(message.content || '').includes('第2条重要上下文'));
 
         assert.equal(summaryRequests.length, 1);

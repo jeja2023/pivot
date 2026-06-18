@@ -587,7 +587,7 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
         return { skipped: true, reason: 'not_enough_messages' };
     }
 
-    const summaryPrompt = '你是一个记忆压缩专家。请将以下对话内容提炼为一段极简的摘要（300字以内），保留所有关键事实、决定和背景信息。输出必须直接开始摘要内容：\n\n'
+    const summaryPrompt = '你是一个短期会话记忆压缩专家。请将以下同一会话内的对话内容提炼为一段极简摘要（300字以内），用于当前会话后续上下文续接；保留关键事实、决定和背景信息，但不要把它当作跨会话长期记忆。输出必须直接开始摘要内容：\n\n'
         + toSummarize.map(m => `${m.role}: ${getMessageTextForContext(m)}`).join('\n');
 
     try {
@@ -610,7 +610,7 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
             ...agents
         });
 
-        const summaryText = `【长期记忆摘要】： ${response.data.choices[0].message.content}`;
+        const summaryText = `【短期会话记忆摘要】： ${response.data.choices[0].message.content}`;
         const now = getBeijingTimestamp();
         const transaction = db.transaction(() => {
             const ids = toSummarize.map(m => m.id);

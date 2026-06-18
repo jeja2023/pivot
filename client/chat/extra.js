@@ -95,7 +95,7 @@ function renderPromptGrid() {
                 ${(prompt.scope !== 'global' || isSuperAdminUser()) ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt-id="${prompt.id}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${prompt.id}">删除</button>` : ''}
             </div>
         </div>
-    `).join('') : '<div class="prompt-empty-state">暂无可用角色与规范</div>';
+    `).join('') : '<div class="prompt-empty-state">暂无可用提示词</div>';
 }
 
 window.loadPrompts = async function() {
@@ -126,7 +126,7 @@ function appendTextBlock(current, block) {
 
 async function applyPromptToChat(prompt) {
     if (!currentSessionId) return showToast('请先选择或新建一个对话', 'error');
-    showConfirm('套用到聊天', '确定将这条角色与规范应用到当前对话的系统提示词吗？', async () => {
+    showConfirm('套用到聊天', '确定将这条提示词应用到当前对话的系统提示词吗？', async () => {
         try {
             const res = await apiFetch(`${API_BASE}/sessions/${currentSessionId}/system-prompt`, {
                 method: 'PUT',
@@ -245,7 +245,7 @@ function renderPromptApplyList() {
                 <small>${escapeHtml(prompt.category || '通用')}</small>
             </span>
         </button>
-    `).join('') : '<div class="prompt-empty-state">当前入口暂无可用角色与规范</div>';
+    `).join('') : '<div class="prompt-empty-state">当前入口暂无可用提示词</div>';
     const status = document.getElementById('prompt-apply-status');
     if (status) status.textContent = `${promptTargetLabel(promptApplyTarget)} · ${prompts.length} 条可用`;
 }
@@ -256,7 +256,7 @@ window.openPromptLibrary = async function(target = 'chat') {
     const title = document.getElementById('prompt-apply-title');
     const desc = document.getElementById('prompt-apply-desc');
     if (title) title.textContent = `套用到${promptTargetLabel(promptApplyTarget)}`;
-    if (desc) desc.textContent = '选择一条角色与规范应用到当前入口。';
+    if (desc) desc.textContent = '选择一条提示词应用到当前入口。';
     const search = document.getElementById('prompt-apply-search');
     const typeFilter = document.getElementById('prompt-apply-type-filter');
     if (search) search.value = '';
@@ -283,7 +283,7 @@ function getPromptTargetChecks() {
 
 window.openPromptModal = () => {
     resetPromptForm();
-    document.getElementById('prompt-modal-title').innerText = '新增规范';
+    document.getElementById('prompt-modal-title').innerText = '新增提示词';
     document.getElementById('p-scope').disabled = !isSuperAdminUser();
     document.getElementById('prompt-modal-container').classList.remove('hidden');
 };
@@ -310,7 +310,7 @@ window.prepareEditPrompt = (prompt) => {
     document.getElementById('p-scope').disabled = !isSuperAdminUser() || p.scope === 'global';
     document.getElementById('p-content').value = p.content;
     setPromptTargetChecks(p.targetSurfaces);
-    document.getElementById('prompt-modal-title').innerText = '编辑规范';
+    document.getElementById('prompt-modal-title').innerText = '编辑提示词';
     document.getElementById('prompt-modal-container').classList.remove('hidden');
 };
 
@@ -336,14 +336,14 @@ window.savePrompt = async () => {
     }
     window.closePromptModal();
     await window.loadPrompts();
-    showToast('角色与规范已保存');
+    showToast('提示词已保存');
 };
 
 window.deletePrompt = (id) => {
-    showConfirm('删除角色与规范', '确定删除这条角色与规范吗？', async () => {
+    showConfirm('删除提示词', '确定删除这条提示词吗？', async () => {
         const res = await apiFetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) {
-            showToast('角色与规范已删除');
+            showToast('提示词已删除');
             await window.loadPrompts();
         }
     });

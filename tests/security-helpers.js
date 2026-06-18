@@ -286,6 +286,8 @@ const {
     maybeBuildMcpChatContext
 } = require('../server/services/chat-mcp-context');
 
+const longTermMemory = require('../server/services/long-term-memory');
+
 const {
     buildEmbeddingModelItem,
     buildEmbeddingResponse,
@@ -807,6 +809,7 @@ module.exports = {
     listDeletedRunsForAdmin,
     listEntities,
     listRelations,
+    longTermMemory,
     listRuns,
     localizeAuditDetails,
     localizeAuditLogRow,

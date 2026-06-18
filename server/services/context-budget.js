@@ -150,6 +150,11 @@ function isMcpMessage(message) {
     return text.includes('MCP') || text.includes('工具:');
 }
 
+function isLongTermMemoryMessage(message) {
+    const text = contentText(message.content);
+    return text.includes('PIVOT_LONG_TERM_MEMORY_BEGIN') || text.includes('PIVOT_LONG_TERM_MEMORY_END');
+}
+
 function truncateTextToTokens(text, maxTokens, suffix) {
     const source = String(text || '');
     if (maxTokens <= 0) return '';
@@ -233,8 +238,10 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         droppedMessages: 0,
         droppedRagContexts: 0,
         droppedMcpContexts: 0,
+        droppedMemoryContexts: 0,
         trimmedRagContexts: 0,
         trimmedMcpContexts: 0,
+        trimmedMemoryContexts: 0,
         budget
     };
 
@@ -267,7 +274,11 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
 
     const ragBudgetPercent = Math.max(5, Math.min(70, getRagLimits().contextBudgetPercent || 25));
     const ragCap = Math.max(512, Math.floor(budget.inputBudget * (ragBudgetPercent / 100)));
+    const memoryCap = Math.max(256, Math.floor(budget.inputBudget * 0.08));
     const mcpCap = Math.max(768, Math.floor(budget.inputBudget * 0.20));
+    if (trimGeneratedContextMessages(working, isLongTermMemoryMessage, memoryCap, 'trimmedMemoryContexts', metadata)) {
+        total = estimateMessagesTokens(working);
+    }
     if (trimGeneratedContextMessages(working, isRagMessage, ragCap, 'trimmedRagContexts', metadata)) {
         total = estimateMessagesTokens(working);
     }
@@ -283,6 +294,7 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         const pinned = message.__originIndex === lastUserOriginIndex
             || message.__originIndex === firstSystemOriginIndex
             || isRagMessage(message)
+            || isLongTermMemoryMessage(message)
             || isMcpMessage(message);
         if (pinned) {
             i += 1;
@@ -291,6 +303,16 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         total -= estimateMessageTokens(message);
         working.splice(i, 1);
         metadata.droppedMessages += 1;
+    }
+
+    for (let i = 0; i < working.length && total > budget.inputBudget;) {
+        if (!isLongTermMemoryMessage(working[i])) {
+            i += 1;
+            continue;
+        }
+        total -= estimateMessageTokens(working[i]);
+        working.splice(i, 1);
+        metadata.droppedMemoryContexts += 1;
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
@@ -328,8 +350,10 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
     metadata.adjusted = metadata.droppedMessages > 0
         || metadata.droppedRagContexts > 0
         || metadata.droppedMcpContexts > 0
+        || metadata.droppedMemoryContexts > 0
         || metadata.trimmedRagContexts > 0
-        || metadata.trimmedMcpContexts > 0;
+        || metadata.trimmedMcpContexts > 0
+        || metadata.trimmedMemoryContexts > 0;
 
     return {
         messages: working.map(({ __originIndex, ...message }) => message),

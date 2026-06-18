@@ -80,6 +80,55 @@ function runMigrations() {
     ensureColumn('messages', 'deleted_at', 'DATETIME');
     ensureColumn('messages', 'deleted_by_user', 'INTEGER DEFAULT 0');
     db.prepare('UPDATE messages SET context_archived = 0 WHERE context_archived IS NULL').run();
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            scope TEXT DEFAULT 'user',
+            type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            embedding TEXT,
+            salience REAL DEFAULT 0.5,
+            confidence REAL DEFAULT 0.6,
+            source_session_id TEXT,
+            source_message_ids TEXT DEFAULT '[]',
+            status TEXT DEFAULT 'active',
+            last_used_at DATETIME,
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_session_id) REFERENCES sessions(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memories_user_status ON memories(user_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, type, status);
+        CREATE INDEX IF NOT EXISTS idx_memories_source_session ON memories(source_session_id);
+        CREATE TABLE IF NOT EXISTS memory_extraction_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            session_id TEXT NOT NULL,
+            message_ids TEXT DEFAULT '[]',
+            model_id INTEGER,
+            dedupe_key TEXT,
+            status TEXT DEFAULT 'queued',
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            locked_at DATETIME,
+            last_error TEXT,
+            result TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            next_run_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_jobs_status_next_run ON memory_extraction_jobs(status, next_run_at, id);
+        CREATE INDEX IF NOT EXISTS idx_memory_jobs_user_status ON memory_extraction_jobs(user_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_memory_jobs_dedupe ON memory_extraction_jobs(dedupe_key, status);
+    `);
+    ensureColumn('memory_extraction_jobs', 'dedupe_key', 'TEXT');
     ensureColumn('attachments', 'access_token', 'TEXT');
     ensureColumn('attachments', 'expires_at', 'DATETIME');
     ensureColumn('attachments', 'deleted_at', 'DATETIME');

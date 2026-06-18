@@ -257,7 +257,7 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
             config,
             httpConfig: targetHttpConfig,
             inputs: [text],
-            source: 'rag_embedding'
+            source: options.source || 'rag_embedding'
         });
         return vector;
     }

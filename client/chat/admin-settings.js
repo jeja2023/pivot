@@ -21,6 +21,380 @@ async function loadSettings() {
     }
 }
 
+async function updateMemoryStatus(memoryId, status) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆状态更新失败');
+    return data;
+}
+
+async function deleteMemory(memoryId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆删除失败');
+    return data;
+}
+
+let currentLongTermMemories = [];
+const ENHANCED_MEMORY_TYPE_LABELS = {
+    preference: '用户偏好',
+    fact: '项目事实',
+    decision: '长期决策',
+    episode: '历史片段'
+};
+
+function getCurrentMemory(memoryId) {
+    return currentLongTermMemories.find(memory => String(memory.id) === String(memoryId)) || null;
+}
+
+function renderEnhancedMemorySummary(summary = {}) {
+    const grid = document.getElementById('memory-summary-grid');
+    if (!grid) return;
+    const byType = summary.byType || {};
+    const items = [
+        ['启用状态', summary.enabled ? '已启用' : '已关闭'],
+        ['活跃记忆', Number(summary.active || 0)],
+        ['用户偏好', Number(byType.preference || 0)],
+        ['项目事实', Number(byType.fact || 0)],
+        ['长期决策', Number(byType.decision || 0)],
+        ['历史片段', Number(byType.episode || 0)]
+    ];
+    grid.innerHTML = items.map(([label, value]) => `
+        <div class="memory-summary-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(String(value))}</strong>
+        </div>
+    `).join('');
+}
+
+window.updateLongTermMemoryEnabled = async function(enabled) {
+    const toggle = document.getElementById('long-term-memory-toggle');
+    if (toggle) toggle.disabled = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/memories/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '长期记忆设置保存失败');
+        if (toggle) toggle.checked = data.enabled !== false;
+        renderEnhancedMemorySummary(data.summary);
+        showToast(data.enabled ? '长期记忆已启用' : '长期记忆已关闭');
+    } catch (e) {
+        if (toggle) toggle.checked = !enabled;
+        showToast(e.message || '长期记忆设置保存失败', 'error');
+    } finally {
+        if (toggle) toggle.disabled = false;
+    }
+};
+
+async function saveMemory(memoryId, payload) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆保存失败');
+    return data;
+}
+
+async function fetchMemorySource(memoryId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/source`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆来源加载失败');
+    return data;
+}
+
+async function fetchMemoryMergeSuggestions() {
+    const res = await apiFetch(`${API_BASE}/memories/merge-suggestions?limit=20`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '合并建议加载失败');
+    return data.suggestions || [];
+}
+
+async function mergeMemoryPair(targetId, sourceId) {
+    const res = await apiFetch(`${API_BASE}/memories/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId, sourceId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆合并失败');
+    return data;
+}
+
+window.openMemoryEditModal = function(memory) {
+    const modal = document.getElementById('memory-edit-modal');
+    if (!modal || !memory) return;
+    document.getElementById('memory-edit-id').value = memory.id;
+    document.getElementById('memory-edit-type').value = memory.type || 'episode';
+    document.getElementById('memory-edit-content').value = memory.content || '';
+    document.getElementById('memory-edit-salience').value = Number(memory.salience || 0).toFixed(2);
+    document.getElementById('memory-edit-confidence').value = Number(memory.confidence || 0).toFixed(2);
+    modal.classList.remove('hidden');
+};
+
+window.closeMemoryEditModal = function() {
+    document.getElementById('memory-edit-modal')?.classList.add('hidden');
+};
+
+function renderMemorySource(data = {}) {
+    const body = document.getElementById('memory-source-body');
+    if (!body) return;
+    const session = data.session || {};
+    const messages = Array.isArray(data.messages) ? data.messages : [];
+    body.innerHTML = `
+        <div class="memory-source-meta">
+            <strong>${escapeHtml(session.title || session.id || '-')}</strong>
+            <span>${escapeHtml(session.updatedAt || session.createdAt || '')}</span>
+        </div>
+        <div class="memory-source-list">
+            ${messages.length ? messages.map(message => `
+                <article class="memory-source-message">
+                    <div>
+                        <strong>${escapeHtml(message.role || '')}</strong>
+                        <span>#${escapeHtml(String(message.id || ''))}</span>
+                    </div>
+                    <pre>${escapeHtml(message.content || '')}</pre>
+                </article>
+            `).join('') : '<p class="muted">暂无可追溯消息</p>'}
+        </div>
+    `;
+}
+
+window.openMemorySourceModal = async function(memoryId) {
+    const modal = document.getElementById('memory-source-modal');
+    if (!modal) return;
+    const body = document.getElementById('memory-source-body');
+    if (body) body.innerHTML = '<p class="muted">正在加载...</p>';
+    modal.classList.remove('hidden');
+    const data = await fetchMemorySource(memoryId);
+    renderMemorySource(data);
+};
+
+window.closeMemorySourceModal = function() {
+    document.getElementById('memory-source-modal')?.classList.add('hidden');
+};
+
+function renderMemoryMergeSuggestions(suggestions = []) {
+    const panel = document.getElementById('memory-merge-panel');
+    if (!panel) return;
+    panel.classList.remove('hidden');
+    if (!suggestions.length) {
+        panel.innerHTML = '<div class="memory-merge-empty">暂无合并建议</div>';
+        return;
+    }
+    panel.innerHTML = suggestions.map(item => `
+        <div class="memory-merge-row">
+            <div class="memory-merge-copy">
+                <span>${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[item.primary?.type] || item.primary?.type || '记忆')}</span>
+                <strong>${Math.round(Number(item.score || 0) * 100)}%</strong>
+                <p>${escapeHtml(item.primary?.content || '')}</p>
+                <p>${escapeHtml(item.duplicate?.content || '')}</p>
+            </div>
+            <button class="btn-primary" data-memory-merge-target="${item.primary?.id}" data-memory-merge-source="${item.duplicate?.id}">合并</button>
+        </div>
+    `).join('');
+}
+
+window.loadMemoryMergeSuggestions = async function() {
+    const button = document.getElementById('memory-merge-suggestions-btn');
+    if (button) button.disabled = true;
+    try {
+        renderMemoryMergeSuggestions(await fetchMemoryMergeSuggestions());
+    } catch (e) {
+        showToast(e.message || '合并建议加载失败', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+};
+
+function memoryQueryParams() {
+    const params = new URLSearchParams();
+    params.set('status', document.getElementById('memory-status-filter')?.value || 'active');
+    params.set('limit', '200');
+    const type = document.getElementById('memory-type-filter')?.value || '';
+    const search = document.getElementById('memory-search-input')?.value?.trim?.() || '';
+    if (type) params.set('type', type);
+    if (search) params.set('search', search);
+    return params;
+}
+
+function selectedMemoryIds() {
+    return Array.from(document.querySelectorAll('[data-memory-select]:checked'))
+        .map(input => Number(input.value))
+        .filter(Number.isSafeInteger);
+}
+
+function renderMemoryQualityPanel(summary = {}) {
+    const panel = document.getElementById('memory-quality-panel');
+    if (!panel) return;
+    const quality = summary.quality || {};
+    const jobs = quality.jobSummary || {};
+    const statusLabel = quality.status === 'healthy' ? '健康' : quality.status === 'attention' ? '需关注' : '待复核';
+    const items = [
+        ['质量状态', statusLabel],
+        ['重复建议', Number(quality.duplicateSuggestions || 0)],
+        ['低置信', Number(quality.lowConfidence || 0)],
+        ['过期', Number(quality.expired || 0)],
+        ['任务积压', Number(jobs.queued || 0) + Number(jobs.running || 0)],
+        ['失败任务', Number(jobs.failed || 0)]
+    ];
+    panel.innerHTML = items.map(([label, value]) => `
+        <div class="memory-quality-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(String(value))}</strong>
+        </div>
+    `).join('');
+}
+
+function renderMemoryJobsPanel(jobsData = {}) {
+    const panel = document.getElementById('memory-jobs-panel');
+    if (!panel) return;
+    const summary = jobsData.summary || {};
+    const running = Number(summary.running || 0);
+    const queued = Number(summary.queued || 0);
+    const failed = Number(summary.failed || 0);
+    panel.innerHTML = `
+        <div class="memory-jobs-line">
+            <span>抽取任务</span>
+            <strong>${queued} 排队 / ${running} 执行 / ${failed} 失败</strong>
+            <button id="memory-jobs-retry-btn" class="btn-secondary" type="button" ${failed ? '' : 'disabled'}>重试失败</button>
+            <button id="memory-jobs-cleanup-btn" class="btn-secondary" type="button">清理旧任务</button>
+        </div>
+    `;
+}
+
+function renderProductMemoryRows(memories = []) {
+    const body = document.getElementById('memory-list-body');
+    if (!body) return;
+    const colspan = 9;
+    if (!memories.length) {
+        body.innerHTML = `<tr><td colspan="${colspan}" class="text-center muted">暂无长期记忆</td></tr>`;
+        return;
+    }
+    body.innerHTML = memories.map(memory => `
+        <tr>
+            <td><input type="checkbox" data-memory-select value="${memory.id}"></td>
+            <td><span class="memory-type-badge">${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[memory.type] || memory.type || '记忆')}</span></td>
+            <td class="memory-content-cell">${escapeHtml(memory.content || '')}</td>
+            <td>${Number(memory.salience || 0).toFixed(2)}</td>
+            <td>${Number(memory.confidence || 0).toFixed(2)}</td>
+            <td>${escapeHtml(memory.status || 'active')}</td>
+            <td>
+                <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
+            </td>
+            <td>${escapeHtml(memory.lastUsedAt || memory.updatedAt || '-')}</td>
+            <td class="text-center memory-action-cell">
+                <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
+                ${memory.status === 'active'
+                    ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`
+                    : `<button class="btn-secondary" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`}
+                <button class="btn-danger" data-memory-action="delete" data-memory-id="${memory.id}">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function fetchMemoryQuality() {
+    const res = await apiFetch(`${API_BASE}/memories/quality`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆质量摘要加载失败');
+    return data.summary || {};
+}
+
+async function fetchMemoryJobs() {
+    const res = await apiFetch(`${API_BASE}/memories/jobs?limit=20`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆任务加载失败');
+    return data;
+}
+
+async function bulkUpdateMemoryStatus(ids, status) {
+    const res = await apiFetch(`${API_BASE}/memories/status/bulk`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, status })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '批量更新失败');
+    return data;
+}
+
+async function retryMemoryJobs() {
+    const res = await apiFetch(`${API_BASE}/memories/jobs/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '任务重试失败');
+    return data;
+}
+
+async function cleanupMemoryJobs() {
+    const res = await apiFetch(`${API_BASE}/memories/jobs/cleanup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retentionDays: 30 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '任务清理失败');
+    return data;
+}
+
+async function archiveExpiredMemories() {
+    const res = await apiFetch(`${API_BASE}/memories/maintenance/archive-expired`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'disabled' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '过期记忆归档失败');
+    return data;
+}
+
+window.loadMemories = async function() {
+    const toggle = document.getElementById('long-term-memory-toggle');
+    try {
+        const res = await apiFetch(`${API_BASE}/memories?${memoryQueryParams().toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '长期记忆加载失败');
+        if (toggle) toggle.checked = data.enabled !== false;
+        currentLongTermMemories = Array.isArray(data.memories) ? data.memories : [];
+        renderEnhancedMemorySummary(data.summary);
+        renderProductMemoryRows(currentLongTermMemories);
+        renderMemoryQualityPanel(await fetchMemoryQuality());
+        renderMemoryJobsPanel(await fetchMemoryJobs());
+    } catch (e) {
+        showToast(e.message || '长期记忆加载失败', 'error');
+    }
+};
+
+window.exportMemories = async function() {
+    try {
+        const res = await apiFetch(`${API_BASE}/memories/export?${memoryQueryParams().toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '长期记忆导出失败');
+        const blob = new Blob([JSON.stringify(data.export, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `pivot-memories-${Date.now()}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showToast('长期记忆已导出');
+    } catch (e) {
+        showToast(e.message || '长期记忆导出失败', 'error');
+    }
+};
+
 function runtimeItemsByKey(runtimeConfig = {}) {
     const map = {};
     (runtimeConfig.items || []).forEach(item => {
@@ -206,8 +580,157 @@ document.getElementById('runtime-settings-cancel')?.addEventListener('click', ()
 document.getElementById('runtime-settings-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
 document.getElementById('runtime-settings-page-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
 document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => loadSettings());
+document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.loadMemories?.());
+document.getElementById('long-term-memory-toggle')?.addEventListener('change', (event) => {
+    window.updateLongTermMemoryEnabled?.(event.target.checked === true);
+});
 document.getElementById('runtime-settings-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'runtime-settings-modal') window.closeRuntimeSettingsModal?.();
+});
+
+document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.loadMemoryMergeSuggestions?.());
+document.getElementById('memory-export-btn')?.addEventListener('click', () => window.exportMemories?.());
+document.getElementById('memory-search-input')?.addEventListener('input', () => {
+    clearTimeout(window.memorySearchTimer);
+    window.memorySearchTimer = setTimeout(() => window.loadMemories?.(), 250);
+});
+document.getElementById('memory-status-filter')?.addEventListener('change', () => window.loadMemories?.());
+document.getElementById('memory-type-filter')?.addEventListener('change', () => window.loadMemories?.());
+document.getElementById('memory-archive-expired-btn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        const data = await archiveExpiredMemories();
+        showToast(`已归档 ${Number(data.archived || 0)} 条过期记忆`);
+        await window.loadMemories?.();
+    } catch (e) {
+        showToast(e.message || '过期记忆归档失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+document.getElementById('memory-select-all')?.addEventListener('change', (event) => {
+    document.querySelectorAll('[data-memory-select]').forEach(input => {
+        input.checked = event.target.checked === true;
+    });
+});
+document.getElementById('memory-bulk-enable-btn')?.addEventListener('click', async () => {
+    const ids = selectedMemoryIds();
+    if (!ids.length) return showToast('请先选择记忆', 'warning');
+    await bulkUpdateMemoryStatus(ids, 'active');
+    showToast('选中记忆已恢复');
+    await window.loadMemories?.();
+});
+document.getElementById('memory-bulk-disable-btn')?.addEventListener('click', async () => {
+    const ids = selectedMemoryIds();
+    if (!ids.length) return showToast('请先选择记忆', 'warning');
+    await bulkUpdateMemoryStatus(ids, 'disabled');
+    showToast('选中记忆已禁用');
+    await window.loadMemories?.();
+});
+document.getElementById('memory-bulk-delete-btn')?.addEventListener('click', async () => {
+    const ids = selectedMemoryIds();
+    if (!ids.length) return showToast('请先选择记忆', 'warning');
+    await bulkUpdateMemoryStatus(ids, 'deleted');
+    showToast('选中记忆已删除');
+    await window.loadMemories?.();
+});
+document.getElementById('memory-jobs-panel')?.addEventListener('click', async (event) => {
+    const retryButton = event.target?.closest?.('#memory-jobs-retry-btn');
+    const cleanupButton = event.target?.closest?.('#memory-jobs-cleanup-btn');
+    if (!retryButton && !cleanupButton) return;
+    const button = retryButton || cleanupButton;
+    button.disabled = true;
+    try {
+        if (retryButton) {
+            await retryMemoryJobs();
+            showToast('失败任务已重新入队');
+        } else {
+            const data = await cleanupMemoryJobs();
+            showToast(`已清理 ${Number(data.deleted || 0)} 个旧任务`);
+        }
+        await window.loadMemories?.();
+    } catch (e) {
+        showToast(e.message || '任务维护失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+document.getElementById('memory-list-body')?.addEventListener('click', async (event) => {
+    const button = event.target?.closest?.('[data-memory-action]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const memoryId = button.dataset.memoryId;
+    const action = button.dataset.memoryAction;
+    button.disabled = true;
+    try {
+        if (action === 'edit') {
+            window.openMemoryEditModal?.(getCurrentMemory(memoryId));
+        } else if (action === 'source') {
+            await window.openMemorySourceModal?.(memoryId);
+        } else if (action === 'disable') {
+            await updateMemoryStatus(memoryId, 'disabled');
+            showToast('长期记忆已禁用');
+            await window.loadMemories?.();
+        } else if (action === 'restore') {
+            await updateMemoryStatus(memoryId, 'active');
+            showToast('长期记忆已恢复');
+            await window.loadMemories?.();
+        } else if (action === 'delete') {
+            await deleteMemory(memoryId);
+            showToast('长期记忆已删除');
+            await window.loadMemories?.();
+        }
+    } catch (e) {
+        showToast(e.message || '长期记忆操作失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+}, true);
+document.getElementById('memory-edit-cancel')?.addEventListener('click', () => window.closeMemoryEditModal?.());
+document.getElementById('memory-edit-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const saveButton = document.getElementById('memory-edit-save');
+    if (saveButton) saveButton.disabled = true;
+    const memoryId = document.getElementById('memory-edit-id')?.value;
+    try {
+        await saveMemory(memoryId, {
+            type: document.getElementById('memory-edit-type')?.value,
+            content: document.getElementById('memory-edit-content')?.value,
+            salience: Number(document.getElementById('memory-edit-salience')?.value),
+            confidence: Number(document.getElementById('memory-edit-confidence')?.value)
+        });
+        showToast('长期记忆已保存');
+        window.closeMemoryEditModal?.();
+        await window.loadMemories?.();
+    } catch (e) {
+        showToast(e.message || '记忆保存失败', 'error');
+    } finally {
+        if (saveButton) saveButton.disabled = false;
+    }
+});
+document.getElementById('memory-source-close')?.addEventListener('click', () => window.closeMemorySourceModal?.());
+document.getElementById('memory-merge-panel')?.addEventListener('click', async (event) => {
+    const button = event.target?.closest?.('[data-memory-merge-target]');
+    if (!button) return;
+    button.disabled = true;
+    try {
+        await mergeMemoryPair(button.dataset.memoryMergeTarget, button.dataset.memoryMergeSource);
+        showToast('长期记忆已合并');
+        await window.loadMemories?.();
+        await window.loadMemoryMergeSuggestions?.();
+    } catch (e) {
+        showToast(e.message || '记忆合并失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+document.getElementById('memory-edit-modal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'memory-edit-modal') window.closeMemoryEditModal?.();
+});
+document.getElementById('memory-source-modal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'memory-source-modal') window.closeMemorySourceModal?.();
 });
 
 window.fetchEmbeddingModels = async () => {
