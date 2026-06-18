@@ -1,4 +1,5 @@
 const { estimateTokens } = require('../llm');
+const { getGlobalContextRuntimeConfig } = require('./runtime-settings');
 
 const DEFAULT_RESERVED_OUTPUT_TOKENS = 2048;
 const MIN_RESERVED_OUTPUT_TOKENS = 512;
@@ -6,9 +7,9 @@ const SAFETY_MARGIN_TOKENS = 256;
 const IMAGE_INPUT_TOKEN_ESTIMATE = 1024;
 const UNBOUNDED_CONTEXT_BUDGET = Number.MAX_SAFE_INTEGER;
 
-// 当模型既未配置 max_input_tokens / context_window_tokens、也没有全局上下文环境变量时，
+// 当模型既未配置 max_input_tokens / context_window_tokens、也没有全局上下文配置时，
 // 上下文预算为“无界”——请求时不会做任何裁剪，仅靠记忆压缩兜底。大输入时节流告警一次，
-// 提醒管理员为该模型补配上下文窗口，避免无感知地把超长上下文直接转发给上游。
+// 提醒管理员在模型配置或并发治理中补配上下文窗口，避免无感知地把超长上下文直接转发给上游。
 const UNBOUNDED_WARN_INPUT_TOKENS = 16000;
 const UNBOUNDED_WARN_INTERVAL_MS = 300000;
 let lastUnboundedWarnAt = 0;
@@ -24,7 +25,7 @@ function warnUnboundedContextBudget(modelCfg, inputTokens) {
             model: modelCfg?.name,
             modelName: modelCfg?.model_name,
             inputTokens
-        }, '模型未配置上下文窗口（max_input_tokens / context_window_tokens 均为空），本次大输入未经预算裁剪直接转发');
+        }, '未配置上下文预算（模型 max_input_tokens / context_window_tokens 均为空，且全局上下文窗口为空），本次大输入未经预算裁剪直接转发');
     } catch (_err) {
         // logger 不可用时静默，不影响主流程
     }
@@ -46,16 +47,16 @@ function toPositiveInt(value, fallback = 0) {
 }
 
 function getModelContextBudget(modelCfg = {}, options = {}) {
-    const explicitContextWindow = options.contextWindowTokens
-        ?? modelCfg.context_window_tokens
-        ?? process.env.MODEL_CONTEXT_WINDOW_TOKENS
-        ?? process.env.CONTEXT_WINDOW_TOKENS;
-    const explicitContextWindowTokens = toPositiveInt(explicitContextWindow, 0);
+    const runtimeContext = getGlobalContextRuntimeConfig();
+    const explicitContextWindowTokens = toPositiveInt(
+        options.contextWindowTokens ?? modelCfg.context_window_tokens ?? runtimeContext.modelContextWindowTokens,
+        0
+    );
     const configuredInputLimit = toPositiveInt(modelCfg.max_input_tokens, 0);
     const requestedOutput = toPositiveInt(
         options.maxOutputTokens
             ?? modelCfg.max_tokens
-            ?? process.env.CONTEXT_RESERVED_OUTPUT_TOKENS,
+            ?? runtimeContext.contextReservedOutputTokens,
         DEFAULT_RESERVED_OUTPUT_TOKENS
     );
     const requestedReservedOutput = Math.max(requestedOutput, MIN_RESERVED_OUTPUT_TOKENS);

@@ -67,6 +67,7 @@ const {
     getAgentMetrics,
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('./agent-monitoring');
+const { getAgentConcurrencyConfig } = require('./runtime-settings');
 const {
     DEFAULT_STEPS,
     ACTIVE_STATUSES,
@@ -87,14 +88,20 @@ const {
     normalizeAgentTitle
 } = require('./agent-validators');
 
-const AGENT_MAX_CONCURRENT_RUNS = Math.max(Number.parseInt(process.env.AGENT_MAX_CONCURRENT_RUNS || '2', 10) || 2, 1);
 const AGENT_DEFAULT_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_RUN_TIMEOUT_MS || '600000', 10) || 600000, 60000);
 const AGENT_TOOL_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_TOOL_TIMEOUT_MS || '120000', 10) || 120000, 30000);
 const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_STALE_RUNNING_MINUTES || '30', 10) || 30, 5);
 const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
-const AGENT_DAG_NODE_CONCURRENCY = Math.max(Number.parseInt(process.env.AGENT_DAG_NODE_CONCURRENCY || '4', 10) || 4, 1);
 const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
 let agentQueue = null;
+
+function getAgentMaxConcurrentRuns() {
+    return getAgentConcurrencyConfig().maxConcurrentRuns;
+}
+
+function getAgentDagNodeConcurrency() {
+    return getAgentConcurrencyConfig().dagNodeConcurrency;
+}
 
 function createRunId() {
     return `run_${crypto.randomBytes(12).toString('hex')}`;
@@ -200,7 +207,7 @@ function getAgentQueue() {
             db,
             logger,
             instanceId: AGENT_INSTANCE_ID,
-            maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
+            maxConcurrent: getAgentMaxConcurrentRuns(),
             lockMs: AGENT_QUEUE_LOCK_MS,
             getRunUser,
             runAgent,
@@ -208,6 +215,7 @@ function getAgentQueue() {
             getTimestamp: getBeijingTimestamp
         });
     }
+    agentQueue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
     return agentQueue;
 }
 
@@ -634,7 +642,7 @@ function isMissingFinalAnswer(value) {
 function getAgentRuntimeDeps() {
     return {
         agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
-        dagNodeConcurrency: AGENT_DAG_NODE_CONCURRENCY,
+        dagNodeConcurrency: getAgentDagNodeConcurrency(),
         db,
         logger,
         assertRunNotCancelled,
@@ -961,11 +969,18 @@ function approveAgentTool(runId, user, approve = true) {
 
 function getAgentRuntimeStatus(user = null) {
     return buildAgentRuntimeStatus({
-        maxConcurrent: AGENT_MAX_CONCURRENT_RUNS,
-        dagNodeConcurrency: AGENT_DAG_NODE_CONCURRENCY,
+        maxConcurrent: getAgentMaxConcurrentRuns(),
+        dagNodeConcurrency: getAgentDagNodeConcurrency(),
         queueStatus: getAgentQueue().getStatus(),
         user
     });
+}
+
+function syncAgentRuntimeConcurrency() {
+    const queue = getAgentQueue();
+    queue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
+    queue.processQueue?.();
+    return queue.getStatus();
 }
 
 configureAgentSchedules({
@@ -1146,6 +1161,7 @@ module.exports = {
     listAgentWorkflows,
     getAgentMetrics,
     getAgentRuntimeStatus,
+    syncAgentRuntimeConcurrency,
     normalizeAgentGoal,
     normalizeDagSpec,
     normalizeRunMode,

@@ -48,7 +48,8 @@
 
     function buildGraphRelationTooltip(row = {}) {
         const relationText = graphRelationLabel(row.relation_type);
-        return [
+        const chunkText = String(row.chunk_text || '').trim();
+        const lines = [
             `起点：${row.source_name || '-'}`,
             `关系：${relationText}${row.relation_type && row.relation_type !== relationText ? `（${row.relation_type}）` : ''}`,
             `终点：${row.target_name || '-'}`,
@@ -57,7 +58,11 @@
             `可信度：${Number(row.confidence || 0).toFixed(2)}`,
             row.description ? `描述：${row.description}` : '',
             row.id ? `关系 ID：${row.id}` : ''
-        ].filter(Boolean).join('\n');
+        ].filter(Boolean);
+        if (chunkText) {
+            lines.splice(Math.max(lines.length - (row.id ? 1 : 0), 0), 0, `内容：${chunkText}`);
+        }
+        return lines.join('\n');
     }
 
     function buildGraphSummaryHtml(summary = {}, options = {}) {
@@ -87,15 +92,19 @@
         const emptyHtml = messages.emptyHtml || '';
         const describeEntityMeta = messages.describeEntityMeta || (() => '');
         const formatConfidence = messages.formatConfidence || (value => String(value ?? ''));
-        return entities.map(entity => `
-        <button class="rag-graph-entity ${Number(entity.id) === selectedEntityId ? 'active' : ''}" data-entity-id="${entity.id}">
+        const buildGraphNodeTooltip = options.buildGraphNodeTooltip || (() => '');
+        return entities.map(entity => {
+            const entityTooltip = buildGraphNodeTooltip(entity, Number(entity.relation_count || 0), false);
+            return `
+        <button class="rag-graph-entity ${Number(entity.id) === selectedEntityId ? 'active' : ''}" data-entity-id="${entity.id}" data-graph-node-tooltip="${escapeAttr(entityTooltip)}" aria-label="${escapeAttr(entityTooltip)}">
             <span>
                 <strong>${escapeHtml(entity.name)}</strong>
                 <small>${describeEntityMeta(entity, graphTypeLabel, escapeHtml)}</small>
             </span>
-            <em title="${escapeAttr(formatConfidence(entity))}">${escapeHtml(formatConfidence(entity))}</em>
+            <em aria-label="${escapeAttr(formatConfidence(entity))}">${escapeHtml(formatConfidence(entity))}</em>
         </button>
-    `).join('') || emptyHtml;
+    `;
+        }).join('') || emptyHtml;
     }
 
     function buildGraphCanvasMarkup(graph = {}, options = {}) {
@@ -129,7 +138,7 @@
                 ? messages.describeNodeMeta({ isCenter, relationCount })
                 : '';
             const nodeTooltip = buildGraphNodeTooltip(node, relationCount, isCenter);
-            return `<button class="rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" style="left:${pos.x.toFixed(2)}%;top:${pos.y.toFixed(2)}%;" title="${escapeAttr(nodeTooltip)}">
+            return `<button class="rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" style="left:${pos.x.toFixed(2)}%;top:${pos.y.toFixed(2)}%;">
             <span>${escapeHtml(graphTypeLabel(node.type))}</span>
             <strong>${escapeHtml(getGraphNodeName(node))}</strong>
             <small>${escapeHtml(nodeMeta)}</small>
@@ -191,12 +200,12 @@
             const status = ['active', 'pending', 'deleted'].includes(rawStatus) ? rawStatus : 'active';
             const sourceSnippet = String(row.chunk_text || '').trim().slice(0, 180);
             return `
-        <article class="rag-graph-relation ${layout.graphRelationTone(row.relation_type)} is-${escapeAttr(status)}" data-relation-id="${row.id}" data-graph-relation-tooltip="${escapeAttr(relationTooltip)}" title="${escapeAttr(relationTooltip)}">
+        <article class="rag-graph-relation ${layout.graphRelationTone(row.relation_type)} is-${escapeAttr(status)}" data-relation-id="${row.id}" data-graph-relation-tooltip="${escapeAttr(relationTooltip)}">
             <header>
                 <strong>
-                    <span title="${escapeAttr(row.source_name || '')}">${escapeHtml(row.source_name)}</span>
+                    <span>${escapeHtml(row.source_name)}</span>
                     <b>${escapeHtml(graphRelationLabel(row.relation_type))}</b>
-                    <span title="${escapeAttr(row.target_name || '')}">${escapeHtml(row.target_name)}</span>
+                    <span>${escapeHtml(row.target_name)}</span>
                 </strong>
                 <span class="rag-graph-confidence">${escapeHtml(formatConfidence(row))} · ${escapeHtml(statusLabel(status))}</span>
             </header>

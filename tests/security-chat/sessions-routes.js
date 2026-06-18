@@ -345,15 +345,28 @@ test('聊天路由会把非流式上游 JSON 重放为聊天 SSE 内容', async 
         });
 
         const assistant = db.prepare(`
-            SELECT role, content, token_count
+            SELECT role, content, token_count, cost_time, tokens_per_sec
             FROM messages
             WHERE session_id = ? AND user_id = ? AND role = 'assistant'
             ORDER BY id DESC
         `).get(sessionId, userId);
+        const savedEvent = sseText
+            .split(/\r?\n/)
+            .filter(line => line.startsWith('data: '))
+            .map(line => line.replace(/^data:\s*/, ''))
+            .filter(line => line.startsWith('{'))
+            .map(line => JSON.parse(line))
+            .find(event => event.type === 'message_saved' && event.role === 'assistant');
 
         assert.ok(assistant);
         assert.equal(assistant.content, 'fallback streamed answer');
         assert.equal(assistant.token_count, 4);
+        assert.ok(assistant.cost_time > 0);
+        assert.ok(assistant.tokens_per_sec > 0);
+        assert.ok(savedEvent);
+        assert.equal(savedEvent.tokenCount, 4);
+        assert.equal(savedEvent.costTime, assistant.cost_time);
+        assert.equal(savedEvent.tps, assistant.tokens_per_sec);
         assert.match(sseText, /fallback streamed answer/);
         assert.match(sseText, /message_saved/);
         assert.match(sseText, /\[DONE\]/);

@@ -248,6 +248,27 @@ function estimateStreamingTokenCount(content) {
     return Math.ceil(chineseChars * 2 + (text.length - chineseChars) * 0.5);
 }
 
+function stripStreamingThoughtContent(content = '') {
+    return String(content || '')
+        .replace(/<thought\b[^>]*>[\s\S]*?<\/thought>/gi, '\n')
+        .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, '\n')
+        .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '\n')
+        .replace(/<thought\b[^>]*>[\s\S]*$/gi, '')
+        .replace(/<thinking\b[^>]*>[\s\S]*$/gi, '')
+        .replace(/<think\b[^>]*>[\s\S]*$/gi, '')
+        .replace(/<\/?(thought|thinking|think)\b[^>]*>/gi, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function estimateStreamingAnswerTokenCount(content) {
+    return estimateStreamingTokenCount(stripStreamingThoughtContent(content));
+}
+
+window.stripStreamingThoughtContent = stripStreamingThoughtContent;
+window.estimateStreamingAnswerTokenCount = estimateStreamingAnswerTokenCount;
+
 function splitAssistantStreamDelta(delta) {
     const text = String(delta || '');
     if (!text) return [];
@@ -329,8 +350,10 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
         restoreThoughtStateAfterRender(textBody, thoughtState);
     }
 
-    const elapsed = (Date.now() - startTime) / 1000;
-    const tps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
+    const elapsed = Math.max((Date.now() - startTime) / 1000, 0.001);
+    const answerTokenCount = estimateStreamingAnswerTokenCount(content);
+    const answerElapsed = firstTokenTime ? Math.max((Date.now() - firstTokenTime) / 1000, 0.001) : 0;
+    const tps = firstTokenTime && answerTokenCount > 0 ? (answerTokenCount / answerElapsed).toFixed(1) : 0;
     const modelName = String(statsEl?.dataset?.modelName || '').trim();
     const modelHtml = modelName
         ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeChatStatusHtml(modelName)}</span>`

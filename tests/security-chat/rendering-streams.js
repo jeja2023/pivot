@@ -2,6 +2,7 @@
 const {
     appendStreamedChartsToAssistantContent,
     assert,
+    buildAssistantSpeedStats,
     buildChatCompletionsUrl,
     buildFtsQuery,
     buildModelHeaders,
@@ -168,6 +169,84 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     assert.doesNotMatch(mcpCss, /\.mcp-next-step-action/);
     assert.match(mcpCss, /\.mcp-config-helper/);
     assert.doesNotMatch(mcpGovernanceCss, /\.mcp-tool-governance-details/);
+});
+
+test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息', () => {
+    const sandbox = { window: {} };
+    const escapeHtml = value => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const escapeAttr = value => escapeHtml(value).replace(/"/g, '&quot;');
+
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-graph-layout.js'), 'utf8'),
+        sandbox
+    );
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-graph-render.js'), 'utf8'),
+        sandbox
+    );
+
+    const graphRender = sandbox.window.Pivot.ragGraphRender;
+    const entityHtml = graphRender.buildGraphEntitiesHtml([{
+        id: 7,
+        name: '代码文件中',
+        type: 'concept',
+        mention_count: 3,
+        relation_count: 2,
+        confidence: 0.78,
+        description: '代码文件中使用中文注释和中文提示'
+    }], {
+        buildGraphNodeTooltip: graphRender.buildGraphNodeTooltip,
+        escapeAttr,
+        escapeHtml,
+        graphTypeLabel: graphRender.graphTypeLabel,
+        messages: {
+            describeEntityMeta: (entity, getTypeLabel, escape) => `${escape(getTypeLabel(entity.type))} · 提及 ${entity.mention_count} · 关系 ${entity.relation_count}`,
+            formatConfidence: entity => `可信度 ${Number(entity.confidence || 0).toFixed(2)}`
+        }
+    });
+    assert.match(entityHtml, /class="rag-graph-entity/);
+    assert.match(entityHtml, /data-graph-node-tooltip="/);
+    assert.match(entityHtml, /描述：代码文件中使用中文注释和中文提示/);
+    assert.doesNotMatch(entityHtml, /\stitle="/);
+
+    const relationHtml = graphRender.buildGraphRelationsHtml([{
+        id: 827,
+        source_name: '代码文件中',
+        relation_type: 'depends_on',
+        target_name: '中文注释和中文提示',
+        status: 'active',
+        doc_name: '开发命令.txt',
+        confidence: 0.78,
+        description: '代码文件中使用中文注释和中文提示',
+        chunk_text: '完整来源片段应该进入自定义浮层，不能只显示列表里的截断内容。'
+    }], {
+        buildGraphRelationTooltip: graphRender.buildGraphRelationTooltip,
+        escapeAttr,
+        escapeHtml,
+        graphRelationLabel: graphRender.graphRelationLabel,
+        messages: {
+            deleteLabel: '删除',
+            editLabel: '编辑',
+            formatConfidence: row => `可信度 ${Number(row.confidence || 0).toFixed(2)}`,
+            statusLabel: value => value
+        }
+    });
+    assert.match(relationHtml, /data-graph-relation-tooltip="/);
+    assert.match(relationHtml, /内容：完整来源片段应该进入自定义浮层/);
+    assert.doesNotMatch(relationHtml, /\stitle="/);
+
+    const graphUi = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-graph-ui.js'), 'utf8');
+    const ragCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag.js'), 'utf8');
+    const graphCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'rag-graph-map.css'), 'utf8');
+    assert.match(graphUi, /scheduleGraphNodeTooltipHide/);
+    assert.match(graphUi, /tooltip\.addEventListener\('mouseenter', cancelGraphNodeTooltipHide\)/);
+    assert.match(ragCore, /scheduleGraphNodeTooltipHideUi\(300\)/);
+    assert.match(ragCore, /#rag-graph-node-tooltip/);
+    assert.match(graphCss, /pointer-events:\s*auto/);
+    assert.match(graphCss, /overflow:\s*auto/);
 });
 
 test('聊天回答会保留知识库和工具箱状态提示', () => {
@@ -367,15 +446,48 @@ test('createStreamAccumulator 包装推理增量并捕获用量', () => {
     const emitted = [];
     const accumulator = createStreamAccumulator({
         includeThoughtTags: true,
-        onContent: chunk => emitted.push(chunk)
+        onContent: (chunk, meta) => emitted.push({ chunk, meta })
     });
     accumulator.pushJson({ choices: [{ delta: { reasoning_content: 'reasoning' } }] });
     accumulator.pushJson({ choices: [{ delta: { content: 'answer' } }], usage: { completion_tokens: 2 } });
     accumulator.finish();
 
     assert.equal(accumulator.getContent(), '<thought>reasoning</thought>answer');
-    assert.deepEqual(emitted, ['<thought>reasoning', '</thought>answer']);
+    assert.deepEqual(emitted, [
+        { chunk: '<thought>reasoning', meta: { delta: 'reasoning', isThought: true, usage: null } },
+        { chunk: '</thought>answer', meta: { delta: 'answer', isThought: false, usage: { completion_tokens: 2 } } }
+    ]);
     assert.deepEqual(accumulator.getUsage(), { completion_tokens: 2 });
+});
+
+test('聊天回答速度只按可见答案片段计算', () => {
+    const stats = buildAssistantSpeedStats({
+        assistantContent: '<thought>思考 1000 token</thought>最终答案',
+        requestStartedAt: 1_000,
+        endedAt: 71_000,
+        firstVisibleAnswerAt: 61_000
+    });
+
+    assert.equal(stats.assistantTokens > 0, true);
+    assert.equal(stats.answerTokens > 0, true);
+    assert.equal(stats.costTime, 70);
+    assert.equal(stats.answerCostTime, 10);
+    assert.equal(stats.tokensPerSec, stats.answerTokens / 10);
+});
+
+test('前端流式速度统计会排除思考块 token', () => {
+    const sandbox = createChatRenderSandbox();
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8'),
+        sandbox
+    );
+
+    const answerOnly = sandbox.estimateStreamingTokenCount('最终答案');
+    const withThought = sandbox.estimateStreamingAnswerTokenCount('<thought>思考 1000 token</thought>最终答案');
+    const openThought = sandbox.estimateStreamingAnswerTokenCount('<thought>仍在思考');
+
+    assert.equal(withThought, answerOnly);
+    assert.equal(openThought, 0);
 });
 
 test('createStreamAccumulator 可收集不含思考标签的转发流文本', () => {

@@ -239,6 +239,7 @@ const renderGraphEntities = (payload = {}) => {
     list.innerHTML = buildGraphEntitiesHtml(entities, {
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
+        buildGraphNodeTooltip,
         graphTypeLabel,
         selectedEntityId: ragGraphState.selectedEntityId,
         messages: {

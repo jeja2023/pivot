@@ -97,6 +97,24 @@ window.sendMessage = async function(isRegenerate = false) {
     let localReplayTimer = null;
     let pendingStreamChunks = [];
     let reader = null;
+    let hasServerFinalStats = false;
+
+    const getElapsedSeconds = () => Math.max((Date.now() - startTime) / 1000, 0.001);
+    const getAnswerTokenCount = (content = fullAiContent) => {
+        if (typeof window.estimateStreamingAnswerTokenCount === 'function') {
+            return window.estimateStreamingAnswerTokenCount(content);
+        }
+        return estimateStreamingTokenCount(content);
+    };
+    const getAnswerElapsedSeconds = () => {
+        if (!firstTokenTime) return 0;
+        return Math.max((Date.now() - firstTokenTime) / 1000, 0.001);
+    };
+    const getAverageTps = (count = getAnswerTokenCount()) => {
+        const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+        const elapsed = getAnswerElapsedSeconds();
+        return safeCount > 0 && elapsed > 0 ? safeCount / elapsed : 0;
+    };
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
@@ -174,6 +192,9 @@ window.sendMessage = async function(isRegenerate = false) {
             if (!content) return;
             fullAiContent += content;
             tokenCount = estimateStreamingTokenCount(fullAiContent);
+            if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
+                firstTokenTime = Date.now();
+            }
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
                 flushStreamRender();
@@ -287,11 +308,12 @@ window.sendMessage = async function(isRegenerate = false) {
                         window.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
                         renderPersistedAssistantContent(data.content);
                         if (data.tokenCount !== undefined || data.costTime !== undefined || data.tps !== undefined) {
+                            hasServerFinalStats = data.costTime !== undefined && data.tps !== undefined;
                             renderFinalAssistantStats(statsEl, {
                                 modelName: data.modelName || data.model_name || assistantModelName,
-                                costTime: data.costTime ?? ((Date.now() - startTime) / 1000),
+                                costTime: data.costTime ?? getElapsedSeconds(),
                                 tokenCount: data.tokenCount ?? tokenCount,
-                                tps: data.tps ?? (firstTokenTime ? tokenCount / ((Date.now() - firstTokenTime) / 1000) : 0)
+                                tps: data.tps ?? getAverageTps()
                             });
                         }
                         window.refreshCurrentContextUsage?.(requestSessionId);
@@ -302,11 +324,15 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                     if (data.content) {
                         fullAiContent = data.content;
+                        tokenCount = estimateStreamingTokenCount(fullAiContent);
+                        if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
+                            firstTokenTime = Date.now();
+                        }
                         if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
                     }
-                    const elapsed = (Date.now() - startTime) / 1000;
+                    const elapsed = getElapsedSeconds();
                     const finalTokenCount = data.tokenCount ?? (data.content ? estimateStreamingTokenCount(data.content) : tokenCount);
-                    const finalTps = elapsed > 0 ? finalTokenCount / elapsed : 0;
+                    const finalTps = getAverageTps();
                     renderFinalAssistantStats(statsEl, {
                         modelName: data.modelName || data.model_name || assistantModelName,
                         costTime: elapsed,
@@ -330,7 +356,8 @@ window.sendMessage = async function(isRegenerate = false) {
                 }
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
-                    if (!firstTokenTime) {
+                    const nextStreamContent = [fullAiContent, pendingStreamChunks.join(''), data.content].filter(Boolean).join('');
+                    if (!firstTokenTime && getAnswerTokenCount(nextStreamContent) > 0) {
                         firstTokenTime = Date.now();
                     }
                     enqueueStreamContent(data.content);
@@ -355,15 +382,17 @@ window.sendMessage = async function(isRegenerate = false) {
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
         if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 
-        const finalElapsed = (Date.now() - startTime) / 1000;
-        const finalTps = firstTokenTime ? (tokenCount / ((Date.now() - firstTokenTime) / 1000)).toFixed(1) : 0;
+        const finalElapsed = getElapsedSeconds();
+        const finalTps = getAverageTps();
         // Post-success bookkeeping must not surface as a chat error if it fails.
         try {
-            await apiFetch(API_BASE + '/chat/stats', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
-            });
+            if (!hasServerFinalStats) {
+                await apiFetch(API_BASE + '/chat/stats', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
+                });
+            }
             await window.refreshCurrentContextUsage?.(requestSessionId);
         } catch (statsError) {
             console.warn('更新会话统计失败', statsError);
@@ -390,6 +419,9 @@ window.sendMessage = async function(isRegenerate = false) {
             if (remainingStreamContent) {
                 fullAiContent += remainingStreamContent;
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
+                if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
+                    firstTokenTime = Date.now();
+                }
             }
             fullAiContent += '\n\n[已由用户中断生成]';
             if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, true);

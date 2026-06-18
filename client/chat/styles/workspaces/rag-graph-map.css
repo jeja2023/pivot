@@ -173,16 +173,19 @@
         z-index: 5510;
         display: grid;
         gap: 4px;
-        max-width: min(340px, calc(100vw - 24px));
+        width: max-content;
+        max-width: min(460px, calc(100vw - 24px));
+        max-height: min(58vh, 420px);
         padding: 9px 11px;
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 8px;
         background: rgba(15, 23, 42, 0.95);
         color: rgba(255, 255, 255, 0.88);
         box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
-        pointer-events: none;
+        pointer-events: auto;
         font-size: 0.73rem;
         line-height: 1.45;
+        overflow: auto;
         overflow-wrap: anywhere;
         white-space: normal;
     }
@@ -196,6 +199,7 @@
     }
     .rag-graph-node-tooltip span {
         color: rgba(226, 232, 240, 0.9);
+        white-space: pre-wrap;
     }
     .rag-graph-map-footer {
         position: absolute;

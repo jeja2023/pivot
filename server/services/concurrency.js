@@ -1,6 +1,6 @@
 /* AI concurrency protection */
 const { logger } = require('../logger');
-const { parsePositiveInt } = require('../number');
+const { getGlobalAiConcurrencyConfig } = require('./runtime-settings');
 
 class ConcurrencyLimitError extends Error {
     constructor(message, code = 'AI_QUEUE_FULL') {
@@ -131,6 +131,31 @@ class ConcurrencySemaphore {
         if (this.maxConcurrent > oldMax) this.drainQueue();
     }
 
+    updateLimits(options = {}) {
+        const oldMax = this.maxConcurrent;
+        const oldQueue = this.maxQueueSize;
+        const oldTimeout = this.queueTimeoutMs;
+        const nextMax = Number.parseInt(options.maxConcurrent, 10);
+        const nextQueue = Number.parseInt(options.maxQueueSize, 10);
+        const nextTimeout = Number.parseInt(options.queueTimeoutMs, 10);
+
+        if (Number.isFinite(nextMax) && nextMax > 0) this.maxConcurrent = nextMax;
+        if (Number.isFinite(nextQueue) && nextQueue >= 0) this.maxQueueSize = nextQueue;
+        if (Number.isFinite(nextTimeout) && nextTimeout >= 1000) this.queueTimeoutMs = nextTimeout;
+
+        if (this.maxConcurrent !== oldMax || this.maxQueueSize !== oldQueue || this.queueTimeoutMs !== oldTimeout) {
+            logger.info({
+                old: { maxConcurrent: oldMax, maxQueueSize: oldQueue, queueTimeoutMs: oldTimeout },
+                next: {
+                    maxConcurrent: this.maxConcurrent,
+                    maxQueueSize: this.maxQueueSize,
+                    queueTimeoutMs: this.queueTimeoutMs
+                }
+            }, 'AI 并发限制已动态调整');
+        }
+        if (this.maxConcurrent > oldMax) this.drainQueue();
+    }
+
     getStatus() {
         return {
             active: this.currentConcurrent,
@@ -146,10 +171,15 @@ class ConcurrencySemaphore {
 }
 
 const aiSemaphore = new ConcurrencySemaphore({
-    maxConcurrent: parsePositiveInt(process.env.MAX_CONCURRENT_AI_REQUESTS, 1),
-    maxQueueSize: parsePositiveInt(process.env.MAX_AI_QUEUE_SIZE, 20),
-    queueTimeoutMs: parsePositiveInt(process.env.AI_QUEUE_TIMEOUT_MS, 300000)
+    maxConcurrent: getGlobalAiConcurrencyConfig().maxConcurrent,
+    maxQueueSize: getGlobalAiConcurrencyConfig().maxQueueSize,
+    queueTimeoutMs: getGlobalAiConcurrencyConfig().queueTimeoutMs
 });
+
+function syncGlobalAiConcurrencySettings() {
+    aiSemaphore.updateLimits(getGlobalAiConcurrencyConfig());
+    return aiSemaphore.getStatus();
+}
 
 class TimeoutError extends Error {
     constructor(message, code = 'OPERATION_TIMEOUT') {
@@ -207,6 +237,12 @@ class KeyedConcurrencyGuard {
         return this.running.has(String(key));
     }
 
+    updateMaxConcurrent(newMaxConcurrent) {
+        const next = Math.max(1, Number.parseInt(newMaxConcurrent, 10) || this.maxGlobal);
+        this.maxGlobal = next;
+        return this.maxGlobal;
+    }
+
     async run(key, task) {
         const id = String(key);
         if (this.running.has(id)) {
@@ -230,6 +266,7 @@ module.exports = {
     ConcurrencySemaphore,
     ConcurrencyLimitError,
     TimeoutError,
+    syncGlobalAiConcurrencySettings,
     withTimeout,
     KeyedConcurrencyGuard
 };

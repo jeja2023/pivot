@@ -9,6 +9,7 @@
     const DEFAULT_MAP_SELECTOR = '.rag-graph-map';
     const DEFAULT_STAGE_SELECTOR = '.rag-graph-map-stage';
     const DEFAULT_IGNORE_PAN_SELECTOR = '.rag-graph-map-controls, .rag-graph-map-node';
+    let graphNodeTooltipHideTimer = null;
 
     function normalizeNumber(value, fallback) {
         const num = Number(value);
@@ -114,8 +115,25 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
         tooltip = document.createElement('div');
         tooltip.id = 'rag-graph-node-tooltip';
         tooltip.className = 'rag-graph-node-tooltip hidden';
+        tooltip.setAttribute('role', 'tooltip');
+        tooltip.addEventListener('mouseenter', cancelGraphNodeTooltipHide);
+        tooltip.addEventListener('mouseleave', () => scheduleGraphNodeTooltipHide(120));
         document.body.appendChild(tooltip);
         return tooltip;
+    }
+
+    function cancelGraphNodeTooltipHide() {
+        if (!graphNodeTooltipHideTimer) return;
+        clearTimeout(graphNodeTooltipHideTimer);
+        graphNodeTooltipHideTimer = null;
+    }
+
+    function scheduleGraphNodeTooltipHide(delay = 160) {
+        cancelGraphNodeTooltipHide();
+        graphNodeTooltipHideTimer = setTimeout(() => {
+            graphNodeTooltipHideTimer = null;
+            hideGraphNodeTooltip();
+        }, Math.max(0, Number(delay) || 0));
     }
 
     function positionGraphNodeTooltip(eventOrRect) {
@@ -125,7 +143,7 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
             ? { x: eventOrRect.left + eventOrRect.width / 2, y: eventOrRect.top }
             : { x: eventOrRect?.clientX, y: eventOrRect?.clientY };
         if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-        const offset = 14;
+        const offset = 8;
         let left = point.x + offset;
         let top = point.y + offset;
         const rect = tooltip.getBoundingClientRect();
@@ -140,6 +158,7 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
         if (!text) return;
         const escapeHtml = options.escapeHtml || (value => String(value ?? ''));
         const tooltip = ensureGraphNodeTooltip();
+        cancelGraphNodeTooltipHide();
         const lines = text.split('\n').filter(Boolean);
         tooltip.innerHTML = lines.map((line, index) => (
             index === 0
@@ -151,6 +170,7 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
     }
 
     function hideGraphNodeTooltip() {
+        cancelGraphNodeTooltipHide();
         document.getElementById('rag-graph-node-tooltip')?.classList.add('hidden');
     }
 
@@ -214,12 +234,14 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
     const existingPivot = window.Pivot || {};
     existingPivot.ragGraphUi = {
         applyGraphMapTransform,
+        cancelGraphNodeTooltipHide,
         ensureGraphMapView,
         ensureGraphNodeTooltip,
         hideGraphNodeTooltip,
         moveGraphMapPan,
         positionGraphNodeTooltip,
         resetGraphMapView,
+        scheduleGraphNodeTooltipHide,
         showGraphNodeTooltip,
         startGraphMapPan,
         stopGraphMapPan,

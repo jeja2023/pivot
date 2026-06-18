@@ -181,8 +181,8 @@
                         <div class="form-item">
                             <label>上下文窗口 (Token)</label>
                             <input type="text" id="m-context-window-tokens" class="form-input"
-                                placeholder="如 32K；留空自动推导"
-                                title="模型实际总上下文窗口，例如 32K；留空时按输入 Token 上限推导">
+                                placeholder="如 32K；留空使用全局默认"
+                                title="模型实际总上下文窗口，例如 32K；留空时使用并发治理中的全局上下文设置">
                         </div>
                     </div>
                     <div class="model-form-row">
@@ -210,11 +210,11 @@
                         </div>
                         <div class="form-item model-capability-row">
                             <div>
-                                <label>聊天中关闭思考</label>
-                                <small>仅对思考模型生效；普通聊天会追加 /no_think，减少本轮思考 Token 消耗。</small>
+                                <label>聊天中开启思考</label>
+                                <small>仅对思考模型生效；关闭时普通聊天会隐藏思考过程并追加 /no_think。</small>
                             </div>
-                            <label class="switch" title="聊天中关闭思考">
-                                <input type="checkbox" id="m-disable-chat-thinking">
+                            <label class="switch" title="聊天中开启思考">
+                                <input type="checkbox" id="m-chat-thinking-enabled">
                                 <span class="switch-slider"></span>
                             </label>
                         </div>
@@ -235,6 +235,94 @@
                     <button id="modal-model-test" class="btn-secondary"
                         style="border-color: var(--primary); color: var(--primary); width: auto; padding: 0 15px;">测试连接</button>
                     <button id="m-submit-btn" class="btn-primary">保存配置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="runtime-settings-modal" class="modal-overlay hidden" style="z-index: 210;">
+        <div class="modal model-modal model-config-modal runtime-settings-modal">
+            <div class="model-modal-header runtime-settings-modal-header">
+                <div>
+                    <h3>并发治理</h3>
+                    <p class="model-modal-desc">调整系统运行时并发、排队和全局上下文默认值。</p>
+                </div>
+            </div>
+            <div class="model-form runtime-settings-form">
+                <div class="model-form-scroll runtime-settings-grid">
+                    <section class="runtime-settings-group">
+                        <h4>全局请求</h4>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>AI 并发请求数</label>
+                                <input type="number" id="runtime-max-concurrent-ai-requests" class="form-input" min="1" step="1" data-runtime-key="max_concurrent_ai_requests">
+                            </div>
+                            <div class="form-item">
+                                <label>AI 排队长度</label>
+                                <input type="number" id="runtime-max-ai-queue-size" class="form-input" min="0" step="1" data-runtime-key="max_ai_queue_size">
+                            </div>
+                            <div class="form-item">
+                                <label>AI 排队超时 (ms)</label>
+                                <input type="number" id="runtime-ai-queue-timeout-ms" class="form-input" min="1000" step="1000" data-runtime-key="ai_queue_timeout_ms">
+                            </div>
+                        </div>
+                    </section>
+                    <section class="runtime-settings-group">
+                        <h4>模型端点</h4>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>默认端点并发</label>
+                                <input type="number" id="runtime-model-endpoint-default-concurrency" class="form-input" min="1" step="1" data-runtime-key="model_endpoint_default_concurrency">
+                            </div>
+                            <div class="form-item">
+                                <label>端点排队长度</label>
+                                <input type="number" id="runtime-model-endpoint-queue-size" class="form-input" min="0" step="1" data-runtime-key="model_endpoint_queue_size">
+                            </div>
+                            <div class="form-item">
+                                <label>端点排队超时 (ms)</label>
+                                <input type="number" id="runtime-model-endpoint-queue-timeout-ms" class="form-input" min="1000" step="1000" data-runtime-key="model_endpoint_queue_timeout_ms">
+                            </div>
+                        </div>
+                    </section>
+                    <section class="runtime-settings-group">
+                        <h4>智能体与后台</h4>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>智能体任务并发</label>
+                                <input type="number" id="runtime-agent-max-concurrent-runs" class="form-input" min="1" step="1" data-runtime-key="agent_max_concurrent_runs">
+                            </div>
+                            <div class="form-item">
+                                <label>工作流节点并发</label>
+                                <input type="number" id="runtime-agent-dag-node-concurrency" class="form-input" min="1" step="1" data-runtime-key="agent_dag_node_concurrency">
+                            </div>
+                            <div class="form-item">
+                                <label>知识库索引并发</label>
+                                <input type="number" id="runtime-rag-index-max-concurrent" class="form-input" min="1" step="1" data-runtime-key="rag_index_max_concurrent">
+                            </div>
+                            <div class="form-item">
+                                <label>记忆压缩并发</label>
+                                <input type="number" id="runtime-memory-compression-max-concurrent" class="form-input" min="1" step="1" data-runtime-key="memory_compression_max_concurrent">
+                            </div>
+                        </div>
+                    </section>
+                    <section class="runtime-settings-group">
+                        <h4>全局上下文</h4>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>上下文窗口 (Token)</label>
+                                <input type="text" id="runtime-model-context-window-tokens" class="form-input" placeholder="0 表示不设全局默认" data-runtime-key="model_context_window_tokens">
+                            </div>
+                            <div class="form-item">
+                                <label>预留输出 (Token)</label>
+                                <input type="text" id="runtime-context-reserved-output-tokens" class="form-input" placeholder="如 2K" data-runtime-key="context_reserved_output_tokens">
+                            </div>
+                        </div>
+                    </section>
+                </div>
+                <p id="runtime-settings-status" class="model-modal-desc runtime-settings-status"></p>
+                <div class="model-modal-actions">
+                    <button id="runtime-settings-cancel" class="btn-secondary" type="button">取消</button>
+                    <button id="runtime-settings-save" class="btn-primary" type="button">保存配置</button>
                 </div>
             </div>
         </div>

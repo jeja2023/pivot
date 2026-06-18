@@ -6,7 +6,7 @@ const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
 } = require('../capabilities');
-const { estimateTokens, getContext } = require('../llm');
+const { createVisibleReasoningStreamFilter, estimateTokens, getContext, stripThoughtContent, stripVisibleReasoningScaffold } = require('../llm');
 const {
     getAccessibleModel,
     getModelDailyUsage,
@@ -129,6 +129,39 @@ function appendStreamedChartsToAssistantContent(content = '', chartSpecs = []) {
     });
     if (!blocks.length) return String(content || '');
     return [baseContent, ...blocks].filter(Boolean).join('\n\n');
+}
+
+function estimateVisibleAnswerTokensForSpeed(content = '') {
+    return estimateTokens(stripVisibleReasoningScaffold(stripThoughtContent(String(content || ''))));
+}
+
+function buildAssistantSpeedStats({
+    assistantContent = '',
+    streamedChartSpecs = [],
+    apiUsage = null,
+    requestStartedAt = Date.now(),
+    endedAt = Date.now(),
+    firstVisibleAnswerAt = null
+} = {}) {
+    const finalContent = appendStreamedChartsToAssistantContent(assistantContent, streamedChartSpecs);
+    const assistantTokens = streamedChartSpecs.length > 0
+        ? estimateTokens(finalContent)
+        : (apiUsage && apiUsage.completion_tokens)
+            ? apiUsage.completion_tokens
+            : estimateTokens(finalContent);
+    const costTime = Math.max((endedAt - requestStartedAt) / 1000, 0.001);
+    const answerTokens = estimateVisibleAnswerTokensForSpeed(finalContent);
+    const answerStartAt = firstVisibleAnswerAt || (answerTokens > 0 ? requestStartedAt : null);
+    const answerCostTime = answerStartAt ? Math.max((endedAt - answerStartAt) / 1000, 0.001) : costTime;
+    const tokensPerSec = answerTokens > 0 ? answerTokens / answerCostTime : 0;
+    return {
+        assistantContent: finalContent,
+        assistantTokens,
+        answerTokens,
+        answerCostTime,
+        costTime,
+        tokensPerSec
+    };
 }
 
 function createChartSseCapture(writeRaw) {
@@ -481,6 +514,7 @@ function createChatRouter({
         }
 
         let history = await getContext(sessionId, userId, modelCfg);
+        const disableChatThinking = shouldDisableChatThinking(modelCfg);
         const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
         if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
             const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : null;
@@ -712,9 +746,26 @@ function createChatRouter({
                     writeSse(JSON.stringify({ content: chunk }));
                 });
             };
+            const visibleReasoningFilter = disableChatThinking ? createVisibleReasoningStreamFilter() : null;
+            let firstVisibleAnswerAt = null;
+            const markFirstVisibleAnswer = () => {
+                if (!firstVisibleAnswerAt) firstVisibleAnswerAt = Date.now();
+            };
             const accumulator = createStreamAccumulator({
-                includeThoughtTags: true,
-                onContent(sendContent) {
+                includeThoughtTags: !disableChatThinking,
+                includeThoughtContent: !disableChatThinking,
+                onContent(sendContent, meta = {}) {
+                    if (disableChatThinking) {
+                        const filteredContent = visibleReasoningFilter.push(sendContent);
+                        if (filteredContent) {
+                            markFirstVisibleAnswer();
+                            writeContentSse(filteredContent);
+                        }
+                        return;
+                    }
+                    if (!meta.isThought && String(meta.delta || '').trim()) {
+                        markFirstVisibleAnswer();
+                    }
                     writeContentSse(sendContent);
                 }
             });
@@ -755,32 +806,51 @@ function createChatRouter({
                         const fallback = extractModelTextFromRawResponse(rawStreamText);
                         if (fallback.content) {
                             assistantContent = fallback.content;
+                            if (disableChatThinking) assistantContent = stripVisibleReasoningScaffold(assistantContent);
                             apiUsage = fallback.usage || apiUsage;
-                            writeContentSse(assistantContent);
+                            if (!disableChatThinking) writeContentSse(assistantContent);
                             req.log.warn({
                                 sessionId,
                                 rawStreamCaptureTruncated
                             }, '上游未按 SSE 流式返回，已按完整 JSON 内容回放');
                         }
                     }
-                    assistantContent = appendStreamedChartsToAssistantContent(assistantContent, streamedChartSpecs);
-                    const assistantTokens = streamedChartSpecs.length > 0
-                        ? estimateTokens(assistantContent)
-                        : (apiUsage && apiUsage.completion_tokens)
-                            ? apiUsage.completion_tokens
-                            : estimateTokens(assistantContent);
+                    if (disableChatThinking) {
+                        const filteredContent = visibleReasoningFilter.finish(assistantContent);
+                        if (filteredContent) {
+                            markFirstVisibleAnswer();
+                            writeContentSse(filteredContent);
+                        }
+                        assistantContent = stripVisibleReasoningScaffold(assistantContent);
+                    }
+                    const endedAt = Date.now();
+                    const stats = buildAssistantSpeedStats({
+                        assistantContent,
+                        streamedChartSpecs,
+                        apiUsage,
+                        requestStartedAt,
+                        endedAt,
+                        firstVisibleAnswerAt
+                    });
+                    assistantContent = stats.assistantContent;
+                    const assistantTokens = stats.assistantTokens;
                     const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
+                    const costTime = stats.costTime;
+                    const tokensPerSec = stats.tokensPerSec;
+                    updateLastAssistantStats({ sessionId, userId, costTime, tps: tokensPerSec });
 
                     maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
-                    recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+                    recordModelSuccess(modelCfg, endedAt - requestStartedAt);
                     writeSse(JSON.stringify({
                         type: 'message_saved',
                         role: 'assistant',
                         messageId: assistantMessageResult.lastInsertRowid,
                         modelName: modelCfg.name || modelCfg.model_name || '',
                         tokenCount: assistantTokens,
+                        costTime,
+                        tps: tokensPerSec,
                         content: assistantContent
                     }));
                     writeSse('[DONE]');
@@ -882,6 +952,7 @@ module.exports = {
     appendStreamedChartsToAssistantContent,
     applyChatLanguageInstruction,
     applyChatNoThinkSoftSwitch,
+    buildAssistantSpeedStats,
     buildFallbackDataQueryInput,
     buildPersistedChatErrorContent,
     buildRagContextMessage,

@@ -22,6 +22,15 @@ const {
     API_ACCESS_SETTING_KEY,
     getApiAccessSetting
 } = require('../services/api-access-settings');
+const {
+    buildRuntimeConfigSnapshot,
+    saveRuntimeConfig
+} = require('../services/runtime-settings');
+const { syncGlobalAiConcurrencySettings } = require('../services/concurrency');
+const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
+const { syncAgentRuntimeConcurrency } = require('../services/agent-runtime');
+const { syncKnowledgeDocumentIndexConcurrency } = require('../services/rag-documents');
+const { syncMemoryCompressionConcurrency } = require('../llm');
 const { isSuperAdmin } = require('../permissions');
 
 const allowedSettings = new Set([
@@ -148,6 +157,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
             memoryConfig: getMemoryConfig(settings),
+            runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             defaultModelId: settings.default_model_id?.value || null,
@@ -263,8 +273,45 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({
             success: true,
             memoryConfig: getMemoryConfig(settings),
+            runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
             settings
+        });
+    }));
+
+    router.put('/admin/settings/runtime', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const result = saveRuntimeConfig(req.body || {}, req.user?.id || null);
+        if (result.error) return res.status(400).json({ error: result.error });
+
+        let modelEndpointRuntime = [];
+        let knowledgeIndexQueue = null;
+        let agentQueue = null;
+        let memoryCompressionConcurrency = null;
+        let globalAiConcurrency = null;
+
+        try {
+            globalAiConcurrency = syncGlobalAiConcurrencySettings();
+            modelEndpointRuntime = getModelEndpointRuntimeStatus();
+            agentQueue = syncAgentRuntimeConcurrency();
+            knowledgeIndexQueue = syncKnowledgeDocumentIndexConcurrency();
+            memoryCompressionConcurrency = syncMemoryCompressionConcurrency();
+        } catch (e) {
+            req.log?.warn({ err: e.message }, '运行时配置保存后的同步刷新失败');
+        }
+
+        if (result.changed.length > 0) {
+            logAction(req, 'UPDATE_RUNTIME_SETTINGS', result.changed.join('；'));
+        }
+
+        res.json({
+            success: true,
+            runtimeConfig: result.config,
+            changed: result.changed,
+            globalAiConcurrency,
+            modelEndpointRuntime,
+            agentQueue,
+            knowledgeIndexQueue,
+            memoryCompressionConcurrency
         });
     }));
 
@@ -313,6 +360,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             ragEnabled: true,
             ragConfig: getRagConfig(),
             memoryConfig: getMemoryConfig(settings),
+            runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,

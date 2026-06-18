@@ -8,6 +8,7 @@ const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
 const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge-graph');
+const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -21,10 +22,13 @@ const allowedExtensions = new Set([
     '.csv', '.json',
     '.html', '.htm'
 ]);
-const maxConcurrentIndexes = Math.max(Number.parseInt(process.env.RAG_INDEX_MAX_CONCURRENT || '1', 10) || 1, 1);
 const activeIndexes = new Set();
 const pendingIndexes = new Map();
 let runningIndexCount = 0;
+
+function getMaxConcurrentIndexes() {
+    return getBackgroundRuntimeConfig().ragIndexMaxConcurrent;
+}
 
 function ensureKnowledgeSourceRoot() {
     fs.mkdirSync(knowledgeSourceRoot, { recursive: true });
@@ -696,12 +700,13 @@ function getKnowledgeQualityReport(userId) {
         queue: {
             running: runningIndexCount,
             pending: pendingIndexes.size,
-            maxConcurrent: maxConcurrentIndexes
+            maxConcurrent: getMaxConcurrentIndexes()
         }
     };
 }
 
 function drainKnowledgeDocumentIndexQueue() {
+    const maxConcurrentIndexes = getMaxConcurrentIndexes();
     while (runningIndexCount < maxConcurrentIndexes && pendingIndexes.size > 0) {
         const [key, job] = pendingIndexes.entries().next().value;
         pendingIndexes.delete(key);
@@ -733,6 +738,15 @@ function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null }) {
     pendingIndexes.set(key, { docId: normalizedDocId, userId, user });
     drainKnowledgeDocumentIndexQueue();
     return { started: true };
+}
+
+function syncKnowledgeDocumentIndexConcurrency() {
+    drainKnowledgeDocumentIndexQueue();
+    return {
+        running: runningIndexCount,
+        pending: pendingIndexes.size,
+        maxConcurrent: getMaxConcurrentIndexes()
+    };
 }
 
 function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
@@ -795,7 +809,7 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         queue: {
             running: runningIndexCount,
             pending: pendingIndexes.size,
-            maxConcurrent: maxConcurrentIndexes
+            maxConcurrent: getMaxConcurrentIndexes()
         }
     };
 
@@ -917,5 +931,6 @@ module.exports = {
     setKnowledgeDocumentCollection,
     setKnowledgeDocumentTags,
     setKnowledgeDocumentEnabled,
-    scheduleKnowledgeDocumentIndexing
+    scheduleKnowledgeDocumentIndexing,
+    syncKnowledgeDocumentIndexConcurrency
 };

@@ -67,14 +67,13 @@ window.addModel = async () => {
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
         supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
-        disable_chat_thinking: document.getElementById('m-disable-chat-thinking')?.checked ? 1 : 0,
+        chat_thinking_enabled: document.getElementById('m-chat-thinking-enabled')?.checked ? 1 : 0,
         input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
         output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
         price_currency: (document.getElementById('m-price-currency')?.value || 'CNY').trim(),
         scope: isSuperAdminUser() ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');
-    // 上下文关系校验（后端仍会权威校验）：输入/输出上限须小于上下文窗口。
     if (payload.context_window_tokens) {
         if (payload.max_input_tokens && payload.max_input_tokens >= payload.context_window_tokens) {
             return showToast('输入 Token 上限应小于上下文窗口', 'error');

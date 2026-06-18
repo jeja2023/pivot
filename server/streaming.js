@@ -118,7 +118,7 @@ function createSseEventParser({ onData, onDone } = {}) {
     };
 }
 
-function createStreamAccumulator({ includeThoughtTags = false, onContent } = {}) {
+function createStreamAccumulator({ includeThoughtTags = false, includeThoughtContent = true, onContent } = {}) {
     let content = '';
     let usage = null;
     let lastWasThought = false;
@@ -128,6 +128,7 @@ function createStreamAccumulator({ includeThoughtTags = false, onContent } = {})
         const { delta, isThought, usage: extractedUsage } = extractStreamPayload(json);
         if (extractedUsage) usage = extractedUsage;
         if (!delta) return '';
+        if (isThought && !includeThoughtContent) return '';
 
         let sendContent = '';
         if (includeThoughtTags && isThought) {
@@ -146,7 +147,13 @@ function createStreamAccumulator({ includeThoughtTags = false, onContent } = {})
 
         if (sendContent) {
             content += sendContent;
-            if (typeof onContent === 'function') onContent(sendContent);
+            if (typeof onContent === 'function') {
+                onContent(sendContent, {
+                    delta,
+                    isThought,
+                    usage: extractedUsage || usage
+                });
+            }
         }
         return sendContent;
     };
@@ -164,7 +171,14 @@ function createStreamAccumulator({ includeThoughtTags = false, onContent } = {})
             const closeTag = '</thought>';
             content += closeTag;
             lastWasThought = false;
-            if (typeof onContent === 'function') onContent(closeTag);
+            if (typeof onContent === 'function') {
+                onContent(closeTag, {
+                    delta: '',
+                    isThought: false,
+                    isSynthetic: true,
+                    usage
+                });
+            }
             return closeTag;
         }
         return '';

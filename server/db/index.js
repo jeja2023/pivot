@@ -3,6 +3,10 @@ const { initSchema } = require('./schema');
 const { runMigrations } = require('./migrate');
 const { runSeeds } = require('./seed');
 const { getBeijingTimestamp } = require('../time');
+const {
+    RUNTIME_SETTING_DEFINITIONS,
+    getRuntimeDefaultValue
+} = require('../services/runtime-settings-defs');
 
 // 1. 初始化表结构
 initSchema();
@@ -23,8 +27,8 @@ const stmts = {
     getSessionById: db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL'),
     updateSessionTitle: db.prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     // 模型
-    getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, supports_reasoning, disable_chat_thinking, user_id, status, created_at FROM models ORDER BY id DESC'),
-    getAccessibleModels: db.prepare("SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, supports_reasoning, disable_chat_thinking, user_id, status FROM models WHERE status = 'active' AND (user_id IS NULL OR user_id = ?) ORDER BY id DESC"),
+    getAllModels: db.prepare('SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, user_id, status, created_at FROM models ORDER BY id DESC'),
+    getAccessibleModels: db.prepare("SELECT id, name, url, model_name, daily_token_limit, allowed_units, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, user_id, status FROM models WHERE status = 'active' AND (user_id IS NULL OR user_id = ?) ORDER BY id DESC"),
     getUserPasswordHash: db.prepare('SELECT password_hash FROM users WHERE id = ?'),
     // 刷新令牌
     insertRefreshToken: db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'),
@@ -63,5 +67,8 @@ ensureSetting('rag_embedding_model', process.env.EMBEDDING_MODEL || 'nomic-embed
 ensureSetting('allow_public_registration', process.env.ALLOW_PUBLIC_REGISTRATION === 'true' ? 'true' : 'false');
 ensureSetting('api_access_enabled', process.env.API_ACCESS_ENABLED === 'false' ? 'false' : 'true');
 ensureSetting('memory_threshold', process.env.MEMORY_THRESHOLD || '12000');
+RUNTIME_SETTING_DEFINITIONS.forEach(definition => {
+    ensureSetting(definition.key, getRuntimeDefaultValue(definition));
+});
 
 module.exports = { db, dataDir, dbPath, stmts };

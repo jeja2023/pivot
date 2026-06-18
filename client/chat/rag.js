@@ -37,6 +37,7 @@ const {
 } = window.Pivot?.ragGraphLayout || {};
 
 const {
+    cancelGraphNodeTooltipHide: cancelGraphNodeTooltipHideUi = () => {},
     ensureGraphMapView: ensureGraphMapViewState = (graphState) => {
         if (!graphState.mapView) {
             graphState.mapView = {
@@ -59,6 +60,7 @@ const {
     moveGraphMapPan: moveGraphMapPanUi = () => false,
     positionGraphNodeTooltip: positionGraphNodeTooltipUi = () => {},
     resetGraphMapView: resetGraphMapViewUi = () => {},
+    scheduleGraphNodeTooltipHide: scheduleGraphNodeTooltipHideUi = () => {},
     showGraphNodeTooltip: showGraphNodeTooltipUi = () => {},
     startGraphMapPan: startGraphMapPanUi = () => false,
     stopGraphMapPan: stopGraphMapPanUi = () => false,
@@ -350,7 +352,11 @@ document.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 document.addEventListener('mouseover', (event) => {
-    const node = event.target.closest?.('.rag-graph-map-node');
+    if (event.target.closest?.('#rag-graph-node-tooltip')) {
+        cancelGraphNodeTooltipHideUi();
+        return;
+    }
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-entity');
     if (node && !node.contains(event.relatedTarget)) {
         showGraphNodeTooltip(node, event);
         return;
@@ -361,30 +367,32 @@ document.addEventListener('mouseover', (event) => {
 });
 
 document.addEventListener('mousemove', (event) => {
-    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-relation');
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-entity, .rag-graph-relation');
     if (!node) return;
     positionGraphNodeTooltip(event);
 });
 
 document.addEventListener('mouseout', (event) => {
-    const node = event.target.closest?.('.rag-graph-map-node');
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-entity');
     if (node && !node.contains(event.relatedTarget)) {
-        hideGraphNodeTooltip();
+        if (event.relatedTarget?.closest?.('#rag-graph-node-tooltip')) return;
+        scheduleGraphNodeTooltipHideUi(300);
         return;
     }
     const relation = event.target.closest?.('.rag-graph-relation');
     if (!relation || relation.contains(event.relatedTarget)) return;
-    hideGraphNodeTooltip();
+    if (event.relatedTarget?.closest?.('#rag-graph-node-tooltip')) return;
+    scheduleGraphNodeTooltipHideUi(300);
 });
 
 document.addEventListener('focusin', (event) => {
-    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-relation');
+    const node = event.target.closest?.('.rag-graph-map-node, .rag-graph-entity, .rag-graph-relation');
     if (!node) return;
     showGraphNodeTooltip(node, node.getBoundingClientRect());
 });
 
 document.addEventListener('focusout', (event) => {
-    if (event.target.closest?.('.rag-graph-map-node, .rag-graph-relation')) hideGraphNodeTooltip();
+    if (event.target.closest?.('.rag-graph-map-node, .rag-graph-entity, .rag-graph-relation')) hideGraphNodeTooltip();
 });
 
 document.addEventListener('change', async (event) => {

@@ -13,7 +13,7 @@ function createAgentQueue({
 }) {
     const activeRunIds = new Set();
     const queuedHints = new Set();
-    const safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
+    let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
 
     const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
@@ -127,8 +127,17 @@ function createAgentQueue({
         };
     }
 
+    function updateMaxConcurrent(nextMaxConcurrent) {
+        const next = Math.max(Number.parseInt(nextMaxConcurrent, 10) || safeMaxConcurrent, 1);
+        if (next === safeMaxConcurrent) return safeMaxConcurrent;
+        safeMaxConcurrent = next;
+        setImmediate(processQueue);
+        return safeMaxConcurrent;
+    }
+
     return {
         enqueueRun,
+        updateMaxConcurrent,
         processQueue,
         recoverQueued,
         getStatus

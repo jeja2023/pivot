@@ -17,6 +17,7 @@ const {
     MEMORY_CONFIG_KEYS,
     normalizeMemoryThreshold
 } = require('./services/memory-config');
+const { getBackgroundRuntimeConfig } = require('./services/runtime-settings');
 
 const THRESHOLD = DEFAULT_MEMORY_THRESHOLD;
 const SUMMARY_KEEP_COUNT = Math.max(1, parseInt(process.env.MEMORY_SUMMARY_KEEP_COUNT, 10) || 6);
@@ -24,8 +25,12 @@ const MIN_MESSAGES_TO_COMPRESS = Math.max(1, parseInt(process.env.MEMORY_MIN_MES
 const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 180000);
 // 同会话同时只触发一次后台压缩，全局并发上限可在环境变量调整
 const memoryCompressionGuard = new KeyedConcurrencyGuard({
-    maxConcurrent: Math.max(1, parseInt(process.env.MEMORY_COMPRESSION_MAX_CONCURRENT, 10) || 2)
+    maxConcurrent: getBackgroundRuntimeConfig().memoryCompressionMaxConcurrent
 });
+
+function syncMemoryCompressionConcurrency() {
+    return memoryCompressionGuard.updateMaxConcurrent(getBackgroundRuntimeConfig().memoryCompressionMaxConcurrent);
+}
 
 function loadSessionMessages(sessionId, userId) {
     return db.prepare(`
@@ -41,6 +46,7 @@ function unwrapGuardedCompressionResult(guardedResult) {
 }
 
 async function runGuardedCompression(sessionId, userId, messages, modelCfg) {
+    syncMemoryCompressionConcurrency();
     const guardedResult = await memoryCompressionGuard.run(`mem:${sessionId}`, () =>
         withTimeout(
             (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
@@ -79,6 +85,187 @@ function stripThoughtContent(text = '') {
         value = value.replace(pattern, '\n');
     });
     return value.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripVisibleReasoningScaffold(text = '') {
+    let value = stripThoughtContent(text);
+    const hasScaffold = [
+        /^Analyze User Input:\s*$/gim,
+        /^Key constraints from system prompt:\s*$/gim,
+        /^Formulate Response\b.*:\s*$/gim,
+        /^Draft:\s*$/gim,
+        /^Check Constraints:\s*$/gim,
+        /^All good\. Proceed\.\s*$/gim,
+        /^Output matches the draft\.[\s\S]*$/gim
+    ].some(pattern => pattern.test(value));
+    if (!hasScaffold) return value;
+
+    const lines = value.split(/\r?\n/);
+    const draftIndex = lines.findIndex(line => /^Draft:\s*$/i.test(line.trim()));
+    if (draftIndex >= 0) {
+        const answerLines = [];
+        for (let i = draftIndex + 1; i < lines.length; i += 1) {
+            const line = lines[i];
+            if (/^Check Constraints:\s*$/i.test(line.trim())) break;
+            answerLines.push(line);
+        }
+        const answer = answerLines.join('\n').trim();
+        if (answer) return answer;
+    }
+
+    return value
+        .replace(/^[\s\S]*?(?:Draft:\s*)/i, '')
+        .replace(/(?:Check Constraints:|All good\. Proceed\.|Output matches the draft\.)[\s\S]*$/i, '')
+        .trim();
+}
+
+const VISIBLE_REASONING_PREFIXES = [
+    'analyze user input:',
+    'key constraints from system prompt:',
+    'formulate response',
+    'draft:',
+    'check constraints:',
+    'user says:'
+];
+
+const VISIBLE_REASONING_START_PATTERN = /^(?:Analyze User Input:|Key constraints from system prompt:|Formulate Response\b.*:|Draft:|Check Constraints:|User says:)/im;
+const VISIBLE_REASONING_DRAFT_PATTERN = /^Draft:\s*/im;
+const VISIBLE_REASONING_STOP_PATTERN = /(?:^|\r?\n)(?:Check Constraints:|All good\. Proceed\.|Output matches the draft\.)/i;
+const LEADING_THOUGHT_OPEN_PATTERN = /^\s*<(think|thought|thinking)\b[^>]*>/i;
+const STREAM_FILTER_HOLD_CHARS = 32;
+
+function isPotentialVisibleReasoningPrefix(text = '') {
+    const value = String(text || '').trimStart().toLowerCase();
+    if (!value) return true;
+    return VISIBLE_REASONING_PREFIXES.some(prefix => prefix.startsWith(value) || value.startsWith(prefix));
+}
+
+function createVisibleReasoningStreamFilter() {
+    let buffer = '';
+    let mode = 'probe';
+    let answerStarted = false;
+    let stopped = false;
+    let seenContentChunk = false;
+
+    const consumeLeadingThoughtTag = () => {
+        const open = buffer.match(LEADING_THOUGHT_OPEN_PATTERN);
+        if (!open) return false;
+        const tag = open[1].toLowerCase();
+        const closePattern = new RegExp(`</${tag}>`, 'i');
+        const rest = buffer.slice(open.index + open[0].length);
+        const close = rest.search(closePattern);
+        if (close === -1) {
+            buffer = '';
+            mode = `drop-${tag}`;
+            return true;
+        }
+        const closeTag = rest.match(closePattern)?.[0] || '';
+        buffer = rest.slice(close + closeTag.length);
+        return true;
+    };
+
+    const consumeDroppedThoughtTag = () => {
+        const tag = mode.replace(/^drop-/, '');
+        const closePattern = new RegExp(`</${tag}>`, 'i');
+        const close = buffer.search(closePattern);
+        if (close === -1) {
+            buffer = '';
+            return '';
+        }
+        const closeTag = buffer.match(closePattern)?.[0] || '';
+        buffer = buffer.slice(close + closeTag.length);
+        mode = 'probe';
+        return drain(false);
+    };
+
+    const drainScaffold = (final = false) => {
+        if (stopped) {
+            buffer = '';
+            return '';
+        }
+
+        if (!answerStarted) {
+            const draft = buffer.match(VISIBLE_REASONING_DRAFT_PATTERN);
+            if (!draft) {
+                if (!final) return '';
+                const clean = stripVisibleReasoningScaffold(buffer);
+                buffer = '';
+                stopped = true;
+                return clean;
+            }
+            buffer = buffer.slice(draft.index + draft[0].length);
+            answerStarted = true;
+        }
+
+        const stop = buffer.search(VISIBLE_REASONING_STOP_PATTERN);
+        if (stop !== -1) {
+            const output = buffer.slice(0, stop).trimEnd();
+            buffer = '';
+            stopped = true;
+            return output;
+        }
+
+        if (final) {
+            const output = buffer.trimEnd();
+            buffer = '';
+            return output;
+        }
+
+        if (buffer.length <= STREAM_FILTER_HOLD_CHARS) return '';
+        const output = buffer.slice(0, -STREAM_FILTER_HOLD_CHARS);
+        buffer = buffer.slice(-STREAM_FILTER_HOLD_CHARS);
+        return output;
+    };
+
+    function drain(final = false) {
+        let output = '';
+        let progressed = true;
+
+        while (progressed) {
+            progressed = false;
+            if (mode.startsWith('drop-')) {
+                output += consumeDroppedThoughtTag();
+                progressed = mode === 'probe' && buffer.length > 0;
+            } else if (mode === 'probe') {
+                if (consumeLeadingThoughtTag()) {
+                    progressed = mode === 'probe' && buffer.length > 0;
+                    continue;
+                }
+                if (VISIBLE_REASONING_START_PATTERN.test(buffer)) {
+                    mode = 'scaffold';
+                    output += drainScaffold(final);
+                    progressed = false;
+                } else if (!isPotentialVisibleReasoningPrefix(buffer) || final) {
+                    mode = 'plain';
+                    output += buffer;
+                    buffer = '';
+                }
+            } else if (mode === 'scaffold') {
+                output += drainScaffold(final);
+            } else if (mode === 'plain') {
+                output += buffer;
+                buffer = '';
+            }
+        }
+
+        return output;
+    }
+
+    return {
+        push(chunk = '') {
+            const value = String(chunk || '');
+            if (!value || stopped) return '';
+            seenContentChunk = true;
+            buffer += value;
+            return drain(false);
+        },
+        finish(fallbackText = '') {
+            const output = drain(true);
+            if (output) return output;
+            if (!seenContentChunk && fallbackText) return stripVisibleReasoningScaffold(fallbackText);
+            return '';
+        }
+    };
 }
 
 function stripThoughtContentFromContent(content) {
@@ -448,6 +635,9 @@ module.exports = {
     estimateTokens,
     getContext,
     getMemoryThreshold,
+    createVisibleReasoningStreamFilter,
+    syncMemoryCompressionConcurrency,
     stripThoughtContent,
+    stripVisibleReasoningScaffold,
     THRESHOLD
 };

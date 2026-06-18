@@ -6,10 +6,8 @@ const { assertSafeModelRuntimeUrl, createSafeModelHttpAgents } = require('./mode
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
 const { recordSlowModelResponse } = require('./observability');
 const { parsePositiveInt } = require('../number');
+const { getModelEndpointRuntimeConfig } = require('./runtime-settings');
 
-const DEFAULT_MAX_CONCURRENT = parsePositiveInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY, 1);
-const MAX_QUEUE_SIZE = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_SIZE, 20);
-const QUEUE_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_QUEUE_TIMEOUT_MS, 300000);
 const FAILURE_THRESHOLD = parsePositiveInt(process.env.MODEL_ENDPOINT_FAILURE_THRESHOLD, 3);
 const CIRCUIT_OPEN_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_CIRCUIT_OPEN_MS, 60000);
 const MONITOR_INTERVAL_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_INTERVAL_MS, 30000);
@@ -36,12 +34,13 @@ function normalizeEndpointKey(modelCfg) {
 }
 
 function normalizeMaxConcurrent(modelCfg) {
-    return parsePositiveInt(modelCfg?.max_concurrent, DEFAULT_MAX_CONCURRENT);
+    return parsePositiveInt(modelCfg?.max_concurrent, getModelEndpointRuntimeConfig().defaultConcurrency);
 }
 
 function ensureRuntime(modelCfg) {
     const key = normalizeEndpointKey(modelCfg);
     const maxConcurrent = normalizeMaxConcurrent(modelCfg);
+    const runtimeConfig = getModelEndpointRuntimeConfig();
     let runtime = runtimes.get(key);
     if (!runtime) {
         runtime = {
@@ -51,8 +50,8 @@ function ensureRuntime(modelCfg) {
             models: new Map(),
             semaphore: new ConcurrencySemaphore({
                 maxConcurrent,
-                maxQueueSize: MAX_QUEUE_SIZE,
-                queueTimeoutMs: QUEUE_TIMEOUT_MS
+                maxQueueSize: runtimeConfig.queueSize,
+                queueTimeoutMs: runtimeConfig.queueTimeoutMs
             }),
             configuredMaxConcurrent: maxConcurrent,
             consecutiveFailures: 0,
@@ -83,7 +82,11 @@ function ensureRuntime(modelCfg) {
 
     runtime.name = modelCfg?.name || runtime.name;
     runtime.configuredMaxConcurrent = maxConcurrent;
-    runtime.semaphore.updateMaxConcurrent(maxConcurrent);
+    runtime.semaphore.updateLimits({
+        maxConcurrent,
+        maxQueueSize: runtimeConfig.queueSize,
+        queueTimeoutMs: runtimeConfig.queueTimeoutMs
+    });
     runtime.models.set(String(modelCfg?.id || runtime.models.size), {
         id: modelCfg?.id,
         name: modelCfg?.name || '',

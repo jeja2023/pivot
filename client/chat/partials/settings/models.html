@@ -6,11 +6,7 @@
                                 <p>管理聊天模型、服务地址、额度、能力标记、可见范围和启用状态。</p>
                             </div>
                             <div class="settings-page-actions">
-                                <div class="settings-memory-inline admin-only hidden" title="达到该 Token 数后自动压缩较早会话历史">
-                                    <label for="setting-memory-threshold">上下文阈值</label>
-                                    <input type="text" id="setting-memory-threshold" class="form-input" placeholder="12K">
-                                    <button type="button" id="memory-threshold-save-btn" class="btn-secondary" data-memory-threshold-save>保存</button>
-                                </div>
+                                <button type="button" id="runtime-settings-open-btn" class="btn-secondary admin-only hidden">并发治理</button>
                                 <button id="model-add-btn" class="btn-primary">+ 添加模型</button>
                             </div>
                         </div>

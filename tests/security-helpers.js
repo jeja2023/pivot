@@ -48,7 +48,7 @@ const { getClientIp } = require('../server/http');
 
 const { getBeijingTimestamp } = require('../server/time');
 
-const { buildContextMeta, estimateTokens, getContext } = require('../server/llm');
+const { buildContextMeta, createVisibleReasoningStreamFilter, estimateTokens, getContext, stripVisibleReasoningScaffold } = require('../server/llm');
 
 const { normalizeUploadedOriginalName } = require('../server/upload');
 
@@ -261,6 +261,7 @@ const {
     appendStreamedChartsToAssistantContent,
     applyChatLanguageInstruction,
     applyChatNoThinkSoftSwitch,
+    buildAssistantSpeedStats,
     buildFallbackDataQueryInput,
     buildRagContextMessage,
     createChartSseCapture,
@@ -670,6 +671,7 @@ module.exports = {
     buildEmbeddingModelListUrls,
     buildEmbeddingPayload,
     buildEmbeddingResponse,
+    buildAssistantSpeedStats,
     buildFallbackDataQueryInput,
     buildFtsOrQuery,
     buildFtsQuery,
@@ -720,6 +722,7 @@ module.exports = {
     createSettingsRouter,
     createSseEventParser,
     createStreamAccumulator,
+    createVisibleReasoningStreamFilter,
     csrfMiddleware,
     db,
     debugRetrieveContext,
@@ -732,6 +735,7 @@ module.exports = {
     estimateEmbeddingTokens,
     estimateMessagesTokens,
     estimateTokens,
+    stripVisibleReasoningScaffold,
     executeBuiltInTool,
     extractEmbeddingModelIds,
     extractKnowledgeGraph,

@@ -5,7 +5,7 @@ const { normalizeTokenUsage } = require('./token-accounting');
 const { normalizePriceCurrency, normalizePriceValue } = require('./model-costs');
 const { isSuperAdmin } = require('../permissions');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, disable_chat_thinking, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -71,7 +71,11 @@ function modelSupportsReasoning(model) {
 }
 
 function shouldDisableChatThinking(model) {
-    return modelSupportsReasoning(model) && normalizeBooleanFlag(model?.disable_chat_thinking) === 1;
+    return modelSupportsReasoning(model) && normalizeBooleanFlag(model?.chat_thinking_enabled) !== 1;
+}
+
+function isChatThinkingEnabled(model) {
+    return modelSupportsReasoning(model) && !shouldDisableChatThinking(model);
 }
 
 function contentContainsVisionInput(content) {
@@ -255,6 +259,7 @@ module.exports = {
     modelSupportsVision,
     modelSupportsReasoning,
     shouldDisableChatThinking,
+    isChatThinkingEnabled,
     contentContainsVisionInput,
     messagesContainVisionInput,
     getAccessibleModel,
