@@ -94,6 +94,14 @@ test('RAG 辅助函数生成安全 FTS 查询和确定性分块', () => {
     assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
 });
 
+test('RAG 切片会保留段落换行并优先贴近自然边界', () => {
+    const text = `${'A'.repeat(24)}。\n\n${'B'.repeat(18)}。`;
+    const chunks = chunkText(text, 20, 5);
+    assert.ok(chunks.length > 1);
+    assert.ok(chunks[0].includes('\n\n'));
+    assert.ok(chunks[0].endsWith('。\n\n'));
+});
+
 test('旧版知识库文档表缺少 collection_id 时数据库初始化可完成迁移', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-legacy-rag-db-'));
     const dbPath = path.join(dir, 'chat.db');

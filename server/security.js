@@ -8,6 +8,7 @@ const net = require('net');
 const path = require('path');
 const { logger } = require('./logger');
 const { isAdmin } = require('./permissions');
+const { clearDirSizeCache } = require('./services/dir-size-cache');
 const dnsPromises = dns.promises;
 
 const projectRoot = path.resolve(__dirname, '..');
@@ -303,6 +304,7 @@ function parseCsvLine(line) {
 
 function removeAttachmentFiles(attachments) {
     const results = [];
+    let changed = false;
     for (const attachment of attachments) {
         const filePath = attachment.file_path;
         const result = {
@@ -329,11 +331,13 @@ function removeAttachmentFiles(attachments) {
             if (fs.existsSync(target)) {
                 fs.rmSync(target, { force: true, maxRetries: 5, retryDelay: 80 });
                 result.removed = true;
+                changed = true;
             }
             let dir = path.dirname(target);
             while (dir.startsWith(uploadRoot + path.sep) && dir !== uploadRoot) {
                 if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
                     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+                    changed = true;
                 }
                 dir = path.dirname(dir);
             }
@@ -343,6 +347,7 @@ function removeAttachmentFiles(attachments) {
             logger.warn({ filePath, err: e.message }, 'Attachment cleanup failed to remove file');
         }
     }
+    if (changed) clearDirSizeCache();
     return results;
 }
 

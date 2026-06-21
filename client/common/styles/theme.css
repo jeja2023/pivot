@@ -25,6 +25,13 @@
     --form-file-input-basis: 200px;
     --form-file-input-min: 150px;
     --form-file-input-max: 300px;
+    --pwa-update-bg: var(--surface, #ffffff);
+    --pwa-update-text: var(--text-main, #374151);
+    --pwa-update-border: var(--border, #e5e7eb);
+    --pwa-update-shadow: 0 16px 36px rgba(15,23,42,.24);
+    --pwa-update-action-bg: var(--primary, #10a37f);
+    --pwa-update-action-bg-hover: var(--primary-hover, #0e8c6d);
+    --pwa-update-action-text: #ffffff;
 }
 
 /* 全局隐藏类 (符合规范第39条) */
@@ -41,6 +48,10 @@
         --surface: #2d2d2e;
         --msg-user: #343541;
         --msg-ai: #444654;
+        --pwa-update-bg: var(--surface, #2d2d2e);
+        --pwa-update-text: var(--text-main, #ececf1);
+        --pwa-update-border: var(--border, #4d4d4f);
+        --pwa-update-shadow: 0 16px 36px rgba(0,0,0,.36);
     }
 }
 
@@ -91,4 +102,46 @@ input[type="file"]::file-selector-button:hover { background: var(--border); }
 /* Toast 容器 */
 #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; }
 .toast { padding: 12px 24px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); border-left: 4px solid var(--primary); margin-bottom: 10px; animation: slideDown 0.3s; }
+.pwa-update-notice {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(calc(100vw - 36px), 360px);
+    padding: 12px 14px;
+    border: 1px solid var(--pwa-update-border, var(--border, #e5e7eb));
+    border-radius: var(--radius-md, 10px);
+    background: var(--pwa-update-bg, var(--surface, #ffffff));
+    color: var(--pwa-update-text, var(--text-main, #374151));
+    box-shadow: var(--pwa-update-shadow, 0 16px 36px rgba(15,23,42,.24));
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.pwa-update-notice__text {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-wrap: anywhere;
+}
+
+.pwa-update-notice__action {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--pwa-update-action-bg, var(--primary, #10a37f));
+    color: var(--pwa-update-action-text, #ffffff);
+    cursor: pointer;
+    font: inherit;
+    white-space: nowrap;
+    transition: background 0.2s ease;
+}
+
+.pwa-update-notice__action:hover {
+    background: var(--pwa-update-action-bg-hover, var(--primary-hover, #0e8c6d));
+}
 @keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

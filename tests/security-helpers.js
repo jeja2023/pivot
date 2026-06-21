@@ -32,6 +32,8 @@ if (generatedTestUploadDir) {
     process.env.PIVOT_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-security-uploads-'));
 }
 
+process.env.PIVOT_SQLITE_WRITE_QUEUE_SYNC = process.env.PIVOT_SQLITE_WRITE_QUEUE_SYNC || 'true';
+
 const {
     assertSafeOutboundUrl,
     assertSafeMcpOutboundUrl,

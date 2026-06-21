@@ -389,13 +389,44 @@ function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source }) {
     }
 }
 
+const SENTENCE_BOUNDARY_RE = /[。！？!?；;.!?]/;
+
+function findParagraphChunkEnd(text, start, limit) {
+    const slice = text.slice(start, limit);
+    const boundaryIndex = slice.lastIndexOf('\n\n');
+    if (boundaryIndex < 0) return -1;
+    let end = start + boundaryIndex + 2;
+    while (end < limit && text[end] === '\n') end += 1;
+    return end;
+}
+
+function findSentenceChunkEnd(text, start, limit) {
+    for (let i = limit - 1; i >= start; i -= 1) {
+        if (SENTENCE_BOUNDARY_RE.test(text[i])) return i + 1;
+    }
+    return -1;
+}
+
+function findLineChunkEnd(text, start, limit) {
+    const newlineIndex = text.lastIndexOf('\n', limit - 1);
+    return newlineIndex >= start ? newlineIndex + 1 : -1;
+}
+
 function chunkText(text, chunkSize = 500, overlap = 100) {
-    const normalizedText = String(text || '').replace(/\n+/g, ' ').trim();
+    const normalizedText = String(text || '').replace(/\r\n?/g, '\n').trim();
     const chunks = [];
     let i = 0;
     const step = Math.max(chunkSize - overlap, 1);
+    const maxExtension = Math.max(32, Math.min(Math.max(overlap, 0), 120));
     while (i < normalizedText.length) {
-        const chunk = normalizedText.slice(i, i + chunkSize);
+        const hardEnd = Math.min(normalizedText.length, i + chunkSize);
+        const searchStart = Math.min(normalizedText.length, i + step);
+        const searchLimit = Math.min(normalizedText.length, i + chunkSize + maxExtension);
+        let chunkEnd = findParagraphChunkEnd(normalizedText, searchStart, searchLimit);
+        if (chunkEnd < 0) chunkEnd = findSentenceChunkEnd(normalizedText, searchStart, searchLimit);
+        if (chunkEnd < 0) chunkEnd = findLineChunkEnd(normalizedText, searchStart, searchLimit);
+        if (chunkEnd < 0 || chunkEnd <= i) chunkEnd = hardEnd;
+        const chunk = normalizedText.slice(i, chunkEnd);
         if (chunk.length > 0) chunks.push(chunk);
         i += step;
     }

@@ -1,4 +1,4 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 
 // 自动处理 Windows 控制台中文乱码
 if (process.platform === 'win32') {
@@ -30,15 +30,32 @@ const { validateConfig } = require('./config');
 const { applyAppVersionTemplate, getAppVersion } = require('./version');
 const { loadChatHtmlTemplate } = require('./chat-template');
 const { MANUAL_PATH, renderManualHtml } = require('./manual-page');
-const { LruCache } = require('./cache');
+const {
+    configureDirSizeCache,
+    getCachedDirSize
+} = require('./services/dir-size-cache');
+const {
+    enqueueAuditLog,
+    flushAllSqliteWrites
+} = require('./services/sqlite-write-queue');
 const appConfig = validateConfig();
 const PORT = appConfig.port;
 const appVersion = getAppVersion();
 const chatHtmlTemplate = loadChatHtmlTemplate();
+configureDirSizeCache({
+    ttlMs: appConfig.directorySizeCacheMs,
+    max: 64,
+    depth: 32
+});
 
 let shuttingDown = false;
 const fatalExit = (reason, err) => {
     logger.fatal({ err }, reason);
+    try {
+        flushAllSqliteWrites();
+    } catch (flushErr) {
+        logger.warn({ err: flushErr }, 'SQLite write queue flush during fatal exit failed');
+    }
     if (shuttingDown) return;
     shuttingDown = true;
     setTimeout(() => process.exit(1), 250).unref();
@@ -52,7 +69,6 @@ process.on('unhandledRejection', (reason) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
     logger.error({ err }, '未处理的 Promise 拒绝 (Unhandled Rejection)');
 });
-const { stmts } = require('./db');
 const { authMiddleware, csrfMiddleware } = require('./auth');
 const { isAdmin } = require('./permissions');
 const {
@@ -130,57 +146,26 @@ setImmediate(() => {
 const logAction = (req, action, details) => {
     const userId = req.user ? req.user.id : null;
     const ip = getClientIp(req);
-    stmts.insertLog.run(userId, normalizeAuditAction(action), details, ip, getBeijingTimestamp());
+    const serializedDetails = typeof details === 'string'
+        ? details
+        : (() => {
+            try {
+                return JSON.stringify(details);
+            } catch (err) {
+                return String(details ?? '');
+            }
+        })();
+    enqueueAuditLog({
+        userId,
+        action: normalizeAuditAction(action),
+        details: serializedDetails,
+        ipAddress: ip,
+        timestamp: getBeijingTimestamp()
+    });
 };
 
 // 移除冗余的分页格式化函数，已由 http.js 提供
 const isPublicRegistrationEnabled = () => getPublicRegistrationSetting();
-const DIR_SIZE_MAX_DEPTH = 32;
-async function getDirSizeAsync(dir, depth = 0) {
-    if (!fs.existsSync(dir)) return 0;
-    // 限制递归深度，避免异常深或循环的目录结构导致栈溢出；
-    // 跳过符号链接目录，避免顺着软链接进入死循环。
-    if (depth >= DIR_SIZE_MAX_DEPTH) {
-        logger.warn({ dir, depth }, '目录统计已达最大深度，停止下探');
-        return 0;
-    }
-    let total = 0;
-    try {
-        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isSymbolicLink()) {
-                continue;
-            }
-            if (entry.isDirectory()) {
-                total += await getDirSizeAsync(fullPath, depth + 1);
-            } else if (entry.isFile()) {
-                const stats = await fs.promises.stat(fullPath);
-                total += stats.size;
-            }
-        }
-    } catch (e) {
-        logger.warn({ dir, err: e.message }, '目录统计失败');
-    }
-    return total;
-}
-
-// 使用带 TTL + 容量上限的 LRU，避免长时间运行时 Map 无限增长
-const dirSizeCache = new LruCache({
-    max: 64,
-    ttlMs: appConfig.directorySizeCacheMs > 0 ? appConfig.directorySizeCacheMs : 0
-});
-async function getCachedDirSize(dir) {
-    const key = path.resolve(dir);
-    if (appConfig.directorySizeCacheMs > 0) {
-        const cached = dirSizeCache.get(key);
-        if (cached !== undefined) return cached;
-    }
-    const value = await getDirSizeAsync(key);
-    if (appConfig.directorySizeCacheMs > 0) dirSizeCache.set(key, value);
-    return value;
-}
-
 const app = express();
 app.locals.appVersion = appVersion;
 app.use((req, res, next) => {
@@ -333,7 +318,7 @@ const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
         <p>清理完成后请返回系统页面。</p>
         <div class="actions">
             <button id="reset-btn" class="primary">立即清理</button>
-            <a href="/chat/chat.html">返回系统</a>
+            <a href="/chat">返回系统</a>
         </div>
         <div id="status">等待操作</div>
     </main>
@@ -353,7 +338,7 @@ const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
                 }
                 localStorage.removeItem('pivot-current-build');
                 status.textContent = '清理完成，正在返回系统...';
-                setTimeout(function () { location.href = '/chat/chat.html'; }, 800);
+                setTimeout(function () { location.href = '/chat'; }, 800);
             } catch (err) {
                 status.textContent = '清理失败：' + (err && err.message ? err.message : err);
             }
@@ -370,10 +355,19 @@ app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/
     immutable: true
 }));
 
-// chat.html 由服务端注入版本号，必须单独处理
-app.get('/chat/chat.html', (req, res) => {
+const sendChatPage = (req, res) => {
     noCacheHeaders(res);
     res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
+};
+
+app.get('/chat', sendChatPage);
+app.get('/chat/', (req, res) => {
+    noCacheHeaders(res);
+    res.redirect(302, '/chat');
+});
+app.get('/chat/chat.html', (req, res) => {
+    noCacheHeaders(res);
+    res.redirect(302, '/chat');
 });
 
 // sw.js 必须禁止缓存，否则浏览器无法检测到新版本
@@ -454,7 +448,7 @@ app.use(createAttachmentsRouter({
 // 根路径跳转至对话页面
 app.get('/', (req, res) => {
     noCacheHeaders(res);
-    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
+    res.redirect(302, '/chat');
 });
 
 app.use('/api', createAuthRouter({
@@ -614,8 +608,17 @@ const gracefulShutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, '进程退出，正在关闭 HTTP 服务...');
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 5000).unref();
+    const exitWithCode = (code) => {
+        try {
+            flushAllSqliteWrites();
+        } catch (err) {
+            logger.warn({ err }, 'SQLite write queue flush during shutdown failed');
+        }
+        process.exit(code);
+    };
+    server.close(() => exitWithCode(0));
+    setTimeout(() => exitWithCode(1), 5000).unref();
 };
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+

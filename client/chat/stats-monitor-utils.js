@@ -185,7 +185,10 @@ const ROUTE_NAME_MAP = {
     
     // 核心静态资源
     '/': '系统主入口',
+    '/chat': '对话主界面',
+    '/chat/': '对话主界面',
     '/chat.html': '对话主界面',
+    '/chat/chat.html': '对话主界面',
     '/chat/config.js': '前端基础配置脚本',
     '/chat/ui.js': '界面交互逻辑脚本',
     '/chat/auth.js': '前端认证逻辑脚本',
@@ -277,7 +280,9 @@ function describeMonitorRoute(routePath) {
     const raw = String(routePath || '').trim();
     if (!raw) return '';
     const key = raw.split('?')[0].trim().toLowerCase();
-    const direct = ROUTE_NAME_MAP[key] || ROUTE_NAME_MAP[raw.toLowerCase()];
+    const normalizedKey = key.length > 1 ? key.replace(/\/+$/, '') : key;
+    const htmlNormalizedKey = normalizedKey.endsWith('.html') ? normalizedKey.replace(/\.html$/, '') : normalizedKey;
+    const direct = ROUTE_NAME_MAP[key] || ROUTE_NAME_MAP[normalizedKey] || ROUTE_NAME_MAP[htmlNormalizedKey] || ROUTE_NAME_MAP[raw.toLowerCase()];
     if (direct) return direct;
     if (key.startsWith('/common/vendor/')) return '第三方组件库资源';
     if (key.startsWith('/uploads/')) return '用户上传附件流';

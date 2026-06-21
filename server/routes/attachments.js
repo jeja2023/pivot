@@ -13,6 +13,7 @@ const { normalizeUploadedOriginalName } = require('../upload');
 const { encodeAttachmentUrl, toProjectRelativePath } = require('../security');
 const { isSuperAdmin } = require('../permissions');
 const { getAttachmentContextLimit } = require('../services/resource-limits');
+const { clearDirSizeCache } = require('../services/dir-size-cache');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -36,6 +37,7 @@ function removeLocalFile(filePath, logContext = 'Remove upload file failed') {
     try {
         if (fs.existsSync(filePath)) {
             fs.rmSync(filePath, { force: true, maxRetries: 5, retryDelay: 80 });
+            clearDirSizeCache();
             return true;
         }
     } catch (e) {
@@ -206,6 +208,7 @@ function createAttachmentsRouter({
             `).run(userId, sessionId, originalName, relativePath, imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp(), getBeijingTimestamp());
 
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
+            clearDirSizeCache();
             res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, type: imageOutput ? 'image/jpeg' : mimeType, sessionId, extractedText, visionAttachments });
         } catch (e) {
             removeLocalFile(req.file.path);

@@ -16,26 +16,14 @@
         if (document.getElementById('pwa-update-notice')) return;
         const notice = document.createElement('div');
         notice.id = 'pwa-update-notice';
-        notice.style.cssText = [
-            'position:fixed',
-            'right:18px',
-            'bottom:18px',
-            'z-index:9999',
-            'display:flex',
-            'align-items:center',
-            'gap:10px',
-            'padding:12px 14px',
-            'background:#0f172a',
-            'color:#fff',
-            'border-radius:10px',
-            'box-shadow:0 16px 36px rgba(15,23,42,.24)',
-            'font-size:13px'
-        ].join(';');
+        notice.className = 'pwa-update-notice';
+        notice.setAttribute('role', 'status');
+        notice.setAttribute('aria-live', 'polite');
         notice.innerHTML = `
-            <span>检测到新版本 ${escapeText(info.version || '')}</span>
-            <button type="button" style="height:30px;padding:0 10px;border:0;border-radius:7px;background:#10a37f;color:#fff;cursor:pointer;">刷新</button>
+            <span class="pwa-update-notice__text">检测到新版本 ${escapeText(info.version || '')}</span>
+            <button type="button" class="pwa-update-notice__action">刷新</button>
         `;
-        notice.querySelector('button')?.addEventListener('click', () => {
+        notice.querySelector('.pwa-update-notice__action')?.addEventListener('click', () => {
             localStorage.setItem(VERSION_KEY, info.build || info.version || String(Date.now()));
             window.location.reload();
         });

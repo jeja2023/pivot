@@ -10,6 +10,7 @@ const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
 const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge-graph');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
+const { clearDirSizeCache } = require('./dir-size-cache');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -302,6 +303,7 @@ function persistUploadedKnowledgeFile(file, userId, docId) {
     const targetPath = path.join(targetDir, `${docId}${ext}`);
     fs.mkdirSync(targetDir, { recursive: true });
     fs.renameSync(file.path, targetPath);
+    clearDirSizeCache();
     return {
         sourcePath: toProjectRelativePath(targetPath),
         sourceSize: fs.statSync(targetPath).size

@@ -1,3 +1,18 @@
+## [v0.0.135] - 2026-06-21
+
+### PWA 更新提示样式规范化与主题变量收口
+
+本版本把 PWA 更新提示从内联硬编码样式改为 class + 全局 CSS 变量驱动，并保留变量 fallback，确保在非完整 chat 样式环境里也能稳定显示，同时继续保持刷新更新的原有行为。
+
+#### 变更内容
+- **更新提示组件化**：`client/pwa-manager.js` 中的更新提示改用 `pwa-update-notice`、`pwa-update-notice__text`、`pwa-update-notice__action` 结构，移除内联布局与颜色声明。
+- **主题变量收口**：`client/common/styles/theme.css` 新增 `--pwa-update-*` 变量，并为浅色/暗色主题提供默认值与回退值，样式跟随全局主题统一。
+- **可访问性与兼容性**：提示容器增加 `role="status"` 和 `aria-live="polite"`，同时保留 CSS/变量 fallback，避免脚本在非完整 chat 样式环境中显示异常。
+- **版本号启用**：应用版本升级至 `v0.0.135`，同步更新 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
+#### 说明
+- 本次为 PWA 提示样式收口与版本升级，刷新更新逻辑保持不变。
+
 # 更新日志 (CHANGELOG)
 
 ## [v0.0.134] - 2026-06-21

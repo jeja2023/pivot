@@ -4,6 +4,11 @@ const { encryptSecret, decryptSecret } = require('../security');
 const { normalizeTokenUsage } = require('./token-accounting');
 const { normalizePriceCurrency, normalizePriceValue } = require('./model-costs');
 const { isSuperAdmin } = require('../permissions');
+const { getBeijingTimestamp } = require('../time');
+const {
+    enqueueModelUsageEvent,
+    getPendingModelUsageTotal
+} = require('./sqlite-write-queue');
 
 const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
@@ -181,6 +186,7 @@ function getRunnableModelForUser(modelId, user) {
 }
 
 function getModelDailyUsage(userId, modelId) {
+    const todayPrefix = getBeijingTimestamp().slice(0, 10);
     const messageTokens = db.prepare(`
         SELECT COALESCE(SUM(token_count), 0) AS tokens
         FROM messages
@@ -191,16 +197,21 @@ function getModelDailyUsage(userId, modelId) {
         FROM model_usage_events
         WHERE user_id = ? AND model_id = ? AND date(created_at) = date('now', '+8 hours')
     `).get(userId, modelId).tokens || 0;
-    return messageTokens + eventTokens;
+    return messageTokens + eventTokens + getPendingModelUsageTotal(userId, modelId, todayPrefix);
 }
 
 function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inputTokens = 0, outputTokens = 0) {
     const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens: tokenCount });
     if (!userId || !modelId || usage.totalTokens <= 0) return;
-    db.prepare(`
-        INSERT INTO model_usage_events (user_id, model_id, source, token_count, input_tokens, output_tokens, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(userId, modelId, String(source || 'api').slice(0, 40), usage.totalTokens, usage.inputTokens, usage.outputTokens);
+    enqueueModelUsageEvent({
+        userId,
+        modelId,
+        source: String(source || 'api').slice(0, 40),
+        tokenCount: usage.totalTokens,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        createdAt: getBeijingTimestamp()
+    });
 }
 
 function getOrCreateEmbeddingUsageModel({ userId = null, url = '', model = '' } = {}) {

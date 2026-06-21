@@ -120,7 +120,7 @@ function renderManualHtml(markdown, { appVersion = '', nonce = '', embedded = fa
                 <span>版本 ${safeVersion || 'current'} · 面向普通用户的操作说明</span>
             </div>
             <nav class="manual-actions" aria-label="手册操作">
-                <a href="/chat/chat.html">返回系统</a>
+                <a href="/chat">返回系统</a>
             </nav>
         </header>`;
     return `<!DOCTYPE html>

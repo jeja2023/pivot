@@ -39,6 +39,9 @@ const {
     normalizeTokenUsage
 } = require('../services/token-accounting');
 const {
+    enqueueApiCallLog
+} = require('../services/sqlite-write-queue');
+const {
     ContextLengthExceededError,
     estimateMessagesTokens,
     fitMessagesToContextBudget
@@ -60,28 +63,22 @@ function recordApiCallLog(req, modelCfg, messages, data = {}) {
         outputTokens: data.outputTokens,
         totalTokens: data.totalTokens
     });
-    db.prepare(`
-        INSERT INTO api_call_logs (
-            user_id, api_key_id, model_id, model_name, request_messages, response_text,
-            status, error_message, input_tokens, output_tokens, total_tokens, stream,
-            ip_address, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        req.user.id,
-        req.apiKeyId,
-        modelCfg?.id || null,
-        modelCfg?.name || modelCfg?.model_name || null,
-        stringifyForAudit(messages),
-        data.responseText ? String(data.responseText).slice(0, 200000) : '',
-        data.status || 'success',
-        data.errorMessage ? String(data.errorMessage).slice(0, 4000) : '',
-        usage.inputTokens,
-        usage.outputTokens,
-        usage.totalTokens,
-        data.stream ? 1 : 0,
-        req.ip,
-        getBeijingTimestamp()
-    );
+    enqueueApiCallLog({
+        userId: req.user?.id || null,
+        apiKeyId: req.apiKeyId,
+        modelId: modelCfg?.id || null,
+        modelName: modelCfg?.name || modelCfg?.model_name || null,
+        requestMessages: stringifyForAudit(messages),
+        responseText: data.responseText ? String(data.responseText).slice(0, 200000) : '',
+        status: data.status || 'success',
+        errorMessage: data.errorMessage ? String(data.errorMessage).slice(0, 4000) : '',
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        stream: data.stream ? 1 : 0,
+        ipAddress: req.ip,
+        createdAt: getBeijingTimestamp()
+    });
 }
 
 function normalizeEmbeddingInputItem(item) {

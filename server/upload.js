@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { getUploadLimits } = require('./services/resource-limits');
+const { clearDirSizeCache } = require('./services/dir-size-cache');
 
 const projectRoot = path.resolve(__dirname, '..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -47,7 +48,7 @@ function removeUploadedFile(file) {
     if (!file?.path) return;
     const target = path.resolve(file.path);
     if (!target.startsWith(uploadRoot + path.sep)) return;
-    fs.promises.unlink(target).catch(() => {});
+    fs.promises.unlink(target).then(() => clearDirSizeCache()).catch(() => {});
 }
 
 function verifyUploadedMagic(file) {

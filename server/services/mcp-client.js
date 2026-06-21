@@ -21,6 +21,7 @@ const {
     listBuiltinMcpTools
 } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
+const { enqueueMcpCallLog } = require('./sqlite-write-queue');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
@@ -39,23 +40,18 @@ function previewValue(value, limit = PREVIEW_LIMIT) {
 
 function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status = 'success', durationMs = 0, input, output, error }) {
     try {
-        db.prepare(`
-            INSERT INTO mcp_call_logs (
-                user_id, server_id, tool_name, source, status, duration_ms,
-                input_preview, output_preview, error_message, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            user?.id || null,
-            serverId || null,
-            String(toolName || '').slice(0, 240),
-            String(source || 'manual').slice(0, 40),
-            status === 'error' ? 'error' : 'success',
-            Math.max(Number(durationMs) || 0, 0),
-            previewValue(input),
-            status === 'error' ? '' : previewValue(output),
-            status === 'error' ? String(error?.message || error || '').slice(0, 1000) : '',
-            getBeijingTimestamp()
-        );
+        enqueueMcpCallLog({
+            userId: user?.id || null,
+            serverId: serverId || null,
+            toolName: String(toolName || '').slice(0, 240),
+            source: String(source || 'manual').slice(0, 40),
+            status: status === 'error' ? 'error' : 'success',
+            durationMs: Math.max(Number(durationMs) || 0, 0),
+            inputPreview: previewValue(input),
+            outputPreview: status === 'error' ? '' : previewValue(output),
+            errorMessage: status === 'error' ? String(error?.message || error || '').slice(0, 1000) : '',
+            createdAt: getBeijingTimestamp()
+        });
     } catch (e) {
         // Audit logging must never block the tool call path.
     }
