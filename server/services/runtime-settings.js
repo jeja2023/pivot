@@ -126,12 +126,22 @@ function getGlobalContextRuntimeConfig() {
     };
 }
 
+function getGlobalSamplingRuntimeConfig() {
+    return {
+        temperature: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.samplingTemperature),
+        topP: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.samplingTopP),
+        presencePenalty: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.samplingPresencePenalty),
+        frequencyPenalty: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.samplingFrequencyPenalty)
+    };
+}
+
 function getUploadRuntimeConfig() {
     return {
         attachmentMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes),
         knowledgeMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.knowledgeUploadMaxBytes),
         imageUploadMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.imageUploadMaxBytes),
         imageContextMaxBytes: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.imageContextMaxBytes),
+        maxAttachmentsPerMessage: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.maxAttachmentsPerMessage),
         maxImagesPerMessage: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.maxImagesPerMessage)
     };
 }
@@ -167,6 +177,7 @@ module.exports = {
     getBackgroundRuntimeConfig,
     getGlobalAiConcurrencyConfig,
     getGlobalContextRuntimeConfig,
+    getGlobalSamplingRuntimeConfig,
     getKnowledgeRuntimeConfig,
     getModelEndpointRuntimeConfig,
     getRagRuntimeConfig,

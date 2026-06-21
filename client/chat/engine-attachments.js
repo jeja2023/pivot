@@ -1,11 +1,214 @@
 // 聊天附件上传与待发送附件状态 Chat attachment upload and pending attachment state
 let pendingAttachments = [];
-const MAX_PENDING_ATTACHMENTS = 5;
-window.MAX_PENDING_ATTACHMENTS = MAX_PENDING_ATTACHMENTS;
+const DEFAULT_MAX_PENDING_ATTACHMENTS = 5;
+let maxPendingAttachments = Number.parseInt(window.MAX_PENDING_ATTACHMENTS, 10);
+if (!Number.isFinite(maxPendingAttachments) || maxPendingAttachments <= 0) {
+    maxPendingAttachments = DEFAULT_MAX_PENDING_ATTACHMENTS;
+}
+let pendingAttachmentCounter = 0;
+window.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
 window.pendingAttachments = pendingAttachments;
 
 function syncPendingAttachmentsGlobal() {
     window.pendingAttachments = pendingAttachments;
+}
+
+function normalizeMaxPendingAttachments(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_PENDING_ATTACHMENTS;
+}
+
+function getMaxPendingAttachments() {
+    const configured = normalizeMaxPendingAttachments(window.MAX_PENDING_ATTACHMENTS);
+    maxPendingAttachments = configured;
+    window.MAX_PENDING_ATTACHMENTS = configured;
+    return configured;
+}
+
+function setMaxPendingAttachments(value) {
+    maxPendingAttachments = normalizeMaxPendingAttachments(value);
+    window.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
+    renderAttachmentPreviews?.();
+    return maxPendingAttachments;
+}
+
+function revokeAttachmentPreview(item = {}) {
+    const previewUrl = String(item.previewUrl || '');
+    if (!previewUrl.startsWith('blob:')) return;
+    try {
+        URL.revokeObjectURL(previewUrl);
+    } catch (e) {}
+}
+
+function createLocalAttachment(file, sessionId = currentSessionId || '') {
+    return {
+        id: `local-${Date.now()}-${++pendingAttachmentCounter}`,
+        kind: 'local',
+        status: 'local',
+        name: file.name,
+        url: '',
+        type: String(file.type || ''),
+        size: file.size || 0,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        sessionId: String(sessionId || ''),
+        extractedText: '',
+        markdown: ''
+    };
+}
+
+function createUploadedAttachmentRecord(sourceItem, data, sessionId) {
+    const name = data?.name || sourceItem?.name || '附件';
+    const url = data?.url || '';
+    const type = data?.type || sourceItem?.type || '';
+    return {
+        id: sourceItem?.id || `uploaded-${Date.now()}-${++pendingAttachmentCounter}`,
+        kind: 'uploaded',
+        status: 'uploaded',
+        name,
+        url,
+        type,
+        size: sourceItem?.size || 0,
+        sessionId: data?.sessionId || sessionId || sourceItem?.sessionId || '',
+        extractedText: data?.extractedText || '',
+        markdown: buildAttachmentMarkdown(name, url, isChatImageAttachment({ name, url, type }))
+    };
+}
+
+function createUploadedVisionAttachmentRecord(item, sessionId, fallbackSessionId = '') {
+    const name = item?.name || '图片';
+    const url = item?.url || '';
+    const type = item?.type || 'image/png';
+    return {
+        id: `vision-${Date.now()}-${++pendingAttachmentCounter}`,
+        kind: 'uploaded',
+        status: 'uploaded',
+        name,
+        url,
+        type,
+        size: 0,
+        sessionId: item?.sessionId || sessionId || fallbackSessionId || '',
+        extractedText: '',
+        markdown: item?.markdown || buildAttachmentMarkdown(name, url, true)
+    };
+}
+
+async function uploadChatFile(file, uploadSessionId, password = '', onProgress = null) {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (password) fd.append('password', password);
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(uploadSessionId)}`);
+        Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && typeof onProgress === 'function') {
+                onProgress((event.loaded / event.total) * 100);
+            }
+        };
+        xhr.onload = () => {
+            let data = {};
+            try {
+                data = JSON.parse(xhr.responseText || '{}');
+            } catch (e) {
+                data = { error: xhr.responseText || 'Upload failed' };
+            }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(data);
+                return;
+            }
+            const err = new Error(data.error || `Upload failed (${xhr.status})`);
+            err.data = data;
+            reject(err);
+        };
+        xhr.onerror = () => reject(new Error('上传连接失败'));
+        xhr.send(fd);
+    });
+}
+
+async function uploadPendingAttachmentItem(item, uploadSessionId) {
+    const uploadOnce = async (password = '') => {
+        const progress = createUploadProgress(item.name);
+        try {
+            return await uploadChatFile(item.file, uploadSessionId, password, percent => progress.update(percent));
+        } finally {
+            progress.close();
+        }
+    };
+
+    let data;
+    try {
+        data = await uploadOnce('');
+    } catch (uploadErr) {
+        if (uploadErr.data?.passwordRequired) {
+            const password = await window.showInputPrompt({
+                title: '文档密码',
+                message: `文档 ${item.name} 已加密，请输入文档密码。`,
+                type: 'password',
+                placeholder: '文档密码',
+                autocomplete: 'off',
+                trim: false
+            });
+            if (!password) return { aborted: true };
+            data = await uploadOnce(password);
+        } else {
+            throw uploadErr;
+        }
+    }
+
+    const uploadedItem = createUploadedAttachmentRecord(item, data, uploadSessionId);
+    const extraItems = [];
+    (data.visionAttachments || []).forEach(visionItem => {
+        extraItems.push(createUploadedVisionAttachmentRecord(visionItem, data.sessionId || uploadSessionId, uploadSessionId));
+    });
+    return { uploadedItem, extraItems };
+}
+
+async function preparePendingAttachmentsForSend(uploadSessionId) {
+    const sessionId = String(uploadSessionId || '').trim();
+    if (!sessionId) throw new Error('缺少会话 ID，请先创建或选择会话');
+
+    const maxAttachments = getMaxPendingAttachments();
+    let uploadedCount = 0;
+    let skippedCount = 0;
+
+    for (let index = 0; index < pendingAttachments.length; index += 1) {
+        if (String(currentSessionId || '') !== sessionId) {
+            throw new Error('会话已切换，附件无法继续发送');
+        }
+        const item = pendingAttachments[index];
+        if (!item || item.kind === 'uploaded' || !item.file) continue;
+
+        const result = await uploadPendingAttachmentItem(item, sessionId);
+        if (result.aborted) return { aborted: true, uploadedCount, skippedCount };
+
+        revokeAttachmentPreview(item);
+        pendingAttachments[index] = result.uploadedItem;
+        uploadedCount += 1;
+
+        if (result.extraItems.length > 0) {
+            const slotsLeft = Math.max(0, maxAttachments - pendingAttachments.length);
+            const extras = result.extraItems.slice(0, slotsLeft);
+            skippedCount += result.extraItems.length - extras.length;
+            if (extras.length > 0) {
+                pendingAttachments.splice(index + 1, 0, ...extras);
+                index += extras.length;
+            }
+        }
+
+        syncPendingAttachmentsGlobal();
+        renderAttachmentPreviews();
+    }
+
+    if (pendingAttachments.length > maxAttachments) {
+        const overflow = pendingAttachments.splice(maxAttachments);
+        overflow.forEach(revokeAttachmentPreview);
+        skippedCount += overflow.length;
+        syncPendingAttachmentsGlobal();
+        renderAttachmentPreviews();
+    }
+
+    return { uploadedCount, skippedCount };
 }
 
 function isChatImageAttachment(item = {}) {
@@ -46,6 +249,7 @@ function attachmentBelongsToSession(attachment, sessionId) {
 
 function clearPendingAttachments(message = '') {
     if (pendingAttachments.length === 0) return;
+    pendingAttachments.forEach(revokeAttachmentPreview);
     pendingAttachments = [];
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews?.();
@@ -53,6 +257,8 @@ function clearPendingAttachments(message = '') {
 }
 
 window.isChatImageAttachment = isChatImageAttachment;
+window.getMaxPendingAttachments = getMaxPendingAttachments;
+window.setMaxPendingAttachments = setMaxPendingAttachments;
 window.syncPendingAttachmentsGlobal = syncPendingAttachmentsGlobal;
 
 function createUploadProgress(label) {
@@ -95,144 +301,28 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
 
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
+    const maxAttachments = getMaxPendingAttachments();
     if (pendingAttachments.length >= maxAttachments) {
-        showToast(`最多只能上传 ${maxAttachments} 个附件`, 'error');
+        showToast(`最多只能添加 ${maxAttachments} 个附件`, 'error');
         e.target.value = '';
         return;
     }
-    if (!currentSessionId) {
-        const s = await createSession('新对话');
-        if (!s) return;
-        currentSessionId = s.id;
-        document.getElementById('current-title').innerText = s.title;
-        window.loadSessions();
+    const availableSlots = Math.max(0, maxAttachments - pendingAttachments.length);
+    const acceptedFiles = files.slice(0, availableSlots);
+    const skippedCount = files.length - acceptedFiles.length;
+    acceptedFiles.forEach(file => {
+        pendingAttachments.push(createLocalAttachment(file, currentSessionId || ''));
+    });
+    syncPendingAttachmentsGlobal();
+    renderAttachmentPreviews();
+    if (skippedCount > 0) {
+        showToast(`已添加 ${acceptedFiles.length} 个附件，跳过 ${skippedCount} 个`, 'info');
     }
-    const batchSessionId = String(currentSessionId || '');
-    const uploadChatFile = async (file, uploadSessionId, password = '', onProgress = null) => {
-        const fd = new FormData();
-        fd.append('file', file);
-        if (password) fd.append('password', password);
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(uploadSessionId)}`);
-            Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable && typeof onProgress === 'function') {
-                    onProgress((event.loaded / event.total) * 100);
-                }
-            };
-            xhr.onload = () => {
-                let data = {};
-                try {
-                    data = JSON.parse(xhr.responseText || '{}');
-                } catch (e) {
-                    data = { error: xhr.responseText || 'Upload failed' };
-                }
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve(data);
-                    return;
-                }
-                const err = new Error(data.error || `Upload failed (${xhr.status})`);
-                err.data = data;
-                reject(err);
-            };
-            xhr.onerror = () => reject(new Error('上传连接失败'));
-            xhr.send(fd);
-        });
-    };
-    try {
-        let uploadedCount = 0;
-        let skippedCount = 0;
-        let sessionSwitchedDuringUpload = false;
-        showToast(files.length > 1 ? `正在上传 ${files.length} 个文件...` : '正在上传...', 'info');
-        for (const file of files) {
-            const uploadSessionId = batchSessionId;
-            if (String(currentSessionId || '') !== uploadSessionId) {
-                skippedCount += 1;
-                sessionSwitchedDuringUpload = true;
-                continue;
-            }
-            if (pendingAttachments.length >= maxAttachments) {
-                skippedCount += 1;
-                continue;
-            }
-            const selectedIsImage = isChatImageAttachment(file);
-            const hasPendingImage = pendingAttachments.some(item => isChatImageAttachment(item));
-            if (selectedIsImage && hasPendingImage) {
-                skippedCount += 1;
-                continue;
-            }
-
-            let data;
-            const progress = createUploadProgress(file.name);
-            try {
-                data = await uploadChatFile(file, uploadSessionId, '', percent => progress.update(percent));
-            } catch (uploadErr) {
-                if (uploadErr.data?.passwordRequired) {
-                    progress.close();
-                    const password = await window.showInputPrompt({
-                        title: '文档密码',
-                        message: `文档 ${file.name} 已加密，请输入文档密码。`,
-                        type: 'password',
-                        placeholder: '文档密码',
-                        autocomplete: 'off',
-                        trim: false
-                    });
-                    if (!password) {
-                        skippedCount += 1;
-                        continue;
-                    }
-                    const retryProgress = createUploadProgress(file.name);
-                    data = await uploadChatFile(file, uploadSessionId, password, percent => retryProgress.update(percent));
-                    retryProgress.close();
-                } else {
-                    progress.close();
-                    throw uploadErr;
-                }
-            }
-            progress.close();
-
-            if (data.url) {
-                if (String(currentSessionId || '') !== uploadSessionId || String(data.sessionId || uploadSessionId) !== uploadSessionId) {
-                    skippedCount += 1;
-                    sessionSwitchedDuringUpload = true;
-                    continue;
-                }
-                const attachmentType = data.type || (selectedIsImage ? 'image/jpeg' : file.type);
-                pendingAttachments.push({
-                    name: data.name,
-                    url: data.url,
-                    type: attachmentType,
-                    sessionId: data.sessionId || uploadSessionId,
-                    extractedText: data.extractedText,
-                    markdown: buildAttachmentMarkdown(data.name, data.url, isChatImageAttachment({ name: data.name, url: data.url, type: attachmentType }))
-                });
-                uploadedCount += 1;
-                (data.visionAttachments || []).forEach(item => {
-                    if (pendingAttachments.length >= maxAttachments) return;
-                    if (pendingAttachments.some(entry => isChatImageAttachment(entry))) return;
-                    pendingAttachments.push({
-                        name: item.name,
-                        url: item.url,
-                        type: item.type || 'image/png',
-                        sessionId: item.sessionId || data.sessionId || currentSessionId,
-                        extractedText: '',
-                        markdown: item.markdown || buildAttachmentMarkdown(item.name, item.url, true)
-                    });
-                });
-                syncPendingAttachmentsGlobal();
-                renderAttachmentPreviews();
-            }
-        }
-        if (sessionSwitchedDuringUpload) showToast('会话已切换，刚上传的附件不会加入当前输入框', 'info');
-        if (uploadedCount > 0) showToast(skippedCount > 0 ? `已上传 ${uploadedCount} 个，跳过 ${skippedCount} 个` : '上传成功');
-        else if (skippedCount > 0) showToast('没有可上传的文件：最多 5 个附件，且图片每次仅 1 张', 'error');
-    } catch (e) { showToast(e.message || '上传失败', 'error'); }
     e.target.value = '';
 });
 
 window.removeAttachment = (index) => {
+    revokeAttachmentPreview(pendingAttachments[index]);
     pendingAttachments.splice(index, 1);
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();

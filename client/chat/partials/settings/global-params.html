@@ -2,7 +2,7 @@
                         <div class="settings-page-head">
                             <div>
                                 <h3>全局参数</h3>
-                                <p>运行时调整上下文、并发、上传、图片与知识库检索参数，无需修改 .env 或重启服务。</p>
+                                <p>运行时调整并发、上下文、采样、上传、图片与检索参数，字段名和说明已统一为中文，无需修改配置文件或重启服务。</p>
                             </div>
                             <div class="settings-page-actions">
                                 <p class="model-modal-desc runtime-settings-status" data-runtime-status></p>
@@ -13,33 +13,40 @@
 
                         <div class="settings-list global-params-list">
                             <section class="stat-card global-params-section">
-                                <h4>请求与队列</h4>
+                                <h4>请求队列</h4>
+                                <p class="global-params-section-desc">控制聊天请求与模型端点的并发、排队和超时，优先保证服务稳定。</p>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
                                             <label>AI 并发请求数</label>
+                                            <small class="runtime-key-note">max_concurrent_ai_requests</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_concurrent_ai_requests">
                                         </div>
                                         <div class="form-item">
                                             <label>AI 队列长度</label>
+                                            <small class="runtime-key-note">max_ai_queue_size</small>
                                             <input type="number" class="form-input" min="0" step="1" data-runtime-key="max_ai_queue_size">
                                         </div>
                                         <div class="form-item">
                                             <label>AI 队列超时 (ms)</label>
+                                            <small class="runtime-key-note">ai_queue_timeout_ms</small>
                                             <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="ai_queue_timeout_ms">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
                                             <label>端点默认并发</label>
+                                            <small class="runtime-key-note">model_endpoint_default_concurrency</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="model_endpoint_default_concurrency">
                                         </div>
                                         <div class="form-item">
                                             <label>端点队列长度</label>
+                                            <small class="runtime-key-note">model_endpoint_queue_size</small>
                                             <input type="number" class="form-input" min="0" step="1" data-runtime-key="model_endpoint_queue_size">
                                         </div>
                                         <div class="form-item">
                                             <label>端点队列超时 (ms)</label>
+                                            <small class="runtime-key-note">model_endpoint_queue_timeout_ms</small>
                                             <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="model_endpoint_queue_timeout_ms">
                                         </div>
                                     </div>
@@ -47,49 +54,95 @@
                             </section>
 
                             <section class="stat-card global-params-section">
-                                <h4>上下文窗口</h4>
+                                <h4>上下文预算</h4>
+                                <p class="global-params-section-desc">控制默认上下文窗口、输出预留和附件注入预算，影响所有未单独配置的模型。</p>
                                 <div class="model-form global-params-form">
-                                    <div class="model-form-row global-params-row">
+                                    <div class="model-form-row global-params-row global-params-context-row">
                                         <div class="form-item">
                                             <label>全局上下文窗口 (Token)</label>
-                                            <input type="text" class="form-input" placeholder="0 表示不设全局默认，可填 128K" data-runtime-key="model_context_window_tokens">
+                                            <small class="runtime-key-note">model_context_window_tokens</small>
+                                            <input type="text" class="form-input" placeholder="0 不设默认，可填 128K" data-runtime-key="model_context_window_tokens">
                                         </div>
                                         <div class="form-item">
                                             <label>预留输出 (Token)</label>
+                                            <small class="runtime-key-note">context_reserved_output_tokens</small>
                                             <input type="text" class="form-input" placeholder="如 4K / 8K" data-runtime-key="context_reserved_output_tokens">
                                         </div>
                                         <div class="form-item">
                                             <label>附件注入字符上限</label>
+                                            <small class="runtime-key-note">attachment_context_max_chars</small>
                                             <input type="text" class="form-input" placeholder="如 80K" data-runtime-key="attachment_context_max_chars">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
+                            <section class="stat-card global-params-section global-params-sampling">
+                                <h4>采样参数</h4>
+                                <p class="global-params-section-desc">统一聊天和 OpenAI 兼容接口的默认采样行为，便于整体调参。</p>
+                                <div class="model-form global-params-form">
+                                    <div class="model-form-row global-params-row global-params-sampling-row">
+                                        <div class="form-item">
+                                            <label>默认温度</label>
+                                            <small class="runtime-key-note">sampling_temperature</small>
+                                            <input type="number" class="form-input" min="0" max="2" step="0.1" data-runtime-key="sampling_temperature">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>默认采样概率上限</label>
+                                            <small class="runtime-key-note">sampling_top_p</small>
+                                            <input type="number" class="form-input" min="0" max="1" step="0.01" data-runtime-key="sampling_top_p">
+                                        </div>
+                                    </div>
+                                    <div class="model-form-row global-params-row global-params-sampling-row">
+                                        <div class="form-item">
+                                            <label>默认重复惩罚</label>
+                                            <small class="runtime-key-note">sampling_presence_penalty</small>
+                                            <input type="number" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_presence_penalty">
+                                        </div>
+                                        <div class="form-item">
+                                            <label>默认频率惩罚</label>
+                                            <small class="runtime-key-note">sampling_frequency_penalty</small>
+                                            <input type="number" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_frequency_penalty">
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
                             <section class="stat-card global-params-section">
-                                <h4>上传与图片</h4>
+                                <h4>上传附件</h4>
+                                <p class="global-params-section-desc">控制聊天附件、知识库文件和图片输入的大小及图片数量，避免单次请求过重。</p>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>聊天附件上传字节</label>
+                                            <label>聊天附件上限</label>
+                                            <small class="runtime-key-note">upload_attachment_max_bytes</small>
                                             <input type="text" class="form-input" placeholder="如 64M" data-runtime-key="upload_attachment_max_bytes">
                                         </div>
                                         <div class="form-item">
-                                            <label>知识库上传字节</label>
+                                            <label>知识库文件上限</label>
+                                            <small class="runtime-key-note">knowledge_upload_max_bytes</small>
                                             <input type="text" class="form-input" placeholder="如 128M" data-runtime-key="knowledge_upload_max_bytes">
                                         </div>
                                         <div class="form-item">
-                                            <label>图片上传字节</label>
+                                            <label>图片上传上限</label>
+                                            <small class="runtime-key-note">image_upload_max_bytes</small>
                                             <input type="text" class="form-input" placeholder="如 32M" data-runtime-key="image_upload_max_bytes">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>图片上下文字节</label>
+                                            <label>图片上下文上限</label>
+                                            <small class="runtime-key-note">image_context_max_bytes</small>
                                             <input type="text" class="form-input" placeholder="如 8M" data-runtime-key="image_context_max_bytes">
                                         </div>
                                         <div class="form-item">
+                                            <label>附件数量上限</label>
+                                            <small class="runtime-key-note">max_attachments_per_message</small>
+                                            <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_attachments_per_message">
+                                        </div>
+                                        <div class="form-item">
                                             <label>单次图片数量</label>
+                                            <small class="runtime-key-note">max_images_per_message</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_images_per_message">
                                         </div>
                                     </div>
@@ -97,33 +150,40 @@
                             </section>
 
                             <section class="stat-card global-params-section">
-                                <h4>知识库与 RAG</h4>
+                                <h4>知识库检索</h4>
+                                <p class="global-params-section-desc">控制 RAG 召回、切片和上下文预算，尽量在信息量和上下文占用之间保持平衡。</p>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>RAG 引用数量上限</label>
+                                            <label>检索引用上限</label>
+                                            <small class="runtime-key-note">rag_top_k_max</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_top_k_max">
                                         </div>
                                         <div class="form-item">
-                                            <label>RAG 候选片段上限</label>
+                                            <label>候选片段上限</label>
+                                            <small class="runtime-key-note">rag_candidate_limit_max</small>
                                             <input type="text" class="form-input" placeholder="如 5K" data-runtime-key="rag_candidate_limit_max">
                                         </div>
                                         <div class="form-item">
-                                            <label>RAG 切片字符上限</label>
+                                            <label>切片字符上限</label>
+                                            <small class="runtime-key-note">rag_chunk_size_max</small>
                                             <input type="text" class="form-input" placeholder="如 4K" data-runtime-key="rag_chunk_size_max">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>RAG 上下文预算占比 (%)</label>
+                                            <label>检索预算占比 (%)</label>
+                                            <small class="runtime-key-note">rag_context_budget_percent</small>
                                             <input type="number" class="form-input" min="5" max="70" step="1" data-runtime-key="rag_context_budget_percent">
                                         </div>
                                         <div class="form-item">
-                                            <label>知识库抽取字符上限</label>
+                                            <label>知识库抽取上限</label>
+                                            <small class="runtime-key-note">knowledge_extract_max_chars</small>
                                             <input type="text" class="form-input" placeholder="如 600K" data-runtime-key="knowledge_extract_max_chars">
                                         </div>
                                         <div class="form-item">
                                             <label>知识库索引并发</label>
+                                            <small class="runtime-key-note">rag_index_max_concurrent</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_index_max_concurrent">
                                         </div>
                                     </div>
@@ -131,19 +191,23 @@
                             </section>
 
                             <section class="stat-card global-params-section">
-                                <h4>智能体与后台</h4>
+                                <h4>智能体后台</h4>
+                                <p class="global-params-section-desc">控制智能体任务、工作流和记忆压缩并发，适合按服务器资源做整体调度。</p>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
                                             <label>智能体任务并发</label>
+                                            <small class="runtime-key-note">agent_max_concurrent_runs</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_max_concurrent_runs">
                                         </div>
                                         <div class="form-item">
                                             <label>工作流节点并发</label>
+                                            <small class="runtime-key-note">agent_dag_node_concurrency</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_dag_node_concurrency">
                                         </div>
                                         <div class="form-item">
                                             <label>记忆压缩并发</label>
+                                            <small class="runtime-key-note">memory_compression_max_concurrent</small>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="memory_compression_max_concurrent">
                                         </div>
                                     </div>

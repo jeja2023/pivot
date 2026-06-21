@@ -13,6 +13,7 @@ async function loadSettings() {
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? 300;
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
+        window.applyUploadRuntimeLimits?.(data.uploadLimits);
         updateRuntimeSettingsForm(data.runtimeConfig);
         updateApiAccessState(data.apiAccessEnabled === true);
         updateEmbeddingSettingsForm(data.embeddingConfig);
@@ -403,6 +404,40 @@ function runtimeItemsByKey(runtimeConfig = {}) {
     return map;
 }
 
+function getRuntimeItemHint(item) {
+    const hintMap = {
+        max_concurrent_ai_requests: '同时处理的聊天请求数，过大可能影响响应稳定性。',
+        max_ai_queue_size: '请求排队上限，队列满后会拒绝新的请求。',
+        ai_queue_timeout_ms: '请求在队列里等待多久后自动超时。',
+        model_endpoint_default_concurrency: '单个模型端点默认并发量。',
+        model_endpoint_queue_size: '单个模型端点的排队长度。',
+        model_endpoint_queue_timeout_ms: '模型端点排队等待超时时间。',
+        model_context_window_tokens: '没有单独配置上下文时使用的全局默认窗口。',
+        context_reserved_output_tokens: '为输出预留的 token 数，避免把回答空间压得太小。',
+        sampling_temperature: '温度越高越发散，越低越稳定。',
+        sampling_top_p: '采样概率上限，常和温度配合调节。',
+        sampling_presence_penalty: '减少反复提同一内容的倾向。',
+        sampling_frequency_penalty: '减少高频重复词的倾向。',
+        upload_attachment_max_bytes: '聊天附件的总上传上限。',
+        knowledge_upload_max_bytes: '知识库文件的总上传上限。',
+        image_upload_max_bytes: '单张图片在上传阶段的大小上限。',
+        image_context_max_bytes: '图片进入模型上下文前允许携带的大小上限。',
+        max_attachments_per_message: '用户输入框中一条消息最多保留的待发送附件数量。',
+        max_images_per_message: '一条消息允许注入的图片数量上限。',
+        attachment_context_max_chars: '附件抽取文本写入上下文时的字符上限。',
+        knowledge_extract_max_chars: '知识库文件抽取文本时的字符上限。',
+        rag_top_k_max: '每次检索最多返回多少条结果。',
+        rag_candidate_limit_max: '候选片段池的最大数量。',
+        rag_chunk_size_max: '检索切片的最大字符数。',
+        rag_context_budget_percent: 'RAG 在上下文中可占用的大致比例。',
+        rag_index_max_concurrent: '同时执行多少个知识库索引任务。',
+        agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。',
+        agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
+        memory_compression_max_concurrent: '后台同时压缩多少个记忆任务。'
+    };
+    return hintMap[item?.key] || '';
+}
+
 function isRuntimeHumanIntKey(key) {
     return new Set([
         'model_context_window_tokens',
@@ -441,6 +476,12 @@ function updateRuntimeEditState() {
 
 function updateRuntimeSettingsForm(runtimeConfig = {}) {
     window.currentRuntimeConfig = runtimeConfig || {};
+    if (runtimeConfig?.values) {
+        window.applyUploadRuntimeLimits?.({
+            maxAttachmentsPerMessage: runtimeConfig.values.maxAttachmentsPerMessage,
+            maxImagesPerMessage: runtimeConfig.values.maxImagesPerMessage
+        });
+    }
     const byKey = runtimeItemsByKey(runtimeConfig);
     document.querySelectorAll('[data-runtime-key]').forEach(input => {
         const key = input.dataset.runtimeKey;
@@ -449,7 +490,8 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
         input.min = item.min ?? input.min;
         input.max = item.max ?? input.max;
         input.value = isRuntimeHumanIntKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
-        input.title = `${item.label}，范围 ${item.min} - ${item.max}`;
+        const hint = getRuntimeItemHint(item);
+        input.title = hint ? `${item.label}。${hint} 范围 ${item.min} - ${item.max}` : `${item.label}，范围 ${item.min} - ${item.max}`;
     });
     const updated = (runtimeConfig.items || []).map(item => item.updatedAt).filter(Boolean).sort().pop();
     updateRuntimeEditState();

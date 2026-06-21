@@ -101,11 +101,11 @@
                 <div class="model-form-scroll">
                     <input type="hidden" id="m-id">
                     <div class="form-item">
-                        <label>接口地址 (Endpoint)</label>
+                        <label>接口地址（Endpoint，服务入口）</label>
                         <input type="text" id="m-url" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
                     </div>
                     <div class="form-item">
-                        <label>API Key (可选)</label>
+                        <label>接口密钥（API Key，可选）</label>
                         <div style="position: relative;">
                             <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
                                 style="padding-right: 45px;">
@@ -123,11 +123,11 @@
                         <input type="text" id="m-name" class="form-input" placeholder="例如: DeepSeek-V3">
                     </div>
                     <div class="form-item">
-                        <label>模型标识 (Model ID)</label>
+                        <label>模型标识（Model ID）</label>
                         <div style="display: flex; gap: 8px;">
                             <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
                                 style="flex: 1;">
-                            <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从 API 获取模型列表"
+                            <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从接口获取模型列表"
                                 style="padding: 0 12px; height: 38px;">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -157,29 +157,29 @@
                     </div>
                     <div class="model-form-row">
                         <div class="form-item">
-                            <label>每日额度 (Token)</label>
+                            <label>每日额度（Token，用量单位）</label>
                             <input type="text" id="m-daily-limit" class="form-input"
                                 placeholder="0 表示不限，可填 8K / 1M">
                         </div>
                         <div class="form-item">
-                            <label>Temperature (温度)</label>
+                            <label>温度（Temperature）</label>
                             <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
                                 placeholder="留空使用默认">
                         </div>
                     </div>
                     <div class="model-form-row model-context-row">
                         <div class="form-item">
-                            <label>输入 Token 上限</label>
+                            <label>输入上限（Token）</label>
                             <input type="text" id="m-max-input-tokens" class="form-input"
                                 placeholder="留空使用默认，可填 128K">
                         </div>
                         <div class="form-item">
-                            <label>输出 Token 上限</label>
+                            <label>输出上限（Token）</label>
                             <input type="text" id="m-max-tokens" class="form-input"
                                 placeholder="留空使用默认，可填 8K">
                         </div>
                         <div class="form-item">
-                            <label>上下文窗口 (Token)</label>
+                            <label>上下文窗口（Token，总窗口）</label>
                             <input type="text" id="m-context-window-tokens" class="form-input"
                                 placeholder="如 32K；留空使用全局默认"
                                 title="模型实际总上下文窗口，例如 32K；留空时使用并发治理中的全局上下文设置">
@@ -187,7 +187,7 @@
                     </div>
                     <div class="model-form-row">
                         <div class="form-item">
-                            <label>远端健康检查 URL</label>
+                            <label>远端健康检查地址（URL）</label>
                             <input type="text" id="m-monitor-url" class="form-input"
                                 placeholder="例如: http://10.0.0.8:8000/health">
                         </div>
@@ -250,8 +250,9 @@
             </div>
             <div class="model-form runtime-settings-form">
                 <div class="model-form-scroll runtime-settings-grid">
-                    <section class="runtime-settings-group">
-                        <h4>全局请求</h4>
+                    <section class="runtime-settings-group runtime-settings-group-sampling">
+                        <h4>请求队列</h4>
+                        <p class="runtime-settings-group-desc">控制聊天请求和模型端点的并发、排队与超时。</p>
                         <div class="model-form-row">
                             <div class="form-item">
                                 <label>AI 并发请求数</label>
@@ -269,6 +270,7 @@
                     </section>
                     <section class="runtime-settings-group">
                         <h4>模型端点</h4>
+                        <p class="runtime-settings-group-desc">控制单个模型服务的默认并发和等待队列。</p>
                         <div class="model-form-row">
                             <div class="form-item">
                                 <label>默认端点并发</label>
@@ -285,7 +287,8 @@
                         </div>
                     </section>
                     <section class="runtime-settings-group">
-                        <h4>智能体与后台</h4>
+                        <h4>智能体后台</h4>
+                        <p class="runtime-settings-group-desc">控制智能体、工作流、知识库索引和记忆压缩的后台并发。</p>
                         <div class="model-form-row">
                             <div class="form-item">
                                 <label>智能体任务并发</label>
@@ -306,7 +309,8 @@
                         </div>
                     </section>
                     <section class="runtime-settings-group">
-                        <h4>全局上下文</h4>
+                        <h4>上下文预算</h4>
+                        <p class="runtime-settings-group-desc">控制全局上下文窗口、输出预留和附件注入预算。</p>
                         <div class="model-form-row">
                             <div class="form-item">
                                 <label>上下文窗口 (Token)</label>
@@ -315,6 +319,50 @@
                             <div class="form-item">
                                 <label>预留输出 (Token)</label>
                                 <input type="text" id="runtime-context-reserved-output-tokens" class="form-input" placeholder="如 2K" data-runtime-key="context_reserved_output_tokens">
+                            </div>
+                        </div>
+                    </section>
+                    <section class="runtime-settings-group">
+                        <h4>上传限制</h4>
+                        <p class="runtime-settings-group-desc">控制聊天附件、图片和知识库文件的上传限制。</p>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>聊天附件上限</label>
+                                <input type="text" id="runtime-upload-attachment-max-bytes" class="form-input" placeholder="如 64M" data-runtime-key="upload_attachment_max_bytes">
+                            </div>
+                            <div class="form-item">
+                                <label>附件数量上限</label>
+                                <input type="number" id="runtime-max-attachments-per-message" class="form-input" min="1" step="1" data-runtime-key="max_attachments_per_message">
+                            </div>
+                            <div class="form-item">
+                                <label>单次图片数量</label>
+                                <input type="number" id="runtime-max-images-per-message" class="form-input" min="1" step="1" data-runtime-key="max_images_per_message">
+                            </div>
+                            <div class="form-item">
+                                <label>图片上传上限</label>
+                                <input type="text" id="runtime-image-upload-max-bytes" class="form-input" placeholder="如 32M" data-runtime-key="image_upload_max_bytes">
+                            </div>
+                        </div>
+                    </section>
+                    <section class="runtime-settings-group">
+                        <h4>采样参数</h4>
+                        <p class="runtime-settings-group-desc">统一聊天与 OpenAI 兼容接口的默认采样行为。</p>
+                        <div class="model-form-row">
+                            <div class="form-item">
+                                <label>默认温度</label>
+                                <input type="number" id="runtime-sampling-temperature" class="form-input" min="0" max="2" step="0.1" data-runtime-key="sampling_temperature">
+                            </div>
+                            <div class="form-item">
+                                <label>默认采样概率上限</label>
+                                <input type="number" id="runtime-sampling-top-p" class="form-input" min="0" max="1" step="0.01" data-runtime-key="sampling_top_p">
+                            </div>
+                            <div class="form-item">
+                                <label>默认重复惩罚</label>
+                                <input type="number" id="runtime-sampling-presence-penalty" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_presence_penalty">
+                            </div>
+                            <div class="form-item">
+                                <label>默认频率惩罚</label>
+                                <input type="number" id="runtime-sampling-frequency-penalty" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_frequency_penalty">
                             </div>
                         </div>
                     </section>

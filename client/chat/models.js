@@ -1,6 +1,12 @@
 // --- 模型管理模块 Model Management ---
 const pendingTests = new Set();
 
+function formatModelPriceCurrency(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '人民币';
+    return /[一-龥]/.test(raw) ? raw : '人民币';
+}
+
 function ensureModelCostFields() {
     if (document.getElementById('m-input-price')) return;
     const dailyInput = document.getElementById('m-daily-limit');
@@ -10,16 +16,23 @@ function ensureModelCostFields() {
     row.className = 'model-form-row model-cost-row';
     row.innerHTML = `
         <div class="form-item">
-            <label>Input price / 1M Token</label>
-            <input type="number" id="m-input-price" class="form-input" min="0" step="0.000001" placeholder="0 = no cost tracking">
+            <label>输入单价（每百万 Token）</label>
+            <input type="number" id="m-input-price" class="form-input" min="0" step="0.000001" placeholder="0 表示不统计成本">
         </div>
         <div class="form-item">
-            <label>Output price / 1M Token</label>
-            <input type="number" id="m-output-price" class="form-input" min="0" step="0.000001" placeholder="0 = no cost tracking">
+            <label>输出单价（每百万 Token）</label>
+            <input type="number" id="m-output-price" class="form-input" min="0" step="0.000001" placeholder="0 表示不统计成本">
         </div>
         <div class="form-item">
-            <label>Currency</label>
-            <input type="text" id="m-price-currency" class="form-input" placeholder="CNY">
+            <label>计价币种</label>
+            <select id="m-price-currency" class="form-input">
+                <option value="人民币">人民币</option>
+                <option value="美元">美元</option>
+                <option value="欧元">欧元</option>
+                <option value="港币">港币</option>
+                <option value="日元">日元</option>
+                <option value="英镑">英镑</option>
+            </select>
         </div>
     `;
     anchorRow.insertAdjacentElement('afterend', row);
@@ -104,6 +117,7 @@ window.loadModels = async function(page = 1) {
         }
 
         const capabilityBadge = renderModelCapabilityBadges(m);
+        const priceCurrency = formatModelPriceCurrency(m.price_currency);
 
         return `
         <tr id="model-row-${m.id}">
@@ -114,7 +128,7 @@ window.loadModels = async function(page = 1) {
                 </div>
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
-            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens / ${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}">${formatTokenAmount(m.daily_token_limit)} / <small>${escapeHtml(m.price_currency || 'CNY')} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
+            <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens / ${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}">${formatTokenAmount(m.daily_token_limit)} / <small>${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
             <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
@@ -238,7 +252,7 @@ window.prepareEditModel = (model) => {
     const outputPriceEl = document.getElementById('m-output-price');
     if (outputPriceEl) outputPriceEl.value = model.output_price_per_million || '';
     const currencyEl = document.getElementById('m-price-currency');
-    if (currencyEl) currencyEl.value = model.price_currency || 'CNY';
+    if (currencyEl) currencyEl.value = formatModelPriceCurrency(model.price_currency);
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     window.updateModelScopeControls?.(model);
     document.getElementById('model-modal-container').classList.remove('hidden');
@@ -282,7 +296,7 @@ window.resetModelForm = () => {
         if (el) el.value = '';
     });
     const currencyEl = document.getElementById('m-price-currency');
-    if (currencyEl) currencyEl.value = 'CNY';
+    if (currencyEl) currencyEl.value = '人民币';
     const scopeEl = document.getElementById('m-scope');
     if (scopeEl) scopeEl.value = 'personal';
     const supportsVisionEl = document.getElementById('m-supports-vision');

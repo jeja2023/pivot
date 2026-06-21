@@ -165,7 +165,7 @@ function initSchema() {
             chat_thinking_enabled INTEGER DEFAULT 0,
             input_price_per_million REAL DEFAULT 0,
             output_price_per_million REAL DEFAULT 0,
-            price_currency TEXT DEFAULT 'CNY',
+            price_currency TEXT DEFAULT '人民币',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );

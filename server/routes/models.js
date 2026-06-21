@@ -107,7 +107,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             chat_thinking_enabled: isChatThinkingEnabled(model) ? 1 : 0,
             input_price_per_million: model.input_price_per_million || 0,
             output_price_per_million: model.output_price_per_million || 0,
-            price_currency: model.price_currency || 'CNY',
+            price_currency: normalizePriceCurrency(model.price_currency),
             type: 'chat',
             endpoint: '/v1/chat/completions',
             capabilities: [
@@ -308,7 +308,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             ORDER BY m.is_default DESC, m.id ASC 
             LIMIT ? OFFSET ?
         `;
-        const models = db.prepare(sql).all(isSuperAdmin(req.user) ? 1 : 0, req.user.id, ...params, limit, offset);
+        const models = db.prepare(sql).all(isSuperAdmin(req.user) ? 1 : 0, req.user.id, ...params, limit, offset)
+            .map(model => ({
+                ...model,
+                price_currency: normalizePriceCurrency(model.price_currency)
+            }));
         const countSql = `
             SELECT COUNT(*) as count 
             FROM models m

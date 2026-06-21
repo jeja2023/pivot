@@ -4,12 +4,11 @@ function normalizePriceValue(value) {
     return Math.round(numeric * 1e6) / 1e6;
 }
 
-function normalizePriceCurrency(value, fallback = 'CNY') {
-    const normalized = String(value || fallback || 'CNY')
-        .trim()
-        .toUpperCase()
-        .replace(/[^A-Z0-9_-]/g, '');
-    return normalized || fallback || 'CNY';
+function normalizePriceCurrency(value, fallback = '人民币') {
+    const raw = String(value || fallback || '人民币').trim();
+    if (/[\u4e00-\u9fff]/.test(raw)) return raw.slice(0, 16);
+    const fallbackText = String(fallback || '人民币').trim();
+    return /[\u4e00-\u9fff]/.test(fallbackText) ? fallbackText.slice(0, 16) : '人民币';
 }
 
 function calculateUsageCost({

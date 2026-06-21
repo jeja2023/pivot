@@ -23,14 +23,35 @@ window.sendMessage = async function(isRegenerate = false) {
     if (!content && pendingAttachments.length === 0 && !shouldRegenerate) return;
 
     if (pendingAttachments.length > 0) {
-        const sessionMismatches = pendingAttachments.some(item => !attachmentBelongsToSession(item, currentSessionId));
+        const sessionMismatches = pendingAttachments.some(item => item?.kind === 'uploaded' && !attachmentBelongsToSession(item, currentSessionId));
         if (sessionMismatches) {
             clearPendingAttachments('附件属于其他会话，请重新上传后发送');
             return;
         }
     }
 
+    if (!currentSessionId) {
+        const draftTitle = userVisibleContent
+            ? `${userVisibleContent.slice(0, 15)}...`
+            : (pendingAttachments.find(item => item?.file)?.name || '新对话');
+        const data = await createSession(draftTitle);
+        if (data && data.id) {
+            currentSessionId = data.id;
+            if (window.loadSessions) window.loadSessions();
+            document.getElementById('current-title').innerText = data.title;
+        } else return;
+    }
+
     if (pendingAttachments.length > 0) {
+        const uploadSessionId = String(currentSessionId || '').trim() || null;
+        try {
+            const uploadResult = await window.preparePendingAttachmentsForSend?.(uploadSessionId);
+            if (uploadResult?.aborted) return;
+            if (uploadResult?.skippedCount > 0) showToast(`有 ${uploadResult.skippedCount} 个附件超出数量上限，已跳过`, 'warning');
+        } catch (e) {
+            showToast(e.message || '附件上传失败', 'error');
+            return;
+        }
         const attachmentLinks = pendingAttachments.map(a => a.markdown).join('\n');
         content = (content ? content + '\n\n' : '') + attachmentLinks;
         displayContent = (displayContent ? displayContent + '\n\n' : '') + attachmentLinks;
@@ -62,15 +83,6 @@ window.sendMessage = async function(isRegenerate = false) {
     pendingAttachments = [];
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();
-
-    if (!currentSessionId) {
-        const data = await createSession(content.slice(0, 15) + '...');
-        if (data && data.id) {
-            currentSessionId = data.id;
-            if (window.loadSessions) window.loadSessions();
-            document.getElementById('current-title').innerText = data.title;
-        } else return;
-    }
 
     const requestSessionId = String(currentSessionId);
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;

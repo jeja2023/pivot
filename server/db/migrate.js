@@ -160,7 +160,7 @@ function runMigrations() {
     ensureColumn('models', 'chat_thinking_enabled', 'INTEGER DEFAULT 0');
     ensureColumn('models', 'input_price_per_million', 'REAL DEFAULT 0');
     ensureColumn('models', 'output_price_per_million', 'REAL DEFAULT 0');
-    ensureColumn('models', 'price_currency', "TEXT DEFAULT 'CNY'");
+    ensureColumn('models', 'price_currency', "TEXT DEFAULT '人民币'");
     ensureColumn('models', 'created_at', "DATETIME");
     db.prepare('UPDATE models SET created_at = ? WHERE created_at IS NULL').run(getBeijingTimestamp());
     ensureColumn('sessions', 'is_pinned', 'INTEGER DEFAULT 0');

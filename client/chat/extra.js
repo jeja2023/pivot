@@ -189,7 +189,7 @@ async function applyPromptToWorkflow(prompt) {
     try {
         spec = typeof parseAgentWorkflowText === 'function' ? parseAgentWorkflowText() : JSON.parse(textarea.value || '{"nodes":[]}');
     } catch (e) {
-        return showToast('工作流 JSON 需要先修正后再套用规范', 'error');
+        return showToast('工作流 JSON 需要先修正后再套用提示词', 'error');
     }
     const normalized = Array.isArray(spec) ? { nodes: spec } : (spec && typeof spec === 'object' ? spec : { nodes: [] });
     const nodes = Array.isArray(normalized.nodes) ? normalized.nodes : [];

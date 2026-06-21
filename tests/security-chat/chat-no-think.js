@@ -8,6 +8,7 @@ const {
     stripVisibleReasoningScaffold,
     test
 } = require('../security-helpers');
+const { limitVisionImages } = require('../../server/services/chat-vision');
 
 test('chat no-think switch only applies to reasoning models', () => {
     assert.equal(modelSupportsReasoning({ supports_reasoning: 1 }), true);
@@ -45,6 +46,25 @@ test('chat no-think switch appends directive to the latest user message once', (
     ], model);
     assert.equal(vision[0].content[0].text, 'look\n/no_think');
     assert.equal(vision[0].content[1].type, 'image_url');
+});
+
+test('chat vision limit keeps multiple images within the per-message cap', () => {
+    const input = [
+        {
+            role: 'user',
+            content: [
+                { type: 'text', text: 'look' },
+                { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+                { type: 'image_url', image_url: { url: 'data:image/png;base64,def' } }
+            ]
+        }
+    ];
+
+    const out = limitVisionImages(input);
+    const imageParts = out[0].content.filter(part => part.type === 'image_url');
+
+    assert.equal(imageParts.length, 2);
+    assert.equal(out[0].content[0].text, 'look');
 });
 
 test('chat no-think switch drops reasoning deltas from streamed content', () => {

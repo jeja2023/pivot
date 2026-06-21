@@ -1,9 +1,16 @@
 /* 统计与日志模块 Stats & Logs */
 
-function formatEstimatedCost(value, currency = 'CNY') {
+function formatStatsPriceCurrency(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '人民币';
+    return /[一-龥]/.test(raw) ? raw : '人民币';
+}
+
+function formatEstimatedCost(value, currency = '人民币') {
+    const currencyLabel = formatStatsPriceCurrency(currency);
     const amount = Number(value || 0);
-    if (amount <= 0) return `${currency} 0`;
-    return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+    if (amount <= 0) return `${currencyLabel} 0`;
+    return `${currencyLabel} ${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
 }
 
 const USAGE_ROLE_LABELS = {
@@ -102,7 +109,7 @@ window.loadStats = async function() {
                 <td class="text-center">${s.msg_count}</td>
                 <td class="text-center" title="${Number(s.input_tokens || 0).toLocaleString()}">${formatTokenCount(s.input_tokens)}</td>
                 <td class="text-center" title="${Number(s.output_tokens || 0).toLocaleString()}">${formatTokenCount(s.output_tokens)}</td>
-                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)} / <small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || 'CNY'))}</small></td>
+                <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)} / <small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || '人民币'))}</small></td>
                 <td>${s.last_active || '-'}</td>
             </tr>
         `).join('');

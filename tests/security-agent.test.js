@@ -339,7 +339,7 @@ test('agent quick task exposes save template action without opening templates pa
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
 });
 
-test('role and policy library serves chat free task and workflow entry points', () => {
+test('prompt library serves chat free task and workflow entry points', () => {
     const chatPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
     const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
     const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
@@ -350,7 +350,7 @@ test('role and policy library serves chat free task and workflow entry points', 
     const extra = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'extra.js'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'sessions-prompts.css'), 'utf8');
 
-    assert.match(settingsNav, />角色与规范库<\/button>/);
+    assert.match(settingsNav, />提示词库<\/button>/);
     assert.match(settingsPrompts, /id="prompt-type-filter"/);
     assert.match(settingsPrompts, /id="prompt-surface-filter"/);
     assert.match(settingsPrompts, /<option value="workflow">工作流<\/option>/);

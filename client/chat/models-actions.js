@@ -70,7 +70,7 @@ window.addModel = async () => {
         chat_thinking_enabled: document.getElementById('m-chat-thinking-enabled')?.checked ? 1 : 0,
         input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
         output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
-        price_currency: (document.getElementById('m-price-currency')?.value || 'CNY').trim(),
+        price_currency: (document.getElementById('m-price-currency')?.value || '人民币').trim(),
         scope: isSuperAdminUser() ? (document.getElementById('m-scope')?.value || 'personal') : 'personal'
     };
     if (!payload.name || !payload.url) return showToast('模型名称和接口地址不能为空', 'error');

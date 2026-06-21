@@ -1,4 +1,5 @@
 const { Buffer } = require('node:buffer');
+const { normalizePriceCurrency } = require('./model-costs');
 
 const CRC_TABLE = (() => {
     const table = new Uint32Array(256);
@@ -267,14 +268,17 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
                 { key: 'id', label: 'Model ID' },
                 { key: 'name', label: 'Model Name' },
                 { key: 'model_name', label: 'Upstream Model' },
-                { key: 'price_currency', label: 'Currency' },
+                { key: 'price_currency', label: '计价币种' },
                 { key: 'input_price_per_million', label: 'Input Price / 1M' },
                 { key: 'output_price_per_million', label: 'Output Price / 1M' },
                 { key: 'input_tokens', label: 'Input Tokens' },
                 { key: 'output_tokens', label: 'Output Tokens' },
                 { key: 'total_tokens', label: 'Total Tokens' },
                 { key: 'estimated_cost', label: 'Estimated Cost' }
-            ], modelCosts, escapeCsvCell)
+            ], modelCosts.map(row => ({
+                ...row,
+                price_currency: normalizePriceCurrency(row.price_currency)
+            })), escapeCsvCell)
         }
     ];
 

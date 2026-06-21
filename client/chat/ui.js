@@ -140,6 +140,15 @@ function isSelectableModelForCurrentUser(model) {
 
 window.isSelectableModelForCurrentUser = isSelectableModelForCurrentUser;
 
+window.applyUploadRuntimeLimits = function(limits = {}) {
+    const maxAttachments = limits?.maxAttachmentsPerMessage;
+    if (maxAttachments !== undefined && typeof window.setMaxPendingAttachments === 'function') {
+        window.setMaxPendingAttachments(maxAttachments);
+    } else if (maxAttachments !== undefined) {
+        window.MAX_PENDING_ATTACHMENTS = maxAttachments;
+    }
+};
+
 window.loadSelectableModels = async function() {
     const [modelRes, settingsRes] = await Promise.all([
         apiFetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
@@ -150,6 +159,7 @@ window.loadSelectableModels = async function() {
     const { data = [] } = await modelRes.json();
     window._cachedModels = data;
     const settings = settingsRes.ok ? await settingsRes.json() : {};
+    window.applyUploadRuntimeLimits(settings.uploadLimits);
     const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
 
     const models = data.filter(isSelectableModelForCurrentUser);

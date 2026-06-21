@@ -11,10 +11,15 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
     modelContextWindowTokens: 'model_context_window_tokens',
     contextReservedOutputTokens: 'context_reserved_output_tokens',
+    samplingTemperature: 'sampling_temperature',
+    samplingTopP: 'sampling_top_p',
+    samplingPresencePenalty: 'sampling_presence_penalty',
+    samplingFrequencyPenalty: 'sampling_frequency_penalty',
     uploadAttachmentMaxBytes: 'upload_attachment_max_bytes',
     knowledgeUploadMaxBytes: 'knowledge_upload_max_bytes',
     imageUploadMaxBytes: 'image_upload_max_bytes',
     imageContextMaxBytes: 'image_context_max_bytes',
+    maxAttachmentsPerMessage: 'max_attachments_per_message',
     maxImagesPerMessage: 'max_images_per_message',
     attachmentContextMaxChars: 'attachment_context_max_chars',
     knowledgeExtractMaxChars: 'knowledge_extract_max_chars',
@@ -150,6 +155,50 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         unit: 'tokens'
     },
     {
+        key: RUNTIME_SETTING_KEYS.samplingTemperature,
+        prop: 'samplingTemperature',
+        label: '默认温度',
+        env: 'SAMPLING_TEMPERATURE',
+        defaultValue: 0.7,
+        min: 0,
+        max: 2,
+        group: 'sampling',
+        valueType: 'float'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.samplingTopP,
+        prop: 'samplingTopP',
+        label: '默认采样概率上限',
+        env: 'SAMPLING_TOP_P',
+        defaultValue: 1,
+        min: 0,
+        max: 1,
+        group: 'sampling',
+        valueType: 'float'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.samplingPresencePenalty,
+        prop: 'samplingPresencePenalty',
+        label: '默认重复惩罚',
+        env: 'SAMPLING_PRESENCE_PENALTY',
+        defaultValue: 0,
+        min: -2,
+        max: 2,
+        group: 'sampling',
+        valueType: 'float'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.samplingFrequencyPenalty,
+        prop: 'samplingFrequencyPenalty',
+        label: '默认频率惩罚',
+        env: 'SAMPLING_FREQUENCY_PENALTY',
+        defaultValue: 0,
+        min: -2,
+        max: 2,
+        group: 'sampling',
+        valueType: 'float'
+    },
+    {
         key: RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes,
         prop: 'uploadAttachmentMaxBytes',
         label: '聊天附件上传大小',
@@ -192,6 +241,16 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         max: 128 * 1024 * 1024,
         group: 'upload',
         unit: 'bytes'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.maxAttachmentsPerMessage,
+        prop: 'maxAttachmentsPerMessage',
+        label: '单次附件数量',
+        env: 'MAX_ATTACHMENTS_PER_MESSAGE',
+        defaultValue: 5,
+        min: 1,
+        max: 50,
+        group: 'upload'
     },
     {
         key: RUNTIME_SETTING_KEYS.maxImagesPerMessage,
@@ -292,11 +351,19 @@ function parseHumanInt(value) {
     return Math.round(amount * multiplier);
 }
 
+function parseRuntimeSettingRawValue(definition, value) {
+    if (definition?.valueType === 'float') {
+        const parsed = Number.parseFloat(String(value ?? '').trim());
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    return parseHumanInt(value);
+}
+
 function getRuntimeDefaultValue(definition) {
     const envNames = Array.isArray(definition.env) ? definition.env : [definition.env];
     for (const envName of envNames) {
         if (envName && process.env[envName] !== undefined && String(process.env[envName]).trim() !== '') {
-            const parsed = parseHumanInt(process.env[envName]);
+            const parsed = parseRuntimeSettingRawValue(definition, process.env[envName]);
             if (Number.isFinite(parsed)) return parsed;
         }
     }
@@ -310,7 +377,7 @@ function normalizeRuntimeSettingValue(key, value, options = {}) {
     if (allowBlank && (value === null || value === undefined || String(value).trim() === '')) {
         return { value: getRuntimeDefaultValue(definition) };
     }
-    const parsed = parseHumanInt(value);
+    const parsed = parseRuntimeSettingRawValue(definition, value);
     if (!Number.isFinite(parsed)) {
         return { error: `${definition.label} 必须是有效数字` };
     }

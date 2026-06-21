@@ -7,7 +7,7 @@ const MAX_IMAGE_UPLOAD_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGE_INPUT_PIXELS = 40 * 1000 * 1000;
 const MAX_IMAGE_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_CONTEXT_BYTES = 3 * 1024 * 1024;
-const MAX_IMAGES_PER_MESSAGE = 1;
+const MAX_IMAGES_PER_MESSAGE = 4;
 const IMAGE_OUTPUT_SIZE = 1024;
 
 function isLikelyImageMime(mimeType = '') {

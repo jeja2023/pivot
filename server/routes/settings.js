@@ -24,6 +24,7 @@ const {
 } = require('../services/api-access-settings');
 const {
     buildRuntimeConfigSnapshot,
+    getUploadRuntimeConfig,
     saveRuntimeConfig
 } = require('../services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../services/concurrency');
@@ -153,12 +154,17 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/settings', authMiddleware, (req, res) => {
         const settings = getSettings();
+        const uploadRuntimeConfig = getUploadRuntimeConfig();
         const payload = {
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
             memoryConfig: getMemoryConfig(settings),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
+            uploadLimits: {
+                maxAttachmentsPerMessage: uploadRuntimeConfig.maxAttachmentsPerMessage,
+                maxImagesPerMessage: uploadRuntimeConfig.maxImagesPerMessage
+            },
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings

@@ -311,7 +311,8 @@ const {
 } = require('../server/services/compliance-package');
 
 const {
-    calculateUsageCost
+    calculateUsageCost,
+    normalizePriceCurrency
 } = require('../server/services/model-costs');
 
 const {
@@ -393,9 +394,25 @@ function runExpressHandlers(handlers, req, res) {
     return new Promise((resolve, reject) => {
         let index = 0;
         const originalJson = res.json?.bind(res);
+        const originalSend = res.send?.bind(res);
+        const originalEnd = res.end?.bind(res);
         if (originalJson) {
             res.json = (data) => {
                 originalJson(data);
+                resolve();
+                return res;
+            };
+        }
+        if (originalSend) {
+            res.send = (data) => {
+                originalSend(data);
+                resolve();
+                return res;
+            };
+        }
+        if (originalEnd) {
+            res.end = (data) => {
+                originalEnd(data);
                 resolve();
                 return res;
             };
@@ -831,6 +848,7 @@ module.exports = {
     normalizeHostAlias,
     normalizeMemoryThreshold,
     normalizeModelBaseUrl,
+    normalizePriceCurrency,
     normalizeRegenerateFlag,
     normalizeTokenUsage,
     normalizeToolAllowlist,

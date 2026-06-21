@@ -19,6 +19,7 @@ const {
     updateObservabilityEventStatus
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
+const { normalizePriceCurrency } = require('../services/model-costs');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 
@@ -551,7 +552,7 @@ function createAdminStatsRouter({
                    COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
                    COALESCE(SUM(usage.token_count), 0) as total_tokens,
                    COALESCE(SUM(${usageCostSql('usage', 'm')}), 0) as estimated_cost,
-                   COALESCE(m.price_currency, 'CNY') as price_currency,
+                   COALESCE(m.price_currency, '人民币') as price_currency,
                    MAX(usage.created_at) as last_active
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
@@ -718,7 +719,7 @@ function createAdminStatsRouter({
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
-                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.price_currency, '人民币') AS price_currency,
                    usage.usage_source
             FROM (${tokenUsageSubquery(innerWhere)}) usage
             JOIN users u ON usage.user_id = u.id
@@ -742,7 +743,7 @@ function createAdminStatsRouter({
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
-                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.price_currency, '人民币') AS price_currency,
                    usage.usage_source
             FROM (${tokenUsageSubquery(canViewAll ? '' : 'user_id = @userId')}) usage
             JOIN users u ON usage.user_id = u.id
@@ -793,7 +794,7 @@ function createAdminStatsRouter({
         const rows = db.prepare(`
             SELECT md.id AS model_id, COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
-                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.price_currency, '人民币') AS price_currency,
                    COALESCE(md.input_price_per_million, 0) AS input_price_per_million,
                    COALESCE(md.output_price_per_million, 0) AS output_price_per_million,
                    COUNT(usage.id) AS usage_count,
@@ -833,7 +834,7 @@ function createAdminStatsRouter({
         const rows = db.prepare(`
             SELECT COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
-                   COALESCE(md.price_currency, 'CNY') AS price_currency,
+                   COALESCE(md.price_currency, '人民币') AS price_currency,
                    COALESCE(md.input_price_per_million, 0) AS input_price_per_million,
                    COALESCE(md.output_price_per_million, 0) AS output_price_per_million,
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) AS input_tokens,
@@ -845,12 +846,12 @@ function createAdminStatsRouter({
             GROUP BY usage.model_id
             ORDER BY estimated_cost DESC, total_tokens DESC
         `).all(params);
-        let csv = '\uFEFFModel,Upstream Model,Currency,Input Price / 1M,Output Price / 1M,Input Tokens,Output Tokens,Total Tokens,Estimated Cost\n';
+        let csv = '\uFEFFModel,Upstream Model,计价币种,Input Price / 1M,Output Price / 1M,Input Tokens,Output Tokens,Total Tokens,Estimated Cost\n';
         rows.forEach(row => {
             csv += [
                 row.model_name,
                 row.upstream_model,
-                row.price_currency,
+                normalizePriceCurrency(row.price_currency),
                 row.input_price_per_million,
                 row.output_price_per_million,
                 row.input_tokens,

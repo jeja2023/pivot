@@ -10,6 +10,7 @@ const {
     buildZipArchive,
     calculateUsageCost,
     db,
+    normalizePriceCurrency,
     readZipEntries,
     test,
     titleHelpers,
@@ -23,6 +24,8 @@ test('模型成本辅助函数和合规包会生成可审计导出', () => {
         inputPricePerMillion: 2,
         outputPricePerMillion: 6
     }), 5);
+    assert.equal(normalizePriceCurrency('美元'), '美元');
+    assert.equal(normalizePriceCurrency('KRW'), '人民币');
 
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -33,7 +36,7 @@ test('模型成本辅助函数和合规包会生成可审计导出', () => {
     const modelInfo = db.prepare(`
         INSERT INTO models (user_id, name, url, model_name, status, input_price_per_million, output_price_per_million, price_currency, created_at)
         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(userId, 'Cost Model', 'https://model.example/v1', 'cost-model', 1.5, 4.5, 'CNY');
+    `).run(userId, 'Cost Model', 'https://model.example/v1', 'cost-model', 1.5, 4.5, '人民币');
     const modelId = Number(modelInfo.lastInsertRowid);
     const sessionId = `compliance-session-${suffix}`;
     db.prepare('INSERT INTO sessions (id, user_id, title, tags, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\', \'+8 hours\'), datetime(\'now\', \'+8 hours\'))')

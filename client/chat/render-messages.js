@@ -230,19 +230,49 @@ window.setMessageActionId = setMessageActionId;
 
 function renderAttachmentPreviews() {
     const previewArea = document.getElementById('attachment-preview');
-    if (pendingAttachments.length === 0) { previewArea.classList.add('hidden'); previewArea.innerHTML = ''; return; }
-    const maxAttachments = window.MAX_PENDING_ATTACHMENTS || 5;
+    if (pendingAttachments.length === 0) {
+        previewArea.classList.add('hidden');
+        previewArea.innerHTML = '';
+        previewArea.title = '';
+        previewArea.removeAttribute('aria-label');
+        return;
+    }
+    const maxAttachments = typeof window.getMaxPendingAttachments === 'function'
+        ? window.getMaxPendingAttachments()
+        : (window.MAX_PENDING_ATTACHMENTS || 5);
     if (pendingAttachments.length > maxAttachments) pendingAttachments.splice(maxAttachments);
     if (typeof window.syncPendingAttachmentsGlobal === 'function') window.syncPendingAttachmentsGlobal();
     previewArea.classList.remove('hidden');
     const hasImage = pendingAttachments.some(file => typeof window.isChatImageAttachment === 'function' ? window.isChatImageAttachment(file) : String(file.type || '').startsWith('image/'));
-    const notice = hasImage ? '<div class="attachment-limit-note">当前模型每次仅解析 1 张图片</div>' : '';
-    previewArea.innerHTML = notice + pendingAttachments.map((file, index) => {
+    const imageCount = pendingAttachments.filter(file => typeof window.isChatImageAttachment === 'function' ? window.isChatImageAttachment(file) : String(file.type || '').startsWith('image/')).length;
+    const fileCount = Math.max(0, pendingAttachments.length - imageCount);
+    const summaryItems = [
+        `附件 ${pendingAttachments.length}`,
+        `图片 ${imageCount}`,
+        `文件 ${fileCount}`
+    ];
+    if (hasImage) summaryItems.push('图片解析数量受模型上限限制');
+    previewArea.title = summaryItems.join(' · ');
+    previewArea.setAttribute('aria-label', previewArea.title);
+    const removeButton = index => `
+        <button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件" title="移除附件">
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path>
+            </svg>
+        </button>
+    `;
+    previewArea.innerHTML = pendingAttachments.map((file, index) => {
         const isImage = typeof window.isChatImageAttachment === 'function' ? window.isChatImageAttachment(file) : String(file.type || '').startsWith('image/');
-        if (isImage) {
-            return `<div class="preview-card"><img src="${escapeAttrValue(file.url)}"><button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件">&times;</button></div>`;
+        const isLocal = file?.kind === 'local' || file?.status === 'local';
+        const previewUrl = isLocal ? String(file.previewUrl || '') : String(file.url || '');
+        const icon = isImage
+            ? `<div class="file-icon file-icon-image"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"></rect><circle cx="9" cy="9" r="1.5"></circle><path d="M21 16l-5-5-4 4-2-2-5 5"></path></svg></div>`
+            : `<div class="file-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>`;
+        const badge = isLocal ? '<span class="preview-state-badge">待上传</span>' : '';
+        if (isImage && previewUrl) {
+            return `<div class="preview-card preview-card-local"><img src="${escapeAttrValue(previewUrl)}" alt="${escapeAttrValue(file.name)}">${badge}${removeButton(index)}</div>`;
         }
-        return `<div class="preview-card file-card"><div class="file-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="file-name">${escapeCodeHtml(file.name)}</div><button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件">&times;</button></div>`;
+        return `<div class="preview-card file-card preview-card-local">${icon}<div class="file-main"><div class="file-name">${escapeCodeHtml(file.name)}</div>${badge}</div>${removeButton(index)}</div>`;
     }).join('');
 }
 

@@ -7,6 +7,8 @@ const { validateModelTokenSettings, normalizeModelTokenLimit } = require('../../
 const {
     RUNTIME_SETTING_KEYS,
     getGlobalContextRuntimeConfig,
+    getGlobalSamplingRuntimeConfig,
+    getUploadRuntimeConfig,
     saveRuntimeConfig
 } = require('../../server/services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
@@ -126,6 +128,45 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
     }
 });
 
+test('运行时采样默认值可从设置页保存并回读', () => {
+    const keys = [
+        RUNTIME_SETTING_KEYS.samplingTemperature,
+        RUNTIME_SETTING_KEYS.samplingTopP,
+        RUNTIME_SETTING_KEYS.samplingPresencePenalty,
+        RUNTIME_SETTING_KEYS.samplingFrequencyPenalty
+    ];
+    const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
+    try {
+        const saved = saveRuntimeConfig({
+            sampling_temperature: 0.35,
+            sampling_top_p: 0.92,
+            sampling_presence_penalty: -0.3,
+            sampling_frequency_penalty: 0.1
+        }, null);
+        assert.equal(saved.error, undefined);
+        assert.equal(getGlobalSamplingRuntimeConfig().temperature, 0.35);
+        assert.equal(getGlobalSamplingRuntimeConfig().topP, 0.92);
+        assert.equal(getGlobalSamplingRuntimeConfig().presencePenalty, -0.3);
+        assert.equal(getGlobalSamplingRuntimeConfig().frequencyPenalty, 0.1);
+    } finally {
+        keys.forEach((key, index) => {
+            const row = previousRows[index];
+            if (row) {
+                db.prepare(`
+                    INSERT INTO app_settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by
+                `).run(row.key, row.value, row.updated_at, row.updated_by);
+            } else {
+                db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+            }
+        });
+    }
+});
+
 test('设置接口仅向管理员返回全局运行参数', async () => {
     const router = createSettingsRouter({
         authMiddleware: (_req, _res, next) => next(),
@@ -140,12 +181,14 @@ test('设置接口仅向管理员返回全局运行参数', async () => {
     await runExpressHandlers(route.route.stack.map(layer => layer.handle), normalReq, normalRes);
     assert.equal(normalRes.statusCode, 200);
     assert.equal(Object.prototype.hasOwnProperty.call(normalRes.body, 'runtimeConfig'), false);
+    assert.equal(normalRes.body.uploadLimits?.maxAttachmentsPerMessage, getUploadRuntimeConfig().maxAttachmentsPerMessage);
 
     const adminReq = { user: { id: 2, username: 'manager', role: 'admin', unit: 'QA' }, headers: {} };
     const adminRes = createJsonResponse();
     await runExpressHandlers(route.route.stack.map(layer => layer.handle), adminReq, adminRes);
     assert.equal(adminRes.statusCode, 200);
     assert.ok(adminRes.body.runtimeConfig?.items?.length > 0);
+    assert.equal(adminRes.body.uploadLimits?.maxAttachmentsPerMessage, getUploadRuntimeConfig().maxAttachmentsPerMessage);
 });
 
 test('非内置 admin 管理员不能修改全局运行参数', async () => {
@@ -238,6 +281,7 @@ test('全局运行时资源参数可通过设置接口保存', async () => {
     const adminUser = { id: 1, username: 'admin', role: 'admin', unit: 'QA' };
     const keys = [
         RUNTIME_SETTING_KEYS.uploadAttachmentMaxBytes,
+        RUNTIME_SETTING_KEYS.maxAttachmentsPerMessage,
         RUNTIME_SETTING_KEYS.maxImagesPerMessage,
         RUNTIME_SETTING_KEYS.attachmentContextMaxChars,
         RUNTIME_SETTING_KEYS.ragTopKMax
@@ -252,6 +296,7 @@ test('全局运行时资源参数可通过设置接口保存', async () => {
     const req = {
         body: {
             upload_attachment_max_bytes: '96M',
+            max_attachments_per_message: 12,
             max_images_per_message: 6,
             attachment_context_max_chars: '120K',
             rag_top_k_max: 80
@@ -277,7 +322,9 @@ test('全局运行时资源参数可通过设置接口保存', async () => {
         assert.equal(res.statusCode, 200);
         assert.equal(res.body.success, true);
         assert.equal(res.body.runtimeConfig.values.uploadAttachmentMaxBytes, 96000000);
+        assert.equal(res.body.runtimeConfig.values.maxAttachmentsPerMessage, 12);
         assert.equal(res.body.runtimeConfig.values.maxImagesPerMessage, 6);
+        assert.equal(getUploadRuntimeConfig().maxAttachmentsPerMessage, 12);
         assert.equal(res.body.runtimeConfig.values.attachmentContextMaxChars, 120000);
         assert.equal(res.body.runtimeConfig.values.ragTopKMax, 80);
     } finally {

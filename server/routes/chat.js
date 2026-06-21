@@ -55,6 +55,7 @@ const {
     getModelContextBudget
 } = require('../services/context-budget');
 const { maybeGenerateTitle } = require('../services/chat-title');
+const { getGlobalSamplingRuntimeConfig } = require('../services/runtime-settings');
 const {
     buildPersistedChatErrorContent,
     readStreamErrorDetail,
@@ -717,14 +718,16 @@ function createChatRouter({
 
             // 将 Chat Completions 格式转换为 Responses API 格式
             const responsesHistory = convertChatMessagesToResponsesInput(visionHistory);
+            const runtimeSampling = getGlobalSamplingRuntimeConfig();
 
             const requestData = { 
                 model: modelName, 
-                stream: true 
+                stream: true,
+                temperature: modelCfg.temperature ?? runtimeSampling.temperature,
+                top_p: runtimeSampling.topP,
+                presence_penalty: runtimeSampling.presencePenalty,
+                frequency_penalty: runtimeSampling.frequencyPenalty
             };
-            if (modelCfg.temperature !== null && modelCfg.temperature !== undefined) {
-                requestData.temperature = modelCfg.temperature;
-            }
             // 网页聊天有意不强制 max_tokens 兜底：未配置时不下发输出上限，让上游用自身默认，
             // 避免把交互式回复人为截断在某个固定值（与 openai/apps 接口的 2000 兜底口径不同，属刻意设计）。
             if (modelCfg.max_tokens !== null && modelCfg.max_tokens !== undefined) {

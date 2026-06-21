@@ -28,6 +28,7 @@ const {
     buildChatCompletionsUrl,
     buildModelHeaders
 } = require('../services/model-adapter');
+const { getGlobalSamplingRuntimeConfig } = require('../services/runtime-settings');
 const { forwardChatCompletion } = require('../services/model-forwarder');
 const { createApiAccessGuard } = require('../services/api-access-settings');
 const { getEmbeddingConfig } = require('../services/rag-config');
@@ -189,6 +190,192 @@ function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens
       .run(usage.totalTokens, usage.inputTokens, usage.outputTokens, req.apiKeyId);
 }
 
+function extractChatCompletionText(choice = {}) {
+    const content = choice.message?.content;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content.map(part => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part === 'object') return part.text || part.content || '';
+            return '';
+        }).filter(Boolean).join('\n');
+    }
+    return typeof choice.text === 'string' ? choice.text : '';
+}
+
+function isChatCompletionResponse(body) {
+    return body && typeof body === 'object' && Array.isArray(body.choices);
+}
+
+function toCompletionResponse(chatResponse = {}, model) {
+    return {
+        id: String(chatResponse.id || `cmpl-${Date.now().toString(36)}`),
+        object: 'text_completion',
+        created: chatResponse.created || Math.floor(Date.now() / 1000),
+        model: String(chatResponse.model || model || ''),
+        choices: chatResponse.choices.map((choice, index) => ({
+            text: extractChatCompletionText(choice),
+            index: Number.isInteger(choice.index) ? choice.index : index,
+            logprobs: choice.logprobs || null,
+            finish_reason: choice.finish_reason || null
+        })),
+        usage: chatResponse.usage || undefined
+    };
+}
+
+function toCompletionStreamFrame(payload, model) {
+    try {
+        const json = typeof payload === 'string' ? JSON.parse(payload) : payload;
+        const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
+        if (!choice) return null;
+        const delta = choice.delta || {};
+        const text = delta.content ?? delta.reasoning_content ?? choice.text ?? '';
+        const frame = {
+            id: String(json.id || `cmpl-${Date.now().toString(36)}`),
+            object: 'text_completion',
+            created: json.created || Math.floor(Date.now() / 1000),
+            model: String(json.model || model || ''),
+            choices: [{
+                text: typeof text === 'string' ? text : '',
+                index: Number.isInteger(choice.index) ? choice.index : 0,
+                logprobs: choice.logprobs || null,
+                finish_reason: choice.finish_reason || null
+            }]
+        };
+        if (json.usage) frame.usage = json.usage;
+        return frame;
+    } catch (e) {
+        return null;
+    }
+}
+
+function runRouteHandlers(handlers, req, res) {
+    return new Promise((resolve, reject) => {
+        let index = 0;
+        let settled = false;
+        const settle = () => {
+            if (!settled) {
+                settled = true;
+                resolve();
+            }
+        };
+        ['json', 'send', 'end'].forEach(method => {
+            if (typeof res[method] !== 'function') return;
+            const original = res[method].bind(res);
+            res[method] = (...args) => {
+                const result = original(...args);
+                settle();
+                return result;
+            };
+        });
+        const next = (err) => {
+            if (settled) return;
+            if (err) {
+                settled = true;
+                return reject(err);
+            }
+            const handler = handlers[index];
+            index += 1;
+            if (!handler) return settle();
+            try {
+                const result = handler(req, res, next);
+                if (result && typeof result.then === 'function') result.catch(reject);
+            } catch (e) {
+                settled = true;
+                reject(e);
+            }
+        };
+        next();
+    });
+}
+
+function createCompletionResponseProxy(res, { model = '', stream = false } = {}) {
+    let completionStreamDone = false;
+    const completionParser = stream ? createSseEventParser({
+        onData(payload) {
+            const frame = toCompletionStreamFrame(payload, model);
+            if (frame) {
+                res.write(`data: ${JSON.stringify(frame)}\n\n`);
+            }
+        },
+        onDone() {
+            completionStreamDone = true;
+            res.write('data: [DONE]\n\n');
+        }
+    }) : null;
+
+    return {
+        get statusCode() {
+            return res.statusCode;
+        },
+        set statusCode(value) {
+            res.statusCode = value;
+        },
+        get headersSent() {
+            return Boolean(res.headersSent);
+        },
+        get writableEnded() {
+            return Boolean(res.writableEnded);
+        },
+        status(code) {
+            res.status(code);
+            return this;
+        },
+        setHeader(name, value) {
+            res.setHeader(name, value);
+            return this;
+        },
+        getHeader(name) {
+            return typeof res.getHeader === 'function' ? res.getHeader(name) : undefined;
+        },
+        flushHeaders() {
+            if (typeof res.flushHeaders === 'function') res.flushHeaders();
+            return this;
+        },
+        json(body) {
+            if (isChatCompletionResponse(body)) {
+                return res.json(toCompletionResponse(body, model));
+            }
+            return res.json(body);
+        },
+        send(body) {
+            if (isChatCompletionResponse(body)) {
+                return res.json(toCompletionResponse(body, model));
+            }
+            return typeof res.send === 'function' ? res.send(body) : res.end(body);
+        },
+        write(chunk) {
+            if (stream && completionParser && chunk !== undefined && chunk !== null) {
+                completionParser.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+                return true;
+            }
+            return typeof res.write === 'function' ? res.write(chunk) : true;
+        },
+        end(chunk) {
+            if (stream && completionParser) {
+                if (chunk !== undefined && chunk !== null && chunk !== '') {
+                    this.write(chunk);
+                }
+                completionParser.end();
+                if (!completionStreamDone) {
+                    res.write('data: [DONE]\n\n');
+                    completionStreamDone = true;
+                }
+                return res.end();
+            }
+            return typeof res.end === 'function' ? res.end(chunk) : undefined;
+        },
+        on(event, handler) {
+            if (typeof res.on === 'function') res.on(event, handler);
+            return this;
+        },
+        once(event, handler) {
+            if (typeof res.once === 'function') res.once(event, handler);
+            return this;
+        }
+    };
+}
+
 function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_req, _res, next) => next() }) {
     const router = express.Router();
     router.use(createApiAccessGuard({ logAction }));
@@ -340,6 +527,22 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
     }));
 
     // 2. 聊天补全接口
+    router.post('/completions', authMiddleware, asyncHandler(async (req, res) => {
+        const chatRoute = router.stack.find(layer => layer.route?.path === '/chat/completions');
+        if (!chatRoute) {
+            return res.status(500).json({ error: { message: 'Chat completions route is not available.', type: 'api_error' } });
+        }
+        req.body = {
+            ...req.body,
+            stream: !!req.body?.stream
+        };
+        const proxyRes = createCompletionResponseProxy(res, {
+            model: req.body?.model,
+            stream: !!req.body?.stream
+        });
+        return runRouteHandlers(chatRoute.route.stack.map(layer => layer.handle), req, proxyRes);
+    }));
+
     router.post('/chat/completions', authMiddleware, asyncHandler(async (req, res) => {
         const {
             model,
@@ -402,6 +605,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         if (modelCfg.secret_error) {
             return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
         }
+        const runtimeSampling = getGlobalSamplingRuntimeConfig();
 
         if (messagesContainVisionInput(messages) && !modelSupportsVision(modelCfg)) {
             return res.status(400).json({
@@ -534,13 +738,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             model: modelCfg.model_name,
             messages: upstreamMessages,
             stream: !!stream,
-            temperature: temperature ?? modelCfg.temperature ?? 0.7,
+            temperature: temperature ?? modelCfg.temperature ?? runtimeSampling.temperature,
             max_tokens: requestedMaxTokens ?? modelCfg.max_tokens ?? 2000
         };
         if (stop !== undefined) payload.stop = stop;
-        if (top_p !== undefined) payload.top_p = top_p;
-        if (presence_penalty !== undefined) payload.presence_penalty = presence_penalty;
-        if (frequency_penalty !== undefined) payload.frequency_penalty = frequency_penalty;
+        payload.top_p = top_p ?? runtimeSampling.topP;
+        payload.presence_penalty = presence_penalty ?? runtimeSampling.presencePenalty;
+        payload.frequency_penalty = frequency_penalty ?? runtimeSampling.frequencyPenalty;
         if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
             payload.max_input_tokens = modelCfg.max_input_tokens;
         }
