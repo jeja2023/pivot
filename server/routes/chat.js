@@ -149,7 +149,8 @@ function buildAssistantSpeedStats({
     apiUsage = null,
     requestStartedAt = Date.now(),
     endedAt = Date.now(),
-    firstVisibleAnswerAt = null
+    firstVisibleAnswerAt = null,
+    disableChatThinking = false
 } = {}) {
     const finalContent = appendStreamedChartsToAssistantContent(assistantContent, streamedChartSpecs);
     const assistantTokens = streamedChartSpecs.length > 0
@@ -159,7 +160,10 @@ function buildAssistantSpeedStats({
             : estimateTokens(finalContent);
     const costTime = Math.max((endedAt - requestStartedAt) / 1000, 0.001);
     const answerTokens = estimateVisibleAnswerTokensForSpeed(finalContent);
-    const answerStartAt = firstVisibleAnswerAt || (answerTokens > 0 ? requestStartedAt : null);
+    // 如果关闭了思考过程，我们将整个请求时间作为生成时间，以使速率与用户体感一致
+    const answerStartAt = disableChatThinking
+        ? requestStartedAt
+        : (firstVisibleAnswerAt || (answerTokens > 0 ? requestStartedAt : null));
     const answerCostTime = answerStartAt ? Math.max((endedAt - answerStartAt) / 1000, 0.001) : costTime;
     const tokensPerSec = answerTokens > 0 ? answerTokens / answerCostTime : 0;
     return {
@@ -876,7 +880,8 @@ function createChatRouter({
                         apiUsage,
                         requestStartedAt,
                         endedAt,
-                        firstVisibleAnswerAt
+                        firstVisibleAnswerAt,
+                        disableChatThinking
                     });
                     assistantContent = stats.assistantContent;
                     const assistantTokens = stats.assistantTokens;

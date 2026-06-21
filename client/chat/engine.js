@@ -88,6 +88,9 @@ window.sendMessage = async function(isRegenerate = false) {
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
     const assistantModelName = model?.name || model?.model_name || '';
+    const isReasoning = model && Number(model.supports_reasoning || 0) === 1;
+    const isThinkingEnabled = model && Number(model.chat_thinking_enabled || 0) === 1;
+    const disableChatThinking = isReasoning && !isThinkingEnabled;
 
     let userMsgEl = null;
     if (!shouldRegenerate) {
@@ -205,7 +208,7 @@ window.sendMessage = async function(isRegenerate = false) {
             fullAiContent += content;
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                firstTokenTime = Date.now();
+                firstTokenTime = disableChatThinking ? startTime : Date.now();
             }
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
@@ -338,7 +341,7 @@ window.sendMessage = async function(isRegenerate = false) {
                         fullAiContent = data.content;
                         tokenCount = estimateStreamingTokenCount(fullAiContent);
                         if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                            firstTokenTime = Date.now();
+                            firstTokenTime = disableChatThinking ? startTime : Date.now();
                         }
                         if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
                     }
@@ -370,7 +373,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 if (data.content) {
                     const nextStreamContent = [fullAiContent, pendingStreamChunks.join(''), data.content].filter(Boolean).join('');
                     if (!firstTokenTime && getAnswerTokenCount(nextStreamContent) > 0) {
-                        firstTokenTime = Date.now();
+                        firstTokenTime = disableChatThinking ? startTime : Date.now();
                     }
                     enqueueStreamContent(data.content);
                 }
@@ -432,7 +435,7 @@ window.sendMessage = async function(isRegenerate = false) {
                 fullAiContent += remainingStreamContent;
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
                 if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                    firstTokenTime = Date.now();
+                    firstTokenTime = disableChatThinking ? startTime : Date.now();
                 }
             }
             fullAiContent += '\n\n[已由用户中断生成]';

@@ -1,3 +1,14 @@
+## [v0.0.136] - 2026-06-21
+
+### 关闭思考时 Token 速度统计修正
+
+本版本解决了思考模型在关闭思考过程时，大模型计算并展示的 token 速率不准确的问题。由于关闭思考过程时思考文字被过滤隐藏，速率计算应当基于请求总耗时进行，以与用户的体感展示保持一致。
+
+#### 变更内容
+- **后端速率统计修正**：`/server/routes/chat.js` 中 `buildAssistantSpeedStats` 新增 `disableChatThinking` 参数，在该模式下将计算起点 `answerStartAt` 对齐为请求启动时间 `requestStartedAt`，从而将隐藏的思考耗时计入分母。
+- **前端流式判定对齐**：`/client/chat/engine.js` 判定首个答案 token 并且处于关闭思考模式时，将首字节到达时间 `firstTokenTime` 设为起跑时间 `startTime`，确保流式输出过程中的 t/s 速率不出现偏高偏差。
+- **单测用例与版本同步**：新增单元测试 `关闭思考过程后聊天回答速率按总耗时计算`；版本号升级至 `0.0.136` 并同步更新至 `package.json`、`package-lock.json`、`README.md` 和 `CHANGELOG.md`。
+
 ## [v0.0.135] - 2026-06-21
 
 ### PWA 更新提示样式规范化与主题变量收口

@@ -475,6 +475,22 @@ test('聊天回答速度只按可见答案片段计算', () => {
     assert.equal(stats.tokensPerSec, stats.answerTokens / 10);
 });
 
+test('关闭思考过程后聊天回答速率按总耗时计算', () => {
+    const stats = buildAssistantSpeedStats({
+        assistantContent: '最终答案',
+        requestStartedAt: 1_000,
+        endedAt: 71_000,
+        firstVisibleAnswerAt: 61_000,
+        disableChatThinking: true
+    });
+
+    assert.equal(stats.assistantTokens > 0, true);
+    assert.equal(stats.answerTokens > 0, true);
+    assert.equal(stats.costTime, 70);
+    assert.equal(stats.answerCostTime, 70);
+    assert.equal(stats.tokensPerSec, stats.answerTokens / 70);
+});
+
 test('前端流式速度统计会排除思考块 token', () => {
     const sandbox = createChatRenderSandbox();
     vm.runInNewContext(
