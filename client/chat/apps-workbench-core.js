@@ -8,6 +8,15 @@ const PIVOT_APP_REGISTRY = [
         icon: 'file-text',
         status: 'available',
         openMode: 'inline'
+    },
+    {
+        id: 'data-analysis',
+        name: '数据分析',
+        category: '数据工具',
+        description: '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和 AI 辅助洞察。',
+        icon: 'bar-chart',
+        status: 'available',
+        openMode: 'inline'
     }
 ];
 
@@ -305,6 +314,16 @@ function getAppIconSvg(icon) {
             </svg>
         `;
     }
+    if (icon === 'bar-chart') {
+        return `
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path d="M3 3v18h18"></path>
+                <path d="M7 16V9"></path>
+                <path d="M12 16V5"></path>
+                <path d="M17 16v-4"></path>
+            </svg>
+        `;
+    }
     return `
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
@@ -367,6 +386,7 @@ function showAppsHome() {
     setStoredAppsActiveApp('');
     document.getElementById('apps-home-view')?.classList.remove('hidden');
     document.getElementById('official-writing-view')?.classList.add('hidden');
+    document.getElementById('data-analysis-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
     renderAppsGrid();
@@ -376,6 +396,7 @@ function showOfficialWritingApp() {
     setStoredAppsActiveApp('official-writing');
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
+    document.getElementById('data-analysis-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '正文模式用于正式写作，对照模式用于原文和正文稿并排审改；批注、版本、规范检查和材料引用集中在右侧审改栏。');
     loadOfficialWritingState();
@@ -393,10 +414,25 @@ function showOfficialWritingApp() {
     renderOfficialWritingDocList();
 }
 
+async function showDataAnalysisAppFromRegistry() {
+    if (typeof window.showDataAnalysisApp === 'function') {
+        await window.showDataAnalysisApp();
+        return;
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-data-analysis.js');
+    await window.showDataAnalysisApp?.();
+}
+
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
     if (app.id === 'official-writing') showOfficialWritingApp();
+    if (app.id === 'data-analysis') {
+        showDataAnalysisAppFromRegistry()
+            .catch(() => {
+                if (typeof showToast === 'function') showToast('数据分析应用加载失败', 'error');
+            });
+    }
 }
 
 function loadOfficialWritingLibrary() {
@@ -539,4 +575,3 @@ function exportOfficialWritingBackup() {
     );
     if (typeof showToast === 'function') showToast('已导出工作区备份');
 }
-

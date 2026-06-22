@@ -493,6 +493,8 @@ window.openAppsWorkbench = function() {
     bindAppsWorkbenchEvents();
     if (getStoredAppsActiveApp() === 'official-writing') {
         showOfficialWritingApp();
+    } else if (getStoredAppsActiveApp() === 'data-analysis') {
+        showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
     } else {
         showAppsHome();
     }

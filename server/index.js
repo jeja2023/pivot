@@ -551,7 +551,9 @@ app.use('/v1', createOpenAIRouter({
 // --- 应用中心接口（公文写作 AI 等） ---
 app.use('/api', createAppsRouter({
     authMiddleware,
-    logAction
+    logAction,
+    uploadLimiter,
+    upload: secureUpload
 }));
 
 // --- API 404 处理器 (确保 API 请求永远返回 JSON) ---

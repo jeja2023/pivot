@@ -793,6 +793,46 @@ function runMigrations() {
     `);
 
     db.exec(`
+        CREATE TABLE IF NOT EXISTS analysis_datasets (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            file_type TEXT DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            source_path TEXT DEFAULT '',
+            parquet_path TEXT DEFAULT '',
+            row_count INTEGER DEFAULT 0,
+            column_count INTEGER DEFAULT 0,
+            columns_json TEXT DEFAULT '[]',
+            profile_json TEXT DEFAULT '[]',
+            preview_json TEXT DEFAULT '[]',
+            sheet_name TEXT DEFAULT '',
+            active_version INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'ready',
+            error_message TEXT DEFAULT '',
+            deleted_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS analysis_artifacts (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            dataset_id TEXT DEFAULT '',
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT DEFAULT '',
+            file_path TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_analysis_datasets_user ON analysis_datasets(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_artifacts_user ON analysis_artifacts(user_id, dataset_id, created_at);
+    `);
+
+    db.exec(`
         CREATE TABLE IF NOT EXISTS announcements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,

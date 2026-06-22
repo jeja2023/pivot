@@ -1,3 +1,15 @@
+## [v0.0.137] - 2026-06-22
+
+### 数据分析应用上线
+
+本版本新增应用中心里的数据分析工作台，采用 SQLite 元数据 + Parquet 数据层 + DuckDB 查询引擎的组合，补齐了数据上传、概览、字段画像、图表生成、对比分析、CSV 导出和 AI 辅助分析等能力，同时把持久化与查询职责分开，减少多进程锁冲突和临时文件干扰。
+
+#### 变更内容
+- **应用中心新增数据分析工作台**：`client/chat/apps-workbench-data-analysis.js` 提供数据集上传、列表、详情、摘要、图表、对比和导出入口，`client/chat/apps-workbench-core.js`、`client/chat/apps-workbench-rag.js`、`client/chat/stats-monitor-utils.js`、`client/chat/styles/workspaces/apps.css` 与 `server/routes/apps.js` 完成注册与展示。
+- **存储与查询分层**：数据集元信息与 artifact 继续存 SQLite，原始数据转换为 Parquet 持久层，分析查询由 DuckDB 执行；导入过程改为直接写入 DuckDB appender 并生成 Parquet，减少中间 CSV 和 `.duckdb` 临时产物。
+- **分析能力补齐**：支持 CSV/XLS/XLSX 上传、字段画像、统计摘要、图表生成、双数据集对比、CSV 导出和 AI 上下文构建，对比逻辑按 join key 聚合并暴露重复键，避免匹配数被放大。
+- **版本与文档同步**：版本号升级到 `0.0.137`，并同步更新 `package.json`、`package-lock.json`、`README.md`、`使用手册.md` 和 `CHANGELOG.md`。
+
 ## [v0.0.136] - 2026-06-21
 
 ### 关闭思考时 Token 速度统计修正

@@ -715,6 +715,43 @@ function initSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
+        CREATE TABLE IF NOT EXISTS analysis_datasets (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            file_type TEXT DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            source_path TEXT DEFAULT '',
+            parquet_path TEXT DEFAULT '',
+            row_count INTEGER DEFAULT 0,
+            column_count INTEGER DEFAULT 0,
+            columns_json TEXT DEFAULT '[]',
+            profile_json TEXT DEFAULT '[]',
+            preview_json TEXT DEFAULT '[]',
+            sheet_name TEXT DEFAULT '',
+            active_version INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'ready',
+            error_message TEXT DEFAULT '',
+            deleted_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_artifacts (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            dataset_id TEXT DEFAULT '',
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT DEFAULT '',
+            file_path TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS capability_packages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             package_key TEXT UNIQUE NOT NULL,
@@ -790,6 +827,8 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_mcp_database_connections_user ON mcp_database_connections(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_server ON mcp_builtin_configs(mcp_server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_user ON mcp_builtin_configs(user_id, service_type, status);
+        CREATE INDEX IF NOT EXISTS idx_analysis_datasets_user ON analysis_datasets(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_artifacts_user ON analysis_artifacts(user_id, dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);

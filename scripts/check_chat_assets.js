@@ -135,7 +135,8 @@ const appsWorkbenchSlices = [
     'apps-workbench-ai.js',
     'apps-workbench-rewrite.js',
     'apps-workbench-export.js',
-    'apps-workbench-rag.js'
+    'apps-workbench-rag.js',
+    'apps-workbench-data-analysis.js'
 ];
 const appsWorkbenchJs = appsWorkbenchSlices.map(name => {
     const filePath = path.join(chatDir, name);

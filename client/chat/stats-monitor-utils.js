@@ -215,6 +215,7 @@ const ROUTE_NAME_MAP = {
     '/chat/apps-workbench-rewrite.js': '应用中心工作区脚本（流式改写）',
     '/chat/apps-workbench-export.js': '应用中心工作区脚本（导出 DOCX/MD/PDF）',
     '/chat/apps-workbench-rag.js': '应用中心工作区脚本（知识库检索/入口）',
+    '/chat/apps-workbench-data-analysis.js': '应用中心工作区脚本（数据分析）',
     '/chat/announcements-admin.js': '公告管理脚本',
     '/chat/models-actions.js': '模型管理动作脚本',
     '/chat/dag-core.js': 'DAG 基础脚本',

@@ -34,6 +34,17 @@ const {
     parseOfficialWritingReviewItems,
     OFFICIAL_WRITING_MODE_LABELS
 } = require('../services/official-writing');
+const {
+    buildAiContext,
+    buildChart,
+    compareDatasets,
+    exportDatasetCsv,
+    getDatasetDetail,
+    importDataset,
+    listDatasets,
+    runSummary,
+    softDeleteDataset
+} = require('../services/data-analysis');
 
 // 剥离推理型模型可能内联在正文里的思考块（<think>…</think>）。
 // 兼容未闭合的 <think>（被 max_tokens 截断时只剩开标签）情形。
@@ -82,8 +93,188 @@ function resolveOfficialWritingModel(requestedModel, user) {
     return getAccessibleModel(null, user);
 }
 
-function createAppsRouter({ authMiddleware, logAction }) {
+function resolveAppsModel(requestedModel, user) {
+    return resolveOfficialWritingModel(requestedModel, user);
+}
+
+async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35 }) {
+    const modelCfg = resolveAppsModel(String(req.body?.model || '').trim(), req.user);
+    if (!modelCfg) {
+        return res.status(404).json({
+            error: {
+                message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。',
+                type: 'invalid_request_error',
+                code: 'model_not_found'
+            }
+        });
+    }
+    if (modelCfg.secret_error) {
+        return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+    }
+
+    const userId = req.user.id;
+    let upstreamMessages = messages;
+    const outputTokens = Math.max(maxTokens, Number(modelCfg.max_tokens) || 0);
+    try {
+        const budgetResult = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: outputTokens });
+        upstreamMessages = budgetResult.messages;
+    } catch (e) {
+        if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
+            return res.status(400).json({
+                error: {
+                    message: e.message,
+                    type: 'invalid_request_error',
+                    code: 'context_length_exceeded',
+                    context_budget: e.metadata || {}
+                }
+            });
+        }
+        throw e;
+    }
+
+    if (modelCfg.daily_token_limit > 0) {
+        const usedToday = getModelDailyUsage(userId, modelCfg.id);
+        if (usedToday >= modelCfg.daily_token_limit) {
+            return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
+        }
+    }
+
+    logAction(req, auditAction, `模型: ${modelCfg.name}`);
+
+    try {
+        await aiSemaphore.acquire();
+    } catch (e) {
+        return res.status(e.statusCode || 503).json({
+            error: { message: e.message || 'Model service is busy. Please retry later.', type: 'server_overloaded', code: e.code || 'AI_OVERLOADED' }
+        });
+    }
+    let endpointRelease = null;
+    const requestStartedAt = Date.now();
+    try {
+        endpointRelease = await acquireModelSlot(modelCfg);
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user: req.user,
+            url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true }),
+            data: {
+                model: modelCfg.model_name,
+                messages: shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages,
+                stream: false,
+                temperature,
+                max_tokens: outputTokens
+            },
+            headers: buildModelHeaders(modelCfg),
+            stream: false
+        });
+        const content = extractCompletionContent(response.data);
+        const usage = normalizeTokenUsage({
+            inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
+            outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
+            totalTokens: response.data?.usage?.total_tokens
+        });
+        recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+        recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+        return res.json({ content, model: modelCfg.model_name });
+    } catch (e) {
+        const errorMsg = e.response?.data?.error?.message || e.message;
+        logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
+        recordModelFailure(modelCfg, e);
+        return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+    } finally {
+        if (endpointRelease) endpointRelease();
+        aiSemaphore.release();
+    }
+}
+
+function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
+
+    router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ datasets: listDatasets(req.user.id) });
+    }));
+
+    router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        try {
+            const dataset = await importDataset({
+                user: req.user,
+                file: req.file,
+                name: req.body?.name
+            });
+            logAction(req, '数据分析-上传数据集', `数据集: ${dataset.name} (${dataset.rowCount} 行)`);
+            res.json({ dataset });
+        } catch (e) {
+            if (req.file?.path) {
+                try { require('fs').rmSync(req.file.path, { force: true }); } catch (_err) { /* noop */ }
+            }
+            throw e;
+        }
+    }));
+
+    router.get('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ dataset: await getDatasetDetail(req.user.id, req.params.id) });
+    }));
+
+    router.delete('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const dataset = softDeleteDataset(req.user.id, req.params.id);
+        logAction(req, '数据分析-删除数据集', `数据集: ${dataset.name}`);
+        res.json({ success: true });
+    }));
+
+    router.post('/apps/data-analysis/datasets/:id/summary', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(await runSummary(req.user.id, req.params.id));
+    }));
+
+    router.post('/apps/data-analysis/datasets/:id/chart', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await buildChart(req.user.id, req.params.id, req.body || {});
+        logAction(req, '数据分析-生成图表', `数据集: ${req.params.id}`);
+        res.json(result);
+    }));
+
+    router.post('/apps/data-analysis/compare', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await compareDatasets(req.user.id, req.body || {});
+        logAction(req, '数据分析-数据比对', `左侧: ${req.body?.leftDatasetId || ''}, 右侧: ${req.body?.rightDatasetId || ''}`);
+        res.json(result);
+    }));
+
+    router.get('/apps/data-analysis/datasets/:id/export.csv', authMiddleware, asyncHandler(async (req, res) => {
+        const exported = await exportDatasetCsv(req.user.id, req.params.id);
+        logAction(req, '数据分析-导出 CSV', `数据集: ${req.params.id}`);
+        res.download(exported.filePath, exported.fileName);
+    }));
+
+    router.post('/apps/data-analysis/ai', authMiddleware, asyncHandler(async (req, res) => {
+        const body = req.body || {};
+        const datasetId = String(body.datasetId || '').trim();
+        const userPrompt = String(body.prompt || '').trim();
+        if (!datasetId || !userPrompt) {
+            return res.status(400).json({ error: { message: '缺少数据集或问题。', type: 'invalid_request_error' } });
+        }
+        const context = await buildAiContext(req.user.id, datasetId);
+        return runAppsAiCompletion({
+            req,
+            res,
+            logAction,
+            source: 'data_analysis',
+            auditAction: '数据分析 AI',
+            messages: [
+                {
+                    role: 'system',
+                    content: [
+                        '你是数据分析工作台的辅助分析师。',
+                        '只能基于给定的数据集摘要、字段画像和统计结果回答。',
+                        '不要编造不存在的字段或精确数值；如果需要进一步查询，给出可执行的分析建议。',
+                        '输出应简洁，优先给出洞察、风险、推荐图表和下一步操作。'
+                    ].join('\n')
+                },
+                {
+                    role: 'user',
+                    content: `数据集上下文：\n${context}\n\n用户问题：${userPrompt}`
+                }
+            ],
+            maxTokens: 1200,
+            temperature: 0.3
+        });
+    }));
 
     router.post('/apps/official-writing/ai', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
