@@ -738,7 +738,29 @@ function initSchema() {
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-
+        CREATE TABLE IF NOT EXISTS analysis_dataset_versions (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            dataset_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            source_name TEXT DEFAULT '',
+            file_type TEXT DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            source_path TEXT DEFAULT '',
+            parquet_path TEXT DEFAULT '',
+            row_count INTEGER DEFAULT 0,
+            column_count INTEGER DEFAULT 0,
+            columns_json TEXT DEFAULT '[]',
+            profile_json TEXT DEFAULT '[]',
+            preview_json TEXT DEFAULT '[]',
+            sheet_name TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            created_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(dataset_id, version),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (dataset_id) REFERENCES analysis_datasets(id) ON DELETE CASCADE
+        );
         CREATE TABLE IF NOT EXISTS analysis_artifacts (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -828,6 +850,8 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_server ON mcp_builtin_configs(mcp_server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_user ON mcp_builtin_configs(user_id, service_type, status);
         CREATE INDEX IF NOT EXISTS idx_analysis_datasets_user ON analysis_datasets(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_dataset_versions_dataset ON analysis_dataset_versions(dataset_id, version);
+        CREATE INDEX IF NOT EXISTS idx_analysis_dataset_versions_user ON analysis_dataset_versions(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_artifacts_user ON analysis_artifacts(user_id, dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);

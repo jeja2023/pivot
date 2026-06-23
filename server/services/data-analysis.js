@@ -424,6 +424,70 @@ async function createParquetFromRows(columns, rows, parquetPath) {
     }
 }
 
+// 把一个上传文件落入指定版本目录：移动源文件 → 生成 Parquet（CSV 走 DuckDB 快路径，
+// XLSX/XLS 走 JS 解析）→ 计算画像与预览。返回该版本的完整元信息，供 dataset 行与版本行复用。
+// 调用方负责用 withAnalysisSlot 包裹（重型 DuckDB 操作）。
+async function ingestUploadToVersion({ versionDir, file, ext }) {
+    const sourceName = path.basename(file.originalname || `dataset${ext}`).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
+    const sourcePath = resolveInside(versionDir, sourceName);
+    moveUploadedFile(file.path, sourcePath);
+    const parquetPath = resolveInside(versionDir, 'data.parquet');
+    let columns;
+    let rowCount;
+    let sheetName = '';
+    let sourceType;
+    if (ext === '.csv') {
+        const meta = await importCsvToParquet(sourcePath, parquetPath);
+        columns = meta.columns;
+        rowCount = meta.rowCount;
+        sourceType = 'csv';
+    } else {
+        const parsed = readSpreadsheet(sourcePath, sourceName);
+        await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
+        columns = parsed.columns;
+        rowCount = parsed.rows.length;
+        sheetName = parsed.sheetName || '';
+        sourceType = parsed.sourceType;
+        parsed.rows = null; // 释放整表行数组，降低后续内存峰值。
+    }
+    const profile = await profileViaSql(parquetPath, columns, rowCount);
+    const previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
+    const fileSize = file.size || fs.statSync(sourcePath).size;
+    return { sourceName, sourcePath, parquetPath, columns, rowCount, sheetName, sourceType, profile, previewRows, fileSize };
+}
+
+// 记录一个数据集版本快照：把该版本的列/画像/预览与文件路径写入 analysis_dataset_versions。
+function recordDatasetVersion({ userId, datasetId, version, ingest, note = '', createdBy = null }) {
+    const versionId = analysisId('dsv');
+    db.prepare(`
+        INSERT INTO analysis_dataset_versions (
+            id, user_id, dataset_id, version, source_name, file_type, file_size,
+            source_path, parquet_path, row_count, column_count,
+            columns_json, profile_json, preview_json, sheet_name, note, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        versionId,
+        userId,
+        datasetId,
+        version,
+        ingest.sourceName || '',
+        ingest.sourceType || '',
+        ingest.fileSize || 0,
+        ingest.sourcePath ? toProjectRelative(ingest.sourcePath) : '',
+        ingest.parquetPath ? toProjectRelative(ingest.parquetPath) : '',
+        ingest.rowCount || 0,
+        (ingest.columns || []).length,
+        JSON.stringify(ingest.columns || []),
+        JSON.stringify(ingest.profile || []),
+        JSON.stringify(ingest.previewRows || []),
+        ingest.sheetName || '',
+        String(note || '').slice(0, 500),
+        createdBy,
+        getBeijingTimestamp()
+    );
+    return versionId;
+}
+
 function recordArtifact({ userId, datasetId = '', type, title, content = '', filePath = '', metadata = {} }) {
     const artifactId = analysisId('art');
     db.prepare(`
@@ -463,63 +527,40 @@ async function importDataset({ user, file, name }) {
     fs.mkdirSync(versionDir, { recursive: true });
     let committed = false;
     try {
-        const sourceName = path.basename(file.originalname || `dataset${ext}`).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
-        const sourcePath = resolveInside(versionDir, sourceName);
-        moveUploadedFile(file.path, sourcePath);
-        const parquetPath = resolveInside(versionDir, 'data.parquet');
-
-        // 导入分流：CSV 走 DuckDB 原生快路径（整表零 JS 内存）；XLSX/XLS 仍需 JS 解析。
+        // 导入分流由 ingestUploadToVersion 内部完成（CSV 走 DuckDB 快路径，XLSX/XLS 走 JS 解析），
         // 两路最终都把数据落成 c_N 列的 Parquet，并统一用 profileViaSql 计算画像（口径一致）。
-        const { columns, rowCount, sheetName, sourceType, profile, previewRows } = await withAnalysisSlot(async () => {
-            let cols;
-            let total;
-            let sheet = '';
-            let type;
-            if (ext === '.csv') {
-                const meta = await importCsvToParquet(sourcePath, parquetPath);
-                cols = meta.columns;
-                total = meta.rowCount;
-                type = 'csv';
-            } else {
-                const parsed = readSpreadsheet(sourcePath, sourceName);
-                await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
-                cols = parsed.columns;
-                total = parsed.rows.length;
-                sheet = parsed.sheetName || '';
-                type = parsed.sourceType;
-                parsed.rows = null; // 释放整表行数组，降低后续内存峰值。
-            }
-            const prof = await profileViaSql(parquetPath, cols, total);
-            const preview = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
-            return { columns: cols, rowCount: total, sheetName: sheet, sourceType: type, profile: prof, previewRows: preview };
-        });
+        const ingest = await withAnalysisSlot(() => ingestUploadToVersion({ versionDir, file, ext }));
         const now = getBeijingTimestamp();
-        const datasetName = normalizeDatasetName(sourceName, name);
-        db.prepare(`
-            INSERT INTO analysis_datasets (
-                id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
-                row_count, column_count, columns_json, profile_json, preview_json,
-                sheet_name, active_version, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
-        `).run(
-            datasetId,
-            user.id,
-            datasetName,
-            sourceName,
-            sourceType,
-            file.size || fs.statSync(sourcePath).size,
-            toProjectRelative(sourcePath),
-            toProjectRelative(parquetPath),
-            rowCount,
-            columns.length,
-            JSON.stringify(columns),
-            JSON.stringify(profile),
-            JSON.stringify(previewRows),
-            sheetName,
-            version,
-            now,
-            now
-        );
+        const datasetName = normalizeDatasetName(ingest.sourceName, name);
+        const tx = db.transaction(() => {
+            db.prepare(`
+                INSERT INTO analysis_datasets (
+                    id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
+                    row_count, column_count, columns_json, profile_json, preview_json,
+                    sheet_name, active_version, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            `).run(
+                datasetId,
+                user.id,
+                datasetName,
+                ingest.sourceName,
+                ingest.sourceType,
+                ingest.fileSize,
+                toProjectRelative(ingest.sourcePath),
+                toProjectRelative(ingest.parquetPath),
+                ingest.rowCount,
+                ingest.columns.length,
+                JSON.stringify(ingest.columns),
+                JSON.stringify(ingest.profile),
+                JSON.stringify(ingest.previewRows),
+                ingest.sheetName,
+                version,
+                now,
+                now
+            );
+            recordDatasetVersion({ userId: user.id, datasetId, version, ingest, note: '初始导入', createdBy: user.id });
+        });
+        tx();
         committed = true;
         return serializeDataset(getDatasetForUser(user.id, datasetId));
     } catch (err) {
@@ -574,15 +615,153 @@ function softDeleteDataset(userId, datasetId) {
         SET deleted_at = ?, status = 'deleted', updated_at = ?
         WHERE id = ? AND user_id = ?
     `).run(getBeijingTimestamp(), getBeijingTimestamp(), datasetId, userId);
-    // 软删除同时回收物理资源：数据集目录（源文件 + parquet）与关联 artifacts，避免磁盘只增不减。
+    // 软删除同时回收物理资源：数据集目录（全部版本的源文件 + parquet）与关联 artifacts / 版本元信息，避免磁盘与 DB 只增不减。
     try {
         purgeDatasetArtifacts(userId, datasetId);
+        try {
+            db.prepare('DELETE FROM analysis_dataset_versions WHERE user_id = ? AND dataset_id = ?').run(userId, datasetId);
+        } catch (err) {
+            logger.warn({ err: err.message, datasetId }, '数据集版本元信息清理失败');
+        }
         const datasetDir = resolveInside(datasetRoot, String(userId), datasetId);
         bestEffortRemove(datasetDir, { recursive: true });
     } catch (err) {
         logger.warn({ err: err.message, datasetId }, '数据集物理文件清理失败');
     }
     return serializeDataset(row);
+}
+
+function serializeVersion(row, activeVersion) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        version: row.version,
+        sourceName: row.source_name,
+        fileType: row.file_type,
+        fileSize: row.file_size,
+        rowCount: row.row_count,
+        columnCount: row.column_count,
+        sheetName: row.sheet_name || '',
+        note: row.note || '',
+        createdAt: row.created_at,
+        active: row.version === activeVersion
+    };
+}
+
+// 列出数据集的全部版本（不含大字段），标注当前激活版本，供前端「版本」面板消费。
+function listDatasetVersions(userId, datasetId) {
+    const dataset = getDatasetForUser(userId, datasetId);
+    const rows = db.prepare(`
+        SELECT id, version, source_name, file_type, file_size, row_count, column_count, sheet_name, note, created_at
+        FROM analysis_dataset_versions
+        WHERE user_id = ? AND dataset_id = ?
+        ORDER BY version DESC
+    `).all(userId, datasetId);
+    return {
+        datasetId,
+        activeVersion: dataset.active_version,
+        versions: rows.map(row => serializeVersion(row, dataset.active_version))
+    };
+}
+
+// 上传新版本：在数据集目录下新建 v{N+1}，落地文件并生成版本快照。
+// 默认把数据集主行切换到新版本（activate=true），使后续分析/查询都基于新版本。
+async function addDatasetVersion({ user, datasetId, file, note, activate = true }) {
+    ensureAnalysisDirs();
+    const dataset = getDatasetForUser(user.id, datasetId);
+    if (!file?.path) {
+        const err = new Error('未收到上传文件。');
+        err.status = 400;
+        throw err;
+    }
+    const ext = path.extname(file.originalname || file.filename || '').toLowerCase();
+    if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+        const err = new Error('数据分析仅支持 CSV、XLSX、XLS 文件。');
+        err.status = 400;
+        throw err;
+    }
+    const maxVersion = Number(db.prepare(
+        'SELECT MAX(version) AS v FROM analysis_dataset_versions WHERE dataset_id = ?'
+    ).get(datasetId)?.v || dataset.active_version || 0);
+    const version = maxVersion + 1;
+    const datasetDir = resolveInside(datasetRoot, String(user.id), datasetId);
+    const versionDir = resolveInside(datasetDir, `v${version}`);
+    fs.mkdirSync(versionDir, { recursive: true });
+    let committed = false;
+    try {
+        const ingest = await withAnalysisSlot(() => ingestUploadToVersion({ versionDir, file, ext }));
+        const now = getBeijingTimestamp();
+        const tx = db.transaction(() => {
+            recordDatasetVersion({ userId: user.id, datasetId, version, ingest, note, createdBy: user.id });
+            if (activate) {
+                db.prepare(`
+                    UPDATE analysis_datasets
+                    SET file_type = ?, file_size = ?, source_path = ?, parquet_path = ?,
+                        row_count = ?, column_count = ?, columns_json = ?, profile_json = ?, preview_json = ?,
+                        sheet_name = ?, active_version = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?
+                `).run(
+                    ingest.sourceType,
+                    ingest.fileSize,
+                    toProjectRelative(ingest.sourcePath),
+                    toProjectRelative(ingest.parquetPath),
+                    ingest.rowCount,
+                    ingest.columns.length,
+                    JSON.stringify(ingest.columns),
+                    JSON.stringify(ingest.profile),
+                    JSON.stringify(ingest.previewRows),
+                    ingest.sheetName,
+                    version,
+                    now,
+                    datasetId,
+                    user.id
+                );
+            }
+        });
+        tx();
+        committed = true;
+        return { dataset: serializeDataset(getDatasetForUser(user.id, datasetId)), version };
+    } catch (err) {
+        if (!committed) bestEffortRemove(versionDir, { recursive: true });
+        throw err;
+    }
+}
+
+// 切换激活版本：把版本快照里的列/画像/预览与文件路径回填到数据集主行。
+function activateDatasetVersion(userId, datasetId, version) {
+    getDatasetForUser(userId, datasetId);
+    const target = Number(version);
+    const versionRow = db.prepare(
+        'SELECT * FROM analysis_dataset_versions WHERE dataset_id = ? AND user_id = ? AND version = ?'
+    ).get(datasetId, userId, target);
+    if (!versionRow) {
+        const err = new Error('指定的版本不存在。');
+        err.status = 404;
+        throw err;
+    }
+    db.prepare(`
+        UPDATE analysis_datasets
+        SET file_type = ?, file_size = ?, source_path = ?, parquet_path = ?,
+            row_count = ?, column_count = ?, columns_json = ?, profile_json = ?, preview_json = ?,
+            sheet_name = ?, active_version = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+    `).run(
+        versionRow.file_type,
+        versionRow.file_size,
+        versionRow.source_path,
+        versionRow.parquet_path,
+        versionRow.row_count,
+        versionRow.column_count,
+        versionRow.columns_json,
+        versionRow.profile_json,
+        versionRow.preview_json,
+        versionRow.sheet_name || '',
+        target,
+        getBeijingTimestamp(),
+        datasetId,
+        userId
+    );
+    return serializeDataset(getDatasetForUser(userId, datasetId));
 }
 
 // 周期清理工作区：删除超过保留期的导出文件与残留临时文件（按 mtime）。
@@ -1144,30 +1323,252 @@ function prependBomStream(sourcePath, targetPath) {
     });
 }
 
-async function exportDatasetCsv(userId, datasetId) {
+// 直接把整张数据集的 parquet 拷贝为新的 parquet 导出文件，全程在 DuckDB 内完成。
+async function duckCopyToParquet(parquetPath, columns, targetPath) {
+    const selectList = columns.length
+        ? columns.map(column => `${sqlIdent(column.key)} AS ${sqlIdent(column.name)}`).join(', ')
+        : '*';
+    const sql = `
+        COPY (
+            SELECT ${selectList}
+            FROM read_parquet(${sqlLiteral(parquetPath)})
+        ) TO ${sqlLiteral(targetPath)} (FORMAT PARQUET, COMPRESSION ZSTD)
+    `;
+    const { instance, connection } = await createDuckConnection();
+    try {
+        await connection.run(sql);
+    } finally {
+        connection.closeSync();
+        instance.closeSync();
+    }
+}
+
+// 写 XLSX：以 MAX_QUERY_LIMIT 为页大小从 parquet 分页读出整表，累积为 AOA 后一次性成表写盘。
+// 列名使用人类可读显示名。对工作台量级（默认 ≤20 万行）内存可接受。
+async function duckWriteXlsx(parquetPath, columns, targetPath, displayName) {
+    const pageSize = MAX_QUERY_LIMIT;
+    let offset = 0;
+    const aoa = [];
+    if (columns.length) aoa.push(columns.map(column => column.name));
+    for (;;) {
+        const page = await parquetToRows(parquetPath, { limit: pageSize, offset });
+        if (!page.length) break;
+        // parquet 列以 c_N 为键（createParquetFromRows），表头用显示名、取值用 key。
+        page.forEach(record => {
+            aoa.push(columns.length ? columns.map(column => record[column.key] ?? '') : Object.values(record));
+        });
+        offset += pageSize;
+        if (page.length < pageSize) break;
+    }
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet(aoa);
+    const sheetName = String(displayName || 'Sheet1').replace(/[\\/?*[\]:]/g, '_').slice(0, 31) || 'Sheet1';
+    XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+    XLSX.writeFile(workbook, targetPath, { bookType: 'xlsx' });
+    return aoa.length - (columns.length ? 1 : 0);
+}
+
+const EXPORT_FORMATS = {
+    csv: { ext: 'csv' },
+    xlsx: { ext: 'xlsx' },
+    parquet: { ext: 'parquet' }
+};
+
+async function exportDataset(userId, datasetId, format = 'csv') {
     ensureAnalysisDirs();
+    const fmt = String(format || 'csv').toLowerCase();
+    if (!EXPORT_FORMATS[fmt]) {
+        const err = new Error('仅支持导出 CSV、XLSX 或 Parquet 格式。');
+        err.status = 400;
+        throw err;
+    }
     const row = getDatasetForUser(userId, datasetId);
     const columns = jsonParse(row.columns_json, []);
     const { parquetPath } = getDatasetPaths(row);
     const exportDir = resolveInside(exportRoot, String(userId));
     fs.mkdirSync(exportDir, { recursive: true });
-    const fileName = `${row.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80)}-${Date.now()}.csv`;
+    const baseName = row.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
+    const ext = EXPORT_FORMATS[fmt].ext;
+    const fileName = `${baseName}-${Date.now()}.${ext}`;
     const filePath = resolveInside(exportDir, fileName);
-    const tmpPath = resolveInside(tempRoot, `${analysisId('csv')}.csv`);
     await withAnalysisSlot(async () => {
-        await duckCopyToCsv(parquetPath, columns, tmpPath);
-        await prependBomStream(tmpPath, filePath);
+        if (fmt === 'csv') {
+            const tmpPath = resolveInside(tempRoot, `${analysisId('csv')}.csv`);
+            try {
+                await duckCopyToCsv(parquetPath, columns, tmpPath);
+                await prependBomStream(tmpPath, filePath);
+            } finally {
+                bestEffortRemove(tmpPath);
+            }
+        } else if (fmt === 'parquet') {
+            await duckCopyToParquet(parquetPath, columns, filePath);
+        } else {
+            await duckWriteXlsx(parquetPath, columns, filePath, row.name);
+        }
     });
-    bestEffortRemove(tmpPath);
     recordArtifact({
         userId,
         datasetId,
         type: 'export',
         title: fileName,
         filePath,
-        metadata: { format: 'csv', rows: row.row_count }
+        metadata: { format: fmt, rows: row.row_count }
     });
     return { filePath, fileName };
+}
+
+// 兼容旧入口：保留 exportDatasetCsv 作为 exportDataset(..., 'csv') 的薄封装。
+async function exportDatasetCsv(userId, datasetId) {
+    return exportDataset(userId, datasetId, 'csv');
+}
+
+// 从内存行（对象数组，键为列显示名）构建数据集：归一列名为 c_N、清洗单元格、写 Parquet、
+// 计算画像与预览，并写入 analysis_datasets + 初始版本。供「从数据库导入」等非文件来源复用。
+async function createDatasetFromRows({ user, name, rows, sourceType = 'database', note = '数据库导入' }) {
+    ensureAnalysisDirs();
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    if (!sourceRows.length) {
+        const err = new Error('查询结果为空，没有可导入的数据行。');
+        err.status = 400;
+        throw err;
+    }
+    // 列集合：按首批行的键并集，保持出现顺序，截断到列上限。
+    const seen = new Set();
+    const headerNames = [];
+    sourceRows.slice(0, 200).forEach(record => {
+        if (record && typeof record === 'object' && !Array.isArray(record)) {
+            Object.keys(record).forEach(key => {
+                if (!seen.has(key)) { seen.add(key); headerNames.push(key); }
+            });
+        }
+    });
+    if (!headerNames.length) {
+        const err = new Error('查询结果不包含可识别的列。');
+        err.status = 400;
+        throw err;
+    }
+    const nameSeen = new Set();
+    const columns = headerNames.slice(0, MAX_UPLOAD_COLUMNS).map((header, index) => ({
+        key: `c_${index + 1}`,
+        name: normalizeHeader(header, index, nameSeen),
+        index,
+        sourceKey: header
+    }));
+    const dataRows = sourceRows.slice(0, MAX_UPLOAD_ROWS).map(record => {
+        const item = {};
+        columns.forEach(column => {
+            const raw = record && typeof record === 'object' ? record[column.sourceKey] : '';
+            item[column.key] = normalizeCell(raw && typeof raw === 'object' ? JSON.stringify(raw) : raw);
+        });
+        return item;
+    });
+
+    const datasetId = analysisId('ds');
+    const datasetDir = resolveInside(datasetRoot, String(user.id), datasetId);
+    const version = 1;
+    const versionDir = resolveInside(datasetDir, `v${version}`);
+    fs.mkdirSync(versionDir, { recursive: true });
+    let committed = false;
+    try {
+        const parquetPath = resolveInside(versionDir, 'data.parquet');
+        const ingest = await withAnalysisSlot(async () => {
+            const exportColumns = columns.map(({ key, name: colName, index }) => ({ key, name: colName, index }));
+            await createParquetFromRows(exportColumns, dataRows, parquetPath);
+            const profile = await profileViaSql(parquetPath, exportColumns, dataRows.length);
+            const previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
+            return {
+                sourceName: `${normalizeDatasetName('', name)}.${sourceType}`,
+                sourcePath: '',
+                parquetPath,
+                columns: exportColumns,
+                rowCount: dataRows.length,
+                sheetName: '',
+                sourceType,
+                profile,
+                previewRows,
+                fileSize: fs.statSync(parquetPath).size
+            };
+        });
+        const now = getBeijingTimestamp();
+        const datasetName = normalizeDatasetName('', name);
+        const tx = db.transaction(() => {
+            db.prepare(`
+                INSERT INTO analysis_datasets (
+                    id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
+                    row_count, column_count, columns_json, profile_json, preview_json,
+                    sheet_name, active_version, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            `).run(
+                datasetId,
+                user.id,
+                datasetName,
+                ingest.sourceName,
+                sourceType,
+                ingest.fileSize,
+                '',
+                toProjectRelative(ingest.parquetPath),
+                ingest.rowCount,
+                ingest.columns.length,
+                JSON.stringify(ingest.columns),
+                JSON.stringify(ingest.profile),
+                JSON.stringify(ingest.previewRows),
+                '',
+                version,
+                now,
+                now
+            );
+            recordDatasetVersion({ userId: user.id, datasetId, version, ingest, note, createdBy: user.id });
+        });
+        tx();
+        committed = true;
+        return serializeDataset(getDatasetForUser(user.id, datasetId));
+    } catch (err) {
+        if (!committed) bestEffortRemove(datasetDir, { recursive: true });
+        throw err;
+    }
+}
+
+const MAX_DB_IMPORT_ROWS = Math.min(MAX_UPLOAD_ROWS, Math.max(1000, Number.parseInt(process.env.DATA_ANALYSIS_DB_IMPORT_MAX_ROWS || '50000', 10) || 50000));
+
+// 从已配置的 MCP 数据库连接导入：执行只读查询（或对整表的 SELECT），把返回行落成数据集。
+// 安全：仅复用现有数据库 MCP 工具链（只读校验、白名单治理、脱敏、SSRF 守卫都在其中），
+// 本函数不直接连库。limit 受 MAX_DB_IMPORT_ROWS 上限保护。
+async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit, name }) {
+    // 延迟引入，避免与 mcp-client 之间形成模块加载环。
+    const { getAccessibleMcpServer } = require('./mcp-client');
+    const { executeDatabaseMcpTool } = require('./database-mcp');
+
+    const serverId = Number(mcpServerId);
+    if (!serverId) {
+        const err = new Error('请选择一个数据库连接。');
+        err.status = 400;
+        throw err;
+    }
+    const server = getAccessibleMcpServer(serverId, user);
+    if (!server || String(server.base_url || '').indexOf('pivot-db://') !== 0) {
+        const err = new Error('数据库连接不存在或无权访问。');
+        err.status = 404;
+        throw err;
+    }
+    const safeLimit = Math.min(Math.max(Number(limit) || MAX_DB_IMPORT_ROWS, 1), MAX_DB_IMPORT_ROWS);
+    let result;
+    const trimmedSql = String(sql || '').trim();
+    const trimmedTable = String(table || '').trim();
+    if (trimmedSql) {
+        result = await executeDatabaseMcpTool(server, 'db.run_readonly_query', { sql: trimmedSql, limit: safeLimit });
+    } else if (trimmedTable) {
+        // 无显式 SQL 时，对指定表做一次受限的全列 SELECT（由 db.run_readonly_query 内部治理与限行）。
+        const safeIdent = `"${trimmedTable.replace(/"/g, '""')}"`;
+        const qualified = schema ? `"${String(schema).replace(/"/g, '""')}".${safeIdent}` : safeIdent;
+        result = await executeDatabaseMcpTool(server, 'db.run_readonly_query', { sql: `SELECT * FROM ${qualified}`, limit: safeLimit });
+    } else {
+        const err = new Error('请提供要导入的 SQL 查询或数据表名。');
+        err.status = 400;
+        throw err;
+    }
+    const rows = Array.isArray(result?.rows) ? result.rows : (Array.isArray(result) ? result : []);
+    const datasetName = name || trimmedTable || `${server.name || '数据库'}导入`;
+    return createDatasetFromRows({ user, name: datasetName, rows, sourceType: 'database', note: `从「${server.name || '数据库'}」导入` });
 }
 
 async function buildAiContext(userId, datasetId) {
@@ -1185,15 +1586,21 @@ async function buildAiContext(userId, datasetId) {
 module.exports = {
     MAX_PREVIEW_ROWS,
     analysisRoot,
+    activateDatasetVersion,
+    addDatasetVersion,
     buildAiContext,
     buildChart,
     cleanupAnalysisWorkspace,
     compareDatasets,
+    createDatasetFromRows,
     ensureAnalysisDirs,
+    exportDataset,
     exportDatasetCsv,
     getDatasetDetail,
     importDataset,
+    importFromDatabase,
     listDatasetArtifacts,
+    listDatasetVersions,
     listDatasets,
     runPivot,
     runSummary,

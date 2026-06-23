@@ -11,6 +11,7 @@
         query: null,
         pivot: null,
         artifacts: [],
+        versions: null,
         aiBusy: false
     };
 
@@ -38,18 +39,7 @@
         return num.toLocaleString('zh-CN');
     }
 
-    function fmtPercent(value) {
-        const num = Number(value);
-        if (!Number.isFinite(num)) return '-';
-        return `${(num * 100).toFixed(1)}%`;
-    }
 
-    // 统计量格式化：保留至多 2 位小数后本地化，避免浮点长尾。
-    function fmtStat(value) {
-        const num = Number(value);
-        if (!Number.isFinite(num)) return '-';
-        return (Math.round(num * 100) / 100).toLocaleString('zh-CN');
-    }
 
     function activeDataset() {
         return state.datasets.find(item => item.id === state.activeId) || state.datasets[0] || null;
@@ -66,14 +56,16 @@
         view.innerHTML = `
             <div class="workspace-panel data-analysis-panel">
                 <aside class="data-analysis-sidebar">
-                    <div class="data-analysis-upload">
-                        <strong>数据集</strong>
-                        <label class="data-analysis-upload-drop" for="data-analysis-file">
-                            <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls">
-                            <span>上传 Excel / CSV</span>
-                        </label>
-                    </div>
-                    <div id="data-analysis-dataset-list" class="data-analysis-dataset-list"></div>
+                    <nav class="data-analysis-tabs" role="tablist" aria-label="数据分析视图" aria-orientation="vertical">
+                        <button class="data-analysis-tab active" type="button" data-data-analysis-tab="overview">数据总览</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="chart">图表生成</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="compare">数据比对</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="query">数据查询</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="pivot">数据透视</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">AI辅助</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="versions">版本管理</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史记录</button>
+                    </nav>
                 </aside>
                 <main class="data-analysis-main">
                     <div class="data-analysis-toolbar">
@@ -81,40 +73,43 @@
                             <h4 id="data-analysis-title">数据分析</h4>
                             <span id="data-analysis-meta">请选择或上传数据集</span>
                         </div>
-                        <div class="data-analysis-toolbar-actions">
-                            <button id="data-analysis-refresh" class="btn-secondary" type="button">刷新</button>
-                            <button id="data-analysis-export" class="btn-secondary" type="button">导出 CSV</button>
-                            <button id="data-analysis-delete" class="btn-secondary" type="button">删除</button>
-                        </div>
+                        <div class="data-analysis-toolbar-actions"></div>
                     </div>
-                    <div class="data-analysis-tabs" role="tablist" aria-label="数据分析视图">
-                        <button class="data-analysis-tab active" type="button" data-data-analysis-tab="overview">总览</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="chart">图表</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="compare">比对</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="query">查询</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="pivot">透视</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">AI 辅助</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史</button>
-                    </div>
+
                     <section id="data-analysis-overview-panel" class="data-analysis-tab-panel">
-                        <div id="data-analysis-kpis" class="data-analysis-kpis"></div>
-                        <div class="data-analysis-split">
-                            <section class="data-analysis-section">
-                                <div class="data-analysis-section-head">
-                                    <strong>字段画像</strong>
-                                </div>
-                                <div id="data-analysis-profile" class="data-analysis-profile"></div>
-                            </section>
-                            <section class="data-analysis-section">
-                                <div class="data-analysis-section-head">
-                                    <strong>数据预览</strong>
-                                </div>
-                                <div id="data-analysis-preview" class="data-analysis-preview"></div>
-                            </section>
+                        <div class="data-analysis-form-grid" style="margin-bottom: 12px; justify-content: space-between; align-items: center;">
+                            <strong style="font-size: 0.95rem; color: var(--text-main);">已导入的数据集</strong>
+                            <div style="display: flex; gap: 8px;">
+                                <label class="btn-secondary" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; margin: 0;">
+                                    <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls" style="display: none;">
+                                    <span>上传 Excel / CSV</span>
+                                </label>
+                                <button id="data-analysis-import-db" class="btn-secondary" type="button" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; cursor: pointer;">从数据库导入</button>
+                                <button id="data-analysis-overview-refresh" class="btn-secondary" type="button" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; cursor: pointer;">刷新列表</button>
+                            </div>
+                        </div>
+                        <div class="data-analysis-dataset-table-wrap">
+                            <table class="data-analysis-dataset-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 60px; text-align: center;">序号</th>
+                                        <th>数据集名称</th>
+                                        <th>原始文件名</th>
+                                        <th style="width: 140px;">数据大小</th>
+                                        <th style="width: 80px;">文件类型</th>
+                                        <th style="width: 180px;">导入时间</th>
+                                        <th style="width: 240px; text-align: center;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="data-analysis-dataset-table-body">
+                                    <!-- 动态渲染数据集列表 -->
+                                </tbody>
+                            </table>
                         </div>
                     </section>
                     <section id="data-analysis-chart-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-analysis-form-grid">
+                            <label>分析数据集<select id="data-analysis-chart-dataset" class="form-input"></select></label>
                             <label>分类字段<select id="data-analysis-chart-x" class="form-input"></select></label>
                             <label>数值字段<select id="data-analysis-chart-y" class="form-input"></select></label>
                             <label>分组字段<select id="data-analysis-chart-group" class="form-input"></select></label>
@@ -147,6 +142,9 @@
                         <div id="data-analysis-compare-result" class="data-analysis-compare-result"></div>
                     </section>
                     <section id="data-analysis-query-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-form-grid data-analysis-query-controls" style="margin-bottom: 8px;">
+                            <label>分析数据集<select id="data-analysis-query-dataset" class="form-input"></select></label>
+                        </div>
                         <div class="data-analysis-query-box">
                             <div id="data-analysis-query-fields" class="data-analysis-query-fields"></div>
                             <textarea id="data-analysis-query-sql" class="form-input data-analysis-query-sql" spellcheck="false" placeholder="SELECT * FROM data LIMIT 100"></textarea>
@@ -159,6 +157,7 @@
                     </section>
                     <section id="data-analysis-pivot-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-analysis-form-grid data-analysis-pivot-controls">
+                            <label>分析数据集<select id="data-analysis-pivot-dataset" class="form-input"></select></label>
                             <label>行维度<select id="data-analysis-pivot-row" class="form-input"></select></label>
                             <label>列维度<select id="data-analysis-pivot-col" class="form-input"></select></label>
                             <label>值字段<select id="data-analysis-pivot-value" class="form-input"></select></label>
@@ -174,6 +173,9 @@
                         <div id="data-analysis-pivot-result" class="data-analysis-pivot-result"></div>
                     </section>
                     <section id="data-analysis-ai-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-form-grid data-analysis-ai-controls" style="margin-bottom: 8px;">
+                            <label>分析数据集<select id="data-analysis-ai-dataset" class="form-input"></select></label>
+                        </div>
                         <div class="data-analysis-ai-box">
                             <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
                             <div class="data-analysis-ai-actions">
@@ -183,10 +185,68 @@
                         </div>
                         <div id="data-analysis-ai-result" class="data-analysis-ai-result"></div>
                     </section>
+                    <section id="data-analysis-versions-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-form-grid data-analysis-versions-controls" style="margin-bottom: 8px;">
+                            <label>分析数据集<select id="data-analysis-versions-dataset" class="form-input"></select></label>
+                        </div>
+                        <div class="data-analysis-versions-actions">
+                            <label class="data-analysis-upload-drop data-analysis-version-upload" for="data-analysis-version-file">
+                                <input id="data-analysis-version-file" type="file" accept=".csv,.xlsx,.xls">
+                                <span>上传新版本（替换当前数据，保留历史版本）</span>
+                            </label>
+                        </div>
+                        <div id="data-analysis-versions-result" class="data-analysis-versions-result"></div>
+                    </section>
                     <section id="data-analysis-history-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-form-grid data-analysis-history-controls" style="margin-bottom: 8px;">
+                            <label>分析数据集<select id="data-analysis-history-dataset" class="form-input"></select></label>
+                        </div>
                         <div id="data-analysis-history-result" class="data-analysis-history-result"></div>
                     </section>
                 </main>
+            </div>
+
+            <!-- 数据预览模态弹窗 -->
+            <div id="data-analysis-preview-modal" class="modal-overlay hidden" style="z-index: 8000;">
+                <div class="modal" style="width: min(1000px, 92vw); max-height: 85vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
+                        <h3 id="data-analysis-preview-modal-title" style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">数据集数据预览</h3>
+                        <button id="data-analysis-preview-modal-close" class="btn-secondary" style="height: 32px; padding: 0 12px; border-radius: 7px; font-size: 0.8rem; border-color: rgba(239, 68, 68, 0.35); color: var(--danger); font-weight: 700; cursor: pointer;" type="button">关闭</button>
+                    </div>
+                    <div id="data-analysis-preview-modal-content" class="data-analysis-preview" style="flex: 1; overflow: auto; min-height: 0;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据库导入模态弹窗 -->
+            <div id="data-analysis-db-import-modal" class="modal-overlay hidden" style="z-index: 8000;">
+                <div class="modal" style="width: min(500px, 92vw); max-height: 85vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
+                    <div style="display: flex; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
+                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">从数据库导入数据集</h3>
+                    </div>
+                    <form id="data-analysis-db-import-form" style="display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 4px; text-align: left;">
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据库连接</label>
+                            <select id="data-analysis-db-conn" class="form-input" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 10px; margin-bottom: 0;" required></select>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">只读 SQL 查询 (可选)</label>
+                            <textarea id="data-analysis-db-sql" class="form-input" style="width: 100%; height: 75px; font-family: monospace; border-radius: 8px; font-size: 0.85rem; padding: 8px 12px; margin-bottom: 0; resize: vertical;" placeholder="例如: SELECT * FROM my_table LIMIT 100 (留空则从下方表名导入)"></textarea>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据表名 (若未填写 SQL 查询)</label>
+                            <input id="data-analysis-db-table" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: my_table">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">导入后的数据集名称 (可选)</label>
+                            <input id="data-analysis-db-name" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="留空则自动生成名称">
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px;">
+                            <button id="data-analysis-db-import-modal-cancel" class="btn-secondary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;" type="button">取消</button>
+                            <button id="data-analysis-db-import-submit" class="btn-primary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;" type="button">开始导入</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         `;
         body.appendChild(view);
@@ -225,6 +285,7 @@
         state.query = null;
         state.pivot = null;
         state.artifacts = [];
+        state.versions = null;
         render();
         await loadSummary(id);
     }
@@ -312,59 +373,115 @@
         `).join('');
     }
 
+    function updateToolbarHeader(tab) {
+        const titleEl = document.getElementById('data-analysis-title');
+        const metaEl = document.getElementById('data-analysis-meta');
+        if (!titleEl || !metaEl) return;
+
+        const headers = {
+            overview: {
+                title: '数据总览',
+                desc: '上传表格数据，导入数据集，并对已导入的数据集进行预览、选择和管理。'
+            },
+            chart: {
+                title: '图表生成',
+                desc: '选择分类与数值字段，自适应聚合生成柱状图、折线图、面积图或饼图。'
+            },
+            compare: {
+                title: '数据比对',
+                desc: '选择两个不同的数据集及对应主键，进行存在性比对与字段差异分析。'
+            },
+            query: {
+                title: '数据查询',
+                desc: '使用只读 SQL 语句对当前数据集进行自定义数据查询与高级筛选。'
+            },
+            pivot: {
+                title: '数据透视',
+                desc: '配置行维度、列维度及值字段对数据进行多维交叉聚合与透视分析。'
+            },
+            ai: {
+                title: 'AI辅助',
+                desc: '调用大语言模型智能分析数据集，提供分析方向、推荐图表与报告摘要等深度洞察。'
+            },
+            versions: {
+                title: '版本管理',
+                desc: '上传新版本表格替换当前数据以进行追溯，支持查看、切换和管理数据集的历史版本。'
+            },
+            history: {
+                title: '历史记录',
+                desc: '查看当前数据集在图表生成、数据比对、导出和 SQL 查询中的历史记录与快照。'
+            }
+        };
+
+        const header = headers[tab] || headers.overview;
+        titleEl.textContent = header.title;
+        metaEl.textContent = header.desc;
+    }
+
     function renderHeader() {
-        const dataset = activeDataset();
-        const title = document.getElementById('data-analysis-title');
-        const meta = document.getElementById('data-analysis-meta');
-        const exportBtn = document.getElementById('data-analysis-export');
-        const deleteBtn = document.getElementById('data-analysis-delete');
-        if (title) title.textContent = dataset ? dataset.name : '数据分析';
-        if (meta) {
-            meta.textContent = dataset
-                ? `${fmtNumber(dataset.rowCount)} 行 / ${fmtNumber(dataset.columnCount)} 列 / ${dataset.fileType || '表格'}`
-                : '请选择或上传数据集';
-        }
-        if (exportBtn) exportBtn.disabled = !dataset;
-        if (deleteBtn) deleteBtn.disabled = !dataset;
+        const activeTabEl = document.querySelector('.data-analysis-tab.active');
+        const activeTabName = activeTabEl?.dataset.dataAnalysisTab || 'overview';
+        updateToolbarHeader(activeTabName);
     }
 
     function renderOverview() {
-        const dataset = activeDataset();
-        const kpis = document.getElementById('data-analysis-kpis');
-        const profile = document.getElementById('data-analysis-profile');
-        const preview = document.getElementById('data-analysis-preview');
-        if (!dataset) {
-            if (kpis) kpis.innerHTML = '<div class="data-analysis-empty">上传数据后开始分析</div>';
-            if (profile) profile.innerHTML = '';
-            if (preview) preview.innerHTML = '';
+        const body = document.getElementById('data-analysis-dataset-table-body');
+        if (!body) return;
+        if (!state.datasets.length) {
+            body.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;">暂无数据集，请上传或导入。</td></tr>';
             return;
         }
-        const highlights = state.summary?.highlights || [];
-        if (kpis) {
-            kpis.innerHTML = [
-                { label: '行数', value: fmtNumber(dataset.rowCount) },
-                { label: '列数', value: fmtNumber(dataset.columnCount) },
-                { label: '工作表', value: dataset.sheetName || '-' },
-                { label: '提示', value: highlights[1] || '字段画像已生成' }
-            ].map(item => `
-                <div class="data-analysis-kpi">
-                    <span>${esc(item.label)}</span>
-                    <strong>${esc(item.value)}</strong>
-                </div>
-            `).join('');
+        body.innerHTML = state.datasets.map((dataset, index) => {
+            const isSelected = dataset.id === state.activeId;
+            return `
+                <tr class="${isSelected ? 'active' : ''}">
+                    <td style="text-align: center; color: #64748b; font-weight: 500;">${index + 1}</td>
+                    <td style="font-weight: 700; color: var(--text-main);">${esc(dataset.name)}</td>
+                    <td style="color: #475569; word-break: break-all;">${esc(dataset.originalName || '-')}</td>
+                    <td style="color: #475569;">${fmtNumber(dataset.rowCount)} 行 / ${fmtNumber(dataset.columnCount)} 列</td>
+                    <td style="color: #64748b;"><span style="padding: 2px 6px; border-radius: 4px; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; font-weight: 700;">${esc(dataset.fileType || '表格')}</span></td>
+                    <td style="color: #64748b; font-size: 0.78rem;">${esc(dataset.createdAt || '-')}</td>
+                    <td style="text-align: center;">
+                        <div style="display: inline-flex; gap: 6px; align-items: center; justify-content: center;">
+                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(16, 185, 129, 0.35); color: var(--primary); font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-preview="${esc(dataset.id)}">预览数据</button>
+                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(37, 99, 235, 0.35); color: #2563eb; font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-select="${esc(dataset.id)}">${isSelected ? '当前分析' : '选择分析'}</button>
+                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(148, 163, 184, 0.35); color: #475569; font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-export="${esc(dataset.id)}">导出</button>
+                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(239, 68, 68, 0.35); color: var(--danger); font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-delete="${esc(dataset.id)}">删除</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function previewDataset(id) {
+        let dataset = state.datasets.find(item => item.id === id);
+        if (!dataset || !dataset.previewRows) {
+            setBusy(true, '正在加载预览数据...');
+            try {
+                const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}`);
+                const index = state.datasets.findIndex(item => item.id === id);
+                if (index >= 0) {
+                    state.datasets[index] = data.dataset;
+                    dataset = data.dataset;
+                }
+            } catch (e) {
+                toast(e && e.message ? e.message : '预览数据加载失败', 'error');
+                return;
+            } finally {
+                setBusy(false);
+            }
         }
-        if (profile) {
-            const rows = dataset.profile || [];
-            profile.innerHTML = rows.map(column => `
-                <div class="data-analysis-profile-row">
-                    <strong>${esc(column.name)}</strong>
-                    <span>${esc(column.type)} · 填充 ${fmtPercent(column.fillRate)} · ${fmtNumber(column.distinct)} 类值</span>
-                    ${column.numeric ? `<small class="data-analysis-profile-stats">中位数 ${fmtStat(column.numeric.median)} · 均值 ${fmtStat(column.numeric.avg)} · 标准差 ${fmtStat(column.numeric.stddev)} · 范围 ${fmtStat(column.numeric.min)}~${fmtStat(column.numeric.max)}</small>` : ''}
-                    <em>${esc((column.samples || []).join(' / '))}</em>
-                </div>
-            `).join('') || '<div class="data-analysis-empty">暂无字段画像</div>';
+        if (dataset) {
+            const modal = document.getElementById('data-analysis-preview-modal');
+            const title = document.getElementById('data-analysis-preview-modal-title');
+            const content = document.getElementById('data-analysis-preview-modal-content');
+            if (modal && content && title) {
+                title.textContent = `数据预览 - ${dataset.name}`;
+                content.innerHTML = buildTable(dataset.previewRows || [], dataset.columns || []);
+                modal.classList.remove('hidden');
+            }
         }
-        if (preview) preview.innerHTML = buildTable(dataset.previewRows || [], dataset.columns || []);
     }
 
     function buildOptions(columns = [], { includeEmpty = false, emptyLabel = '无' } = {}) {
@@ -394,6 +511,14 @@
         setSelectOptions('data-analysis-compare-left', datasetOptions, state.compareLeftId || state.activeId);
         setSelectOptions('data-analysis-compare-right', datasetOptions, state.compareRightId);
         renderCompareKeyOptions();
+
+        // 渲染各个具体分析页面的数据集选择框
+        setSelectOptions('data-analysis-chart-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-query-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-pivot-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-ai-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-versions-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-history-dataset', datasetOptions, state.activeId);
     }
 
     function renderCompareKeyOptions() {
@@ -477,7 +602,10 @@
         const result = state.query;
         box.innerHTML = `
             <div class="data-analysis-query-meta">返回 ${fmtNumber(result.rowCount)} 行${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</div>
-            <div class="data-analysis-query-table">${buildTableFromRows(result.columns || [], result.rows || [])}</div>
+            <div class="data-analysis-query-table" style="margin-bottom: 12px;">${buildTableFromRows(result.columns || [], result.rows || [])}</div>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="data-analysis-query-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出查询结果 (CSV)</button>
+            </div>
         `;
     }
 
@@ -539,11 +667,14 @@
         `;
         box.innerHTML = `
             ${result.truncated ? '<div class="data-analysis-query-meta">维度过多，行/列已截断展示。</div>' : ''}
-            <div class="data-analysis-pivot-table">
+            <div class="data-analysis-pivot-table" style="margin-bottom: 12px;">
                 <table>
                     <thead>${head}</thead>
                     <tbody>${body || ''}${footer}</tbody>
                 </table>
+            </div>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="data-analysis-pivot-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出透视结果 (CSV)</button>
             </div>
         `;
     }
@@ -587,6 +718,10 @@
             return;
         }
         box.innerHTML = `
+            <div class="data-analysis-chart-actions" style="display: flex; gap: 8px;">
+                <button id="data-analysis-chart-png" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;">保存为图片</button>
+                <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;">导出图表数据 (CSV)</button>
+            </div>
             <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(state.chart))}">
                 <div class="pivot-echart-title">图表预览</div>
                 <div class="pivot-echart-canvas"></div>
@@ -595,6 +730,148 @@
             </div>
         `;
         window.renderPivotCharts?.(box);
+    }
+
+    // 把当前图表块导出为 PNG：优先用 ECharts 实例的 getDataURL，回退到 2D canvas 的 toDataURL。
+    function downloadChartPng() {
+        const box = document.getElementById('data-analysis-chart-result');
+        const block = box?.querySelector('.pivot-echart-block');
+        if (!block) return;
+        let dataUrl = '';
+        try {
+            if (block._pivotEchart && typeof block._pivotEchart.getDataURL === 'function') {
+                dataUrl = block._pivotEchart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+            } else {
+                const canvas = block.querySelector('canvas');
+                if (canvas && !canvas.hidden) dataUrl = canvas.toDataURL('image/png');
+            }
+        } catch (_e) { dataUrl = ''; }
+        if (!dataUrl) {
+            toast('图表尚未渲染完成，请稍后再试', 'warning');
+            return;
+        }
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = `${(state.chart?.title || 'chart').replace(/[<>:"/\\|?*]/g, '_').slice(0, 60)}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // 将 HTML 表格数据前端导出为 CSV (包含 UTF-8 BOM 防乱码)
+    function exportTableToCsv(tableElement, filename) {
+        if (!tableElement) return;
+        const rows = Array.from(tableElement.querySelectorAll('tr'));
+        const csvContent = rows.map(row => {
+            const cells = Array.from(row.querySelectorAll('th, td'));
+            return cells.map(cell => {
+                let text = cell.textContent || '';
+                text = text.replace(/"/g, '""');
+                return `"${text}"`;
+            }).join(',');
+        }).join('\n');
+
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename || 'export.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // 智能解析 ECharts 选项数据并导出为 CSV
+    function exportChartDataToCsv() {
+        const chart = state.chart;
+        if (!chart) return;
+
+        let csvContent = '\uFEFF';
+
+        // 优先尝试读取 dataset.source
+        if (chart.dataset && Array.isArray(chart.dataset.source)) {
+            const source = chart.dataset.source;
+            csvContent += source.map(row => {
+                return row.map(cell => {
+                    let text = String(cell ?? '');
+                    text = text.replace(/"/g, '""');
+                    return `"${text}"`;
+                }).join(',');
+            }).join('\n');
+        }
+        // 读取传统的 xAxis.data 和 series
+        else if (chart.xAxis && chart.xAxis.data && Array.isArray(chart.series)) {
+            const xData = chart.xAxis.data;
+            const seriesList = chart.series;
+            
+            const headers = ['分类字段', ...seriesList.map(s => s.name || '数值')];
+            csvContent += headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
+            
+            xData.forEach((xVal, rowIndex) => {
+                const row = [String(xVal)];
+                seriesList.forEach(s => {
+                    const val = s.data?.[rowIndex] ?? '';
+                    row.push(String(val));
+                });
+                csvContent += row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',') + '\n';
+            });
+        }
+        // 读取饼图类型的单 series.data 键值对
+        else if (Array.isArray(chart.series) && chart.series[0] && Array.isArray(chart.series[0].data)) {
+            const data = chart.series[0].data;
+            csvContent += '"名称","数值"\n';
+            data.forEach(item => {
+                const name = String(item.name || '');
+                const val = String(item.value ?? '');
+                csvContent += `"${name.replace(/"/g, '""')}","${val.replace(/"/g, '""')}"\n`;
+            });
+        } else {
+            toast('图表数据格式暂不支持导出', 'warning');
+            return;
+        }
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `${(chart.title?.text || 'chart_data').replace(/[<>:"/\\|?*]/g, '_').slice(0, 60)}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // 将数据比对结果导出为差异 CSV
+    function exportCompareToCsv() {
+        const result = state.compare;
+        if (!result) return;
+        
+        let csvContent = '\uFEFF';
+        csvContent += '"差异类型","主键","左侧值","右侧值"\n';
+        
+        (result.onlyLeft || []).forEach(row => {
+            csvContent += `"仅左侧存在","${(row.key || '').replace(/"/g, '""')}",,""\n`;
+        });
+        (result.onlyRight || []).forEach(row => {
+            csvContent += `"仅右侧存在","${(row.key || '').replace(/"/g, '""')}",,""\n`;
+        });
+        (result.changed || []).forEach(row => {
+            const key = (row.key || '').replace(/"/g, '""');
+            const leftVal = (row.leftValue || '').replace(/"/g, '""');
+            const rightVal = (row.rightValue || '').replace(/"/g, '""');
+            csvContent += `"字段差异","${key}","${leftVal}","${rightVal}"\n`;
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', '数据比对差异结果.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     async function runCompare() {
@@ -630,6 +907,9 @@
                 <div><span>仅左侧存在</span><strong>${fmtNumber(result.onlyLeft?.length || 0)}</strong></div>
                 <div><span>仅右侧存在</span><strong>${fmtNumber(result.onlyRight?.length || 0)}</strong></div>
                 <div><span>字段差异</span><strong>${fmtNumber(result.changed?.length || 0)}</strong></div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin: 12px 0;">
+                <button id="data-analysis-compare-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出比对差异结果 (CSV)</button>
             </div>
             ${renderDuplicateKeys(result)}
             <div class="data-analysis-compare-lists">
@@ -843,6 +1123,159 @@
         });
     }
 
+    async function loadVersions() {
+        const dataset = activeDataset();
+        const box = document.getElementById('data-analysis-versions-result');
+        if (!dataset) {
+            state.versions = null;
+            renderVersions();
+            return;
+        }
+        if (box) box.innerHTML = '<div class="data-analysis-empty">加载中…</div>';
+        try {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions`);
+            state.versions = data;
+            renderVersions();
+        } catch (e) {
+            state.versions = null;
+            if (box) box.innerHTML = `<div class="data-analysis-empty">版本加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+        }
+    }
+
+    function renderVersions() {
+        const box = document.getElementById('data-analysis-versions-result');
+        if (!box) return;
+        const list = state.versions?.versions || [];
+        if (!list.length) {
+            box.innerHTML = '<div class="data-analysis-empty">暂无版本信息</div>';
+            return;
+        }
+        box.innerHTML = list.map(item => `
+            <div class="data-analysis-version-item${item.active ? ' is-active' : ''}">
+                <div class="data-analysis-version-head">
+                    <strong>v${esc(item.version)}</strong>
+                    ${item.active ? '<span class="data-analysis-version-badge">当前</span>' : ''}
+                    <small>${esc(item.createdAt || '')}</small>
+                </div>
+                <span>${fmtNumber(item.rowCount)} 行 / ${fmtNumber(item.columnCount)} 列 · ${esc(item.fileType || '')}</span>
+                ${item.note ? `<em>${esc(item.note)}</em>` : ''}
+                ${item.active ? '' : `<button type="button" class="btn-secondary" data-data-analysis-activate-version="${esc(item.version)}">切换到此版本</button>`}
+            </div>
+        `).join('');
+    }
+
+    async function uploadVersion(file) {
+        const dataset = activeDataset();
+        if (!dataset || !file) return;
+        const form = new FormData();
+        form.append('file', file);
+        setBusy(true, '正在上传新版本...');
+        try {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions`, { method: 'POST', body: form });
+            toast(`已创建 v${data.version}`);
+            await loadDatasetDetail(dataset.id);
+            activateTab('versions');
+            await loadVersions();
+        } catch (e) {
+            toast(e && e.message ? e.message : '新版本上传失败', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function activateVersion(version) {
+        const dataset = activeDataset();
+        if (!dataset) return;
+        try {
+            await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions/${encodeURIComponent(version)}/activate`, { method: 'POST' });
+            toast(`已切换到 v${version}`);
+            await loadDatasetDetail(dataset.id);
+            activateTab('versions');
+            await loadVersions();
+        } catch (e) {
+            toast(e && e.message ? e.message : '切换版本失败', 'error');
+        }
+    }
+
+    // 从数据库导入：列出可用数据库连接并开启自定义导入模态弹窗
+    async function importFromDatabase() {
+        let connections = [];
+        try {
+            const data = await fetchJson('/api/mcp/servers');
+            connections = (Array.isArray(data.data) ? data.data : []).filter(item => item.server_type === 'database');
+        } catch (_e) { /* 空处理 */ }
+        if (!connections.length) {
+            toast('没有可用的数据库连接，请先在「工具服务」中配置数据库连接', 'warning');
+            return;
+        }
+
+        // 渲染连接下拉选项
+        const connSelect = document.getElementById('data-analysis-db-conn');
+        if (connSelect) {
+            connSelect.innerHTML = connections.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
+        }
+
+        // 重置/清除表单输入内容
+        const sqlText = document.getElementById('data-analysis-db-sql');
+        if (sqlText) sqlText.value = 'SELECT * FROM ';
+        const tableNameInput = document.getElementById('data-analysis-db-table');
+        if (tableNameInput) tableNameInput.value = '';
+        const datasetNameInput = document.getElementById('data-analysis-db-name');
+        if (datasetNameInput) datasetNameInput.value = '';
+
+        // 显示自定义导入弹窗
+        document.getElementById('data-analysis-db-import-modal')?.classList.remove('hidden');
+    }
+
+    // 提交数据库导入请求
+    async function submitDatabaseImport() {
+        const connSelect = document.getElementById('data-analysis-db-conn');
+        const sqlText = document.getElementById('data-analysis-db-sql');
+        const tableNameInput = document.getElementById('data-analysis-db-table');
+        const datasetNameInput = document.getElementById('data-analysis-db-name');
+
+        const mcpServerId = connSelect?.value;
+        const sql = sqlText?.value || '';
+        const table = tableNameInput?.value || '';
+        const name = datasetNameInput?.value || '';
+
+        if (!mcpServerId) {
+            toast('请选择数据库连接', 'warning');
+            return;
+        }
+        if (!sql.trim() && !table.trim()) {
+            toast('请输入只读 SQL 查询或数据表名', 'warning');
+            return;
+        }
+
+        // 默认命名规则：优先使用自定义名称 -> 表名 -> 连接原名
+        const selectedConnText = connSelect.options[connSelect.selectedIndex]?.text || '';
+        const finalName = name.trim() || table.trim() || selectedConnText;
+
+        // 关闭导入弹窗并进入忙碌状态
+        document.getElementById('data-analysis-db-import-modal')?.classList.add('hidden');
+        setBusy(true, '正在从数据库导入...');
+        try {
+            const data = await fetchJson(`${API}/import-database`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mcpServerId,
+                    sql: sql.trim(),
+                    table: table.trim(),
+                    name: finalName.trim()
+                })
+            });
+            state.activeId = data.dataset?.id || '';
+            toast('数据库数据已导入');
+            await loadDatasets({ keepActive: true });
+        } catch (e) {
+            toast(e && e.message ? e.message : '数据库导入失败', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
     function activateTab(tab) {
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
             button.classList.toggle('active', button.dataset.dataAnalysisTab === tab);
@@ -850,23 +1283,97 @@
         document.querySelectorAll('.data-analysis-tab-panel').forEach(panel => {
             panel.classList.toggle('hidden', panel.id !== `data-analysis-${tab}-panel`);
         });
+        // 切换 Tab 时同步更新顶部标题和简介
+        updateToolbarHeader(tab);
     }
 
     function bindEvents(root) {
-        root.addEventListener('change', event => {
+        root.addEventListener('change', async event => {
             if (event.target?.id === 'data-analysis-file') {
                 uploadDataset(event.target.files?.[0]);
                 event.target.value = '';
                 return;
             }
+            if (event.target?.id === 'data-analysis-version-file') {
+                uploadVersion(event.target.files?.[0]);
+                event.target.value = '';
+                return;
+            }
             if (['data-analysis-compare-left', 'data-analysis-compare-right'].includes(event.target?.id)) {
                 renderCompareKeyOptions();
+                return;
+            }
+            if ([
+                'data-analysis-chart-dataset',
+                'data-analysis-query-dataset',
+                'data-analysis-pivot-dataset',
+                'data-analysis-ai-dataset',
+                'data-analysis-versions-dataset',
+                'data-analysis-history-dataset'
+            ].includes(event.target?.id)) {
+                const targetDatasetId = event.target.value;
+                await loadDatasetDetail(targetDatasetId);
+                const activeTabEl = document.querySelector('.data-analysis-tab.active');
+                const activeTabName = activeTabEl?.dataset.dataAnalysisTab;
+                if (activeTabName === 'history') loadArtifacts();
+                if (activeTabName === 'versions') loadVersions();
             }
         });
         root.addEventListener('click', async event => {
-            const datasetBtn = event.target.closest('[data-data-analysis-dataset]');
-            if (datasetBtn) {
-                await loadDatasetDetail(datasetBtn.dataset.dataAnalysisDataset);
+            // 数据集行内“预览数据”按钮
+            const previewBtn = event.target.closest('[data-data-analysis-action-preview]');
+            if (previewBtn) {
+                await previewDataset(previewBtn.dataset.dataAnalysisActionPreview);
+                return;
+            }
+            // 数据集行内“选择分析”按钮
+            const selectBtn = event.target.closest('[data-data-analysis-action-select]');
+            if (selectBtn) {
+                await loadDatasetDetail(selectBtn.dataset.dataAnalysisActionSelect);
+                return;
+            }
+            // 数据集行内“导出”按钮
+            const rowExportBtn = event.target.closest('[data-data-analysis-action-export]');
+            if (rowExportBtn) {
+                const datasetId = rowExportBtn.dataset.dataAnalysisActionExport;
+                // 默认以 Excel (.xlsx) 格式导出原始数据集
+                window.location.href = `${API}/datasets/${encodeURIComponent(datasetId)}/export?format=xlsx`;
+                return;
+            }
+            // 数据集行内“删除”按钮
+            const rowDeleteBtn = event.target.closest('[data-data-analysis-action-delete]');
+            if (rowDeleteBtn) {
+                const datasetId = rowDeleteBtn.dataset.dataAnalysisActionDelete;
+                const dataset = state.datasets.find(item => item.id === datasetId);
+                if (!dataset || !confirm(`确认删除数据集「${dataset.name}」？`)) return;
+                setBusy(true, '正在删除数据集...');
+                try {
+                    await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}`, { method: 'DELETE' });
+                    toast('数据集已删除');
+                    if (state.activeId === datasetId) {
+                        state.activeId = '';
+                    }
+                    await loadDatasets({ keepActive: false });
+                } catch (e) {
+                    toast(e && e.message ? e.message : '删除失败', 'error');
+                } finally {
+                    setBusy(false);
+                }
+                return;
+            }
+            // 关闭预览弹窗按钮
+            if (event.target.closest('#data-analysis-preview-modal-close')) {
+                document.getElementById('data-analysis-preview-modal')?.classList.add('hidden');
+                return;
+            }
+            // 关闭/取消数据库导入弹窗
+            if (event.target.closest('#data-analysis-db-import-modal-close') || event.target.closest('#data-analysis-db-import-modal-cancel')) {
+                document.getElementById('data-analysis-db-import-modal')?.classList.add('hidden');
+                return;
+            }
+            // 提交数据库导入
+            if (event.target.closest('#data-analysis-db-import-submit')) {
+                await submitDatabaseImport();
                 return;
             }
             const tab = event.target.closest('[data-data-analysis-tab]');
@@ -874,6 +1381,16 @@
                 const name = tab.dataset.dataAnalysisTab;
                 activateTab(name);
                 if (name === 'history') loadArtifacts();
+                if (name === 'versions') loadVersions();
+                return;
+            }
+            const activateBtn = event.target.closest('[data-data-analysis-activate-version]');
+            if (activateBtn) {
+                await activateVersion(activateBtn.dataset.dataAnalysisActivateVersion);
+                return;
+            }
+            if (event.target.closest('#data-analysis-import-db')) {
+                await importFromDatabase();
                 return;
             }
             const historyItem = event.target.closest('[data-data-analysis-history]');
@@ -898,7 +1415,7 @@
                 }
                 return;
             }
-            if (event.target.closest('#data-analysis-refresh')) {
+            if (event.target.closest('#data-analysis-overview-refresh')) {
                 await loadDatasets({ keepActive: true });
                 return;
             }
@@ -906,8 +1423,20 @@
                 await buildChart();
                 return;
             }
+            if (event.target.closest('#data-analysis-chart-png')) {
+                downloadChartPng();
+                return;
+            }
+            if (event.target.closest('#data-analysis-chart-data-csv')) {
+                exportChartDataToCsv();
+                return;
+            }
             if (event.target.closest('#data-analysis-run-compare')) {
                 await runCompare();
+                return;
+            }
+            if (event.target.closest('#data-analysis-compare-export-btn')) {
+                exportCompareToCsv();
                 return;
             }
             const queryField = event.target.closest('[data-data-analysis-query-field]');
@@ -929,25 +1458,23 @@
                 await runQuery();
                 return;
             }
+            if (event.target.closest('#data-analysis-query-export-btn')) {
+                const table = document.querySelector('.data-analysis-query-table table');
+                exportTableToCsv(table, '数据查询结果.csv');
+                return;
+            }
             if (event.target.closest('#data-analysis-run-pivot')) {
                 await runPivot();
+                return;
+            }
+            if (event.target.closest('#data-analysis-pivot-export-btn')) {
+                const table = document.querySelector('.data-analysis-pivot-table table');
+                exportTableToCsv(table, '数据透视分析结果.csv');
                 return;
             }
             if (event.target.closest('#data-analysis-ai-run')) {
                 await runAi();
                 return;
-            }
-            if (event.target.closest('#data-analysis-export')) {
-                const dataset = activeDataset();
-                if (dataset) window.location.href = `${API}/datasets/${encodeURIComponent(dataset.id)}/export.csv`;
-                return;
-            }
-            if (event.target.closest('#data-analysis-delete')) {
-                const dataset = activeDataset();
-                if (!dataset || !confirm(`删除数据集「${dataset.name}」？`)) return;
-                await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}`, { method: 'DELETE' });
-                state.activeId = '';
-                await loadDatasets({ keepActive: false });
             }
         });
     }

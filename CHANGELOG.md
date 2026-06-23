@@ -1,3 +1,68 @@
+## [v0.0.146] - 2026-06-23
+
+### 数据分析应用：顶部信息优化、自定义导入弹窗与局部精准导出
+
+精简和优化数据分析页面的界面排版与交互体验，解决公共工具栏冗余、容易产生误触的问题，并美化了数据库导入的交互弹窗，增加纯前端高精度防乱码 CSV 导出。
+
+#### 变更内容
+
+- **移除顶部公共冗余按钮**：移除了顶部工具栏上与具体分析功能无关且容易引发误触的「刷新、CSV、导出、删除」按钮，使各具体分析子 Tab 页面更加关注于当页的分析。
+- **数据总览局部刷新与行内导出**：
+  - 在「数据总览」的“已导入的数据集”表格上方挂载了局部「刷新列表」按钮，供用户手动同步最新数据集。
+  - 在表格行内新增了「导出」操作。点击即可默认以 Excel (.xlsx) 格式流式下载整个原始数据集，避免了顶栏下拉框形式的累赘操作，让数据集管理在总览页面闭环。
+- **高精度前端 CSV 导出引擎**：
+  - 开发了通用表格导出组件 `exportTableToCsv`，智能解析并清理 HTML 表格内容为标准的 CSV。
+  - **UTF-8 BOM 支持**：在导出的 CSV 首部增加 UTF-8 BOM (`\uFEFF`)，彻底解决 Windows 平台使用 Excel 打开中文 CSV 时产生乱码的问题，满足中文编码规范。
+  - **图表数据解析**：实现了 `exportChartDataToCsv`，能智能解析 ECharts 的 `dataset.source` 以及传统的 `xAxis`/`series`/饼图数据，自动生成坐标与系列值对照的 CSV 并提供下载。
+  - **比对差异结果导出**：实现了 `exportCompareToCsv`，直接对比 `state.compare` 中的左右侧差异，智能导出差异类型、主键、左右侧数值对比的 CSV。
+- **各分析面板精准功能挂载**：
+  - **数据查询**：查询结果表格下方挂载「导出查询结果 (CSV)」按钮。
+  - **数据透视**：生成的透视汇总表下方挂载「导出透视结果 (CSV)」按钮。
+  - **图表生成**：操作栏提供「保存为图片」与「导出图表数据 (CSV)」按钮。
+  - **数据比对**：在 KPI 指标框下方挂载「导出比对差异结果 (CSV)」按钮。
+- **导入弹窗体验优化**：移除了从数据库导入弹窗右上角的多余「取消」按钮，只保留右下角明确的“取消”与“开始导入”按钮，规避界面取消入口的重复设计，并使标题排版居左且对齐。
+
+#### 验证
+- `npm run check` 校验通过，JS 语法及 Chat 资产完整性正常。
+- `npm run lint` 语法风格校验全量通过。
+- `npm test` 单元测试及回归测试校验全量通过。
+
+#### 说明
+- 版本号提升至 `0.0.146`。
+
+## [v0.0.145] - 2026-06-23
+
+### 数据分析应用：数据集版本管理 + 多格式导出 + 数据库导入
+
+在四项扩展（自定义 SQL / 透视表 / CSV 原生导入 / AI 工具调用）收官的基础上，补齐两块此前未闭环的能力：① **数据集版本管理**（此前仅建表、`importDataset` 硬编码 `version=1`，无任何版本逻辑）；② **多格式导出与从已配置数据库导入**（此前仅有 CSV 导出，无 XLSX/Parquet/PNG，也无数据库来源）。
+
+#### 变更内容
+
+**数据集版本管理（B）**
+- **版本快照**：抽出 `ingestUploadToVersion()` 统一文件落地（CSV 走 DuckDB 快路径、XLSX/XLS 走 JS 解析）与画像/预览生成；新增 `recordDatasetVersion()` 把每个版本的列/画像/预览与文件路径写入 `analysis_dataset_versions`。`importDataset` 现在在事务内同时写主行与 v1 快照，替代原硬编码 `version=1`。
+- **新增版本**：`addDatasetVersion()` 把新上传落入 `v{N+1}` 目录，默认激活并把列/画像/预览回填到数据集主行，旧版本文件与元信息完整保留。
+- **切换版本**：`activateDatasetVersion()` 把任一历史版本快照回填到主行，使后续分析/查询/图表都基于该版本。
+- **版本接口**：新增 `GET /apps/data-analysis/datasets/:id/versions`、`POST /apps/data-analysis/datasets/:id/versions`（上传新版本）、`POST /apps/data-analysis/datasets/:id/versions/:version/activate`，均按 `user_id` 校验归属。
+- **软删除连带清理**：删除数据集时一并清理 `analysis_dataset_versions` 行与全部版本的物理文件，避免磁盘与 DB 只增不减。
+- **版本前端**：新增「版本」Tab，展示版本列表（行列数 / 类型 / 备注 / 创建时间，标注当前版本）、上传新版本入口与一键切换。
+
+**多格式导出 + 数据库导入（D）**
+- **多格式导出**：`exportDataset(userId, id, format)` 支持 **CSV / XLSX / Parquet**——CSV 保留 UTF-8 BOM 流式写入；Parquet 走 DuckDB `COPY`；XLSX 分页读 Parquet 后成表写盘。旧 `exportDatasetCsv` 保留为薄封装，原 `/export.csv` 接口不变，新增 `GET /apps/data-analysis/datasets/:id/export?format=`。
+- **从数据库导入**：新增 `importFromDatabase()`，复用现有数据库 MCP 工具链（`db.run_readonly_query`），**只读校验、表/字段白名单治理、敏感字段脱敏、SSRF 守卫全部沿用**，本身不直接连库；行数受 `MAX_DB_IMPORT_ROWS`（默认 5 万）保护。新增 `createDatasetFromRows()` 把查询结果归一为内部 `c_N` 列落 Parquet 并生成画像。新增 `POST /apps/data-analysis/import-database`。
+- **图表 PNG 下载**：图表面板新增「下载 PNG」，优先用 ECharts 实例 `getDataURL`，回退到 2D canvas `toDataURL`。
+- **导入/导出前端**：工具栏新增导出格式下拉（CSV/Excel/Parquet）与「从数据库导入」入口（列出数据库型 MCP 连接，选连接并填 SQL/表名后导入）。
+
+#### 数据结构
+- 新增 `analysis_dataset_versions` 表（`schema.js` + `migrate.js` 同步），含 `UNIQUE(dataset_id, version)` 与 `dataset/user` 两个索引；`CREATE TABLE IF NOT EXISTS` 对存量库自动生效。
+
+#### 验证
+- `npm run check`
+- `npm run lint`
+- `node tests/security.test.js`
+
+#### 说明
+- 版本号提升至 `0.0.145`。图表/比对/查询/透视/导出/版本均基于内部 `c_N` 键，保持兼容；数据库导入仅作为非文件来源复用既有安全治理，不新增对外连库路径。
+
 ## [v0.0.144] - 2026-06-23
 
 ### 数据分析应用：AI 工具调用 / 深度分析（四项扩展之四 · 收官）
