@@ -8,6 +8,7 @@
         chart: null,
         summary: null,
         compare: null,
+        artifacts: [],
         aiBusy: false
     };
 
@@ -39,6 +40,13 @@
         const num = Number(value);
         if (!Number.isFinite(num)) return '-';
         return `${(num * 100).toFixed(1)}%`;
+    }
+
+    // 统计量格式化：保留至多 2 位小数后本地化，避免浮点长尾。
+    function fmtStat(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '-';
+        return (Math.round(num * 100) / 100).toLocaleString('zh-CN');
     }
 
     function activeDataset() {
@@ -82,6 +90,7 @@
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="chart">图表</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="compare">比对</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">AI 辅助</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史</button>
                     </div>
                     <section id="data-analysis-overview-panel" class="data-analysis-tab-panel">
                         <div id="data-analysis-kpis" class="data-analysis-kpis"></div>
@@ -140,6 +149,9 @@
                         </div>
                         <div id="data-analysis-ai-result" class="data-analysis-ai-result"></div>
                     </section>
+                    <section id="data-analysis-history-panel" class="data-analysis-tab-panel hidden">
+                        <div id="data-analysis-history-result" class="data-analysis-history-result"></div>
+                    </section>
                 </main>
             </div>
         `;
@@ -176,6 +188,7 @@
         state.activeId = id;
         state.summary = null;
         state.chart = null;
+        state.artifacts = [];
         render();
         await loadSummary(id);
     }
@@ -195,8 +208,10 @@
         try {
             const data = await fetchJson(`${API}/datasets`, { method: 'POST', body: form });
             state.activeId = data.dataset?.id || '';
-            if (typeof showToast === 'function') showToast('数据集已导入');
+            toast('数据集已导入');
             await loadDatasets({ keepActive: true });
+        } catch (e) {
+            toast(e && e.message ? e.message : '数据集导入失败', 'error');
         } finally {
             setBusy(false);
         }
@@ -206,6 +221,32 @@
         const panel = document.querySelector('.data-analysis-panel');
         panel?.classList.toggle('is-busy', !!busy);
         if (text && typeof showToast === 'function') showToast(text);
+    }
+
+    function toast(message, type) {
+        if (typeof showToast === 'function') showToast(message, type);
+    }
+
+    // 统一的按钮级保护：进行中禁用按钮并显示忙碌文案，捕获异常弹 toast，结束后复位，
+    // 避免重复点击触发并发请求、以及失败时无任何反馈。
+    async function guardButton(buttonId, busyText, fn) {
+        const btn = buttonId ? document.getElementById(buttonId) : null;
+        if (btn && btn.disabled) return;
+        const original = btn ? btn.textContent : '';
+        if (btn) {
+            btn.disabled = true;
+            if (busyText) btn.textContent = busyText;
+        }
+        try {
+            await fn();
+        } catch (e) {
+            toast(e && e.message ? e.message : '操作失败', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                if (busyText) btn.textContent = original;
+            }
+        }
     }
 
     function render() {
@@ -280,6 +321,7 @@
                 <div class="data-analysis-profile-row">
                     <strong>${esc(column.name)}</strong>
                     <span>${esc(column.type)} · 填充 ${fmtPercent(column.fillRate)} · ${fmtNumber(column.distinct)} 类值</span>
+                    ${column.numeric ? `<small class="data-analysis-profile-stats">中位数 ${fmtStat(column.numeric.median)} · 均值 ${fmtStat(column.numeric.avg)} · 标准差 ${fmtStat(column.numeric.stddev)} · 范围 ${fmtStat(column.numeric.min)}~${fmtStat(column.numeric.max)}</small>` : ''}
                     <em>${esc((column.samples || []).join(' / '))}</em>
                 </div>
             `).join('') || '<div class="data-analysis-empty">暂无字段画像</div>';
@@ -341,20 +383,22 @@
     async function buildChart() {
         const dataset = activeDataset();
         if (!dataset) return;
-        const payload = {
-            xField: document.getElementById('data-analysis-chart-x')?.value || '',
-            yField: document.getElementById('data-analysis-chart-y')?.value || '',
-            groupField: document.getElementById('data-analysis-chart-group')?.value || '',
-            aggregation: document.getElementById('data-analysis-chart-aggregation')?.value || 'sum',
-            chartType: document.getElementById('data-analysis-chart-type')?.value || 'bar'
-        };
-        const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/chart`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+        await guardButton('data-analysis-build-chart', '生成中…', async () => {
+            const payload = {
+                xField: document.getElementById('data-analysis-chart-x')?.value || '',
+                yField: document.getElementById('data-analysis-chart-y')?.value || '',
+                groupField: document.getElementById('data-analysis-chart-group')?.value || '',
+                aggregation: document.getElementById('data-analysis-chart-aggregation')?.value || 'sum',
+                chartType: document.getElementById('data-analysis-chart-type')?.value || 'bar'
+            };
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/chart`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            state.chart = data.chart;
+            renderChart();
         });
-        state.chart = data.chart;
-        renderChart();
     }
 
     function renderChart() {
@@ -386,20 +430,22 @@
     }
 
     async function runCompare() {
-        const payload = {
-            leftDatasetId: document.getElementById('data-analysis-compare-left')?.value || '',
-            rightDatasetId: document.getElementById('data-analysis-compare-right')?.value || '',
-            leftKey: document.getElementById('data-analysis-compare-left-key')?.value || '',
-            rightKey: document.getElementById('data-analysis-compare-right-key')?.value || '',
-            compareField: document.getElementById('data-analysis-compare-field')?.value || ''
-        };
-        const data = await fetchJson(`${API}/compare`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+        await guardButton('data-analysis-run-compare', '比对中…', async () => {
+            const payload = {
+                leftDatasetId: document.getElementById('data-analysis-compare-left')?.value || '',
+                rightDatasetId: document.getElementById('data-analysis-compare-right')?.value || '',
+                leftKey: document.getElementById('data-analysis-compare-left-key')?.value || '',
+                rightKey: document.getElementById('data-analysis-compare-right-key')?.value || '',
+                compareField: document.getElementById('data-analysis-compare-field')?.value || ''
+            };
+            const data = await fetchJson(`${API}/compare`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            state.compare = data;
+            renderCompare();
         });
-        state.compare = data;
-        renderCompare();
     }
 
     function renderCompare() {
@@ -462,26 +508,112 @@
         `;
     }
 
+    async function loadArtifacts() {
+        const dataset = activeDataset();
+        const box = document.getElementById('data-analysis-history-result');
+        if (!dataset) {
+            state.artifacts = [];
+            renderHistory();
+            return;
+        }
+        if (box) box.innerHTML = '<div class="data-analysis-empty">加载中…</div>';
+        try {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/artifacts?limit=30`);
+            state.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+            renderHistory();
+        } catch (e) {
+            state.artifacts = [];
+            if (box) box.innerHTML = `<div class="data-analysis-empty">历史加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+        }
+    }
+
+    function renderHistory() {
+        const box = document.getElementById('data-analysis-history-result');
+        if (!box) return;
+        const items = state.artifacts || [];
+        if (!items.length) {
+            box.innerHTML = '<div class="data-analysis-empty">暂无历史记录，生成图表 / 比对 / 导出后会显示在这里</div>';
+            return;
+        }
+        const typeLabel = { chart: '图表', comparison: '比对', export: '导出' };
+        box.innerHTML = items.map((item, index) => {
+            const clickable = item.type === 'chart' && item.chart;
+            const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
+            return `
+                <div class="data-analysis-history-item${clickable ? ' is-chart' : ''}" ${attrs}>
+                    <span class="data-analysis-history-type data-analysis-history-type-${esc(item.type)}">${esc(typeLabel[item.type] || item.type)}</span>
+                    <strong>${esc(item.title)}</strong>
+                    <small>${esc(item.createdAt || '')}${clickable ? ' · 点击重新查看' : ''}</small>
+                </div>
+            `;
+        }).join('');
+    }
+
     async function runAi() {
         const dataset = activeDataset();
         const prompt = document.getElementById('data-analysis-ai-prompt')?.value.trim();
         if (!dataset || !prompt) {
-            if (typeof showToast === 'function') showToast('请选择数据集并输入问题', 'warning');
+            toast('请选择数据集并输入问题', 'warning');
             return;
         }
-        state.aiBusy = true;
+        if (state.aiBusy) return;
         const result = document.getElementById('data-analysis-ai-result');
+        const model = document.getElementById('model-selector')?.value || '';
+        // 环境支持时走 SSE 流式逐字输出，否则回退一次性请求。
+        const useStream = typeof createBrowserSseParser === 'function' && typeof apiFetch === 'function';
+        state.aiBusy = true;
         if (result) result.textContent = 'AI 正在分析...';
-        try {
-            const data = await fetchJson(`${API}/ai`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ datasetId: dataset.id, prompt, model: document.getElementById('model-selector')?.value || '' })
-            });
-            if (result) result.textContent = data.content || 'AI 未返回有效内容';
-        } finally {
-            state.aiBusy = false;
-        }
+        await guardButton('data-analysis-ai-run', '分析中…', async () => {
+            try {
+                if (!useStream) {
+                    const data = await fetchJson(`${API}/ai`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ datasetId: dataset.id, prompt, model })
+                    });
+                    if (result) result.textContent = data.content || 'AI 未返回有效内容';
+                    return;
+                }
+                const res = await apiFetch(`${API}/ai`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+                    body: JSON.stringify({ datasetId: dataset.id, prompt, model, stream: true })
+                });
+                if (!res.ok || !res.body) {
+                    const data = await res.clone().json().catch(() => ({}));
+                    throw new Error(data?.error?.message || `AI 请求失败（${res.status}）`);
+                }
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let full = '';
+                const parser = createBrowserSseParser({
+                    onData(p) {
+                        let data = null;
+                        try { data = JSON.parse(p); } catch (_e) { return; }
+                        const chunk = data?.content ?? data?.choices?.[0]?.delta?.content ?? '';
+                        if (chunk) {
+                            full += chunk;
+                            if (result) result.textContent = full;
+                        }
+                    }
+                });
+                while (!parser.isDone()) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        parser.write(decoder.decode());
+                        parser.end();
+                        break;
+                    }
+                    parser.write(decoder.decode(value, { stream: true }));
+                }
+                if (result) result.textContent = full.trim() || 'AI 未返回有效内容';
+            } catch (e) {
+                if (result) result.textContent = `AI 分析失败：${e && e.message ? e.message : '请稍后重试'}`;
+                toast(e && e.message ? e.message : 'AI 分析失败', 'error');
+            } finally {
+                state.aiBusy = false;
+            }
+        });
     }
 
     function activateTab(tab) {
@@ -512,7 +644,19 @@
             }
             const tab = event.target.closest('[data-data-analysis-tab]');
             if (tab) {
-                activateTab(tab.dataset.dataAnalysisTab);
+                const name = tab.dataset.dataAnalysisTab;
+                activateTab(name);
+                if (name === 'history') loadArtifacts();
+                return;
+            }
+            const historyItem = event.target.closest('[data-data-analysis-history]');
+            if (historyItem) {
+                const item = state.artifacts?.[Number(historyItem.dataset.dataAnalysisHistory)];
+                if (item && item.chart) {
+                    state.chart = item.chart;
+                    activateTab('chart');
+                    renderChart();
+                }
                 return;
             }
             const suggestion = event.target.closest('[data-data-analysis-chart-suggestion]');

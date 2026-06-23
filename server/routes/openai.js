@@ -10,7 +10,7 @@ const {
     modelSupportsVision,
     messagesContainVisionInput
 } = require('../services/models');
-const { estimateTokens } = require('../llm');
+const { estimateTokens, createVisibleReasoningStreamFilter } = require('../llm');
 const { logger } = require('../logger');
 const { aiSemaphore } = require('../services/concurrency');
 const {
@@ -152,6 +152,48 @@ function normalizeCompletionText(value) {
     return '';
 }
 
+const COMPLETION_THOUGHT_BLOCK_PATTERNS = [
+    /<thought\b[^>]*>[\s\S]*?<\/thought>/gi,
+    /<thought\b[^>]*>[\s\S]*$/gi,
+    /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi,
+    /<thinking\b[^>]*>[\s\S]*$/gi,
+    /<think\b[^>]*>[\s\S]*?<\/think>/gi,
+    /<think\b[^>]*>[\s\S]*$/gi
+];
+const COMPLETION_VISIBLE_REASONING_START_PATTERN = /^(?:Analyze User Input:|Key constraints from system prompt:|Formulate Response\b.*:|Draft:|Check Constraints:|User says:)/im;
+const COMPLETION_VISIBLE_REASONING_DRAFT_PATTERN = /^Draft:\s*$/im;
+const COMPLETION_VISIBLE_REASONING_STOP_PATTERN = /(?:^|\r?\n)(?:Check Constraints:|All good\. Proceed\.|Output matches the draft\.)/i;
+
+function stripCompletionThoughtContent(text = '') {
+    let value = String(text || '');
+    COMPLETION_THOUGHT_BLOCK_PATTERNS.forEach(pattern => {
+        value = value.replace(pattern, '');
+    });
+    return value;
+}
+
+function stripCompletionVisibleReasoning(text = '') {
+    const value = stripCompletionThoughtContent(text);
+    if (!COMPLETION_VISIBLE_REASONING_START_PATTERN.test(value)) return value;
+
+    const lines = value.split(/\r?\n/);
+    const draftIndex = lines.findIndex(line => COMPLETION_VISIBLE_REASONING_DRAFT_PATTERN.test(line.trim()));
+    if (draftIndex >= 0) {
+        const answerLines = [];
+        for (let i = draftIndex + 1; i < lines.length; i += 1) {
+            const line = lines[i];
+            if (COMPLETION_VISIBLE_REASONING_STOP_PATTERN.test(line)) break;
+            answerLines.push(line);
+        }
+        const answer = answerLines.join('\n');
+        if (answer.replace(/\s+/g, '').length > 0) return answer;
+    }
+
+    return value
+        .replace(/^[\s\S]*?(?:Draft:\s*)/i, '')
+        .replace(/(?:Check Constraints:|All good\. Proceed\.|Output matches the draft\.)[\s\S]*$/i, '');
+}
+
 function buildPromptStyleCompletionMessage(body = {}) {
     const beforeCursor = normalizeCompletionText(body.prompt ?? body.input ?? body.prefix).trimEnd();
     const afterCursor = normalizeCompletionText(body.suffix).trimStart();
@@ -188,16 +230,8 @@ function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens
 }
 
 function extractChatCompletionText(choice = {}) {
-    const content = choice.message?.content;
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-        return content.map(part => {
-            if (typeof part === 'string') return part;
-            if (part && typeof part === 'object') return part.text || part.content || '';
-            return '';
-        }).filter(Boolean).join('\n');
-    }
-    return typeof choice.text === 'string' ? choice.text : '';
+    const content = normalizeCompletionText(choice.message?.content ?? choice.text ?? '');
+    return stripCompletionVisibleReasoning(content);
 }
 
 function isChatCompletionResponse(body) {
@@ -220,13 +254,16 @@ function toCompletionResponse(chatResponse = {}, model) {
     };
 }
 
-function toCompletionStreamFrame(payload, model) {
+function toCompletionStreamFrame(payload, model, textOverride) {
     try {
         const json = typeof payload === 'string' ? JSON.parse(payload) : payload;
         const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
         if (!choice) return null;
         const delta = choice.delta || {};
-        const text = delta.content ?? delta.reasoning_content ?? choice.text ?? '';
+        const text = typeof textOverride === 'string'
+            ? textOverride
+            : stripCompletionVisibleReasoning(normalizeCompletionText(delta.content ?? choice.text ?? ''));
+        if (!text && choice.finish_reason == null && !json.usage) return null;
         const frame = {
             id: String(json.id || `cmpl-${Date.now().toString(36)}`),
             object: 'text_completion',
@@ -288,14 +325,46 @@ function runRouteHandlers(handlers, req, res) {
 
 function createCompletionResponseProxy(res, { model = '', stream = false } = {}) {
     let completionStreamDone = false;
+    let completionFinalized = false;
+    const completionVisibleReasoningFilter = stream ? createVisibleReasoningStreamFilter() : null;
     const completionParser = stream ? createSseEventParser({
         onData(payload) {
-            const frame = toCompletionStreamFrame(payload, model);
+            const json = typeof payload === 'string' ? JSON.parse(payload) : payload;
+            const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
+            if (!choice) return;
+            const rawText = normalizeCompletionText(choice.delta?.content ?? choice.text ?? '');
+            let text = completionVisibleReasoningFilter
+                ? completionVisibleReasoningFilter.push(rawText)
+                : stripCompletionVisibleReasoning(rawText);
+            const isFinalChunk = completionVisibleReasoningFilter && (choice.finish_reason != null || json.usage);
+            if (isFinalChunk) {
+                text += completionVisibleReasoningFilter.finish();
+                completionFinalized = true;
+            }
+            const frame = toCompletionStreamFrame(json, model, text);
             if (frame) {
                 res.write(`data: ${JSON.stringify(frame)}\n\n`);
             }
         },
         onDone() {
+            if (completionVisibleReasoningFilter && !completionFinalized) {
+                const tail = completionVisibleReasoningFilter.finish();
+                if (tail) {
+                    const frame = {
+                        id: `cmpl-${Date.now().toString(36)}`,
+                        object: 'text_completion',
+                        created: Math.floor(Date.now() / 1000),
+                        model: String(model || ''),
+                        choices: [{
+                            text: tail,
+                            index: 0,
+                            logprobs: null,
+                            finish_reason: null
+                        }]
+                    };
+                    res.write(`data: ${JSON.stringify(frame)}\n\n`);
+                }
+            }
             completionStreamDone = true;
             res.write('data: [DONE]\n\n');
         }

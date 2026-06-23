@@ -41,6 +41,7 @@ const {
     exportDatasetCsv,
     getDatasetDetail,
     importDataset,
+    listDatasetArtifacts,
     listDatasets,
     runSummary,
     softDeleteDataset
@@ -97,7 +98,7 @@ function resolveAppsModel(requestedModel, user) {
     return resolveOfficialWritingModel(requestedModel, user);
 }
 
-async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35 }) {
+async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false }) {
     const modelCfg = resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
         return res.status(404).json({
@@ -149,7 +150,15 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         });
     }
     let endpointRelease = null;
+    let released = false;
+    const releaseSlots = () => {
+        if (released) return;
+        released = true;
+        if (endpointRelease) endpointRelease();
+        aiSemaphore.release();
+    };
     const requestStartedAt = Date.now();
+    const upstreamPayloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
     try {
         endpointRelease = await acquireModelSlot(modelCfg);
         const response = await forwardChatCompletion({
@@ -158,14 +167,53 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true }),
             data: {
                 model: modelCfg.model_name,
-                messages: shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages,
-                stream: false,
+                messages: upstreamPayloadMessages,
+                stream,
                 temperature,
                 max_tokens: outputTokens
             },
             headers: buildModelHeaders(modelCfg),
-            stream: false
+            stream
         });
+
+        if (stream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            const accumulator = createStreamAccumulator();
+            const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
+            response.data.on('data', chunk => {
+                res.write(chunk);
+                parser.write(chunk);
+            });
+            response.data.on('end', () => {
+                parser.end();
+                accumulator.finish();
+                const totalContent = accumulator.getContent();
+                const apiUsage = accumulator.getUsage();
+                const usage = normalizeTokenUsage({
+                    inputTokens: apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
+                    outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
+                    totalTokens: apiUsage?.total_tokens
+                });
+                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+                recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+                if (!res.writableEnded) res.end();
+                releaseSlots();
+            });
+            response.data.on('error', err => {
+                logger.error({ err: err.message, model: modelCfg.name, source }, '应用中心 AI 流式转发中断');
+                recordModelFailure(modelCfg, err);
+                if (!res.writableEnded) res.end();
+                releaseSlots();
+            });
+            req.on('close', () => {
+                if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
+                releaseSlots();
+            });
+            return undefined;
+        }
+
         const content = extractCompletionContent(response.data);
         const usage = normalizeTokenUsage({
             inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
@@ -174,15 +222,18 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         });
         recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
         recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+        releaseSlots();
         return res.json({ content, model: modelCfg.model_name });
     } catch (e) {
         const errorMsg = e.response?.data?.error?.message || e.message;
         logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
         recordModelFailure(modelCfg, e);
-        return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
-    } finally {
-        if (endpointRelease) endpointRelease();
-        aiSemaphore.release();
+        releaseSlots();
+        if (!res.headersSent) {
+            return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+        }
+        if (!res.writableEnded) res.end();
+        return undefined;
     }
 }
 
@@ -236,6 +287,11 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         res.json(result);
     }));
 
+    router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
+        const limit = Number.parseInt(req.query.limit, 10) || 30;
+        res.json({ artifacts: listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
+    }));
+
     router.get('/apps/data-analysis/datasets/:id/export.csv', authMiddleware, asyncHandler(async (req, res) => {
         const exported = await exportDatasetCsv(req.user.id, req.params.id);
         logAction(req, '数据分析-导出 CSV', `数据集: ${req.params.id}`);
@@ -272,7 +328,8 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 }
             ],
             maxTokens: 1200,
-            temperature: 0.3
+            temperature: 0.3,
+            stream: !!body.stream
         });
     }));
 

@@ -181,6 +181,14 @@ function syncGlobalAiConcurrencySettings() {
     return aiSemaphore.getStatus();
 }
 
+// 数据分析的重型 DuckDB 查询（图表/比对/导出/详情预览）独立限流，
+// 避免大表并发查询瞬间吃满 CPU/内存，且与 AI 调用的信号量隔离互不影响。
+const analysisSemaphore = new ConcurrencySemaphore({
+    maxConcurrent: Math.max(1, Number.parseInt(process.env.DATA_ANALYSIS_MAX_CONCURRENT || '4', 10) || 4),
+    maxQueueSize: Math.max(0, Number.parseInt(process.env.DATA_ANALYSIS_MAX_QUEUE || '16', 10) || 16),
+    queueTimeoutMs: Math.max(1000, Number.parseInt(process.env.DATA_ANALYSIS_QUEUE_TIMEOUT_MS || '120000', 10) || 120000)
+});
+
 class TimeoutError extends Error {
     constructor(message, code = 'OPERATION_TIMEOUT') {
         super(message);
@@ -263,6 +271,7 @@ class KeyedConcurrencyGuard {
 
 module.exports = {
     aiSemaphore,
+    analysisSemaphore,
     ConcurrencySemaphore,
     ConcurrencyLimitError,
     TimeoutError,

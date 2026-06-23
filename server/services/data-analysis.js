@@ -7,7 +7,7 @@ const { DuckDBInstance } = require('@duckdb/node-api');
 const { db, dataDir } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
-const { escapeCsvCell } = require('../security');
+const { analysisSemaphore } = require('./concurrency');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const analysisRoot = process.env.PIVOT_ANALYSIS_DIR
@@ -23,6 +23,9 @@ const MAX_UPLOAD_ROWS = Math.max(1000, Number.parseInt(process.env.DATA_ANALYSIS
 const MAX_UPLOAD_COLUMNS = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_MAX_COLUMNS || '120', 10) || 120);
 const MAX_QUERY_LIMIT = 5000;
 const CHART_COLORS = ['#0f766e', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
+// 工作区文件保留期：导出文件默认 7 天、临时文件默认 1 天，超期由维护任务清理。
+const EXPORT_RETENTION_MS = Math.max(60 * 60 * 1000, Number.parseInt(process.env.DATA_ANALYSIS_EXPORT_RETENTION_MS || '', 10) || 7 * 24 * 60 * 60 * 1000);
+const TMP_RETENTION_MS = Math.max(60 * 60 * 1000, Number.parseInt(process.env.DATA_ANALYSIS_TMP_RETENTION_MS || '', 10) || 24 * 60 * 60 * 1000);
 
 function ensureAnalysisDirs() {
     [analysisRoot, datasetRoot, exportRoot, tempRoot].forEach(dir => {
@@ -133,11 +136,15 @@ function inferKind(values) {
     let booleanCount = 0;
     filled.forEach(value => {
         const text = String(value).trim();
-        if (toFiniteNumber(text) !== null) numberCount += 1;
-        if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(text) || !Number.isNaN(Date.parse(text))) dateCount += 1;
+        const isNumeric = toFiniteNumber(text) !== null;
+        if (isNumeric) numberCount += 1;
+        // 仅接受明确的日期形态（YYYY-MM-DD / YYYY/MM/DD，可带时间或 ISO 后缀），
+        // 不再用宽松的 Date.parse 兜底，避免把纯数字、短文本误判为日期。
+        if (!isNumeric && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$/.test(text)) dateCount += 1;
         if (/^(true|false|是|否|yes|no)$/i.test(text)) booleanCount += 1;
     });
     const threshold = Math.max(1, Math.floor(filled.length * 0.75));
+    // 数值判定优先于日期：形如 20240101 的数值不应被当作日期。
     if (numberCount >= threshold) return 'number';
     if (dateCount >= threshold) return 'date';
     if (booleanCount >= threshold) return 'boolean';
@@ -216,6 +223,34 @@ function moveUploadedFile(sourcePath, targetPath) {
     }
 }
 
+// 在已有数值数组上计算扩展统计：除 min/max/avg/sum 外，补中位数、四分位与总体标准差。
+function buildNumericStats(nums) {
+    const sorted = nums.slice().sort((a, b) => a - b);
+    const count = sorted.length;
+    const sum = sorted.reduce((acc, value) => acc + value, 0);
+    const avg = sum / count;
+    const quantile = ratio => {
+        if (count === 1) return sorted[0];
+        const pos = (count - 1) * ratio;
+        const lower = Math.floor(pos);
+        const upper = Math.ceil(pos);
+        if (lower === upper) return sorted[lower];
+        return sorted[lower] + (sorted[upper] - sorted[lower]) * (pos - lower);
+    };
+    const variance = sorted.reduce((acc, value) => acc + (value - avg) ** 2, 0) / count;
+    return {
+        count,
+        min: sorted[0],
+        max: sorted[count - 1],
+        avg,
+        sum,
+        median: quantile(0.5),
+        p25: quantile(0.25),
+        p75: quantile(0.75),
+        stddev: Math.sqrt(variance)
+    };
+}
+
 function buildProfile(columns, rows) {
     return columns.map(column => {
         const values = rows.map(row => row[column.key]);
@@ -241,13 +276,7 @@ function buildProfile(columns, rows) {
             distinct: distinctMap.size,
             samples: Array.from(distinctMap.keys()).slice(0, 5),
             topValues,
-            numeric: nums.length ? {
-                count: nums.length,
-                min: Math.min(...nums),
-                max: Math.max(...nums),
-                avg: nums.reduce((sum, value) => sum + value, 0) / nums.length,
-                sum: nums.reduce((sum, value) => sum + value, 0)
-            } : null
+            numeric: nums.length ? buildNumericStats(nums) : null
         };
     });
 }
@@ -309,6 +338,24 @@ async function duckReadAll(sql) {
     } finally {
         connection.closeSync();
         instance.closeSync();
+    }
+}
+
+// 重型 DuckDB 操作的并发闸：限制同时执行的查询数，过载时把信号量的 503
+// 透传为带 status 的错误，交由路由层 asyncHandler 返回友好提示。
+async function withAnalysisSlot(fn) {
+    try {
+        await analysisSemaphore.acquire();
+    } catch (e) {
+        const err = new Error(e.message || '数据分析服务繁忙，请稍后重试。');
+        err.status = e.statusCode || 503;
+        err.code = e.code || 'ANALYSIS_OVERLOADED';
+        throw err;
+    }
+    try {
+        return await fn();
+    } finally {
+        analysisSemaphore.release();
     }
 }
 
@@ -394,11 +441,19 @@ async function importDataset({ user, file, name }) {
         moveUploadedFile(file.path, sourcePath);
         const parquetPath = resolveInside(versionDir, 'data.parquet');
 
+        // TODO: CSV 可改走 DuckDB read_csv_auto 原生快路径（零 JS 内存），另起一轮重写；
+        // 当前 XLSX 必须经 JS 解析，故统一走内存路径并以 MAX_UPLOAD_ROWS 硬上限兜底。
         const parsed = readSpreadsheet(sourcePath, sourceName);
         await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
 
         const profile = buildProfile(parsed.columns, parsed.rows);
         const previewRows = parsed.rows.slice(0, MAX_PREVIEW_ROWS);
+        // 画像与预览已落地，及时释放整表行数组引用，降低后续 JSON 序列化期间的内存峰值。
+        const rowCount = parsed.rows.length;
+        const columns = parsed.columns;
+        const sourceType = parsed.sourceType;
+        const sheetName = parsed.sheetName || '';
+        parsed.rows = null;
         const now = getBeijingTimestamp();
         const datasetName = normalizeDatasetName(sourceName, name);
         db.prepare(`
@@ -412,16 +467,16 @@ async function importDataset({ user, file, name }) {
             user.id,
             datasetName,
             sourceName,
-            parsed.sourceType,
+            sourceType,
             file.size || fs.statSync(sourcePath).size,
             toProjectRelative(sourcePath),
             toProjectRelative(parquetPath),
-            parsed.rows.length,
-            parsed.columns.length,
-            JSON.stringify(parsed.columns),
+            rowCount,
+            columns.length,
+            JSON.stringify(columns),
             JSON.stringify(profile),
             JSON.stringify(previewRows),
-            parsed.sheetName || '',
+            sheetName,
             version,
             now,
             now
@@ -446,8 +501,31 @@ async function getDatasetDetail(userId, datasetId) {
     const row = getDatasetForUser(userId, datasetId);
     const dataset = serializeDataset(row);
     const { parquetPath } = getDatasetPaths(row);
-    dataset.previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
+    dataset.previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS }));
     return dataset;
+}
+
+// 删除数据集关联的 artifacts：先移除导出等落地文件，再删行。best-effort，失败只告警。
+function purgeDatasetArtifacts(userId, datasetId) {
+    let artifacts = [];
+    try {
+        artifacts = db.prepare(`
+            SELECT id, file_path FROM analysis_artifacts
+            WHERE user_id = ? AND dataset_id = ?
+        `).all(userId, datasetId);
+    } catch (err) {
+        logger.warn({ err: err.message, datasetId }, '读取分析 artifacts 失败');
+        return;
+    }
+    artifacts.forEach(item => {
+        if (!item.file_path) return;
+        try {
+            bestEffortRemove(fromProjectRelative(item.file_path));
+        } catch (err) {
+            logger.warn({ err: err.message, datasetId, artifactId: item.id }, 'artifact 文件清理失败');
+        }
+    });
+    db.prepare('DELETE FROM analysis_artifacts WHERE user_id = ? AND dataset_id = ?').run(userId, datasetId);
 }
 
 function softDeleteDataset(userId, datasetId) {
@@ -457,7 +535,77 @@ function softDeleteDataset(userId, datasetId) {
         SET deleted_at = ?, status = 'deleted', updated_at = ?
         WHERE id = ? AND user_id = ?
     `).run(getBeijingTimestamp(), getBeijingTimestamp(), datasetId, userId);
+    // 软删除同时回收物理资源：数据集目录（源文件 + parquet）与关联 artifacts，避免磁盘只增不减。
+    try {
+        purgeDatasetArtifacts(userId, datasetId);
+        const datasetDir = resolveInside(datasetRoot, String(userId), datasetId);
+        bestEffortRemove(datasetDir, { recursive: true });
+    } catch (err) {
+        logger.warn({ err: err.message, datasetId }, '数据集物理文件清理失败');
+    }
     return serializeDataset(row);
+}
+
+// 周期清理工作区：删除超过保留期的导出文件与残留临时文件（按 mtime）。
+function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmpRetentionMs = TMP_RETENTION_MS } = {}) {
+    const now = Date.now();
+    let removed = 0;
+    const sweep = (root, retentionMs) => {
+        let entries = [];
+        try {
+            entries = fs.readdirSync(root, { withFileTypes: true });
+        } catch (_err) {
+            return; // 目录尚未创建则跳过
+        }
+        entries.forEach(entry => {
+            const target = path.join(root, entry.name);
+            try {
+                const stat = fs.statSync(target);
+                if (now - stat.mtimeMs < retentionMs) return;
+                fs.rmSync(target, { force: true, recursive: entry.isDirectory(), maxRetries: 2, retryDelay: 100 });
+                removed += 1;
+            } catch (err) {
+                logger.warn({ err: err.message, target }, '工作区文件清理失败');
+            }
+        });
+    };
+    // 导出目录按用户分子目录：逐用户子目录扫描其中的导出文件。
+    let userDirs = [];
+    try {
+        userDirs = fs.readdirSync(exportRoot, { withFileTypes: true }).filter(entry => entry.isDirectory());
+    } catch (_err) {
+        userDirs = [];
+    }
+    userDirs.forEach(dir => sweep(path.join(exportRoot, dir.name), exportRetentionMs));
+    sweep(tempRoot, tmpRetentionMs);
+    if (removed) logger.info({ removed }, '数据分析工作区清理完成');
+    return { removed };
+}
+
+// 历史记录：返回某数据集的图表/比对/导出 artifacts，供前端「历史」Tab 消费。
+// chart 类型解析出 content 供前端一键重渲染；其余类型仅返回元信息。
+function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
+    getDatasetForUser(userId, datasetId); // 校验归属，越权抛 404
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
+    const rows = db.prepare(`
+        SELECT id, type, title, content, file_path, metadata_json, created_at
+        FROM analysis_artifacts
+        WHERE user_id = ? AND dataset_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+    `).all(userId, datasetId, safeLimit);
+    return rows.map(row => {
+        const item = {
+            id: row.id,
+            type: row.type,
+            title: row.title,
+            createdAt: row.created_at,
+            metadata: jsonParse(row.metadata_json, {}),
+            hasFile: !!row.file_path
+        };
+        if (row.type === 'chart') item.chart = jsonParse(row.content, null);
+        return item;
+    });
 }
 
 function getColumn(row, key) {
@@ -551,7 +699,7 @@ async function buildChart(userId, datasetId, input = {}) {
         ${orderBy}
         LIMIT ${limit * (groupCol ? 20 : 1)}
     `;
-    const rows = await duckReadAll(sql);
+    const rows = await withAnalysisSlot(() => duckReadAll(sql));
     const labels = Array.from(new Set(rows.map(item => String(item.label)))).slice(0, limit);
     const groups = groupCol ? Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 12) : ['value'];
     const series = groups.map(group => ({
@@ -730,7 +878,7 @@ async function compareDatasets(userId, input = {}) {
         UNION ALL SELECT 'duplicate_left', key, left_value, right_value FROM duplicate_left
         UNION ALL SELECT 'duplicate_right', key, left_value, right_value FROM duplicate_right
     `;
-    const rows = await duckReadAll(sql);
+    const rows = await withAnalysisSlot(() => duckReadAll(sql));
     const matched = Number(rows.find(item => item.section === 'matched')?.key || 0);
     const onlyLeft = rows.filter(item => item.section === 'only_left').map(item => ({ key: item.key }));
     const onlyRight = rows.filter(item => item.section === 'only_right').map(item => ({ key: item.key }));
@@ -763,13 +911,36 @@ async function compareDatasets(userId, input = {}) {
     return result;
 }
 
-function rowsToDisplay(rows, columns) {
-    return rows.map(row => {
-        const item = {};
-        columns.forEach(column => {
-            item[column.name] = row[column.key] ?? '';
-        });
-        return item;
+// \u7528 DuckDB \u76F4\u63A5\u628A parquet COPY \u6210\u4E34\u65F6 CSV\uFF08\u5E26\u8868\u5934\uFF09\uFF0C\u518D\u4EE5\u6D41\u5F0F\u65B9\u5F0F\u5728\u524D\u9762\u8865 UTF-8 BOM
+// \u5199\u5165\u6700\u7EC8\u6587\u4EF6\uFF0C\u5168\u7A0B\u5E38\u91CF\u5185\u5B58\uFF0C\u907F\u514D\u628A\u6574\u8868\u884C\u8F7D\u5165 JS \u540E\u518D\u62FC\u5B57\u7B26\u4E32\u3002
+async function duckCopyToCsv(parquetPath, columns, targetPath) {
+    const selectList = columns.length
+        ? columns.map(column => `${sqlIdent(column.key)} AS ${sqlIdent(column.name)}`).join(', ')
+        : '*';
+    const sql = `
+        COPY (
+            SELECT ${selectList}
+            FROM read_parquet(${sqlLiteral(parquetPath)})
+        ) TO ${sqlLiteral(targetPath)} (FORMAT CSV, HEADER, DELIMITER ',')
+    `;
+    const { instance, connection } = await createDuckConnection();
+    try {
+        await connection.run(sql);
+    } finally {
+        connection.closeSync();
+        instance.closeSync();
+    }
+}
+
+function prependBomStream(sourcePath, targetPath) {
+    return new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(targetPath, { encoding: 'utf8' });
+        out.on('error', reject);
+        out.on('finish', resolve);
+        out.write('\uFEFF');
+        const input = fs.createReadStream(sourcePath);
+        input.on('error', reject);
+        input.pipe(out);
     });
 }
 
@@ -778,25 +949,23 @@ async function exportDatasetCsv(userId, datasetId) {
     const row = getDatasetForUser(userId, datasetId);
     const columns = jsonParse(row.columns_json, []);
     const { parquetPath } = getDatasetPaths(row);
-    const rows = await duckReadAll(`SELECT * FROM read_parquet(${sqlLiteral(parquetPath)})`);
     const exportDir = resolveInside(exportRoot, String(userId));
     fs.mkdirSync(exportDir, { recursive: true });
     const fileName = `${row.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80)}-${Date.now()}.csv`;
     const filePath = resolveInside(exportDir, fileName);
-    const displayRows = rowsToDisplay(rows, columns);
-    const header = columns.map(column => escapeCsvCell(column.name)).join(',');
-    const lines = [
-        header,
-        ...displayRows.map(item => columns.map(column => escapeCsvCell(item[column.name])).join(','))
-    ];
-    fs.writeFileSync(filePath, `\uFEFF${lines.join(os.EOL)}`, 'utf8');
+    const tmpPath = resolveInside(tempRoot, `${analysisId('csv')}.csv`);
+    await withAnalysisSlot(async () => {
+        await duckCopyToCsv(parquetPath, columns, tmpPath);
+        await prependBomStream(tmpPath, filePath);
+    });
+    bestEffortRemove(tmpPath);
     recordArtifact({
         userId,
         datasetId,
         type: 'export',
         title: fileName,
         filePath,
-        metadata: { format: 'csv', rows: rows.length }
+        metadata: { format: 'csv', rows: row.row_count }
     });
     return { filePath, fileName };
 }
@@ -818,11 +987,13 @@ module.exports = {
     analysisRoot,
     buildAiContext,
     buildChart,
+    cleanupAnalysisWorkspace,
     compareDatasets,
     ensureAnalysisDirs,
     exportDatasetCsv,
     getDatasetDetail,
     importDataset,
+    listDatasetArtifacts,
     listDatasets,
     runSummary,
     serializeDataset,

@@ -468,7 +468,15 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
                 object: 'chat.completion',
                 created: 1710000000,
                 model: 'autocomplete-model',
-                choices: [{ index: 0, message: { role: 'assistant', content: 'return a + b' }, finish_reason: 'stop' }],
+                choices: [{
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'return a + b<think>hidden reasoning</think>',
+                        reasoning_content: 'hidden reasoning'
+                    },
+                    finish_reason: 'stop'
+                }],
                 usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 }
             }));
         });
@@ -552,6 +560,7 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         req.resume();
         req.on('end', () => {
             res.setHeader('Content-Type', 'text/event-stream');
+            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"reasoning_content":"hidden reasoning"},"finish_reason":null}]}\n\n');
             res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"ret"},"finish_reason":null}]}\n\n');
             res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"urn"},"finish_reason":null}]}\n\n');
             res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n\n');
@@ -624,6 +633,7 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         const output = res.chunks.join('');
         assert.equal(res.statusCode, 200);
         assert.equal(res.headers['content-type'], 'text/event-stream');
+        assert.doesNotMatch(output, /hidden reasoning/);
         assert.match(output, /"object":"text_completion"/);
         assert.match(output, /"text":"ret"/);
         assert.match(output, /"text":"urn"/);
