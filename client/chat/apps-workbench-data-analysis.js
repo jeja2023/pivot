@@ -8,6 +8,8 @@
         chart: null,
         summary: null,
         compare: null,
+        query: null,
+        pivot: null,
         artifacts: [],
         aiBusy: false
     };
@@ -89,6 +91,8 @@
                         <button class="data-analysis-tab active" type="button" data-data-analysis-tab="overview">总览</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="chart">图表</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="compare">比对</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="query">查询</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="pivot">透视</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">AI 辅助</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史</button>
                     </div>
@@ -142,10 +146,40 @@
                         </div>
                         <div id="data-analysis-compare-result" class="data-analysis-compare-result"></div>
                     </section>
+                    <section id="data-analysis-query-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-query-box">
+                            <div id="data-analysis-query-fields" class="data-analysis-query-fields"></div>
+                            <textarea id="data-analysis-query-sql" class="form-input data-analysis-query-sql" spellcheck="false" placeholder="SELECT * FROM data LIMIT 100"></textarea>
+                            <div class="data-analysis-query-actions">
+                                <span class="data-analysis-query-hint">只读查询，表名固定为 <code>data</code>，列名为字段名。</span>
+                                <button id="data-analysis-run-query" class="btn-primary" type="button">运行查询</button>
+                            </div>
+                        </div>
+                        <div id="data-analysis-query-result" class="data-analysis-query-result"></div>
+                    </section>
+                    <section id="data-analysis-pivot-panel" class="data-analysis-tab-panel hidden">
+                        <div class="data-analysis-form-grid data-analysis-pivot-controls">
+                            <label>行维度<select id="data-analysis-pivot-row" class="form-input"></select></label>
+                            <label>列维度<select id="data-analysis-pivot-col" class="form-input"></select></label>
+                            <label>值字段<select id="data-analysis-pivot-value" class="form-input"></select></label>
+                            <label>聚合<select id="data-analysis-pivot-aggregation" class="form-input">
+                                <option value="sum">求和</option>
+                                <option value="count">计数</option>
+                                <option value="avg">平均</option>
+                                <option value="min">最小</option>
+                                <option value="max">最大</option>
+                            </select></label>
+                            <button id="data-analysis-run-pivot" class="btn-primary" type="button">生成透视表</button>
+                        </div>
+                        <div id="data-analysis-pivot-result" class="data-analysis-pivot-result"></div>
+                    </section>
                     <section id="data-analysis-ai-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-analysis-ai-box">
                             <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
-                            <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                            <div class="data-analysis-ai-actions">
+                                <label class="data-analysis-ai-toggle"><input type="checkbox" id="data-analysis-ai-deep"> 深度分析（可查询数据 / 生成图表）</label>
+                                <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                            </div>
                         </div>
                         <div id="data-analysis-ai-result" class="data-analysis-ai-result"></div>
                     </section>
@@ -188,6 +222,8 @@
         state.activeId = id;
         state.summary = null;
         state.chart = null;
+        state.query = null;
+        state.pivot = null;
         state.artifacts = [];
         render();
         await loadSummary(id);
@@ -256,6 +292,8 @@
         renderControls();
         renderChart();
         renderCompare();
+        renderQueryFields();
+        renderPivotControls();
     }
 
     function renderDatasets() {
@@ -377,6 +415,136 @@
                     `).join('')}
                 </tbody>
             </table>
+        `;
+    }
+
+    // 通用表渲染：columns 为列名字符串数组，rows 为按列名取值的对象数组。
+    function buildTableFromRows(columns = [], rows = []) {
+        if (!columns.length) return '<div class="data-analysis-empty">无结果</div>';
+        return `
+            <table>
+                <thead><tr>${columns.map(name => `<th>${esc(name)}</th>`).join('')}</tr></thead>
+                <tbody>
+                    ${rows.slice(0, 5000).map(row => `
+                        <tr>${columns.map(name => `<td>${esc(row[name] ?? '')}</td>`).join('')}</tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    }
+
+    function renderQueryFields() {
+        const box = document.getElementById('data-analysis-query-fields');
+        if (!box) return;
+        const dataset = activeDataset();
+        const columns = dataset?.columns || [];
+        if (!columns.length) {
+            box.innerHTML = '';
+            return;
+        }
+        box.innerHTML = `<span class="data-analysis-query-fields-label">可用字段：</span>${columns.map(column => `<button type="button" class="data-analysis-query-field" data-data-analysis-query-field="${esc(column.name)}">${esc(column.name)}</button>`).join('')}`;
+    }
+
+    async function runQuery() {
+        const dataset = activeDataset();
+        if (!dataset) {
+            toast('请先选择数据集', 'warning');
+            return;
+        }
+        const sql = document.getElementById('data-analysis-query-sql')?.value.trim();
+        if (!sql) {
+            toast('请输入查询语句', 'warning');
+            return;
+        }
+        await guardButton('data-analysis-run-query', '查询中…', async () => {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql })
+            });
+            state.query = data;
+            renderQuery();
+        });
+    }
+
+    function renderQuery() {
+        const box = document.getElementById('data-analysis-query-result');
+        if (!box) return;
+        if (!state.query) {
+            box.innerHTML = '<div class="data-analysis-empty">编写并运行查询后在此查看结果</div>';
+            return;
+        }
+        const result = state.query;
+        box.innerHTML = `
+            <div class="data-analysis-query-meta">返回 ${fmtNumber(result.rowCount)} 行${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</div>
+            <div class="data-analysis-query-table">${buildTableFromRows(result.columns || [], result.rows || [])}</div>
+        `;
+    }
+
+    function renderPivotControls() {
+        const dataset = activeDataset();
+        const columns = dataset?.columns || [];
+        const numeric = (dataset?.profile || []).filter(item => item.type === 'number').map(item => item.key);
+        setSelectOptions('data-analysis-pivot-row', buildOptions(columns), columns[0]?.key || '');
+        setSelectOptions('data-analysis-pivot-col', buildOptions(columns, { includeEmpty: true, emptyLabel: '不分列' }), '');
+        setSelectOptions('data-analysis-pivot-value', buildOptions(columns, { includeEmpty: true, emptyLabel: '计数' }), numeric[0] || '');
+    }
+
+    async function runPivot() {
+        const dataset = activeDataset();
+        if (!dataset) {
+            toast('请先选择数据集', 'warning');
+            return;
+        }
+        await guardButton('data-analysis-run-pivot', '生成中…', async () => {
+            const payload = {
+                rowField: document.getElementById('data-analysis-pivot-row')?.value || '',
+                colField: document.getElementById('data-analysis-pivot-col')?.value || '',
+                valueField: document.getElementById('data-analysis-pivot-value')?.value || '',
+                aggregation: document.getElementById('data-analysis-pivot-aggregation')?.value || 'sum'
+            };
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/pivot`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            state.pivot = data;
+            renderPivot();
+        });
+    }
+
+    function renderPivot() {
+        const box = document.getElementById('data-analysis-pivot-result');
+        if (!box) return;
+        const result = state.pivot;
+        if (!result) {
+            box.innerHTML = '<div class="data-analysis-empty">选择行维度、列维度与值后生成透视表</div>';
+            return;
+        }
+        const cols = result.columns || [];
+        const head = `<tr><th>${esc(result.rowField?.name || '行')}</th>${cols.map(col => `<th>${esc(col)}</th>`).join('')}<th>合计</th></tr>`;
+        const body = (result.rows || []).map(row => `
+            <tr>
+                <th>${esc(row.label)}</th>
+                ${cols.map(col => `<td>${fmtNumber(row.values?.[col] || 0)}</td>`).join('')}
+                <td class="data-analysis-pivot-total">${fmtNumber(row.total || 0)}</td>
+            </tr>
+        `).join('');
+        const footer = `
+            <tr class="data-analysis-pivot-total-row">
+                <th>合计</th>
+                ${cols.map(col => `<td>${fmtNumber(result.colTotals?.[col] || 0)}</td>`).join('')}
+                <td class="data-analysis-pivot-total">${fmtNumber(result.grandTotal || 0)}</td>
+            </tr>
+        `;
+        box.innerHTML = `
+            ${result.truncated ? '<div class="data-analysis-query-meta">维度过多，行/列已截断展示。</div>' : ''}
+            <div class="data-analysis-pivot-table">
+                <table>
+                    <thead>${head}</thead>
+                    <tbody>${body || ''}${footer}</tbody>
+                </table>
+            </div>
         `;
     }
 
@@ -535,7 +703,7 @@
             box.innerHTML = '<div class="data-analysis-empty">暂无历史记录，生成图表 / 比对 / 导出后会显示在这里</div>';
             return;
         }
-        const typeLabel = { chart: '图表', comparison: '比对', export: '导出' };
+        const typeLabel = { chart: '图表', comparison: '比对', export: '导出', query: '查询' };
         box.innerHTML = items.map((item, index) => {
             const clickable = item.type === 'chart' && item.chart;
             const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
@@ -549,6 +717,60 @@
         }).join('');
     }
 
+    // 深度分析：调用后端 ReAct 工具调用接口，渲染答案 + 执行过程 + 内联图表。
+    async function runAiAgent(dataset, prompt, model, result) {
+        state.aiBusy = true;
+        if (result) result.innerHTML = '<div class="data-analysis-ai-thinking">AI 正在查询数据并分析…</div>';
+        await guardButton('data-analysis-ai-run', '分析中…', async () => {
+            try {
+                const data = await fetchJson(`${API}/ai`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: 'agent', datasetId: dataset.id, prompt, model })
+                });
+                renderAgentResult(result, data);
+            } catch (e) {
+                if (result) result.innerHTML = `<div class="data-analysis-empty">深度分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+                toast(e && e.message ? e.message : '深度分析失败', 'error');
+            } finally {
+                state.aiBusy = false;
+            }
+        });
+    }
+
+    function renderAgentResult(box, data) {
+        if (!box) return;
+        const steps = data.steps || [];
+        const charts = data.charts || [];
+        const toolLabel = { run_sql: 'SQL 查询', make_chart: '生成图表' };
+        const stepsHtml = steps.length ? `
+            <details class="data-analysis-ai-steps">
+                <summary>执行过程（${steps.length} 步）</summary>
+                ${steps.map(step => `
+                    <div class="data-analysis-ai-step">
+                        <span class="data-analysis-ai-step-tool">${esc(toolLabel[step.tool] || step.tool)}</span>
+                        <code>${esc(step.input?.sql || JSON.stringify(step.input || {}))}</code>
+                        <em>${esc(step.summary || '')}</em>
+                    </div>
+                `).join('')}
+            </details>
+        ` : '';
+        const chartsHtml = charts.length ? `<div class="data-analysis-ai-charts">${charts.map(chart => `
+            <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(chart))}">
+                <div class="pivot-echart-title">${esc(chart.title || '图表')}</div>
+                <div class="pivot-echart-canvas"></div>
+                <canvas height="300"></canvas>
+                <pre class="pivot-echart-error-text"></pre>
+            </div>
+        `).join('')}</div>` : '';
+        box.innerHTML = `
+            <div class="data-analysis-ai-answer">${esc(data.answer || 'AI 未返回有效内容')}</div>
+            ${chartsHtml}
+            ${stepsHtml}
+        `;
+        if (charts.length) window.renderPivotCharts?.(box);
+    }
+
     async function runAi() {
         const dataset = activeDataset();
         const prompt = document.getElementById('data-analysis-ai-prompt')?.value.trim();
@@ -559,6 +781,11 @@
         if (state.aiBusy) return;
         const result = document.getElementById('data-analysis-ai-result');
         const model = document.getElementById('model-selector')?.value || '';
+        const deep = document.getElementById('data-analysis-ai-deep')?.checked;
+        if (deep) {
+            await runAiAgent(dataset, prompt, model, result);
+            return;
+        }
         // 环境支持时走 SSE 流式逐字输出，否则回退一次性请求。
         const useStream = typeof createBrowserSseParser === 'function' && typeof apiFetch === 'function';
         state.aiBusy = true;
@@ -681,6 +908,29 @@
             }
             if (event.target.closest('#data-analysis-run-compare')) {
                 await runCompare();
+                return;
+            }
+            const queryField = event.target.closest('[data-data-analysis-query-field]');
+            if (queryField) {
+                const textarea = document.getElementById('data-analysis-query-sql');
+                if (textarea) {
+                    const name = queryField.dataset.dataAnalysisQueryField;
+                    const needsQuote = /[^A-Za-z0-9_]/.test(name);
+                    const token = needsQuote ? `"${name}"` : name;
+                    const start = textarea.selectionStart ?? textarea.value.length;
+                    const end = textarea.selectionEnd ?? textarea.value.length;
+                    textarea.value = textarea.value.slice(0, start) + token + textarea.value.slice(end);
+                    textarea.focus();
+                    textarea.selectionStart = textarea.selectionEnd = start + token.length;
+                }
+                return;
+            }
+            if (event.target.closest('#data-analysis-run-query')) {
+                await runQuery();
+                return;
+            }
+            if (event.target.closest('#data-analysis-run-pivot')) {
+                await runPivot();
                 return;
             }
             if (event.target.closest('#data-analysis-ai-run')) {

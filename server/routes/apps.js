@@ -43,7 +43,9 @@ const {
     importDataset,
     listDatasetArtifacts,
     listDatasets,
+    runPivot,
     runSummary,
+    runUserQuery,
     softDeleteDataset
 } = require('../services/data-analysis');
 
@@ -61,6 +63,30 @@ function stripThinkTags(text) {
 // 不把 reasoning_content 当作正文返回——它是思考过程而非成稿，空正文交由上层给出明确提示。
 function extractCompletionContent(data) {
     return stripThinkTags(extractModelText(data));
+}
+
+// 从模型文本中尽力解析一个 JSON 对象：剥离 ```json 代码围栏后取首个 { 到末个 }。
+// 解析失败返回 null（调用方据此把整段文本当作普通回答兜底）。
+function parseJsonObject(text) {
+    const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+    try {
+        const direct = JSON.parse(raw);
+        return direct && typeof direct === 'object' && !Array.isArray(direct) ? direct : null;
+    } catch (_e) { /* fall through to brace extraction */ }
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+        try {
+            const parsed = JSON.parse(raw.slice(start, end + 1));
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+        } catch (_e2) { /* not JSON */ }
+    }
+    return null;
+}
+
+function clampText(value, max = 4000) {
+    const text = String(value ?? '');
+    return text.length > max ? `${text.slice(0, max)}…（已截断）` : text;
 }
 
 // 判断是否应为该模型关闭“思考”模式：公文起草/润色/审校属工具型任务，无需思维链。
@@ -237,6 +263,153 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
     }
 }
 
+// 单次非流式模型调用，返回正文文本（供 AI 工具调用循环多轮使用）。
+// 自带配额/上下文预算/并发与用量统计，调用方负责循环与工具执行。
+async function callAppsModelText({ modelCfg, user, messages, source, maxTokens = 900, temperature = 0.2 }) {
+    const outputTokens = Math.max(maxTokens, Number(modelCfg.max_tokens) || 0);
+    let upstreamMessages = messages;
+    const budgetResult = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: outputTokens });
+    upstreamMessages = budgetResult.messages;
+    const payloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
+
+    await aiSemaphore.acquire();
+    let endpointRelease = null;
+    const startedAt = Date.now();
+    try {
+        endpointRelease = await acquireModelSlot(modelCfg);
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user,
+            url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true }),
+            data: { model: modelCfg.model_name, messages: payloadMessages, stream: false, temperature, max_tokens: outputTokens },
+            headers: buildModelHeaders(modelCfg),
+            stream: false
+        });
+        const content = extractCompletionContent(response.data);
+        const usage = normalizeTokenUsage({
+            inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
+            outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
+            totalTokens: response.data?.usage?.total_tokens
+        });
+        recordModelTokenUsage(user.id, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+        recordModelSuccess(modelCfg, Date.now() - startedAt);
+        return content;
+    } catch (e) {
+        recordModelFailure(modelCfg, e);
+        throw e;
+    } finally {
+        if (endpointRelease) endpointRelease();
+        aiSemaphore.release();
+    }
+}
+
+const ANALYSIS_AGENT_MAX_STEPS = 3;
+
+function buildAnalysisAgentSystemPrompt(context) {
+    return [
+        '你是数据分析工作台的智能分析师，可以调用工具查询真实数据、生成图表，再据此回答。',
+        '',
+        '【可用工具】',
+        '1) run_sql：对当前数据集执行只读 SQL。表名固定为 data，列名为下方字段名。仅支持 SELECT/WITH，会自动限制返回行数。',
+        '2) make_chart：生成图表。参数 chartType(bar|line|area|pie)、xField(分类字段名)、yField(数值字段名，可选)、groupField(分组字段名，可选)、aggregation(sum|count|avg|min|max)。',
+        '',
+        '【数据集上下文】',
+        context,
+        '',
+        '【回答协议】每一步只输出一个 JSON 对象，不要输出多余文字：',
+        '- 调用工具：{"thought":"简要思考","action":"tool","tool":"run_sql","input":{"sql":"SELECT ..."}}',
+        '  或 {"thought":"...","action":"tool","tool":"make_chart","input":{"chartType":"bar","xField":"字段名","yField":"字段名","aggregation":"sum"}}',
+        '- 给出最终回答：{"action":"final","answer":"基于数据的中文结论，简洁给出洞察与建议"}',
+        '不要编造字段或数值；需要数据时先用 run_sql 查询。最多可调用工具若干次后必须给出 final。'
+    ].join('\n');
+}
+
+// 数据分析 AI 工具调用（深度分析）：JSON-planner ReAct 循环，模型回结构化 JSON，
+// 后端执行 run_sql / make_chart 并把观测回灌，直至 final 或达步数上限。兼容不支持原生 function-calling 的模型。
+async function runDataAnalysisAgent({ req, res, logAction }) {
+    const body = req.body || {};
+    const datasetId = String(body.datasetId || '').trim();
+    const userPrompt = String(body.prompt || '').trim();
+    if (!datasetId || !userPrompt) {
+        return res.status(400).json({ error: { message: '缺少数据集或问题。', type: 'invalid_request_error' } });
+    }
+    const modelCfg = resolveAppsModel(String(body.model || '').trim(), req.user);
+    if (!modelCfg) {
+        return res.status(404).json({ error: { message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。', type: 'invalid_request_error', code: 'model_not_found' } });
+    }
+    if (modelCfg.secret_error) {
+        return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+    }
+    if (modelCfg.daily_token_limit > 0 && getModelDailyUsage(req.user.id, modelCfg.id) >= modelCfg.daily_token_limit) {
+        return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
+    }
+
+    const userId = req.user.id;
+    const context = await buildAiContext(userId, datasetId);
+    const messages = [
+        { role: 'system', content: buildAnalysisAgentSystemPrompt(context) },
+        { role: 'user', content: userPrompt }
+    ];
+    const steps = [];
+    const charts = [];
+    let answer = '';
+
+    logAction(req, '数据分析 AI 深度分析', `数据集: ${datasetId}，模型: ${modelCfg.name}`);
+
+    try {
+        for (let step = 0; step < ANALYSIS_AGENT_MAX_STEPS; step += 1) {
+            const text = await callAppsModelText({ modelCfg, user: req.user, messages, source: 'data_analysis_agent', maxTokens: 900, temperature: 0.2 });
+            const plan = parseJsonObject(text);
+            if (!plan) { answer = text.trim(); break; } // 非 JSON：当作普通回答兜底
+            if (plan.action === 'final' || !plan.tool) { answer = String(plan.answer || '').trim(); break; }
+
+            let observation;
+            try {
+                if (plan.tool === 'run_sql') {
+                    const sql = String(plan.input?.sql || plan.input?.query || '').trim();
+                    const result = await runUserQuery(userId, datasetId, { sql, limit: 50 });
+                    observation = JSON.stringify({ columns: result.columns, rows: result.rows.slice(0, 30), rowCount: result.rowCount, truncated: result.truncated });
+                    steps.push({ tool: 'run_sql', input: { sql }, summary: `返回 ${result.rowCount} 行` });
+                } else if (plan.tool === 'make_chart') {
+                    const result = await buildChart(userId, datasetId, plan.input || {});
+                    charts.push(result.chart);
+                    observation = JSON.stringify({ ok: true, title: result.chart.title, chartType: result.chart.chartType });
+                    steps.push({ tool: 'make_chart', input: plan.input || {}, summary: result.chart.title });
+                } else {
+                    observation = `未知工具：${plan.tool}`;
+                    steps.push({ tool: String(plan.tool), input: plan.input || {}, summary: '未知工具' });
+                }
+            } catch (toolErr) {
+                observation = `工具执行失败：${toolErr.message}`;
+                steps.push({ tool: String(plan.tool || ''), input: plan.input || {}, summary: `失败：${toolErr.message}` });
+            }
+            messages.push({ role: 'assistant', content: text });
+            messages.push({ role: 'user', content: `工具 ${plan.tool} 结果：\n${clampText(observation, 4000)}\n请据此继续：输出下一步 JSON，或用 action=final 给出最终中文回答。` });
+        }
+
+        if (!answer) {
+            // 达到步数上限仍未 final：要求模型据已有观测收尾。
+            const closing = await callAppsModelText({
+                modelCfg,
+                user: req.user,
+                source: 'data_analysis_agent',
+                messages: [...messages, { role: 'user', content: '请基于以上工具结果，用 {"action":"final","answer":"..."} 给出最终中文回答。' }],
+                maxTokens: 900,
+                temperature: 0.2
+            });
+            answer = String(parseJsonObject(closing)?.answer || closing || '').trim();
+        }
+        return res.json({ answer: answer || '未能得出结论，请调整问题后重试。', steps, charts });
+    } catch (e) {
+        const errorMsg = e.response?.data?.error?.message || e.message;
+        logger.error({ err: errorMsg, model: modelCfg.name }, '数据分析 AI 深度分析失败');
+        if (!res.headersSent) {
+            return res.status(e.response?.status || e.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+        }
+        return undefined;
+    }
+}
+
 function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
 
@@ -287,6 +460,18 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         res.json(result);
     }));
 
+    router.post('/apps/data-analysis/datasets/:id/query', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await runUserQuery(req.user.id, req.params.id, req.body || {});
+        logAction(req, '数据分析-SQL 查询', `数据集: ${req.params.id}`);
+        res.json(result);
+    }));
+
+    router.post('/apps/data-analysis/datasets/:id/pivot', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await runPivot(req.user.id, req.params.id, req.body || {});
+        logAction(req, '数据分析-透视表', `数据集: ${req.params.id}`);
+        res.json(result);
+    }));
+
     router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
         const limit = Number.parseInt(req.query.limit, 10) || 30;
         res.json({ artifacts: listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
@@ -300,6 +485,10 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
     router.post('/apps/data-analysis/ai', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
+        // 深度分析模式：走工具调用（ReAct）循环，可查询真实数据与生成图表。
+        if (body.mode === 'agent') {
+            return runDataAnalysisAgent({ req, res, logAction });
+        }
         const datasetId = String(body.datasetId || '').trim();
         const userPrompt = String(body.prompt || '').trim();
         if (!datasetId || !userPrompt) {

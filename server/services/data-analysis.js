@@ -22,6 +22,9 @@ const MAX_PROFILE_DISTINCT = 20;
 const MAX_UPLOAD_ROWS = Math.max(1000, Number.parseInt(process.env.DATA_ANALYSIS_MAX_ROWS || '200000', 10) || 200000);
 const MAX_UPLOAD_COLUMNS = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_MAX_COLUMNS || '120', 10) || 120);
 const MAX_QUERY_LIMIT = 5000;
+const MAX_SQL_LEN = 5000;
+const MAX_PIVOT_ROWS = 200;
+const MAX_PIVOT_COLS = 50;
 const CHART_COLORS = ['#0f766e', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 // 工作区文件保留期：导出文件默认 7 天、临时文件默认 1 天，超期由维护任务清理。
 const EXPORT_RETENTION_MS = Math.max(60 * 60 * 1000, Number.parseInt(process.env.DATA_ANALYSIS_EXPORT_RETENTION_MS || '', 10) || 7 * 24 * 60 * 60 * 1000);
@@ -112,45 +115,6 @@ function normalizeCell(value) {
     return String(value).trim();
 }
 
-function toFiniteNumber(value) {
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-    const text = String(value ?? '').trim();
-    if (!text) return null;
-    const percent = text.endsWith('%');
-    let normalized = text
-        .replace(/,/g, '')
-        .replace(/[￥¥$]/g, '')
-        .replace(/\s+/g, '');
-    if (/^\((.*)\)$/.test(normalized)) normalized = `-${RegExp.$1}`;
-    normalized = normalized.replace(/%/g, '');
-    const parsed = Number(normalized);
-    if (!Number.isFinite(parsed)) return null;
-    return percent ? parsed / 100 : parsed;
-}
-
-function inferKind(values) {
-    const filled = values.filter(value => String(value ?? '').trim() !== '');
-    if (!filled.length) return 'empty';
-    let numberCount = 0;
-    let dateCount = 0;
-    let booleanCount = 0;
-    filled.forEach(value => {
-        const text = String(value).trim();
-        const isNumeric = toFiniteNumber(text) !== null;
-        if (isNumeric) numberCount += 1;
-        // 仅接受明确的日期形态（YYYY-MM-DD / YYYY/MM/DD，可带时间或 ISO 后缀），
-        // 不再用宽松的 Date.parse 兜底，避免把纯数字、短文本误判为日期。
-        if (!isNumeric && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$/.test(text)) dateCount += 1;
-        if (/^(true|false|是|否|yes|no)$/i.test(text)) booleanCount += 1;
-    });
-    const threshold = Math.max(1, Math.floor(filled.length * 0.75));
-    // 数值判定优先于日期：形如 20240101 的数值不应被当作日期。
-    if (numberCount >= threshold) return 'number';
-    if (dateCount >= threshold) return 'date';
-    if (booleanCount >= threshold) return 'boolean';
-    return 'text';
-}
-
 function sanitizeRows(rows) {
     const sourceRows = Array.isArray(rows) ? rows : [];
     const firstUseful = sourceRows.find(row => Array.isArray(row) && row.some(cell => String(cell ?? '').trim() !== ''));
@@ -223,62 +187,125 @@ function moveUploadedFile(sourcePath, targetPath) {
     }
 }
 
-// 在已有数值数组上计算扩展统计：除 min/max/avg/sum 外，补中位数、四分位与总体标准差。
-function buildNumericStats(nums) {
-    const sorted = nums.slice().sort((a, b) => a - b);
-    const count = sorted.length;
-    const sum = sorted.reduce((acc, value) => acc + value, 0);
-    const avg = sum / count;
-    const quantile = ratio => {
-        if (count === 1) return sorted[0];
-        const pos = (count - 1) * ratio;
-        const lower = Math.floor(pos);
-        const upper = Math.ceil(pos);
-        if (lower === upper) return sorted[lower];
-        return sorted[lower] + (sorted[upper] - sorted[lower]) * (pos - lower);
-    };
-    const variance = sorted.reduce((acc, value) => acc + (value - avg) ** 2, 0) / count;
-    return {
-        count,
-        min: sorted[0],
-        max: sorted[count - 1],
-        avg,
-        sum,
-        median: quantile(0.5),
-        p25: quantile(0.25),
-        p75: quantile(0.75),
-        stddev: Math.sqrt(variance)
-    };
+// 数值清洗表达式：镜像旧 toFiniteNumber 的去千分位/货币符号/百分号/空白逻辑（近似，
+// 不处理百分比 /100 与括号负数）。日期形态只认明确的 YYYY-(MM)-(DD)，与旧 inferKind 对齐。
+const SQL_NUMERIC_CLEAN = "regexp_replace(v, '[,￥¥$%[:space:]]', '', 'g')";
+const SQL_DATE_PATTERN = '[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}([ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?)?(Z|[+-][0-9]{2}:?[0-9]{2})?';
+
+// 统一画像：直接在 DuckDB 内对 parquet 计算字段画像，CSV/Excel 两条导入路径共用，
+// 输出形状与历史 buildProfile 完全一致（type/filled/empty/fillRate/distinct/samples/topValues/numeric）。
+async function profileViaSql(parquetPath, columns, totalRows) {
+    const { instance, connection } = await createDuckConnection();
+    try {
+        const profile = [];
+        for (const column of columns) {
+            const ident = sqlIdent(column.key);
+            const nonEmpty = `SELECT CAST(${ident} AS VARCHAR) AS v FROM read_parquet(${sqlLiteral(parquetPath)}) WHERE trim(CAST(${ident} AS VARCHAR)) <> ''`;
+            const aggSql = `
+                WITH base AS (${nonEmpty}),
+                prepared AS (
+                    SELECT v,
+                        TRY_CAST(${SQL_NUMERIC_CLEAN} AS DOUBLE) AS numv,
+                        regexp_full_match(v, '${SQL_DATE_PATTERN}') AS is_date_raw,
+                        lower(v) IN ('true', 'false', '是', '否', 'yes', 'no') AS is_bool
+                    FROM base
+                )
+                SELECT
+                    COUNT(*) AS filled,
+                    COUNT(DISTINCT v) AS distinct_count,
+                    COUNT(numv) AS number_count,
+                    COUNT(*) FILTER (WHERE numv IS NULL AND is_date_raw) AS date_count,
+                    COUNT(*) FILTER (WHERE is_bool) AS boolean_count,
+                    MIN(numv) AS min_v, MAX(numv) AS max_v, AVG(numv) AS avg_v, SUM(numv) AS sum_v,
+                    MEDIAN(numv) AS median_v, QUANTILE_CONT(numv, 0.25) AS p25_v,
+                    QUANTILE_CONT(numv, 0.75) AS p75_v, STDDEV_POP(numv) AS stddev_v
+                FROM prepared
+            `;
+            const agg = (await connection.runAndReadAll(aggSql)).getRowObjectsJson()[0] || {};
+            const topRows = (await connection.runAndReadAll(
+                `SELECT v, COUNT(*) AS cnt FROM (${nonEmpty}) GROUP BY v ORDER BY cnt DESC, v LIMIT ${MAX_PROFILE_DISTINCT}`
+            )).getRowObjectsJson();
+
+            const filled = Number(agg.filled) || 0;
+            const numberCount = Number(agg.number_count) || 0;
+            const dateCount = Number(agg.date_count) || 0;
+            const booleanCount = Number(agg.boolean_count) || 0;
+            const threshold = Math.max(1, Math.floor(filled * 0.75));
+            let type = 'text';
+            if (!filled) type = 'empty';
+            else if (numberCount >= threshold) type = 'number';
+            else if (dateCount >= threshold) type = 'date';
+            else if (booleanCount >= threshold) type = 'boolean';
+
+            const topValues = topRows.map(item => ({ value: item.v, count: Number(item.cnt) || 0 }));
+            profile.push({
+                key: column.key,
+                name: column.name,
+                type,
+                filled,
+                empty: Math.max(0, (Number(totalRows) || 0) - filled),
+                fillRate: totalRows ? filled / totalRows : 0,
+                distinct: Number(agg.distinct_count) || 0,
+                samples: topValues.slice(0, 5).map(item => item.value),
+                topValues,
+                numeric: numberCount ? {
+                    count: numberCount,
+                    min: Number(agg.min_v),
+                    max: Number(agg.max_v),
+                    avg: Number(agg.avg_v),
+                    sum: Number(agg.sum_v),
+                    median: Number(agg.median_v),
+                    p25: Number(agg.p25_v),
+                    p75: Number(agg.p75_v),
+                    stddev: Number(agg.stddev_v)
+                } : null
+            });
+        }
+        return profile;
+    } finally {
+        connection.closeSync();
+        instance.closeSync();
+    }
 }
 
-function buildProfile(columns, rows) {
-    return columns.map(column => {
-        const values = rows.map(row => row[column.key]);
-        const filled = values.filter(value => String(value ?? '').trim() !== '');
-        const kind = inferKind(filled);
-        const distinctMap = new Map();
-        filled.forEach(value => {
-            const key = String(value);
-            distinctMap.set(key, (distinctMap.get(key) || 0) + 1);
-        });
-        const topValues = Array.from(distinctMap.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, MAX_PROFILE_DISTINCT)
-            .map(([value, count]) => ({ value, count }));
-        const nums = filled.map(toFiniteNumber).filter(value => value !== null);
-        return {
-            key: column.key,
-            name: column.name,
-            type: kind,
-            filled: filled.length,
-            empty: rows.length - filled.length,
-            fillRate: rows.length ? filled.length / rows.length : 0,
-            distinct: distinctMap.size,
-            samples: Array.from(distinctMap.keys()).slice(0, 5),
-            topValues,
-            numeric: nums.length ? buildNumericStats(nums) : null
-        };
-    });
+// CSV 原生导入：用 DuckDB read_csv_auto 直接把整表 COPY 成 Parquet（列名归一为 c_N），
+// 整表数据不经过 JS 内存。表头取首行（positional column0..），其后数据 OFFSET 1 写入。
+async function importCsvToParquet(sourcePath, parquetPath) {
+    const { instance, connection } = await createDuckConnection();
+    try {
+        const headerRows = (await connection.runAndReadAll(
+            `SELECT * FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true) LIMIT 1`
+        )).getRowObjectsJson();
+        if (!headerRows.length) {
+            const err = new Error('未识别到有效表头或数据行。');
+            err.status = 400;
+            throw err;
+        }
+        const firstRow = headerRows[0];
+        const fieldKeys = Object.keys(firstRow);
+        const seen = new Set();
+        const columns = fieldKeys.slice(0, MAX_UPLOAD_COLUMNS).map((fieldKey, index) => ({
+            key: `c_${index + 1}`,
+            name: normalizeHeader(firstRow[fieldKey], index, seen),
+            index
+        }));
+        const selectList = columns.map(column => `${sqlIdent(`column${column.index}`)} AS ${sqlIdent(column.key)}`).join(', ');
+        await connection.run(
+            `COPY (SELECT ${selectList} FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true) OFFSET 1 LIMIT ${MAX_UPLOAD_ROWS}) TO ${sqlLiteral(parquetPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`
+        );
+        const rowCount = Number((await connection.runAndReadAll(
+            `SELECT COUNT(*) AS n FROM read_parquet(${sqlLiteral(parquetPath)})`
+        )).getRowObjectsJson()[0]?.n || 0);
+        if (!rowCount) {
+            const err = new Error('表格中没有可分析的数据行。');
+            err.status = 400;
+            throw err;
+        }
+        return { columns, rowCount };
+    } finally {
+        connection.closeSync();
+        instance.closeSync();
+    }
 }
 
 function serializeDataset(row) {
@@ -441,19 +468,31 @@ async function importDataset({ user, file, name }) {
         moveUploadedFile(file.path, sourcePath);
         const parquetPath = resolveInside(versionDir, 'data.parquet');
 
-        // TODO: CSV 可改走 DuckDB read_csv_auto 原生快路径（零 JS 内存），另起一轮重写；
-        // 当前 XLSX 必须经 JS 解析，故统一走内存路径并以 MAX_UPLOAD_ROWS 硬上限兜底。
-        const parsed = readSpreadsheet(sourcePath, sourceName);
-        await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
-
-        const profile = buildProfile(parsed.columns, parsed.rows);
-        const previewRows = parsed.rows.slice(0, MAX_PREVIEW_ROWS);
-        // 画像与预览已落地，及时释放整表行数组引用，降低后续 JSON 序列化期间的内存峰值。
-        const rowCount = parsed.rows.length;
-        const columns = parsed.columns;
-        const sourceType = parsed.sourceType;
-        const sheetName = parsed.sheetName || '';
-        parsed.rows = null;
+        // 导入分流：CSV 走 DuckDB 原生快路径（整表零 JS 内存）；XLSX/XLS 仍需 JS 解析。
+        // 两路最终都把数据落成 c_N 列的 Parquet，并统一用 profileViaSql 计算画像（口径一致）。
+        const { columns, rowCount, sheetName, sourceType, profile, previewRows } = await withAnalysisSlot(async () => {
+            let cols;
+            let total;
+            let sheet = '';
+            let type;
+            if (ext === '.csv') {
+                const meta = await importCsvToParquet(sourcePath, parquetPath);
+                cols = meta.columns;
+                total = meta.rowCount;
+                type = 'csv';
+            } else {
+                const parsed = readSpreadsheet(sourcePath, sourceName);
+                await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
+                cols = parsed.columns;
+                total = parsed.rows.length;
+                sheet = parsed.sheetName || '';
+                type = parsed.sourceType;
+                parsed.rows = null; // 释放整表行数组，降低后续内存峰值。
+            }
+            const prof = await profileViaSql(parquetPath, cols, total);
+            const preview = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
+            return { columns: cols, rowCount: total, sheetName: sheet, sourceType: type, profile: prof, previewRows: preview };
+        });
         const now = getBeijingTimestamp();
         const datasetName = normalizeDatasetName(sourceName, name);
         db.prepare(`
@@ -911,6 +950,167 @@ async function compareDatasets(userId, input = {}) {
     return result;
 }
 
+// \u900F\u89C6\u8868\uFF1A\u6309\u884C\u7EF4 + \u53EF\u9009\u5217\u7EF4\u4EA4\u53C9\u805A\u5408\u4E00\u4E2A\u6570\u503C\uFF08\u6216\u8BA1\u6570\uFF09\u3002\u7ED3\u679C\u5728 JS \u6574\u5F62\u4E3A\u77E9\u9635\uFF0C
+// \u884C/\u5217\u5404\u8BBE\u4E0A\u9650\uFF0C\u8D85\u9650\u6309\u603B\u91CF\u6392\u5E8F\u622A\u65AD\u5E76\u6807\u6CE8 truncated\u3002
+async function runPivot(userId, datasetId, input = {}) {
+    const row = getDatasetForUser(userId, datasetId);
+    const rowCol = getColumn(row, input.rowField);
+    const colField = String(input.colField || '').trim();
+    const colCol = colField ? getColumn(row, colField) : null;
+    const valueField = String(input.valueField || '').trim();
+    const valueCol = valueField ? getColumn(row, valueField) : null;
+    const aggregation = normalizeAggregation(input.aggregation, Boolean(valueCol));
+    const { parquetPath } = getDatasetPaths(row);
+    const valueExpr = aggregation === 'count'
+        ? 'COUNT(*)'
+        : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(valueCol.key)} AS DOUBLE))`;
+    const rowLabelExpr = `COALESCE(NULLIF(${sqlIdent(rowCol.key)}, ''), '(empty)')`;
+    const colLabelExpr = colCol ? `COALESCE(NULLIF(${sqlIdent(colCol.key)}, ''), '(empty)')` : `'\u5408\u8BA1'`;
+    const sql = `
+        SELECT ${rowLabelExpr} AS row_label, ${colLabelExpr} AS col_label, ${valueExpr} AS value
+        FROM read_parquet(${sqlLiteral(parquetPath)})
+        GROUP BY row_label, col_label
+    `;
+    const records = await withAnalysisSlot(() => duckReadAll(sql));
+
+    // \u884C/\u5217\u6309\u805A\u5408\u603B\u91CF\u6392\u5E8F\u540E\u622A\u65AD\u3002
+    const rowTotals = new Map();
+    const colTotals = new Map();
+    records.forEach(record => {
+        const value = Number(record.value) || 0;
+        rowTotals.set(record.row_label, (rowTotals.get(record.row_label) || 0) + value);
+        colTotals.set(record.col_label, (colTotals.get(record.col_label) || 0) + value);
+    });
+    const sortByTotalDesc = totals => Array.from(totals.entries()).sort((a, b) => b[1] - a[1]).map(entry => String(entry[0]));
+    const allRowLabels = sortByTotalDesc(rowTotals);
+    const allColLabels = colCol ? sortByTotalDesc(colTotals) : ['\u5408\u8BA1'];
+    const rowLabels = allRowLabels.slice(0, MAX_PIVOT_ROWS);
+    const colLabels = allColLabels.slice(0, MAX_PIVOT_COLS);
+    const truncated = allRowLabels.length > rowLabels.length || allColLabels.length > colLabels.length;
+
+    const cellMap = new Map();
+    records.forEach(record => {
+        cellMap.set(`${record.row_label} ${record.col_label}`, Number(record.value) || 0);
+    });
+    const rows = rowLabels.map(label => {
+        const values = {};
+        let total = 0;
+        colLabels.forEach(col => {
+            const value = cellMap.get(`${label} ${col}`) || 0;
+            values[col] = value;
+            total += value;
+        });
+        return { label, values, total };
+    });
+    const colTotalsObj = {};
+    let grandTotal = 0;
+    colLabels.forEach(col => {
+        const sum = rows.reduce((acc, item) => acc + (item.values[col] || 0), 0);
+        colTotalsObj[col] = sum;
+        grandTotal += sum;
+    });
+
+    const result = {
+        rowField: { key: rowCol.key, name: rowCol.name },
+        colField: colCol ? { key: colCol.key, name: colCol.name } : null,
+        valueField: valueCol ? { key: valueCol.key, name: valueCol.name } : null,
+        aggregation,
+        columns: colLabels,
+        rows,
+        colTotals: colTotalsObj,
+        grandTotal,
+        truncated
+    };
+    recordArtifact({
+        userId,
+        datasetId,
+        type: 'pivot',
+        title: `${rowCol.name}${colCol ? ` \u00D7 ${colCol.name}` : ''} ${aggregation === 'count' ? '\u8BA1\u6570' : valueCol?.name || ''}`.trim(),
+        content: JSON.stringify({ rowField: rowCol.key, colField: colCol?.key || '', valueField: valueCol?.key || '', aggregation }),
+        metadata: { aggregation, truncated }
+    });
+    return result;
+}
+
+// \u81EA\u5B9A\u4E49 SQL \u67E5\u8BE2\uFF1A\u7528\u6237\u4E66\u5199\u7684\u53EA\u8BFB SELECT/WITH\uFF0C\u9488\u5BF9\u5F53\u524D\u6570\u636E\u96C6\u6267\u884C\u3002
+// \u5B89\u5168\u4E3A\u591A\u5C42\u7EB5\u6DF1\uFF1A\u2460\u8BED\u6CD5/\u9ED1\u540D\u5355\u6821\u9A8C \u2461\u628A\u6570\u636E\u96C6\u7269\u5316\u4E3A\u8868\u540E\u7981\u7528\u5916\u90E8\u8BBF\u95EE\uFF08\u7528\u6237 SQL \u65E0\u6CD5\u518D\u8BFB\u4EFB\u610F\u6587\u4EF6\uFF09
+// \u2462\u5916\u5C42\u5305\u88F9\u5355\u6761\u5B50\u67E5\u8BE2 + \u5F3A\u5236 LIMIT\u3002\u5217\u540D\u4F7F\u7528\u4EBA\u7C7B\u53EF\u8BFB\u663E\u793A\u540D\uFF0C\u8868\u540D\u56FA\u5B9A\u4E3A data\u3002
+const SQL_BLOCKLIST = /\b(ATTACH|DETACH|COPY|INSTALL|LOAD|PRAGMA|SET|RESET|EXPORT|IMPORT|CREATE|INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CALL|read_csv|read_csv_auto|read_parquet|read_json|read_json_auto|read_text|read_blob|parquet_scan|glob|system|getenv)\b/i;
+
+function validateUserSql(sql) {
+    const raw = String(sql || '').trim();
+    if (!raw) {
+        const err = new Error('\u8BF7\u8F93\u5165\u67E5\u8BE2\u8BED\u53E5\u3002');
+        err.status = 400;
+        throw err;
+    }
+    if (raw.length > MAX_SQL_LEN) {
+        const err = new Error(`\u67E5\u8BE2\u8BED\u53E5\u8FC7\u957F\uFF08\u4E0A\u9650 ${MAX_SQL_LEN} \u5B57\u7B26\uFF09\u3002`);
+        err.status = 400;
+        throw err;
+    }
+    // \u53BB\u6389\u5355\u4E2A\u5C3E\u90E8\u5206\u53F7\u540E\uFF0C\u82E5\u4ECD\u542B\u5206\u53F7\u5219\u89C6\u4E3A\u591A\u8BED\u53E5\uFF0C\u62D2\u7EDD\u3002
+    const stripped = raw.replace(/;\s*$/, '');
+    if (stripped.includes(';')) {
+        const err = new Error('\u4EC5\u652F\u6301\u5355\u6761\u67E5\u8BE2\u8BED\u53E5\u3002');
+        err.status = 400;
+        throw err;
+    }
+    if (!/^\s*(SELECT|WITH)\b/i.test(stripped)) {
+        const err = new Error('\u4EC5\u652F\u6301\u4EE5 SELECT \u6216 WITH \u5F00\u5934\u7684\u53EA\u8BFB\u67E5\u8BE2\u3002');
+        err.status = 400;
+        throw err;
+    }
+    if (SQL_BLOCKLIST.test(stripped)) {
+        const err = new Error('\u67E5\u8BE2\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u5173\u952E\u5B57\uFF0C\u4EC5\u652F\u6301\u5BF9\u5F53\u524D\u6570\u636E\u96C6\u7684\u53EA\u8BFB\u67E5\u8BE2\u3002');
+        err.status = 400;
+        throw err;
+    }
+    return stripped;
+}
+
+async function runUserQuery(userId, datasetId, input = {}) {
+    const row = getDatasetForUser(userId, datasetId);
+    const userSql = validateUserSql(input.sql);
+    const limit = Math.min(Math.max(Number(input.limit) || MAX_PREVIEW_ROWS, 1), MAX_QUERY_LIMIT);
+    const columns = jsonParse(row.columns_json, []);
+    const { parquetPath } = getDatasetPaths(row);
+    const selectList = columns.length
+        ? columns.map(column => `${sqlIdent(column.key)} AS ${sqlIdent(column.name)}`).join(', ')
+        : '*';
+    const result = await withAnalysisSlot(async () => {
+        const { instance, connection } = await createDuckConnection();
+        try {
+            await connection.run(`CREATE TABLE data AS SELECT ${selectList} FROM read_parquet(${sqlLiteral(parquetPath)})`);
+            // \u7269\u5316\u5B8C\u6210\u540E\u5207\u65AD\u5916\u90E8\u6587\u4EF6\u8BBF\u95EE\uFF0C\u4F7F\u7528\u6237 SQL \u65E0\u6CD5\u8BFB\u53D6\u6570\u636E\u96C6\u4EE5\u5916\u7684\u4EFB\u4F55\u6587\u4EF6\u3002
+            await connection.run('SET enable_external_access=false');
+            const reader = await connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`);
+            return reader.getRowObjectsJson();
+        } catch (err) {
+            const wrapped = new Error(`\u67E5\u8BE2\u6267\u884C\u5931\u8D25\uFF1A${err.message || '\u8BED\u6CD5\u6216\u5B57\u6BB5\u6709\u8BEF'}`);
+            wrapped.status = 400;
+            throw wrapped;
+        } finally {
+            connection.closeSync();
+            instance.closeSync();
+        }
+    });
+    const truncated = result.length > limit;
+    const rows = truncated ? result.slice(0, limit) : result;
+    const resultColumns = rows.length
+        ? Object.keys(rows[0])
+        : (columns.length ? columns.map(column => column.name) : []);
+    recordArtifact({
+        userId,
+        datasetId,
+        type: 'query',
+        title: userSql.slice(0, 120),
+        content: JSON.stringify({ sql: userSql, rowCount: rows.length, truncated }),
+        metadata: { rows: rows.length, truncated }
+    });
+    return { columns: resultColumns, rows, rowCount: rows.length, truncated };
+}
+
 // \u7528 DuckDB \u76F4\u63A5\u628A parquet COPY \u6210\u4E34\u65F6 CSV\uFF08\u5E26\u8868\u5934\uFF09\uFF0C\u518D\u4EE5\u6D41\u5F0F\u65B9\u5F0F\u5728\u524D\u9762\u8865 UTF-8 BOM
 // \u5199\u5165\u6700\u7EC8\u6587\u4EF6\uFF0C\u5168\u7A0B\u5E38\u91CF\u5185\u5B58\uFF0C\u907F\u514D\u628A\u6574\u8868\u884C\u8F7D\u5165 JS \u540E\u518D\u62FC\u5B57\u7B26\u4E32\u3002
 async function duckCopyToCsv(parquetPath, columns, targetPath) {
@@ -995,7 +1195,9 @@ module.exports = {
     importDataset,
     listDatasetArtifacts,
     listDatasets,
+    runPivot,
     runSummary,
+    runUserQuery,
     serializeDataset,
     softDeleteDataset
 };

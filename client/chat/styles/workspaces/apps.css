@@ -364,6 +364,179 @@
     color: #b45309;
 }
 
+.data-analysis-history-type-query {
+    background: rgba(124, 58, 237, 0.14);
+    color: #7c3aed;
+}
+
+.data-analysis-history-type-pivot {
+    background: rgba(8, 145, 178, 0.14);
+    color: #0891b2;
+}
+
+/* 查询 Tab */
+.data-analysis-query-box {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.data-analysis-query-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.data-analysis-query-fields-label {
+    color: #64748b;
+    font-size: 0.7rem;
+}
+
+.data-analysis-query-field {
+    padding: 2px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+    background: #fff;
+    color: #334155;
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.data-analysis-query-field:hover {
+    border-color: #7c3aed;
+    color: #7c3aed;
+}
+
+.data-analysis-query-sql {
+    min-height: 96px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    resize: vertical;
+}
+
+.data-analysis-query-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.data-analysis-query-hint {
+    color: #94a3b8;
+    font-size: 0.7rem;
+}
+
+.data-analysis-query-hint code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(124, 58, 237, 0.1);
+    color: #7c3aed;
+}
+
+.data-analysis-query-meta {
+    margin-bottom: 6px;
+    color: #64748b;
+    font-size: 0.72rem;
+}
+
+.data-analysis-query-table {
+    overflow: auto;
+}
+
+.data-analysis-query-table table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 0.74rem;
+}
+
+.data-analysis-query-table th,
+.data-analysis-query-table td {
+    max-width: 260px;
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    color: #334155;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-analysis-query-table th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 800;
+    z-index: 1;
+}
+
+/* 透视 Tab */
+.data-analysis-pivot-table {
+    overflow: auto;
+}
+
+.data-analysis-pivot-table table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 0.74rem;
+}
+
+.data-analysis-pivot-table th,
+.data-analysis-pivot-table td {
+    max-width: 220px;
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    color: #334155;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 800;
+    text-align: right;
+    z-index: 1;
+}
+
+.data-analysis-pivot-table tbody th {
+    position: sticky;
+    left: 0;
+    background: #fff;
+    color: #334155;
+    font-weight: 700;
+    text-align: left;
+    z-index: 1;
+}
+
+.data-analysis-pivot-table thead th:first-child {
+    left: 0;
+    z-index: 2;
+    text-align: left;
+}
+
+.data-analysis-pivot-total {
+    font-weight: 700;
+    color: #0f766e;
+}
+
+.data-analysis-pivot-total-row th,
+.data-analysis-pivot-total-row td {
+    border-top: 2px solid rgba(148, 163, 184, 0.3);
+    background: #f8fafc;
+    font-weight: 700;
+}
+
 .data-analysis-preview {
     overflow: auto;
 }
@@ -537,7 +710,6 @@
 
 .data-analysis-ai-box {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     margin-bottom: 10px;
 }
@@ -548,8 +720,23 @@
     resize: vertical;
 }
 
+.data-analysis-ai-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.data-analysis-ai-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #475569;
+    font-size: 0.74rem;
+    cursor: pointer;
+}
+
 .data-analysis-ai-box .btn-primary {
-    align-self: start;
     height: 34px;
     border-radius: 8px;
 }
@@ -560,6 +747,67 @@
     font-size: 0.82rem;
     line-height: 1.7;
     white-space: pre-wrap;
+}
+
+.data-analysis-ai-thinking {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.data-analysis-ai-answer {
+    white-space: pre-wrap;
+}
+
+.data-analysis-ai-charts {
+    display: grid;
+    gap: 12px;
+    margin: 12px 0;
+}
+
+.data-analysis-ai-steps {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: #f8fafc;
+    white-space: normal;
+}
+
+.data-analysis-ai-steps summary {
+    color: #475569;
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.data-analysis-ai-step {
+    display: grid;
+    gap: 3px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.data-analysis-ai-step-tool {
+    color: #7c3aed;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.data-analysis-ai-step code {
+    display: block;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #334155;
+    font-size: 0.72rem;
+    word-break: break-all;
+}
+
+.data-analysis-ai-step em {
+    color: #94a3b8;
+    font-size: 0.7rem;
+    font-style: normal;
 }
 
 .data-analysis-empty {
