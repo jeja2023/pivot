@@ -1,3 +1,29 @@
+## [v0.0.138] - 2026-06-22
+
+### Windows 桌面首发版与企业远程分发能力
+
+本版本将 Pivot 从 Web 服务扩展为可直接安装的 Windows 桌面应用，支持“单安装包 + 外置 config.json”的企业分发模式。当前首发包默认使用本地开发服务地址 `http://127.0.0.1:3000/` 作为远程测试目标；部署到生产环境时，只需要将 `config.json` 中的 `remoteUrl` 和 `autoUpdate.url` 替换为生产地址后重新分发配置或重新打包。
+
+#### 变更内容
+- **Windows 桌面应用打包**：新增 Electron 主进程、预加载脚本、错误页、图标生成脚本和打包脚本，支持生成 NSIS 安装器和 `win-unpacked` 解压版 app。
+- **远程/本地配置分流**：新增 `desktop/config.js`，按命令行、环境变量、`Pivot.exe` 同目录、`resources/config.json` 的优先级读取配置，并校验 `remoteUrl` 与更新源 URL。
+- **本地开发远程测试配置**：新增 `config.json`，默认指向 `http://127.0.0.1:3000/`，用于首发包在本地开发服务上验证桌面壳、登录态、远程加载和错误页重试流程。
+- **企业环境隔离**：窗口标题展示环境名，Electron `partition` 按环境隔离 Cookie 与缓存，避免测试、生产登录态串用。
+- **远程加载失败体验**：新增 `desktop/error.html`，远程服务不可达时显示环境名、目标地址和重试按钮，避免暴露原始 Chromium 错误页。
+- **自动升级能力**：引入 `electron-updater`，新增 `desktop/updater.js`，支持 generic 更新源、启动检查、自动下载、下载完成后提示重启安装，并通过 `autoUpdate` 配置开关控制。
+- **企业分发文档**：新增 `docs/远程模式部署说明.md`，记录配置优先级、环境切换、自动升级发布文件和 IT 分发注意事项。
+- **打包稳定性修复**：生成合法 Windows ICO 图标，规避无效 favicon 导致的打包失败；跳过 Electron Builder 原生依赖重建，避免本地 Node ABI 与打包运行时冲突影响远程模式首发包。
+
+#### 发布与升级说明
+- 首发测试配置：`remoteUrl=http://127.0.0.1:3000/`，`autoUpdate.enabled=false`。
+- 生产部署时：将 `config.json` 改为生产服务地址，并按需启用 `autoUpdate.enabled=true`。
+- 自动升级发布目录需要上传 `Pivot Setup <version>.exe`、`Pivot Setup <version>.exe.blockmap` 和 `latest.yml`。
+
+#### 验证
+- `npm run check`
+- `npm run lint`
+- `npm run dist:win`
+
 ## [v0.0.137] - 2026-06-22
 
 ### 数据分析应用上线

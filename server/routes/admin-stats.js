@@ -402,7 +402,9 @@ function createAdminStatsRouter({
             }
         } catch(e) {}
         
-        const uploadsDir = path.resolve(__dirname, '../../uploads');
+        const uploadsDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+            ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+            : path.resolve(__dirname, '../../uploads');
         let uploadsSize = 0;
         try {
             uploadsSize = await getCachedDirSize(uploadsDir);
@@ -653,8 +655,10 @@ function createAdminStatsRouter({
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         if (canViewAll) {
-            const uploadDir = path.resolve(__dirname, '../../uploads');
-            const dataDir = path.resolve(__dirname, '../../data');
+            const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+                ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+                : path.resolve(__dirname, '../../uploads');
+            const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../data');
             // 合并多个 COUNT 为单条标量子查询，减少往返与锁争用；目录大小为异步文件操作，保持并行
             const [counts, uploadsSize, dataSize] = await Promise.all([
                 Promise.resolve(db.prepare(`

@@ -1,8 +1,8 @@
 {
   "name": "pivot",
-  "version": "0.0.137",
+  "version": "0.0.138",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
-  "main": "server/index.js",
+  "main": "desktop/main.js",
   "engines": {
     "node": ">=20"
   },
@@ -16,7 +16,11 @@
     "check": "npm run check:text && node scripts/check_syntax.js && node scripts/check_chat_assets.js",
     "test": "npm run check && npm run lint && node tests/security.test.js",
     "verify": "npm test",
-    "backup": "node scripts/backup_db.js"
+    "backup": "node scripts/backup_db.js",
+    "desktop": "node scripts/run_desktop.js",
+    "pack:win": "node scripts/package_desktop.js --dir",
+    "dist:win": "node scripts/package_desktop.js nsis",
+    "desktop:icon": "node scripts/build_desktop_icon.js"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.4-r.1",
@@ -27,6 +31,7 @@
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.8.9",
     "express": "^4.18.2",
     "express-rate-limit": "^8.4.1",
     "helmet": "^8.1.0",
@@ -45,7 +50,73 @@
     "word-extractor": "^1.0.4"
   },
   "devDependencies": {
+    "electron": "^38.4.0",
+    "electron-builder": "^26.0.12",
     "eslint": "^10.3.0",
     "nodemon": "^3.1.0"
+  },
+  "build": {
+    "appId": "com.pivot.desktop",
+    "productName": "Pivot",
+    "directories": {
+      "output": "dist-electron-remote"
+    },
+    "files": [
+      "desktop/**",
+      "server/**",
+      "client/**",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "README.md",
+      "使用手册.md",
+      "node_modules/**",
+      "!data/**",
+      "!uploads/**",
+      "!logs/**",
+      "!.env",
+      "!.git/**",
+      "!.github/**",
+      "!tests/**"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**",
+      "node_modules/@duckdb/**",
+      "node_modules/sharp/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "desktop/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "config.json",
+        "to": "config.json"
+      },
+      {
+        "from": "config.example.json",
+        "to": "config.example.json"
+      },
+      {
+        "from": "docs/远程模式部署说明.md",
+        "to": "docs/远程模式部署说明.md"
+      }
+    ],
+    "nodeGypRebuild": false,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.example.com/pivot/"
+      }
+    ]
   }
 }

@@ -78,7 +78,9 @@ function overallStatus(checks) {
 
 function getSystemHealthSnapshot() {
     const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../data');
-    const uploadDir = path.resolve(__dirname, '../../uploads');
+    const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+        ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+        : path.resolve(__dirname, '../../uploads');
     const checks = [
         { name: 'database', ...checkDatabase() },
         { name: 'dataDir', ...checkWritableDirectory('Data directory', dataDir) },

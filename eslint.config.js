@@ -2,6 +2,7 @@ const nodeGlobals = {
     AbortController: 'readonly',
     Buffer: 'readonly',
     URL: 'readonly',
+    URLSearchParams: 'readonly',
     __dirname: 'readonly',
     __filename: 'readonly',
     clearInterval: 'readonly',
@@ -479,11 +480,12 @@ module.exports = [
             'data/**',
             'logs/**',
             'uploads/**',
+            'dist-electron/**',
             'client/common/vendor/**'
         ]
     },
     {
-        files: ['server/**/*.js', 'scripts/**/*.js', 'tests/**/*.js', 'eslint.config.js'],
+        files: ['server/**/*.js', 'scripts/**/*.js', 'tests/**/*.js', 'desktop/**/*.js', 'eslint.config.js'],
         languageOptions: {
             ecmaVersion: 2022,
             sourceType: 'commonjs',

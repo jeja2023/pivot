@@ -5,7 +5,9 @@ const fs = require('fs');
 const { getClientIp } = require('./http');
 
 const isProduction = process.env.NODE_ENV === 'production';
-const logDir = path.resolve(__dirname, '../logs');
+const logDir = process.env.LOG_DIR
+    ? path.resolve(process.env.LOG_DIR)
+    : path.resolve(__dirname, '../logs');
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
 // 敏感字段脱敏配置

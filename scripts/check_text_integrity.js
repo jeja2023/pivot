@@ -10,6 +10,9 @@ const ignoredDirs = new Set([
     'logs',
     'uploads',
     'dist',
+    'dist-electron',
+    'dist-electron-remote',
+    'dist-electron-0.0.138',
     'build'
 ]);
 const textExtensions = new Set([

@@ -1,0 +1,16 @@
+{
+  "mode": "remote",
+  "environmentName": "Production",
+  "remoteUrl": "https://pivot.example.com/",
+  "partition": "persist:pivot-production",
+  "windowTitle": "Pivot",
+  "allowExternalOpen": true,
+  "autoUpdate": {
+    "enabled": false,
+    "url": "https://updates.example.com/pivot/",
+    "checkOnStart": true,
+    "autoDownload": true,
+    "allowPrerelease": false,
+    "installOnQuit": true
+  }
+}

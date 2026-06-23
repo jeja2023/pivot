@@ -416,7 +416,7 @@ app.get(['/manual', '/manual/'], async (req, res) => {
 // 静态文件服务：通过 setHeaders 动态控制缓存策略
 // 注意：express.static 会在发送文件时覆盖已设置的 Cache-Control 头，
 // 因此必须在 setHeaders 回调中设置，而不是在前置中间件中设置
-app.use(express.static('client', {
+app.use(express.static(path.join(__dirname, '../client'), {
     maxAge: appConfig.staticMaxAge,
     setHeaders: (res, filePath) => {
         const urlPath = '/' + path.relative(path.join(__dirname, '../client'), filePath).replace(/\\/g, '/');
@@ -623,4 +623,6 @@ const gracefulShutdown = (signal) => {
 };
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+module.exports = { app, server };
 

@@ -1,0 +1,16 @@
+{
+  "mode": "remote",
+  "environmentName": "Local Dev",
+  "remoteUrl": "http://127.0.0.1:3000/",
+  "partition": "persist:pivot-local-dev",
+  "windowTitle": "Pivot",
+  "allowExternalOpen": true,
+  "autoUpdate": {
+    "enabled": false,
+    "url": "http://127.0.0.1:8080/pivot-updates/",
+    "checkOnStart": true,
+    "autoDownload": true,
+    "allowPrerelease": false,
+    "installOnQuit": true
+  }
+}
