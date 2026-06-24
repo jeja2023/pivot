@@ -343,18 +343,20 @@ function deleteOfficialWritingComment(commentId) {
 }
 
 function addOfficialWritingSuggestion(payload) {
-    officialWritingState.suggestions.unshift({
+    const suggestion = {
         id: `suggestion-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         status: 'pending',
         createdAt: new Date().toISOString(),
         ...payload
-    });
+    };
+    officialWritingState.suggestions.unshift(suggestion);
     if (officialWritingState.suggestions.length > OFFICIAL_WRITING_SUGGESTION_LIMIT) {
         officialWritingState.suggestions = officialWritingState.suggestions.slice(0, OFFICIAL_WRITING_SUGGESTION_LIMIT);
     }
     saveOfficialWritingState();
     openOfficialWritingDrawer('suggestions');
     renderOfficialWritingWorkspace();
+    return suggestion;
 }
 
 function saveOfficialWritingVersion(stage = '') {

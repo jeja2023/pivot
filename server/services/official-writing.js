@@ -11,6 +11,16 @@ const OFFICIAL_WRITING_MODE_LABELS = {
     rewrite_stream: '逐句改写'
 };
 
+// 可流式输出的模式集合：文本类模式逐字返回即可；
+// review 模式需在后端把整段输出解析为结构化 JSON 条目，必须拿到完整文本，故不在此列。
+const OFFICIAL_WRITING_STREAMABLE_MODES = new Set([
+    'draft',
+    'polish',
+    'rewrite_section',
+    'selection',
+    'rewrite_stream'
+]);
+
 // 选区浮动工具条动作 -> 指令。
 const OFFICIAL_WRITING_SELECTION_INSTRUCTIONS = {
     polish: '对以下公文片段进行润色，使表达更规范、准确、流畅，保持原意和事实不变。',
@@ -28,7 +38,8 @@ function buildSystemPrompt(standard) {
     ].join('\n');
 }
 
-// 根据结构化参数组装公文写作的 messages、最大输出令牌数与模式标签。
+// 根据结构化参数组装公文写作的 messages 与模式标签。
+// 输出长度不再由公文模式内置默认值约束，完全交由模型配置 / 全局上下文预算决定。
 // 入参字段全部为可选字符串/对象，缺失时取安全默认值。校验失败时抛出 Error（由路由转为 400）。
 function buildOfficialWritingMessages(params = {}) {
     const mode = String(params.mode || '').trim();
@@ -45,14 +56,12 @@ function buildOfficialWritingMessages(params = {}) {
     const baseText = selectionText || draft;
 
     const userLines = [];
-    let maxTokens = 2000;
 
     if (mode === 'draft') {
         userLines.push(`请基于以下材料和要求，起草一篇规范的「${docType}」，包含标题、主送机关、正文、落款单位和成文日期。`);
         userLines.push('只输出公文正文本身，不要输出任何说明。');
         if (requirements) userLines.push(`补充要求：${requirements}`);
         userLines.push('', '材料：', source || '【暂无材料，请基于文种结构生成规范初稿，未知信息用【待补充】标注】');
-        maxTokens = 2600;
     } else if (mode === 'review') {
         userLines.push(`请审校以下「${docType}」的格式与表达，逐项指出问题。`);
         userLines.push('以 JSON 数组输出，数组每一项为对象，字段为：title（问题简述）、original（涉及的原文片段，可为空字符串）、suggestion（具体修改建议）。');
@@ -74,7 +83,6 @@ function buildOfficialWritingMessages(params = {}) {
         userLines.push('逐句改写，尽量与原文句子一一对应，只输出改写后的文本，不要输出说明。');
         if (requirements) userLines.push(`补充要求：${requirements}`);
         userLines.push('', '待改写片段：', selectionText);
-        maxTokens = 2200;
     } else {
         // polish / rewrite_section
         if (!baseText) throw new Error('待处理文本为空。');
@@ -93,7 +101,6 @@ function buildOfficialWritingMessages(params = {}) {
     return {
         mode,
         modeLabel: OFFICIAL_WRITING_MODE_LABELS[mode],
-        maxTokens,
         messages: [
             { role: 'system', content: buildSystemPrompt(standard) },
             { role: 'user', content: userLines.join('\n') }
@@ -131,6 +138,7 @@ function parseOfficialWritingReviewItems(text) {
 
 module.exports = {
     OFFICIAL_WRITING_MODE_LABELS,
+    OFFICIAL_WRITING_STREAMABLE_MODES,
     OFFICIAL_WRITING_SELECTION_INSTRUCTIONS,
     buildOfficialWritingMessages,
     parseOfficialWritingReviewItems

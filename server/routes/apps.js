@@ -32,7 +32,8 @@ const {
 const {
     buildOfficialWritingMessages,
     parseOfficialWritingReviewItems,
-    OFFICIAL_WRITING_MODE_LABELS
+    OFFICIAL_WRITING_MODE_LABELS,
+    OFFICIAL_WRITING_STREAMABLE_MODES
 } = require('../services/official-writing');
 const {
     buildAiContext,
@@ -312,6 +313,7 @@ function buildAnalysisAgentSystemPrompt(context) {
         '',
         '【可用工具】',
         '1) run_sql：对当前数据集执行只读 SQL。表名固定为 data，列名为下方字段名。仅支持 SELECT/WITH，会自动限制返回行数。',
+        '   写 SQL 时中文字段名必须用双引号；上下文标为数值的字段可直接做 SUM/AVG/MAX/MIN 和加减运算，其他字段需要先 TRY_CAST("字段名" AS DOUBLE)。',
         '2) make_chart：生成图表。参数 chartType(bar|line|area|pie)、xField(分类字段名)、yField(数值字段名，可选)、groupField(分组字段名，可选)、aggregation(sum|count|avg|min|max)。',
         '',
         '【数据集上下文】',
@@ -323,6 +325,14 @@ function buildAnalysisAgentSystemPrompt(context) {
         '- 给出最终回答：{"action":"final","answer":"基于数据的中文结论，简洁给出洞察与建议"}',
         '不要编造字段或数值；需要数据时先用 run_sql 查询。最多可调用工具若干次后必须给出 final。'
     ].join('\n');
+}
+
+function formatAgentToolError(error) {
+    const message = String(error?.message || '工具执行失败');
+    return message
+        .replace(/^查询执行失败[:：]\s*/, '')
+        .split('\n')[0]
+        .slice(0, 500);
 }
 
 // 数据分析 AI 工具调用（深度分析）：JSON-planner ReAct 循环，模型回结构化 JSON，
@@ -370,19 +380,26 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
                     const sql = String(plan.input?.sql || plan.input?.query || '').trim();
                     const result = await runUserQuery(userId, datasetId, { sql, limit: 50 });
                     observation = JSON.stringify({ columns: result.columns, rows: result.rows.slice(0, 30), rowCount: result.rowCount, truncated: result.truncated });
-                    steps.push({ tool: 'run_sql', input: { sql }, summary: `返回 ${result.rowCount} 行` });
+                    steps.push({ tool: 'run_sql', input: { sql }, summary: `返回 ${result.rowCount} 行`, status: 'success' });
                 } else if (plan.tool === 'make_chart') {
                     const result = await buildChart(userId, datasetId, plan.input || {});
                     charts.push(result.chart);
                     observation = JSON.stringify({ ok: true, title: result.chart.title, chartType: result.chart.chartType });
-                    steps.push({ tool: 'make_chart', input: plan.input || {}, summary: result.chart.title });
+                    steps.push({ tool: 'make_chart', input: plan.input || {}, summary: result.chart.title, status: 'success' });
                 } else {
                     observation = `未知工具：${plan.tool}`;
-                    steps.push({ tool: String(plan.tool), input: plan.input || {}, summary: '未知工具' });
+                    steps.push({ tool: String(plan.tool), input: plan.input || {}, summary: '未知工具', status: 'error', error: '未知工具' });
                 }
             } catch (toolErr) {
-                observation = `工具执行失败：${toolErr.message}`;
-                steps.push({ tool: String(plan.tool || ''), input: plan.input || {}, summary: `失败：${toolErr.message}` });
+                const errorText = formatAgentToolError(toolErr);
+                observation = JSON.stringify({ ok: false, error: errorText });
+                steps.push({
+                    tool: String(plan.tool || ''),
+                    input: plan.input || {},
+                    summary: `失败：${errorText}`,
+                    status: 'error',
+                    error: errorText
+                });
             }
             messages.push({ role: 'assistant', content: text });
             messages.push({ role: 'user', content: `工具 ${plan.tool} 结果：\n${clampText(observation, 4000)}\n请据此继续：输出下一步 JSON，或用 action=final 给出最终中文回答。` });
@@ -565,7 +582,9 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             return res.status(400).json({ error: { message: e.message, type: 'invalid_request_error' } });
         }
 
-        const wantStream = !!body.stream && mode === 'rewrite_stream';
+        // 文本类模式（起草/润色/全文改写/选区/逐句改写）均可流式；
+        // review 模式需要在后端把整段输出解析为结构化 JSON 条目，必须拿到完整文本，故不参与流式。
+        const wantStream = !!body.stream && OFFICIAL_WRITING_STREAMABLE_MODES.has(mode);
         const modelCfg = resolveOfficialWritingModel(String(body.model || '').trim(), req.user);
         if (!modelCfg) {
             return res.status(404).json({
@@ -581,8 +600,11 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         }
 
         const userId = req.user.id;
-        // 输出上限：不再写死，取任务基线与模型配置的较大值，让管理员调高“最大输出 Token”能生效。
-        const maxTokens = Math.max(built.maxTokens, Number(modelCfg.max_tokens) || 0);
+        // 获取模型配置的最大输出 Token 限制
+        const modelMaxTokens = Number(modelCfg.max_tokens) || 0;
+        // 输出长度完全由模型决定：公文不再设内置默认上限。
+        // 预算检查时，若模型未配置最大输出限制，则传 null，由全局上下文预算用默认预留量裁剪输入。
+        const maxTokens = modelMaxTokens > 0 ? modelMaxTokens : null;
         // 推理型模型：公文工具任务关闭思考，避免思考耗尽 token 导致正文为空（Qwen3 等）。
         const disableThinking = shouldDisableThinking(modelCfg);
         const requestMessages = disableThinking ? applyNoThinkSoftSwitch(built.messages) : built.messages;
@@ -653,9 +675,11 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             model: modelCfg.model_name,
             messages: upstreamMessages,
             stream: wantStream,
-            temperature: modelCfg.temperature ?? 0.4,
-            max_tokens: maxTokens
+            temperature: modelCfg.temperature ?? 0.4
         };
+        if (modelMaxTokens > 0) {
+            payload.max_tokens = modelMaxTokens;
+        }
         if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
             payload.max_input_tokens = modelCfg.max_input_tokens;
         }

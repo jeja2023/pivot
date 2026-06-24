@@ -15,7 +15,8 @@ test('公文写作起草模式组装 system+user 并带入材料与规范库', (
         source: '关于开展安全检查的材料',
         requirements: '简明扼要'
     });
-    assert.equal(built.maxTokens, 2600);
+    // 输出长度交由模型/全局预算决定，不再产出公文内置 maxTokens。
+    assert.equal(built.maxTokens, undefined);
     assert.equal(built.messages.length, 2);
     assert.equal(built.messages[0].role, 'system');
     assert.ok(built.messages[0].content.includes('党政机关公文格式'));

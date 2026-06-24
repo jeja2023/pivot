@@ -233,7 +233,10 @@ function sanitizeOfficialWritingState(parsed) {
         meta: normalizeOfficialWritingMeta(data.meta),
         comments: Array.isArray(data.comments) ? data.comments : [],
         versions: Array.isArray(data.versions) ? data.versions : [],
-        suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+        // 清理上次会话遗留的流式占位卡片：丢弃无内容的占位，其余清除 streaming 标记恢复为正常待处理建议。
+        suggestions: (Array.isArray(data.suggestions) ? data.suggestions : [])
+            .filter(item => !(item && item.streaming && !String(item.replacement || '').trim()))
+            .map(item => (item && item.streaming ? { ...item, streaming: false } : item)),
         autoSaves: Array.isArray(data.autoSaves) ? data.autoSaves : []
     });
 }

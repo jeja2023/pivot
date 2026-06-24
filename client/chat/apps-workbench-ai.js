@@ -94,6 +94,31 @@ function officialWritingNoContentMessage(result) {
     return 'AI 未返回有效内容，请调整要求后重试';
 }
 
+// 流式建议卡片：直接更新对应卡片的文本节点，避免每个增量都整页重渲染（会丢焦点、抖动）。
+function updateOfficialWritingStreamingCard(id, full) {
+    const node = document.querySelector(`[data-suggestion-id="${id}"] .official-writing-suggestion-text`);
+    if (node) node.textContent = full;
+}
+
+// 流式结束：写入完整文本、清除 streaming 标记，并整页重渲染以恢复操作按钮。
+function finalizeOfficialWritingStreamingCard(id, text) {
+    const suggestion = officialWritingState.suggestions.find(item => item.id === id);
+    if (!suggestion) return;
+    suggestion.replacement = text;
+    suggestion.streaming = false;
+    saveOfficialWritingState();
+    renderOfficialWritingWorkspace();
+}
+
+// 流式失败/空结果：移除占位卡片。
+function removeOfficialWritingSuggestionById(id) {
+    const idx = officialWritingState.suggestions.findIndex(item => item.id === id);
+    if (idx < 0) return;
+    officialWritingState.suggestions.splice(idx, 1);
+    saveOfficialWritingState();
+    renderOfficialWritingWorkspace();
+}
+
 async function runOfficialWritingAiTask(mode, { selection } = {}) {
     if (officialWritingAiBusy) return;
     const docType = getOfficialWritingDocType();
@@ -102,22 +127,24 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
     const baseText = (selection?.text || '').trim() || officialWritingState.draft.trim();
     const modeLabel = OFFICIAL_WRITING_MODES[mode] || '处理';
 
+    const params = {
+        mode,
+        docType,
+        standard: getOfficialWritingStandard(),
+        requirements,
+        comments,
+        source: officialWritingState.source || '',
+        draft: officialWritingState.draft || '',
+        selection: selection?.text ? { text: selection.text } : null
+    };
+
     setOfficialWritingAiBusy(true, `AI ${modeLabel}中…`);
     try {
-        const result = await requestOfficialWritingAi({
-            mode,
-            docType,
-            standard: getOfficialWritingStandard(),
-            requirements,
-            comments,
-            source: officialWritingState.source || '',
-            draft: officialWritingState.draft || '',
-            selection: selection?.text ? { text: selection.text } : null
-        });
-        if (result == null) return;
-        const text = String(result.content || '').trim();
         if (mode === 'review') {
-            // 审校结果由后端完成 JSON 提取与校验；无结构化条目时退回整体意见。
+            // 审校结果需后端完成 JSON 提取与校验，必须拿到完整文本，保持非流式。
+            const result = await requestOfficialWritingAi(params);
+            if (result == null) return;
+            const text = String(result.content || '').trim();
             const items = Array.isArray(result.items) ? result.items : [];
             if (!items.length) {
                 if (!text) {
@@ -162,36 +189,49 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
             showToast(`AI 已生成 ${Math.min(items.length, 20)} 条审校建议`);
             return;
         }
-        if (!text) {
-            showToast(officialWritingNoContentMessage(result), 'warning');
-            return;
-        }
+
+        // 文本类模式（起草/润色/全文改写）：先插入占位卡片，再流式增量填充。
+        // 索引按当前正文长度捕获；流式期间不改动文本框，故索引保持有效。
+        let cardMeta;
+        let successToast;
         if (mode === 'draft') {
             const insertionPoint = selection?.text ? selection.start : officialWritingState.draft.length;
-            addOfficialWritingSuggestion({
+            cardMeta = {
                 type: '起草',
                 title: `${docType} AI 初稿`,
                 target: 'draft',
                 start: insertionPoint,
                 end: selection?.text ? selection.end : insertionPoint,
                 original: selection?.text || '',
-                replacement: text,
                 detail: 'AI 基于材料和文种生成的规范初稿。'
-            });
-            showToast('AI 初稿已生成，可在审改栏接受或调整');
+            };
+            successToast = 'AI 初稿已生成，可在审改栏接受或调整';
+        } else {
+            cardMeta = {
+                type: modeLabel,
+                title: selection?.text ? `选区${modeLabel}建议` : `全文${modeLabel}建议`,
+                target: selection?.target || 'draft',
+                start: selection?.text ? selection.start : 0,
+                end: selection?.text ? selection.end : officialWritingState.draft.length,
+                original: baseText,
+                detail: 'AI 生成，可替换、插入、转为批注或保存为新版本。'
+            };
+            successToast = `AI ${modeLabel}建议已生成`;
+        }
+
+        const placeholder = addOfficialWritingSuggestion({ ...cardMeta, replacement: '', streaming: true });
+        const result = await requestOfficialWritingAi(params, {
+            stream: true,
+            onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
+        });
+        const text = result ? String(result.content || '').trim() : '';
+        if (!text) {
+            removeOfficialWritingSuggestionById(placeholder.id);
+            if (result != null) showToast(officialWritingNoContentMessage(result), 'warning');
             return;
         }
-        addOfficialWritingSuggestion({
-            type: modeLabel,
-            title: selection?.text ? `选区${modeLabel}建议` : `全文${modeLabel}建议`,
-            target: selection?.target || 'draft',
-            start: selection?.text ? selection.start : 0,
-            end: selection?.text ? selection.end : officialWritingState.draft.length,
-            original: baseText,
-            replacement: text,
-            detail: 'AI 生成，可替换、插入、转为批注或保存为新版本。'
-        });
-        showToast(`AI ${modeLabel}建议已生成`);
+        finalizeOfficialWritingStreamingCard(placeholder.id, text);
+        showToast(successToast);
     } finally {
         setOfficialWritingAiBusy(false);
     }
@@ -262,6 +302,17 @@ async function runOfficialWritingSelectionAi(action, selection) {
     if (!label) return;
     setOfficialWritingAiBusy(true, `AI ${label}中…`);
     try {
+        const placeholder = addOfficialWritingSuggestion({
+            type: '选区修改',
+            title: `选区${label}建议`,
+            target: selection.target,
+            start: selection.start,
+            end: selection.end,
+            original: selection.text,
+            replacement: '',
+            detail: `来自选区浮动工具条的 AI ${label}。`,
+            streaming: true
+        });
         const result = await requestOfficialWritingAi({
             mode: 'selection',
             action,
@@ -269,23 +320,17 @@ async function runOfficialWritingSelectionAi(action, selection) {
             standard: getOfficialWritingStandard(),
             requirements: getOfficialWritingRequirements(),
             selection: { text: selection.text }
+        }, {
+            stream: true,
+            onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
         });
-        if (result == null) return;
-        const text = String(result.content || '').trim();
+        const text = result ? String(result.content || '').trim() : '';
         if (!text) {
-            showToast(officialWritingNoContentMessage(result), 'warning');
+            removeOfficialWritingSuggestionById(placeholder.id);
+            if (result != null) showToast(officialWritingNoContentMessage(result), 'warning');
             return;
         }
-        addOfficialWritingSuggestion({
-            type: '选区修改',
-            title: `选区${label}建议`,
-            target: selection.target,
-            start: selection.start,
-            end: selection.end,
-            original: selection.text,
-            replacement: text,
-            detail: `来自选区浮动工具条的 AI ${label}。`
-        });
+        finalizeOfficialWritingStreamingCard(placeholder.id, text);
         showToast(`AI ${label}建议已生成`);
     } finally {
         setOfficialWritingAiBusy(false);

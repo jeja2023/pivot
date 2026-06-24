@@ -1,0 +1,230 @@
+
+(function () {
+    const app = window.PivotDataAnalysis;
+    if (!app) throw new Error('PivotDataAnalysis context is not loaded');
+    const { API, state, esc, fmtNumber, activeDataset } = app;
+    const fetchJson = (...args) => app.fetchJson(...args);
+    const setBusy = (...args) => app.setBusy(...args);
+    const toast = (...args) => app.toast(...args);
+    const guardButton = (...args) => app.guardButton(...args);
+
+    // 将数据比对结果导出为差异 Excel (含相同项、仅在A表、仅在B表和差异项，空白除外)
+    async function exportCompareToExcel() {
+        const result = state.compare;
+        if (!result) return;
+        
+        try {
+            setBusy(true, '正在生成比对结果Excel...');
+            const res = await apiFetch(`${API}/compare/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(result)
+            });
+            if (!res.ok) throw new Error('导出失败');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `数据比对差异结果-${Date.now()}.xlsx`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            toast(e && e.message ? e.message : '导出失败', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function runCompare() {
+        const leftId = document.getElementById('data-analysis-compare-left')?.value;
+        const rightId = document.getElementById('data-analysis-compare-right')?.value;
+        const leftKey = document.getElementById('data-analysis-compare-left-key')?.value;
+        const rightKey = document.getElementById('data-analysis-compare-right-key')?.value;
+        if (!leftId || !rightId) {
+            toast('请选择要比对的数据集', 'warning');
+            return;
+        }
+        if (!leftKey || !rightKey) {
+            toast('请选择比对的左侧主键和右侧主键', 'warning');
+            return;
+        }
+        await guardButton('data-analysis-run-compare', '比对中…', async () => {
+            const payload = {
+                leftDatasetId: leftId,
+                rightDatasetId: rightId,
+                leftKey: leftKey,
+                rightKey: rightKey,
+                compareField: document.getElementById('data-analysis-compare-field')?.value || ''
+            };
+            const data = await fetchJson(`${API}/compare`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            state.compare = data;
+            renderCompare();
+        });
+    }
+
+    function renderCompare() {
+        const box = document.getElementById('data-analysis-compare-result');
+        if (!box) return;
+        if (!state.compare) {
+            box.innerHTML = '<div class="data-analysis-empty">选择两个数据集和主键后开始比对</div>';
+            return;
+        }
+        const result = state.compare;
+        box.innerHTML = `
+            <div style="display: flex; justify-content: flex-end; margin: 12px 10px 6px;">
+                <button id="data-analysis-compare-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出结果</button>
+            </div>
+            ${renderDuplicateKeys(result)}
+            <div class="data-analysis-compare-lists">
+                ${renderCompareList(`相同项 (${fmtNumber(result.matched)})`, result.matchedKeys || [], 'matched')}
+                ${renderCompareList(`仅左侧存在 (${fmtNumber(result.onlyLeft?.length || 0)})`, result.onlyLeft, 'onlyLeft')}
+                ${renderCompareList(`仅右侧存在 (${fmtNumber(result.onlyRight?.length || 0)})`, result.onlyRight, 'onlyRight')}
+                ${renderChangedList(`字段差异 (${fmtNumber(result.changed?.length || 0)})`, result.changed)}
+            </div>
+        `;
+    }
+
+    function renderDuplicateKeys(result = {}) {
+        const left = result.duplicateLeft || [];
+        const right = result.duplicateRight || [];
+        if (!left.length && !right.length) return '';
+        const renderItems = rows => rows.slice(0, 12).map(row => `<span>${esc(row.key)} (${fmtNumber(row.count)})</span>`).join('');
+        return `
+            <div class="data-analysis-compare-warning">
+                <strong>主键存在重复值，已按主键聚合后比对</strong>
+                <div>
+                    ${left.length ? `<section><em>左侧重复</em>${renderItems(left)}</section>` : ''}
+                    ${right.length ? `<section><em>右侧重复</em>${renderItems(right)}</section>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    function renderCompareList(title, rows = [], type = '') {
+        return `
+            <section data-compare-type="${esc(type)}">
+                <strong>${esc(title)}</strong>
+                <div>${rows.slice(0, 30).map(row => `<span>${esc(row.key)}</span>`).join('') || '<em>无</em>'}</div>
+            </section>
+        `;
+    }
+
+    function renderChangedList(title, rows = []) {
+        return `
+            <section data-compare-type="changed">
+                <strong>${esc(title)}</strong>
+                <div>${rows.slice(0, 30).map(row => `
+                    <span>${esc(row.key)}：${esc(row.leftValue)} → ${esc(row.rightValue)}</span>
+                `).join('') || '<em>无</em>'}</div>
+            </section>
+        `;
+    }
+
+    function showCompareDetailModal(type) {
+        const modal = document.getElementById('data-analysis-compare-modal');
+        const titleEl = document.getElementById('data-analysis-compare-modal-title');
+        const contentEl = document.getElementById('data-analysis-compare-modal-content');
+        if (!modal || !titleEl || !contentEl || !state.compare) return;
+
+        const result = state.compare;
+        let title = '';
+        let htmlContent = '';
+
+        if (type === 'matched') {
+            title = `相同项明细 (${result.matched})`;
+            const list = result.matchedKeys || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'onlyLeft') {
+            title = `仅左侧存在明细 (${result.onlyLeft?.length || 0})`;
+            const list = result.onlyLeft || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'onlyRight') {
+            title = `仅右侧存在明细 (${result.onlyRight?.length || 0})`;
+            const list = result.onlyRight || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'changed') {
+            title = `字段差异明细 (${result.changed?.length || 0})`;
+            const list = result.changed || [];
+            const compareField = result.compareField || '对比字段';
+            htmlContent = `
+                <table class="data-table compact-table data-analysis-result-table" style="width: 100%; table-layout: fixed; margin: 0;">
+                    <thead>
+                        <tr><th style="width: 40%; text-align: left;">主键</th><th style="width: 30%; text-align: left;">左侧值 (${esc(compareField)})</th><th style="width: 30%; text-align: left;">右侧值 (${esc(compareField)})</th></tr>
+                    </thead>
+                    <tbody>
+                        ${list.map(item => `
+                            <tr>
+                                <td style="word-break: break-all; text-align: left;"><strong>${esc(item.key)}</strong></td>
+                                <td style="color: #dc2626; font-weight: 700; word-break: break-all; text-align: left;">${esc(item.leftValue)}</td>
+                                <td style="color: #16a34a; font-weight: 700; word-break: break-all; text-align: left;">${esc(item.rightValue)}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="3" style="text-align: center;">无差异</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        titleEl.textContent = title;
+        contentEl.innerHTML = htmlContent;
+        modal.classList.remove('hidden');
+    }
+
+    async function loadArtifacts() {
+        const dataset = activeDataset();
+        const box = document.getElementById('data-analysis-history-result');
+        if (!dataset) {
+            state.artifacts = [];
+            renderHistory();
+            return;
+        }
+        if (box) box.innerHTML = '<div class="data-analysis-empty">加载中…</div>';
+        try {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/artifacts?limit=30`);
+            state.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+            renderHistory();
+        } catch (e) {
+            state.artifacts = [];
+            if (box) box.innerHTML = `<div class="data-analysis-empty">历史加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+        }
+    }
+
+    function renderHistory() {
+        const box = document.getElementById('data-analysis-history-result');
+        if (!box) return;
+        const items = state.artifacts || [];
+        if (!items.length) {
+            box.innerHTML = '<div class="data-analysis-empty">暂无历史记录，生成图表 / 数据透视 / 比对 / 导出后会显示在这里</div>';
+            return;
+        }
+        const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询' };
+        box.innerHTML = items.map((item, index) => {
+            const clickable = item.type === 'chart' && item.chart;
+            const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
+            return `
+                <div class="data-analysis-history-item${clickable ? ' is-chart' : ''}" ${attrs}>
+                    <span class="data-analysis-history-type data-analysis-history-type-${esc(item.type)}">${esc(typeLabel[item.type] || item.type)}</span>
+                    <strong>${esc(item.title)}</strong>
+                    <small>${esc(item.createdAt || '')}${clickable ? ' · 点击重新查看' : ''}</small>
+                </div>
+            `;
+        }).join('');
+    }
+
+    Object.assign(app, {
+        exportCompareToExcel,
+        runCompare,
+        renderCompare,
+        renderDuplicateKeys,
+        renderCompareList,
+        renderChangedList,
+        showCompareDetailModal,
+        loadArtifacts,
+        renderHistory
+    });
+})();

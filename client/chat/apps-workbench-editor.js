@@ -1026,18 +1026,14 @@ function renderOfficialWritingSuggestions() {
     const pending = officialWritingState.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected');
     setText('official-writing-suggestion-count', `${pending.length} 条待处理`);
     if (!list) return;
-    list.innerHTML = officialWritingState.suggestions.map(suggestion => `
-        <article class="official-writing-suggestion-item is-${escapeAppsHtml(suggestion.status || 'pending')}" data-suggestion-id="${escapeAppsHtml(suggestion.id)}">
-            <div>
-                <strong>${escapeAppsHtml(suggestion.title || '修改建议')}</strong>
-                <span>${escapeAppsHtml(suggestion.type || '建议')}</span>
-            </div>
-            <div class="official-writing-suggestion-meta">
-                <span class="official-writing-suggestion-status is-${escapeAppsHtml(suggestion.status || 'pending')}">${escapeAppsHtml(suggestion.status === 'accepted' ? '已接受' : suggestion.status === 'rejected' ? '已拒绝' : '待处理')}</span>
-                <span>${escapeAppsHtml(formatVersionTime(suggestion.resolvedAt || suggestion.createdAt))}</span>
-            </div>
-            ${suggestion.original ? `<p class="official-writing-suggestion-original">${escapeAppsHtml(suggestion.original)}</p>` : ''}
-            <p class="official-writing-suggestion-text">${escapeAppsHtml(suggestion.replacement || suggestion.detail || '')}</p>
+    list.innerHTML = officialWritingState.suggestions.map(suggestion => {
+        // 流式生成中：展示“AI 生成中…”指示，隐藏操作按钮（避免对未完成文本执行接受/替换）。
+        const streaming = !!suggestion.streaming;
+        const statusLabel = streaming
+            ? 'AI 生成中…'
+            : (suggestion.status === 'accepted' ? '已接受' : suggestion.status === 'rejected' ? '已拒绝' : '待处理');
+        const statusClass = streaming ? 'streaming' : (suggestion.status || 'pending');
+        const actions = streaming ? '' : `
             <div class="official-writing-suggestion-actions">
                 <button type="button" class="btn-secondary" data-suggestion-action="replace">替换选区</button>
                 <button type="button" class="btn-secondary" data-suggestion-action="insert">插入下方</button>
@@ -1045,9 +1041,22 @@ function renderOfficialWritingSuggestions() {
                 <button type="button" class="btn-secondary" data-suggestion-action="version">生成版本</button>
                 <button type="button" class="btn-primary" data-suggestion-action="accept">接受</button>
                 <button type="button" class="btn-secondary" data-suggestion-action="reject">拒绝</button>
+            </div>`;
+        return `
+        <article class="official-writing-suggestion-item is-${escapeAppsHtml(suggestion.status || 'pending')}${streaming ? ' is-streaming' : ''}" data-suggestion-id="${escapeAppsHtml(suggestion.id)}">
+            <div>
+                <strong>${escapeAppsHtml(suggestion.title || '修改建议')}</strong>
+                <span>${escapeAppsHtml(suggestion.type || '建议')}</span>
             </div>
-        </article>
-    `).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>';
+            <div class="official-writing-suggestion-meta">
+                <span class="official-writing-suggestion-status is-${escapeAppsHtml(statusClass)}">${escapeAppsHtml(statusLabel)}</span>
+                <span>${escapeAppsHtml(formatVersionTime(suggestion.resolvedAt || suggestion.createdAt))}</span>
+            </div>
+            ${suggestion.original ? `<p class="official-writing-suggestion-original">${escapeAppsHtml(suggestion.original)}</p>` : ''}
+            <p class="official-writing-suggestion-text">${escapeAppsHtml(suggestion.replacement || suggestion.detail || '')}</p>
+            ${actions}
+        </article>`;
+    }).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>';
 }
 
 function renderOfficialWritingReferences() {
