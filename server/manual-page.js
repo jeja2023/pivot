@@ -1,6 +1,6 @@
 const path = require('path');
 
-const MANUAL_PATH = path.resolve(__dirname, '../使用手册.md');
+const MANUAL_PATH = path.resolve(__dirname, '../使用帮助.md');
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -116,10 +116,10 @@ function renderManualHtml(markdown, { appVersion = '', nonce = '', embedded = fa
     const safeNonce = escapeHtml(nonce || '');
     const topbarHtml = embedded ? '' : `        <header class="manual-topbar">
             <div class="manual-brand">
-                <strong>Pivot 用户使用手册</strong>
+                <strong>Pivot 使用帮助</strong>
                 <span>版本 ${safeVersion || 'current'} · 面向普通用户的操作说明</span>
             </div>
-            <nav class="manual-actions" aria-label="手册操作">
+            <nav class="manual-actions" aria-label="帮助操作">
                 <a href="/chat">返回系统</a>
             </nav>
         </header>`;
@@ -128,7 +128,7 @@ function renderManualHtml(markdown, { appVersion = '', nonce = '', embedded = fa
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pivot 用户使用手册</title>
+    <title>Pivot 使用帮助</title>
     <style nonce="${safeNonce}">
         :root { color-scheme: light; --primary: #10a37f; --text: #0f172a; --muted: #64748b; --border: #e2e8f0; --bg: #f8fafc; }
         * { box-sizing: border-box; }

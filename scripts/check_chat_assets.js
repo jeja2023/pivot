@@ -57,16 +57,16 @@ if (!renderChartsJs.includes("loadScriptOnce('/common/vendor/echarts.min.js')"))
     fail('render-charts.js must lazy-load echarts instead of requiring it on the initial chat page');
 }
 
-const manualPath = path.join(rootDir, '使用手册.md');
-if (!fs.existsSync(manualPath)) fail('使用手册.md is required for the /manual page and Docker deployment');
+const manualPath = path.join(rootDir, '使用帮助.md');
+if (!fs.existsSync(manualPath)) fail('使用帮助.md is required for the /manual page and Docker deployment');
 const dockerignorePath = path.join(rootDir, '.dockerignore');
 if (fs.existsSync(dockerignorePath)) {
     const ignoredEntries = fs.readFileSync(dockerignorePath, 'utf8')
         .split(/\r?\n/)
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('#'));
-    if (ignoredEntries.includes('使用手册.md') || ignoredEntries.includes('*.md')) {
-        fail('使用手册.md must not be excluded by .dockerignore');
+    if (ignoredEntries.includes('使用帮助.md') || ignoredEntries.includes('*.md')) {
+        fail('使用帮助.md must not be excluded by .dockerignore');
     }
 }
 

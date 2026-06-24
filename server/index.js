@@ -408,8 +408,8 @@ app.get(['/manual', '/manual/'], async (req, res) => {
             embedded: req.query.embed === '1'
         }));
     } catch (err) {
-        logger.error({ err, manualPath: MANUAL_PATH }, '用户使用手册读取失败');
-        res.status(500).type('text/plain; charset=utf-8').send('用户使用手册暂时无法打开，请联系管理员检查部署文件。');
+        logger.error({ err, manualPath: MANUAL_PATH }, '使用帮助读取失败');
+        res.status(500).type('text/plain; charset=utf-8').send('使用帮助暂时无法打开，请联系管理员检查部署文件。');
     }
 });
 
