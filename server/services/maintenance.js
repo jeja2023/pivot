@@ -152,7 +152,7 @@ function cleanupOldBackups(options = {}) {
             fs.unlinkSync(filePath);
             deletedFiles += 1;
         } catch (e) {
-            logger.warn({ err: e.message, filePath }, 'Old database backup cleanup skipped file');
+            logger.warn({ err: e.message, filePath }, '旧数据库备份清理已跳过文件');
         }
     });
 
@@ -176,12 +176,12 @@ async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
         maintenanceState.auditCleanup.lastChanges = changes;
         maintenanceState.auditCleanup.totalChanges += changes;
         if (changes > 0) {
-            logger.info({ changes, days }, 'Old audit logs cleaned');
+            logger.info({ changes, days }, '旧审计日志已清理');
         }
         return changes;
     } catch (e) {
         maintenanceState.auditCleanup.lastError = e.message;
-        logger.error({ err: e.message }, 'Audit log cleanup failed');
+        logger.error({ err: e.message }, '审计日志清理失败');
         return 0;
     }
 }
@@ -197,12 +197,12 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
         maintenanceState.apiCallLogCleanup.lastChanges = changes;
         maintenanceState.apiCallLogCleanup.totalChanges += changes;
         if (changes > 0) {
-            logger.info({ changes, days }, 'Old API call logs cleaned');
+            logger.info({ changes, days }, '旧 API 调用日志已清理');
         }
         return changes;
     } catch (e) {
         maintenanceState.apiCallLogCleanup.lastError = e.message;
-        logger.error({ err: e.message }, 'API call log cleanup failed');
+        logger.error({ err: e.message }, 'API 调用日志清理失败');
         return 0;
     }
 }
@@ -217,12 +217,12 @@ async function cleanupExpiredRefreshTokens() {
         maintenanceState.refreshTokenCleanup.lastChanges = changes;
         maintenanceState.refreshTokenCleanup.totalChanges += changes;
         if (changes > 0) {
-            logger.info({ changes }, 'Expired refresh tokens cleaned');
+            logger.info({ changes }, '过期刷新令牌已清理');
         }
         return changes;
     } catch (e) {
         maintenanceState.refreshTokenCleanup.lastError = e.message;
-        logger.error({ err: e.message }, 'Refresh token cleanup failed');
+        logger.error({ err: e.message }, '刷新令牌清理失败');
         return 0;
     }
 }
@@ -243,7 +243,7 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
         return result;
     } catch (e) {
         maintenanceState.storageGc.lastError = e.message;
-        logger.error({ err: e.message }, 'Soft-deleted storage cleanup failed');
+        logger.error({ err: e.message }, '软删除存储清理失败');
         return { retentionDays: days, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0 };
     }
 }
@@ -262,14 +262,14 @@ async function optimizeDatabase() {
         return true;
     } catch (e) {
         maintenanceState.optimize.lastError = e.message;
-        logger.error({ err: e.message }, 'SQLite optimize failed');
+        logger.error({ err: e.message }, 'SQLite 优化失败');
         return false;
     }
 }
 
 async function backupDatabase(options = {}) {
     if (maintenanceState.backup.running) {
-        logger.warn('Database backup skipped because another backup is still running');
+        logger.warn('数据库备份已跳过：另一个备份任务仍在运行');
         return { skipped: true, reason: 'running' };
     }
 
@@ -302,7 +302,7 @@ async function backupDatabase(options = {}) {
             deletedFiles: cleanup.deletedFiles,
             retentionDays,
             maxVersions
-        }, 'SQLite database backup completed');
+        }, 'SQLite 数据库备份完成');
 
         return {
             backupPath,
@@ -311,7 +311,7 @@ async function backupDatabase(options = {}) {
         };
     } catch (e) {
         maintenanceState.backup.lastError = e.message;
-        logger.error({ err: e.message }, 'SQLite database backup failed');
+        logger.error({ err: e.message }, 'SQLite 数据库备份失败');
         return null;
     } finally {
         maintenanceState.backup.running = false;
@@ -374,7 +374,7 @@ function startMaintenanceTasks() {
         backupRetentionDays,
         backupMaxVersions,
         backupDir
-    }, 'Maintenance service started');
+    }, '后台维护服务已启动');
 }
 
 module.exports = {

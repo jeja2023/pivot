@@ -225,7 +225,7 @@ function runDueAgentSchedules(limit = 20) {
             createAgentNotificationCallback(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
             created.push(run);
         } catch (e) {
-            logger.error({ err: e.message, scheduleId: schedule.id }, 'Agent schedule failed');
+            logger.error({ err: e.message, scheduleId: schedule.id }, '智能体计划执行失败');
             db.prepare('UPDATE agent_schedules SET status = ?, updated_at = ? WHERE id = ?')
                 .run('paused', getBeijingTimestamp(), schedule.id);
             createAgentNotificationCallback(user.id, null, 'error', '计划任务已暂停', `${schedule.name}: ${e.message}`);
@@ -239,7 +239,7 @@ function startAgentScheduleRunner() {
         try {
             runDueAgentSchedules();
         } catch (e) {
-            logger.error({ err: e.message }, 'Agent schedule runner failed');
+            logger.error({ err: e.message }, '智能体计划调度器执行失败');
         }
     };
     const initial = setTimeout(tick, 5000);

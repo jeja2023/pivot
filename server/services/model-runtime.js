@@ -217,7 +217,7 @@ async function refreshEndpointMonitor(runtime) {
         runtime.monitor.updatedAt = getBeijingTimestamp();
         runtime.monitor.latencyMs = Date.now() - start;
         runtime.monitor.status = 'unreachable';
-        runtime.monitor.error = e.message || 'monitor request failed';
+        runtime.monitor.error = e.message || '监控请求失败';
         runtime.monitor.payload = null;
     }
     return runtime.monitor;

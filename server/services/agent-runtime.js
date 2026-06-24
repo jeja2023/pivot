@@ -698,10 +698,10 @@ async function runAgent(runId, user) {
                         title: `模型路由选择：${routerStrategy}`,
                         output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
                     });
-                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, 'Agent model router selected a model');
+                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
                 }
             } catch (routerErr) {
-                logger.warn({ runId, err: routerErr.message }, 'Agent model routing failed; using original model');
+                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，已使用原始模型');
             }
         }
 
@@ -835,14 +835,14 @@ async function runAgent(runId, user) {
                             title: '模型自动升级：auto-escalate',
                             output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
                         });
-                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, 'Agent confidence low; escalating model');
+                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度较低，正在升级模型');
                         modelCfg = escalation;
                         db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
                             .run(modelCfg.id, getBeijingTimestamp(), runId);
                         answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary');
                     }
                 } catch (escErr) {
-                    logger.warn({ runId, err: escErr.message }, 'auto-escalate failed; keeping first answer');
+                    logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
                 }
             }
         }
@@ -864,7 +864,7 @@ async function runAgent(runId, user) {
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             return;
         }
-        logger.error({ err: e.message, runId }, 'Agent run failed');
+        logger.error({ err: e.message, runId }, '智能体运行失败');
         const retryRow = db.prepare('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?').get(runId);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
@@ -891,7 +891,7 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'error', 'Agent run failed', e.message);
+        createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
     }
 }
 
@@ -925,7 +925,7 @@ function recoverAgentRuns() {
     });
 
     const recoveredQueued = getAgentQueue().recoverQueued(100);
-    logger.info({ recoveredQueued, staleRunning: staleRunning.length }, 'Agent runtime recovery completed');
+    logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时恢复完成');
 }
 
 function approveAgentTool(runId, user, approve = true) {

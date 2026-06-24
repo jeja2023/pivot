@@ -86,6 +86,15 @@
     overflow: auto;
 }
 
+.workspace-table-wrap + .workspace-pagination {
+    margin-top: 10px;
+    padding-top: 10px;
+}
+
+.workspace-pagination:empty {
+    display: none;
+}
+
 .workspace-panel,
 .mcp-form,
 .mcp-list-wrap {

@@ -11,7 +11,8 @@
         query: null,
         pivot: null,
         artifacts: [],
-        versions: null,
+        overviewPage: 1,
+        overviewPageSize: 10,
         aiBusy: false
     };
 
@@ -63,7 +64,6 @@
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="query">数据查询</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="pivot">数据透视</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">AI辅助</button>
-                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="versions">版本管理</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史记录</button>
                     </nav>
                 </aside>
@@ -77,28 +77,26 @@
                     </div>
 
                     <section id="data-analysis-overview-panel" class="data-analysis-tab-panel">
-                        <div class="data-analysis-form-grid" style="margin-bottom: 12px; justify-content: space-between; align-items: center;">
-                            <strong style="font-size: 0.95rem; color: var(--text-main);">已导入的数据集</strong>
-                            <div style="display: flex; gap: 8px;">
-                                <label class="btn-secondary" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; margin: 0;">
-                                    <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls" style="display: none;">
-                                    <span>上传 Excel / CSV</span>
-                                </label>
-                                <button id="data-analysis-import-db" class="btn-secondary" type="button" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; cursor: pointer;">从数据库导入</button>
-                                <button id="data-analysis-overview-refresh" class="btn-secondary" type="button" style="height: 32px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; cursor: pointer;">刷新列表</button>
-                            </div>
-                        </div>
-                        <div class="data-analysis-dataset-table-wrap">
-                            <table class="data-analysis-dataset-table">
+                        <div class="table-container workspace-table-wrap data-analysis-dataset-table-wrap">
+                            <table class="data-table compact-table data-analysis-dataset-table">
+                                <colgroup>
+                                    <col class="col-index">
+                                    <col class="col-name">
+                                    <col class="col-source">
+                                    <col class="col-size">
+                                    <col class="col-type">
+                                    <col class="col-created">
+                                    <col class="col-actions">
+                                </colgroup>
                                 <thead>
                                     <tr>
-                                        <th style="width: 60px; text-align: center;">序号</th>
+                                        <th class="col-index text-center">序号</th>
                                         <th>数据集名称</th>
                                         <th>原始文件名</th>
-                                        <th style="width: 140px;">数据大小</th>
-                                        <th style="width: 80px;">文件类型</th>
-                                        <th style="width: 180px;">导入时间</th>
-                                        <th style="width: 240px; text-align: center;">操作</th>
+                                        <th class="col-size">数据大小</th>
+                                        <th class="col-type">文件类型</th>
+                                        <th class="col-created">导入时间</th>
+                                        <th class="col-actions text-center">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="data-analysis-dataset-table-body">
@@ -106,13 +104,14 @@
                                 </tbody>
                             </table>
                         </div>
+                        <div id="data-analysis-dataset-pagination" class="pagination workspace-pagination"></div>
                     </section>
                     <section id="data-analysis-chart-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-form-grid">
+                        <div class="data-analysis-form-grid data-analysis-chart-controls">
                             <label>分析数据集<select id="data-analysis-chart-dataset" class="form-input"></select></label>
                             <label>分类字段<select id="data-analysis-chart-x" class="form-input"></select></label>
                             <label>数值字段<select id="data-analysis-chart-y" class="form-input"></select></label>
-                            <label>分组字段<select id="data-analysis-chart-group" class="form-input"></select></label>
+                            <label data-data-analysis-chart-control="group">分组字段<select id="data-analysis-chart-group" class="form-input"></select></label>
                             <label>聚合<select id="data-analysis-chart-aggregation" class="form-input">
                                 <option value="sum">求和</option>
                                 <option value="count">计数</option>
@@ -125,6 +124,19 @@
                                 <option value="line">折线图</option>
                                 <option value="area">面积图</option>
                                 <option value="pie">饼图</option>
+                            </select></label>
+                            <label>显示前几位<input id="data-analysis-chart-limit" class="form-input" type="number" min="1" max="80" value="30"></label>
+                            <label>排序<select id="data-analysis-chart-sort" class="form-input">
+                                <option value="value_desc">数值降序</option>
+                                <option value="value_asc">数值升序</option>
+                                <option value="label_asc">分类升序</option>
+                                <option value="label_desc">分类降序</option>
+                            </select></label>
+                            <label>配色<select id="data-analysis-chart-palette" class="form-input">
+                                <option value="teal">经典青绿</option>
+                                <option value="business">商务蓝绿</option>
+                                <option value="soft">柔和多彩</option>
+                                <option value="warm">暖色强调</option>
                             </select></label>
                             <button id="data-analysis-build-chart" class="btn-primary" type="button">生成图表</button>
                         </div>
@@ -185,18 +197,7 @@
                         </div>
                         <div id="data-analysis-ai-result" class="data-analysis-ai-result"></div>
                     </section>
-                    <section id="data-analysis-versions-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-form-grid data-analysis-versions-controls" style="margin-bottom: 8px;">
-                            <label>分析数据集<select id="data-analysis-versions-dataset" class="form-input"></select></label>
-                        </div>
-                        <div class="data-analysis-versions-actions">
-                            <label class="data-analysis-upload-drop data-analysis-version-upload" for="data-analysis-version-file">
-                                <input id="data-analysis-version-file" type="file" accept=".csv,.xlsx,.xls">
-                                <span>上传新版本（替换当前数据，保留历史版本）</span>
-                            </label>
-                        </div>
-                        <div id="data-analysis-versions-result" class="data-analysis-versions-result"></div>
-                    </section>
+
                     <section id="data-analysis-history-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-analysis-form-grid data-analysis-history-controls" style="margin-bottom: 8px;">
                             <label>分析数据集<select id="data-analysis-history-dataset" class="form-input"></select></label>
@@ -285,7 +286,6 @@
         state.query = null;
         state.pivot = null;
         state.artifacts = [];
-        state.versions = null;
         render();
         await loadSummary(id);
     }
@@ -347,7 +347,6 @@
     }
 
     function render() {
-        renderDatasets();
         renderHeader();
         renderOverview();
         renderControls();
@@ -357,31 +356,16 @@
         renderPivotControls();
     }
 
-    function renderDatasets() {
-        const list = document.getElementById('data-analysis-dataset-list');
-        if (!list) return;
-        if (!state.datasets.length) {
-            list.innerHTML = '<div class="data-analysis-empty">还没有数据集</div>';
-            return;
-        }
-        list.innerHTML = state.datasets.map(dataset => `
-            <button class="data-analysis-dataset-item ${dataset.id === state.activeId ? 'active' : ''}" type="button" data-data-analysis-dataset="${esc(dataset.id)}">
-                <strong>${esc(dataset.name)}</strong>
-                <span>${fmtNumber(dataset.rowCount)} 行 / ${fmtNumber(dataset.columnCount)} 列</span>
-                <small>${esc(dataset.originalName || '')}</small>
-            </button>
-        `).join('');
-    }
-
     function updateToolbarHeader(tab) {
         const titleEl = document.getElementById('data-analysis-title');
         const metaEl = document.getElementById('data-analysis-meta');
+        const actionsEl = document.querySelector('.data-analysis-toolbar-actions');
         if (!titleEl || !metaEl) return;
 
         const headers = {
             overview: {
-                title: '数据总览',
-                desc: '上传表格数据，导入数据集，并对已导入的数据集进行预览、选择和管理。'
+                title: '\u6570\u636e\u603b\u89c8',
+                desc: '\u4e0a\u4f20\u8868\u683c\u6570\u636e\uff0c\u5bfc\u5165\u6570\u636e\u96c6\uff0c\u5e76\u5bf9\u6570\u636e\u96c6\u8fdb\u884c\u9884\u89c8\u548c\u7ba1\u7406\u3002'
             },
             chart: {
                 title: '图表生成',
@@ -403,19 +387,25 @@
                 title: 'AI辅助',
                 desc: '调用大语言模型智能分析数据集，提供分析方向、推荐图表与报告摘要等深度洞察。'
             },
-            versions: {
-                title: '版本管理',
-                desc: '上传新版本表格替换当前数据以进行追溯，支持查看、切换和管理数据集的历史版本。'
-            },
             history: {
                 title: '历史记录',
-                desc: '查看当前数据集在图表生成、数据比对、导出和 SQL 查询中的历史记录与快照。'
+                desc: '查看当前数据集在图表生成、数据比对、导出和 SQL 查询中的历史记录。'
             }
         };
 
         const header = headers[tab] || headers.overview;
         titleEl.textContent = header.title;
         metaEl.textContent = header.desc;
+        if (actionsEl) {
+            actionsEl.innerHTML = tab === 'overview' ? `
+                <label class="btn-secondary data-analysis-upload-action">
+                    <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls">
+                    <span>\u4e0a\u4f20 Excel / CSV</span>
+                </label>
+                <button id="data-analysis-import-db" class="btn-secondary" type="button">\u4ece\u6570\u636e\u5e93\u5bfc\u5165</button>
+                <button id="data-analysis-overview-refresh" class="btn-secondary" type="button">\u5237\u65b0\u5217\u8868</button>
+            ` : '';
+        }
     }
 
     function renderHeader() {
@@ -426,32 +416,51 @@
 
     function renderOverview() {
         const body = document.getElementById('data-analysis-dataset-table-body');
+        const pager = document.getElementById('data-analysis-dataset-pagination');
         if (!body) return;
-        if (!state.datasets.length) {
-            body.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;">暂无数据集，请上传或导入。</td></tr>';
+        const total = state.datasets.length;
+        const pageSize = Math.max(Number(state.overviewPageSize) || 10, 1);
+        const pageCount = Math.max(Math.ceil(total / pageSize), 1);
+        state.overviewPage = Math.min(Math.max(Number(state.overviewPage) || 1, 1), pageCount);
+        if (!total) {
+            body.innerHTML = '<tr><td colspan="7" class="text-center data-analysis-empty-cell">\u6682\u65e0\u6570\u636e\u96c6\uff0c\u8bf7\u4e0a\u4f20\u6216\u5bfc\u5165\u3002</td></tr>';
+            if (pager) pager.innerHTML = '';
             return;
         }
-        body.innerHTML = state.datasets.map((dataset, index) => {
-            const isSelected = dataset.id === state.activeId;
-            return `
-                <tr class="${isSelected ? 'active' : ''}">
-                    <td style="text-align: center; color: #64748b; font-weight: 500;">${index + 1}</td>
-                    <td style="font-weight: 700; color: var(--text-main);">${esc(dataset.name)}</td>
-                    <td style="color: #475569; word-break: break-all;">${esc(dataset.originalName || '-')}</td>
-                    <td style="color: #475569;">${fmtNumber(dataset.rowCount)} 行 / ${fmtNumber(dataset.columnCount)} 列</td>
-                    <td style="color: #64748b;"><span style="padding: 2px 6px; border-radius: 4px; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; font-weight: 700;">${esc(dataset.fileType || '表格')}</span></td>
-                    <td style="color: #64748b; font-size: 0.78rem;">${esc(dataset.createdAt || '-')}</td>
-                    <td style="text-align: center;">
-                        <div style="display: inline-flex; gap: 6px; align-items: center; justify-content: center;">
-                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(16, 185, 129, 0.35); color: var(--primary); font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-preview="${esc(dataset.id)}">预览数据</button>
-                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(37, 99, 235, 0.35); color: #2563eb; font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-select="${esc(dataset.id)}">${isSelected ? '当前分析' : '选择分析'}</button>
-                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(148, 163, 184, 0.35); color: #475569; font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-export="${esc(dataset.id)}">导出</button>
-                            <button class="btn-secondary" style="height: 26px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; border-color: rgba(239, 68, 68, 0.35); color: var(--danger); font-weight: 700; cursor: pointer;" type="button" data-data-analysis-action-delete="${esc(dataset.id)}">删除</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+        const startIndex = (state.overviewPage - 1) * pageSize;
+        const pageRows = state.datasets.slice(startIndex, startIndex + pageSize);
+        body.innerHTML = pageRows.map((dataset, offset) => {
+            const rowIndex = startIndex + offset;
+            return (
+                '<tr>' +
+                    '<td class="text-center data-analysis-row-index">' + (rowIndex + 1) + '</td>' +
+                    '<td class="data-analysis-dataset-name">' + esc(dataset.name) + '</td>' +
+                    '<td class="data-analysis-break-text">' + esc(dataset.originalName || '-') + '</td>' +
+                    '<td>' + fmtNumber(dataset.rowCount) + ' \u884c / ' + fmtNumber(dataset.columnCount) + ' \u5217</td>' +
+                    '<td><span class="data-analysis-file-type">' + esc(dataset.fileType || '\u8868\u683c') + '</span></td>' +
+                    '<td class="data-analysis-muted-cell">' + esc(dataset.createdAt || '-') + '</td>' +
+                    '<td class="text-center"><div class="data-analysis-table-actions">' +
+                        '<button class="btn-secondary data-analysis-table-btn" type="button" data-data-analysis-action-preview="' + esc(dataset.id) + '">\u9884\u89c8</button>' +
+                        '<button class="btn-secondary data-analysis-table-btn" type="button" data-data-analysis-action-export="' + esc(dataset.id) + '">\u5bfc\u51fa</button>' +
+                        '<button class="btn-secondary data-analysis-table-btn is-danger" type="button" data-data-analysis-action-delete="' + esc(dataset.id) + '">\u5220\u9664</button>' +
+                    '</div></td>' +
+                '</tr>'
+            );
         }).join('');
+        if (!pager) return;
+        if (typeof window.renderWorkspacePagination === 'function') {
+            window.renderWorkspacePagination(pager, {
+                total,
+                page: state.overviewPage,
+                limit: pageSize,
+                onPageChange: targetPage => {
+                    state.overviewPage = targetPage;
+                    renderOverview();
+                }
+            });
+            return;
+        }
+        pager.innerHTML = '';
     }
 
     async function previewDataset(id) {
@@ -500,13 +509,60 @@
         if (previous && Array.from(el.options).some(option => option.value === previous)) el.value = previous;
     }
 
+    function chartNumericFields(dataset = activeDataset()) {
+        return (dataset?.profile || []).filter(item => item.type === 'number').map(item => item.key);
+    }
+
+    function selectHasOption(select, value) {
+        return Array.from(select?.options || []).some(option => option.value === value);
+    }
+
+    function syncChartAggregationControls(source = 'auto', notify = false) {
+        const yEl = document.getElementById('data-analysis-chart-y');
+        const aggregationEl = document.getElementById('data-analysis-chart-aggregation');
+        if (!yEl || !aggregationEl) return;
+        const aggregation = aggregationEl.value || 'sum';
+        if (yEl.value || aggregation === 'count') return;
+
+        if (source === 'aggregation') {
+            const fallback = chartNumericFields().find(key => selectHasOption(yEl, key));
+            if (fallback) {
+                yEl.value = fallback;
+                return;
+            }
+        }
+
+        aggregationEl.value = 'count';
+        if (notify) toast('未选择数值字段，已自动切换为计数。', 'warning');
+    }
+
+    function syncChartTypeControls(source = 'auto') {
+        const typeEl = document.getElementById('data-analysis-chart-type');
+        const groupEl = document.getElementById('data-analysis-chart-group');
+        const sortEl = document.getElementById('data-analysis-chart-sort');
+        const groupControl = document.querySelector('[data-data-analysis-chart-control="group"]');
+        const chartType = typeEl?.value || 'bar';
+        const isPie = chartType === 'pie';
+        groupControl?.classList.toggle('hidden', isPie);
+        if (isPie && groupEl) groupEl.value = '';
+        if (!sortEl || !['auto', 'type'].includes(source)) return;
+
+        const isTrendChart = chartType === 'line' || chartType === 'area';
+        if (isTrendChart && ['value_desc', 'value_asc'].includes(sortEl.value)) {
+            sortEl.value = 'label_asc';
+        } else if (!isTrendChart && ['label_asc', 'label_desc'].includes(sortEl.value)) {
+            sortEl.value = 'value_desc';
+        }
+    }
     function renderControls() {
         const dataset = activeDataset();
         const columns = dataset?.columns || [];
-        const numeric = (dataset?.profile || []).filter(item => item.type === 'number').map(item => item.key);
+        const numeric = chartNumericFields(dataset);
         setSelectOptions('data-analysis-chart-x', buildOptions(columns), columns[0]?.key || '');
         setSelectOptions('data-analysis-chart-y', buildOptions(columns, { includeEmpty: true, emptyLabel: '计数' }), numeric[0] || '');
         setSelectOptions('data-analysis-chart-group', buildOptions(columns, { includeEmpty: true, emptyLabel: '不分组' }), '');
+        syncChartAggregationControls('auto');
+        syncChartTypeControls('auto');
         const datasetOptions = state.datasets.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
         setSelectOptions('data-analysis-compare-left', datasetOptions, state.compareLeftId || state.activeId);
         setSelectOptions('data-analysis-compare-right', datasetOptions, state.compareRightId);
@@ -517,7 +573,6 @@
         setSelectOptions('data-analysis-query-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-pivot-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-ai-dataset', datasetOptions, state.activeId);
-        setSelectOptions('data-analysis-versions-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-history-dataset', datasetOptions, state.activeId);
     }
 
@@ -532,7 +587,7 @@
     function buildTable(rows = [], columns = []) {
         if (!rows.length || !columns.length) return '<div class="data-analysis-empty">暂无预览数据</div>';
         return `
-            <table>
+            <table class="data-table compact-table data-analysis-result-table">
                 <thead><tr>${columns.map(column => `<th>${esc(column.name)}</th>`).join('')}</tr></thead>
                 <tbody>
                     ${rows.slice(0, 80).map(row => `
@@ -547,7 +602,7 @@
     function buildTableFromRows(columns = [], rows = []) {
         if (!columns.length) return '<div class="data-analysis-empty">无结果</div>';
         return `
-            <table>
+            <table class="data-table compact-table data-analysis-result-table">
                 <thead><tr>${columns.map(name => `<th>${esc(name)}</th>`).join('')}</tr></thead>
                 <tbody>
                     ${rows.slice(0, 5000).map(row => `
@@ -668,7 +723,7 @@
         box.innerHTML = `
             ${result.truncated ? '<div class="data-analysis-query-meta">维度过多，行/列已截断展示。</div>' : ''}
             <div class="data-analysis-pivot-table" style="margin-bottom: 12px;">
-                <table>
+                <table class="data-table compact-table data-analysis-result-table">
                     <thead>${head}</thead>
                     <tbody>${body || ''}${footer}</tbody>
                 </table>
@@ -683,12 +738,20 @@
         const dataset = activeDataset();
         if (!dataset) return;
         await guardButton('data-analysis-build-chart', '生成中…', async () => {
+            syncChartAggregationControls('build', true);
+            syncChartTypeControls('build');
+            const sortValue = document.getElementById('data-analysis-chart-sort')?.value || 'value_desc';
+            const [sortBy, sortOrder] = sortValue.split('_');
             const payload = {
                 xField: document.getElementById('data-analysis-chart-x')?.value || '',
                 yField: document.getElementById('data-analysis-chart-y')?.value || '',
                 groupField: document.getElementById('data-analysis-chart-group')?.value || '',
                 aggregation: document.getElementById('data-analysis-chart-aggregation')?.value || 'sum',
-                chartType: document.getElementById('data-analysis-chart-type')?.value || 'bar'
+                chartType: document.getElementById('data-analysis-chart-type')?.value || 'bar',
+                limit: document.getElementById('data-analysis-chart-limit')?.value || '30',
+                sortBy: sortBy || 'value',
+                sortOrder: sortOrder || 'desc',
+                colorPalette: document.getElementById('data-analysis-chart-palette')?.value || 'teal'
             };
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/chart`, {
                 method: 'POST',
@@ -718,9 +781,9 @@
             return;
         }
         box.innerHTML = `
-            <div class="data-analysis-chart-actions" style="display: flex; gap: 8px;">
-                <button id="data-analysis-chart-png" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;">保存为图片</button>
-                <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;">导出图表数据 (CSV)</button>
+            <div class="data-analysis-chart-actions">
+                <button id="data-analysis-chart-png" class="btn-secondary" type="button">保存为图片</button>
+                <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button">导出图表数据 (CSV)</button>
             </div>
             <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(state.chart))}">
                 <div class="pivot-echart-title">图表预览</div>
@@ -1123,81 +1186,6 @@
         });
     }
 
-    async function loadVersions() {
-        const dataset = activeDataset();
-        const box = document.getElementById('data-analysis-versions-result');
-        if (!dataset) {
-            state.versions = null;
-            renderVersions();
-            return;
-        }
-        if (box) box.innerHTML = '<div class="data-analysis-empty">加载中…</div>';
-        try {
-            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions`);
-            state.versions = data;
-            renderVersions();
-        } catch (e) {
-            state.versions = null;
-            if (box) box.innerHTML = `<div class="data-analysis-empty">版本加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
-        }
-    }
-
-    function renderVersions() {
-        const box = document.getElementById('data-analysis-versions-result');
-        if (!box) return;
-        const list = state.versions?.versions || [];
-        if (!list.length) {
-            box.innerHTML = '<div class="data-analysis-empty">暂无版本信息</div>';
-            return;
-        }
-        box.innerHTML = list.map(item => `
-            <div class="data-analysis-version-item${item.active ? ' is-active' : ''}">
-                <div class="data-analysis-version-head">
-                    <strong>v${esc(item.version)}</strong>
-                    ${item.active ? '<span class="data-analysis-version-badge">当前</span>' : ''}
-                    <small>${esc(item.createdAt || '')}</small>
-                </div>
-                <span>${fmtNumber(item.rowCount)} 行 / ${fmtNumber(item.columnCount)} 列 · ${esc(item.fileType || '')}</span>
-                ${item.note ? `<em>${esc(item.note)}</em>` : ''}
-                ${item.active ? '' : `<button type="button" class="btn-secondary" data-data-analysis-activate-version="${esc(item.version)}">切换到此版本</button>`}
-            </div>
-        `).join('');
-    }
-
-    async function uploadVersion(file) {
-        const dataset = activeDataset();
-        if (!dataset || !file) return;
-        const form = new FormData();
-        form.append('file', file);
-        setBusy(true, '正在上传新版本...');
-        try {
-            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions`, { method: 'POST', body: form });
-            toast(`已创建 v${data.version}`);
-            await loadDatasetDetail(dataset.id);
-            activateTab('versions');
-            await loadVersions();
-        } catch (e) {
-            toast(e && e.message ? e.message : '新版本上传失败', 'error');
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    async function activateVersion(version) {
-        const dataset = activeDataset();
-        if (!dataset) return;
-        try {
-            await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/versions/${encodeURIComponent(version)}/activate`, { method: 'POST' });
-            toast(`已切换到 v${version}`);
-            await loadDatasetDetail(dataset.id);
-            activateTab('versions');
-            await loadVersions();
-        } catch (e) {
-            toast(e && e.message ? e.message : '切换版本失败', 'error');
-        }
-    }
-
-    // 从数据库导入：列出可用数据库连接并开启自定义导入模态弹窗
     async function importFromDatabase() {
         let connections = [];
         try {
@@ -1294,13 +1282,20 @@
                 event.target.value = '';
                 return;
             }
-            if (event.target?.id === 'data-analysis-version-file') {
-                uploadVersion(event.target.files?.[0]);
-                event.target.value = '';
-                return;
-            }
             if (['data-analysis-compare-left', 'data-analysis-compare-right'].includes(event.target?.id)) {
                 renderCompareKeyOptions();
+                return;
+            }
+            if (event.target?.id === 'data-analysis-chart-y') {
+                syncChartAggregationControls('y');
+                return;
+            }
+            if (event.target?.id === 'data-analysis-chart-aggregation') {
+                syncChartAggregationControls('aggregation', true);
+                return;
+            }
+            if (event.target?.id === 'data-analysis-chart-type') {
+                syncChartTypeControls('type');
                 return;
             }
             if ([
@@ -1308,7 +1303,6 @@
                 'data-analysis-query-dataset',
                 'data-analysis-pivot-dataset',
                 'data-analysis-ai-dataset',
-                'data-analysis-versions-dataset',
                 'data-analysis-history-dataset'
             ].includes(event.target?.id)) {
                 const targetDatasetId = event.target.value;
@@ -1316,20 +1310,13 @@
                 const activeTabEl = document.querySelector('.data-analysis-tab.active');
                 const activeTabName = activeTabEl?.dataset.dataAnalysisTab;
                 if (activeTabName === 'history') loadArtifacts();
-                if (activeTabName === 'versions') loadVersions();
             }
         });
         root.addEventListener('click', async event => {
-            // 数据集行内“预览数据”按钮
+            // 数据集行内“预览”按钮
             const previewBtn = event.target.closest('[data-data-analysis-action-preview]');
             if (previewBtn) {
                 await previewDataset(previewBtn.dataset.dataAnalysisActionPreview);
-                return;
-            }
-            // 数据集行内“选择分析”按钮
-            const selectBtn = event.target.closest('[data-data-analysis-action-select]');
-            if (selectBtn) {
-                await loadDatasetDetail(selectBtn.dataset.dataAnalysisActionSelect);
                 return;
             }
             // 数据集行内“导出”按钮
@@ -1345,7 +1332,11 @@
             if (rowDeleteBtn) {
                 const datasetId = rowDeleteBtn.dataset.dataAnalysisActionDelete;
                 const dataset = state.datasets.find(item => item.id === datasetId);
-                if (!dataset || !confirm(`确认删除数据集「${dataset.name}」？`)) return;
+                if (!dataset) return;
+                const confirmed = typeof window.showConfirm === 'function'
+                    ? await window.showConfirm('删除数据集', `确定删除数据集「${dataset.name}」吗？删除后相关分析记录和文件也会一并清理。`)
+                    : false;
+                if (!confirmed) return;
                 setBusy(true, '正在删除数据集...');
                 try {
                     await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}`, { method: 'DELETE' });
@@ -1381,12 +1372,6 @@
                 const name = tab.dataset.dataAnalysisTab;
                 activateTab(name);
                 if (name === 'history') loadArtifacts();
-                if (name === 'versions') loadVersions();
-                return;
-            }
-            const activateBtn = event.target.closest('[data-data-analysis-activate-version]');
-            if (activateBtn) {
-                await activateVersion(activateBtn.dataset.dataAnalysisActivateVersion);
                 return;
             }
             if (event.target.closest('#data-analysis-import-db')) {
@@ -1411,6 +1396,7 @@
                     document.getElementById('data-analysis-chart-y').value = item.yField || '';
                     document.getElementById('data-analysis-chart-aggregation').value = item.aggregation || 'count';
                     document.getElementById('data-analysis-chart-type').value = item.chartType || 'bar';
+                    syncChartTypeControls('type');
                     await buildChart();
                 }
                 return;

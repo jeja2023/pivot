@@ -43,7 +43,7 @@ function decryptSecret(value) {
             decipher.final()
         ]).toString('utf8');
     } catch (e) {
-        throw new Error('Secret decryption failed. Check DATA_ENCRYPTION_KEY or JWT_SECRET consistency.');
+        throw new Error('密钥解密失败，请检查 DATA_ENCRYPTION_KEY 或 JWT_SECRET 是否一致。');
     }
 }
 
@@ -324,7 +324,7 @@ function removeAttachmentFiles(attachments) {
             : path.resolve(projectRoot, relativePath);
         if (target === uploadRoot || !isPathInsideUploadRoot(target)) {
             result.skipped = true;
-            logger.warn({ filePath }, 'Attachment cleanup skipped unsafe path');
+            logger.warn({ filePath }, '附件清理已跳过不安全路径');
             continue;
         }
         try {
@@ -344,7 +344,7 @@ function removeAttachmentFiles(attachments) {
         } catch (e) {
             result.ok = false;
             result.error = e.message;
-            logger.warn({ filePath, err: e.message }, 'Attachment cleanup failed to remove file');
+            logger.warn({ filePath, err: e.message }, '附件清理删除文件失败');
         }
     }
     if (changed) clearDirSizeCache();

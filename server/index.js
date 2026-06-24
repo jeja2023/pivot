@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 
 // 自动处理 Windows 控制台中文乱码
 if (process.platform === 'win32') {
@@ -54,7 +54,7 @@ const fatalExit = (reason, err) => {
     try {
         flushAllSqliteWrites();
     } catch (flushErr) {
-        logger.warn({ err: flushErr }, 'SQLite write queue flush during fatal exit failed');
+        logger.warn({ err: flushErr }, '致命退出时 SQLite 写入队列刷新失败');
     }
     if (shuttingDown) return;
     shuttingDown = true;
@@ -67,7 +67,7 @@ process.on('unhandledRejection', (reason) => {
     // 仅记录并继续运行：未处理的 Promise 拒绝不应直接终止进程，
     // 否则单个被忽略的 Promise 会拖垮整个服务。uncaughtException 仍保留退出行为。
     const err = reason instanceof Error ? reason : new Error(String(reason));
-    logger.error({ err }, '未处理的 Promise 拒绝 (Unhandled Rejection)');
+    logger.error({ err }, '未处理的 Promise 拒绝');
 });
 const { authMiddleware, csrfMiddleware } = require('./auth');
 const { isAdmin } = require('./permissions');
@@ -614,7 +614,7 @@ const gracefulShutdown = (signal) => {
         try {
             flushAllSqliteWrites();
         } catch (err) {
-            logger.warn({ err }, 'SQLite write queue flush during shutdown failed');
+            logger.warn({ err }, '关闭服务时 SQLite 写入队列刷新失败');
         }
         process.exit(code);
     };

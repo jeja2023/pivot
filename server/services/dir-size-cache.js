@@ -18,7 +18,7 @@ function configureDirSizeCache({ ttlMs = 0, max = 64, depth = DEFAULT_MAX_DEPTH 
 async function getDirSizeAsync(dir, depth = 0) {
     if (!fs.existsSync(dir)) return 0;
     if (depth >= maxDepth) {
-        logger.warn({ dir, depth, maxDepth }, 'Directory size recursion limit reached');
+        logger.warn({ dir, depth, maxDepth }, '目录大小扫描已达到递归深度上限');
         return 0;
     }
     let total = 0;
@@ -35,7 +35,7 @@ async function getDirSizeAsync(dir, depth = 0) {
             }
         }
     } catch (err) {
-        logger.warn({ dir, err: err.message }, 'Directory size scan failed');
+        logger.warn({ dir, err: err.message }, '目录大小扫描失败');
     }
     return total;
 }

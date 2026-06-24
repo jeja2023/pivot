@@ -35,8 +35,6 @@ const {
     OFFICIAL_WRITING_MODE_LABELS
 } = require('../services/official-writing');
 const {
-    activateDatasetVersion,
-    addDatasetVersion,
     buildAiContext,
     buildChart,
     compareDatasets,
@@ -45,7 +43,6 @@ const {
     importDataset,
     importFromDatabase,
     listDatasetArtifacts,
-    listDatasetVersions,
     listDatasets,
     runPivot,
     runSummary,
@@ -495,37 +492,6 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         res.download(exported.filePath, exported.fileName);
     }));
 
-    // 版本管理：列出版本、上传新版本、切换激活版本。
-    router.get('/apps/data-analysis/datasets/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
-        res.json(listDatasetVersions(req.user.id, req.params.id));
-    }));
-
-    router.post('/apps/data-analysis/datasets/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
-        try {
-            const result = await addDatasetVersion({
-                user: req.user,
-                datasetId: req.params.id,
-                file: req.file,
-                note: req.body?.note,
-                activate: req.body?.activate !== 'false' && req.body?.activate !== false
-            });
-            logAction(req, '数据分析-上传新版本', `数据集: ${req.params.id}，版本: v${result.version}`);
-            res.json(result);
-        } catch (e) {
-            if (req.file?.path) {
-                try { require('fs').rmSync(req.file.path, { force: true }); } catch (_err) { /* noop */ }
-            }
-            throw e;
-        }
-    }));
-
-    router.post('/apps/data-analysis/datasets/:id/versions/:version/activate', authMiddleware, asyncHandler(async (req, res) => {
-        const dataset = activateDatasetVersion(req.user.id, req.params.id, req.params.version);
-        logAction(req, '数据分析-切换版本', `数据集: ${req.params.id}，版本: v${req.params.version}`);
-        res.json({ dataset });
-    }));
-
-    // 从已配置的 MCP 数据库连接导入数据集（只读查询，复用数据库 MCP 治理与 SSRF 守卫）。
     router.post('/apps/data-analysis/import-database', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
         const dataset = await importFromDatabase({

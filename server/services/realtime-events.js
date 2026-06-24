@@ -55,7 +55,7 @@ function subscribeUserEvents(user, res, options = {}) {
         try {
             res.write(encodeSse(type, payload));
         } catch (err) {
-            logger.debug({ err: err.message, userId }, 'Realtime SSE client write failed');
+            logger.debug({ err: err.message, userId }, '实时 SSE 客户端写入失败');
             removeClient(userId, client);
         }
     };

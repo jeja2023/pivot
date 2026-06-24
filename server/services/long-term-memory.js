@@ -1026,7 +1026,7 @@ function triggerMemoryExtractionWorker() {
         processMemoryExtractionJobs()
             .catch(err => {
                 if (/database connection is not open/i.test(String(err.message || ''))) return;
-                logger.warn({ err: err.message }, 'long-term memory extraction worker failed');
+                logger.warn({ err: err.message }, '长期记忆抽取工作线程失败');
             });
     }, 0).unref?.();
 }
@@ -1256,7 +1256,7 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
             candidates = await extractMemoryCandidatesWithModel(messages, { sessionId, user, modelCfg });
             if (candidates.length > 0) extractor = 'model';
         } catch (err) {
-            logger.warn({ userId, sessionId, err: err.message }, 'long-term memory model extraction failed; falling back to heuristics');
+            logger.warn({ userId, sessionId, err: err.message }, '长期记忆模型抽取失败，已回退到启发式规则');
         }
     }
     if (candidates.length === 0) {

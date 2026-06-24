@@ -869,7 +869,7 @@ function safeIndexKnowledgeGraphForChunks(payload) {
     try {
         return indexKnowledgeGraphForChunks(payload);
     } catch (e) {
-        logger.warn({ err: e.message, docId: payload?.docId }, 'Knowledge graph indexing skipped for document batch');
+        logger.warn({ err: e.message, docId: payload?.docId }, '知识图谱已跳过文档批次索引');
         return { entities: 0, relations: 0, error: e.message };
     }
 }

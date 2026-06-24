@@ -14,12 +14,12 @@ function configureAgentArtifacts({ getRunDetailForUser, getAgentRunTitle, create
 }
 
 function ensureGetRunDetailForUser() {
-    if (typeof getRunDetailForUserCallback !== 'function') throw new Error('Agent artifact runtime is not configured.');
+    if (typeof getRunDetailForUserCallback !== 'function') throw new Error('智能体产物运行时尚未配置。');
     return getRunDetailForUserCallback;
 }
 
 function ensureGetAgentRunTitle() {
-    if (typeof getAgentRunTitleCallback !== 'function') throw new Error('Agent artifact runtime is not configured.');
+    if (typeof getAgentRunTitleCallback !== 'function') throw new Error('智能体产物运行时尚未配置。');
     return getAgentRunTitleCallback;
 }
 

@@ -82,7 +82,7 @@ function createAgentQueue({
             activeRunIds.add(runId);
             queuedHints.delete(runId);
             runAgent(runId, user).catch(err => {
-                logger.error({ err: err.message, runId }, 'Agent run failed outside runtime guard');
+                logger.error({ err: err.message, runId }, '智能体运行在运行时保护外失败');
                 markRunError(runId, err.message);
             }).finally(() => {
                 activeRunIds.delete(runId);

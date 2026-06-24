@@ -127,7 +127,7 @@ function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
             attachmentRows,
             knowledgeDocRows,
             messageRows
-        }, 'Soft-deleted storage purged');
+        }, '软删除存储已清理');
     }
 
     return {

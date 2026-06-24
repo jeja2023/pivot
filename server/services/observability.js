@@ -61,7 +61,7 @@ async function sendWebhookAlert(event) {
         db.prepare('UPDATE observability_events SET alerted_at = ? WHERE id = ?')
             .run(getBeijingTimestamp(), event.id);
     } catch (e) {
-        logger.warn({ err: e.message, eventId: event.id }, 'Observability webhook alert failed');
+        logger.warn({ err: e.message, eventId: event.id }, '可观测性 Webhook 告警发送失败');
     }
 }
 
@@ -92,7 +92,7 @@ function recordObservabilityEvent(input = {}) {
         }
         return event;
     } catch (e) {
-        logger.warn({ err: e.message, type, source: input.source }, 'Observability event write failed');
+        logger.warn({ err: e.message, type, source: input.source }, '可观测性事件写入失败');
         return null;
     }
 }

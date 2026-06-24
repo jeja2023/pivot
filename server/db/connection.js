@@ -14,7 +14,7 @@ if (!fs.existsSync(dataDir)) {
 
 const dbPath = path.join(dataDir, 'chat.db');
 const db = new Database(dbPath);
-logger.info({ dbPath }, 'SQLite database connected');
+logger.info({ dbPath }, 'SQLite 数据库已连接');
 
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
@@ -55,9 +55,9 @@ try {
         temp_store: db.pragma('temp_store', { simple: true }),
         mmap_size: db.pragma('mmap_size', { simple: true })
     };
-    logger.info(effective, 'SQLite performance pragmas applied');
+    logger.info(effective, 'SQLite 性能参数已应用');
 } catch (e) {
-    logger.debug?.({ err: e.message }, 'SQLite pragma readback skipped');
+    logger.debug?.({ err: e.message }, 'SQLite 性能参数读取回显已跳过');
 }
 
 const rawPrepare = db.prepare.bind(db);
@@ -76,7 +76,7 @@ db.prepare = (sql) => {
                     try {
                         require('../services/observability').recordSlowSql(sql, durationMs, params);
                     } catch (e) {
-                        logger.debug?.({ err: e.message }, 'Slow SQL recording skipped');
+                        logger.debug?.({ err: e.message }, '慢 SQL 记录已跳过');
                     }
                 }
             }

@@ -81,10 +81,10 @@ function scheduleFlush() {
 
 function enqueue(queueName, item) {
     const queue = queues[queueName];
-    if (!queue) throw new Error(`Unknown SQLite write queue: ${queueName}`);
+    if (!queue) throw new Error(`未知 SQLite 写入队列： ${queueName}`);
     if (queue.length >= QUEUE_LIMITS[queueName]) {
         queue.shift();
-        logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, 'SQLite write queue overflow; oldest item dropped');
+        logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, 'SQLite 写入队列溢出，已丢弃最早任务');
     }
     queue.push(item);
     if (SYNC_MODE) {
@@ -115,7 +115,7 @@ function flushSqliteWriteQueue() {
                 try {
                     transactions[queueName](batch);
                 } catch (err) {
-                    logger.warn({ err: err.message, queueName, count: batch.length }, 'SQLite write queue flush failed; retrying later');
+                    logger.warn({ err: err.message, queueName, count: batch.length }, 'SQLite 写入队列刷新失败，稍后重试');
                     queues[queueName].unshift(...batch);
                     return;
                 }
@@ -171,6 +171,6 @@ process.once('beforeExit', () => {
     try {
         flushAllSqliteWrites();
     } catch (err) {
-        logger.warn({ err: err && err.message ? err.message : err }, 'SQLite write queue flush on exit failed');
+        logger.warn({ err: err && err.message ? err.message : err }, '退出时 SQLite 写入队列刷新失败');
     }
 });

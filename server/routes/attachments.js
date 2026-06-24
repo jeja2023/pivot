@@ -32,7 +32,7 @@ function getSafeUploadPath(userId, sessionId, filename) {
     return { uploadRoot, target };
 }
 
-function removeLocalFile(filePath, logContext = 'Remove upload file failed') {
+function removeLocalFile(filePath, logContext = '上传文件删除失败') {
     if (!filePath) return false;
     try {
         if (fs.existsSync(filePath)) {
@@ -48,7 +48,7 @@ function removeLocalFile(filePath, logContext = 'Remove upload file failed') {
 
 function removeTempUploadFile(file) {
     if (!file?.path) return;
-    removeLocalFile(file.path, 'Remove temporary upload file failed');
+    removeLocalFile(file.path, '临时上传文件删除失败');
 }
 
 function createAttachmentsRouter({
@@ -158,7 +158,7 @@ function createAttachmentsRouter({
                         getAttachmentContextLimit()
                     );
                 } catch (readErr) {
-                    logger.error({ err: readErr.message, path: req.file.path, originalName }, 'Read attachment text failed');
+                    logger.error({ err: readErr.message, path: req.file.path, originalName }, '附件文本读取失败');
                     if (isPasswordError(readErr) || readErr.code === 'PASSWORD_UNSUPPORTED') {
                         removeLocalFile(req.file.path);
                         return res.status(422).json({
@@ -168,7 +168,7 @@ function createAttachmentsRouter({
                         });
                     }
                     if (path.extname(originalName).toLowerCase() === '.pdf') {
-                        throw new Error(`PDF text extraction failed: ${readErr.message}`);
+                        throw new Error(`PDF 文本提取失败： ${readErr.message}`);
                     }
                     extractedText = '';
                 }
@@ -197,7 +197,7 @@ function createAttachmentsRouter({
                             });
                         }
                     } catch (ocrErr) {
-                        logger.error({ err: ocrErr.message, originalName }, 'Render scanned PDF pages failed');
+                        logger.error({ err: ocrErr.message, originalName }, '扫描版 PDF 页面渲染失败');
                     }
                 }
             }

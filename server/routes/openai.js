@@ -580,7 +580,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             return res.json(payload);
         } catch (e) {
             const errorMsg = e.response?.data?.error?.message || e.message;
-            logger.error({ err: errorMsg, model: configuredModel }, 'OpenAI Embeddings 转发失败');
+            logger.error({ err: errorMsg, model: configuredModel }, 'OpenAI 嵌入转发失败');
             recordApiCallLog(req, { name: configuredModel, model_name: configuredModel }, inputs || [], {
                 status: 'error',
                 errorMessage: errorMsg,

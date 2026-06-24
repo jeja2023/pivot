@@ -459,10 +459,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 message: failure.detail || failure.message || err?.message,
                 hint: failure.hint,
                 connection: sanitizeDatabaseConnectionForLog(connection, req.body)
-            }, 'MCP database connection test failed');
+            }, 'MCP 数据库连接测试失败');
             res.status(status).json({
                 success: false,
-                error: failure.message || err?.message || 'Database connection test failed.',
+                error: failure.message || err?.message || '数据库连接测试失败。',
                 code: failure.code || err?.code || 'MCP_DATABASE_CONNECTION_TEST_FAILED',
                 detail: failure.detail || '',
                 hint: failure.hint || '',
