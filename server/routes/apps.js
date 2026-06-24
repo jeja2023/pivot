@@ -461,6 +461,14 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         res.json(result);
     }));
 
+    router.post('/apps/data-analysis/compare/export', authMiddleware, asyncHandler(async (req, res) => {
+        const { exportCompareExcel } = require('../services/data-analysis');
+        const buffer = exportCompareExcel(req.body || {});
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="data_compare.xlsx"');
+        res.send(buffer);
+    }));
+
     router.post('/apps/data-analysis/datasets/:id/query', authMiddleware, asyncHandler(async (req, res) => {
         const result = await runUserQuery(req.user.id, req.params.id, req.body || {});
         logAction(req, '数据分析-SQL 查询', `数据集: ${req.params.id}`);

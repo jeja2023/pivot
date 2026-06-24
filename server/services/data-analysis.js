@@ -911,6 +911,12 @@ async function compareDatasets(userId, input = {}) {
             FROM left_data l
             INNER JOIN right_data r ON l.join_key = r.join_key
         ),
+        matched_keys AS (
+            SELECT l.join_key AS key
+            FROM left_data l
+            INNER JOIN right_data r ON l.join_key = r.join_key
+            LIMIT 100
+        ),
         only_left AS (
             SELECT l.join_key AS key
             FROM left_data l
@@ -947,6 +953,7 @@ async function compareDatasets(userId, input = {}) {
             LIMIT 50
         )
         SELECT 'matched' AS section, count::VARCHAR AS key, NULL AS left_value, NULL AS right_value FROM matched
+        UNION ALL SELECT 'matched_keys' AS section, key, NULL AS left_value, NULL AS right_value FROM matched_keys
         UNION ALL SELECT 'only_left', key, NULL, NULL FROM only_left
         UNION ALL SELECT 'only_right', key, NULL, NULL FROM only_right
         UNION ALL SELECT 'changed', key, left_value, right_value FROM changed
@@ -955,6 +962,7 @@ async function compareDatasets(userId, input = {}) {
     `;
     const rows = await withAnalysisSlot(() => duckReadAll(sql));
     const matched = Number(rows.find(item => item.section === 'matched')?.key || 0);
+    const matchedKeys = rows.filter(item => item.section === 'matched_keys').map(item => ({ key: item.key }));
     const onlyLeft = rows.filter(item => item.section === 'only_left').map(item => ({ key: item.key }));
     const onlyRight = rows.filter(item => item.section === 'only_right').map(item => ({ key: item.key }));
     const changed = rows.filter(item => item.section === 'changed').map(item => ({
@@ -968,6 +976,7 @@ async function compareDatasets(userId, input = {}) {
         left: { id: left.id, name: left.name, key: leftKey.name },
         right: { id: right.id, name: right.name, key: rightKey.name },
         matched,
+        matchedKeys,
         onlyLeft,
         onlyRight,
         changed,
@@ -1435,6 +1444,71 @@ async function buildAiContext(userId, datasetId) {
     ].join('\n');
 }
 
+function exportCompareExcel(data = {}) {
+    const workbook = XLSX.utils.book_new();
+    const leftKeyName = data.left?.key || '主键';
+    const rightKeyName = data.right?.key || '主键';
+    const compareField = data.compareField || '对比字段';
+    
+    let hasAnySheet = false;
+    
+    // 1. 相同项
+    const matchedKeys = data.matchedKeys || [];
+    if (matchedKeys.length > 0) {
+        const rows = [[leftKeyName]];
+        matchedKeys.forEach(item => {
+            rows.push([item.key]);
+        });
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, sheet, '相同项');
+        hasAnySheet = true;
+    }
+    
+    // 2. 仅在A表
+    const onlyLeft = data.onlyLeft || [];
+    if (onlyLeft.length > 0) {
+        const rows = [[leftKeyName]];
+        onlyLeft.forEach(item => {
+            rows.push([item.key]);
+        });
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, sheet, '仅在A表');
+        hasAnySheet = true;
+    }
+    
+    // 3. 仅在B表
+    const onlyRight = data.onlyRight || [];
+    if (onlyRight.length > 0) {
+        const rows = [[rightKeyName]];
+        onlyRight.forEach(item => {
+            rows.push([item.key]);
+        });
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, sheet, '仅在B表');
+        hasAnySheet = true;
+    }
+    
+    // 4. 差异项
+    const changed = data.changed || [];
+    if (changed.length > 0) {
+        const rows = [[leftKeyName, `左侧值 (${compareField})`, `右侧值 (${compareField})`]];
+        changed.forEach(item => {
+            rows.push([item.key, item.leftValue, item.rightValue]);
+        });
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, sheet, '差异项');
+        hasAnySheet = true;
+    }
+    
+    // 如果没有任何 sheet，至少放一个空白 sheet 避免报错
+    if (!hasAnySheet) {
+        const sheet = XLSX.utils.aoa_to_sheet([['无比对数据']]);
+        XLSX.utils.book_append_sheet(workbook, sheet, '无数据');
+    }
+    
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+}
+
 module.exports = {
     MAX_PREVIEW_ROWS,
     analysisRoot,
@@ -1446,6 +1520,7 @@ module.exports = {
     ensureAnalysisDirs,
     exportDataset,
     exportDatasetCsv,
+    exportCompareExcel,
     getDatasetDetail,
     importDataset,
     importFromDatabase,

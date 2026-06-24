@@ -13,7 +13,17 @@
         artifacts: [],
         overviewPage: 1,
         overviewPageSize: 10,
-        aiBusy: false
+        aiBusy: false,
+        queryMode: 'visual',
+        visualQuery: {
+            logicalOperator: 'AND',
+            filters: [
+                { field: '', operator: 'eq', value: '' }
+            ],
+            sortField: '',
+            sortOrder: 'ASC',
+            limit: 100
+        }
     };
 
     const html = window.PivotSafeHtml || {
@@ -43,7 +53,7 @@
 
 
     function activeDataset() {
-        return state.datasets.find(item => item.id === state.activeId) || state.datasets[0] || null;
+        return state.datasets.find(item => item.id === state.activeId) || null;
     }
 
     function ensureView() {
@@ -157,14 +167,64 @@
                         <div class="data-analysis-form-grid data-analysis-query-controls" style="margin-bottom: 8px;">
                             <label>分析数据集<select id="data-analysis-query-dataset" class="form-input"></select></label>
                         </div>
-                        <div class="data-analysis-query-box">
-                            <div id="data-analysis-query-fields" class="data-analysis-query-fields"></div>
-                            <textarea id="data-analysis-query-sql" class="form-input data-analysis-query-sql" spellcheck="false" placeholder="SELECT * FROM data LIMIT 100"></textarea>
-                            <div class="data-analysis-query-actions">
-                                <span class="data-analysis-query-hint">只读查询，表名固定为 <code>data</code>，列名为字段名。</span>
-                                <button id="data-analysis-run-query" class="btn-primary" type="button">运行查询</button>
+                        <div class="data-analysis-query-mode-selector" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 8px;">
+                            <button type="button" class="btn-secondary active" id="data-analysis-query-mode-visual" style="height: 32px; padding: 0 12px; font-size: 0.82rem; border-radius: 6px; font-weight: 700; cursor: pointer;">可视化查询</button>
+                            <button type="button" class="btn-secondary" id="data-analysis-query-mode-sql" style="height: 32px; padding: 0 12px; font-size: 0.82rem; border-radius: 6px; font-weight: 700; cursor: pointer;">SQL 查询 (高级)</button>
+                        </div>
+                        
+                        <!-- 可视化查询编辑器 -->
+                        <div id="data-analysis-query-visual-box" class="data-analysis-query-visual-box" style="background: rgba(148, 163, 184, 0.04); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+                            <div style="margin-bottom: 14px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                    <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">筛选条件</span>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 0.8rem; color: var(--text-muted);">条件关系:</span>
+                                        <select id="data-analysis-query-visual-op" class="form-input" style="width: 80px; height: 28px; padding: 0 6px; font-size: 0.8rem; margin: 0; border-radius: 4px;">
+                                            <option value="AND">且 (AND)</option>
+                                            <option value="OR">或 (OR)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="data-analysis-query-visual-filters" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
+                                    <!-- 动态渲染筛选条件行 -->
+                                </div>
+                                <button type="button" id="data-analysis-query-visual-add" class="btn-secondary" style="height: 30px; padding: 0 10px; font-size: 0.8rem; border-radius: 5px; cursor: pointer;">+ 添加筛选条件</button>
+                            </div>
+                            
+                            <div class="data-analysis-form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; padding-top: 10px; border-top: 1px dashed rgba(148, 163, 184, 0.16);">
+                                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 700; color: var(--text-main);">
+                                    排序字段
+                                    <select id="data-analysis-query-visual-sort-field" class="form-input" style="height: 34px; border-radius: 6px; font-size: 0.85rem; padding: 0 8px; margin: 0;"></select>
+                                </label>
+                                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 700; color: var(--text-main);">
+                                    排序方式
+                                    <select id="data-analysis-query-visual-sort-order" class="form-input" style="height: 34px; border-radius: 6px; font-size: 0.85rem; padding: 0 8px; margin: 0;">
+                                        <option value="ASC">升序 (ASC)</option>
+                                        <option value="DESC">降序 (DESC)</option>
+                                    </select>
+                                </label>
+                                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 700; color: var(--text-main);">
+                                    限制行数
+                                    <input type="number" id="data-analysis-query-visual-limit" class="form-input" style="height: 34px; border-radius: 6px; font-size: 0.85rem; padding: 0 10px; margin: 0;" min="1" max="5000" value="100">
+                                </label>
+                            </div>
+                            
+                            <div class="data-analysis-query-actions" style="border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+                                <span class="data-analysis-query-hint" style="font-size: 0.78rem; color: var(--text-muted);">通过可视化选项配置快速筛选数据。</span>
+                                <button id="data-analysis-run-query-visual" class="btn-primary" type="button" style="height: 34px; padding: 0 16px; border-radius: 6px; font-size: 0.82rem; font-weight: 700; cursor: pointer;">运行查询</button>
                             </div>
                         </div>
+                        
+                        <!-- SQL 查询编辑器（高级） -->
+                        <div id="data-analysis-query-sql-box" class="data-analysis-query-box hidden">
+                            <div id="data-analysis-query-fields" class="data-analysis-query-fields"></div>
+                            <textarea id="data-analysis-query-sql" class="form-input data-analysis-query-sql" spellcheck="false" placeholder="SELECT * FROM data LIMIT 100"></textarea>
+                            <div class="data-analysis-query-actions" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span class="data-analysis-query-hint" style="font-size: 0.78rem; color: var(--text-muted);">只读查询，表名固定为 <code>data</code>，列名为字段名。</span>
+                                <button id="data-analysis-run-query" class="btn-primary" type="button" style="height: 34px; padding: 0 16px; border-radius: 6px; font-size: 0.82rem; font-weight: 700; cursor: pointer;">运行查询</button>
+                            </div>
+                        </div>
+                        
                         <div id="data-analysis-query-result" class="data-analysis-query-result"></div>
                     </section>
                     <section id="data-analysis-pivot-panel" class="data-analysis-tab-panel hidden">
@@ -249,6 +309,18 @@
                     </form>
                 </div>
             </div>
+
+            <!-- 比对列表放大模态弹窗 -->
+            <div id="data-analysis-compare-modal" class="modal-overlay hidden" style="z-index: 8000;">
+                <div class="modal" style="width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
+                        <h3 id="data-analysis-compare-modal-title" style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">比对明细</h3>
+                        <button id="data-analysis-compare-modal-close" class="btn-secondary" style="height: 32px; padding: 0 12px; border-radius: 7px; font-size: 0.8rem; border-color: rgba(148, 163, 184, 0.3); color: var(--text-main); font-weight: 700; cursor: pointer;" type="button">关闭</button>
+                    </div>
+                    <div id="data-analysis-compare-modal-content" class="data-analysis-compare-modal-content" style="flex: 1; overflow-y: auto; max-height: 55vh; padding-right: 4px;">
+                    </div>
+                </div>
+            </div>
         `;
         body.appendChild(view);
         bindEvents(view);
@@ -268,15 +340,34 @@
         const data = await fetchJson(`${API}/datasets`);
         state.datasets = Array.isArray(data.datasets) ? data.datasets : [];
         if (!keepActive || !state.datasets.some(item => item.id === state.activeId)) {
-            state.activeId = state.datasets[0]?.id || '';
+            state.activeId = '';
         }
-        if (!state.compareLeftId) state.compareLeftId = state.activeId;
-        if (!state.compareRightId) state.compareRightId = state.datasets.find(item => item.id !== state.activeId)?.id || state.activeId;
+        if (!state.compareLeftId) state.compareLeftId = '';
+        if (!state.compareRightId) state.compareRightId = '';
         render();
         if (state.activeId) await loadDatasetDetail(state.activeId);
     }
 
     async function loadDatasetDetail(id) {
+        if (!id) {
+            state.activeId = '';
+            state.summary = null;
+            state.chart = null;
+            state.query = null;
+            state.pivot = null;
+            state.artifacts = [];
+            state.visualQuery = {
+                logicalOperator: 'AND',
+                filters: [
+                    { field: '', operator: 'eq', value: '' }
+                ],
+                sortField: '',
+                sortOrder: 'ASC',
+                limit: 100
+            };
+            render();
+            return;
+        }
         const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}`);
         const index = state.datasets.findIndex(item => item.id === id);
         if (index >= 0) state.datasets[index] = data.dataset;
@@ -286,6 +377,15 @@
         state.query = null;
         state.pivot = null;
         state.artifacts = [];
+        state.visualQuery = {
+            logicalOperator: 'AND',
+            filters: [
+                { field: '', operator: 'eq', value: '' }
+            ],
+            sortField: '',
+            sortOrder: 'ASC',
+            limit: 100
+        };
         render();
         await loadSummary(id);
     }
@@ -506,7 +606,11 @@
         if (!el) return;
         const previous = value !== undefined ? value : el.value;
         el.innerHTML = htmlText;
-        if (previous && Array.from(el.options).some(option => option.value === previous)) el.value = previous;
+        if (Array.from(el.options).some(option => option.value === previous)) {
+            el.value = previous;
+        } else {
+            el.value = '';
+        }
     }
 
     function chartNumericFields(dataset = activeDataset()) {
@@ -557,14 +661,14 @@
     function renderControls() {
         const dataset = activeDataset();
         const columns = dataset?.columns || [];
-        const numeric = chartNumericFields(dataset);
-        setSelectOptions('data-analysis-chart-x', buildOptions(columns), columns[0]?.key || '');
-        setSelectOptions('data-analysis-chart-y', buildOptions(columns, { includeEmpty: true, emptyLabel: '计数' }), numeric[0] || '');
-        setSelectOptions('data-analysis-chart-group', buildOptions(columns, { includeEmpty: true, emptyLabel: '不分组' }), '');
+        setSelectOptions('data-analysis-chart-x', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分类字段' }));
+        setSelectOptions('data-analysis-chart-y', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择数值字段' }));
+        setSelectOptions('data-analysis-chart-group', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分组字段' }));
         syncChartAggregationControls('auto');
         syncChartTypeControls('auto');
-        const datasetOptions = state.datasets.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
-        setSelectOptions('data-analysis-compare-left', datasetOptions, state.compareLeftId || state.activeId);
+        
+        const datasetOptions = `<option value="">请选择数据集</option>` + state.datasets.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
+        setSelectOptions('data-analysis-compare-left', datasetOptions, state.compareLeftId);
         setSelectOptions('data-analysis-compare-right', datasetOptions, state.compareRightId);
         renderCompareKeyOptions();
 
@@ -574,14 +678,97 @@
         setSelectOptions('data-analysis-pivot-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-ai-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-history-dataset', datasetOptions, state.activeId);
+        
+        // 渲染可视化查询编辑器
+        renderVisualQueryControls();
     }
 
     function renderCompareKeyOptions() {
-        const left = state.datasets.find(item => item.id === document.getElementById('data-analysis-compare-left')?.value) || activeDataset();
-        const right = state.datasets.find(item => item.id === document.getElementById('data-analysis-compare-right')?.value) || state.datasets[0];
-        setSelectOptions('data-analysis-compare-left-key', buildOptions(left?.columns || []), left?.columns?.[0]?.key || '');
-        setSelectOptions('data-analysis-compare-right-key', buildOptions(right?.columns || []), right?.columns?.[0]?.key || '');
-        setSelectOptions('data-analysis-compare-field', buildOptions(left?.columns || [], { includeEmpty: true, emptyLabel: '只比对主键存在性' }), '');
+        const leftId = document.getElementById('data-analysis-compare-left')?.value;
+        const rightId = document.getElementById('data-analysis-compare-right')?.value;
+        const left = state.datasets.find(item => item.id === leftId) || null;
+        const right = state.datasets.find(item => item.id === rightId) || null;
+        setSelectOptions('data-analysis-compare-left-key', buildOptions(left?.columns || [], { includeEmpty: true, emptyLabel: '请选择左侧主键' }));
+        setSelectOptions('data-analysis-compare-right-key', buildOptions(right?.columns || [], { includeEmpty: true, emptyLabel: '请选择右侧主键' }));
+        setSelectOptions('data-analysis-compare-field', buildOptions(left?.columns || [], { includeEmpty: true, emptyLabel: '请选择对比字段（留空仅比对主键）' }));
+    }
+
+    function renderVisualQueryControls() {
+        const dataset = activeDataset();
+        const columns = dataset?.columns || [];
+        
+        // 逻辑关系下拉框设置
+        const opEl = document.getElementById('data-analysis-query-visual-op');
+        if (opEl) opEl.value = state.visualQuery.logicalOperator || 'AND';
+        
+        // 限制条数设置
+        const limitEl = document.getElementById('data-analysis-query-visual-limit');
+        if (limitEl) limitEl.value = state.visualQuery.limit || 100;
+        
+        // 排序方式下拉框设置
+        const orderEl = document.getElementById('data-analysis-query-visual-sort-order');
+        if (orderEl) orderEl.value = state.visualQuery.sortOrder || 'ASC';
+        
+        // 渲染排序字段下拉框
+        setSelectOptions('data-analysis-query-visual-sort-field', buildOptions(columns, { includeEmpty: true, emptyLabel: '不排序' }), state.visualQuery.sortField);
+        
+        // 渲染筛选行条件列表
+        renderVisualFilters();
+    }
+
+    function renderVisualFilters() {
+        const container = document.getElementById('data-analysis-query-visual-filters');
+        if (!container) return;
+        
+        const dataset = activeDataset();
+        const columns = dataset?.columns || [];
+        const filters = state.visualQuery.filters;
+        
+        if (filters.length === 0) {
+            container.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 10px; border: 1px dashed rgba(148, 163, 184, 0.16); border-radius: 6px;">无筛选条件，将查询全部数据</div>`;
+            return;
+        }
+        
+        const opOptions = [
+            { value: 'eq', label: '等于 (=)' },
+            { value: 'ne', label: '不等于 (!=)' },
+            { value: 'contains', label: '包含' },
+            { value: 'not_contains', label: '不包含' },
+            { value: 'gt', label: '大于 (>)' },
+            { value: 'gte', label: '大于等于 (>=)' },
+            { value: 'lt', label: '小于 (<)' },
+            { value: 'lte', label: '小于等于 (<=)' },
+            { value: 'null', label: '为空' },
+            { value: 'not_null', label: '不为空' }
+        ];
+        
+        container.innerHTML = filters.map((filter, index) => {
+            const fieldOptionsHtml = buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择字段' });
+            const operatorOptionsHtml = opOptions.map(op => `<option value="${op.value}" ${filter.operator === op.value ? 'selected' : ''}>${esc(op.label)}</option>`).join('');
+            const showValueInput = !['null', 'not_null'].includes(filter.operator);
+            
+            return `
+                <div class="data-analysis-query-filter-row" data-filter-index="${index}" style="display: flex; gap: 8px; align-items: center;">
+                    <select class="form-input data-analysis-query-filter-field" style="flex: 2; height: 32px; padding: 0 8px; font-size: 0.82rem; margin: 0; border-radius: 5px;">
+                        ${fieldOptionsHtml}
+                    </select>
+                    <select class="form-input data-analysis-query-filter-operator" style="flex: 1.5; height: 32px; padding: 0 8px; font-size: 0.82rem; margin: 0; border-radius: 5px;">
+                        ${operatorOptionsHtml}
+                    </select>
+                    <input type="text" class="form-input data-analysis-query-filter-value" style="flex: 3; height: 32px; padding: 0 8px; font-size: 0.82rem; margin: 0; border-radius: 5px; ${showValueInput ? '' : 'visibility: hidden;'}" value="${esc(filter.value)}" placeholder="请输入筛选值">
+                    <button type="button" class="btn-secondary data-analysis-query-filter-remove" style="height: 32px; padding: 0 10px; font-size: 0.82rem; border-radius: 5px; border-color: rgba(239, 68, 68, 0.3); color: var(--danger); font-weight: 700; cursor: pointer;">删除</button>
+                </div>
+            `;
+        }).join('');
+        
+        // 分别为每个渲染出来的 field select 设置当前选中的 value
+        filters.forEach((filter, index) => {
+            const row = container.querySelector(`[data-filter-index="${index}"]`);
+            if (row) {
+                const fieldSelect = row.querySelector('.data-analysis-query-filter-field');
+                if (fieldSelect) fieldSelect.value = filter.field;
+            }
+        });
     }
 
     function buildTable(rows = [], columns = []) {
@@ -664,27 +851,133 @@
         `;
     }
 
+    function buildSqlFromVisual() {
+        const dataset = activeDataset();
+        if (!dataset) return '';
+        
+        let sql = 'SELECT * FROM data';
+        
+        const filters = state.visualQuery.filters || [];
+        const validFilters = filters.filter(f => f.field.trim() !== '');
+        
+        if (validFilters.length > 0) {
+            const conditions = validFilters.map(filter => {
+                const colName = filter.field;
+                const fieldExpr = `"${colName.replace(/"/g, '""')}"`;
+                const op = filter.operator;
+                const rawVal = filter.value || '';
+                const escapedVal = rawVal.replace(/'/g, "''");
+                
+                switch (op) {
+                    case 'eq':
+                        return `${fieldExpr} = '${escapedVal}'`;
+                    case 'ne':
+                        return `${fieldExpr} <> '${escapedVal}'`;
+                    case 'contains':
+                        return `${fieldExpr} LIKE '%${escapedVal}%'`;
+                    case 'not_contains':
+                        return `${fieldExpr} NOT LIKE '%${escapedVal}%'`;
+                    case 'gt':
+                        return `${fieldExpr} > '${escapedVal}'`;
+                    case 'gte':
+                        return `${fieldExpr} >= '${escapedVal}'`;
+                    case 'lt':
+                        return `${fieldExpr} < '${escapedVal}'`;
+                    case 'lte':
+                        return `${fieldExpr} <= '${escapedVal}'`;
+                    case 'null':
+                        return `(${fieldExpr} IS NULL OR trim(CAST(${fieldExpr} AS VARCHAR)) = '')`;
+                    case 'not_null':
+                        return `(${fieldExpr} IS NOT NULL AND trim(CAST(${fieldExpr} AS VARCHAR)) <> '')`;
+                    default:
+                        return '';
+                }
+            }).filter(c => c !== '');
+            
+            if (conditions.length > 0) {
+                const logicOp = state.visualQuery.logicalOperator || 'AND';
+                sql += ` WHERE ${conditions.map(c => `(${c})`).join(` ${logicOp} `)}`;
+            }
+        }
+        
+        const sortField = state.visualQuery.sortField;
+        if (sortField) {
+            const order = state.visualQuery.sortOrder === 'DESC' ? 'DESC' : 'ASC';
+            sql += ` ORDER BY "${sortField.replace(/"/g, '""')}" ${order}`;
+        }
+        
+        const limit = Number(state.visualQuery.limit) || 100;
+        const safeLimit = Math.min(Math.max(limit, 1), 5000);
+        sql += ` LIMIT ${safeLimit}`;
+        
+        return sql;
+    }
+
+    async function runQueryVisual() {
+        const dataset = activeDataset();
+        if (!dataset) {
+            toast('请选择分析数据集', 'warning');
+            return;
+        }
+        
+        const filters = state.visualQuery.filters || [];
+        for (let i = 0; i < filters.length; i++) {
+            const f = filters[i];
+            if (f.field && !['null', 'not_null'].includes(f.operator) && !f.value.trim()) {
+                toast(`请为筛选条件第 ${i + 1} 行填入值`, 'warning');
+                return;
+            }
+        }
+        
+        const sql = buildSqlFromVisual();
+        if (!sql) {
+            toast('生成查询语句失败', 'error');
+            return;
+        }
+        
+        await guardButton('data-analysis-run-query-visual', '查询中…', async () => {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql })
+            });
+            state.query = data;
+            renderQuery();
+        });
+    }
+
     function renderPivotControls() {
         const dataset = activeDataset();
         const columns = dataset?.columns || [];
-        const numeric = (dataset?.profile || []).filter(item => item.type === 'number').map(item => item.key);
-        setSelectOptions('data-analysis-pivot-row', buildOptions(columns), columns[0]?.key || '');
-        setSelectOptions('data-analysis-pivot-col', buildOptions(columns, { includeEmpty: true, emptyLabel: '不分列' }), '');
-        setSelectOptions('data-analysis-pivot-value', buildOptions(columns, { includeEmpty: true, emptyLabel: '计数' }), numeric[0] || '');
+        setSelectOptions('data-analysis-pivot-row', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择行维度' }));
+        setSelectOptions('data-analysis-pivot-col', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择列维度' }));
+        setSelectOptions('data-analysis-pivot-value', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择值字段' }));
     }
 
     async function runPivot() {
         const dataset = activeDataset();
         if (!dataset) {
-            toast('请先选择数据集', 'warning');
+            toast('请选择分析数据集', 'warning');
+            return;
+        }
+        const rowField = document.getElementById('data-analysis-pivot-row')?.value;
+        if (!rowField) {
+            toast('请选择行维度', 'warning');
+            return;
+        }
+        const colField = document.getElementById('data-analysis-pivot-col')?.value || '';
+        const valueField = document.getElementById('data-analysis-pivot-value')?.value || '';
+        const aggregation = document.getElementById('data-analysis-pivot-aggregation')?.value || 'sum';
+        if (aggregation !== 'count' && !valueField) {
+            toast('该聚合方式下请选择值字段', 'warning');
             return;
         }
         await guardButton('data-analysis-run-pivot', '生成中…', async () => {
             const payload = {
-                rowField: document.getElementById('data-analysis-pivot-row')?.value || '',
-                colField: document.getElementById('data-analysis-pivot-col')?.value || '',
-                valueField: document.getElementById('data-analysis-pivot-value')?.value || '',
-                aggregation: document.getElementById('data-analysis-pivot-aggregation')?.value || 'sum'
+                rowField,
+                colField,
+                valueField,
+                aggregation
             };
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/pivot`, {
                 method: 'POST',
@@ -736,7 +1029,15 @@
 
     async function buildChart() {
         const dataset = activeDataset();
-        if (!dataset) return;
+        if (!dataset) {
+            toast('请选择分析数据集', 'warning');
+            return;
+        }
+        const xField = document.getElementById('data-analysis-chart-x')?.value;
+        if (!xField) {
+            toast('请选择分类字段', 'warning');
+            return;
+        }
         await guardButton('data-analysis-build-chart', '生成中…', async () => {
             syncChartAggregationControls('build', true);
             syncChartTypeControls('build');
@@ -905,45 +1206,54 @@
         document.body.removeChild(link);
     }
 
-    // 将数据比对结果导出为差异 CSV
-    function exportCompareToCsv() {
+    // 将数据比对结果导出为差异 Excel (含相同项、仅在A表、仅在B表和差异项，空白除外)
+    async function exportCompareToExcel() {
         const result = state.compare;
         if (!result) return;
         
-        let csvContent = '\uFEFF';
-        csvContent += '"差异类型","主键","左侧值","右侧值"\n';
-        
-        (result.onlyLeft || []).forEach(row => {
-            csvContent += `"仅左侧存在","${(row.key || '').replace(/"/g, '""')}",,""\n`;
-        });
-        (result.onlyRight || []).forEach(row => {
-            csvContent += `"仅右侧存在","${(row.key || '').replace(/"/g, '""')}",,""\n`;
-        });
-        (result.changed || []).forEach(row => {
-            const key = (row.key || '').replace(/"/g, '""');
-            const leftVal = (row.leftValue || '').replace(/"/g, '""');
-            const rightVal = (row.rightValue || '').replace(/"/g, '""');
-            csvContent += `"字段差异","${key}","${leftVal}","${rightVal}"\n`;
-        });
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', '数据比对差异结果.csv');
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        try {
+            setBusy(true, '正在生成比对结果Excel...');
+            const res = await apiFetch(`${API}/compare/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(result)
+            });
+            if (!res.ok) throw new Error('导出失败');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `数据比对差异结果-${Date.now()}.xlsx`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            toast(e && e.message ? e.message : '导出失败', 'error');
+        } finally {
+            setBusy(false);
+        }
     }
 
     async function runCompare() {
+        const leftId = document.getElementById('data-analysis-compare-left')?.value;
+        const rightId = document.getElementById('data-analysis-compare-right')?.value;
+        const leftKey = document.getElementById('data-analysis-compare-left-key')?.value;
+        const rightKey = document.getElementById('data-analysis-compare-right-key')?.value;
+        if (!leftId || !rightId) {
+            toast('请选择要比对的数据集', 'warning');
+            return;
+        }
+        if (!leftKey || !rightKey) {
+            toast('请选择比对的左侧主键和右侧主键', 'warning');
+            return;
+        }
         await guardButton('data-analysis-run-compare', '比对中…', async () => {
             const payload = {
-                leftDatasetId: document.getElementById('data-analysis-compare-left')?.value || '',
-                rightDatasetId: document.getElementById('data-analysis-compare-right')?.value || '',
-                leftKey: document.getElementById('data-analysis-compare-left-key')?.value || '',
-                rightKey: document.getElementById('data-analysis-compare-right-key')?.value || '',
+                leftDatasetId: leftId,
+                rightDatasetId: rightId,
+                leftKey: leftKey,
+                rightKey: rightKey,
                 compareField: document.getElementById('data-analysis-compare-field')?.value || ''
             };
             const data = await fetchJson(`${API}/compare`, {
@@ -965,20 +1275,15 @@
         }
         const result = state.compare;
         box.innerHTML = `
-            <div class="data-analysis-compare-kpis">
-                <div><span>匹配主键</span><strong>${fmtNumber(result.matched)}</strong></div>
-                <div><span>仅左侧存在</span><strong>${fmtNumber(result.onlyLeft?.length || 0)}</strong></div>
-                <div><span>仅右侧存在</span><strong>${fmtNumber(result.onlyRight?.length || 0)}</strong></div>
-                <div><span>字段差异</span><strong>${fmtNumber(result.changed?.length || 0)}</strong></div>
-            </div>
-            <div style="display: flex; justify-content: flex-end; margin: 12px 0;">
-                <button id="data-analysis-compare-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出比对差异结果 (CSV)</button>
+            <div style="display: flex; justify-content: flex-end; margin: 12px 10px 6px;">
+                <button id="data-analysis-compare-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出结果</button>
             </div>
             ${renderDuplicateKeys(result)}
             <div class="data-analysis-compare-lists">
-                ${renderCompareList('仅左侧存在', result.onlyLeft)}
-                ${renderCompareList('仅右侧存在', result.onlyRight)}
-                ${renderChangedList(result.changed)}
+                ${renderCompareList(`相同项 (${fmtNumber(result.matched)})`, result.matchedKeys || [], 'matched')}
+                ${renderCompareList(`仅左侧存在 (${fmtNumber(result.onlyLeft?.length || 0)})`, result.onlyLeft, 'onlyLeft')}
+                ${renderCompareList(`仅右侧存在 (${fmtNumber(result.onlyRight?.length || 0)})`, result.onlyRight, 'onlyRight')}
+                ${renderChangedList(`字段差异 (${fmtNumber(result.changed?.length || 0)})`, result.changed)}
             </div>
         `;
     }
@@ -999,24 +1304,73 @@
         `;
     }
 
-    function renderCompareList(title, rows = []) {
+    function renderCompareList(title, rows = [], type = '') {
         return `
-            <section>
+            <section data-compare-type="${esc(type)}">
                 <strong>${esc(title)}</strong>
                 <div>${rows.slice(0, 30).map(row => `<span>${esc(row.key)}</span>`).join('') || '<em>无</em>'}</div>
             </section>
         `;
     }
 
-    function renderChangedList(rows = []) {
+    function renderChangedList(title, rows = []) {
         return `
-            <section>
-                <strong>字段差异</strong>
+            <section data-compare-type="changed">
+                <strong>${esc(title)}</strong>
                 <div>${rows.slice(0, 30).map(row => `
                     <span>${esc(row.key)}：${esc(row.leftValue)} → ${esc(row.rightValue)}</span>
                 `).join('') || '<em>无</em>'}</div>
             </section>
         `;
+    }
+
+    function showCompareDetailModal(type) {
+        const modal = document.getElementById('data-analysis-compare-modal');
+        const titleEl = document.getElementById('data-analysis-compare-modal-title');
+        const contentEl = document.getElementById('data-analysis-compare-modal-content');
+        if (!modal || !titleEl || !contentEl || !state.compare) return;
+
+        const result = state.compare;
+        let title = '';
+        let htmlContent = '';
+
+        if (type === 'matched') {
+            title = `相同项明细 (${result.matched})`;
+            const list = result.matchedKeys || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'onlyLeft') {
+            title = `仅左侧存在明细 (${result.onlyLeft?.length || 0})`;
+            const list = result.onlyLeft || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'onlyRight') {
+            title = `仅右侧存在明细 (${result.onlyRight?.length || 0})`;
+            const list = result.onlyRight || [];
+            htmlContent = list.map(item => `<div class="compare-modal-item">${esc(item.key)}</div>`).join('') || '<div class="compare-modal-empty">无数据</div>';
+        } else if (type === 'changed') {
+            title = `字段差异明细 (${result.changed?.length || 0})`;
+            const list = result.changed || [];
+            const compareField = result.compareField || '对比字段';
+            htmlContent = `
+                <table class="data-table compact-table data-analysis-result-table" style="width: 100%; table-layout: fixed; margin: 0;">
+                    <thead>
+                        <tr><th style="width: 40%; text-align: left;">主键</th><th style="width: 30%; text-align: left;">左侧值 (${esc(compareField)})</th><th style="width: 30%; text-align: left;">右侧值 (${esc(compareField)})</th></tr>
+                    </thead>
+                    <tbody>
+                        ${list.map(item => `
+                            <tr>
+                                <td style="word-break: break-all; text-align: left;"><strong>${esc(item.key)}</strong></td>
+                                <td style="color: #dc2626; font-weight: 700; word-break: break-all; text-align: left;">${esc(item.leftValue)}</td>
+                                <td style="color: #16a34a; font-weight: 700; word-break: break-all; text-align: left;">${esc(item.rightValue)}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="3" style="text-align: center;">无差异</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        titleEl.textContent = title;
+        contentEl.innerHTML = htmlContent;
+        modal.classList.remove('hidden');
     }
 
     async function loadArtifacts() {
@@ -1116,9 +1470,13 @@
 
     async function runAi() {
         const dataset = activeDataset();
+        if (!dataset) {
+            toast('请选择分析数据集', 'warning');
+            return;
+        }
         const prompt = document.getElementById('data-analysis-ai-prompt')?.value.trim();
-        if (!dataset || !prompt) {
-            toast('请选择数据集并输入问题', 'warning');
+        if (!prompt) {
+            toast('请输入分析问题', 'warning');
             return;
         }
         if (state.aiBusy) return;
@@ -1310,9 +1668,106 @@
                 const activeTabEl = document.querySelector('.data-analysis-tab.active');
                 const activeTabName = activeTabEl?.dataset.dataAnalysisTab;
                 if (activeTabName === 'history') loadArtifacts();
+                return;
+            }
+            
+            // 筛选条件变化同步到 state
+            const filterRow = event.target.closest('.data-analysis-query-filter-row');
+            if (filterRow) {
+                const index = Number(filterRow.dataset.filterIndex);
+                if (state.visualQuery.filters[index]) {
+                    if (event.target.classList.contains('data-analysis-query-filter-field')) {
+                        state.visualQuery.filters[index].field = event.target.value;
+                    } else if (event.target.classList.contains('data-analysis-query-filter-operator')) {
+                        state.visualQuery.filters[index].operator = event.target.value;
+                        renderVisualFilters();
+                    } else if (event.target.classList.contains('data-analysis-query-filter-value')) {
+                        state.visualQuery.filters[index].value = event.target.value;
+                    }
+                }
+                return;
+            }
+            if (event.target?.id === 'data-analysis-query-visual-op') {
+                state.visualQuery.logicalOperator = event.target.value;
+                return;
+            }
+            if (event.target?.id === 'data-analysis-query-visual-sort-field') {
+                state.visualQuery.sortField = event.target.value;
+                return;
+            }
+            if (event.target?.id === 'data-analysis-query-visual-sort-order') {
+                state.visualQuery.sortOrder = event.target.value;
+                return;
+            }
+            if (event.target?.id === 'data-analysis-query-visual-limit') {
+                state.visualQuery.limit = Number(event.target.value) || 100;
+                return;
+            }
+        });
+
+        // 捕获用户在筛选输入框的实时打字输入以保存筛选值
+        root.addEventListener('input', event => {
+            const filterRow = event.target.closest('.data-analysis-query-filter-row');
+            if (filterRow && event.target.classList.contains('data-analysis-query-filter-value')) {
+                const index = Number(filterRow.dataset.filterIndex);
+                if (state.visualQuery.filters[index]) {
+                    state.visualQuery.filters[index].value = event.target.value;
+                }
+            }
+            if (event.target?.id === 'data-analysis-query-visual-limit') {
+                state.visualQuery.limit = Number(event.target.value) || 100;
             }
         });
         root.addEventListener('click', async event => {
+            // 切换为可视化查询模式
+            if (event.target.closest('#data-analysis-query-mode-visual')) {
+                state.queryMode = 'visual';
+                document.getElementById('data-analysis-query-mode-visual').classList.add('active');
+                document.getElementById('data-analysis-query-mode-sql').classList.remove('active');
+                document.getElementById('data-analysis-query-visual-box').classList.remove('hidden');
+                document.getElementById('data-analysis-query-sql-box').classList.add('hidden');
+                return;
+            }
+            // 切换为 SQL 查询模式（高级）
+            if (event.target.closest('#data-analysis-query-mode-sql')) {
+                state.queryMode = 'sql';
+                document.getElementById('data-analysis-query-mode-sql').classList.add('active');
+                document.getElementById('data-analysis-query-mode-visual').classList.remove('active');
+                document.getElementById('data-analysis-query-sql-box').classList.remove('hidden');
+                document.getElementById('data-analysis-query-visual-box').classList.add('hidden');
+                
+                const sqlTextarea = document.getElementById('data-analysis-query-sql');
+                if (sqlTextarea) {
+                    try {
+                        const sql = buildSqlFromVisual();
+                        if (sql) sqlTextarea.value = sql;
+                    } catch (_e) {}
+                }
+                return;
+            }
+            // 添加可视化查询筛选条件
+            if (event.target.closest('#data-analysis-query-visual-add')) {
+                state.visualQuery.filters.push({ field: '', operator: 'eq', value: '' });
+                renderVisualFilters();
+                return;
+            }
+            // 删除可视化查询筛选条件
+            const removeBtn = event.target.closest('.data-analysis-query-filter-remove');
+            if (removeBtn) {
+                const filterRow = removeBtn.closest('.data-analysis-query-filter-row');
+                if (filterRow) {
+                    const index = Number(filterRow.dataset.filterIndex);
+                    state.visualQuery.filters.splice(index, 1);
+                    renderVisualFilters();
+                }
+                return;
+            }
+            // 运行可视化查询
+            if (event.target.closest('#data-analysis-run-query-visual')) {
+                await runQueryVisual();
+                return;
+            }
+
             // 数据集行内“预览”按钮
             const previewBtn = event.target.closest('[data-data-analysis-action-preview]');
             if (previewBtn) {
@@ -1355,6 +1810,18 @@
             // 关闭预览弹窗按钮
             if (event.target.closest('#data-analysis-preview-modal-close')) {
                 document.getElementById('data-analysis-preview-modal')?.classList.add('hidden');
+                return;
+            }
+            // 关闭比对列表放大弹窗按钮
+            if (event.target.closest('#data-analysis-compare-modal-close')) {
+                document.getElementById('data-analysis-compare-modal')?.classList.add('hidden');
+                return;
+            }
+            // 点击比对列表放大查看
+            const compareSection = event.target.closest('.data-analysis-compare-lists section');
+            if (compareSection) {
+                const type = compareSection.dataset.compareType;
+                if (type) showCompareDetailModal(type);
                 return;
             }
             // 关闭/取消数据库导入弹窗
@@ -1422,7 +1889,7 @@
                 return;
             }
             if (event.target.closest('#data-analysis-compare-export-btn')) {
-                exportCompareToCsv();
+                exportCompareToExcel();
                 return;
             }
             const queryField = event.target.closest('[data-data-analysis-query-field]');
