@@ -225,6 +225,9 @@ function runMigrations() {
     db.prepare("UPDATE knowledge_docs SET progress = CASE WHEN status = 'ready' THEN 100 WHEN status = 'error' THEN 0 ELSE COALESCE(progress, 0) END WHERE progress IS NULL OR progress = 0").run();
     db.prepare('UPDATE knowledge_docs SET indexed_chunks = chunk_count WHERE indexed_chunks IS NULL OR indexed_chunks = 0').run();
     ensureColumn('knowledge_chunks', 'search_content', 'TEXT');
+    // 结构感知切片：存储面包屑（文档名 › 章 › 节 › 条 等），用于上下文增强与精确引用。
+    // 旧切片该列为 NULL，检索/展示自动退化为旧行为，向后兼容。
+    ensureColumn('knowledge_chunks', 'heading_path', 'TEXT');
     db.exec(`
         CREATE TABLE IF NOT EXISTS knowledge_doc_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

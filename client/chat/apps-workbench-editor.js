@@ -11,7 +11,7 @@ function renderOfficialWritingDocList() {
                 <small>${escapeAppsHtml(formatVersionTime(doc.updatedAt))}</small>
             </button>
             <span class="official-writing-doc-actions">
-                <button type="button" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}" title="重命名" aria-label="重命名">改名</button>
+                <button type="button" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}" title="重命名" aria-label="重命名">重命名</button>
                 <button type="button" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}" title="删除" aria-label="删除">删除</button>
             </span>
         </div>
@@ -68,7 +68,8 @@ async function renameOfficialWritingDoc(docId) {
         message: '请输入新的公文标题：',
         placeholder: '新公文',
         value: doc.title || '',
-        requiredMessage: '公文标题不能为空'
+        requiredMessage: '公文标题不能为空',
+        width: 520
     });
     if (next === null) return;
     const trimmed = next.trim();
@@ -79,13 +80,15 @@ async function renameOfficialWritingDoc(docId) {
     renderOfficialWritingDocList();
 }
 
-function deleteOfficialWritingDoc(docId) {
+async function deleteOfficialWritingDoc(docId) {
     const index = officialWritingLibrary.docs.findIndex(item => item.id === docId);
     if (index < 0) return;
     const doc = officialWritingLibrary.docs[index];
     const hasContent = String(doc.state?.draft || '').trim() || String(doc.state?.source || '').trim();
-    if (hasContent && !window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)) {
-        return;
+    if (hasContent) {
+        const confirmed = await (window.showConfirm?.('删除公文', `确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)
+            ?? Promise.resolve(window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)));
+        if (!confirmed) return;
     }
     officialWritingLibrary.docs.splice(index, 1);
     if (!officialWritingLibrary.docs.length) {

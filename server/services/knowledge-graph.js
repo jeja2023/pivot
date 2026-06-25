@@ -2,6 +2,7 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { buildRagSearchTerms, normalizeSearchText } = require('./rag-tokenizer');
+const { detectDocType } = require('./rag-chunker');
 
 const MAX_ENTITIES_PER_CHUNK = 12;
 const MAX_RELATIONS_PER_CHUNK = 16;
@@ -108,7 +109,18 @@ function buildGraphRelationScopeSql(scope, docAlias = 'd') {
     };
 }
 
+// 汉字基本区间 U+4E00–U+9FA5。用 String.fromCharCode 构造，避免在源码中散落生僻字或转义序列。
+const HAN_RANGE = `${String.fromCharCode(0x4e00)}-${String.fromCharCode(0x9fa5)}`;
+const HAN_TOKEN = `[${HAN_RANGE}A-Za-z0-9_.-]{2,40}`;
+
 const ENTITY_SUFFIX_TYPES = [
+    // 法规领域类型优先匹配（正则足够具体，避免误吞 IT/通用术语）。
+    ['legal_doc', new RegExp(`(中华人民共和国[${HAN_RANGE}]{2,40}法|[${HAN_RANGE}]{2,40}条例|[${HAN_RANGE}]{2,40}准则)$`)],
+    ['clause', /第[一二三四五六七八九十百千零〇两0-9]+(?:条|款|项)$/],
+    ['obligation', /(义务|责任)$/],
+    ['right', /(权利|权益)$/],
+    ['penalty', /(罚则|处罚|罚款|追责)$/],
+    ['subject', /(当事人|相对人|权利人|义务人|被申请人)$/],
     ['department', /(部门|中心|小组|团队|委员会|办公室|事业部|分公司|集团|公司)$/],
     ['system', /(系统|平台|服务|数据库|网关|接口|API|模型|知识库|控制台|门户)$/i],
     ['process', /(流程|工单|审批|审核|申请|报销|归档|发布|上线|巡检)$/],
@@ -117,13 +129,32 @@ const ENTITY_SUFFIX_TYPES = [
     ['role', /(管理员|负责人|审批人|申请人|用户|客户|供应商|运维|开发|测试)$/]
 ];
 
-const RELATION_PATTERNS = [
-    { type: 'responsible_for', regex: /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})(?:负责|管理|维护|承接)([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})/g },
-    { type: 'belongs_to', regex: /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})(?:属于|隶属于|归口于)([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})/g },
-    { type: 'depends_on', regex: /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})(?:依赖|调用|接入|连接|使用)([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})/g },
-    { type: 'contains', regex: /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})(?:包含|包括|覆盖|由)([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})/g },
-    { type: 'affects', regex: /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})(?:影响|适用于|约束|支撑)([\u4e00-\u9fa5A-Za-z0-9_.-]{2,40})/g }
+// 通用关系（适用所有文档）。实体抽取也沿用此通用集，避免法规祈使句产生噪声实体。
+const GENERIC_RELATION_PATTERNS = [
+    { type: 'responsible_for', regex: new RegExp(`(${HAN_TOKEN})(?:负责|管理|维护|承接)(${HAN_TOKEN})`, 'g') },
+    { type: 'belongs_to', regex: new RegExp(`(${HAN_TOKEN})(?:属于|隶属于|归口于)(${HAN_TOKEN})`, 'g') },
+    { type: 'depends_on', regex: new RegExp(`(${HAN_TOKEN})(?:依赖|调用|接入|连接|使用)(${HAN_TOKEN})`, 'g') },
+    { type: 'contains', regex: new RegExp(`(${HAN_TOKEN})(?:包含|包括|覆盖|由)(${HAN_TOKEN})`, 'g') },
+    { type: 'affects', regex: new RegExp(`(${HAN_TOKEN})(?:影响|约束|支撑)(${HAN_TOKEN})`, 'g') }
 ];
+
+// 法规领域关系（仅在法规类文档上叠加，避免跨域误抽）。
+const LEGAL_RELATION_PATTERNS = [
+    { type: 'applies_to', regex: new RegExp(`(${HAN_TOKEN})(?:适用于|适用)(${HAN_TOKEN})`, 'g') },
+    { type: 'references', regex: new RegExp(`(${HAN_TOKEN})(?:依据|根据|引用|参照)(${HAN_TOKEN})`, 'g') },
+    { type: 'supersedes', regex: new RegExp(`(${HAN_TOKEN})(?:废止|替代|取代|修订)(${HAN_TOKEN})`, 'g') },
+    { type: 'prohibits', regex: new RegExp(`(${HAN_TOKEN})(?:禁止|不得)(${HAN_TOKEN})`, 'g') },
+    { type: 'requires', regex: new RegExp(`(${HAN_TOKEN})(?:应当|必须|要求)(${HAN_TOKEN})`, 'g') }
+];
+
+// 实体抽取沿用通用动词集（保持既有行为）。
+const RELATION_PATTERNS = GENERIC_RELATION_PATTERNS;
+
+function relationPatternsForDocType(docType) {
+    return docType === 'legal'
+        ? GENERIC_RELATION_PATTERNS.concat(LEGAL_RELATION_PATTERNS)
+        : GENERIC_RELATION_PATTERNS;
+}
 
 function normalizeEntityName(value) {
     return normalizeSearchText(value)
@@ -159,7 +190,9 @@ function cleanEntityName(value) {
     let text = String(value || '')
         .replace(/^[\s"'“”‘’《》（）()【】[\]{}<>:：,，;；.。]+|[\s"'“”‘’《》（）()【】[\]{}<>:：,，;；.。]+$/g, '')
         .trim();
-    text = text.split(/(?:负责|管理|维护|承接|属于|隶属于|归口于|依赖|调用|接入|连接|使用|包含|包括|覆盖|影响|适用于|约束|支撑)/)[0] || text;
+    // 去掉指代式前缀（该公司/本办法/上述部门→公司/办法/部门），保留双字以上实体名。
+    text = text.replace(new RegExp(`^(?:该|本|上述|前述|该等|此)(?=[${HAN_RANGE}]{2,})`), '');
+    text = text.split(/(?:负责|管理|维护|承接|属于|隶属于|归口于|依赖|调用|接入|连接|使用|包含|包括|覆盖|影响|适用于|适用|约束|支撑|依据|引用|参照|废止|替代|取代|修订|禁止|不得|应当|必须|要求)/)[0] || text;
     return text.trim().slice(0, 80);
 }
 
@@ -175,8 +208,8 @@ function isUsefulEntityName(name) {
     const text = cleanEntityName(name);
     if (text.length < 2 || text.length > 80) return false;
     if (/^\d+$/.test(text)) return false;
-    if (/(?:负责|管理|维护|承接|属于|隶属于|归口于|依赖|调用|接入|连接|使用|包含|包括|覆盖|影响|适用于|约束|支撑)/.test(text)) return false;
-    if (/^(以及|或者|如果|因此|同时|需要|可以|进行|通过|相关|当前|必须|不得|应该|问题)$/.test(text)) return false;
+    if (/(?:负责|管理|维护|承接|属于|隶属于|归口于|依赖|调用|接入|连接|使用|包含|包括|覆盖|影响|适用于|适用|约束|支撑|依据|引用|参照|废止|替代|取代|修订|禁止|不得|应当|必须|要求)/.test(text)) return false;
+    if (/^(以及|或者|如果|因此|同时|需要|可以|进行|通过|相关|当前|必须|不得|应该|问题|该|本|上述|前述|此)$/.test(text)) return false;
     return true;
 }
 
@@ -209,7 +242,7 @@ function extractEntitiesFromText(text, limit = MAX_ENTITIES_PER_CHUNK) {
     let match;
     while ((match = bracketRegex.exec(content))) push(match[1], 0.82);
 
-    const suffixRegex = /([\u4e00-\u9fa5A-Za-z0-9_.-]{2,32}(?:部门|中心|小组|团队|委员会|办公室|事业部|集团|公司|系统|平台|服务|数据库|网关|接口|API|模型|知识库|流程|制度|规范|办法|规定|指南|手册|项目|计划|管理员|负责人))/gi;
+    const suffixRegex = new RegExp(`([${HAN_RANGE}A-Za-z0-9_.-]{2,32}(?:部门|中心|小组|团队|委员会|办公室|事业部|集团|公司|系统|平台|服务|数据库|网关|接口|API|模型|知识库|流程|制度|规范|办法|规定|指南|手册|项目|计划|管理员|负责人))`, 'gi');
     while ((match = suffixRegex.exec(content))) push(match[1], 0.76);
 
     RELATION_PATTERNS.forEach(({ regex }) => {
@@ -228,13 +261,16 @@ function extractEntitiesFromText(text, limit = MAX_ENTITIES_PER_CHUNK) {
         .slice(0, limit);
 }
 
-function extractRelationsFromText(text, entities, limit = MAX_RELATIONS_PER_CHUNK) {
+function extractRelationsFromText(text, entities, options = {}) {
+    const patterns = Array.isArray(options.patterns) ? options.patterns : GENERIC_RELATION_PATTERNS;
+    const limit = options.limit || MAX_RELATIONS_PER_CHUNK;
     const content = String(text || '').slice(0, 5000);
     const entityByNorm = new Map((entities || []).map(entity => [entity.normalizedName || normalizeEntityName(entity.name), entity]));
     const relations = [];
     const push = (sourceName, targetName, type, confidence, description = '') => {
-        const sourceNorm = normalizeEntityName(sourceName);
-        const targetNorm = normalizeEntityName(targetName);
+        // 用与实体相同的清洗（去指代前缀/动词）后再归一，确保关系两端能对齐到实体键。
+        const sourceNorm = normalizeEntityName(cleanEntityName(sourceName));
+        const targetNorm = normalizeEntityName(cleanEntityName(targetName));
         const source = entityByNorm.get(sourceNorm);
         const target = entityByNorm.get(targetNorm);
         if (!source || !target || sourceNorm === targetNorm) return;
@@ -247,7 +283,7 @@ function extractRelationsFromText(text, entities, limit = MAX_RELATIONS_PER_CHUN
         });
     };
 
-    RELATION_PATTERNS.forEach(({ type, regex }) => {
+    patterns.forEach(({ type, regex }) => {
         let match;
         regex.lastIndex = 0;
         while ((match = regex.exec(content))) {
@@ -275,16 +311,15 @@ function extractRelationsFromText(text, entities, limit = MAX_RELATIONS_PER_CHUN
     }).slice(0, limit);
 }
 
-function extractKnowledgeGraph(text) {
+function extractKnowledgeGraph(text, docType = 'prose') {
     const entities = extractEntitiesFromText(text);
-    const relations = extractRelationsFromText(text, entities);
+    const relations = extractRelationsFromText(text, entities, { patterns: relationPatternsForDocType(docType) });
     return { entities, relations };
 }
 
-// Prepared statements hoisted out of the per-entity/per-relation indexing loops
-// (indexKnowledgeGraphForChunks). Prepared lazily once and reused across calls so
-// each chunk no longer re-compiles the same SQL. db is a module-level constant, but
-// lazy init keeps this robust against require-time ordering.
+// 将预编译语句提到逐实体/逐关系的索引循环（indexKnowledgeGraphForChunks）之外：
+// 惰性编译一次并跨调用复用，避免每个分块重复编译相同 SQL。db 虽为模块级常量，
+// 但惰性初始化可避免 require 加载顺序带来的问题。
 let upsertEntityStmt = null;
 let recordMentionStmt = null;
 let upsertRelationStmt = null;
@@ -293,8 +328,8 @@ function upsertEntity({ userId, name, type = 'concept', confidence = 0.7, source
     const normalized = normalizeEntityName(name);
     if (!normalized) return null;
     const now = getBeijingTimestamp();
-    // ON CONFLICT DO UPDATE + RETURNING id resolves the row id in a single round-trip
-    // on both the insert and the update path (SQLite RETURNING fires for both).
+    // ON CONFLICT DO UPDATE + RETURNING 让插入与更新两条路径都能在一次往返内拿到行 id
+    //（SQLite 的 RETURNING 对两种路径都会触发）。
     upsertEntityStmt ||= db.prepare(`
         INSERT INTO knowledge_entities (user_id, name, normalized_name, type, description, confidence, source_doc_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -344,9 +379,13 @@ function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
     if (!userId || !docId || !Array.isArray(chunks) || chunks.length === 0) return { entities: 0, relations: 0 };
     let entityCount = 0;
     let relationCount = 0;
+    // 按文档类型选择关系抽取规则集（法规文档叠加法规领域关系）。
+    const docRow = db.prepare('SELECT name FROM knowledge_docs WHERE id = ?').get(docId) || {};
+    const sampleText = chunks.slice(0, 24).map(item => item.content).join('\n');
+    const docType = detectDocType(docRow.name || '', sampleText);
     const indexTransaction = db.transaction(() => {
         chunks.forEach(chunk => {
-            const graph = extractKnowledgeGraph(chunk.content);
+            const graph = extractKnowledgeGraph(chunk.content, docType);
             const entityRows = new Map();
             graph.entities.forEach(entity => {
                 const row = upsertEntity({ userId, sourceDocId: docId, ...entity });
@@ -667,17 +706,16 @@ function suggestDuplicateEntities(userId, limit = 20) {
     return suggestions.slice(0, safeLimit);
 }
 
-// Pull at most this many candidate entities from SQL before scoring in JS.
+// 在 JS 打分前，最多从 SQL 拉取的候选实体数量上限。
 const QUERY_ENTITY_CANDIDATE_LIMIT = 200;
 
 function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, options = {}) {
     const terms = buildRagSearchTerms(query, 20);
-    // No usable query tokens: preserve the original empty result (no full scan).
+    // 没有可用的查询词元：保持原有的空结果（不做全表扫描）。
     if (terms.length === 0) return [];
     const scopeFilter = buildGraphEntityScopeSql(options.scope);
-    // Pre-filter candidates in SQL so we no longer pull a user's entire entity set
-    // on every RAG query. Each token must appear (substring) in one of the scored
-    // columns, mirroring the JS scoring below so ranking over matches is unchanged.
+    // 在 SQL 层预筛候选，避免每次 RAG 查询都拉取该用户的全部实体。每个词元都必须
+    // 以子串形式出现在参与打分的某一列中，与下方 JS 打分逻辑一致，从而保持排序不变。
     const tokenClauses = [];
     const tokenParams = [];
     terms.forEach(term => {

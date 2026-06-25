@@ -1,0 +1,501 @@
+
+
+.official-writing-panel {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    position: relative;
+}
+
+.official-writing-toolbar {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 112px 152px 132px 170px minmax(280px, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.official-writing-field {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.official-writing-field label {
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.official-writing-toolbar .form-input {
+    height: 32px;
+    min-width: 0;
+    margin-bottom: 0;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+}
+
+.official-writing-view-switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, 1fr);
+    align-self: end;
+    justify-self: end;
+    width: 100%;
+    height: 32px;
+    padding: 2px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.official-writing-mode-toggle {
+    min-width: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.74rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.official-writing-mode-toggle.active {
+    background: #fff;
+    color: var(--primary);
+    box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+}
+
+.official-writing-command-row {
+    grid-column: 6 / 7;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+    padding-top: 0;
+    border-top: 0;
+    overflow: visible;
+}
+
+.official-writing-command-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding-right: 8px;
+    border-right: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.official-writing-command-group:last-of-type {
+    border-right: 0;
+    padding-right: 0;
+}
+
+.official-writing-command-group span {
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.official-writing-command-group .btn-primary,
+.official-writing-command-group .btn-secondary,
+.official-writing-command-action {
+    height: 32px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: 0.74rem;
+}
+
+.official-writing-ai-command-group .btn-secondary {
+    min-width: 48px;
+}
+
+.official-writing-ai-indicator {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #2563eb;
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.official-writing-ai-indicator.hidden {
+    display: none;
+}
+
+.official-writing-ai-indicator::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid rgba(37, 99, 235, 0.3);
+    border-top-color: #2563eb;
+    animation: official-writing-spin 0.8s linear infinite;
+}
+
+@keyframes official-writing-spin {
+    to { transform: rotate(360deg); }
+}
+
+.official-writing-command-action:disabled,
+.official-writing-command-group button:disabled,
+.official-writing-selection-toolbar button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 键盘可达性：为公文写作工作台内的可聚焦控件提供清晰的焦点环。 */
+.official-writing-panel button:focus-visible,
+.official-writing-panel select:focus-visible,
+.official-writing-panel input:focus-visible,
+.official-writing-panel textarea:focus-visible,
+.official-writing-drawer-tab:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.official-writing-command-action {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.official-writing-command-menu {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.official-writing-command-menu > summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    list-style: none;
+    cursor: pointer;
+}
+
+.official-writing-command-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.official-writing-command-menu-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(108px, 1fr));
+    gap: 6px;
+    width: 252px;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14);
+}
+
+.official-writing-command-menu-item {
+    justify-content: center;
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 0.74rem;
+}
+
+.official-writing-command-group .btn-secondary.active {
+    border-color: rgba(16, 185, 129, 0.34);
+    background: rgba(16, 185, 129, 0.08);
+    color: var(--primary);
+}
+
+.official-writing-layout-group .official-writing-command-action {
+    min-width: 64px;
+}
+
+.official-writing-layout-group .official-writing-command-action:not(.active) {
+    border-style: dashed;
+    background: #fff;
+    color: #94a3b8;
+}
+
+.official-writing-command-group button span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    margin-left: 4px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    color: #475569;
+    font-size: 0.64rem;
+    font-weight: 800;
+}
+
+.official-writing-command-group .btn-secondary.active span {
+    background: rgba(16, 185, 129, 0.16);
+    color: var(--primary);
+}
+
+.official-writing-workbench {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 8px;
+}
+
+.official-writing-workbench.is-left-rail-hidden {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.official-writing-workbench.is-left-rail-hidden .official-writing-left-rail {
+    display: none;
+}
+
+.official-writing-left-rail {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: #fff;
+    overflow: visible;
+}
+
+.official-writing-rail-head {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 7px 8px 7px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    background: #f8fafc;
+}
+
+.official-writing-rail-head strong {
+    min-width: 0;
+    color: var(--text-main);
+    font-size: 0.82rem;
+}
+
+.official-writing-material-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 3px;
+    padding: 7px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    background: #fff;
+}
+
+.official-writing-material-tab {
+    height: 28px;
+    min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 0.7rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.official-writing-material-tab.active {
+    border-color: rgba(16, 185, 129, 0.26);
+    background: rgba(16, 185, 129, 0.08);
+    color: var(--primary);
+}
+
+.official-writing-rail-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+}
+
+.official-writing-material-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.official-writing-material-panel.hidden {
+    display: none;
+}
+
+.official-writing-material-snapshot {
+    display: grid;
+    gap: 5px;
+    padding: 9px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.official-writing-material-snapshot strong,
+.official-writing-reference-item span {
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.official-writing-material-snapshot p,
+.official-writing-reference-item p,
+.official-writing-check-item p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.48;
+}
+
+.official-writing-material-action,
+.official-writing-standard-item,
+.official-writing-template-item,
+.official-writing-history-item {
+    width: 100%;
+    min-height: 34px;
+    padding: 8px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text-main);
+    text-align: left;
+    font-size: 0.76rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.official-writing-outline-list,
+.official-writing-material-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.official-writing-outline-item {
+    position: relative;
+    width: 100%;
+    min-height: 34px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    padding: 7px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #fff;
+    text-align: left;
+    cursor: pointer;
+}
+
+.official-writing-outline-item:hover,
+.official-writing-outline-item:focus-visible {
+    z-index: 8;
+    align-items: flex-start;
+    border-color: rgba(16, 185, 129, 0.32);
+    background: #f8fffc;
+}
+
+.official-writing-outline-item span {
+    color: var(--primary);
+    font-size: 0.68rem;
+    font-weight: 900;
+}
+
+.official-writing-outline-item strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-main);
+    font-size: 0.74rem;
+}
+
+.official-writing-outline-item:hover strong,
+.official-writing-outline-item:focus-visible strong {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.45;
+}
+
+.official-writing-material-card {
+    display: grid;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.official-writing-material-card p {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+.official-writing-material-card div {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.official-writing-material-card button {
+    height: 24px;
+    padding: 0 7px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 7px;
+    background: #fff;
+    color: #475569;
+    font-size: 0.68rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.official-writing-material-action:hover,
+.official-writing-standard-item:hover,
+.official-writing-template-item:hover,
+.official-writing-history-item:hover {
+    border-color: rgba(16, 185, 129, 0.32);
+    background: rgba(16, 185, 129, 0.05);
+    color: var(--primary);
+}
+
+.official-writing-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.official-writing-history-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.official-writing-history-item span {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+}

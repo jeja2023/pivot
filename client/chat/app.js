@@ -40,7 +40,11 @@ function resetInputPromptError() {
 }
 
 function closeInputPrompt(value = null) {
-    document.getElementById('input-prompt-container')?.classList.add('hidden');
+    const container = document.getElementById('input-prompt-container');
+    container?.classList.add('hidden');
+    // 还原自定义宽度，避免影响下一个复用该弹窗的调用方。
+    const modal = container?.querySelector('.modal');
+    if (modal) modal.style.width = '';
     const resolve = inputPromptResolve;
     inputPromptResolve = null;
     inputPromptOptions = {};
@@ -56,6 +60,9 @@ window.showInputPrompt = function(options = {}) {
 
     if (inputPromptResolve) closeInputPrompt(null);
     inputPromptOptions = options;
+    // 可选自定义宽度（如重命名长公文标题）；不传则回退到 CSS 默认宽度。
+    const modal = container.querySelector('.modal');
+    if (modal) modal.style.width = options.width ? `${options.width}px` : '';
     titleEl.innerText = options.title || '输入';
     messageEl.innerText = options.message || '';
     field.type = options.type || 'text';
@@ -377,7 +384,7 @@ bind('mcp-edit-save-btn', () => window.saveMcpServer?.('edit'));
 
 // 知识库管理
 bind('rag-upload-btn', () => window.openKnowledgeUploadModal?.());
-bind('rag-upload-input', () => window.uploadKnowledgeDoc(), 'change');
+bind('rag-upload-input', () => window.addKnowledgeUploadFiles?.(), 'change');
 
 // 用户管理
 bind('user-add-btn', () => window.openUserModal());

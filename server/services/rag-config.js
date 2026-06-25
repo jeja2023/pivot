@@ -99,7 +99,7 @@ function getPublicEmbeddingConfig(userId = null) {
 function getRagConfig(overrides = {}, userId = null) {
     const ragLimits = getRagLimits();
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
-    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, ragLimits.topKMax || 10);
+    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 6, 1, ragLimits.topKMax || 10);
     const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, ragLimits.candidateLimitMax || 1000);
     const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, ragLimits.chunkSizeMax || 2000);
     const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
@@ -144,13 +144,52 @@ function getRagConfig(overrides = {}, userId = null) {
     };
 }
 
+// 混合检索（RRF 融合 + MMR 去重）参数。env 优先，否则用默认值。
+// - rrfK：RRF 平滑常数（越大越弱化高名次的优势）。
+// - wDense / wFts：稠密向量通道与 FTS(BM25) 词项通道在融合中的权重。
+// - mmrLambda：MMR 相关性 vs 多样性的平衡（1=纯相关，0=纯多样）。
+// - ftsRankFloor：FTS 命中前列即视为精确匹配、软门控放行的名次阈值。
+function getHybridRetrievalConfig() {
+    return {
+        rrfK: clampInteger(process.env.RAG_RRF_K, 60, 1, 1000),
+        wDense: clampNumber(process.env.RAG_RRF_W_DENSE, 1.0, 0, 10),
+        wFts: clampNumber(process.env.RAG_RRF_W_FTS, 0.6, 0, 10),
+        mmrLambda: clampNumber(process.env.RAG_MMR_LAMBDA, 0.7, 0, 1),
+        ftsRankFloor: clampInteger(process.env.RAG_FTS_RANK_FLOOR, 5, 0, 100)
+    };
+}
+
+// 按文档类型解析切片字符数：法规放大以容纳整条，prose 适度放大，
+// 表格/markdown 沿用基础 chunkSize。结果受运行时 chunkSizeMax 上限约束。
+function getChunkSizeForDocType(docType, baseChunkSize, userId = null) {
+    const ragLimits = getRagLimits();
+    const max = ragLimits.chunkSizeMax || 4000;
+    if (docType === 'legal') {
+        return clampInteger(
+            getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_LEGAL,
+            Math.min(Math.max(baseChunkSize, 1100), max),
+            200,
+            max
+        );
+    }
+    if (docType === 'prose') {
+        return clampInteger(
+            getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_PROSE,
+            Math.min(Math.max(baseChunkSize, 800), max),
+            200,
+            max
+        );
+    }
+    return clampInteger(baseChunkSize, baseChunkSize, 200, max);
+}
+
 function toRagSettingValue(key, value) {
     const ragLimits = getRagLimits();
     if (key === RAG_CONFIG_KEYS.scoreThreshold) {
         return String(clampNumber(value, 0.4, 0, 1));
     }
     if (key === RAG_CONFIG_KEYS.topK) {
-        return String(clampInteger(value, 3, 1, ragLimits.topKMax || 10));
+        return String(clampInteger(value, 6, 1, ragLimits.topKMax || 10));
     }
     if (key === RAG_CONFIG_KEYS.candidateLimit) {
         return String(clampInteger(value, 300, 20, ragLimits.candidateLimitMax || 1000));
@@ -182,6 +221,8 @@ module.exports = {
     getEmbeddingConfig,
     getPublicEmbeddingConfig,
     getRagConfig,
+    getHybridRetrievalConfig,
+    getChunkSizeForDocType,
     getUserSettingValue,
     normalizeEmbeddingMode,
     toRagSettingValue

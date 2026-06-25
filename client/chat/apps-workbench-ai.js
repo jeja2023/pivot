@@ -296,6 +296,61 @@ const OFFICIAL_WRITING_SELECTION_ACTION_LABELS = {
     formal: '公文语气'
 };
 
+// 弹窗收集自定义指令后再发起“按指令改写”。
+async function promptOfficialWritingSelectionCustom(selection) {
+    const instruction = await window.showInputPrompt?.({
+        title: '按指令改写选区',
+        message: '请输入修改指令，让 AI 按此改写选中片段：',
+        placeholder: '例如：改得更简洁、去掉口语化表述',
+        requiredMessage: '请输入修改指令',
+        width: 520
+    });
+    const trimmed = String(instruction || '').trim();
+    if (!trimmed) return;
+    runOfficialWritingSelectionCustomAi(selection, trimmed);
+}
+
+// 选区“按指令改写”：用户在弹窗输入自定义指令，后端按指令改写选中片段。
+async function runOfficialWritingSelectionCustomAi(selection, instruction) {
+    if (officialWritingAiBusy) return;
+    setOfficialWritingAiBusy(true, 'AI 按指令改写中…');
+    try {
+        const placeholder = addOfficialWritingSuggestion({
+            type: '选区修改',
+            title: '选区按指令改写',
+            target: selection.target,
+            start: selection.start,
+            end: selection.end,
+            original: selection.text,
+            replacement: '',
+            detail: `按指令改写：${compactTextPreview(instruction, 40)}`,
+            streaming: true
+        });
+        const result = await requestOfficialWritingAi({
+            mode: 'selection',
+            action: 'custom',
+            instruction,
+            docType: getOfficialWritingDocType(),
+            standard: getOfficialWritingStandard(),
+            requirements: getOfficialWritingRequirements(),
+            selection: { text: selection.text }
+        }, {
+            stream: true,
+            onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
+        });
+        const text = result ? String(result.content || '').trim() : '';
+        if (!text) {
+            removeOfficialWritingSuggestionById(placeholder.id);
+            if (result != null) showToast(officialWritingNoContentMessage(result), 'warning');
+            return;
+        }
+        finalizeOfficialWritingStreamingCard(placeholder.id, text);
+        showToast('AI 按指令改写建议已生成');
+    } finally {
+        setOfficialWritingAiBusy(false);
+    }
+}
+
 async function runOfficialWritingSelectionAi(action, selection) {
     if (officialWritingAiBusy) return;
     const label = OFFICIAL_WRITING_SELECTION_ACTION_LABELS[action];
@@ -354,6 +409,10 @@ function applySelectionAction(action) {
     }
     if (action === 'rewrite-diff') {
         runOfficialWritingStreamRewrite(selection);
+        return;
+    }
+    if (action === 'custom') {
+        promptOfficialWritingSelectionCustom(selection);
         return;
     }
     runOfficialWritingSelectionAi(action, selection);

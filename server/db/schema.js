@@ -218,6 +218,7 @@ function initSchema() {
             doc_id INTEGER,
             content TEXT NOT NULL,
             search_content TEXT,
+            heading_path TEXT,
             embedding TEXT,
             FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
         );

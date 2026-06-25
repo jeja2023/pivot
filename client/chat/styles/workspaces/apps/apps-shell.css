@@ -1,0 +1,25 @@
+.apps-workspace-modal .workspace-modal-body {
+    padding: 12px 14px 14px;
+}
+
+.apps-workspace-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+.apps-workspace-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.apps-workspace-actions .btn-secondary {
+    height: 34px;
+    padding: 0 14px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}

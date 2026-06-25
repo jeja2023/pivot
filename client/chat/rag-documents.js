@@ -512,20 +512,34 @@ function ensureKnowledgeUploadModal() {
                 <div class="rag-detail-header">
                     <div>
                         <h3>上传文档</h3>
-                        <p class="model-modal-desc">拖拽文件到下方区域，或点击区域选择文件。上传后系统会自动索引文档内容。</p>
+                        <p class="model-modal-desc">选择或拖拽文件到下方区域，确认无误后点击「开始上传」。上传后系统会自动索引文档内容。</p>
                     </div>
                     <button type="button" id="knowledge-upload-close-btn" class="btn-danger-outline">关闭</button>
                 </div>
                 <div class="knowledge-upload-meta">
-                    <select id="knowledge-upload-collection" class="form-input knowledge-upload-collection" title="上传到专题库">
-                        <option value="">不归类</option>
-                    </select>
-                    <div id="knowledge-upload-tags-list" class="knowledge-tag-picker" aria-label="上传标签"></div>
+                    <div class="knowledge-upload-field">
+                        <label class="knowledge-upload-field-label" for="knowledge-upload-collection">专题库</label>
+                        <select id="knowledge-upload-collection" class="form-input knowledge-upload-collection" title="上传到专题库">
+                            <option value="">不归类</option>
+                        </select>
+                    </div>
+                    <div class="knowledge-upload-field">
+                        <span class="knowledge-upload-field-label">标签</span>
+                        <div id="knowledge-upload-tags-list" class="knowledge-tag-picker" aria-label="上传标签"></div>
+                    </div>
                 </div>
                 <button id="knowledge-upload-zone" class="knowledge-upload-zone" type="button">
-                    <strong>拖拽文件到这里，或点击选择文件</strong>
-                    <span>支持 PDF、Word、Excel、CSV、Markdown、网页文本。</span>
+                    <strong>拖拽文件到这里，或点击选择文件（支持多选/批量）</strong>
+                    <span>支持 PDF、Word、Excel、CSV、Markdown、网页文本。单次最多 ${KNOWLEDGE_MAX_BATCH_FILES} 个，累计不超过 ${knowledgeBatchLimitMb()}MB。</span>
                 </button>
+                <div id="knowledge-upload-list" class="knowledge-upload-list" hidden></div>
+                <div class="knowledge-upload-footer">
+                    <span id="knowledge-upload-summary" class="knowledge-upload-summary">未选择文件</span>
+                    <div class="knowledge-upload-actions">
+                        <button type="button" id="knowledge-upload-clear-btn" class="btn-secondary" disabled>清空</button>
+                        <button type="button" id="knowledge-upload-submit-btn" class="btn-primary" disabled>开始上传</button>
+                    </div>
+                </div>
             </div>
         `;
         document.body.appendChild(modal);
@@ -546,12 +560,16 @@ window.openKnowledgeUploadModal = async function() {
     const collectionId = getLinkedRagCollectionId('upload');
     await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
     updateRagTagControls();
+    renderKnowledgeUploadQueue();
     modal.classList.remove('hidden');
 };
 
 window.closeKnowledgeUploadModal = function() {
     const modal = document.getElementById('knowledge-upload-modal');
     modal?.classList.add('hidden');
+    // 关闭即清空待上传队列，避免下次打开残留。
+    knowledgeUploadQueue = [];
+    renderKnowledgeUploadQueue();
 };
 
 function ensureKnowledgeDocMetaModal() {
@@ -676,10 +694,30 @@ function bindKnowledgeUploadZone(root = document) {
         });
     });
     uploadZone.addEventListener('drop', event => {
-        const file = event.dataTransfer?.files?.[0];
-        if (!file) return;
-        window.uploadKnowledgeDoc(file);
+        const files = event.dataTransfer?.files;
+        if (!files || !files.length) return;
+        window.addKnowledgeUploadFiles(files); // 仅入队，不自动上传
     });
+
+    const scope = root.querySelector ? root : document;
+    const submitBtn = scope.querySelector('#knowledge-upload-submit-btn');
+    if (submitBtn && submitBtn.dataset.bound !== '1') {
+        submitBtn.dataset.bound = '1';
+        submitBtn.addEventListener('click', () => window.submitKnowledgeUpload());
+    }
+    const clearBtn = scope.querySelector('#knowledge-upload-clear-btn');
+    if (clearBtn && clearBtn.dataset.bound !== '1') {
+        clearBtn.dataset.bound = '1';
+        clearBtn.addEventListener('click', () => window.clearKnowledgeUploadQueue());
+    }
+    const listEl = scope.querySelector('#knowledge-upload-list');
+    if (listEl && listEl.dataset.bound !== '1') {
+        listEl.dataset.bound = '1';
+        listEl.addEventListener('click', event => {
+            const removeBtn = event.target.closest?.('.knowledge-upload-item-remove');
+            if (removeBtn) window.removeKnowledgeUploadFile(removeBtn.dataset.index);
+        });
+    }
 }
 
 const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-doc-check:checked'))
@@ -845,40 +883,304 @@ window.retryFailedKnowledgeDocs = async () => {
     }
 };
 
-window.uploadKnowledgeDoc = async (selectedFile = null) => {
+// 批量上传前端约束：单次最多文件数、本次选择文件的总大小上限、并发上传数。
+// （单文件大小由后端 multer 限制兜底，超限文件会在批量循环中按文件单独失败。）
+const KNOWLEDGE_MAX_BATCH_FILES = 20;
+const KNOWLEDGE_MAX_BATCH_BYTES = 500 * 1024 * 1024; // 500MB 总量上限
+const KNOWLEDGE_UPLOAD_CONCURRENCY = 3;
+
+// 以固定并发数处理 items，保留与输入对应的结果顺序；worker 不应抛出（自行兜底）。
+async function runWithConcurrency(items, limit, worker) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    const runOne = async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            results[index] = await worker(items[index], index);
+        }
+    };
+    const poolSize = Math.max(1, Math.min(limit, items.length));
+    await Promise.all(Array.from({ length: poolSize }, runOne));
+    return results;
+}
+
+// 单文件上传（XHR，以便获取真实上传进度），不做 UI 副作用。
+// onProgress(0-100) 上报字节级上传进度；上传完成后等待服务端响应，进度封顶 99%。
+function uploadKnowledgeFileWithProgress(file, { collectionId, tags } = {}, onProgress) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (collectionId) formData.append('collectionId', collectionId);
+        if (tags && tags.length) formData.append('tags', tags.join(','));
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/rag/upload`, true);
+        xhr.withCredentials = true; // Cookie 鉴权
+        if (typeof csrfToken !== 'undefined' && csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+        if (xhr.upload) {
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable && typeof onProgress === 'function') {
+                    onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+                }
+            };
+        }
+        xhr.onload = () => {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) { data = {}; }
+            if (xhr.status >= 200 && xhr.status < 300 && !data.error) resolve(data);
+            else reject(new Error(data.error || `上传失败（HTTP ${xhr.status}）`));
+        };
+        xhr.onerror = () => reject(new Error('网络错误，上传失败'));
+        xhr.ontimeout = () => reject(new Error('上传超时'));
+        xhr.send(formData);
+    });
+}
+
+// 待上传队列：每项为 { file, status, progress, error }；status: pending|uploading|success|error。
+let knowledgeUploadQueue = [];
+let knowledgeUploading = false;
+
+const KNOWLEDGE_UPLOAD_STATUS = {
+    pending: { label: '待上传', cls: '' },
+    uploading: { label: '上传中', cls: 'is-uploading' },
+    success: { label: '已加入索引', cls: 'is-success' },
+    error: { label: '失败', cls: 'is-error' }
+};
+
+function formatUploadSize(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)}MB`;
+    if (value >= 1024) return `${Math.max(1, Math.round(value / 1024))}KB`;
+    return `${value}B`;
+}
+
+function knowledgeBatchLimitMb() {
+    return Math.round(KNOWLEDGE_MAX_BATCH_BYTES / 1024 / 1024);
+}
+
+// 局部更新单个列表项的徽标与进度条（避免进度事件触发整列表重绘）。
+function patchKnowledgeUploadItem(index) {
+    const entry = knowledgeUploadQueue[index];
+    const itemEl = document.querySelector(`#knowledge-upload-list .knowledge-upload-item[data-upload-index="${index}"]`);
+    if (!entry || !itemEl) return;
+    const meta = KNOWLEDGE_UPLOAD_STATUS[entry.status] || KNOWLEDGE_UPLOAD_STATUS.pending;
+    itemEl.dataset.status = entry.status;
+    const badge = itemEl.querySelector('.knowledge-upload-item-badge');
+    if (badge) {
+        badge.textContent = entry.status === 'uploading' ? `上传中 ${entry.progress || 0}%` : meta.label;
+        badge.className = `knowledge-upload-item-badge ${meta.cls}`.trim();
+        badge.title = entry.status === 'error' ? (entry.error || '上传失败') : '';
+    }
+    const bar = itemEl.querySelector('.knowledge-upload-item-bar');
+    if (bar) bar.hidden = !(entry.status === 'uploading' || entry.status === 'success');
+    const fill = itemEl.querySelector('.knowledge-upload-item-bar-fill');
+    if (fill) fill.style.width = `${entry.status === 'success' ? 100 : (entry.progress || 0)}%`;
+    const removeBtn = itemEl.querySelector('.knowledge-upload-item-remove');
+    if (removeBtn) removeBtn.hidden = entry.status === 'uploading' || entry.status === 'success';
+}
+
+// 渲染整个待上传列表、底部摘要与按钮状态（含数量/总量上限提示）。
+function renderKnowledgeUploadQueue() {
+    const listEl = document.getElementById('knowledge-upload-list');
+    const summaryEl = document.getElementById('knowledge-upload-summary');
+    const submitBtn = document.getElementById('knowledge-upload-submit-btn');
+    const clearBtn = document.getElementById('knowledge-upload-clear-btn');
+    const count = knowledgeUploadQueue.length;
+    const totalBytes = knowledgeUploadQueue.reduce((sum, entry) => sum + (entry.file.size || 0), 0);
+    const overCount = count > KNOWLEDGE_MAX_BATCH_FILES;
+    const overSize = totalBytes > KNOWLEDGE_MAX_BATCH_BYTES;
+    const limitMb = knowledgeBatchLimitMb();
+
+    if (listEl) {
+        listEl.hidden = count === 0;
+        listEl.innerHTML = '';
+        // 用 DOM 构建，文件名以 textContent 写入，避免任何转义/注入问题。
+        knowledgeUploadQueue.forEach((entry, index) => {
+            const meta = KNOWLEDGE_UPLOAD_STATUS[entry.status] || KNOWLEDGE_UPLOAD_STATUS.pending;
+            const item = document.createElement('div');
+            item.className = 'knowledge-upload-item';
+            item.dataset.uploadIndex = String(index);
+            item.dataset.status = entry.status;
+
+            const name = document.createElement('span');
+            name.className = 'knowledge-upload-item-name';
+            name.textContent = entry.file.name;
+            name.title = entry.file.name;
+
+            const size = document.createElement('span');
+            size.className = 'knowledge-upload-item-size';
+            size.textContent = formatUploadSize(entry.file.size);
+
+            const badge = document.createElement('span');
+            badge.className = `knowledge-upload-item-badge ${meta.cls}`.trim();
+            badge.textContent = entry.status === 'uploading' ? `上传中 ${entry.progress || 0}%` : meta.label;
+            if (entry.status === 'error') badge.title = entry.error || '上传失败';
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'knowledge-upload-item-remove';
+            remove.dataset.index = String(index);
+            remove.title = '移除';
+            remove.setAttribute('aria-label', '移除');
+            remove.textContent = '×';
+            remove.hidden = entry.status === 'uploading' || entry.status === 'success';
+
+            const bar = document.createElement('div');
+            bar.className = 'knowledge-upload-item-bar';
+            bar.hidden = !(entry.status === 'uploading' || entry.status === 'success');
+            const fill = document.createElement('div');
+            fill.className = 'knowledge-upload-item-bar-fill';
+            fill.style.width = `${entry.status === 'success' ? 100 : (entry.progress || 0)}%`;
+            bar.appendChild(fill);
+
+            item.append(name, size, badge, remove, bar);
+            listEl.appendChild(item);
+        });
+    }
+
+    if (summaryEl) {
+        if (!count) {
+            summaryEl.textContent = `未选择文件（单次最多 ${KNOWLEDGE_MAX_BATCH_FILES} 个、累计不超过 ${limitMb}MB）`;
+        } else {
+            let text = `共 ${count} 个文件，约 ${formatUploadSize(totalBytes)}（上限 ${KNOWLEDGE_MAX_BATCH_FILES} 个 / ${limitMb}MB）`;
+            if (overCount) text += '，已超出数量上限';
+            else if (overSize) text += '，已超出总量上限';
+            summaryEl.textContent = text;
+        }
+        summaryEl.classList.toggle('is-over-limit', overCount || overSize);
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = knowledgeUploading || !count || overCount || overSize;
+        submitBtn.textContent = knowledgeUploading ? '上传中…' : (count ? `开始上传（${count}）` : '开始上传');
+    }
+    if (clearBtn) clearBtn.disabled = knowledgeUploading || !count;
+}
+
+// 将文件加入待上传队列（按 名称+大小 去重），不立即上传。
+window.addKnowledgeUploadFiles = (fileList = null) => {
+    if (knowledgeUploading) { showToast('正在上传，请稍候再添加', 'info'); return; }
     const fileInput = document.getElementById('rag-upload-input');
-    const file = selectedFile || fileInput?.files?.[0];
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('file', file);
+    const incoming = Array.from(fileList && fileList.length ? fileList : (fileInput?.files || []));
+    if (fileInput) fileInput.value = ''; // 重置，便于再次选择同名文件
+    if (!incoming.length) return;
+    const seen = new Set(knowledgeUploadQueue.map(entry => `${entry.file.name}|${entry.file.size}`));
+    let added = 0;
+    incoming.forEach(file => {
+        const key = `${file.name}|${file.size}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        knowledgeUploadQueue.push({ file, status: 'pending', progress: 0, error: '' });
+        added += 1;
+    });
+    const skipped = incoming.length - added;
+    if (skipped > 0) showToast(`已忽略 ${skipped} 个重复文件`, 'info');
+    renderKnowledgeUploadQueue();
+};
+
+window.removeKnowledgeUploadFile = (index) => {
+    if (knowledgeUploading) return;
+    const i = Number(index);
+    if (Number.isInteger(i) && i >= 0 && i < knowledgeUploadQueue.length) {
+        knowledgeUploadQueue.splice(i, 1);
+        renderKnowledgeUploadQueue();
+    }
+};
+
+window.clearKnowledgeUploadQueue = () => {
+    if (knowledgeUploading) return;
+    knowledgeUploadQueue = [];
+    renderKnowledgeUploadQueue();
+};
+
+// 上传当前待上传队列：以并发 KNOWLEDGE_UPLOAD_CONCURRENCY 上传，并逐文件更新进度/状态徽标。
+// 成功的文件移出队列；全部成功才关闭弹窗，否则保留失败文件供重试。
+window.uploadKnowledgeDocs = async () => {
+    if (knowledgeUploading) return;
+    const entries = knowledgeUploadQueue.slice();
+    if (!entries.length) return;
+
+    if (entries.length > KNOWLEDGE_MAX_BATCH_FILES) {
+        showToast(`单次最多上传 ${KNOWLEDGE_MAX_BATCH_FILES} 个文件，请分批上传`, 'error');
+        return;
+    }
+    const totalBytes = entries.reduce((sum, entry) => sum + (entry.file.size || 0), 0);
+    if (totalBytes > KNOWLEDGE_MAX_BATCH_BYTES) {
+        showToast(`本次文件总大小约 ${formatUploadSize(totalBytes)}，超过 ${knowledgeBatchLimitMb()}MB 上限，请减少文件或分批上传`, 'error');
+        return;
+    }
+
     const selectedCollectionId = normalizeRagCollectionId(document.getElementById('knowledge-upload-collection')?.value);
     const uploadTags = getSelectedRagTagCheckboxes('knowledge-upload-tags-list');
-    if (selectedCollectionId) formData.append('collectionId', selectedCollectionId);
-    if (uploadTags.length) formData.append('tags', uploadTags.join(','));
 
-    showToast('正在上传并向量化文档，请稍候...', 'info');
-    if (fileInput) fileInput.value = ''; // 重置 input
+    knowledgeUploading = true;
+    // 重置（含重试场景），锁定按钮、隐藏移除并展示进度条。
+    entries.forEach(entry => { entry.status = 'pending'; entry.progress = 0; entry.error = ''; });
+    renderKnowledgeUploadQueue();
 
-    try {
-        const res = await apiFetch(`${API_BASE}/rag/upload`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: formData
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        
-        showToast(data.message || '文档已加入后台索引队列');
-        document.querySelectorAll('#knowledge-upload-tags-list input[type="checkbox"]').forEach(input => { input.checked = false; });
-        window.closeKnowledgeUploadModal?.();
+    const total = entries.length;
+    showToast(total > 1 ? `正在上传 ${total} 个文档，请稍候...` : '正在上传并向量化文档，请稍候...', 'info');
+
+    const outcomes = await runWithConcurrency(entries, KNOWLEDGE_UPLOAD_CONCURRENCY, async (entry, index) => {
+        entry.status = 'uploading';
+        entry.progress = 0;
+        patchKnowledgeUploadItem(index);
+        try {
+            await uploadKnowledgeFileWithProgress(entry.file, { collectionId: selectedCollectionId, tags: uploadTags }, (pct) => {
+                entry.progress = pct;
+                patchKnowledgeUploadItem(index);
+            });
+            entry.status = 'success';
+            entry.progress = 100;
+            patchKnowledgeUploadItem(index);
+            return { ok: true, entry };
+        } catch (e) {
+            entry.status = 'error';
+            entry.error = e.message || '上传失败';
+            patchKnowledgeUploadItem(index);
+            return { ok: false, entry, error: entry.error };
+        }
+    });
+
+    knowledgeUploading = false;
+    const success = outcomes.filter(outcome => outcome.ok).length;
+    const failures = outcomes.filter(outcome => !outcome.ok);
+
+    // 成功的文件移出队列，失败的保留供重试。
+    const succeeded = new Set(outcomes.filter(outcome => outcome.ok).map(outcome => outcome.entry));
+    knowledgeUploadQueue = knowledgeUploadQueue.filter(entry => !succeeded.has(entry));
+
+    const failText = failures.map(outcome => `${outcome.entry.file.name}：${outcome.error}`).join('；');
+    if (failures.length === 0) {
+        showToast(total > 1 ? `已加入 ${success} 个文档到后台索引队列` : '文档已加入后台索引队列');
+    } else if (success > 0) {
+        showToast(`成功 ${success} 个，失败 ${failures.length} 个：${failText}`, 'error');
+    } else {
+        showToast(`上传失败：${failText}`, 'error');
+    }
+
+    if (success > 0) {
         invalidateRagTagCache();
         await window.loadKnowledgeCollections?.();
         await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
         window.loadKnowledgeDocs();
-    } catch (e) {
-        showToast(e.message || '文档上传失败', 'error');
     }
+
+    if (failures.length === 0) {
+        document.querySelectorAll('#knowledge-upload-tags-list input[type="checkbox"]').forEach(input => { input.checked = false; });
+        window.closeKnowledgeUploadModal?.();
+    } else {
+        renderKnowledgeUploadQueue(); // 恢复按钮状态并展示剩余失败文件
+    }
+};
+
+// 提交按钮入口：上传当前待上传队列。
+window.submitKnowledgeUpload = () => window.uploadKnowledgeDocs();
+
+// 向后兼容的单文件入口：加入队列后立即上传。
+window.uploadKnowledgeDoc = (selectedFile = null) => {
+    if (selectedFile) window.addKnowledgeUploadFiles([selectedFile]);
+    return window.uploadKnowledgeDocs();
 };
 
 window.reindexKnowledgeDoc = async (id) => {

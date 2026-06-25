@@ -16,6 +16,9 @@ const {
     buildRagContextMessage,
     buildRagSearchContent,
     chunkText,
+    chunkDocument,
+    detectDocType,
+    applyMMR,
     confirmRelation,
     cosineSimilarity,
     db,
@@ -154,6 +157,62 @@ test('知识图谱会从 RAG 分块提取实体和类型化关系', () => {
     assert.ok(names.includes('知识库系统'));
     assert.ok(graph.relations.some(row => row.sourceName === '运维中心' && row.relationType === 'responsible_for' && row.targetName === 'Pivot平台'));
     assert.ok(graph.relations.some(row => row.sourceName === 'Pivot平台' && row.relationType === 'depends_on' && row.targetName === '知识库系统'));
+});
+
+test('结构感知切片会按法规条款切分并附带章节面包屑', () => {
+    const text = [
+        '第一章 总则',
+        '第一条 为规范管理，制定本办法。',
+        '第二条 本办法适用于全体员工。',
+        '第二章 罚则',
+        '第三条 违反规定的，给予处分。'
+    ].join('\n');
+    assert.equal(detectDocType('员工管理办法.txt', text), 'legal');
+    const chunks = chunkDocument(text, { docName: '员工管理办法.txt', chunkSize: 1000, overlap: 100 });
+    // 每条独立成片：至少三条 + 章标题不会把不同条混进同一片。
+    const articleChunks = chunks.filter(item => /第[一二三]条/.test(item.content));
+    assert.ok(articleChunks.length >= 3);
+    const third = chunks.find(item => item.content.includes('第三条'));
+    assert.ok(third);
+    assert.ok(third.headingPath.includes('员工管理办法'));
+    assert.ok(third.headingPath.includes('第二章'));
+    assert.ok(third.headingPath.includes('第三条'));
+    // 第三条不应混入第二条内容。
+    assert.equal(third.content.includes('第二条'), false);
+});
+
+test('普通文档不会被识别为法规，按通用滑窗切片', () => {
+    assert.equal(detectDocType('随手笔记.txt', '今天天气不错，记录一些零散想法。'), 'prose');
+    const chunks = chunkDocument('今天天气不错，记录一些零散想法。', { docName: '随手笔记.txt', chunkSize: 500, overlap: 50 });
+    assert.ok(chunks.length >= 1);
+    assert.equal(chunks[0].headingPath, '随手笔记');
+});
+
+test('法规文档会抽取法规领域关系（applies_to/references）', () => {
+    // 标点边界让多个实体可被分别识别，便于覆盖 applies_to 与 references 两类关系。
+    const text = '研发中心，数据管理规范，信息安全制度适用于研发中心，信息安全制度引用数据管理规范。';
+    const graph = extractKnowledgeGraph(text, 'legal');
+    assert.ok(graph.relations.some(row => row.relationType === 'applies_to'));
+    assert.ok(graph.relations.some(row => row.relationType === 'references'));
+    // 非法规文档不应叠加法规关系。
+    const generic = extractKnowledgeGraph(text, 'prose');
+    assert.equal(generic.relations.some(row => row.relationType === 'applies_to'), false);
+    assert.equal(generic.relations.some(row => row.relationType === 'references'), false);
+});
+
+test('MMR 去重会在相关性与多样性间平衡，剔除近重复片段', () => {
+    const makeEntry = (arr) => ({
+        vec: Float64Array.from(arr),
+        norm: Math.sqrt(arr.reduce((sum, value) => sum + value * value, 0))
+    });
+    const a = { chunkId: 1, fused: 1.0, entry: makeEntry([1, 0]) };
+    const nearDup = { chunkId: 2, fused: 0.9, entry: makeEntry([1, 0]) }; // 与 a 近重复
+    const diverse = { chunkId: 3, fused: 0.5, entry: makeEntry([0, 1]) }; // 与 a 正交
+    const selected = applyMMR([a, nearDup, diverse], 2, 0.5);
+    const ids = selected.map(item => item.chunkId);
+    assert.equal(ids[0], 1);
+    assert.equal(ids.includes(3), true); // 多样片段优先于近重复
+    assert.equal(ids.includes(2), false);
 });
 
 test('知识图谱会索引并丰富检索上下文，同时支持整理操作', () => {

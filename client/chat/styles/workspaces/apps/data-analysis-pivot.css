@@ -1,0 +1,279 @@
+
+
+/* 数据透视布局优化：控制区同排对齐、摘要收紧、导出入口前置 */
+.data-analysis-pivot-workspace {
+    min-height: 0;
+}
+
+.data-analysis-pivot-config {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.data-analysis-pivot-config-main,
+.data-analysis-pivot-config-sub {
+    display: grid;
+    gap: 8px;
+    align-items: end;
+}
+
+.data-analysis-pivot-config-main,
+.data-analysis-pivot-config-sub {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.data-analysis-pivot-config-sub {
+    margin-top: 8px;
+}
+
+.data-analysis-pivot-config label {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    color: #334155;
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.data-analysis-pivot-config .form-input {
+    width: 100%;
+    height: 32px;
+    min-width: 0;
+    margin: 0;
+    border-radius: 7px;
+    font-size: 0.8rem;
+}
+
+.data-analysis-pivot-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.data-analysis-pivot-toolbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.data-analysis-pivot-toolbar button {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-toolbar .data-analysis-pivot-hint {
+    min-width: 0;
+    flex: 1;
+    margin: 0;
+    color: #64748b;
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+.data-analysis-pivot-result-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.data-analysis-pivot-summary {
+    display: grid;
+    grid-template-columns: minmax(160px, 1.4fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(120px, 0.8fr);
+    gap: 6px;
+    margin: 0;
+}
+
+.data-analysis-pivot-stat {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 6px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 7px;
+    background: #fff;
+}
+
+.data-analysis-pivot-stat span {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-stat strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 0.83rem;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-stat-total {
+    background: rgba(20, 184, 166, 0.08);
+    border-color: rgba(20, 184, 166, 0.18);
+}
+
+.data-analysis-pivot-meta {
+    max-width: 430px;
+    margin: 0;
+    color: #64748b;
+    font-size: 0.74rem;
+    text-align: right;
+}
+
+.data-analysis-pivot-insights {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.data-analysis-pivot-insights > div {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 7px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 7px;
+    background: #f8fafc;
+}
+
+.data-analysis-pivot-insights > div > span {
+    margin: 0;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-rank-list {
+    min-width: 0;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 5px;
+    margin: 0;
+    overflow: hidden;
+}
+
+.data-analysis-pivot-rank-item {
+    min-width: 0;
+    max-width: 150px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 999px;
+    background: #fff;
+    color: #334155;
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.data-analysis-pivot-rank-item b {
+    color: #0f766e;
+    font-weight: 800;
+}
+
+.data-analysis-pivot-rank-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-rank-item em {
+    color: #0f172a;
+    font-style: normal;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-rank-item small {
+    color: #64748b;
+    font-size: 0.68rem;
+    white-space: nowrap;
+}
+
+.data-analysis-pivot-table {
+    margin-bottom: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+}
+
+.data-analysis-pivot-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    color: #64748b;
+    font-size: 0.74rem;
+}
+
+@media (max-width: 1280px) {
+    .data-analysis-pivot-config-main,
+    .data-analysis-pivot-config-sub {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .data-analysis-pivot-result-head {
+        grid-template-columns: 1fr;
+    }
+
+    .data-analysis-pivot-meta {
+        max-width: none;
+        text-align: left;
+    }
+}
+
+@media (max-width: 900px) {
+    .data-analysis-pivot-config-main,
+    .data-analysis-pivot-config-sub,
+    .data-analysis-pivot-summary,
+    .data-analysis-pivot-insights {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .data-analysis-pivot-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .data-analysis-pivot-toolbar-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .data-analysis-pivot-insights > div {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 560px) {
+    .data-analysis-pivot-config-main,
+    .data-analysis-pivot-config-sub,
+    .data-analysis-pivot-summary,
+    .data-analysis-pivot-insights {
+        grid-template-columns: 1fr;
+    }
+}

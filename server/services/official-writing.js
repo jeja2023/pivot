@@ -70,7 +70,15 @@ function buildOfficialWritingMessages(params = {}) {
         userLines.push('', '正文稿：', draft || '【暂无正文稿】');
     } else if (mode === 'selection') {
         const action = String(params.action || '').trim();
-        const instruction = OFFICIAL_WRITING_SELECTION_INSTRUCTIONS[action];
+        let instruction;
+        if (action === 'custom') {
+            // 用户自定义改写指令：限长，避免注入超长内容。
+            const userInstruction = String(params.instruction || '').trim().slice(0, 500);
+            if (!userInstruction) throw new Error('请输入修改指令。');
+            instruction = `按以下要求改写下面的公文片段，保持事实信息不变，不编造单位、时间和数据：${userInstruction}`;
+        } else {
+            instruction = OFFICIAL_WRITING_SELECTION_INSTRUCTIONS[action];
+        }
         if (!instruction) throw new Error(`不支持的选区动作：${action || '(空)'}`);
         if (!selectionText) throw new Error('选区内容为空。');
         userLines.push(instruction);
