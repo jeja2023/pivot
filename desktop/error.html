@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pivot connection error</title>
+    <title>智枢 Pivot 连接失败</title>
     <style>
         :root { color-scheme: light dark; }
         body {
@@ -47,10 +47,10 @@
 </head>
 <body>
     <main>
-        <h1>Pivot ??????</h1>
-        <p id="message">?????????????????????</p>
+        <h1>智枢 Pivot 连接错误</h1>
+        <p id="message">无法连接到智枢服务器，请检查您的网络连接或服务器运行状态。</p>
         <p class="meta" id="target"></p>
-        <button id="retry">??</button>
+        <button id="retry">重新连接</button>
     </main>
     <script>
         const params = new URLSearchParams(location.search);
@@ -59,8 +59,8 @@
         const env = params.get('env');
         if (message) document.getElementById('message').textContent = message;
         document.getElementById('target').innerHTML = [
-            env ? '???' + env : '',
-            target ? '???<code>' + target.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) + '</code>' : ''
+            env ? '当前环境：' + env : '',
+            target ? '目标地址：<code>' + target.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) + '</code>' : ''
         ].filter(Boolean).join('<br>');
         document.getElementById('retry').addEventListener('click', () => window.pivotDesktop.retry());
     </script>

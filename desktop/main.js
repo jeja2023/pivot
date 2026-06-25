@@ -1,8 +1,8 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { loadDesktopConfig } = require('./config');
 const { setupAutoUpdater } = require('./updater');
 
@@ -40,7 +40,7 @@ function findAvailablePort() {
             const port = address && typeof address === 'object' ? address.port : 0;
             probe.close(() => {
                 if (!port) {
-                    reject(new Error('Failed to allocate a local service port.'));
+                    reject(new Error('分配本地服务端口失败。'));
                     return;
                 }
                 resolve(port);
@@ -51,21 +51,91 @@ function findAvailablePort() {
 
 function windowTitle(config) {
     const env = config && config.environmentName ? config.environmentName : '';
-    const base = config && config.windowTitle ? config.windowTitle : 'Pivot';
-    return env ? base + ' - ' + env : base;
+    const base = config && typeof config.windowTitle === 'string' ? config.windowTitle : 'Pivot';
+    return env && base ? base + ' - ' + env : (base || env);
 }
 
-function toFileUrl(filePath) {
-    return 'file:///' + path.resolve(filePath).replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:');
+function createApplicationMenu() {
+    const template = [
+        {
+            label: '文件',
+            submenu: [
+                {
+                    label: '退出',
+                    accelerator: 'CmdOrCtrl+Q',
+                    click() {
+                        app.quit();
+                    }
+                }
+            ]
+        },
+        {
+            label: '编辑',
+            submenu: [
+                { label: '撤销', role: 'undo' },
+                { label: '重做', role: 'redo' },
+                { type: 'separator' },
+                { label: '剪切', role: 'cut' },
+                { label: '复制', role: 'copy' },
+                { label: '粘贴', role: 'paste' },
+                { label: '全选', role: 'selectAll' }
+            ]
+        },
+        {
+            label: '视图',
+            submenu: [
+                { label: '重新加载', role: 'reload' },
+                { label: '强制重新加载', role: 'forceReload' },
+                { label: '开发者工具', role: 'toggleDevTools' },
+                { type: 'separator' },
+                { label: '实际大小', role: 'resetZoom' },
+                { label: '放大', role: 'zoomIn' },
+                { label: '缩小', role: 'zoomOut' },
+                { type: 'separator' },
+                { label: '切换全屏', role: 'togglefullscreen' }
+            ]
+        },
+        {
+            label: '窗口',
+            submenu: [
+                { label: '最小化', role: 'minimize' },
+                { label: '关闭', role: 'close' }
+            ]
+        },
+        {
+            label: '帮助',
+            submenu: [
+                {
+                    label: '关于智枢',
+                    click() {
+                        dialog.showMessageBox(mainWindow, {
+                            type: 'info',
+                            title: '关于智枢',
+                            message: '智枢 Pivot',
+                            detail: `版本：v${app.getVersion()}\nAI 智能中枢管理系统。\n保留所有权利。`
+                        });
+                    }
+                }
+            ]
+        }
+    ];
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
 }
 
-function errorPageUrl(message) {
-    const params = new URLSearchParams({
-        message: message || 'Connection failed.',
-        env: runtimeConfig && runtimeConfig.environmentName ? runtimeConfig.environmentName : '',
-        target: currentTargetUrl || ''
-    });
-    return toFileUrl(path.join(__dirname, 'error.html')) + '?' + params.toString();
+async function loadErrorPage(message) {
+    if (!mainWindow) return;
+    try {
+        await mainWindow.loadFile(path.join(__dirname, 'error.html'), {
+            query: {
+                message: message || '连接失败。',
+                env: runtimeConfig && runtimeConfig.environmentName ? runtimeConfig.environmentName : '',
+                target: currentTargetUrl || ''
+            }
+        });
+    } catch (err) {
+        console.error('加载错误页面失败:', err);
+    }
 }
 
 async function configureLocalEnvironment() {
@@ -105,7 +175,7 @@ function waitForServer(server) {
         server.once('listening', () => {
             const currentAddress = server.address();
             if (!currentAddress || typeof currentAddress !== 'object') {
-                reject(new Error('Pivot service did not expose a usable port.'));
+                reject(new Error('Pivot 服务未暴露可用端口。'));
                 return;
             }
             resolve(currentAddress.port);
@@ -118,7 +188,7 @@ async function startLocalServer() {
     await configureLocalEnvironment();
     const exported = require('../server/index.js');
     pivotServer = exported.server;
-    if (!pivotServer) throw new Error('Pivot service failed to start: missing HTTP server instance.');
+    if (!pivotServer) throw new Error('Pivot 服务启动失败：缺少 HTTP 服务器实例。');
     const port = await waitForServer(pivotServer);
     return 'http://127.0.0.1:' + port + '/';
 }
@@ -169,7 +239,7 @@ function createMainWindow(config) {
     mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
         if (!isMainFrame || !mainWindow || String(validatedUrl || '').startsWith('file://')) return;
         lastLoadError = { errorCode, errorDescription, validatedUrl };
-        mainWindow.loadURL(errorPageUrl(errorDescription + ' (' + errorCode + ')'));
+        loadErrorPage(errorDescription + ' (' + errorCode + ')');
     });
     mainWindow.webContents.on('page-title-updated', (event) => {
         event.preventDefault();
@@ -193,7 +263,7 @@ async function loadTarget() {
             errorDescription: message,
             validatedUrl: currentTargetUrl
         };
-        await mainWindow.loadURL(errorPageUrl(message));
+        await loadErrorPage(message);
     }
 }
 
@@ -231,13 +301,14 @@ if (!gotLock) {
 
     app.whenReady().then(async () => {
         app.setAppUserModelId('com.pivot.desktop');
+        Menu.setApplicationMenu(null);
         try {
             runtimeConfig = loadDesktopConfig(app);
             createMainWindow(runtimeConfig);
             await loadTarget();
             updaterController = setupAutoUpdater({ app, mainWindow, config: runtimeConfig });
         } catch (err) {
-            dialog.showErrorBox('Pivot startup failed', err && err.stack ? err.stack : String(err));
+            dialog.showErrorBox('Pivot 启动失败', err && err.stack ? err.stack : String(err));
             app.quit();
         }
     });

@@ -32,10 +32,13 @@ function ensureElectronInstalled() {
     }
 }
 
+const DESKTOP_VERSION = '0.0.1';
+
 function normalizeBuilderArgs(rawArgs) {
-    if (!rawArgs.length) return ['--win', 'nsis'];
-    if (rawArgs.includes('--dir')) return ['--win', '--dir'];
-    return ['--win', ...rawArgs];
+    const extraArgs = [`-c.extraMetadata.version=${DESKTOP_VERSION}`];
+    if (!rawArgs.length) return ['--win', 'nsis', ...extraArgs];
+    if (rawArgs.includes('--dir')) return ['--win', '--dir', ...extraArgs];
+    return ['--win', ...rawArgs, ...extraArgs];
 }
 
 ensureElectronInstalled();

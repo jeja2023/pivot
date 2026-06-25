@@ -15,3 +15,14 @@ source/
 *.zip
 *.gz
 scripts/check_syntax.js
+dist-electron-remote/
+dist/
+desktop/
+tests/
+scripts/run_desktop.js
+scripts/package_desktop.js
+scripts/build_desktop_icon.js
+.claude/
+.codex-tmp/
+.codex-sidebar-data/
+artifacts/

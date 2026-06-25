@@ -26,3 +26,26 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
         return () => ipcRenderer.removeListener('pivot-updater:event', listener);
     }
 });
+
+window.addEventListener('DOMContentLoaded', () => {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: rgba(0, 0, 0, 0.08);
+            z-index: 999999;
+            pointer-events: none;
+        }
+        @media (prefers-color-scheme: dark) {
+            body::before {
+                background: rgba(255, 255, 255, 0.12);
+            }
+        }
+    `;
+    document.head.appendChild(style);
+});

@@ -1,16 +1,16 @@
 {
   "mode": "remote",
-  "environmentName": "Local Dev",
-  "remoteUrl": "http://127.0.0.1:3000/",
-  "partition": "persist:pivot-local-dev",
-  "windowTitle": "Pivot",
+  "environmentName": "",
+  "remoteUrl": "http://50.64.150.51:9006/",
+  "partition": "persist:pivot-production",
+  "windowTitle": "",
   "allowExternalOpen": true,
   "autoUpdate": {
     "enabled": false,
-    "url": "http://127.0.0.1:8080/pivot-updates/",
-    "checkOnStart": true,
-    "autoDownload": true,
+    "url": "",
+    "checkOnStart": false,
+    "autoDownload": false,
     "allowPrerelease": false,
-    "installOnQuit": true
+    "installOnQuit": false
   }
 }

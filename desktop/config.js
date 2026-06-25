@@ -127,13 +127,13 @@ function normalizeConfig(raw, meta = {}) {
     const input = raw || {};
     const merged = { ...DEFAULT_CONFIG, ...input };
     const mode = normalizeMode(merged.mode);
-    const environmentName = String(input.environmentName || (mode === 'remote' ? 'Remote' : 'Local')).trim();
+    const environmentName = typeof input.environmentName === 'string' ? input.environmentName.trim() : (mode === 'remote' ? 'Remote' : 'Local');
     const config = {
         mode,
         environmentName,
         remoteUrl: '',
         partition: normalizePartition(merged.partition, mode, environmentName),
-        windowTitle: String(merged.windowTitle || 'Pivot').trim() || 'Pivot',
+        windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : 'Pivot',
         allowExternalOpen: merged.allowExternalOpen !== false,
         autoUpdate: normalizeAutoUpdate(merged.autoUpdate),
         source: meta.source || 'default',

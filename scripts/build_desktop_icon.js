@@ -31,10 +31,40 @@ async function main() {
 
     const images = [];
     for (const size of sizes) {
-        const buffer = await sharp(sourcePath)
+        // 读取 raw 像素数据
+        const { data, info } = await sharp(sourcePath)
             .resize(size, size, { fit: 'cover' })
-            .png()
-            .toBuffer();
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        // 抠除接近纯白的背景
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            
+            // 如果 RGB 三通道的颜色都非常亮（趋向于 255 纯白）
+            if (r > 230 && g > 230 && b > 230) {
+                const max = Math.max(r, g, b);
+                const diff = 255 - max;
+                // 用差值比例做羽化透明（在 230 - 255 的过渡区间实现渐变透明，消除硬锯齿）
+                const alpha = Math.round((diff / 25) * 255);
+                data[i + 3] = Math.min(255, Math.max(0, alpha));
+            }
+        }
+
+        // 重新包装回 sharp 并生成 png 缓存
+        const buffer = await sharp(data, {
+            raw: {
+                width: info.width,
+                height: info.height,
+                channels: 4
+            }
+        })
+        .png()
+        .toBuffer();
+
         images.push({ size, buffer });
     }
 
