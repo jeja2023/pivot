@@ -1,3 +1,36 @@
+## [v0.0.163] - 2026-06-25
+
+### Docker 生产环境 DuckDB 绑定修复，并修复数据概览 Token 趋势图宽度异常
+
+本版本包含两项关键修复：其一，解决 Docker 容器启动时因 DuckDB 平台原生绑定（`@duckdb/node-bindings-linux-x64/duckdb.node`）缺失而抛出 `MODULE_NOT_FOUND` 致使服务无法启动的问题，并对依赖安装方式进行根治性加固，使镜像构建结果可复现、依赖缺失在构建期即暴露；其二，修复客户端「数据概览」页面「近 30 天 Token 趋势」图表偶发突然缩到左侧、右侧大片留白且不会自动恢复的渲染问题。
+
+#### 问题背景
+
+- 生产环境更新部署后，服务端在 `require('@duckdb/node-api')` 时崩溃，报错 `Error: Cannot find module '@duckdb/node-bindings-linux-x64/duckdb.node'`，调用链经 [server/services/data-analysis/shared.js](file:///e:/pivot/server/services/data-analysis/shared.js) → [server/services/data-analysis.js](file:///e:/pivot/server/services/data-analysis.js) → [server/index.js](file:///e:/pivot/server/index.js)。
+- **根因**：`@duckdb/node-api` 按平台拆分原生绑定包（`linux-x64`、`win32-x64` 等），这些绑定均为 **optional dependency（可选依赖）**。当构建处于弱网或镜像源抽风时，npm 对下载失败的可选依赖采取**静默跳过**策略——构建照常成功，直到运行时 `require` 才暴露缺失。叠加 `npm install` 会就地改写/补全 lockfile 的特性，该静默取舍偶发触发，表现为"更新部署时随机失败"。
+
+#### 变更内容
+
+- **构建阶段确定性安装**：在 [Dockerfile](file:///e:/pivot/Dockerfile) 中将依赖安装由 `npm install --omit=dev` 改为 `npm ci --omit=dev`。`npm ci` 严格按 `package-lock.json` 安装、不改写 lock、先清空再装，且在 `package.json` 与 lock 失配时直接报错，从源头消除 `npm install` 的静默取舍行为，保证镜像构建结果可复现。
+- **原生绑定校验与自愈兜底**：在 [Dockerfile](file:///e:/pivot/Dockerfile) 依赖安装后新增校验层——装完立即执行一次 `require('@duckdb/node-api')`；若加载失败则按当前平台显式补装 `@duckdb/node-bindings-linux-x64`（版本与 `@duckdb/node-api` 保持一致），补装后仍无法加载则让 `node -e` 非零退出、**使构建当场失败**。该层将原本运行时才暴露的崩溃前移至构建期，彻底杜绝缺失绑定的镜像流入生产。
+- **修复数据概览 Token 趋势图宽度异常缩窄**：
+  - 根因为 [client/chat/stats.js](file:///e:/pivot/client/chat/stats.js) 的 `renderTrendChart` 在取画布宽度时，当所在标签页处于隐藏（`display:none`）或缩放容器宽度变量尚未就绪的瞬间，`parentElement.clientWidth` 读到 0，旧逻辑 `Math.max(parentWidth || rect.width || 600, 320)` 会退化为固定 `600px` 并写死到画布上，且无重试机制，导致图表突然缩到左侧、右侧大片留白且不会自动恢复；同时 `rect.width` 兜底取自被 CSS `scale` 二次缩小的 `getBoundingClientRect`，本身也不可靠。
+  - 修复后：当容器宽度未就绪（`parentWidth < 1`）时不再按错误宽度落笔，改为通过 `requestAnimationFrame` 等待下一帧重试，直至取得真实未缩放宽度再绘制；并设 60 帧（约 1 秒）重试上限，容器长时间不可见则放弃本次绘制（下次进入该页会重新加载渲染），避免隐藏状态下空转。
+  - 移除被 CSS `scale` 污染的 `rect.width` 兜底，统一采用父容器未缩放布局宽度 `parentElement.clientWidth`。该函数同时服务统计报表页的 `report-trend-chart`，一并受益。
+
+#### 验证
+
+- 本地执行 `npm ci --omit=dev --dry-run` 通过，确认 `package.json` 与 `package-lock.json` 同步，且安装计划中包含 `@duckdb/node-bindings-linux-x64 1.5.4-r.1`，`npm ci` 不会因失配中断构建。
+- 校验 [Dockerfile](file:///e:/pivot/Dockerfile) 依赖安装语句已为 `npm ci --omit=dev`。
+- 校验 [Dockerfile](file:///e:/pivot/Dockerfile) 已包含 DuckDB 原生绑定的 `require` 校验、缺失自愈补装与失败即退出的构建守卫，重建日志应输出 `[build] DuckDB 原生绑定校验通过`。
+- 重建命令：`docker compose build --no-cache pivot && docker compose up -d`。
+- 运行 `npm run check`（含 263 个 JS 文件语法校验、文本完整性校验）与 ESLint 均通过；客户端实测「数据概览」页面在反复切换设置标签、连续点击「刷新」后，「近 30 天 Token 趋势」图表始终保持满宽渲染。
+
+#### 说明
+
+- 后续升级 `@duckdb/node-api` 时，需同步更新 [Dockerfile](file:///e:/pivot/Dockerfile) 自愈补装语句中 pin 的绑定版本号（注释已标注），并提交更新后的 `package-lock.json`，以免 `npm ci` 因失配报错。
+- 服务端版本号提升至 `0.0.163`。
+
 ## [v0.0.162] - 2026-06-25
 
 ### 桌面客户端细节优化：任务栏标题显示与数据概览缩放适配修复

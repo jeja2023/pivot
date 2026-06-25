@@ -34,14 +34,23 @@ ENV npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-lib
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
 ENV SHARP_USE_GLOBAL_LIBVIPS=false
 
-# 安装生产环境依赖
+# 安装生产环境依赖，并确保 DuckDB Linux 原生绑定就位
+# 背景：@duckdb/node-bindings-linux-x64 是 optional 依赖，弱网/TLS 抖动时 npm ci 会“静默跳过”
+#       下载失败的可选依赖，构建照样成功，直到运行时 require 才崩（MODULE_NOT_FOUND）。
+# 策略：仍在镜像源 .npmrc 生效时，require 校验一次；缺失则显式补装该绑定——
+#       直接指名安装即为非可选，失败立即报错；--omit=dev 避免误拉 electron 等开发依赖触发二进制下载，
+#       --registry 强制走国内镜像源，--no-save 不改 package.json。补装后仍无法加载则让构建当场失败。
+#       注意：补装版本号须与 @duckdb/node-api 保持一致，升级 duckdb 时同步更新此处。
 RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
     echo "sharp_binary_host=https://npmmirror.com/mirrors/sharp" >> .npmrc && \
     echo "sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips" >> .npmrc && \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    npm install --omit=dev && \
+    npm ci --omit=dev && \
+    ( node -e "require('@duckdb/node-api')" 2>/dev/null || \
+      npm install --no-save --omit=dev --registry=https://registry.npmmirror.com @duckdb/node-bindings-linux-x64@1.5.4-r.1 ) && \
+    node -e "require('@duckdb/node-api'); console.log('[build] DuckDB 原生绑定校验通过')" && \
     rm .npmrc
 
 # 将项目源代码及模型下载脚本复制进镜像

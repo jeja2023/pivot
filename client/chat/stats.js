@@ -116,13 +116,36 @@ window.loadStats = async function() {
     } catch (e) { showToast('加载统计失败', 'error'); }
 }
 
+const trendChartRetryFrames = {};
+const trendChartRetryCounts = {};
+
 function renderTrendChart(canvasId, data) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
     const parentWidth = canvas.parentElement?.clientWidth || 0;
-    const width = Math.max(parentWidth || rect.width || 600, 320);
+    // 容器尚未完成布局时（所在标签页处于 hidden、缩放容器宽度变量未就绪等），
+    // parentElement.clientWidth 会读到 0。旧逻辑会退化为固定 600px 宽度并“钉死”在画布上，
+    // 视觉上表现为图表突然缩到左侧、右侧大片留白，且不会自动恢复。
+    // 此处改为等待容器获得真实未缩放宽度后再绘制，避免按错误宽度落笔。
+    if (parentWidth < 1) {
+        if (trendChartRetryFrames[canvasId]) window.cancelAnimationFrame(trendChartRetryFrames[canvasId]);
+        trendChartRetryCounts[canvasId] = (trendChartRetryCounts[canvasId] || 0) + 1;
+        if (trendChartRetryCounts[canvasId] <= 60) {
+            trendChartRetryFrames[canvasId] = window.requestAnimationFrame(() => {
+                trendChartRetryFrames[canvasId] = 0;
+                renderTrendChart(canvasId, data);
+            });
+        } else {
+            // 容器长时间不可见，放弃本次绘制；下次进入该页会重新加载并渲染
+            trendChartRetryCounts[canvasId] = 0;
+        }
+        return;
+    }
+    trendChartRetryCounts[canvasId] = 0;
+
+    const ctx = canvas.getContext('2d');
+    // 统一使用父容器的未缩放布局宽度，避免使用被 CSS scale 二次缩小的 getBoundingClientRect 宽度
+    const width = Math.max(parentWidth, 320);
     const height = Number(canvas.getAttribute('height')) || 220;
     const ratio = window.devicePixelRatio || 1;
     canvas.width = width * ratio; canvas.height = height * ratio;
