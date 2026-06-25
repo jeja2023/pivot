@@ -355,6 +355,14 @@ app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/
     immutable: true
 }));
 
+// 客户端下载目录（如果文件存在则提供下载）
+app.use('/downloads', express.static(path.join(__dirname, '../downloads'), {
+    maxAge: 0,
+    setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+}));
+
 const sendChatPage = (req, res) => {
     noCacheHeaders(res);
     res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));

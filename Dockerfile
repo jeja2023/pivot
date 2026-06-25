@@ -7,12 +7,17 @@ WORKDIR /app
 # 首先复制 package.json
 COPY package*.json ./
 
-# 安装系统级图像处理引擎、编译工具及时间数据包
+# 安装系统级图像处理引擎、Canvas 渲染库、编译工具及时间数据包
 RUN apt-get update && apt-get install -y \
     tzdata \
     pkg-config \
     libvips-dev \
     libglib2.0-dev \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
     python3 \
     make \
     g++ \

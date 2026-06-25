@@ -1,30 +1,70 @@
+# Node.js
 node_modules/
+
+# 数据与上传文件（运行时挂载）
 data/
 uploads/
+logs/
+
+# Git 与版本控制
 .git/
+.github/
+.gitignore
+
+# 环境变量
 .env
 .env.example
+
+# 临时与缓存目录
 scratch/
 .gemini/
-Dockerfile
-docker-compose.yml
-updater-state.json
-source/
-*.log
-*.tar
-*.zip
-*.gz
-scripts/check_syntax.js
-dist-electron-remote/
-dist/
-desktop/
-tests/
-scripts/run_desktop.js
-scripts/package_desktop.js
-scripts/build_desktop_icon.js
 .claude/
 .codex-tmp/
 .codex-sidebar-data/
 artifacts/
+
+# Docker 相关
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 桌面端完整排除（Docker 不需要）
+desktop/
+dist-electron-remote/
+dist/
+# 客户端安装包（默认排除，如需在 Docker 中提供下载请移动到 downloads/ 目录）
 client/*.exe
+*.msi
+*.dmg
+*.AppImage
+updater-state.json
+
+# 开发与测试
+tests/
+*.test.js
+*.spec.js
+
+# 桌面端构建脚本（Docker 不需要）
+scripts/run_desktop.js
+scripts/package_desktop.js
+scripts/build_desktop_icon.js
+
+# 语法检查脚本（构建时不需要）
+scripts/check_syntax.js
+scripts/check_text_integrity.js
+scripts/check_external_links.js
+scripts/check_chat_assets.js
+
+# 日志与压缩文件
+*.log
+*.tar
+*.zip
+*.gz
+*.bak
+*.tmp
+
+# 文档（可选，如果想保留可以删除这行）
+# docs/
+# *.md
+# !README.md
 

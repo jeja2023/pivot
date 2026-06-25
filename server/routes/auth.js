@@ -48,9 +48,12 @@ function createAuthRouter({
     }));
 
     router.get('/auth/config', (req, res) => {
-        res.json({ 
+        // Docker 环境默认禁用客户端下载（因为镜像中不包含 .exe）
+        const enableDesktopDownload = process.env.ENABLE_DESKTOP_DOWNLOAD === 'true';
+        res.json({
             allowPublicRegistration: isPublicRegistrationEnabled(),
-            publicUrl: publicUrl
+            publicUrl: publicUrl,
+            desktopDownloadEnabled: enableDesktopDownload
         });
     });
 

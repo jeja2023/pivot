@@ -27,6 +27,10 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+      # 客户端下载目录挂载（可选）：用于提供 Windows 客户端下载
+      # 将 Pivot-Setup.exe 放在宿主机 ./downloads 目录中即可通过 Web 页面下载
+      # 优点：更新客户端无需重新构建镜像，保持镜像精简
+      - ./downloads:/app/downloads
 
     # 网络：加入外部共享网络 ai-bridge
     networks:

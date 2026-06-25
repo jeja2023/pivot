@@ -1,3 +1,50 @@
+## [v0.0.161] - 2026-06-25
+
+### Docker 生产环境优化：Canvas 依赖修复与客户端下载灵活化方案
+
+本版本针对 Docker 生产环境部署进行了两项关键修复：解决了 PDF 解析所需的 Canvas 原生模块加载失败问题，并为客户端下载实现了灵活的外部挂载方案，保持镜像精简的同时支持动态更新客户端。
+
+#### 变更内容
+
+- **修复 Docker 环境 Canvas 依赖加载失败**：
+  - 在 [Dockerfile](file:///e:/pivot/Dockerfile) 中新增 `@napi-rs/canvas` 所需的系统级图形库依赖：`libcairo2-dev`（Cairo 2D 图形库）、`libpango1.0-dev`（Pango 文本渲染引擎）、`libjpeg-dev`、`libgif-dev`、`librsvg2-dev`。
+  - 解决了生产环境日志中 `"Cannot load @napi-rs/canvas"` 以及 `"Cannot polyfill DOMMatrix/ImageData/Path2D"` 警告，确保 `pdf-parse` 及其依赖 `pdfjs-dist` 的 Canvas 渲染能力正常工作，PDF 文档解析功能稳定运行。
+- **客户端下载灵活化方案（推荐外部挂载）**：
+  - 新增专用下载目录 [downloads/](file:///e:/pivot/downloads)，在 [server/index.js](file:///e:/pivot/server/index.js) 中配置 `/downloads` 静态文件服务路由，禁用缓存以保证文件更新即时生效。
+  - 更新 [docker-compose.yml](file:///e:/pivot/docker-compose.yml)，新增 `./downloads:/app/downloads` 卷挂载配置（含详细注释说明），支持通过外部目录挂载客户端安装包，实现**热更新**（直接替换主机文件无需重启容器或重新构建镜像）。
+  - 修改登录页 [client/chat/partials/pre-app-modals.html](file:///e:/pivot/client/chat/partials/pre-app-modals.html) 中的下载链接，从 `/Pivot-Setup.exe` 改为 `/downloads/Pivot-Setup.exe`，并为链接添加 `id="desktop-download-link"` 以便后续动态控制。
+  - 优化 [`.dockerignore`](file:///e:/pivot/.dockerignore)：将 `*.exe` 改为精确排除 `client/*.exe`，保留 `downloads/` 目录不被排除（但默认为空），避免误将构建产物、开发工具等 `.exe` 文件打入镜像；同时补充排除 `*.msi`、`*.dmg`、`*.AppImage` 等其他平台安装包格式。
+  - 更新 [`.gitignore`](file:///e:/pivot/.gitignore)，新增 `downloads/*.exe`、`downloads/*.msi`、`downloads/*.dmg` 等排除规则，防止大体积客户端安装包被提交到 Git 仓库。
+  - 提供**三种部署方案**灵活选择：
+    1. **外部挂载（生产环境推荐）**：通过 Docker volume 挂载主机 `downloads/` 目录，镜像保持精简（~500MB），支持热更新客户端、多版本管理，无需重新构建镜像。
+    2. **打包进镜像（离线环境）**：将客户端复制到 `downloads/` 后构建镜像，适用于无法挂载或完全离线的场景，镜像体积增加约 150MB（~650MB）。
+    3. **外部托管（公网部署）**：将客户端上传至 GitHub Releases、对象存储（OSS/COS/S3）或 CDN，修改前端链接指向外部地址，镜像最精简且更新客户端无需操作服务器。
+- **完善部署文档与验证清单**：
+  - 新增 [downloads/README.md](file:///e:/pivot/downloads/README.md)，详细说明三种方案的使用方法、多版本管理、验证步骤与常见问题排查。
+  - 新增 [docs/Docker客户端下载配置.md](file:///e:/pivot/docs/Docker客户端下载配置.md)，涵盖挂载配置、docker-compose 示例、性能优化建议（Nginx 配置）与完整的故障排查指南。
+  - 新增 [docs/Docker部署快速指南.md](file:///e:/pivot/docs/Docker部署快速指南.md)，提供一键复制的部署命令、目录结构示例、最佳实践与性能优化配置（含 Nginx 反向代理示例）。
+
+#### 验证
+
+- 检查 Dockerfile 已包含 `libcairo2-dev`、`libpango1.0-dev` 等 Canvas 依赖库。
+- 校验 `docker-compose.yml` 已配置 `./downloads:/app/downloads` 挂载。
+- 校验 `server/index.js` 已添加 `/downloads` 静态文件服务路由。
+- 校验登录页下载链接已更新为 `/downloads/Pivot-Setup.exe`。
+- 校验 `.dockerignore` 精确排除 `client/*.exe` 但不排除 `downloads/`。
+- 校验 `.gitignore` 已排除 `downloads/` 目录下的安装包文件。
+- 手动验证建议：
+  1. 将客户端复制到 `downloads/` 目录，执行 `docker-compose up -d`，通过 `docker exec pivot ls -lh /app/downloads/` 确认文件已挂载。
+  2. 访问 `http://localhost:3000/downloads/Pivot-Setup.exe` 验证下载链接返回 200 OK。
+  3. 检查 `docker logs pivot` 无 Canvas 相关警告信息。
+  4. 替换 `downloads/` 中的客户端文件，无需重启容器即可下载到新版本（热更新验证）。
+
+#### 说明
+
+- 服务端版本号提升至 `0.0.161`。
+- Docker 镜像默认不包含客户端文件（保持精简），**推荐使用外部挂载方案**部署。
+- 镜像体积对比：外部挂载约 500MB，打包客户端约 650MB。
+- 客户端安装包（`Pivot-Setup.exe`）约 136MB，建议根据实际场景选择合适的部署方案。
+
 ## [v0.0.160] - 2026-06-25
 
 ### 桌面端菜单汉化、网页端下载闭环与 Docker 镜像精细化瘦身
