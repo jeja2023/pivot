@@ -26,3 +26,5 @@ scripts/build_desktop_icon.js
 .codex-tmp/
 .codex-sidebar-data/
 artifacts/
+client/*.exe
+
