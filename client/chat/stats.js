@@ -122,7 +122,7 @@ function renderTrendChart(canvasId, data) {
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     const parentWidth = canvas.parentElement?.clientWidth || 0;
-    const width = Math.max(rect.width || parentWidth || 600, 320);
+    const width = Math.max(parentWidth || rect.width || 600, 320);
     const height = Number(canvas.getAttribute('height')) || 220;
     const ratio = window.devicePixelRatio || 1;
     canvas.width = width * ratio; canvas.height = height * ratio;
@@ -136,7 +136,7 @@ function renderTrendChart(canvasId, data) {
     const padLeft = 30;
     const padRight = 18;
     const padTop = 28;
-    const padBottom = 34;
+    const padBottom = 42;
     const chartW = width - padLeft - padRight;
     const chartH = height - padTop - padBottom;
 

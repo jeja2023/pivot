@@ -25,6 +25,7 @@ window.loadOpsSummary = async function() {
         gridEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(132px, 1fr))';
         gridEl.innerHTML = cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
         renderTrendChart('usage-trend-chart', trend);
+        window.scheduleSettingsWorkspaceScale?.();
     } catch (e) { showToast('加载概览失败', 'error'); }
 }
 
@@ -261,6 +262,7 @@ window.loadMonitorSummary = async function() {
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();
+        window.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
         showToast(e.message || '系统监控加载失败', 'error');
     }

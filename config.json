@@ -3,7 +3,7 @@
   "environmentName": "",
   "remoteUrl": "http://50.64.150.51:9006/",
   "partition": "persist:pivot-production",
-  "windowTitle": "",
+  "windowTitle": "智枢 Pivot",
   "allowExternalOpen": true,
   "autoUpdate": {
     "enabled": false,

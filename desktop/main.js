@@ -51,9 +51,13 @@ function findAvailablePort() {
 
 function windowTitle(config) {
     const env = config && config.environmentName ? config.environmentName : '';
-    const base = config && typeof config.windowTitle === 'string' ? config.windowTitle : 'Pivot';
+    let base = config && typeof config.windowTitle === 'string' ? config.windowTitle.trim() : '智枢 Pivot';
+    if (!base) {
+        base = '智枢 Pivot';
+    }
     return env && base ? base + ' - ' + env : (base || env);
 }
+
 
 
 

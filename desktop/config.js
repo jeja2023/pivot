@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
     environmentName: 'Local',
     remoteUrl: '',
     partition: '',
-    windowTitle: 'Pivot',
+    windowTitle: '智枢 Pivot',
     allowExternalOpen: true,
     autoUpdate: DEFAULT_AUTO_UPDATE
 };
@@ -133,7 +133,7 @@ function normalizeConfig(raw, meta = {}) {
         environmentName,
         remoteUrl: '',
         partition: normalizePartition(merged.partition, mode, environmentName),
-        windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : 'Pivot',
+        windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : '智枢 Pivot',
         allowExternalOpen: merged.allowExternalOpen !== false,
         autoUpdate: normalizeAutoUpdate(merged.autoUpdate),
         source: meta.source || 'default',

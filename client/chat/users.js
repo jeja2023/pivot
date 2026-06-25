@@ -64,6 +64,7 @@ window.loadUsers = async function(page = 1) {
     `;
     }).join('');
     renderPagination('users', totalCount, requestedPage);
+    window.scheduleSettingsWorkspaceScale?.();
 }
 
 document.getElementById('user-list-body')?.addEventListener('click', (event) => {

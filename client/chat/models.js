@@ -154,6 +154,7 @@ window.loadModels = async function(page = 1) {
     
     data.filter(canTestModelConnection).forEach(m => checkSingleModelStatus(m.id));
     renderPagination('models', total, page);
+    window.scheduleSettingsWorkspaceScale?.();
 }
 
 document.getElementById('model-list-body')?.addEventListener('click', async (event) => {

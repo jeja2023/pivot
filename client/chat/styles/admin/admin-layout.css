@@ -165,10 +165,12 @@
     top: 0;
     left: 0;
     width: var(--settings-canvas-width);
-    transform: scale(var(--settings-scale));
+    transform: translateZ(0) scale(var(--settings-scale));
     transform-origin: top left;
     display: flex;
     flex-direction: column;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }
 .settings-scale-stage {
     --settings-stage-width: 100%;
@@ -674,7 +676,7 @@
     padding-bottom: 18px !important;
 }
 .settings-workspace-view #tab-content-ops .trend-card canvas {
-    min-height: 240px;
+    min-height: 260px;
 }
 .settings-workspace-view .memory-governance-shell {
     display: flex;

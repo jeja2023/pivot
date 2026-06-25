@@ -3,7 +3,7 @@
   "environmentName": "Production",
   "remoteUrl": "https://pivot.example.com/",
   "partition": "persist:pivot-production",
-  "windowTitle": "Pivot",
+  "windowTitle": "智枢 Pivot",
   "allowExternalOpen": true,
   "autoUpdate": {
     "enabled": false,

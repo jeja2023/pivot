@@ -1,3 +1,33 @@
+## [v0.0.162] - 2026-06-25
+
+### 桌面客户端细节优化：任务栏标题显示与数据概览缩放适配修复
+
+本版本针对桌面客户端进行了两项关键的用户体验修复与优化：解决了 Windows 系统任务栏只显示图标而无标题名字的问题，以及由于页面缩放计算机制导致的在客户端中数据概览图表显示不全、左右偏窄留白及文字重叠的问题。
+
+#### 变更内容
+
+- **修复 Windows 系统任务栏空白无标题问题**：
+  - 更新了 [desktop/main.js](file:///e:/pivot/desktop/main.js) 的 `windowTitle` 逻辑，确保当客户端配置 `config.json` 中的 `windowTitle` 为空字符串或仅空格时，自动回退到默认标题 `"智枢 Pivot"`，并在 [desktop/config.js](file:///e:/pivot/desktop/config.js) 中将默认窗口标题更新为 `"智枢 Pivot"`。
+  - 更新了项目的 `config.json` 与 `config.example.json` 文件，将默认的 `"windowTitle"` 值由原先的空字符串或 `"Pivot"` 修改为更直观的 `"智枢 Pivot"`。
+  - 解决了由于原先 `windowTitle` 设置为空字符串导致 Windows 系统底部任务栏图标旁边完全没有文字、显得“光秃秃”的视觉体验问题。
+- **修复数据概览页面显示不完整与文字重叠问题**：
+  - 在 [client/chat/stats-monitor.js](file:///e:/pivot/client/chat/stats-monitor.js) 的 `loadOpsSummary` 与 `loadMonitorSummary` 中、以及 [client/chat/models.js](file:///e:/pivot/client/chat/models.js) 的 `loadModels` 与 [client/chat/users.js](file:///e:/pivot/client/chat/users.js) 的 `loadUsers` 的最后，在 DOM 异步渲染完成后显式调用 `window.scheduleSettingsWorkspaceScale()`，强制触发容器高度重算，彻底解决了图表被截断、下方无法滚动到底部的问题。
+  - 在 [client/chat/stats.js](file:///e:/pivot/client/chat/stats.js) 的 `renderTrendChart` 函数中，将画布的宽度计算优先级调整为优先采用父容器的 unscaled 布局宽度 `parentElement.clientWidth`，完美避免了由于 CSS Scale 引起的“双重缩放”而导致图表左右侧严重缩水、大量留白的排版问题。
+  - 将趋势图画布的 `height` 从原来的 `220` (运营概览) 和 `240` (统计报表) 统一提升到了 `260`，并在 [client/chat/stats.js](file:///e:/pivot/client/chat/stats.js) 中把图表底部的安全间距 `padBottom` 从 `34` 增大到 `42`，为底端的日期轴标签保留了 `34px` 的安全内部绘制空间，彻底解决了日期文本底部边缘被画布边界裁切的问题。
+  - 更新 [client/chat/styles/admin/admin-layout.css](file:///e:/pivot/client/chat/styles/admin/admin-layout.css) 中的样式，将折线图 Canvas 的最小高度限制统一提升至 `260px`，使其物理高度与绘图分辨率高宽比一致，避免图像拉伸失真；同时为缩放容器 `.settings-scale-canvas` 的 CSS `transform` 样式应用了 3D GPU 硬件加速变换 `translateZ(0) scale(...)` 并添加 `backface-visibility: hidden` 声明，有效消除了 Chromium 内核在非整数倍浮点数缩放（scale）下可能导致的部分中文字符定位偏移而出现的字符重叠现象。
+
+#### 验证
+
+- 检查 `config.json` 与 `config.example.json` 已配置 `"windowTitle": "智枢 Pivot"`。
+- 校验 [stats-monitor.js](file:///e:/pivot/client/chat/stats-monitor.js)、[models.js](file:///e:/pivot/client/chat/models.js)、[users.js](file:///e:/pivot/client/chat/users.js) 在异步数据渲染后均有主动调度缩放比例。
+- 校验 [stats.js](file:///e:/pivot/client/chat/stats.js) 中 `renderTrendChart` 的宽度计算优先使用 `parentWidth`。
+- 校验 [admin-layout.css](file:///e:/pivot/client/chat/styles/admin/admin-layout.css) 中 `.settings-scale-canvas` 已声明 3D 变换以启用 GPU 硬件加速。
+- 运行 `npm run check` 且 ESLint 无任何语法警告，所有 JavaScript 检测通过。
+
+#### 说明
+
+- 服务端版本号提升至 `0.0.162`。
+
 ## [v0.0.161] - 2026-06-25
 
 ### Docker 生产环境优化：Canvas 依赖修复与客户端下载灵活化方案
