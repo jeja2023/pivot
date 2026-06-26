@@ -1,0 +1,1015 @@
+const { db } = require('../../db');
+const { logger } = require('../../logger');
+const { getBeijingTimestamp } = require('../../time');
+const { getRunnableModelForUser } = require('../models');
+const { clampText, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
+const { runAgentDag } = require('../agent-dag-runtime');
+const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
+const { createAgentQueue } = require('../agent-queue');
+const { callModelText, recordAgentModelUsage } = require('../agent-model');
+const { publishUserEvent } = require('../realtime-events');
+const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('../model-router');
+const { getModelEndpointRuntimeStatus } = require('../model-runtime');
+const {
+    configureAgentSchedules,
+    computeNextScheduleRun,
+    createAgentSchedule,
+    deleteAgentSchedule,
+    listAgentSchedules,
+    runAgentScheduleNow,
+    runDueAgentSchedules,
+    startAgentScheduleRunner,
+    updateAgentSchedule
+} = require('../agent-schedules');
+const {
+    createAgentTemplate,
+    deleteAgentTemplate,
+    listAgentTemplates,
+    updateAgentTemplate
+} = require('../agent-templates');
+const {
+    createAgentWorkflow,
+    deleteAgentWorkflow,
+    diffAgentWorkflowVersions,
+    getAgentWorkflowForUser,
+    assertWorkflowHasConfiguredLlm,
+    listAgentWorkflowVersions,
+    listAgentWorkflows,
+    normalizeDagInputsPayload,
+    publishAgentWorkflowVersion,
+    restoreAgentWorkflow,
+    resolveAgentWorkflowVersion,
+    restoreAgentWorkflowVersion,
+    updateAgentWorkflow
+} = require('../agent-workflows');
+const {
+    getRunDetailForUser: getRunDetailForUserHelper,
+    getRunForUser,
+    listDagNodes,
+    listSteps
+} = require('../agent-runs');
+const {
+    configureAgentArtifacts,
+    createAgentArtifactVersion,
+    diffAgentArtifactVersions,
+    exportAgentRun,
+    getAgentArtifactForUser,
+    listAgentArtifactVersions,
+    listAgentArtifacts,
+    listAgentNotifications,
+    markAgentNotificationRead,
+    rollbackAgentArtifactVersion,
+    saveAgentRunArtifact
+} = require('../agent-artifacts');
+const { formatToolList } = require('../agent-tool-catalog');
+const {
+    getAgentMetrics,
+    getAgentRuntimeStatus: buildAgentRuntimeStatus
+} = require('../agent-monitoring');
+const {
+    DEFAULT_STEPS,
+    ACTIVE_STATUSES,
+    parseJsonObject,
+    normalizeMaxSteps,
+    normalizePriority,
+    normalizeRunMode,
+    normalizeToolPolicy,
+    normalizeApprovalPolicy,
+    normalizePositiveInt,
+    serializeContextConfig,
+    normalizeDagSpec,
+    normalizeToolAllowlist,
+    serializeToolAllowlist,
+    normalizeAgentGoal,
+    normalizeAgentTitle
+} = require('../agent-validators');
+const {
+    AGENT_DEFAULT_TIMEOUT_MS,
+    AGENT_TOOL_TIMEOUT_MS,
+    AGENT_STALE_RUNNING_MINUTES,
+    AGENT_QUEUE_LOCK_MS,
+    AGENT_INSTANCE_ID,
+    getAgentMaxConcurrentRuns,
+    getAgentDagNodeConcurrency,
+    createRunId,
+    withTimeout
+} = require('./runtime-env');
+const { getAgentRunTitle, getRunMetadata } = require('./metadata');
+
+const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
+const { inferDagRunGoal, inferDagLlmRuntimeSettings } = require('./dag-run-config');
+const { createAgentNotificationFactory } = require('./notifications');
+const { createApprovalHelpers } = require('./approvals');
+
+
+let agentQueue = null;
+const createAgentNotification = createAgentNotificationFactory({
+    db,
+    getTimestamp: getBeijingTimestamp,
+    publishUserEvent
+});
+const { shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers({
+    getRunMetadata,
+    normalizeApprovalPolicy,
+    getTimestamp: getBeijingTimestamp,
+    setRunMetadata,
+    updateRun,
+    insertStep,
+    listSteps,
+    createAgentNotification
+});
+
+
+
+function updateRun(runId, fields = {}) {
+    const allowed = [
+        'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
+        'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
+        'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
+        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
+        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
+        'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
+        'input_tokens', 'output_tokens', 'total_tokens'
+    ];
+    const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
+    if (entries.length === 0) return;
+    const set = entries.map(([key]) => `${key} = ?`).join(', ');
+    const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
+    if (info.changes > 0 && entries.some(([key]) => [
+        'status',
+        'final_answer',
+        'error_message',
+        'completed_at',
+        'cancelled_at',
+        'deleted_at',
+        'last_heartbeat_at'
+    ].includes(key))) {
+        publishAgentRunEvent(runId, 'updated');
+    }
+}
+
+function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
+    const run = db.prepare(`
+        SELECT id, user_id, title, goal, status, updated_at, started_at, completed_at, last_heartbeat_at, error_message
+        FROM agent_runs
+        WHERE id = ?
+    `).get(runId);
+    if (!run) return 0;
+    return publishUserEvent(run.user_id, 'agent.run', {
+        reason,
+        run: {
+            id: run.id,
+            title: getAgentRunTitle(run),
+            goal: run.goal,
+            status: run.status,
+            updated_at: run.updated_at,
+            started_at: run.started_at,
+            completed_at: run.completed_at,
+            last_heartbeat_at: run.last_heartbeat_at,
+            error_message: run.error_message
+        },
+        ...extra
+    });
+}
+
+function getRunStatus(runId) {
+    return db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+}
+
+function getRunUser(runId) {
+    return db.prepare('SELECT u.id, u.username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?').get(runId);
+}
+
+function markRunError(runId, message) {
+    updateRun(runId, {
+        status: 'error',
+        error_message: message,
+        completed_at: getBeijingTimestamp(),
+        last_heartbeat_at: getBeijingTimestamp(),
+        updated_at: getBeijingTimestamp()
+    });
+}
+
+function getAgentQueue() {
+    if (!agentQueue) {
+        agentQueue = createAgentQueue({
+            db,
+            logger,
+            instanceId: AGENT_INSTANCE_ID,
+            maxConcurrent: getAgentMaxConcurrentRuns(),
+            lockMs: AGENT_QUEUE_LOCK_MS,
+            getRunUser,
+            runAgent,
+            markRunError,
+            getTimestamp: getBeijingTimestamp
+        });
+    }
+    agentQueue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
+    return agentQueue;
+}
+
+function setRunMetadata(runId, patch = {}) {
+    const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
+    const current = parseJsonObject(row.metadata) || {};
+    updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
+}
+
+function isRunCancelled(runId) {
+    return getRunStatus(runId) === 'cancelled';
+}
+
+function assertRunNotCancelled(runId) {
+    if (isRunCancelled(runId)) {
+        const err = new Error('Agent run has been cancelled.');
+        err.code = 'AGENT_RUN_CANCELLED';
+        throw err;
+    }
+}
+
+function cancelAgentRun(runId, user) {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (!ACTIVE_STATUSES.has(run.status)) return run;
+    const now = getBeijingTimestamp();
+    updateRun(runId, {
+        status: 'cancelled',
+        error_message: 'Run cancelled by user.',
+        cancelled_at: now,
+        completed_at: now,
+        updated_at: now
+    });
+    insertStep(runId, listSteps(runId).length + 1, {
+        type: 'control',
+        title: 'User cancelled run',
+        output: { status: 'cancelled' }
+    });
+    createAgentNotification(user.id, runId, 'cancelled', 'Agent run cancelled', getAgentRunTitle(run));
+    return getRunForUser(runId, user);
+}
+
+function createChildRunFromExisting(run, user) {
+    const metadata = getRunMetadata(run);
+    return createAgentRun({
+        user,
+        goal: run.goal,
+        modelId: run.model_id,
+        sessionId: run.session_id,
+        title: run.title,
+        maxSteps: run.max_steps,
+        priority: run.priority,
+        runMode: run.run_mode,
+        toolPolicy: run.tool_policy,
+        approvalPolicy: run.approval_policy,
+        toolAllowlist: normalizeToolAllowlist(run.tool_allowlist),
+        timeoutMs: run.timeout_ms,
+        toolTimeoutMs: run.tool_timeout_ms,
+        retryLimit: run.retry_limit,
+        maxTokenBudget: run.max_token_budget,
+        templateId: run.template_id,
+        scheduleId: run.schedule_id,
+        contextConfig: parseJsonObject(run.context_config) || {},
+        parentRunId: run.id,
+        metadata,
+        dagSpec: metadata.dagSpec
+    });
+}
+
+function rerunAgentRun(runId, user) {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status)) {
+        const err = new Error('当前任务仍在执行中，请停止或等待结束后再重新运行。');
+        err.status = 400;
+        throw err;
+    }
+    return createChildRunFromExisting(run, user);
+}
+
+function buildDagResumeSpec(originalRun, startNodeId = '') {
+    const metadata = getRunMetadata(originalRun);
+    const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
+    if (!dagSpec.nodes.length) return null;
+    const dagNodes = listDagNodes(originalRun.id);
+    const failed = dagNodes.filter(node => node.status === 'error');
+    const startIds = startNodeId
+        ? [String(startNodeId)]
+        : failed.map(node => node.node_key);
+    const validStartIds = startIds.filter(id => dagSpec.nodes.some(node => node.id === id));
+    if (!validStartIds.length) return null;
+    const include = new Set(validStartIds);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        dagSpec.nodes.forEach(node => {
+            if (include.has(node.id)) return;
+            if ((node.dependsOn || []).some(dep => include.has(dep))) {
+                include.add(node.id);
+                changed = true;
+            }
+        });
+    }
+    const reusable = {};
+    dagNodes.forEach(node => {
+        if (include.has(node.node_key)) return;
+        if (node.status !== 'completed') return;
+        reusable[node.node_key] = {
+            status: node.status,
+            input: node.input,
+            output: node.output,
+            reusedFromRunId: originalRun.id
+        };
+    });
+    const nodes = dagSpec.nodes.filter(node => include.has(node.id)).map(node => ({
+        ...node,
+        dependsOn: (node.dependsOn || []).filter(dep => include.has(dep))
+    }));
+    return { dagSpec: { nodes }, reusable };
+}
+
+function rerunAgentDagFromNode(runId, user, nodeId = '') {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status)) {
+        const err = new Error('当前任务仍在执行中，请停止或等待结束后再重跑节点。');
+        err.status = 400;
+        throw err;
+    }
+    if (run.run_mode !== 'dag') {
+        const err = new Error('Only DAG runs can be rerun from a node.');
+        err.status = 400;
+        throw err;
+    }
+    const resume = buildDagResumeSpec(run, nodeId);
+    if (!resume || !resume.dagSpec.nodes.length) {
+        const err = new Error('No reusable DAG node was found for rerun.');
+        err.status = 400;
+        throw err;
+    }
+    const metadata = getRunMetadata(run);
+    return createAgentRun({
+        user,
+        goal: run.goal,
+        modelId: run.model_id,
+        sessionId: run.session_id,
+        title: `重跑节点：${getAgentRunTitle(run)}`.slice(0, 80),
+        maxSteps: run.max_steps,
+        priority: run.priority,
+        runMode: 'dag',
+        toolPolicy: run.tool_policy,
+        approvalPolicy: run.approval_policy,
+        toolAllowlist: normalizeToolAllowlist(run.tool_allowlist),
+        timeoutMs: run.timeout_ms,
+        toolTimeoutMs: run.tool_timeout_ms,
+        retryLimit: run.retry_limit,
+        maxTokenBudget: run.max_token_budget,
+        templateId: run.template_id,
+        scheduleId: run.schedule_id,
+        contextConfig: parseJsonObject(run.context_config) || {},
+        parentRunId: run.id,
+        metadata: {
+            ...metadata,
+            dagSpec: resume.dagSpec,
+            reusedDagNodes: resume.reusable,
+            rerunFromRunId: run.id,
+            rerunFromNodeId: nodeId || '',
+            workflowVersionMode: metadata.workflowVersionMode || ''
+        },
+        dagSpec: resume.dagSpec
+    });
+}
+
+function resumeAgentRun(runId, user) {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status) || run.status === 'approval_required') {
+        const err = new Error('当前任务仍在执行中，无需断点续跑。');
+        err.status = 400;
+        throw err;
+    }
+    const steps = listSteps(run.id);
+    const lastStep = steps.length ? Math.max(...steps.map(step => Number(step.step_index || 0))) : 0;
+    const failed = steps.filter(step => step.status === 'error').slice(-3);
+    const resumeGoal = [
+        run.goal,
+        '',
+        'Continue this task from the previous run context.',
+        `Previous status: ${run.status}`,
+        run.final_answer ? `Previous answer: ${clampText(run.final_answer, 1200)}` : '',
+        run.error_message ? `Previous error: ${run.error_message}` : '',
+        failed.length ? `Recent failed steps: ${JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
+    ].filter(Boolean).join('\n');
+    const previousMetadata = getRunMetadata(run);
+    return createAgentRun({
+        user,
+        goal: resumeGoal,
+        modelId: run.model_id,
+        sessionId: run.session_id,
+        title: `断点续跑：${getAgentRunTitle(run)}`.slice(0, 80),
+        maxSteps: run.max_steps,
+        priority: run.priority,
+        runMode: run.run_mode,
+        toolPolicy: run.tool_policy,
+        approvalPolicy: run.approval_policy,
+        toolAllowlist: normalizeToolAllowlist(run.tool_allowlist),
+        timeoutMs: run.timeout_ms,
+        toolTimeoutMs: run.tool_timeout_ms,
+        retryLimit: run.retry_limit,
+        maxTokenBudget: run.max_token_budget,
+        templateId: run.template_id,
+        scheduleId: run.schedule_id,
+        contextConfig: parseJsonObject(run.context_config) || {},
+        resumeFromStep: lastStep,
+        parentRunId: run.id,
+        metadata: {
+            ...previousMetadata,
+            pendingApproval: null,
+            resumedFromRunId: run.id,
+            failedSteps: failed.map(step => step.id)
+        }
+    });
+}
+
+function softDeleteAgentRun(runId, user, reason = '') {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (ACTIVE_STATUSES.has(run.status)) {
+        const err = new Error('Active agent runs cannot be deleted.');
+        err.status = 400;
+        throw err;
+    }
+    const now = getBeijingTimestamp();
+    updateRun(runId, {
+        deleted_at: now,
+        deleted_by_user: user.id,
+        delete_reason: String(reason || '').trim().slice(0, 500),
+        updated_at: now
+    });
+    insertStep(runId, listSteps(runId).length + 1, {
+        type: 'control',
+        title: '任务记录已移除',
+        output: {
+            status: 'deleted',
+            deletedAt: now,
+            deletedBy: user.username || user.id
+        }
+    });
+    return getRunForUser(runId, user, { includeDeleted: true });
+}
+
+function insertStep(runId, stepIndex, data = {}) {
+    const now = getBeijingTimestamp();
+    const info = db.prepare(`
+        INSERT INTO agent_steps (
+            run_id, step_index, type, title, tool_name, input, output, error_message,
+            status, duration_ms, started_at, completed_at, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        runId,
+        stepIndex,
+        data.type || 'note',
+        data.title || '',
+        data.toolName || '',
+        data.input === undefined ? '' : JSON.stringify(data.input),
+        data.output === undefined ? '' : JSON.stringify(data.output),
+        data.errorMessage || '',
+        data.status || 'success',
+        Number(data.durationMs) || 0,
+        data.startedAt || now,
+        data.completedAt || now,
+        now
+    );
+    if (info.changes > 0) {
+        publishAgentRunEvent(runId, 'step', {
+            step: {
+                index: stepIndex,
+                type: data.type || 'note',
+                status: data.status || 'success',
+                title: data.title || ''
+            }
+        });
+    }
+}
+
+function getAgentRuntimeDeps() {
+    return {
+        agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
+        dagNodeConcurrency: getAgentDagNodeConcurrency(),
+        db,
+        logger,
+        assertRunNotCancelled,
+        createAgentNotification,
+        getAgentRunTitle,
+        getRunMetadata,
+        insertStep,
+        isMissingFinalAnswer,
+        listSteps,
+        maybePauseForApproval,
+        parseJsonObject,
+        publishUserEvent,
+        synthesizeFinalAnswer,
+        updateRun,
+        withTimeout
+    };
+}
+
+async function runAgent(runId, user) {
+    try {
+        const run = getRunForUser(runId, user, { includeDeleted: true });
+        if (!run) throw new Error('Agent run not found.');
+        if (run.deleted_at) return;
+        assertRunNotCancelled(runId);
+        const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
+        const assertRunWithinBudget = () => {
+            if (Date.now() > deadline) {
+                const err = new Error('Agent run timed out.');
+                err.code = 'AGENT_TIMEOUT';
+                throw err;
+            }
+        };
+        const initialModelCfg = getRunnableModelForUser(run.model_id, user);
+        if (!initialModelCfg) throw new Error('No accessible model is available for this agent run.');
+        // run.model_router controls whether the initial model is fixed, routed up front, or escalated later.
+        let modelCfg = initialModelCfg;
+        const routerStrategy = normalizeRouterStrategy(run.model_router);
+        if (routerStrategy !== 'fixed') {
+            try {
+                const routed = chooseModel({
+                    user,
+                    strategy: routerStrategy,
+                    hintModelId: run.model_id,
+                    messages: [{ role: 'user', content: run.goal || '' }],
+                    endpointStatusGetter: getModelEndpointRuntimeStatus
+                });
+                if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
+                    modelCfg = routed.model;
+                    db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
+                        .run(modelCfg.id, getBeijingTimestamp(), runId);
+                    insertStep(runId, listSteps(runId).length + 1, {
+                        type: 'control',
+                        title: `模型路由选择：${routerStrategy}`,
+                        output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
+                    });
+                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
+                }
+            } catch (routerErr) {
+                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，已使用原始模型');
+            }
+        }
+
+        const observations = [];
+        const toolList = formatToolList(user, {
+            toolPolicy: run.tool_policy,
+            toolAllowlist: run.tool_allowlist
+        });
+        if (toolList.length === 0) {
+            throw new Error('No available tools match this agent configuration.');
+        }
+        assertRunNotCancelled(runId);
+        const startedAt = getBeijingTimestamp();
+        updateRun(runId, {
+            status: 'running',
+            started_at: run.started_at || startedAt,
+            last_heartbeat_at: startedAt,
+            updated_at: startedAt
+        });
+
+        if (normalizeRunMode(run.run_mode) === 'dag') {
+            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps());
+            return;
+        }
+
+        // Prefer streaming function calling when enabled so the model can issue tool_calls directly.
+        // If streaming does not complete, the JSON planner below continues from collected observations.
+        if (isStreamingToolsEnabled()) {
+            const streamingResult = await tryRunAgentStreaming({
+                run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
+            }, getAgentRuntimeDeps());
+            if (streamingResult?.completed) return;
+            // Streaming emitted partial work but did not finish; continue with the JSON planner path.
+        }
+
+        for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
+            assertRunWithinBudget();
+            assertRunNotCancelled(runId);
+            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {});
+            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划');
+            recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
+            assertRunWithinBudget();
+            assertRunNotCancelled(runId);
+            const plan = parseJsonObject(plannedText) || {};
+            insertStep(runId, step, {
+                type: 'plan',
+                title: plan.thought || 'Agent plan',
+                input: { goal: run.goal },
+                output: plan
+            });
+
+            if (plan.action === 'final' || !plan.tool) {
+                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
+                updateRun(runId, {
+                    status: 'completed',
+                    final_answer: answer,
+                    completed_at: getBeijingTimestamp(),
+                    last_heartbeat_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                });
+                createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
+                return;
+            }
+
+            const startedAt = Date.now();
+            try {
+                assertRunNotCancelled(runId);
+                assertRunWithinBudget();
+                updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+                const selectedTool = findAgentToolByName(plan.tool, toolList);
+                if (maybePauseForApproval(run, selectedTool, plan.input || {})) return;
+                const output = await withTimeout(
+                    executeToolByName(plan.tool, plan.input || {}, user, toolList, { run, modelCfg }),
+                    Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
+                    `执行工具：${plan.tool}`
+                );
+                assertRunNotCancelled(runId);
+                assertRunWithinBudget();
+                const compactOutput = clampText(output, 10000);
+                observations.push({
+                    step,
+                    tool: plan.tool,
+                    input: plan.input || {},
+                    output: compactOutput
+                });
+                insertStep(runId, step, {
+                    type: 'tool',
+                    title: `工具执行完成：${plan.tool}`,
+                    toolName: plan.tool,
+                    input: plan.input || {},
+                    output: compactOutput,
+                    durationMs: Date.now() - startedAt
+                });
+            } catch (toolErr) {
+                observations.push({
+                    step,
+                    tool: plan.tool,
+                    input: plan.input || {},
+                    error: toolErr.message
+                });
+                insertStep(runId, step, {
+                    type: 'tool',
+                    title: `工具执行失败：${plan.tool}`,
+                    toolName: plan.tool,
+                    input: plan.input || {},
+                    output: { error: toolErr.message },
+                    errorMessage: toolErr.message,
+                    status: 'error',
+                    durationMs: Date.now() - startedAt
+                });
+            }
+        }
+
+        assertRunNotCancelled(runId);
+        assertRunWithinBudget();
+        let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
+        // v0.0.50 auto-escalate retries the final summary with a stronger model when confidence is low.
+        if (routerStrategy === 'auto-escalate') {
+            const confidence = assessConfidence({ output: answer });
+            if (!confidence.confident) {
+                try {
+                    const escalation = pickEscalationModel({
+                        user,
+                        currentModel: modelCfg,
+                        messages: [{ role: 'user', content: run.goal || '' }]
+                    });
+                    if (escalation) {
+                        insertStep(runId, listSteps(runId).length + 1, {
+                            type: 'control',
+                            title: '模型自动升级：auto-escalate',
+                            output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
+                        });
+                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度较低，正在升级模型');
+                        modelCfg = escalation;
+                        db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
+                            .run(modelCfg.id, getBeijingTimestamp(), runId);
+                        answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary');
+                    }
+                } catch (escErr) {
+                    logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
+                }
+            }
+        }
+        assertRunNotCancelled(runId);
+        updateRun(runId, {
+            status: 'completed',
+            final_answer: answer,
+            completed_at: getBeijingTimestamp(),
+            last_heartbeat_at: getBeijingTimestamp(),
+            updated_at: getBeijingTimestamp()
+        });
+        createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
+    } catch (e) {
+        if (e.code === 'AGENT_RUN_CANCELLED') {
+            updateRun(runId, { updated_at: getBeijingTimestamp() });
+            return;
+        }
+        if (e.code === 'AGENT_APPROVAL_REQUIRED') {
+            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            return;
+        }
+        logger.error({ err: e.message, runId }, '智能体运行失败');
+        const retryRow = db.prepare('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?').get(runId);
+        const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
+        const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
+        if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
+            updateRun(runId, {
+                status: 'queued',
+                error_message: e.message,
+                retry_count: retryCount + 1,
+                updated_at: getBeijingTimestamp()
+            });
+            insertStep(runId, listSteps(runId).length + 1, {
+                type: 'control',
+                title: `任务失败重试：${retryCount + 1}/${retryLimit}`,
+                output: { error: e.message }
+            });
+            // 重新拉取用户，避免复用运行开始时捕获的过期用户对象（运行中用户可能被禁用或修改）
+            enqueueAgentRun(runId, getRunUser(runId) || user);
+            return;
+        }
+        updateRun(runId, {
+            status: 'error',
+            error_message: e.message,
+            completed_at: getBeijingTimestamp(),
+            last_heartbeat_at: getBeijingTimestamp(),
+            updated_at: getBeijingTimestamp()
+        });
+        createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
+    }
+}
+
+function enqueueAgentRun(runId, _user) {
+    getAgentQueue().enqueueRun(runId);
+}
+
+function recoverAgentRuns() {
+    const now = getBeijingTimestamp();
+    const staleRunning = db.prepare(`
+        SELECT id FROM agent_runs
+        WHERE status = 'running'
+          AND deleted_at IS NULL
+          AND (last_heartbeat_at IS NULL OR last_heartbeat_at < datetime('now', '+8 hours', ?))
+    `).all(`-${AGENT_STALE_RUNNING_MINUTES} minutes`);
+    staleRunning.forEach(run => {
+        updateRun(run.id, {
+            status: 'error',
+            error_message: 'Service restarted or heartbeat timed out; run marked as error.',
+            completed_at: now,
+            updated_at: now,
+            last_heartbeat_at: now,
+            locked_by: null,
+            lock_expires_at: null
+        });
+        insertStep(run.id, listSteps(run.id).length + 1, {
+            type: 'control',
+            title: 'Runtime recovery marked stale run',
+            output: { status: 'error', reason: 'stale_running' }
+        });
+    });
+
+    const recoveredQueued = getAgentQueue().recoverQueued(100);
+    logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时恢复完成');
+}
+
+function approveAgentTool(runId, user, approve = true) {
+    const run = getRunForUser(runId, user);
+    if (!run) return null;
+    if (run.status !== 'approval_required') return run;
+    const metadata = getRunMetadata(run);
+    const pending = metadata.pendingApproval || {};
+    const now = getBeijingTimestamp();
+    if (!approve) {
+        updateRun(runId, {
+            status: 'cancelled',
+            error_message: `用户拒绝工具审批：${pending.tool || '-'}`,
+            cancelled_at: now,
+            completed_at: now,
+            updated_at: now
+        });
+        setRunMetadata(runId, { pendingApproval: null });
+        insertStep(runId, listSteps(runId).length + 1, {
+            type: 'approval',
+            title: 'User rejected tool approval',
+            toolName: pending.tool || '',
+            output: { status: 'rejected' }
+        });
+        createAgentNotification(user.id, runId, 'cancelled', 'Agent approval rejected', pending.tool || getAgentRunTitle(run));
+        return getRunForUser(runId, user);
+    }
+    const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
+    if (pending.tool) approvedTools.add(pending.tool);
+    setRunMetadata(runId, { pendingApproval: null, approvedTools: [...approvedTools] });
+    updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
+    insertStep(runId, listSteps(runId).length + 1, {
+        type: 'approval',
+        title: 'User approved tool call',
+        toolName: pending.tool || '',
+        output: { status: 'approved', tool: pending.tool || '' }
+    });
+    enqueueAgentRun(runId, user);
+    return getRunForUser(runId, user);
+}
+
+function getAgentRuntimeStatus(user = null) {
+    return buildAgentRuntimeStatus({
+        maxConcurrent: getAgentMaxConcurrentRuns(),
+        dagNodeConcurrency: getAgentDagNodeConcurrency(),
+        queueStatus: getAgentQueue().getStatus(),
+        user
+    });
+}
+
+function syncAgentRuntimeConcurrency() {
+    const queue = getAgentQueue();
+    queue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
+    queue.processQueue?.();
+    return queue.getStatus();
+}
+
+configureAgentSchedules({
+    createAgentRun,
+    createAgentNotification
+});
+
+configureAgentArtifacts({
+    createAgentNotification,
+    getAgentRunTitle,
+    getRunDetailForUser: getRunDetailForUserHelper
+});
+
+function createAgentRun({
+    user,
+    goal,
+    modelId,
+    sessionId = null,
+    title = '',
+    maxSteps = DEFAULT_STEPS,
+    parentRunId = null,
+    priority = 0,
+    runMode = 'standard',
+    toolPolicy = 'all',
+    toolAllowlist = [],
+    approvalPolicy = 'safe_mcp_auto',
+    timeoutMs = AGENT_DEFAULT_TIMEOUT_MS,
+    toolTimeoutMs = AGENT_TOOL_TIMEOUT_MS,
+    retryLimit = 1,
+    maxTokenBudget = 0,
+    templateId = null,
+    scheduleId = null,
+    contextConfig = {},
+    resumeFromStep = 0,
+    metadata = {},
+    dagSpec = null,
+    dagInputs = null,
+    workflowId = null,
+    workflowVersion = null,
+    modelRouter = 'fixed'
+}) {
+    const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
+    const normalizedRunMode = normalizeRunMode(runMode);
+    const normalizedRouter = normalizeRouterStrategy(modelRouter);
+    const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+    const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
+        ? inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
+        : goal);
+    const runId = createRunId();
+    const now = getBeijingTimestamp();
+    const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});
+    if (Object.keys(normalizedDagInputs).length) {
+        runMetadata.dagInputs = normalizedDagInputs;
+    }
+    let effectiveModelId = modelId;
+    let effectiveMaxSteps = maxSteps;
+    if (normalizedRunMode === 'dag') {
+        const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
+        const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
+        if (requestedWorkflowId && requestedWorkflowVersion) {
+            const resolvedWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
+            if (!resolvedWorkflow) {
+                const err = new Error('Workflow version is not available.');
+                err.status = 404;
+                throw err;
+            }
+            runMetadata.dagSpec = resolvedWorkflow.dagSpec;
+            runMetadata.workflowId = resolvedWorkflow.workflow.id;
+            runMetadata.workflowName = resolvedWorkflow.workflow.name;
+            runMetadata.workflowVersion = resolvedWorkflow.version;
+            runMetadata.workflowVersionMode = resolvedWorkflow.mode;
+            runMetadata.workflowVersionId = resolvedWorkflow.version_id;
+        } else {
+            runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
+        }
+        assertWorkflowHasConfiguredLlm(runMetadata.dagSpec);
+        const llmRuntimeSettings = inferDagLlmRuntimeSettings(runMetadata.dagSpec);
+        if (!effectiveModelId && llmRuntimeSettings.modelId) effectiveModelId = llmRuntimeSettings.modelId;
+        if (llmRuntimeSettings.maxSteps) effectiveMaxSteps = llmRuntimeSettings.maxSteps;
+    }
+    const modelCfg = getRunnableModelForUser(effectiveModelId, user);
+    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
+    db.prepare(`
+        INSERT INTO agent_runs (
+            id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
+            priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
+            retry_limit, max_token_budget, template_id, schedule_id, context_config, resume_from_step,
+            metadata, model_router, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        runId,
+        user.id,
+        sessionId || null,
+        modelCfg.id,
+        normalizeAgentTitle(title, cleanGoal),
+        cleanGoal,
+        'queued',
+        normalizeMaxSteps(effectiveMaxSteps),
+        parentRunId || null,
+        normalizePriority(priority),
+        normalizedRunMode,
+        normalizedToolPolicy,
+        serializeToolAllowlist(toolAllowlist),
+        normalizeApprovalPolicy(approvalPolicy),
+        normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
+        normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
+        normalizePositiveInt(retryLimit, 1, 0, 5),
+        normalizePositiveInt(maxTokenBudget, 0, 0, 10000000),
+        templateId || null,
+        scheduleId || null,
+        serializeContextConfig(contextConfig),
+        normalizePositiveInt(resumeFromStep, 0, 0, 999),
+        JSON.stringify(runMetadata),
+        normalizedRouter,
+        now,
+        now
+    );
+    enqueueAgentRun(runId, user);
+    const run = getRunForUser(runId, user);
+    publishAgentRunEvent(runId, 'created');
+    return run;
+}
+
+module.exports = {
+    createAgentRun,
+    createAgentArtifactVersion,
+    createAgentSchedule,
+    createAgentTemplate,
+    createAgentWorkflow,
+    cancelAgentRun,
+    computeNextScheduleRun,
+    deleteAgentSchedule,
+    deleteAgentTemplate,
+    deleteAgentWorkflow,
+    approveAgentTool,
+    diffAgentArtifactVersions,
+    diffAgentWorkflowVersions,
+    exportAgentRun,
+    formatToolList,
+    getAgentArtifactForUser,
+    getAgentWorkflowForUser,
+    listAgentArtifacts,
+    listAgentArtifactVersions,
+    listAgentNotifications,
+    listAgentSchedules,
+    listAgentTemplates,
+    listAgentWorkflowVersions,
+    listAgentWorkflows,
+    getAgentMetrics,
+    getAgentRuntimeStatus,
+    syncAgentRuntimeConcurrency,
+    normalizeAgentGoal,
+    normalizeDagSpec,
+    normalizeRunMode,
+    normalizeApprovalPolicy,
+    normalizeToolAllowlist,
+    normalizeToolPolicy,
+    parseJsonObject,
+    publishAgentWorkflowVersion,
+    rerunAgentRun,
+    rerunAgentDagFromNode,
+    resumeAgentRun,
+    restoreAgentWorkflow,
+    restoreAgentWorkflowVersion,
+    recoverAgentRuns,
+    runAgentScheduleNow,
+    runDueAgentSchedules,
+    runAgent,
+    rollbackAgentArtifactVersion,
+    saveAgentRunArtifact,
+    shouldPauseForApproval,
+    softDeleteAgentRun
+    ,
+    markAgentNotificationRead,
+    startAgentScheduleRunner,
+    updateAgentSchedule,
+    updateAgentTemplate,
+    updateAgentWorkflow
+};

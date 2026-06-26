@@ -49,6 +49,7 @@ const {
     assertWorkflowHasConfiguredLlm
 } = require('./security-helpers');
 require('./security-agent/preflight-governance');
+require('./security-agent/queue-scheduling');
 
 function readAgentSourceBundle() {
     return [
@@ -346,7 +347,7 @@ test('prompt library serves chat free task and workflow entry points', () => {
     const settingsNav = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'shell-start.html'), 'utf8');
     const settingsPrompts = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'prompts.html'), 'utf8');
     const preAppModals = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
-    const app = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'app.js'), 'utf8');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'app', 'main.js'), 'utf8');
     const extra = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'extra.js'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'sessions-prompts.css'), 'utf8');
 
@@ -566,7 +567,8 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     const agents = readAgentSourceBundle();
     const editor = readDagEditorSourceBundle();
     const tools = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools.js'), 'utf8');
-    const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime.js'), 'utf8');
+    const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
+    const dagRunConfig = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'dag-run-config.js'), 'utf8');
     const dagRuntime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-dag-runtime.js'), 'utf8');
     const model = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-model.js'), 'utf8');
 
@@ -598,7 +600,7 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     assert.match(tools, /\['prompt', 'model'\]/);
     assert.match(tools, /async function executeAgentLlmNode/);
     assert.match(tools, /recordAgentModelUsage\(user, modelCfg, messages, content, 'agent_llm_node'/);
-    assert.match(runtime, /function inferDagLlmRuntimeSettings/);
+    assert.match(dagRunConfig, /function inferDagLlmRuntimeSettings/);
     assert.match(runtime, /assertWorkflowHasConfiguredLlm\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!effectiveModelId && llmRuntimeSettings\.modelId\)/);
     assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(\)\)/);

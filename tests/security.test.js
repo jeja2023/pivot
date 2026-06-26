@@ -4,3 +4,6 @@ require('./security-mcp.test');
 require('./security-rag.test');
 require('./security-agent.test');
 require('./security-chat.test');
+require('./security-sqlite-write-queue.test');
+require('./security-model-runtime.test');
+require('./db-migration-snapshots.test');

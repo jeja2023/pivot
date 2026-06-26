@@ -25,6 +25,9 @@ const queues = {
 
 let flushTimer = null;
 let flushing = false;
+const BASE_RETRY_DELAY_MS = Math.max(FLUSH_INTERVAL_MS, 10);
+const MAX_RETRY_DELAY_MS = Math.max(BASE_RETRY_DELAY_MS * 16, 1000);
+let retryDelayMs = BASE_RETRY_DELAY_MS;
 
 const statements = {
     auditLogs: db.prepare(`
@@ -66,7 +69,7 @@ const transactions = Object.fromEntries(
     ])
 );
 
-function scheduleFlush() {
+function scheduleFlush(delayMs = FLUSH_INTERVAL_MS) {
     if (flushTimer) return;
     if (SYNC_MODE) {
         flushAllSqliteWrites();
@@ -75,8 +78,14 @@ function scheduleFlush() {
     flushTimer = setTimeout(() => {
         flushTimer = null;
         flushSqliteWriteQueue();
-    }, Math.max(10, FLUSH_INTERVAL_MS));
+    }, Math.max(10, delayMs));
     flushTimer.unref?.();
+}
+
+function scheduleRetryFlush() {
+    if (SYNC_MODE) return;
+    retryDelayMs = Math.min(MAX_RETRY_DELAY_MS, Math.max(BASE_RETRY_DELAY_MS, retryDelayMs * 2));
+    scheduleFlush(retryDelayMs);
 }
 
 function enqueue(queueName, item) {
@@ -117,11 +126,13 @@ function flushSqliteWriteQueue() {
                 } catch (err) {
                     logger.warn({ err: err.message, queueName, count: batch.length }, 'SQLite 写入队列刷新失败，稍后重试');
                     queues[queueName].unshift(...batch);
+                    scheduleRetryFlush();
                     return;
                 }
             }
             if (!SYNC_MODE || !progressed) break;
         }
+        retryDelayMs = BASE_RETRY_DELAY_MS;
         if (!SYNC_MODE && didWork && Object.values(queues).some(queue => queue.length > 0)) scheduleFlush();
     } finally {
         flushing = false;

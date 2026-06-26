@@ -117,9 +117,10 @@ async function listReportFiles(config, query = '', limit = 50) {
     const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const results = [];
     const queue = config.roots.map((root, rootIndex) => ({ dir: root, root: path.resolve(root), rootIndex }));
+    const extensionSet = new Set(config.extensions);
     let scanned = 0;
-    while (queue.length && results.length < max && scanned < 5000) {
-        const current = queue.shift();
+    for (let queueIndex = 0; queueIndex < queue.length && results.length < max && scanned < 5000; queueIndex += 1) {
+        const current = queue[queueIndex];
         scanned += 1;
         let entries = [];
         try {
@@ -137,7 +138,7 @@ async function listReportFiles(config, query = '', limit = 50) {
             }
             if (!entry.isFile()) continue;
             const ext = getExtension(entry.name);
-            if (!config.extensions.includes(ext)) continue;
+            if (!extensionSet.has(ext)) continue;
             const relative = path.relative(current.root, absolute);
             if (needle && !relative.toLowerCase().includes(needle)) continue;
             let stat;
@@ -148,7 +149,7 @@ async function listReportFiles(config, query = '', limit = 50) {
             }
             if (stat.size > config.maxFileMb * 1024 * 1024) continue;
             results.push({
-                path: `${current.rootIndex}:${relative}`,
+                path: current.rootIndex + ':' + relative,
                 name: entry.name,
                 relativePath: relative,
                 rootIndex: current.rootIndex,
@@ -161,7 +162,6 @@ async function listReportFiles(config, query = '', limit = 50) {
     }
     return { files: results, scanned };
 }
-
 async function readWorkbookRows(file, sheetName, maxRows) {
     const buffer = await fs.promises.readFile(file.target);
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
@@ -186,6 +186,14 @@ async function readTextPreview(file, maxRows) {
     };
 }
 
+function matchesReportFilters(row, filters) {
+    return Object.entries(filters).every(([key, value]) => {
+        const actual = String(row[key] ?? '').toLowerCase();
+        const expected = String(value ?? '').toLowerCase();
+        return expected === '' || actual.includes(expected);
+    });
+}
+
 async function queryReportTable(config, input = {}) {
     const file = await resolveReportFile(config, input.path);
     if (!['csv', 'xls', 'xlsx'].includes(file.ext)) {
@@ -197,11 +205,8 @@ async function queryReportTable(config, input = {}) {
     const table = await readWorkbookRows(file, input.sheet, Math.max(limit, config.maxRows));
     const filters = input.filters && typeof input.filters === 'object' ? input.filters : {};
     const wantedColumns = Array.isArray(input.columns) ? input.columns.map(String).filter(Boolean) : [];
-    const rows = table.rows.filter(row => Object.entries(filters).every(([key, value]) => {
-        const actual = String(row[key] ?? '').toLowerCase();
-        const expected = String(value ?? '').toLowerCase();
-        return expected === '' || actual.includes(expected);
-    })).slice(0, limit).map(row => {
+    const filteredRows = table.rows.filter(row => matchesReportFilters(row, filters));
+    const rows = filteredRows.slice(0, limit).map(row => {
         if (!wantedColumns.length) return row;
         const item = {};
         wantedColumns.forEach(col => { item[col] = row[col] ?? ''; });
@@ -213,11 +218,7 @@ async function queryReportTable(config, input = {}) {
         columns: wantedColumns.length ? wantedColumns : table.headers,
         rowCount: rows.length,
         rows,
-        allRows: table.rows.filter(row => Object.entries(filters).every(([key, value]) => {
-            const actual = String(row[key] ?? '').toLowerCase();
-            const expected = String(value ?? '').toLowerCase();
-            return expected === '' || actual.includes(expected);
-        }))
+        allRows: filteredRows
     };
 }
 
@@ -260,16 +261,18 @@ async function executeReportTool(server, name, input = {}) {
         return result;
     }
     if (name === 'reports.compare_files') {
-        const left = await executeReportTool(server, 'reports.read_file_summary', {
-            path: input.leftPath,
-            sheet: input.sheet,
-            sampleRows: input.sampleRows || 20
-        });
-        const right = await executeReportTool(server, 'reports.read_file_summary', {
-            path: input.rightPath,
-            sheet: input.sheet,
-            sampleRows: input.sampleRows || 20
-        });
+        const [left, right] = await Promise.all([
+            executeReportTool(server, 'reports.read_file_summary', {
+                path: input.leftPath,
+                sheet: input.sheet,
+                sampleRows: input.sampleRows || 20
+            }),
+            executeReportTool(server, 'reports.read_file_summary', {
+                path: input.rightPath,
+                sheet: input.sheet,
+                sampleRows: input.sampleRows || 20
+            })
+        ]);
         return {
             left: { file: left.file, sheets: left.sheets || [], columns: left.columns || [] },
             right: { file: right.file, sheets: right.sheets || [], columns: right.columns || [] },

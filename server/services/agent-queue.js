@@ -13,10 +13,20 @@ function createAgentQueue({
 }) {
     const activeRunIds = new Set();
     const queuedHints = new Set();
+    let processScheduled = false;
     let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
 
     const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
+
+    function scheduleProcessQueue() {
+        if (processScheduled) return;
+        processScheduled = true;
+        setImmediate(() => {
+            processScheduled = false;
+            processQueue();
+        });
+    }
 
     function claimNextRun() {
         const rows = db.prepare(`
@@ -82,19 +92,19 @@ function createAgentQueue({
             activeRunIds.add(runId);
             queuedHints.delete(runId);
             runAgent(runId, user).catch(err => {
-                logger.error({ err: err.message, runId }, '智能体运行在运行时保护外失败');
+                logger.error({ err: err.message, runId }, '鏅鸿兘浣撹繍琛屽湪杩愯鏃朵繚鎶ゅ澶辫触');
                 markRunError(runId, err.message);
             }).finally(() => {
                 activeRunIds.delete(runId);
                 releaseRun(runId);
-                setImmediate(processQueue);
+                scheduleProcessQueue();
             });
         }
     }
 
     function enqueueRun(runId) {
         if (runId) queuedHints.add(runId);
-        setImmediate(processQueue);
+        scheduleProcessQueue();
     }
 
     function recoverQueued(limit = 100) {
@@ -107,7 +117,7 @@ function createAgentQueue({
             LIMIT ?
         `).all(limit);
         queued.forEach(run => queuedHints.add(run.id));
-        setImmediate(processQueue);
+        scheduleProcessQueue();
         return queued.length;
     }
 
@@ -131,7 +141,7 @@ function createAgentQueue({
         const next = Math.max(Number.parseInt(nextMaxConcurrent, 10) || safeMaxConcurrent, 1);
         if (next === safeMaxConcurrent) return safeMaxConcurrent;
         safeMaxConcurrent = next;
-        setImmediate(processQueue);
+        scheduleProcessQueue();
         return safeMaxConcurrent;
     }
 

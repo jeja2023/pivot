@@ -15,6 +15,8 @@ const MONITOR_TIMEOUT_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_MONITOR_T
 
 const runtimes = new Map();
 let monitorStarted = false;
+let monitorRefreshPromise = null;
+let monitorRefreshTimer = null;
 
 function getActiveEndpointModels() {
     return db.prepare(`
@@ -223,22 +225,45 @@ async function refreshEndpointMonitor(runtime) {
     return runtime.monitor;
 }
 
-async function refreshAllEndpointMonitors() {
+async function refreshAllEndpointMonitorsCore() {
     syncConfiguredRuntimes(getActiveEndpointModels());
     const jobs = Array.from(runtimes.values()).map(refreshEndpointMonitor);
     await Promise.allSettled(jobs);
 }
 
+function scheduleNextMonitorRefresh(delayMs = MONITOR_INTERVAL_MS) {
+    if (monitorRefreshTimer) return;
+    monitorRefreshTimer = setTimeout(() => {
+        monitorRefreshTimer = null;
+        runMonitorRefresh()
+            .catch(err => {
+                logger.warn({ err: err.message }, '模型端点刷新失败，已在下一轮重试');
+            })
+            .finally(() => {
+                scheduleNextMonitorRefresh(MONITOR_INTERVAL_MS);
+            });
+    }, delayMs);
+    monitorRefreshTimer.unref();
+}
+
+function runMonitorRefresh() {
+    if (monitorRefreshPromise) return monitorRefreshPromise;
+    monitorRefreshPromise = refreshAllEndpointMonitorsCore().finally(() => {
+        monitorRefreshPromise = null;
+    });
+    return monitorRefreshPromise;
+}
+
+async function refreshAllEndpointMonitors() {
+    return runMonitorRefresh();
+}
+
 async function startModelEndpointMonitor() {
     if (monitorStarted) return;
     monitorStarted = true;
-    logger.info({ intervalMs: MONITOR_INTERVAL_MS }, '模型端点运行时监控已启动');
-    await refreshAllEndpointMonitors();
-    setInterval(() => {
-        refreshAllEndpointMonitors().catch(err => {
-            logger.warn({ err: err.message }, '模型端点监控刷新失败');
-        });
-    }, MONITOR_INTERVAL_MS).unref();
+    logger.info({ intervalMs: MONITOR_INTERVAL_MS }, '模型端点监控已启动');
+    await runMonitorRefresh();
+    scheduleNextMonitorRefresh();
 }
 
 function getModelEndpointRuntimeStatus() {
@@ -276,3 +301,4 @@ module.exports = {
     syncConfiguredRuntimes,
     normalizeEndpointKey
 };
+

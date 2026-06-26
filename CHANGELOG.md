@@ -1,3 +1,49 @@
+## [v0.0.165] - 2026-06-26
+
+### 迁移治理、模块拆分与安全校验收口
+
+本版本补齐上一轮项目治理计划中尚未完成的四项结构性改造：数据库迁移开始收口到版本化 migration，服务与路由大文件拆成可维护子模块，主机/DNS/本地地址判断统一到共享校验层，并将前端聊天入口拆成轻量加载器与实际主逻辑文件。
+
+#### 变更内容
+
+- **迁移治理**：新增 `server/db/migrations/runner.js`、`server/db/migrations/index.js`、`server/db/migrations/legacy.js` 与 `server/db/schema/legacy-preflight.js`，`server/db/migrate.js` 变为约 50 行编排入口，`server/db/schema.js` 变为薄导出入口；后续新增 schema 变更通过版本化 migration 清单接入 `schema_migrations`。
+- **旧库快照回归测试**：新增并扩展 `tests/db-migration-snapshots.test.js`，覆盖单个版本化 migration 幂等性，以及临时旧 SQLite 快照经真实 `server/db` 启动路径升级到新结构的完整链路。
+- **拆分大服务模块**：`long-term-memory` 拆出抽取、合并、检索、序列化和工具模块；`database-mcp` 拆出连接策略、连接构建、SQL 治理和工具定义；`agent-runtime` 拆出运行环境、元数据、通知、审批、规划和 DAG 运行配置；`rag-index` 拆出 embedding 客户端。
+- **统一主机与安全校验**：新增 `server/services/host-classifier.js`，集中本地主机别名、Docker 内部服务名、DNS 解析、本地模型主机等判断，`admin-stats` 复用该共享层，避免安全规则分叉。
+- **拆分路由与前端入口**：`chat`、`openai`、`apps`、`mcp` 路由改为薄入口 + 子目录实现 + helpers；`client/chat/app.js` 改为加载器，弹窗辅助逻辑进入 `client/chat/app/dialogs.js`，主绑定逻辑进入 `client/chat/app/main.js`。
+
+#### 验证
+
+- `node tests/db-migration-snapshots.test.js` 通过，覆盖版本化 migration 与旧库快照真实启动升级。
+- `node tests/security.test.js` 通过，253 项安全与功能回归全部通过。
+- `npm run lint` 通过，无 ESLint warning。
+- `npm run check` 通过，文本完整性、303 个 JS 文件语法和聊天资源检查均通过。
+
+#### 版本
+
+- 服务端版本号提升至 `0.0.165`。
+## [v0.0.164] - 2026-06-26
+
+### 队列调度、模型监控与报表检索优化，并补齐回归测试
+
+本版本围绕后台任务调度和监控链路做了几项收敛：减少重复唤醒、避免刷新并发堆叠，让失败后的队列可以自动恢复，同时把大目录报表扫描和双文件比较的路径压缩得更顺。
+
+#### 变更内容
+
+- **SQLite 写队列失败后自动恢复**：`server/services/sqlite-write-queue.js` 在批量写入失败后会重新排队并按退避时间再次处理，避免一次异常后队列长时间停摆。
+- **Agent 队列唤醒去重**：`server/services/agent-queue.js` 新增合并式调度，短时间内重复触发只保留一次待执行唤醒，减少定时器抖动和空转。
+- **模型端点监控改为单飞刷新**：`server/services/model-runtime.js` 将端点监控刷新收敛为单一在途任务，并把固定 `setInterval` 改为自调度 `setTimeout`，避免多个刷新并发堆叠。
+- **MCP 报表路径优化**：`server/services/builtin-mcp-reports.js` 将文件遍历改为游标式遍历，报表过滤改为一次命中判断，`compare_files` 的左右摘要并行读取，减少大目录与双文件比较时的等待。
+- **补齐回归测试**：新增 `tests/security-sqlite-write-queue.test.js`、`tests/security-agent/queue-scheduling.js`、`tests/security-model-runtime.test.js`，并接入 `tests/security.test.js` / `tests/security-agent.test.js`，覆盖失败重试、唤醒合并、监控去重与定时器策略。
+
+#### 验证
+
+- `node tests/security-model-runtime.test.js` 通过。
+- `node tests/security.test.js` 通过（252 项）。
+
+#### 说明
+
+- 服务端版本号提升至 `0.0.164`。
 ## [v0.0.163] - 2026-06-25
 
 ### Docker 生产环境 DuckDB 绑定修复，并修复数据概览 Token 趋势图宽度异常
