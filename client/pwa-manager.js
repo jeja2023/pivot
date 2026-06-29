@@ -12,32 +12,41 @@
         ));
     }
 
-    function showUpdateNotice(info) {
+    function formatVersionLabel(value) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        const match = text.match(/(?:^|[^0-9])v?(\d+\.\d+\.\d+)/i);
+        if (!match) return '';
+        return `v${match[1]}`;
+    }
+
+    function showUpdateNotice(info = {}) {
         if (document.getElementById('pwa-update-notice')) return;
         const notice = document.createElement('div');
         notice.id = 'pwa-update-notice';
         notice.className = 'pwa-update-notice';
         notice.setAttribute('role', 'status');
         notice.setAttribute('aria-live', 'polite');
-        notice.innerHTML = `
-            <span class="pwa-update-notice__text">检测到新版本 ${escapeText(info.version || '')}</span>
-            <button type="button" class="pwa-update-notice__action">刷新</button>
-        `;
-        notice.querySelector('.pwa-update-notice__action')?.addEventListener('click', () => {
-            localStorage.setItem(VERSION_KEY, info.build || info.version || String(Date.now()));
+
+        const text = document.createElement('span');
+        text.className = 'pwa-update-notice__text';
+        const versionLabel = formatVersionLabel(info.version) || formatVersionLabel(info.build);
+        text.textContent = versionLabel ? `检测到新版本 ${versionLabel}` : '检测到新版本，请刷新页面';
+
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'pwa-update-notice__action';
+        action.textContent = '刷新';
+
+        const buildKey = String(info.build || info.version || Date.now()).trim() || String(Date.now());
+        action.addEventListener('click', () => {
+            localStorage.setItem(VERSION_KEY, buildKey);
             window.location.reload();
         });
-        document.body.appendChild(notice);
-    }
 
-    function escapeText(value) {
-        return String(value || '').replace(/[&<>"']/g, ch => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        }[ch]));
+        notice.appendChild(text);
+        notice.appendChild(action);
+        document.body.appendChild(notice);
     }
 
     async function checkVersion({ silent = false } = {}) {
@@ -45,7 +54,7 @@
             const res = await fetch(`${VERSION_URL}?t=${Date.now()}`, { cache: 'no-store' });
             if (!res.ok) return;
             const info = await res.json();
-            const build = info.build || info.version || '';
+            const build = String(info.build || info.version || '').trim();
             if (!build) return;
             const previous = localStorage.getItem(VERSION_KEY);
             if (!previous) {

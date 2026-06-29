@@ -1,4 +1,5 @@
-﻿const { buildRagSearchContent } = require('../../services/rag-tokenizer');
+const { buildRagSearchContent } = require('../../services/rag-tokenizer');
+const regulationsMigrations = require('./regulations');
 
 const migrations = [
     {
@@ -28,7 +29,8 @@ const migrations = [
             db.exec('DELETE FROM knowledge_chunks_fts');
             db.exec('INSERT INTO knowledge_chunks_fts(rowid, content) SELECT id, COALESCE(search_content, content) FROM knowledge_chunks');
         }
-    }
+    },
+    ...regulationsMigrations
 ];
 
 module.exports = migrations;

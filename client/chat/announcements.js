@@ -194,6 +194,7 @@
 
     function ensureLoginAnnouncementShell() {
         const authContainer = document.getElementById('auth-container');
+        const announcementSlot = authContainer?.querySelector('.auth-showcase-announcements-slot');
         const authModal = authContainer?.querySelector('.modal');
         if (!authContainer) return null;
         let panel = document.getElementById('auth-announcements');
@@ -202,7 +203,7 @@
         panel.id = 'auth-announcements';
         panel.className = 'auth-announcements hidden';
         panel.setAttribute('aria-label', '登录页公告');
-        authContainer.insertBefore(panel, authModal || null);
+        (announcementSlot || authContainer).insertBefore(panel, announcementSlot ? null : (authModal || null));
         return panel;
     }
 

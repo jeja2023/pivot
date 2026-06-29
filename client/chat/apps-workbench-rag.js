@@ -495,6 +495,8 @@ window.openAppsWorkbench = function() {
         showOfficialWritingApp();
     } else if (getStoredAppsActiveApp() === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
+    } else if (getStoredAppsActiveApp() === 'regulations') {
+        showRegulationsAppFromRegistry().catch(() => showAppsHome());
     } else {
         showAppsHome();
     }

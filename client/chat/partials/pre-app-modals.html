@@ -1,50 +1,139 @@
     <!-- 用户认证弹窗 -->
     <div id="auth-container" class="modal-overlay">
-        <div class="modal">
-            <img src="/common/logo.png" alt="Zhi-Shu Logo" class="auth-logo">
-            <h2 id="auth-title">智枢</h2>
-            <form class="form-group" id="auth-form" autocomplete="on">
-                <input type="text" id="username" class="form-input" placeholder="用户名">
-                <div class="reg-only hidden">
-                    <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
-                    <input type="text" id="unit" class="form-input" placeholder="工作单位">
-                </div>
-                <div class="auth-password-field" style="position: relative; margin-bottom: 15px;">
-                    <input type="password" id="password" class="form-input" placeholder="密码" style="margin-bottom: 0; padding-right: 45px;">
-                    <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="password" data-icon-id="eye-icon-auth" title="显示/隐藏明文">
-                        <svg id="eye-icon-auth" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                            <circle cx="12" cy="12" r="3" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="reg-only hidden auth-password-field" style="position: relative; margin-bottom: 15px;">
-                    <input type="password" id="confirm-password" class="form-input" placeholder="确认密码" style="margin-bottom: 0; padding-right: 45px;">
-                    <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="confirm-password" data-icon-id="eye-icon-auth-conf" title="显示/隐藏明文">
-                        <svg id="eye-icon-auth-conf" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                            <circle cx="12" cy="12" r="3" />
-                        </svg>
-                    </button>
-                </div>
-            </form>
-            <button id="auth-submit" class="btn-primary" style="width: 100%;">进入系统</button>
-            <p style="margin-top: 15px; font-size: 0.85rem;">
-                <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
-            </p>
-            <p style="margin-top: 10px; font-size: 0.85rem;">
-                <a href="/downloads/Pivot-Setup.exe" class="btn-link" id="desktop-download-link" style="text-decoration: none; color: #0f766e; font-weight: 500;" download>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align: middle; margin-right: 4px;">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>下载 Windows 客户端
-                </a>
-            </p>
-            <p class="copyright-text auth-copyright"></p>
+        <div class="auth-locale-control" aria-label="当前语言">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 0 20"/><path d="M12 2a15.3 15.3 0 0 0 0 20"/></svg>
+            <span>简体中文</span>
         </div>
-    </div>
+        <div class="auth-shell">
+            <section class="auth-showcase" aria-label="Pivot 智枢 品牌介绍">
+                <div class="auth-showcase-brand" aria-label="Pivot 智枢">
+                    <img src="/common/logo.png" alt="Pivot 智枢 Logo" class="auth-brand-icon">
+                    <span class="auth-brand-name"><strong>Pivot</strong><em>智枢</em></span>
+                </div>
 
+                <div class="auth-showcase-main">
+                    <div class="auth-showcase-copy">
+                        <h1>内网 AI 控制平面</h1>
+                        <p>安全 · 可控 · 可审计 · 高效</p>
+                    </div>
+                    <div class="auth-feature-orbit" aria-label="平台能力">
+                        <article class="auth-feature-node auth-feature-node-models">
+                            <span class="auth-feature-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 4.5 7.75"/><path d="M12 12v8.5"/><path d="m12 12 7.5-4.25"/></svg>
+                            </span>
+                            <strong>多模型接入</strong>
+                        </article>
+                        <article class="auth-feature-node auth-feature-node-knowledge">
+                            <span class="auth-feature-icon auth-feature-icon-knowledge" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h6"/><circle cx="14" cy="15" r="3"/><path d="m16.5 17.5 3 3"/></svg>
+                            </span>
+                            <strong>知识库检索</strong>
+                        </article>
+                        <article class="auth-feature-node auth-feature-node-workflow">
+                            <span class="auth-feature-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="7" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.3 8.4 11 15.6"/><path d="m15.7 8.4-2.7 7.2"/><path d="M8.5 7h7"/></svg>
+                            </span>
+                            <strong>工作流编排</strong>
+                        </article>
+                        <article class="auth-feature-node auth-feature-node-tools">
+                            <span class="auth-feature-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7V5.8C9 4.8 9.8 4 10.8 4h2.4c1 0 1.8.8 1.8 1.8V7"/><path d="M4 9h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9Z"/><path d="M4 13h16"/><path d="M10 13v2h4v-2"/></svg>
+                            </span>
+                            <strong>工具箱</strong><small>（MCP 兼容）</small>
+                        </article>
+                        <article class="auth-feature-node auth-feature-node-security">
+                            <span class="auth-feature-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 5 6v5c0 5 3.5 8.5 7 10 3.5-1.5 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+                            </span>
+                            <strong>权限治理</strong>
+                        </article>
+                        <article class="auth-feature-node auth-feature-node-data">
+                            <span class="auth-feature-icon auth-feature-icon-data" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                            </span>
+                            <strong>数据分析</strong>
+                        </article>
+                        <div class="auth-orbit" aria-hidden="true">
+                            <span class="auth-orbit-ring"></span>
+                            <span class="auth-orbit-ring auth-orbit-ring-soft"></span>
+                            <span class="auth-orbit-sweep"></span>
+                            <span class="auth-orbit-node auth-orbit-node-a"></span>
+                            <span class="auth-orbit-node auth-orbit-node-b"></span>
+                            <span class="auth-orbit-node auth-orbit-node-c"></span>
+                            <span class="auth-orbit-platform auth-orbit-platform-back"></span>
+                            <span class="auth-orbit-platform auth-orbit-platform-front"></span>
+                            <span class="auth-orbit-platform-glow"></span>
+                            <img src="/common/logo.png" alt="" class="auth-hero-logo">
+                        </div>
+                    </div>
+                </div>
+                <div class="auth-trust-strip" aria-label="平台特性">
+                    <span><strong>安全可控</strong><small>内网权限体系</small></span>
+                    <span><strong>开放连接</strong><small>开放 API 与 MCP</small></span>
+                    <span><strong>统一调度</strong><small>智能路由与负载均衡</small></span>
+                    <span><strong>高效可靠</strong><small>稳定支持业务增长</small></span>
+                </div>
+                <div class="auth-showcase-announcements-slot"></div>
+            </section>
+
+            <div class="modal auth-panel">
+                <div class="auth-panel-header">
+                    <span class="auth-panel-kicker">内网安全访问</span>
+                    <h2 id="auth-title" class="auth-panel-title">
+                        <span id="auth-title-action">欢迎登录</span>
+                        <span class="auth-title-brand"><strong>Pivot</strong><em>智枢</em></span>
+                    </h2>
+                    <p id="auth-mode-label" class="auth-mode-label">使用账号进入工作台</p>
+                </div>
+                <form class="form-group" id="auth-form" autocomplete="on">
+                    <input type="text" id="username" class="form-input" placeholder="请输入用户名">
+                    <div class="reg-only hidden">
+                        <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
+                        <input type="text" id="unit" class="form-input" placeholder="工作单位">
+                    </div>
+                    <div class="auth-password-field" style="position: relative; margin-bottom: 15px;">
+                        <input type="password" id="password" class="form-input" placeholder="请输入密码" style="margin-bottom: 0; padding-right: 45px;">
+                        <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="password" data-icon-id="eye-icon-auth" title="显示/隐藏明文">
+                            <svg id="eye-icon-auth" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="reg-only hidden auth-password-field" style="position: relative; margin-bottom: 15px;">
+                        <input type="password" id="confirm-password" class="form-input" placeholder="确认密码" style="margin-bottom: 0; padding-right: 45px;">
+                        <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="confirm-password" data-icon-id="eye-icon-auth-conf" title="显示/隐藏明文">
+                            <svg id="eye-icon-auth-conf" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+                <button id="auth-submit" class="btn-primary" style="width: 100%;">
+                    <span>进入系统</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                </button>
+                <p class="auth-switch-row">
+                    <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
+                </p>
+                <p class="auth-download-row">
+                    <a href="/downloads/Pivot-Setup.exe" class="btn-link" id="desktop-download-link" download>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>下载 Windows 客户端
+                    </a>
+                </p>
+                <div class="auth-panel-note" aria-label="安全提示">
+                    <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+                    <div><strong>安全可信的内网 AI 平台</strong><small>账号会话与业务数据在受控环境中流转</small></div>
+                </div>
+            </div>
+        </div>
+        <p class="copyright-text auth-copyright"></p>
+    </div>
     <!-- 自定义重命名弹窗 -->
     <div id="rename-container" class="modal-overlay hidden" style="z-index: 1100;">
         <div class="modal" style="width: 320px;">

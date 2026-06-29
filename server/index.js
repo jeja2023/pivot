@@ -436,7 +436,8 @@ app.use(express.static(path.join(__dirname, '../client'), {
 }));
 const upload = createUploadMiddleware();
 const secureUpload = {
-    single: (field) => [upload.single(field), uploadSecurityMiddleware]
+    single: (field) => [upload.single(field), uploadSecurityMiddleware],
+    array: (field, maxCount) => [upload.array(field, maxCount), uploadSecurityMiddleware]
 };
 const uploadLimiter = rateLimit({
     windowMs: 60 * 1000,

@@ -8,7 +8,7 @@ const XLSX = require('@e965/xlsx');
 
 const TEXT_EXTENSIONS = new Set([
     '.txt', '.md', '.csv', '.json', '.js', '.ts', '.py', '.java', '.cpp',
-    '.c', '.h', '.html', '.css', '.yaml', '.yml', '.sql', '.log'
+    '.c', '.h', '.html', '.htm', '.css', '.yaml', '.yml', '.sql', '.log'
 ]);
 
 const CFB_FREE = 0xffffffff;

@@ -46,6 +46,7 @@ async function loadAuthConfig() {
 window.showAuth = () => {
     document.getElementById('auth-container').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+    document.body?.classList.add('auth-active');
     document.body?.classList.remove('is-main-workspace-full');
     document.body?.setAttribute('data-active-workspace', 'auth');
     document.querySelector('.chat-container')?.setAttribute('data-active-workspace', 'chat');
@@ -57,6 +58,7 @@ window.showApp = (options = {}) => {
     if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    document.body?.classList.remove('auth-active');
     const restoreWorkspace = options.restoreWorkspace !== false;
     if (restoreWorkspace && window.restoreMainWorkspaceAfterLogin) {
         Promise.resolve(window.restoreMainWorkspaceAfterLogin()).catch(err => {
@@ -106,11 +108,18 @@ window.showApp = (options = {}) => {
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
     if (!allowPublicRegistration) return showToast('当前已关闭公开注册，请联系管理员创建账号', 'error');
     isLogin = !isLogin;
-    document.getElementById('auth-title').innerText = isLogin ? '智枢' : '智枢 - 注册账号';
-    document.getElementById('auth-toggle').innerText = isLogin ? '没有账号？点击注册' : '已有账号？点击登录';
-    document.getElementById('auth-submit').innerText = isLogin ? '进入系统' : '立即注册';
+    const authTitleAction = document.getElementById('auth-title-action');
+    if (authTitleAction) authTitleAction.innerText = isLogin ? '欢迎登录' : '注册账号';
+    const authModeLabel = document.getElementById('auth-mode-label');
+    if (authModeLabel) authModeLabel.innerText = isLogin ? '使用账号进入工作台' : '创建 Pivot 智枢账号';
+    const authToggle = document.getElementById('auth-toggle');
+    if (authToggle) authToggle.innerText = isLogin ? '没有账号？点击注册' : '已有账号？点击登录';
+    const authSubmit = document.getElementById('auth-submit');
+    const authSubmitLabel = authSubmit?.querySelector('span');
+    if (authSubmitLabel) authSubmitLabel.innerText = isLogin ? '进入系统' : '立即注册';
+    else if (authSubmit) authSubmit.innerText = isLogin ? '进入系统' : '立即注册';
     const passwordInput = document.getElementById('password');
-    if (passwordInput) passwordInput.placeholder = isLogin ? '密码' : '密码（至少8位，包含字母和数字）';
+    if (passwordInput) passwordInput.placeholder = isLogin ? '请输入密码' : '密码（至少8位，包含字母和数字）';
     document.querySelectorAll('.reg-only').forEach(el => el.classList.toggle('hidden', isLogin));
 });
 

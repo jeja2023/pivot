@@ -3,13 +3,21 @@
  * Policy: cache stable vendor assets only. App HTML/CSS/JS and API traffic always use network.
  */
 const SW_POLICY = 'vendor-only';
-const SW_VERSION = 'pivot-sw-vendor-only-v9';
+const SW_VERSION = 'pivot-sw-vendor-only-v11';
 const CACHE_PREFIX = 'pivot-';
 const VENDOR_CACHE = `${CACHE_PREFIX}vendor-${SW_VERSION}`;
 
 const VENDOR_ASSETS = [
   '/common/logo.png',
   '/favicon.png',
+  '/favicon.ico',
+  '/favicon-16x16.png',
+  '/favicon-32x32.png',
+  '/apple-touch-icon.png',
+  '/android-chrome-192x192.png',
+  '/android-chrome-512x512.png',
+  '/maskable-icon-192x192.png',
+  '/maskable-icon-512x512.png',
   '/common/vendor/marked.min.js',
   '/common/vendor/purify.min.js',
   '/common/vendor/highlight.min.js',

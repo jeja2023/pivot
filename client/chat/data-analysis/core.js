@@ -146,6 +146,7 @@
         sessionStorage.setItem('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
+        document.getElementById('regulations-view')?.classList.add('hidden');
         view.classList.remove('hidden');
         document.getElementById('apps-back-btn')?.classList.remove('hidden');
         if (typeof setAppsTitle === 'function') {

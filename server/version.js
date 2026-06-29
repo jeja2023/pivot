@@ -2,11 +2,11 @@ const fs = require('fs');
 const path = require('path');
 
 function extractAppVersionFromChangelog(text) {
-    const match = String(text || '').match(/^##\s*\[?(.+?)\]?\s*-/m);
+    const match = String(text || '').match(/^##\s*\[?v?(\d+\.\d+\.\d+)\]?\s*-/m);
     if (!match) return 'v0.0.0';
     const version = String(match[1] || '').trim();
     if (!version) return 'v0.0.0';
-    return version.startsWith('v') ? version : `v${version}`;
+    return `v${version}`;
 }
 
 function getAppVersion() {

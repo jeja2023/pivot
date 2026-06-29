@@ -2,6 +2,7 @@
 // 前端只传结构化参数（mode/action/source/draft/requirements/selection 等），
 // 由后端负责提示词组装、模型权限/配额/上下文预算、上游转发、用量统计与审计标签。
 const express = require('express');
+const { createRegulationsRouter } = require('./regulations');
 const { asyncHandler } = require('../../http');
 const { logger } = require('../../logger');
 const { estimateTokens } = require('../../llm');
@@ -61,7 +62,7 @@ const {
     resolveAppsModel
 } = require('./helpers');
 
-async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false }) {
+async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null }) {
     const modelCfg = resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
         return res.status(404).json({
@@ -186,7 +187,8 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
         recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
         releaseSlots();
-        return res.json({ content, model: modelCfg.model_name });
+        // extraPayload 用于让具体应用附带额外字段（如法规问答的引用来源），不影响其它调用方
+        return res.json({ content, model: modelCfg.model_name, ...(extraPayload && typeof extraPayload === 'object' ? extraPayload : {}) });
     } catch (e) {
         const errorMsg = e.response?.data?.error?.message || e.message;
         logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
@@ -365,6 +367,14 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
 
 function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
+
+    router.use('/apps/regulations', createRegulationsRouter({
+        authMiddleware,
+        logAction,
+        uploadLimiter,
+        upload,
+        runAppsAiCompletion
+    }));
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ datasets: listDatasets(req.user.id) });

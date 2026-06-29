@@ -10,7 +10,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
     : path.join(projectRoot, 'uploads');
-const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.doc', '.docx', '.xls', '.xlsx']);
+const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm', '.doc', '.docx', '.xls', '.xlsx']);
 
 function scoreFilenameEncoding(value) {
     const text = String(value || '');

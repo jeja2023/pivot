@@ -17,6 +17,15 @@ const PIVOT_APP_REGISTRY = [
         icon: 'bar-chart',
         status: 'available',
         openMode: 'inline'
+    },
+    {
+        id: 'regulations',
+        name: '\u6cd5\u89c4\u67e5\u8be2',
+        category: '\u6cd5\u89c4\u68c0\u7d22',
+        description: '\u67e5\u8be2\u6cd5\u89c4\u5236\u5ea6\u6587\u6863\uff0c\u6309\u6761\u6587\u68c0\u7d22\u3001\u67e5\u770b\u7248\u672c\uff0c\u5e76\u57fa\u4e8e\u547d\u4e2d\u6761\u6587\u8fdb\u884c AI \u95ee\u7b54\u3002',
+        icon: 'book-open',
+        status: 'available',
+        openMode: 'inline'
     }
 ];
 
@@ -317,6 +326,17 @@ function getAppIconSvg(icon) {
             </svg>
         `;
     }
+
+    if (icon === 'book-open') {
+        return `
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"></path>
+                <path d="M4 5.5v16"></path>
+                <path d="M8 7h8"></path>
+                <path d="M8 11h7"></path>
+            </svg>
+        `;
+    }
     if (icon === 'bar-chart') {
         return `
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
@@ -390,6 +410,7 @@ function showAppsHome() {
     document.getElementById('apps-home-view')?.classList.remove('hidden');
     document.getElementById('official-writing-view')?.classList.add('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
+    document.getElementById('regulations-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
     renderAppsGrid();
@@ -400,6 +421,7 @@ function showOfficialWritingApp() {
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
+    document.getElementById('regulations-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '正文模式用于正式写作，对照模式用于原文和正文稿并排审改；批注、版本、规范检查和材料引用集中在右侧审改栏。');
     loadOfficialWritingState();
@@ -426,6 +448,15 @@ async function showDataAnalysisAppFromRegistry() {
     await window.showDataAnalysisApp?.();
 }
 
+async function showRegulationsAppFromRegistry() {
+    if (typeof window.showRegulationsApp === 'function') {
+        await window.showRegulationsApp();
+        return;
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-regulations.js');
+    await window.showRegulationsApp?.();
+}
+
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
@@ -433,7 +464,13 @@ function openRegisteredApp(appId) {
     if (app.id === 'data-analysis') {
         showDataAnalysisAppFromRegistry()
             .catch(() => {
-                if (typeof showToast === 'function') showToast('数据分析应用加载失败', 'error');
+                if (typeof showToast === 'function') showToast('\u6570\u636e\u5206\u6790\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
+            });
+    }
+    if (app.id === 'regulations') {
+        showRegulationsAppFromRegistry()
+            .catch(() => {
+                if (typeof showToast === 'function') showToast('\u6cd5\u89c4\u67e5\u8be2\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
 }

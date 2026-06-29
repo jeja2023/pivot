@@ -32,9 +32,37 @@
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
-.app-brand-mini { display: flex; align-items: center; gap: 12px; }
-.brand-logo-mini { width: 42px; height: 42px; border-radius: 10px; }
-.brand-text-mini { font-size: 1.5rem; font-weight: 800; color: var(--text-main); letter-spacing: 0.5px; }
+.app-brand-mini {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.brand-logo-mini {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    object-fit: contain;
+}
+.brand-text-mini {
+    min-width: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: 1.42rem;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+.brand-text-pivot {
+    color: #071936;
+    font-weight: 800;
+}
+.brand-text-cn {
+    color: #08a45b;
+    font-weight: 800;
+}
 .new-chat-circle-btn {
     width: 32px; height: 32px; background: var(--primary); color: white;
     border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
