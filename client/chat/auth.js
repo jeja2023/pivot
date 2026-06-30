@@ -2,6 +2,12 @@
 let isLogin = true;
 let allowPublicRegistration = false;
 window.allowPublicRegistration = false;
+function syncAuthModeClass() {
+    const authContainer = document.getElementById('auth-container');
+    if (!authContainer) return;
+    authContainer.classList.toggle('is-login-mode', isLogin);
+    authContainer.classList.toggle('is-register-mode', !isLogin);
+}
 window.setPublicRegistrationState = (enabled) => {
     allowPublicRegistration = enabled === true;
     window.allowPublicRegistration = allowPublicRegistration;
@@ -44,7 +50,9 @@ async function loadAuthConfig() {
 
 // 显式定义界面显示控制逻辑
 window.showAuth = () => {
-    document.getElementById('auth-container').classList.remove('hidden');
+    const authContainer = document.getElementById('auth-container');
+    authContainer?.classList.remove('hidden');
+    syncAuthModeClass();
     document.getElementById('app').classList.add('hidden');
     document.body?.classList.add('auth-active');
     document.body?.classList.remove('is-main-workspace-full');
@@ -108,6 +116,7 @@ window.showApp = (options = {}) => {
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
     if (!allowPublicRegistration) return showToast('当前已关闭公开注册，请联系管理员创建账号', 'error');
     isLogin = !isLogin;
+    syncAuthModeClass();
     const authTitleAction = document.getElementById('auth-title-action');
     if (authTitleAction) authTitleAction.innerText = isLogin ? '欢迎登录' : '注册账号';
     const authModeLabel = document.getElementById('auth-mode-label');

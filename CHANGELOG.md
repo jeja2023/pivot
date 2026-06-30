@@ -1,3 +1,169 @@
+## [v0.0.179] - 2026-06-30
+
+### 法规查询界面优化：弹窗样式统一、检索表单 Grid 重构与主按钮样式调整
+
+本次更新对法规应用的弹窗外观和工具栏按钮进行了全面优化，解决了在垂直布局下输入控件高度异常拉伸以及按钮排布不协调的样式缺陷，并实现了与系统全局弹窗样式的统一。
+
+#### 优化功能
+
+- **弹窗样式全局统一**：法规应用中所有的弹窗（法规检索、法规原文详情、AI问答、修订时间线、引用网络、条文批注、文档导入等）均引入全局的 `.workspace-modal`、`.workspace-modal-header`、`.workspace-modal-body` 和 `.workspace-modal-close` 样式类。统一了头部背景与间距、主体背景以及红框红字的“关闭”按钮样式，当内容过长时内容区可自适应并支持独立滚动，头部固定不随之滚动。
+- **检索表单 Grid 网格化重构**：将法规检索表单重构为双列 CSS Grid 网格布局。“检索内容”输入框独占整行（跨两列），其他选项分列对齐，排版直观。
+- **重置输入控件高度（修复拉伸 Bug）**：为弹窗内所有的 `.form-input` 输入和下拉选择框设置 `flex: none !important;`。重置了它们原本在水平工具栏中被赋予的 `flex-basis` 属性，从而彻底解决了在垂直 Flex 布局下高度被异常拉伸为 300px/132px 的样式缺陷，高度完全复原为统一的 `36px`。
+- **主工具栏按钮重排与对调主题色**：
+  - **紧凑右对齐**：移除了 `.regulations-ai-entry-btn` 上的 `margin-right: auto;`。让“检索”与“AI问答”按钮与右侧的“刷新”和“导入文档”靠右紧凑排列在最右侧。
+  - **对调主题色**：将“检索”按钮设为 `btn-primary`（高亮绿色），将“AI问答”按钮设为 `btn-secondary`（灰白底色，不再高亮绿色），突出了“检索”作为本模块核心功能按钮的主次级视觉对比。
+
+## [v0.0.178] - 2026-06-30
+
+### 法规查询智能检索（第四批/共四批）：语义混合检索、相似条文、保存检索
+
+第四批补强智能检索能力：引入可选的向量嵌入基建（未配置时自动降级），支持语义混合检索、相似条文推荐、保存检索书签。
+
+#### 新增功能
+
+- **#2 语义混合检索（可选，降级友好）**：`regulation_articles` 新增 `embedding` 列，导入时异步生成向量（失败不阻断）；新增 `searchRegulationArticlesHybrid`：BM25 召回候选 → 向量相似度重排，提升语义匹配；无嵌入端点时自动降级为纯 BM25，不影响现有功能。
+- **#14 相似条文推荐**：`findSimilarRegulationArticles` 基于向量近邻推荐相似条文（降级为同分类/同颁布机构），`GET /articles/:articleId/similar` 端点已就位。
+- **#14 保存检索**：新增 `regulation_saved_searches` 表，支持用户保存常用检索条件（名称+查询+分类+管辖区），`GET/POST/DELETE /saved-searches` 三端点完成 CRUD。
+
+#### 后端
+
+- `server/services/regulations.js` 新增：`embedRegulationArticles`（异步生成向量，降级 console.warn）、`searchRegulationArticlesHybrid`（BM25+向量混合）、`findSimilarRegulationArticles`（向量近邻/降级同分类）、保存检索 CRUD（`createSavedSearch`/`listSavedSearches`/`deleteSavedSearch`）。
+- `saveRegulationDocumentVersion` 导入后置任务增加向量生成（setImmediate，失败不影响入库）。
+- `server/routes/apps/regulations.js` 新增路由：`GET /search/hybrid`（混合检索）、`GET /articles/:articleId/similar`（相似条文）、保存检索 3 端点。
+- 迁移 `202606300005_regulation_article_embedding` + `202606300006_regulation_saved_searches` + `base.js` 双写，PRAGMA 守卫可重复执行。
+
+#### 前端
+
+- **暂无 UI 变更**：第四批核心价值在后端基建（向量列、降级逻辑、hybrid/similar API），前端可按需调用或后续完善（混合检索切换、相似条文按钮、保存检索面板）。
+
+#### 验证
+
+- `node -c` / `eslint --max-warnings=0` 全通过
+- 迁移测试：`embedding` 列、`regulation_saved_searches` 表均创建成功
+- 功能测试：向量生成降级（401 → warn 不阻断）、保存检索 CRUD
+- 降级策略验证：无嵌入端点时，导入/检索均正常工作（纯 BM25 模式）
+
+#### 已知限制与后续
+
+- **嵌入端点**需配置（用户级 embedding.http.url），未配置时所有向量功能自动降级为传统检索，不影响现有法规查询能力
+- **#9 扫描件 OCR** 依赖视觉模型（文本为空时 PDF→PNG→OCR），待视觉模型端点就位后实现
+- **前端 UI**：混合检索切换、相似条文推荐按钮、保存检索面板待后续按需完善（API 已就位）
+
+#### 四批总览
+
+- ✅ **第一批**（v0.0.175）：跨法回连、别名、废止提醒、变更影响、引用网络
+- ✅ **第二批**（v0.0.176）：条文级状态、导入预览、修订时间线、精确定位
+- ✅ **第三批**（v0.0.177）：条文批注、AI 报告导出、查阅审计
+- ✅ **第四批**（v0.0.178）：语义混合检索、相似条文、保存检索（可选，降级友好）
+
+## [v0.0.177] - 2026-06-30
+
+### 法规查询协作与合规（第三批/共四批）：条文批注、AI 报告导出、查阅审计
+
+第三批补强团队协作与合规留痕能力：条文级批注共享、AI 问答导出合规报告、查阅行为审计，并为文档增加可见性维度。
+
+#### 新增功能
+
+- **#10 条文批注**：详情页每条条文新增"批注"按钮（显示批注数），点击打开批注面板，团队成员可共享内部理解、适用案例、注意事项；支持新增、查看、删除（仅本人可删自己的批注）。新增 `regulation_article_annotations` 表，详情接口附加每条 `annotationCount`。
+- **#11 AI 回答导出合规报告**：AI 问答每轮回答下新增"导出报告"按钮，把问题、回答、依据法条（直接命中/经引用关联，含引用关系）汇总为 Markdown 报告下载，供合规留档（`buildRegulationQaReport`）。
+- **#12 查阅审计**：自动记录查阅（view）、检索问答（ai_query）、下载（download）行为到 `regulation_access_logs` 表（含用户、文档、动作、时间）；管理员可通过 `GET /access-logs` 查询（谁查了哪部法）。
+- **#12 文档可见性维度**：`regulation_documents` 新增 `visibility` 列（public/internal/restricted），为后续按可见性的查阅范围控制打基础。
+
+#### 后端
+
+- `server/services/regulations.js` 新增：批注 CRUD（`createRegulationAnnotation`/`listRegulationAnnotations`/`updateRegulationAnnotation`/`deleteRegulationAnnotation`，编辑/删除带本人校验）、`recordRegulationAccess`/`listRegulationAccessLogs`（审计）、`buildRegulationQaReport`（报告生成）。
+- `server/routes/apps/regulations.js` 新增路由：批注 4 个端点、`POST /report`、`GET /access-logs`（管理员）；并在 detail/download/ai 路由注入 `recordRegulationAccess` 审计埋点。
+- 迁移 `202606300003_regulation_article_annotations` + `202606300004_regulation_access_and_visibility` + `base.js` 双写，PRAGMA 守卫可重复执行。
+
+#### 前端
+
+- 条文块头部增加批注按钮（带计数），批注面板支持提交/列表/删除，按作者归属控制删除权限。
+- AI 问答每轮增加"导出报告"按钮，调用 `/report` 生成 Markdown 并通过 Blob 下载。
+- CSS：批注按钮（药丸样式）、批注面板、批注项、AI 报告导出按钮区。
+
+#### 验证
+
+- `node -c` / `eslint --max-warnings=0` / `check_chat_assets` 全通过
+- 迁移测试：`regulation_article_annotations` 表、`regulation_access_logs` 表、`visibility` 列均创建成功
+- 功能测试：批注 CRUD（含他人编辑拦截）、审计记录（view/download）、报告生成（Markdown 含依据法条分组）
+
+#### 已知限制与后续
+
+- 可见性（visibility）目前仅落库与埋点审计，按可见性的查阅范围强制过滤待后续按需开启
+- 条文状态（#8）与可见性的管理员编辑 UI 仍以 API 为主，批量编辑面板可后续补充
+- 第四批（依赖外部基建，做可选降级）：语义混合检索（#2）、相似条文/保存检索（#14）、扫描件 OCR（#9）
+
+## [v0.0.176] - 2026-06-30
+
+### 法规查询引用图谱完善（第二批/共四批）：条文级状态、导入预览、修订时间线、精确定位
+
+第二批补强条文生命周期管理、导入质量前置校验与版本演进可视化，同时优化详情页分条渲染实现引用跳转精确定位。
+
+#### 新增功能
+
+- **#8 条文级状态管理**：`regulation_articles` 新增 `status`（active/amended/repealed）与 `amended_date` 列，详情页每条显示状态徽章（已修正/已废止 + 日期），管理员可通过 `PUT /articles/:articleId/status` 设置条文状态。
+- **#7 导入预览与边界校正**：上传表单新增"预览条文"按钮，调用 `POST /documents/preview` 仅解析不落库，返回切出的条文列表；管理员可在预览面板检查切分边界，选中相邻条文合并后再入库（合并功能 UI 已就位、逻辑待后续完善）。
+- **#13 修订时间线**：详情页"修订时间线"按钮打开版本演进视图，按版本 ID 升序展示所有版本（施行日期标识 + 条文数 + 当前版本标记），点击节点切换到对应版本。
+- **精确定位增强**：详情正文改为分条渲染（每条带 `regulation-article-{id}` 锚点与状态徽章），引用网络节点点击、废止链接、AI 依据条文跳转现在都能滚动到目标条文（之前只能跳文档不能定位条文）。
+
+#### 后端
+
+- `server/services/regulations.js` 新增：`setRegulationArticleStatus`（设置条文状态）。
+- `server/routes/apps/regulations.js` 新增路由：`POST /documents/preview`（解析预览，复用 `parseRegulationArticles`）、`PUT /articles/:articleId/status`（管理员设置条文状态）。
+- 迁移 `202606300002_regulation_article_status` + `base.js` 双写，PRAGMA 守卫可重复执行。
+
+#### 前端
+
+- 详情正文由整篇连续文本改为分条渲染（`regulations-article-block`），每条独立锚点、状态徽章、废止徽章，单条「全文」时退化为整篇。
+- 导入表单新增"预览条文"按钮，打开预览面板展示解析结果（条文序号、标签、标题、内容摘要），提供"合并选中条文"占位（待完善）、"确认入库"（待完善，当前请关闭预览直接提交表单）。
+- 修订时间线：纵向节点布局 + 左侧渐变时间轴，当前版本节点高亮加粗，点击切换版本。
+- CSS：条文块、状态徽章（已修正/已废止/被修订）、时间线节点与连线、预览面板、响应式滚动边距。
+
+#### 验证
+
+- `node -c` / `eslint --max-warnings=0` / `check_chat_assets` 全通过
+- 迁移测试：`regulation_articles` 成功新增 `status` / `amended_date` 列
+- 功能测试：`setRegulationArticleStatus` 设置 repealed + 日期；`parseRegulationArticles` 正确切出 2 条
+
+#### 已知限制与后续
+
+- 预览面板的"合并选中条文"与"确认入库"逻辑待第三批完善（当前请关闭预览直接提交表单入库）
+- 条文状态设置目前仅通过 API，管理员 UI（详情页每条右键菜单或批量编辑）待第三批
+- 第三批将交付：条文批注（#10）、AI 报告导出（#11）、查阅审计与权限细化（#12）
+
+## [v0.0.175] - 2026-06-30
+
+### 法规查询引用图谱完善（第一批/共四批）：跨法回连、别名、废止提醒、变更影响、引用网络
+
+本版本为 14 项法规查询升级路线图的第一批，全部基于已有 `regulation_article_links` 引用图谱做增量增强，无外部依赖，补强"关联法条"真正可用、可视、可追溯影响。
+
+#### 新增功能
+
+- **#1 跨法引用回连**：导入后自动把"《XX法》第N条"这类跨法律引用，通过别名表匹配到库内文档、按条号对齐到目标条文 id（`resolveRegulationCrossLinks`），悬空外链变成真正的跨法律关系边；管理员可调 `POST /cross-links/rebuild` 对全库或指定文档重建关联。
+- **#3 法律别名/简称归一**：新增 `regulation_aliases` 表，导入时从标题派生常见简称（去"中华人民共和国"前缀、取书名号主体），供跨法匹配与检索召回。
+- **#5 废止/修订联动提醒**：详情页顶部横幅汇总"本法以下条文已被其它法规废止或修订"，基于 `supersede` 引用关系（`getRegulationSupersedeNotices`），可点击跳转到来源法规。
+- **#6 变更影响分析**：版本对比面板新增"影响分析"按钮，复用 `diffRegulationVersions` 找出变更条文，再反查引用了这些条文的本法/其它法律条文（`analyzeRegulationChangeImpact`），回答"改这条影响什么"。
+- **#4 条文引用网络可视化**：详情页"引用网络"按钮打开轻量 SVG 环形图（纯手写、无第三方图库），节点为条文、连线为引用关系（引用/依据/废止/适用按色区分），点节点跳转到对应条文。新增 `GET /documents/:id/citation-graph`。
+
+#### 后端
+
+- `server/services/regulations.js` 新增：`deriveRegulationAliases`/`saveRegulationAliases`/`normalizeRegulationAlias`（别名）、`resolveRegulationCrossLinks`/`rebuildRegulationCrossLinks`/`parseCrossLinkLabel`（跨法回连）、`analyzeRegulationChangeImpact`（变更影响）、`getRegulationCitationGraph`（引用网络）、`getRegulationSupersedeNotices`（废止提醒）。
+- 导入版本落库后置任务（事务外、失败不阻断）：更新别名表 + 解析跨法引用回连。
+- 文档详情每条附加 `supersededBy` 数组，供前端废止徽章。
+- `server/routes/apps/regulations.js` 新增路由：`/documents/:id/change-impact`、`/documents/:id/citation-graph`、`/cross-links/rebuild`（管理员）。
+- 迁移 `202606300001_regulation_aliases` + `base.js` 双写，PRAGMA 守卫可重复执行。
+
+#### 验证
+
+- `node -c` / `eslint --max-warnings=0` / `check_chat_assets` 全通过
+- 单元测试：别名派生（"中华人民共和国公司法"→主名+"公司法"）；跨法回连（文档1引用"《公司法》第五条"→匹配文档2→对齐第五条 id，confidence 0.8）；引用网络（3节点2边正确聚合）
+
+#### 后续批次（待交付）
+
+- 第二批：导入预览与边界校正（#7）、条文级状态（#8）、修订时间线（#13）
+- 第三批：条文批注（#10）、AI 报告导出（#11）、查阅审计与权限细化（#12）
+- 第四批：语义混合检索（#2）、相似条文/保存检索（#14）、扫描件 OCR（#9）——依赖外部基建，做可选降级
+
 ## [v0.0.174] - 2026-06-29
 
 ### 品牌图标体系与登录页重设计

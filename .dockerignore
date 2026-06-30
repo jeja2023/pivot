@@ -31,6 +31,7 @@ docker-compose.yml
 # 桌面端完整排除（Docker 不需要）
 desktop/
 dist-electron-remote/
+dist-electron-*/
 dist/
 # 客户端安装包（默认排除，如需在 Docker 中提供下载请移动到 downloads/ 目录）
 client/*.exe

@@ -151,5 +151,113 @@ module.exports = [
                 CREATE INDEX IF NOT EXISTS idx_regulation_article_links_target ON regulation_article_links(target_article_id);
             `);
         }
+    },
+    {
+        id: '202606300001_regulation_aliases',
+        description: 'Create regulation_aliases for legal short-name normalization (used for cross-law citation linking and recall).',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS regulation_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER NOT NULL,
+                    alias TEXT NOT NULL,
+                    normalized_alias TEXT NOT NULL,
+                    is_primary INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (document_id) REFERENCES regulation_documents(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_regulation_aliases_document ON regulation_aliases(document_id);
+                CREATE INDEX IF NOT EXISTS idx_regulation_aliases_normalized ON regulation_aliases(normalized_alias);
+            `);
+        }
+    },
+    {
+        id: '202606300002_regulation_article_status',
+        description: 'Add article-level status and amended_date columns to regulation_articles for per-article lifecycle (amended/repealed).',
+        up(db) {
+            const columns = db.prepare('PRAGMA table_info(regulation_articles)').all();
+            if (!columns.some(col => col.name === 'status')) {
+                db.exec('ALTER TABLE regulation_articles ADD COLUMN status TEXT DEFAULT \'active\'');
+            }
+            if (!columns.some(col => col.name === 'amended_date')) {
+                db.exec('ALTER TABLE regulation_articles ADD COLUMN amended_date TEXT DEFAULT \'\'');
+            }
+        }
+    },
+    {
+        id: '202606300003_regulation_article_annotations',
+        description: 'Create regulation_article_annotations for per-article notes, comments, and internal memos.',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS regulation_article_annotations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    article_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (article_id) REFERENCES regulation_articles(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_regulation_annotations_article ON regulation_article_annotations(article_id);
+                CREATE INDEX IF NOT EXISTS idx_regulation_annotations_user ON regulation_article_annotations(user_id);
+            `);
+        }
+    },
+    {
+        id: '202606300004_regulation_access_and_visibility',
+        description: 'Add document visibility column and create regulation_access_logs for view/search/download audit.',
+        up(db) {
+            const columns = db.prepare('PRAGMA table_info(regulation_documents)').all();
+            if (!columns.some(col => col.name === 'visibility')) {
+                db.exec('ALTER TABLE regulation_documents ADD COLUMN visibility TEXT DEFAULT \'internal\'');
+            }
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS regulation_access_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    document_id INTEGER,
+                    action TEXT NOT NULL,
+                    detail TEXT DEFAULT '',
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_regulation_access_user ON regulation_access_logs(user_id);
+                CREATE INDEX IF NOT EXISTS idx_regulation_access_document ON regulation_access_logs(document_id);
+                CREATE INDEX IF NOT EXISTS idx_regulation_access_created ON regulation_access_logs(created_at);
+            `);
+        }
+    },
+    {
+        id: '202606300005_regulation_article_embedding',
+        description: 'Add embedding column to regulation_articles for optional semantic (hybrid) retrieval; degrades to BM25 when no endpoint configured.',
+        up(db) {
+            const columns = db.prepare('PRAGMA table_info(regulation_articles)').all();
+            if (!columns.some(col => col.name === 'embedding')) {
+                db.exec('ALTER TABLE regulation_articles ADD COLUMN embedding TEXT DEFAULT \'\'');
+            }
+        }
+    },
+    {
+        id: '202606300006_regulation_saved_searches',
+        description: 'Create regulation_saved_searches for user-saved query bookmarks.',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS regulation_saved_searches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    query TEXT DEFAULT '',
+                    category TEXT DEFAULT '',
+                    jurisdiction TEXT DEFAULT '',
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_regulation_saved_searches_user ON regulation_saved_searches(user_id);
+            `);
+        }
     }
 ];

@@ -194,8 +194,6 @@
 
     function ensureLoginAnnouncementShell() {
         const authContainer = document.getElementById('auth-container');
-        const announcementSlot = authContainer?.querySelector('.auth-showcase-announcements-slot');
-        const authModal = authContainer?.querySelector('.modal');
         if (!authContainer) return null;
         let panel = document.getElementById('auth-announcements');
         if (panel) return panel;
@@ -203,8 +201,112 @@
         panel.id = 'auth-announcements';
         panel.className = 'auth-announcements hidden';
         panel.setAttribute('aria-label', '登录页公告');
-        (announcementSlot || authContainer).insertBefore(panel, announcementSlot ? null : (authModal || null));
+        authContainer.appendChild(panel);
         return panel;
+    }
+
+    function startAnnouncementsFloating() {
+        const el = document.getElementById('auth-announcements');
+        if (!el) return;
+
+        if (el.dataset.floatingInitialized) return;
+        el.dataset.floatingInitialized = 'true';
+
+        let parent = el.offsetParent || document.getElementById('auth-container') || document.body;
+        let rect = el.getBoundingClientRect();
+        let pRect = parent.getBoundingClientRect();
+
+        let x = 0;
+        let y = 0;
+        let vx = 0.4; // 水平速度 (像素/帧)
+        let vy = 0.3; // 垂直速度 (像素/帧)
+        let isFloating = false;
+
+        // 初始化或重置位置
+        function initPosition() {
+            pRect = parent.getBoundingClientRect();
+            rect = el.getBoundingClientRect();
+
+            // 如果屏幕宽度小于等于 980px，则还原样式交给 CSS，不启动漂浮
+            if (window.innerWidth <= 980) {
+                if (isFloating) {
+                    el.style.position = '';
+                    el.style.left = '';
+                    el.style.bottom = '';
+                    el.style.top = '';
+                    el.style.transform = '';
+                    el.style.animation = '';
+                    isFloating = false;
+                }
+                return;
+            }
+
+            if (!isFloating) {
+                // 开启大屏下的自由漫游定位
+                el.style.position = 'absolute';
+                el.style.bottom = 'auto';
+                el.style.left = '0px';
+                el.style.top = '0px';
+                el.style.animation = 'none'; // 禁用 CSS 的垂直小幅度抖动
+                
+                // 随机初始坐标，避免紧贴屏幕边缘
+                x = Math.random() * Math.max(10, pRect.width - rect.width - 60) + 30;
+                y = Math.random() * Math.max(10, pRect.height - rect.height - 60) + 30;
+
+                // 随机初始方向速度
+                vx = (Math.random() > 0.5 ? 1 : -1) * (0.2 + Math.random() * 0.3);
+                vy = (Math.random() > 0.5 ? 1 : -1) * (0.2 + Math.random() * 0.3);
+
+                isFloating = true;
+            } else {
+                // 窗口 resize 时防止越界
+                if (x + rect.width > pRect.width) {
+                    x = Math.max(0, pRect.width - rect.width - 20);
+                }
+                if (y + rect.height > pRect.height) {
+                    y = Math.max(0, pRect.height - rect.height - 20);
+                }
+            }
+        }
+
+        initPosition();
+        window.addEventListener('resize', initPosition);
+
+        function tick() {
+            if (!document.getElementById('auth-announcements')) return;
+
+            if (isFloating && window.innerWidth > 980) {
+                pRect = parent.getBoundingClientRect();
+                rect = el.getBoundingClientRect();
+
+                x += vx;
+                y += vy;
+
+                // 左右边缘碰撞检测与反弹，内缩 15px 以保持呼吸感
+                if (x <= 15) {
+                    x = 15;
+                    vx = -vx;
+                } else if (x + rect.width >= pRect.width - 15) {
+                    x = pRect.width - rect.width - 15;
+                    vx = -vx;
+                }
+
+                // 上下边缘碰撞检测与反弹
+                if (y <= 15) {
+                    y = 15;
+                    vy = -vy;
+                } else if (y + rect.height >= pRect.height - 15) {
+                    y = pRect.height - rect.height - 15;
+                    vy = -vy;
+                }
+
+                el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+            }
+
+            requestAnimationFrame(tick);
+        }
+
+        requestAnimationFrame(tick);
     }
 
     function renderLoginAnnouncements() {
@@ -214,8 +316,13 @@
         panel.classList.toggle('hidden', items.length === 0);
         panel.innerHTML = items.length ? `
             <div class="auth-announcements-head">
-                <span>公告</span>
-                <small>${items.length} 条</small>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span>公告</span>
+                    <small>${items.length} 条</small>
+                </div>
+                <button type="button" class="auth-announcements-close" title="关闭公告" aria-label="关闭公告">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
             </div>
             <div class="auth-announcements-list">
                 ${items.map(item => `
@@ -229,6 +336,16 @@
                 `).join('')}
             </div>
         ` : '';
+
+        if (items.length > 0) {
+            const closeBtn = panel.querySelector('.auth-announcements-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    panel.classList.add('hidden');
+                });
+            }
+            setTimeout(startAnnouncementsFloating, 0);
+        }
     }
 
     async function loadLoginAnnouncements() {

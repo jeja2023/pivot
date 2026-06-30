@@ -5,21 +5,38 @@ const path = require('path');
 
 const { extractDocumentText, truncateExtractedText } = require('../../document-text');
 const { asyncHandler } = require('../../http');
-const { isAdmin } = require('../../permissions');
+const { isAdmin, isSuperAdmin } = require('../../permissions');
 const { getKnowledgeLimits } = require('../../services/resource-limits');
 const {
+    analyzeRegulationChangeImpact,
     buildRegulationAiContext,
+    buildRegulationQaReport,
+    createRegulationAnnotation,
     createRegulationDocumentFromUpload,
+    createSavedSearch,
+    deleteRegulationAnnotation,
     deleteRegulationDocument,
+    deleteSavedSearch,
     diffRegulationVersions,
     findRegulationDuplicateByHash,
+    findSimilarRegulationArticles,
+    getRegulationCitationGraph,
     getRegulationDocumentDetail,
+    listRegulationAccessLogs,
+    listRegulationAnnotations,
     listRegulationDocuments,
     listRegulationFacets,
+    listSavedSearches,
     normalizeRegulationId,
+    parseRegulationArticles,
+    rebuildRegulationCrossLinks,
+    recordRegulationAccess,
     resolveRegulationVersionDownloadPath,
     saveRegulationDocumentVersion,
     searchRegulationArticles,
+    searchRegulationArticlesHybrid,
+    setRegulationArticleStatus,
+    updateRegulationAnnotation,
     updateRegulationDocument
 } = require('../../services/regulations');
 
@@ -52,6 +69,12 @@ function hashUploadedFile(file) {
 function requireRegulationsAdmin(req, res) {
     if (isAdmin(req.user)) return true;
     res.status(403).json({ error: { message: '仅管理员可管理法规查询', type: 'forbidden' } });
+    return false;
+}
+
+function requireRegulationsSuperAdmin(req, res) {
+    if (isSuperAdmin(req.user)) return true;
+    res.status(403).json({ error: { message: '仅 admin 权限层级可删除法规文档', type: 'forbidden' } });
     return false;
 }
 
@@ -233,6 +256,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
         if (!detail || (!includeArchived && detail.document.status === 'archived')) {
             return res.status(404).json({ error: { message: '法规文档不存在或已归档', type: 'invalid_request_error' } });
         }
+        recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'view', detail: detail.document.title });
         res.json({ detail });
     }));
 
@@ -251,6 +275,35 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
         }
     }));
 
+    router.get('/documents/:id/change-impact', authMiddleware, asyncHandler(async (req, res) => {
+        const fromVersionId = normalizeRegulationId(req.query.from);
+        const toVersionId = normalizeRegulationId(req.query.to);
+        if (!fromVersionId || !toVersionId) {
+            return res.status(400).json({ error: { message: '需要提供 from 和 to 版本 ID', type: 'invalid_request_error' } });
+        }
+        try {
+            const impact = analyzeRegulationChangeImpact({ documentId: req.params.id, fromVersionId, toVersionId });
+            res.json({ impact });
+        } catch (error) {
+            res.status(404).json({ error: { message: error.message || '影响分析失败', type: 'not_found' } });
+        }
+    }));
+
+    router.get('/documents/:id/citation-graph', authMiddleware, asyncHandler(async (req, res) => {
+        const graph = getRegulationCitationGraph(req.params.id, {
+            versionId: req.query.versionId || req.query.version_id
+        });
+        res.json({ graph });
+    }));
+
+    router.post('/cross-links/rebuild', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireRegulationsAdmin(req, res)) return;
+        const documentId = req.body?.documentId || req.body?.document_id || null;
+        const result = rebuildRegulationCrossLinks(documentId);
+        logAction(req, '法规查询重建跨法关联', `回连 ${result.resolved} 条 / 共 ${result.versions} 版本`);
+        res.json(result);
+    }));
+
     router.get('/documents/:id/download', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireRegulationsAdmin(req, res)) return;
         const includeArchived = isAdmin(req.user);
@@ -265,6 +318,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
         if (!filePath || !fs.existsSync(filePath)) {
             return res.status(404).json({ error: { message: '源文件已被移动或删除', type: 'not_found' } });
         }
+        recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'download', detail: detail.document.title });
         res.download(filePath, detail.currentVersion.source_name || `${detail.document.title}.txt`);
     }));
 
@@ -344,6 +398,168 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
         }
     }));
 
+    // #7 导入前预览：只解析不落库，返回切出的条文列表供管理员校正
+    router.post('/documents/preview', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        if (!requireRegulationsAdmin(req, res)) {
+            cleanupTempUpload(req.file);
+            return;
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: { message: `请选择要预览的法规文档，支持 ${SUPPORTED_UPLOAD_LABEL}`, type: 'invalid_request_error' } });
+        }
+        try {
+            const prepared = await prepareRegulationUploadMetadata(req.file, readRegulationMetadata(req.body || {}));
+            const articles = parseRegulationArticles(prepared.extractedText || '', { docTitle: prepared.title });
+            res.json({
+                title: prepared.title || '',
+                effectiveDate: prepared.effectiveDate || '',
+                articleCount: articles.length,
+                articles: articles.map((a, i) => ({
+                    index: i,
+                    articleLabel: a.articleLabel,
+                    articleTitle: a.articleTitle,
+                    headingPath: a.headingPath || '',
+                    content: a.content
+                }))
+            });
+        } finally {
+            cleanupTempUpload(req.file);
+        }
+    }));
+
+    // #8 设置条文级状态（管理员）
+    router.put('/articles/:articleId/status', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireRegulationsAdmin(req, res)) return;
+        const updated = setRegulationArticleStatus({
+            articleId: req.params.articleId,
+            status: req.body?.status,
+            amendedDate: req.body?.amendedDate || req.body?.amended_date || ''
+        });
+        if (!updated) {
+            return res.status(404).json({ error: { message: '条文不存在', type: 'invalid_request_error' } });
+        }
+        logAction(req, '法规查询设置条文状态', `条文 ${req.params.articleId} → ${updated.status}`);
+        res.json({ article: updated });
+    }));
+
+    // #10 条文批注 CRUD
+    router.get('/articles/:articleId/annotations', authMiddleware, asyncHandler(async (req, res) => {
+        const annotations = listRegulationAnnotations({ articleId: req.params.articleId });
+        res.json({ annotations });
+    }));
+
+    router.post('/articles/:articleId/annotations', authMiddleware, asyncHandler(async (req, res) => {
+        const annotation = createRegulationAnnotation({
+            articleId: req.params.articleId,
+            userId: req.user.id,
+            content: req.body?.content
+        });
+        if (!annotation) {
+            return res.status(400).json({ error: { message: '批注内容不能为空或条文不存在', type: 'invalid_request_error' } });
+        }
+        logAction(req, '法规查询新增批注', `条文 ${req.params.articleId}`);
+        res.json({ annotation });
+    }));
+
+    router.put('/annotations/:annotationId', authMiddleware, asyncHandler(async (req, res) => {
+        const annotation = updateRegulationAnnotation({
+            annotationId: req.params.annotationId,
+            userId: req.user.id,
+            content: req.body?.content
+        });
+        if (!annotation) {
+            return res.status(403).json({ error: { message: '批注不存在或无权编辑', type: 'forbidden' } });
+        }
+        res.json({ annotation });
+    }));
+
+    router.delete('/annotations/:annotationId', authMiddleware, asyncHandler(async (req, res) => {
+        const ok = deleteRegulationAnnotation({
+            annotationId: req.params.annotationId,
+            userId: req.user.id
+        });
+        if (!ok) {
+            return res.status(403).json({ error: { message: '批注不存在或无权删除', type: 'forbidden' } });
+        }
+        res.json({ success: true });
+    }));
+
+    // #11 AI 回答导出为合规报告（Markdown）
+    router.post('/report', authMiddleware, asyncHandler(async (req, res) => {
+        const body = req.body || {};
+        const markdown = buildRegulationQaReport({
+            question: body.question,
+            answer: body.answer,
+            sources: Array.isArray(body.sources) ? body.sources : []
+        });
+        logAction(req, '法规查询导出合规报告', `问题：${String(body.question || '').slice(0, 40)}`);
+        res.json({ markdown });
+    }));
+
+    // #12 查阅审计日志（管理员）
+    router.get('/access-logs', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireRegulationsAdmin(req, res)) return;
+        const result = listRegulationAccessLogs({
+            documentId: req.query.documentId,
+            userId: req.query.userId,
+            limit: req.query.limit,
+            offset: req.query.offset
+        });
+        res.json(result);
+    }));
+
+    // #2 混合检索（可选，向量端点未配置时自动降级为 BM25）
+    router.get('/search/hybrid', authMiddleware, asyncHandler(async (req, res) => {
+        const matches = await searchRegulationArticlesHybrid({
+            query: req.query.q || req.query.query,
+            documentId: req.query.documentId || req.query.document_id,
+            limit: req.query.limit,
+            includeArchived: isAdmin(req.user) && req.query.includeArchived === 'true',
+            userId: req.user.id
+        });
+        res.json({ matches });
+    }));
+
+    // #14 相似条文推荐
+    router.get('/articles/:articleId/similar', authMiddleware, asyncHandler(async (req, res) => {
+        const similar = await findSimilarRegulationArticles({
+            articleId: req.params.articleId,
+            limit: req.query.limit
+        });
+        res.json({ similar });
+    }));
+
+    // #14 保存检索 CRUD
+    router.get('/saved-searches', authMiddleware, asyncHandler(async (req, res) => {
+        const searches = listSavedSearches({ userId: req.user.id });
+        res.json({ searches });
+    }));
+
+    router.post('/saved-searches', authMiddleware, asyncHandler(async (req, res) => {
+        const search = createSavedSearch({
+            userId: req.user.id,
+            name: req.body?.name,
+            query: req.body?.query,
+            category: req.body?.category,
+            jurisdiction: req.body?.jurisdiction
+        });
+        if (!search) {
+            return res.status(400).json({ error: { message: '名称不能为空', type: 'invalid_request_error' } });
+        }
+        res.json({ search });
+    }));
+
+    router.delete('/saved-searches/:searchId', authMiddleware, asyncHandler(async (req, res) => {
+        const ok = deleteSavedSearch({
+            searchId: req.params.searchId,
+            userId: req.user.id
+        });
+        if (!ok) {
+            return res.status(403).json({ error: { message: '检索不存在或无权删除', type: 'forbidden' } });
+        }
+        res.json({ success: true });
+    }));
+
     router.post('/documents/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
         if (!requireRegulationsAdmin(req, res)) {
             cleanupTempUpload(req.file);
@@ -390,7 +606,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
     }));
 
     router.delete('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
-        if (!requireRegulationsAdmin(req, res)) return;
+        if (!requireRegulationsSuperAdmin(req, res)) return;
         const deleted = deleteRegulationDocument({
             documentId: req.params.id,
             userId: req.user.id
@@ -411,6 +627,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
         const documentId = normalizeRegulationId(body.documentId || body.document_id);
         const limit = Number.parseInt(body.limit, 10) || 12;
         const built = buildRegulationAiContext({ query, documentId, limit, expandLinks: true });
+        recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
         // 把命中条文的来源精简后随回答一并返回，便于前端展示「依据条文」并可点击跳转
         const sources = (built.sources || []).map(source => ({

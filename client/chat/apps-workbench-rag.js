@@ -496,7 +496,11 @@ window.openAppsWorkbench = function() {
     } else if (getStoredAppsActiveApp() === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'regulations') {
-        showRegulationsAppFromRegistry().catch(() => showAppsHome());
+        if (typeof window.showRegulationsAppFromRegistry === 'function') {
+            window.showRegulationsAppFromRegistry().catch(() => showAppsHome());
+        } else {
+            showAppsHome();
+        }
     } else {
         showAppsHome();
     }

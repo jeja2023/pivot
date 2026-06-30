@@ -1,4 +1,4 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +10,7 @@ const { normalizeUploadedOriginalName } = require('../upload');
 const { buildRagSearchContent, buildRagSearchTerms, normalizeSearchText } = require('./rag-tokenizer');
 const { chunkDocument } = require('./rag-chunker');
 const { getChunkSizeForDocType } = require('./rag-config');
+const { generateEmbeddings, cosineSimilarity } = require('./rag-index/embedding-client');
 const { toProjectRelativePath } = require('../security');
 const { clearDirSizeCache } = require('./dir-size-cache');
 
@@ -107,6 +108,50 @@ function buildVersionLabelFromDate(value) {
     if (!iso) return '';
     const [year, month, day] = iso.split('-');
     return `${year}年${month}月${day}日`;
+}
+
+// 归一化法律名称用于别名匹配：去书名号、空白、全角符号
+function normalizeRegulationAlias(value) {
+    return String(value || '')
+        .replace(/[《》【】\[\]()（）\s]/g, '')
+        .trim()
+        .toLowerCase();
+}
+
+// 从法规标题派生常见简称：去「中华人民共和国」前缀、取《X》内容等
+function deriveRegulationAliases(title) {
+    const raw = String(title || '').trim();
+    if (!raw) return [];
+    const aliases = new Set();
+    // 去书名号后的主体
+    const core = raw.replace(/^《/, '').replace(/》$/, '').trim();
+    if (core) aliases.add(core);
+    // 去「中华人民共和国」前缀
+    const noPrefix = core.replace(/^中华人民共和国/, '').trim();
+    if (noPrefix && noPrefix !== core) aliases.add(noPrefix);
+    return [...aliases].filter(a => a.length >= 2 && a.length <= 80);
+}
+
+// 落库一部文档的别名（含主名 + 派生简称），覆盖式写入
+function saveRegulationAliases(documentId, title) {
+    const docId = normalizeRegulationId(documentId);
+    if (!docId) return;
+    const aliases = deriveRegulationAliases(title);
+    db.prepare('DELETE FROM regulation_aliases WHERE document_id = ? AND is_primary = 0').run(docId);
+    // 主名（完整标题去书名号）置 is_primary=1，其余为派生
+    const primary = aliases[0] || '';
+    const now = getBeijingTimestamp();
+    const insert = db.prepare(`
+        INSERT INTO regulation_aliases (document_id, alias, normalized_alias, is_primary, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    `);
+    const seen = new Set();
+    aliases.forEach(alias => {
+        const norm = normalizeRegulationAlias(alias);
+        if (!norm || seen.has(norm)) return;
+        seen.add(norm);
+        insert.run(docId, alias, norm, alias === primary ? 1 : 0, now);
+    });
 }
 
 function ensureRegulationsSourceRoot() {
@@ -450,6 +495,80 @@ function extractRegulationLinks(articles, { documentId, versionId }) {
     return links.map(link => ({ ...link, documentId, versionId }));
 }
 
+// 解析「《XX法》第N条」中文条号为标准 article_label
+function parseCrossLinkLabel(targetLabel) {
+    const m = String(targetLabel || '').match(/^《([^》]{2,80})》(?:第([〇零一二三四五六七八九十百千万\d]+)条(?:之([〇零一二三四五六七八九十百千万\d]+))?)?/);
+    if (!m) return null;
+    return {
+        bookName: m[1].trim(),
+        articleLabel: m[2] ? `第${m[2]}条${m[3] ? `之${m[3]}` : ''}` : ''
+    };
+}
+
+// 跨法引用回连：把指定版本中悬空的「《XX法》第N条」外链，匹配库内文档并对齐到目标条文 id
+function resolveRegulationCrossLinks(versionId) {
+    const vId = normalizeRegulationId(versionId);
+    if (!vId) return { resolved: 0 };
+    // 取该版本下尚未连上、且 target_label 带书名号的外链
+    const pending = db.prepare(`
+        SELECT id, target_label
+        FROM regulation_article_links
+        WHERE version_id = ? AND target_article_id IS NULL AND target_label LIKE '《%'
+    `).all(vId);
+    if (!pending.length) return { resolved: 0 };
+
+    const updateLink = db.prepare(`
+        UPDATE regulation_article_links
+        SET target_document_id = ?, target_article_id = ?, confidence = ?
+        WHERE id = ?
+    `);
+    let resolved = 0;
+    pending.forEach(row => {
+        const parsed = parseCrossLinkLabel(row.target_label);
+        if (!parsed?.bookName) return;
+        const norm = normalizeRegulationAlias(parsed.bookName);
+        // 通过别名表匹配目标文档（在用、未归档）
+        const aliasRow = db.prepare(`
+            SELECT a.document_id
+            FROM regulation_aliases a
+            JOIN regulation_documents d ON d.id = a.document_id
+            WHERE a.normalized_alias = ? AND d.deleted_at IS NULL
+            ORDER BY a.is_primary DESC
+            LIMIT 1
+        `).get(norm);
+        if (!aliasRow) return;
+        const targetDocId = aliasRow.document_id;
+        let targetArticleId = null;
+        if (parsed.articleLabel) {
+            // 在目标文档当前版本里按条号对齐
+            const art = db.prepare(`
+                SELECT a.id
+                FROM regulation_articles a
+                JOIN regulation_documents d ON d.id = a.document_id
+                WHERE a.document_id = ? AND a.version_id = d.current_version_id AND a.article_label = ?
+                LIMIT 1
+            `).get(targetDocId, parsed.articleLabel);
+            targetArticleId = art?.id || null;
+        }
+        updateLink.run(targetDocId, targetArticleId, targetArticleId ? 0.8 : 0.65, row.id);
+        resolved += 1;
+    });
+    return { resolved };
+}
+
+// 重建：对全库（或指定文档）当前版本重新解析跨法引用回连
+function rebuildRegulationCrossLinks(documentId = null) {
+    const docId = normalizeRegulationId(documentId);
+    const versions = docId
+        ? db.prepare('SELECT current_version_id AS id FROM regulation_documents WHERE id = ? AND deleted_at IS NULL').all(docId)
+        : db.prepare('SELECT current_version_id AS id FROM regulation_documents WHERE deleted_at IS NULL AND current_version_id IS NOT NULL').all();
+    let total = 0;
+    versions.forEach(v => {
+        if (v.id) total += resolveRegulationCrossLinks(v.id).resolved;
+    });
+    return { resolved: total, versions: versions.length };
+}
+
 function getRegulationDocumentById(docId, { includeArchived = false } = {}) {
     const normalizedId = normalizeRegulationId(docId);
     if (!normalizedId) return null;
@@ -630,6 +749,36 @@ function getRegulationDocumentDetail(docId, { versionId = null, includeArchived 
         sort_order: Number(row.sort_order || 0)
     }));
 
+    // #5 附加废止/修订提醒：标记被其它法律 supersede 的条文
+    const supersedeNotices = getRegulationSupersedeNotices(normalizedDocId, { versionId: selectedVersion.id });
+    const supersedeByArticle = new Map();
+    supersedeNotices.forEach(n => {
+        if (!supersedeByArticle.has(n.article_id)) supersedeByArticle.set(n.article_id, []);
+        supersedeByArticle.get(n.article_id).push({
+            sourceDocumentId: n.source_document_id,
+            sourceDocumentTitle: n.source_document_title,
+            sourceArticleLabel: n.source_article_label
+        });
+    });
+    // #10 附加批注数量
+    const annotationCounts = new Map();
+    if (articles.length) {
+        const ids = articles.map(a => a.id);
+        const placeholders = ids.map(() => '?').join(',');
+        const rows = db.prepare(`
+            SELECT article_id, COUNT(*) as count
+            FROM regulation_article_annotations
+            WHERE article_id IN (${placeholders})
+            GROUP BY article_id
+        `).all(...ids);
+        rows.forEach(r => annotationCounts.set(r.article_id, r.count));
+    }
+    const articlesWithNotice = articles.map(a => ({
+        ...a,
+        supersededBy: supersedeByArticle.get(a.id) || [],
+        annotationCount: annotationCounts.get(a.id) || 0
+    }));
+
     return {
         document: { ...doc, effect_status: computeRegulationEffectStatus(doc) },
         versions: versions.map(version => ({
@@ -637,7 +786,7 @@ function getRegulationDocumentDetail(docId, { versionId = null, includeArchived 
             is_current: Number(version.id) === Number(doc.current_version_id)
         })),
         currentVersion: selectedVersion,
-        articles,
+        articles: articlesWithNotice,
         download: selectedVersion.source_path ? {
             fileName: selectedVersion.source_name,
             sourcePath: selectedVersion.source_path
@@ -676,6 +825,7 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 a.article_label,
                 a.article_title,
                 a.content,
+                a.embedding,
                 substr(replace(a.content, char(10), ' '), 1, 240) AS excerpt,
                 0 AS score
             FROM regulation_documents d
@@ -705,6 +855,7 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 a.article_label,
                 a.article_title,
                 a.content,
+                a.embedding,
                 substr(replace(a.content, char(10), ' '), 1, 240) AS excerpt,
                 bm25(regulation_articles_fts) AS score
             FROM regulation_articles_fts
@@ -734,6 +885,7 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 a.article_label,
                 a.article_title,
                 a.content,
+                a.embedding,
                 substr(replace(a.content, char(10), ' '), 1, 240) AS excerpt,
                 999 AS score
             FROM regulation_documents d
@@ -751,6 +903,128 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
             LIMIT ?
         `).all(...params, like, like, like, like, like, safeLimit);
     }
+}
+
+// #2 混合检索（BM25 + 向量重排）：先用 BM25 召回候选，再用向量相似度重排
+async function searchRegulationArticlesHybrid({ query, documentId = null, limit = 8, includeArchived = false, userId = 0 } = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 8, 1), 50);
+    let queryVector;
+    try {
+        // 尝试生成查询向量
+        const vectors = await generateEmbeddings([String(query || '').trim()], null, null, userId, { source: 'regulations_search', timeoutMs: 10000 });
+        queryVector = vectors[0];
+    } catch (err) {
+        // 向量生成失败，降级为纯 BM25
+        console.warn('[regulations] 混合检索降级为 BM25:', err.message);
+        return searchRegulationArticles({ query, documentId, limit, includeArchived });
+    }
+    if (!queryVector || !Array.isArray(queryVector)) {
+        return searchRegulationArticles({ query, documentId, limit, includeArchived });
+    }
+    // BM25 召回候选（数量为 limit*6，保证重排后有足够结果）
+    const candidateLimit = Math.min(safeLimit * 6, 300);
+    const candidates = searchRegulationArticles({ query, documentId, limit: candidateLimit, includeArchived });
+    if (!candidates.length) return [];
+    // 筛选有向量的候选，计算相似度并重排
+    const withVector = candidates.filter(c => c.embedding && String(c.embedding).trim()).map(c => {
+        try {
+            const articleVector = JSON.parse(c.embedding);
+            const similarity = cosineSimilarity(queryVector, articleVector);
+            return { ...c, vectorScore: similarity };
+        } catch (_err) {
+            return null;
+        }
+    }).filter(Boolean);
+    if (!withVector.length) {
+        return candidates.slice(0, safeLimit);
+    }
+    // 混合打分：向量相似度占 70%，BM25 逆序分占 30%（score 越小 BM25 越好，归一化后取反）
+    const maxBM25 = Math.max(...withVector.map(c => c.score || 999), 1);
+    withVector.forEach(c => {
+        const bm25Normalized = 1 - (c.score || 999) / maxBM25;
+        c.hybridScore = (c.vectorScore || 0) * 0.7 + bm25Normalized * 0.3;
+    });
+    withVector.sort((a, b) => (b.hybridScore || 0) - (a.hybridScore || 0));
+    return withVector.slice(0, safeLimit);
+}
+
+// #14 相似条文推荐（基于向量近邻，降级为同分类/同颁布机构）
+async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
+    const aid = normalizeRegulationId(articleId);
+    if (!aid) return [];
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 5, 1), 20);
+    const source = db.prepare('SELECT embedding, document_id, content FROM regulation_articles WHERE id = ?').get(aid);
+    if (!source) return [];
+    let sourceVector;
+    try {
+        if (source.embedding && String(source.embedding).trim()) {
+            sourceVector = JSON.parse(source.embedding);
+        }
+    } catch (_err) {
+        // 源条文无向量或解析失败，降级为分类推荐
+    }
+    if (!sourceVector || !Array.isArray(sourceVector)) {
+        // 降级：推荐同一文档的其它条文，或同分类/颁布机构的条文
+        const doc = db.prepare('SELECT category, issuing_body FROM regulation_documents WHERE id = ?').get(source.document_id);
+        const where = doc?.category ? 'AND d.category = ?' : (doc?.issuing_body ? 'AND d.issuing_body = ?' : '');
+        const param = doc?.category || doc?.issuing_body || '';
+        return db.prepare(`
+            SELECT d.id AS document_id, d.title AS document_title, d.category, d.issuing_body,
+                   a.id AS article_id, a.article_label, a.article_title,
+                   substr(replace(a.content, char(10), ' '), 1, 200) AS excerpt
+            FROM regulation_articles a
+            JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
+            WHERE a.id != ? ${where} AND d.deleted_at IS NULL
+            ORDER BY d.updated_at DESC
+            LIMIT ?
+        `).all(aid, ...(param ? [param] : []), safeLimit);
+    }
+    // 向量近邻：遍历所有有向量的条文，计算相似度，返回 top-k
+    const candidates = db.prepare(`
+        SELECT a.id, a.document_id, a.article_label, a.article_title, a.embedding,
+               substr(replace(a.content, char(10), ' '), 1, 200) AS excerpt,
+               d.title AS document_title, d.category, d.issuing_body
+        FROM regulation_articles a
+        JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
+        WHERE a.id != ? AND a.embedding != '' AND d.deleted_at IS NULL
+        LIMIT 1000
+    `).all(aid);
+    const withScore = candidates.map(c => {
+        try {
+            const vec = JSON.parse(c.embedding);
+            const sim = cosineSimilarity(sourceVector, vec);
+            return { ...c, similarity: sim, article_id: c.id };
+        } catch (_err) {
+            return null;
+        }
+    }).filter(Boolean);
+    withScore.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+    return withScore.slice(0, safeLimit);
+}
+
+// #14 保存检索 CRUD
+function createSavedSearch({ userId, name, query = '', category = '', jurisdiction = '' }) {
+    const uid = normalizeRegulationId(userId);
+    if (!uid || !String(name || '').trim()) return null;
+    const result = db.prepare('INSERT INTO regulation_saved_searches (user_id, name, query, category, jurisdiction) VALUES (?, ?, ?, ?, ?)')
+        .run(uid, normalizeRegulationField(name, 100), normalizeRegulationField(query, 500), normalizeRegulationField(category, 50), normalizeRegulationField(jurisdiction, 50));
+    return db.prepare('SELECT * FROM regulation_saved_searches WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function listSavedSearches({ userId }) {
+    const uid = normalizeRegulationId(userId);
+    if (!uid) return [];
+    return db.prepare('SELECT * FROM regulation_saved_searches WHERE user_id = ? ORDER BY created_at DESC').all(uid);
+}
+
+function deleteSavedSearch({ searchId, userId }) {
+    const id = normalizeRegulationId(searchId);
+    const uid = normalizeRegulationId(userId);
+    if (!id || !uid) return false;
+    const existing = db.prepare('SELECT user_id FROM regulation_saved_searches WHERE id = ?').get(id);
+    if (!existing || Number(existing.user_id) !== Number(uid)) return false;
+    db.prepare('DELETE FROM regulation_saved_searches WHERE id = ?').run(id);
+    return true;
 }
 
 // 行级 LCS diff：返回两文本的行级差异片段 [{type:'eq'|'add'|'del', text}]
@@ -891,6 +1165,110 @@ function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
     `).all(...relatedIds);
 
     return rows.map(row => ({ ...row, viaLink: true, relation: relatedInfo.get(row.article_id)?.relation || '关联' }));
+}
+
+// #6 变更影响分析：找出两版本间变更的条文，再反查引用了这些条文的其它条文（被影响方）
+function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId }) {
+    const diff = diffRegulationVersions({ documentId, fromVersionId, toVersionId });
+    // 变更 + 删除的条文标签（这些是可能影响引用方的）
+    const impactedLabels = [...diff.changed.map(a => a.label), ...diff.removed.map(a => a.label)];
+    if (!impactedLabels.length) {
+        return { ...diff, impacts: [] };
+    }
+    // 在目标版本里找到这些标签对应的 article_id
+    const toVerId = normalizeRegulationId(toVersionId);
+    const docId = normalizeRegulationId(documentId);
+    const impacts = [];
+    impactedLabels.forEach(label => {
+        // 反查：哪些条文引用了「本文档的这个条号」（同文档内引用）
+        const referers = db.prepare(`
+            SELECT DISTINCT sa.id AS article_id, sa.article_label, sa.article_title, l.relation_type
+            FROM regulation_article_links l
+            JOIN regulation_articles sa ON sa.id = l.source_article_id
+            WHERE l.target_document_id = ? AND l.target_article_id IN (
+                SELECT id FROM regulation_articles WHERE document_id = ? AND article_label = ?
+            )
+        `).all(docId, docId, label);
+        // 跨文档：其它法律引用了本文档（通过 target_document_id 对齐）
+        const crossReferers = db.prepare(`
+            SELECT DISTINCT sa.id AS article_id, sa.article_label, sa.article_title,
+                   d.id AS document_id, d.title AS document_title, l.relation_type
+            FROM regulation_article_links l
+            JOIN regulation_articles sa ON sa.id = l.source_article_id
+            JOIN regulation_documents d ON d.id = sa.document_id
+            WHERE l.target_document_id = ? AND d.id != ? AND d.deleted_at IS NULL
+              AND l.target_label LIKE ?
+        `).all(docId, docId, `%${label}%`);
+        if (referers.length || crossReferers.length) {
+            impacts.push({ label, internalReferers: referers, crossReferers });
+        }
+    });
+    return { ...diff, impacts, impactVersionId: toVerId };
+}
+
+// #4 条文引用网络：聚合一篇文档当前版本（或指定版本）的条文节点与引用边
+function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
+    const docId = normalizeRegulationId(documentId);
+    if (!docId) return { nodes: [], edges: [] };
+    const doc = getRegulationDocumentById(docId, { includeArchived: true });
+    if (!doc) return { nodes: [], edges: [] };
+    const vId = normalizeRegulationId(versionId) || doc.current_version_id;
+    if (!vId) return { nodes: [], edges: [] };
+
+    const articles = db.prepare(`
+        SELECT id, article_label, article_title, sort_order
+        FROM regulation_articles
+        WHERE document_id = ? AND version_id = ?
+        ORDER BY sort_order, id
+    `).all(docId, vId);
+    const nodes = articles.map(a => ({
+        id: a.id,
+        label: a.article_label,
+        title: a.article_title || '',
+        sortOrder: a.sort_order
+    }));
+    const nodeIds = new Set(nodes.map(n => n.id));
+
+    // 同文档内的引用边（两端都在本版本）
+    const edges = db.prepare(`
+        SELECT source_article_id AS source, target_article_id AS target, relation_type AS type,
+               target_label, confidence
+        FROM regulation_article_links
+        WHERE version_id = ?
+    `).all(vId).map(e => ({
+        source: e.source,
+        target: e.target,
+        type: e.relation_type || 'cite',
+        targetLabel: e.target_label || '',
+        confidence: e.confidence,
+        // 标记跨法外链（target 不在本文档节点集合内）
+        external: !e.target || !nodeIds.has(e.target)
+    })).filter(e => nodeIds.has(e.source));
+
+    return { document: { id: doc.id, title: doc.title }, nodes, edges };
+}
+
+// #5 查文档中被其它法律废止/修订的条文（supersede 关系指向本文档条文）
+function getRegulationSupersedeNotices(documentId, { versionId = null } = {}) {
+    const docId = normalizeRegulationId(documentId);
+    if (!docId) return [];
+    const doc = getRegulationDocumentById(docId, { includeArchived: true });
+    if (!doc) return [];
+    const vId = normalizeRegulationId(versionId) || doc.current_version_id;
+    if (!vId) return [];
+    // 其它文档里 relation_type=supersede 且 target 指向本文档当前版本条文
+    return db.prepare(`
+        SELECT ta.id AS article_id, ta.article_label,
+               sd.id AS source_document_id, sd.title AS source_document_title,
+               sa.article_label AS source_article_label
+        FROM regulation_article_links l
+        JOIN regulation_articles ta ON ta.id = l.target_article_id
+        JOIN regulation_articles sa ON sa.id = l.source_article_id
+        JOIN regulation_documents sd ON sd.id = sa.document_id
+        WHERE l.relation_type = 'supersede'
+          AND ta.document_id = ? AND ta.version_id = ?
+          AND sd.deleted_at IS NULL AND sd.id != ?
+    `).all(docId, vId, docId);
 }
 
 function buildRegulationAiContext({ query, documentId = null, limit = 12, expandLinks = true, relatedLimit = 8 } = {}) {
@@ -1045,6 +1423,18 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
             return versionId;
         });
         const versionId = tx();
+        // 后置任务：更新别名表，解析跨法引用回连，生成向量（均不在事务内，失败不影响入库）
+        try {
+            saveRegulationAliases(normalizedDocId, title);
+            resolveRegulationCrossLinks(versionId);
+        } catch (_err) {
+            // 别名/跨法回连为增强能力，失败不阻断
+        }
+        // #2 异步生成条文向量（可选，失败降级为纯 BM25）
+        setImmediate(() => {
+            const insertedArticles = db.prepare('SELECT id, content FROM regulation_articles WHERE version_id = ? ORDER BY sort_order').all(versionId);
+            embedRegulationArticles(insertedArticles, { userId, source: 'regulations_import' }).catch(() => {});
+        });
         return {
             document: getRegulationDocumentById(normalizedDocId, { includeArchived: true }),
             version: getRegulationVersionById(versionId),
@@ -1159,6 +1549,159 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
     return getRegulationDocumentById(normalizedDocId, { includeArchived: true });
 }
 
+// #2 为条文生成向量（可选，失败不阻断）
+async function embedRegulationArticles(articles, { userId = 0, source = 'regulations_import' } = {}) {
+    if (!Array.isArray(articles) || !articles.length) return;
+    try {
+        const texts = articles.map(a => String(a.content || '').trim()).filter(Boolean);
+        if (!texts.length) return;
+        const vectors = await generateEmbeddings(texts, null, null, userId, { source, timeoutMs: 30000 });
+        articles.forEach((article, i) => {
+            if (vectors[i] && article.id) {
+                const embedding = JSON.stringify(vectors[i]);
+                db.prepare('UPDATE regulation_articles SET embedding = ? WHERE id = ?').run(embedding, article.id);
+            }
+        });
+    } catch (err) {
+        // 向量生成失败不阻断导入，降级为纯 BM25 检索
+        console.warn('[regulations] 向量生成失败，降级为 BM25 检索:', err.message);
+    }
+}
+
+// #8 设置条文级状态（active/amended/repealed）与修订日期
+function setRegulationArticleStatus({ articleId, status, amendedDate = '' }) {
+    const id = normalizeRegulationId(articleId);
+    if (!id) return null;
+    const safeStatus = ['active', 'amended', 'repealed'].includes(String(status)) ? status : 'active';
+    const safeDate = normalizeRegulationDateValue(amendedDate) || normalizeRegulationField(amendedDate, 40);
+    db.prepare('UPDATE regulation_articles SET status = ?, amended_date = ? WHERE id = ?')
+        .run(safeStatus, safeStatus === 'active' ? '' : safeDate, id);
+    return db.prepare('SELECT id, status, amended_date FROM regulation_articles WHERE id = ?').get(id);
+}
+
+// #10 条文批注 CRUD
+function createRegulationAnnotation({ articleId, userId, content }) {
+    const aid = normalizeRegulationId(articleId);
+    const uid = normalizeRegulationId(userId);
+    if (!aid || !uid) return null;
+    const safeContent = normalizeRegulationField(content, 5000);
+    if (!safeContent) return null;
+    const result = db.prepare('INSERT INTO regulation_article_annotations (article_id, user_id, content) VALUES (?, ?, ?)')
+        .run(aid, uid, safeContent);
+    return db.prepare('SELECT * FROM regulation_article_annotations WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function listRegulationAnnotations({ articleId }) {
+    const aid = normalizeRegulationId(articleId);
+    if (!aid) return [];
+    return db.prepare(`
+        SELECT a.*, u.name as user_name, u.email as user_email
+        FROM regulation_article_annotations a
+        LEFT JOIN users u ON a.user_id = u.id
+        WHERE a.article_id = ?
+        ORDER BY a.created_at DESC
+    `).all(aid);
+}
+
+function updateRegulationAnnotation({ annotationId, userId, content }) {
+    const id = normalizeRegulationId(annotationId);
+    const uid = normalizeRegulationId(userId);
+    if (!id || !uid) return null;
+    const safeContent = normalizeRegulationField(content, 5000);
+    if (!safeContent) return null;
+    const existing = db.prepare('SELECT user_id FROM regulation_article_annotations WHERE id = ?').get(id);
+    if (!existing || Number(existing.user_id) !== Number(uid)) return null; // 只能编辑自己的批注
+    db.prepare('UPDATE regulation_article_annotations SET content = ?, updated_at = datetime(\'now\', \'+8 hours\') WHERE id = ?')
+        .run(safeContent, id);
+    return db.prepare('SELECT * FROM regulation_article_annotations WHERE id = ?').get(id);
+}
+
+function deleteRegulationAnnotation({ annotationId, userId }) {
+    const id = normalizeRegulationId(annotationId);
+    const uid = normalizeRegulationId(userId);
+    if (!id || !uid) return false;
+    const existing = db.prepare('SELECT user_id FROM regulation_article_annotations WHERE id = ?').get(id);
+    if (!existing || Number(existing.user_id) !== Number(uid)) return false;
+    db.prepare('DELETE FROM regulation_article_annotations WHERE id = ?').run(id);
+    return true;
+}
+
+// #12 查阅审计：记录查阅/检索/下载/问答行为
+function recordRegulationAccess({ userId, documentId = null, action, detail = '' }) {
+    const uid = normalizeRegulationId(userId);
+    if (!uid || !action) return;
+    try {
+        db.prepare('INSERT INTO regulation_access_logs (user_id, document_id, action, detail) VALUES (?, ?, ?, ?)')
+            .run(uid, normalizeRegulationId(documentId), String(action).slice(0, 40), String(detail || '').slice(0, 500));
+    } catch (_err) {
+        // 审计失败不影响主流程
+    }
+}
+
+function listRegulationAccessLogs({ documentId = null, userId = null, limit = 100, offset = 0 } = {}) {
+    const clauses = [];
+    const params = [];
+    const did = normalizeRegulationId(documentId);
+    const uid = normalizeRegulationId(userId);
+    if (did) { clauses.push('l.document_id = ?'); params.push(did); }
+    if (uid) { clauses.push('l.user_id = ?'); params.push(uid); }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
+    const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+    const rows = db.prepare(`
+        SELECT l.*, u.name as user_name, d.title as document_title
+        FROM regulation_access_logs l
+        LEFT JOIN users u ON l.user_id = u.id
+        LEFT JOIN regulation_documents d ON l.document_id = d.id
+        ${where}
+        ORDER BY l.created_at DESC
+        LIMIT ? OFFSET ?
+    `).all(...params, safeLimit, safeOffset);
+    const total = db.prepare(`SELECT COUNT(*) as count FROM regulation_access_logs l ${where}`).get(...params).count;
+    return { data: rows, total, limit: safeLimit, offset: safeOffset };
+}
+
+// #11 生成合规报告（Markdown）：把 AI 问答的问题、回答、依据条文、引用关系汇总
+function buildRegulationQaReport({ question, answer, sources = [] }) {
+    const lines = [];
+    lines.push('# 法规查询合规报告');
+    lines.push('');
+    lines.push(`**生成时间**：${getBeijingTimestamp()}`);
+    lines.push('');
+    lines.push('## 咨询问题');
+    lines.push('');
+    lines.push(String(question || '').trim() || '（未提供问题）');
+    lines.push('');
+    lines.push('## AI 回答');
+    lines.push('');
+    lines.push(String(answer || '').trim() || '（无回答内容）');
+    lines.push('');
+    const direct = sources.filter(s => !s.viaLink);
+    const related = sources.filter(s => s.viaLink);
+    if (direct.length) {
+        lines.push('## 依据法条（直接命中）');
+        lines.push('');
+        direct.forEach((s, i) => {
+            lines.push(`${i + 1}. **${String(s.label || '相关条文').trim()}**`);
+            if (s.excerpt) lines.push(`   > ${String(s.excerpt).trim()}`);
+        });
+        lines.push('');
+    }
+    if (related.length) {
+        lines.push('## 关联法条（经引用关联）');
+        lines.push('');
+        related.forEach((s, i) => {
+            lines.push(`${i + 1}. **${String(s.label || '相关条文').trim()}**${s.relation ? ` _(${s.relation})_` : ''}`);
+            if (s.excerpt) lines.push(`   > ${String(s.excerpt).trim()}`);
+        });
+        lines.push('');
+    }
+    lines.push('---');
+    lines.push('');
+    lines.push('> 本报告由法规查询 AI 自动生成，仅供解释与检索辅助，不应替代正式法务意见。');
+    return lines.join('\n');
+}
+
 function deleteRegulationDocument({ documentId, userId }) {
     const normalizedDocId = normalizeRegulationId(documentId);
     if (!normalizedDocId) return false;
@@ -1197,23 +1740,43 @@ function resolveRegulationVersionDownloadPath(version) {
 }
 
 module.exports = {
+    analyzeRegulationChangeImpact,
     buildRegulationAiContext,
+    buildRegulationQaReport,
+    createRegulationAnnotation,
     createRegulationDocumentFromUpload,
+    createSavedSearch,
+    deleteRegulationAnnotation,
     deleteRegulationDocument,
+    deleteSavedSearch,
     diffRegulationVersions,
+    embedRegulationArticles,
     expandRegulationMatchesByLinks,
     extractRegulationLinks,
+    findSimilarRegulationArticles,
+    rebuildRegulationCrossLinks,
+    resolveRegulationCrossLinks,
+    recordRegulationAccess,
+    saveRegulationAliases,
     findRegulationDuplicateByHash,
     getRegulationDocumentById,
+    getRegulationCitationGraph,
     getRegulationDocumentDetail,
+    getRegulationSupersedeNotices,
     getRegulationVersionById,
+    listRegulationAccessLogs,
+    listRegulationAnnotations,
     listRegulationDocuments,
     listRegulationFacets,
     listRegulationVersions,
+    listSavedSearches,
     normalizeRegulationId,
     parseRegulationArticles,
     resolveRegulationVersionDownloadPath,
     saveRegulationDocumentVersion,
     searchRegulationArticles,
+    searchRegulationArticlesHybrid,
+    setRegulationArticleStatus,
+    updateRegulationAnnotation,
     updateRegulationDocument
 };

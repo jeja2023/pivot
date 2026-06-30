@@ -14,7 +14,7 @@ build/
 *.tar
 dist-electron/
 dist-electron-remote/
-dist-electron-0.0.138/
+dist-electron-*/
 client/*.exe
 
 # 下载目录中的大文件（不提交到 Git）

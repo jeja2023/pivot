@@ -243,6 +243,7 @@ function initSchema() {
             expire_date TEXT DEFAULT '',
             summary TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
+            visibility TEXT DEFAULT 'internal',
             current_version_id INTEGER,
             version_count INTEGER DEFAULT 0,
             article_count INTEGER DEFAULT 0,
@@ -283,6 +284,9 @@ function initSchema() {
             content TEXT NOT NULL,
             search_content TEXT,
             heading_path TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            amended_date TEXT DEFAULT '',
+            embedding TEXT DEFAULT '',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (document_id) REFERENCES regulation_documents(id) ON DELETE CASCADE,
             FOREIGN KEY (version_id) REFERENCES regulation_versions(id) ON DELETE CASCADE
@@ -302,6 +306,47 @@ function initSchema() {
             FOREIGN KEY (document_id) REFERENCES regulation_documents(id) ON DELETE CASCADE,
             FOREIGN KEY (version_id) REFERENCES regulation_versions(id) ON DELETE CASCADE,
             FOREIGN KEY (source_article_id) REFERENCES regulation_articles(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS regulation_aliases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            alias TEXT NOT NULL,
+            normalized_alias TEXT NOT NULL,
+            is_primary INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (document_id) REFERENCES regulation_documents(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS regulation_article_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (article_id) REFERENCES regulation_articles(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS regulation_access_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            document_id INTEGER,
+            action TEXT NOT NULL,
+            detail TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+
+        CREATE TABLE IF NOT EXISTS regulation_saved_searches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            query TEXT DEFAULT '',
+            category TEXT DEFAULT '',
+            jurisdiction TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS rag_feedback (
@@ -960,6 +1005,14 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_regulation_article_links_version ON regulation_article_links(version_id);
         CREATE INDEX IF NOT EXISTS idx_regulation_article_links_source ON regulation_article_links(source_article_id);
         CREATE INDEX IF NOT EXISTS idx_regulation_article_links_target ON regulation_article_links(target_article_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_document ON regulation_aliases(document_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_normalized ON regulation_aliases(normalized_alias);
+        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_article ON regulation_article_annotations(article_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_user ON regulation_article_annotations(user_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_user ON regulation_access_logs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_document ON regulation_access_logs(document_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_created ON regulation_access_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_regulation_saved_searches_user ON regulation_saved_searches(user_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             content,
