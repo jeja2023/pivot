@@ -108,6 +108,32 @@
         return String(user?.username || '').toLowerCase() === 'admin';
     }
 
+    function getRegulationsSelectedModelId() {
+        return document.getElementById('model-selector')?.value || '';
+    }
+
+    // 删除类操作统一走项目内自定义确认弹窗（不使用浏览器默认 confirm）；showConfirm 不可用时回退
+    function regulationConfirm(title, message) {
+        return new Promise((resolve) => {
+            if (typeof window.showConfirm === 'function') {
+                window.showConfirm(title, message, () => resolve(true));
+                const cancelBtn = document.getElementById('modal-confirm-cancel');
+                const container = document.getElementById('confirm-container');
+                const cleanup = (result) => {
+                    cancelBtn?.removeEventListener('click', onCancel);
+                    container?.removeEventListener('click', onOverlay);
+                    resolve(result);
+                };
+                const onCancel = () => cleanup(false);
+                const onOverlay = (event) => { if (event.target === container) cleanup(false); };
+                cancelBtn?.addEventListener('click', onCancel, { once: true });
+                container?.addEventListener('click', onOverlay, { once: true });
+                return;
+            }
+            resolve(typeof window.confirm === 'function' ? window.confirm(message) : true);
+        });
+    }
+
     function canDeleteDocuments() {
         const user = getActiveUser();
         if (typeof isSuperAdminUser === 'function' && isSuperAdminUser(user)) return true;
@@ -145,7 +171,6 @@
     function renderRegulationStatusCell(doc) {
         const chips = [];
         if (doc?.status === 'archived') chips.push('<span class="regulations-status-pill archived">已归档</span>');
-        if (doc?.effect_status === 'expired') chips.push('<span class="regulations-status-pill expired">已废止</span>');
         if (!chips.length) chips.push('<span class="regulations-status-pill active">有效</span>');
         return `<span class="regulations-status-cell">${chips.join('')}</span>`;
     }
@@ -176,16 +201,14 @@
         if (!target) return;
         const docs = Array.isArray(state.documents) ? state.documents : [];
         const articleCount = docs.reduce((sum, doc) => sum + Number(doc.article_count || 0), 0);
-        const expiredCount = docs.filter(doc => doc.effect_status === 'expired').length;
         const archivedCount = docs.filter(doc => doc.status === 'archived').length;
-        const activeCount = Math.max(docs.length - expiredCount - archivedCount, 0);
+        const activeCount = Math.max(docs.length - archivedCount, 0);
         const categories = new Set(docs.map(doc => doc.category).filter(Boolean));
         const jurisdictions = new Set(docs.map(doc => doc.jurisdiction).filter(Boolean));
         const chips = [
             `${Number(state.total || 0)} 文档`,
             `${docs.length} 本页`,
             `${activeCount} 有效`,
-            `${expiredCount} 已废止`,
             `${archivedCount} 已归档`,
             `${articleCount} 条文`,
             `${categories.size} 分类`,
@@ -228,7 +251,6 @@
     }
 
     function buildViewHtml() {
-        const admin = canManage();
         const canImport = canImportDocuments();
         return `
             <div class="regulations-panel">
@@ -254,7 +276,6 @@
                                     <th style="width: 96px;" class="text-center">状态</th>
                                     <th style="width: 70px;" class="text-center">条文</th>
                                     <th style="width: 118px;">版本</th>
-                                    <th style="width: 106px;">生效日期</th>
                                     <th style="width: 138px;">更新时间</th>
                                     <th style="width: 156px;" class="text-center">操作</th>
                                 </tr>
@@ -409,9 +430,7 @@
                                 <label>分类<input name="category" class="form-input" maxlength="120" placeholder="如 法律、行政法规、司法解释" list="regulations-category-list"></label>
                                 <label>发布机构<input name="issuingBody" class="form-input" maxlength="120" placeholder="如 全国人大常委会、国务院"></label>
                                 <label>适用范围<input name="jurisdiction" class="form-input" maxlength="120" placeholder="如 全国、某省、某市" list="regulations-jurisdiction-list"></label>
-                                <label>生效日期<input name="effectiveDate" class="form-input" maxlength="40" placeholder="如 2026-06-29；批量可留空"></label>
-                                <label>失效日期<input name="expireDate" class="form-input" maxlength="40" placeholder="可选；留空视为现行有效"></label>
-                                <label>版本标识<input name="versionLabel" class="form-input" maxlength="80" placeholder="如 2024年修正、2020年修订；留空按施行日期"></label>
+                                <label>版本标识<input name="versionLabel" class="form-input" maxlength="80" placeholder="如 2024年修正；留空按文件名日期识别"></label>
                             </div>
                         </div>
                         <div class="regulations-admin-group">
@@ -424,7 +443,7 @@
                                     <span class="regulations-file-button">选择文档</span>
                                     <span id="regulations-file-summary" class="regulations-file-summary">未选择文件</span>
                                 </span>
-                                <small class="regulations-file-hint">支持 ${SUPPORTED_FORMATS}；可批量选择，最多 300 个文件。标题、生效日期可留空，由系统自动识别。</small>
+                                <small class="regulations-file-hint">支持 ${SUPPORTED_FORMATS}；可批量选择，最多 300 个文件。标题、版本可留空，由系统自动识别。</small>
                             </label>
                         </div>
                         <div class="regulations-admin-actions regulations-import-actions">
@@ -490,7 +509,6 @@
                     <td class="text-center">${renderRegulationStatusCell(doc)}</td>
                     <td class="text-center"><span class="regulations-article-count">${Number(doc.article_count || 0)}</span></td>
                     <td title="${esc(doc.current_version_label || '')}">${esc(doc.current_version_label || '-')}</td>
-                    <td title="${esc(doc.effective_date || '')}">${esc(doc.effective_date || '-')}</td>
                     <td title="${esc(fmtDate(doc.updated_at || doc.current_version_updated_at || doc.created_at))}">${esc(fmtDate(doc.updated_at || doc.current_version_updated_at || doc.created_at))}</td>
                     <td class="text-center">${renderRegulationActions(doc)}</td>
                 </tr>`;
@@ -613,11 +631,10 @@
                 <div class="regulations-admin-group">
                     <div class="regulations-admin-grid">
                         <label>标题<input name="title" class="form-input" maxlength="120" value="${esc(doc.title || '')}" required></label>
+                        <label>\u7248\u672c\u6807\u8bc6<input name="versionLabel" class="form-input" maxlength="80" value="${esc(doc.current_version_label || '')}" placeholder="\u5982 2024\u5e74\u4fee\u6b63\u30012020\u5e74\u4fee\u8ba2"></label>
                         <label>分类<input name="category" class="form-input" maxlength="120" value="${esc(doc.category || '')}" list="regulations-category-list"></label>
                         <label>发布机构<input name="issuingBody" class="form-input" maxlength="120" value="${esc(doc.issuing_body || '')}"></label>
                         <label>适用范围<input name="jurisdiction" class="form-input" maxlength="120" value="${esc(doc.jurisdiction || '')}" list="regulations-jurisdiction-list"></label>
-                        <label>生效日期<input name="effectiveDate" class="form-input" maxlength="40" value="${esc(doc.effective_date || '')}"></label>
-                        <label>失效日期<input name="expireDate" class="form-input" maxlength="40" value="${esc(doc.expire_date || '')}" placeholder="可选；留空视为现行有效"></label>
                         <label>状态<select name="status" class="form-input">
                             <option value="active" ${doc.status !== 'archived' ? 'selected' : ''}>启用</option>
                             <option value="archived" ${doc.status === 'archived' ? 'selected' : ''}>归档</option>
@@ -644,8 +661,7 @@
                 </div>
                 <div class="regulations-admin-group">
                     <div class="regulations-admin-grid">
-                        <label>版本标识<input name="versionLabel" class="form-input" maxlength="80" placeholder="如 2024年修正；留空按施行日期"></label>
-                        <label>施行日期<input name="effectiveDate" class="form-input" maxlength="40" placeholder="如 2024-12-01；留空自动识别"></label>
+                        <label>版本标识<input name="versionLabel" class="form-input" maxlength="80" placeholder="如 2024年修正；留空按文件名日期识别"></label>
                         <label>标题<input name="title" class="form-input" maxlength="120" value="${esc(doc.title || '')}"></label>
                     </div>
                     <label>摘要<textarea name="summary" class="form-input" rows="3" placeholder="可选；留空时从新版本正文生成摘要"></textarea></label>
@@ -784,7 +800,7 @@
                         <div class="regulations-article-body">${renderRichText(turn.answer)}</div>
                         ${groupsHtml}
                         <div class="regulations-ai-turn-actions">
-                            <button class="btn-text" type="button" data-regulation-export-report="${turnIndex}">导出报告</button>
+                            <button class="regulations-ai-export-btn" type="button" data-regulation-export-report="${turnIndex}">导出报告</button>
                         </div>
                     </div>
                 </div>
@@ -812,6 +828,11 @@
         renderSavedSearches();
         renderSearchResults();
         window.setTimeout(() => document.getElementById('regulations-query')?.focus(), 0);
+    }
+
+    function closeSearchDialog() {
+        document.getElementById('regulations-search-panel')?.classList.add('hidden');
+        renderDocuments();
     }
 
     function openDetailDialog() {
@@ -856,10 +877,7 @@
         const requestedPage = Math.max(Number(page) || 1, 1);
         const pageSize = Math.max(Number(state.pageSize || REGULATIONS_PAGE_SIZE), 1);
         const params = new URLSearchParams();
-        if (state.query) params.set('query', state.query);
-        if (state.filters.category) params.set('category', state.filters.category);
-        if (state.filters.jurisdiction) params.set('jurisdiction', state.filters.jurisdiction);
-        if (canManage() && state.filters.includeArchived) params.set('includeArchived', 'true');
+        // 文档表格展示法规库目录，弹窗里的条文检索条件不应改写底层表格状态。
         params.set('limit', String(pageSize));
         params.set('offset', String((requestedPage - 1) * pageSize));
         const data = await fetchJson(`${API}/documents?${params.toString()}`);
@@ -951,7 +969,6 @@
 
     async function runSearch() {
         readSearchControls();
-        await loadDocuments({ keepActive: false, page: 1 });
         state.matches = state.query ? await fetchArticleMatches() : [];
         renderSearchResults();
     }
@@ -1017,7 +1034,7 @@
 
     async function deleteSavedSearch(searchId) {
         if (!searchId) return;
-        if (typeof window.confirm === 'function' && !window.confirm('确定删除这个保存检索吗？')) return;
+        if (!(await regulationConfirm('删除保存检索', '确定删除这个保存检索吗？'))) return;
         setBusy(true, '正在删除保存检索...');
         try {
             await fetchJson(`${API}/saved-searches/${encodeURIComponent(searchId)}`, { method: 'DELETE' });
@@ -1187,7 +1204,7 @@
 
     async function archiveDocument(id) {
         if (!id) return;
-        if (typeof window.confirm === 'function' && !window.confirm('确定删除该法规文档吗？删除后仅管理员可在归档列表中查看。')) return;
+        if (!(await regulationConfirm('删除法规文档', '确定删除该法规文档吗？删除后仅管理员可在归档列表中查看。'))) return;
         setBusy(true, '正在删除法规文档...');
         try {
             await fetchJson(`${API}/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -1215,10 +1232,11 @@
         try {
             // 多轮问答：携带最近 4 轮历史，每轮仍做全库检索
             const history = state.aiTurns.slice(-4).map(t => ({ question: t.question, answer: t.answer }));
+            const model = getRegulationsSelectedModelId() || undefined;
             const data = await fetchJson(`${API}/ai`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: question, limit: 8, history })
+                body: JSON.stringify({ query: question, limit: 8, history, model })
             });
             const answer = data.content || data.answer || '';
             const sources = Array.isArray(data.sources) ? data.sources : [];
@@ -1396,7 +1414,7 @@
     }
 
     async function deleteAnnotation(annotationId, articleId) {
-        if (typeof window.confirm === 'function' && !window.confirm('确定删除该批注吗？')) return;
+        if (!(await regulationConfirm('删除批注', '确定删除该批注吗？'))) return;
         try {
             await fetchJson(`${API}/annotations/${encodeURIComponent(annotationId)}`, { method: 'DELETE' });
             toast('批注已删除', 'success');
@@ -1471,10 +1489,11 @@
         const body = document.getElementById('regulations-preview-body');
         if (!panel || !body) return;
         const articles = Array.isArray(preview.articles) ? preview.articles : [];
+        const articleCount = Number(preview.articleCount || 0) || articles.length;
         body.innerHTML = `
             <div class="regulations-preview-summary">
                 <strong>${esc(preview.title || file.name)}</strong>
-                <span>${preview.effectiveDate || '未指定施行日期'} · ${articles.length} 条</span>
+                <span>${articleCount} 条</span>
             </div>
             <div class="regulations-preview-articles" id="regulations-preview-list">
                 ${articles.map((a, i) => `
@@ -1799,7 +1818,11 @@
                 openAiDialog();
                 return;
             }
-            if (['regulations-admin-panel', 'regulations-search-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel'].includes(event.target.id)) {
+            if (event.target.id === 'regulations-search-panel') {
+                closeSearchDialog();
+                return;
+            }
+            if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel'].includes(event.target.id)) {
                 closeDialogs();
                 return;
             }
@@ -1828,7 +1851,7 @@
                 return;
             }
             if (event.target.closest('[data-regulations-close-search]')) {
-                document.getElementById('regulations-search-panel')?.classList.add('hidden');
+                closeSearchDialog();
                 return;
             }
             if (event.target.closest('[data-regulations-close-upload]')) {

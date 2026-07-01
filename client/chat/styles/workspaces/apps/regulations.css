@@ -1749,10 +1749,42 @@
 
 /* #11 AI 报告导出按钮 */
 .regulations-ai-turn-actions {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-light, #f0f0f0);
-    text-align: right;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.regulations-ai-export-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 96px;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 1px solid rgba(16, 163, 127, 0.28);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--primary);
+    font-size: 0.8rem;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.regulations-ai-export-btn:hover,
+.regulations-ai-export-btn:focus-visible {
+    border-color: rgba(16, 163, 127, 0.48);
+    background: rgba(16, 163, 127, 0.06);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+    outline: none;
+}
+
+.regulations-ai-export-btn:active {
+    transform: translateY(1px);
 }
 
 
@@ -1766,6 +1798,7 @@
 }
 
 .regulations-main-search-results,
+.regulations-search-modal-results,
 .regulations-ai-search-results {
     display: grid;
     gap: 8px;
@@ -1782,11 +1815,17 @@
     margin: -2px 0 8px;
 }
 
+.regulations-search-modal-results {
+    max-height: min(420px, 46vh);
+    margin-top: 10px;
+}
+
 .regulations-ai-search-results {
     max-height: 280px;
 }
 
 .regulations-main-search-results .regulations-section-head,
+.regulations-search-modal-results .regulations-section-head,
 .regulations-ai-search-results .regulations-section-head {
     min-height: 22px;
     padding-bottom: 2px;
@@ -2037,6 +2076,7 @@
     }
 
     .regulations-main-search-results,
+    .regulations-search-modal-results,
     .regulations-ai-search-results {
         max-height: 42vh;
         padding: 8px;

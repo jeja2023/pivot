@@ -1151,7 +1151,7 @@ input::-webkit-contacts-auto-fill-button {
 .auth-showcase-copy {
     justify-items: start;
     gap: 9px;
-    transform: translateY(clamp(-34px, -4vh, -20px));
+    transform: translateY(clamp(-12px, -1.8vh, -6px));
 }
 .auth-showcase-copy::before {
     display: none;

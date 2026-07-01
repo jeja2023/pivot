@@ -1,8 +1,6 @@
 ﻿const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
-
 const { extractDocumentText, truncateExtractedText } = require('../../document-text');
 const { asyncHandler } = require('../../http');
 const { isAdmin, isSuperAdmin } = require('../../permissions');
@@ -12,6 +10,7 @@ const {
     buildRegulationAiContext,
     buildRegulationQaReport,
     createRegulationAnnotation,
+    countActualRegulationArticles,
     createRegulationDocumentFromUpload,
     createSavedSearch,
     deleteRegulationAnnotation,
@@ -21,6 +20,8 @@ const {
     findRegulationDuplicateByHash,
     findSimilarRegulationArticles,
     getRegulationCitationGraph,
+    deriveRegulationTitleFromFilename,
+    deriveRegulationVersionLabelFromFilename,
     getRegulationDocumentDetail,
     listRegulationAccessLogs,
     listRegulationAnnotations,
@@ -84,8 +85,6 @@ function readRegulationMetadata(body = {}) {
         category: body.category,
         issuingBody: body.issuingBody || body.issuing_body,
         jurisdiction: body.jurisdiction,
-        effectiveDate: body.effectiveDate || body.effective_date,
-        expireDate: body.expireDate || body.expire_date,
         summary: body.summary,
         versionLabel: body.versionLabel || body.version_label
     };
@@ -135,24 +134,6 @@ function extractUploadDateCandidate(line) {
     return '';
 }
 
-function deriveUploadEffectiveDateFromText(extractedText, fallbackName = '') {
-    const text = normalizeUploadText(extractedText);
-    const fallback = normalizeUploadText(fallbackName);
-    const candidates = [];
-    if (text) {
-        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-        candidates.push(...lines.slice(0, 100));
-        candidates.push(text.slice(0, 3000));
-    }
-    if (fallback) candidates.push(fallback);
-    const preferred = candidates.filter(line => REGULATION_DATE_HINT_RE.test(line));
-    for (const line of preferred.concat(candidates)) {
-        const date = extractUploadDateCandidate(line);
-        if (date) return date;
-    }
-    return '';
-}
-
 function isLikelyUploadTitleLine(line) {
     const text = normalizeUploadField(line, 120);
     if (!text || text.length < 4 || text.length > 120) return false;
@@ -165,6 +146,8 @@ function isLikelyUploadTitleLine(line) {
 }
 
 function deriveUploadTitleFromText(extractedText, fallbackName = '') {
+    const filenameTitle = deriveRegulationTitleFromFilename(fallbackName);
+    if (filenameTitle) return normalizeUploadField(filenameTitle, 120);
     const text = normalizeUploadText(extractedText);
     const lines = text ? text.split('\n').map(line => line.trim()).filter(Boolean) : [];
     for (const line of lines.slice(0, 30)) {
@@ -178,8 +161,7 @@ function deriveUploadTitleFromText(extractedText, fallbackName = '') {
     if (hintedLine) return normalizeUploadField(hintedLine, 120);
     const firstLine = lines.slice(0, 30).find(isLikelyUploadTitleLine);
     if (firstLine) return normalizeUploadField(firstLine, 120);
-    const base = path.basename(String(fallbackName || ''), path.extname(String(fallbackName || '')));
-    return normalizeUploadField(base || '法规文档', 120);
+    return '\u6cd5\u89c4\u6587\u6863';
 }
 
 async function extractUploadText(file) {
@@ -198,14 +180,15 @@ async function prepareRegulationUploadMetadata(file, baseMetadata = {}) {
         baseMetadata.title || deriveUploadTitleFromText(extractedText, file?.originalname || ''),
         120
     ) || '法规文档';
-    const effectiveDate = normalizeUploadField(
-        baseMetadata.effectiveDate || baseMetadata.effective_date || deriveUploadEffectiveDateFromText(extractedText, file?.originalname || ''),
-        40
+    // 版本号优先取用户填写值，其次从文件名中的 8 位日期（如 公司法20240101.pdf）自动识别
+    const versionLabel = normalizeUploadField(
+        baseMetadata.versionLabel || baseMetadata.version_label || deriveRegulationVersionLabelFromFilename(file?.originalname || ''),
+        80
     );
     return {
         ...baseMetadata,
         title,
-        effectiveDate,
+        versionLabel,
         extractedText
     };
 }
@@ -412,8 +395,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
             const articles = parseRegulationArticles(prepared.extractedText || '', { docTitle: prepared.title });
             res.json({
                 title: prepared.title || '',
-                effectiveDate: prepared.effectiveDate || '',
-                articleCount: articles.length,
+                articleCount: countActualRegulationArticles(articles),
                 articles: articles.map((a, i) => ({
                     index: i,
                     articleLabel: a.articleLabel,

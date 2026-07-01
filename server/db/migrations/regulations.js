@@ -259,5 +259,21 @@ module.exports = [
                 CREATE INDEX IF NOT EXISTS idx_regulation_saved_searches_user ON regulation_saved_searches(user_id);
             `);
         }
+    },
+    {
+        id: '202607010001_drop_regulation_date_fields',
+        description: 'Remove effective_date, effective_date_normalized and expire_date from regulation_documents; date-based effective/expire tracking is dropped.',
+        up(db) {
+            const columns = db.prepare('PRAGMA table_info(regulation_documents)').all();
+            if (columns.some(col => col.name === 'effective_date_normalized')) {
+                db.exec('ALTER TABLE regulation_documents DROP COLUMN effective_date_normalized');
+            }
+            if (columns.some(col => col.name === 'effective_date')) {
+                db.exec('ALTER TABLE regulation_documents DROP COLUMN effective_date');
+            }
+            if (columns.some(col => col.name === 'expire_date')) {
+                db.exec('ALTER TABLE regulation_documents DROP COLUMN expire_date');
+            }
+        }
     }
 ];

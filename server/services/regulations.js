@@ -61,10 +61,6 @@ function normalizeRegulationStatus(value) {
     return status === 'archived' ? 'archived' : 'active';
 }
 
-function normalizeRegulationEffectiveDate(value) {
-    return String(value || '').trim().slice(0, 40);
-}
-
 // 把多种日期写法（ISO、YYYY年M月D日、YYYYMMDD）规范成 YYYY-MM-DD，无法识别返回空串
 const REGULATION_DATE_ISO_RE = /((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})/;
 const REGULATION_DATE_CN_RE = /((?:19|20)\d{2})[年/.\-](0?[1-9]|1[0-2])[月/.\-](0?[1-9]|[12]\d|3[01])日?/;
@@ -92,14 +88,6 @@ function normalizeRegulationDateValue(value) {
     m = text.match(REGULATION_DATE_COMPACT_RE);
     if (m) return buildIsoDate(m[1], m[2], m[3]);
     return '';
-}
-
-// 依据失效日期推导现行状态：已过失效日 → expired，否则 active
-function computeRegulationEffectStatus(doc) {
-    const expire = normalizeRegulationDateValue(doc?.expire_date);
-    if (!expire) return 'active';
-    const today = getBeijingTimestamp().slice(0, 10);
-    return expire < today ? 'expired' : 'active';
 }
 
 // 法律法规版本通常以施行/修订日期区分，把 ISO 日期转为「YYYY年MM月DD日」版本标签
@@ -201,7 +189,44 @@ async function readRegulationTextFromPath(filePath, originalName = '') {
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 
+// \u6587\u4ef6\u540d\u5c3e\u90e8\u300c\u7248\u672c\u53f7\u300d\u8bc6\u522b\uff1a\u6cd5\u5f8b\u6587\u6863\u5e38\u4ee5\u300c\u6cd5\u5f8b\u540d\u79f0 + \u7248\u672c\u65e5\u671f\u300d\u547d\u540d\uff08\u5982 \u4e2d\u534e\u4eba\u6c11\u5171\u548c\u56fd\u516c\u53f8\u6cd5_20240101.doc\uff09\u3002
+// \u65e5\u671f\u4e3b\u4f53\u540c\u65f6\u652f\u6301\u7d27\u51d1(20240101)\u4e0e\u5206\u9694(2024-01-01 / 2024.01.01 / 2024/01/01 / 2024\u5e7401\u670801\u65e5)\u7b49\u5e38\u89c1\u5199\u6cd5\u3002
+const REG_FILENAME_DATE_BODY = '(?:19|20)\\d{2}[-.\\/\\u5e74]?(?:0[1-9]|1[0-2])[-.\\/\\u6708]?(?:0[1-9]|[12]\\d|3[01])\\u65e5?';
+const REG_FILENAME_DATE_CAPTURE = '((?:19|20)\\d{2})[-.\\/\\u5e74]?(0[1-9]|1[0-2])[-.\\/\\u6708]?(0[1-9]|[12]\\d|3[01])\\u65e5?';
+// \u5c3e\u90e8\u5141\u8bb8\u8ddf\u53f3\u62ec\u53f7\u4e0e\u300c\u4fee\u8ba2/\u4fee\u6b63/\u7248\u672c/\u7248\u300d\u7b49\u7248\u672c\u8bcd
+const REG_FILENAME_VERSION_SUFFIX = '\\s*(?:[\\uff09)\\u3011\\]])?\\s*(?:\\u4fee\\u8ba2\\u7248|\\u4fee\\u6b63\\u7248|\\u4fee\\u8ba2|\\u4fee\\u6b63|\\u7248\\u672c|\\u7248)?\\s*$';
+// \u65e5\u671f\u524d\u5141\u8bb8\u6709\u5206\u9694\u7b26\u4e0e\u5de6\u62ec\u53f7
+const REG_FILENAME_VERSION_PREFIX = '(?:[\\s._\\-\\u2014\\u2013\\/]*(?:[\\uff08(\\u3010\\[]\\s*)?)?';
+
+const REGULATION_FILENAME_VERSION_DATE_TAIL_RE = new RegExp(REG_FILENAME_VERSION_PREFIX + REG_FILENAME_DATE_BODY + REG_FILENAME_VERSION_SUFFIX);
+const REGULATION_FILENAME_VERSION_DATE_CAPTURE_RE = new RegExp(REG_FILENAME_DATE_CAPTURE + REG_FILENAME_VERSION_SUFFIX);
+const REGULATION_FILENAME_VERSION_WORD_TAIL_RE = /[\s._\-\u2014\u2013/]*(?:\u4fee\u8ba2\u7248|\u4fee\u6b63\u7248|\u4fee\u8ba2|\u4fee\u6b63|\u7248\u672c|\u7248)\s*$/;
+
+function deriveRegulationTitleFromFilename(filename = '') {
+    const rawName = String(filename || '').trim();
+    if (!rawName) return '';
+    const base = path.basename(rawName, path.extname(rawName));
+    const title = base
+        .replace(REGULATION_FILENAME_VERSION_DATE_TAIL_RE, '')
+        .replace(REGULATION_FILENAME_VERSION_WORD_TAIL_RE, '')
+        .replace(/[._\-\u2014\u2013_/]+/g, ' ')
+        .replace(/[\uff08\uff09()\u3010\u3011\[\]{}]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return normalizeRegulationField(title, 120);
+}
+
+// 从文件名尾部的版本日期识别版本号：公司法20240101.doc / 公司法_2024-01-01.pdf → 2024年01月01日
+function deriveRegulationVersionLabelFromFilename(filename = '') {
+    const base = path.basename(String(filename || ''), path.extname(String(filename || '')));
+    const m = base.match(REGULATION_FILENAME_VERSION_DATE_CAPTURE_RE);
+    if (!m) return '';
+    return buildVersionLabelFromDate(`${m[1]}-${m[2]}-${m[3]}`);
+}
+
 function deriveRegulationTitleFromText(extractedText, fallbackName = '') {
+    const filenameTitle = deriveRegulationTitleFromFilename(fallbackName);
+    if (filenameTitle) return filenameTitle;
     const text = normalizeRegulationText(extractedText);
     const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
     for (const line of lines.slice(0, 24)) {
@@ -209,8 +234,7 @@ function deriveRegulationTitleFromText(extractedText, fallbackName = '') {
             return normalizeRegulationField(line, 120);
         }
     }
-    const base = path.basename(String(fallbackName || ''), path.extname(String(fallbackName || '')));
-    return normalizeRegulationField(base || '法规文档', 120);
+    return '\u6cd5\u89c4\u6587\u6863';
 }
 
 function deriveRegulationSummary({ title, extractedText, articles, providedSummary = '' }) {
@@ -274,7 +298,8 @@ function detectRegulationHeadingLine(line, strategy) {
         return {
             label: `第${m[1]}条${m[2] ? `之${m[2]}` : ''}`,
             title: normalizeRegulationField(m[3], 80),
-            derive: true
+            derive: true,
+            includeHeadingLine: true
         };
     }
     if (strategy === 'heading') {
@@ -300,6 +325,7 @@ function detectRegulationHeadingLine(line, strategy) {
 function splitRegulationArticlesByStrategy(lines, strategy) {
     const articles = [];
     let current = null;
+    let preambleLines = [];
     const finalize = () => {
         if (!current) return;
         const content = normalizeRegulationText(current.lines.join('\n'));
@@ -318,21 +344,40 @@ function splitRegulationArticlesByStrategy(lines, strategy) {
             searchContent: buildRagSearchContent([current.label, current.title, content].filter(Boolean).join(' '))
         });
     };
+    // 首条正文之前的内容（标题、颁布信息、目录、序言等）单列为「前言」保留，避免解析后整块丢失。
+    // 该「前言」不带「第X条」标签，故不计入实际条数（见 countActualRegulationArticles）。
+    const finalizePreamble = () => {
+        const content = normalizeRegulationText(preambleLines.join('\n'));
+        preambleLines = [];
+        if (!content) return;
+        articles.push({
+            sortOrder: articles.length + 1,
+            articleLabel: '前言',
+            articleTitle: '',
+            content,
+            headingPath: '',
+            searchContent: buildRagSearchContent(content)
+        });
+    };
     for (const rawLine of lines) {
         const line = String(rawLine || '').trim();
         if (!line) {
             if (current) current.lines.push('');
+            else preambleLines.push('');
             continue;
         }
         const head = detectRegulationHeadingLine(line, strategy);
         if (head) {
-            finalize();
-            current = { ...head, lines: [] };
+            if (current) finalize();
+            else finalizePreamble();
+            current = { ...head, lines: head.includeHeadingLine ? [line] : [] };
             continue;
         }
         if (current) current.lines.push(line);
+        else preambleLines.push(line);
     }
-    finalize();
+    if (current) finalize();
+    else finalizePreamble();
     return articles;
 }
 
@@ -369,6 +414,23 @@ function articlesFromLegalChunks(chunks) {
     return articles;
 }
 
+function countActualRegulationArticles(articles = []) {
+    const legalKeys = new Set();
+    const fallbackKeys = new Set();
+    (Array.isArray(articles) ? articles : []).forEach((article, index) => {
+        const label = normalizeRegulationField(article?.articleLabel ?? article?.article_label, 80);
+        const headingPath = normalizeRegulationField(article?.headingPath ?? article?.heading_path, 255);
+        if (!label) return;
+        const key = (headingPath || '') + '\u001f' + label;
+        if (REGULATION_ARTICLE_LABEL_RE.test(label)) {
+            legalKeys.add(key);
+        } else {
+            fallbackKeys.add(key || 'row:' + index);
+        }
+    });
+    return legalKeys.size || fallbackKeys.size || 0;
+}
+
 function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
     const text = normalizeRegulationText(extractedText);
     if (!text) return [];
@@ -376,12 +438,17 @@ function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
     const lines = text.split('\n');
     const strategy = detectRegulationStructure(lines);
 
-    // 「第X条」结构优先复用 RAG 法律切片：按章/节/条切分并带 headingPath，定位更精准
+    if (strategy) {
+        const articles = splitRegulationArticlesByStrategy(lines, strategy);
+        if (articles.length) return articles;
+    }
+
+    // Fallback to the RAG legal chunker only when local structure parsing fails.
     if (strategy === 'article') {
         try {
             const chunkSize = getChunkSizeForDocType('legal', 600);
             const chunks = chunkDocument(text, {
-                docName: docTitle || '法规文档',
+                docName: docTitle || '\u6cd5\u89c4\u6587\u6863',
                 docType: 'legal',
                 chunkSize,
                 overlap: 0
@@ -389,16 +456,10 @@ function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
             const articles = articlesFromLegalChunks(Array.isArray(chunks) ? chunks : []);
             if (articles.length) return articles;
         } catch (_err) {
-            // 切片异常时回退到本地多策略切分
+            // Fall through to whole-document fallback.
         }
     }
 
-    if (strategy) {
-        const articles = splitRegulationArticlesByStrategy(lines, strategy);
-        if (articles.length) return articles;
-    }
-
-    // 无可识别结构时回退：整篇作为单条「全文」
     const fallbackContent = normalizeRegulationText(text);
     if (!fallbackContent) return [];
     return [{
@@ -583,7 +644,20 @@ function getRegulationDocumentById(docId, { includeArchived = false } = {}) {
 function getRegulationVersionById(versionId) {
     const normalizedId = normalizeRegulationId(versionId);
     if (!normalizedId) return null;
-    return db.prepare('SELECT * FROM regulation_versions WHERE id = ?').get(normalizedId) || null;
+    const row = db.prepare('SELECT * FROM regulation_versions WHERE id = ?').get(normalizedId) || null;
+    return row ? { ...row, article_count: countRegulationArticlesByVersionId(row.id) } : null;
+}
+
+function countRegulationArticlesByVersionId(versionId) {
+    const normalizedId = normalizeRegulationId(versionId);
+    if (!normalizedId) return 0;
+    const rows = db.prepare(`
+        SELECT article_label, heading_path
+        FROM regulation_articles
+        WHERE version_id = ?
+        ORDER BY sort_order ASC, id ASC
+    `).all(normalizedId);
+    return countActualRegulationArticles(rows);
 }
 
 function listRegulationVersions(docId) {
@@ -596,7 +670,7 @@ function listRegulationVersions(docId) {
         ORDER BY id DESC
     `).all(normalizedId).map(row => ({
         ...row,
-        article_count: Number(row.article_count || 0),
+        article_count: countRegulationArticlesByVersionId(row.id),
         source_size: Number(row.source_size || 0)
     }));
 }
@@ -607,7 +681,6 @@ function listRegulationDocuments({
     jurisdiction = '',
     status = '',
     includeArchived = false,
-    sort = '',
     limit = 50,
     offset = 0
 } = {}) {
@@ -646,8 +719,7 @@ function listRegulationDocuments({
     }
 
     const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    let orderSql = 'ORDER BY COALESCE(d.updated_at, d.created_at) DESC, d.id DESC';
-    if (sort === 'date') orderSql = 'ORDER BY d.effective_date_normalized DESC, d.id DESC';
+    const orderSql = 'ORDER BY COALESCE(d.updated_at, d.created_at) DESC, d.id DESC';
     const rows = db.prepare(`
         SELECT
             d.*,
@@ -694,9 +766,8 @@ function listRegulationDocuments({
         data: rows.map(row => ({
             ...row,
             version_count: Number(row.version_count || 0),
-            article_count: Number(row.article_count || 0),
-            source_size: Number(row.current_source_size || 0),
-            effect_status: computeRegulationEffectStatus(row)
+            article_count: countRegulationArticlesByVersionId(row.current_version_id),
+            source_size: Number(row.current_source_size || 0)
         })),
         total,
         limit: safeLimit,
@@ -729,7 +800,11 @@ function getRegulationDocumentDetail(docId, { versionId = null, includeArchived 
     const versions = listRegulationVersions(normalizedDocId);
     if (versions.length === 0) {
         return {
-            document: doc,
+            document: {
+                ...doc,
+                current_version_label: '',
+                article_count: countRegulationArticlesByVersionId(doc.current_version_id)
+            },
             versions: [],
             currentVersion: null,
             articles: [],
@@ -780,7 +855,11 @@ function getRegulationDocumentDetail(docId, { versionId = null, includeArchived 
     }));
 
     return {
-        document: { ...doc, effect_status: computeRegulationEffectStatus(doc) },
+        document: {
+            ...doc,
+            current_version_label: versions.find(version => Number(version.id) === Number(doc.current_version_id))?.version_label || '',
+            article_count: countRegulationArticlesByVersionId(doc.current_version_id)
+        },
         versions: versions.map(version => ({
             ...version,
             is_current: Number(version.id) === Number(doc.current_version_id)
@@ -816,7 +895,6 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 d.category,
                 d.issuing_body,
                 d.jurisdiction,
-                d.effective_date,
                 d.summary AS document_summary,
                 v.id AS version_id,
                 v.version_label,
@@ -846,7 +924,6 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 d.category,
                 d.issuing_body,
                 d.jurisdiction,
-                d.effective_date,
                 d.summary AS document_summary,
                 v.id AS version_id,
                 v.version_label,
@@ -876,7 +953,6 @@ function searchRegulationArticles({ query, documentId = null, limit = 8, include
                 d.category,
                 d.issuing_body,
                 d.jurisdiction,
-                d.effective_date,
                 d.summary AS document_summary,
                 v.id AS version_id,
                 v.version_label,
@@ -1154,7 +1230,7 @@ function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
     const rows = db.prepare(`
         SELECT
             d.id AS document_id, d.title AS document_title, d.category, d.issuing_body,
-            d.jurisdiction, d.effective_date, d.summary AS document_summary,
+            d.jurisdiction, d.summary AS document_summary,
             v.id AS version_id, v.version_label,
             a.id AS article_id, a.sort_order, a.article_label, a.article_title, a.content,
             substr(replace(a.content, char(10), ' '), 1, 240) AS excerpt
@@ -1318,9 +1394,8 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
     }
 
     const title = normalizeRegulationField(providedTitle || metadata.title || doc.title, 120) || doc.title;
-    // 版本标识优先取用户填写值；留空时按法规惯例用施行日期，识别不到再退回 v 序号
+    // 版本标识优先取用户填写值或文件名识别的版本日期；留空时退回 v 序号
     const versionLabel = normalizeRegulationField(metadata.versionLabel || metadata.version_label || '', 80)
-        || buildVersionLabelFromDate(metadata.effectiveDate || metadata.effective_date || '')
         || `v${(Number(doc.version_count || 0) || 0) + 1}`;
     const sourceMeta = saveRegulationUploadedFile(file, normalizedDocId);
     const createdAt = getBeijingTimestamp();
@@ -1328,6 +1403,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
     try {
         const extractedText = normalizeRegulationText(preloadedText) || await readRegulationTextFromPath(sourceMeta.absolutePath, file.originalname);
         const articles = parseRegulationArticles(extractedText, { docTitle: title });
+        const articleCount = countActualRegulationArticles(articles);
         const summary = deriveRegulationSummary({
             title,
             extractedText,
@@ -1353,7 +1429,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                 sourceFormat,
                 extractedText,
                 summary,
-                articles.length,
+                articleCount,
                 userId || 0,
                 createdAt,
                 createdAt
@@ -1419,7 +1495,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                     updated_by_user = ?,
                     updated_at = ?
                 WHERE id = ? AND deleted_at IS NULL
-            `).run(title, summary, versionId, articles.length, userId || 0, createdAt, normalizedDocId);
+            `).run(title, summary, versionId, articleCount, userId || 0, createdAt, normalizedDocId);
             return versionId;
         });
         const versionId = tx();
@@ -1460,24 +1536,19 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
         metadata.title || deriveRegulationTitleFromText(preloadedText || '', file?.originalname || ''),
         120
     ) || '法规文档';
-    const effectiveDate = normalizeRegulationEffectiveDate(metadata.effectiveDate || metadata.effective_date || '');
     const info = db.prepare(`
         INSERT INTO regulation_documents (
-            title, category, issuing_body, jurisdiction, effective_date,
-            effective_date_normalized, expire_date,
+            title, category, issuing_body, jurisdiction,
             summary, status, current_version_id, version_count, article_count,
             created_by_user, updated_by_user, deleted_at, deleted_by_user,
             created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 0, 0, ?, ?, NULL, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'active', NULL, 0, 0, ?, ?, NULL, 0, ?, ?)
     `).run(
         title,
         normalizeRegulationField(metadata.category, 120),
         normalizeRegulationField(metadata.issuingBody || metadata.issuing_body, 120),
         normalizeRegulationField(metadata.jurisdiction, 120),
-        effectiveDate,
-        normalizeRegulationDateValue(effectiveDate),
-        normalizeRegulationDateValue(metadata.expireDate || metadata.expire_date || ''),
         normalizeRegulationSummary(metadata.summary),
         userId || 0,
         userId || 0,
@@ -1505,15 +1576,16 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
     if (!normalizedDocId) return null;
     const doc = getRegulationDocumentById(normalizedDocId, { includeArchived: true });
     if (!doc || doc.deleted_at) return null;
-    const effectiveDate = normalizeRegulationEffectiveDate(patch.effectiveDate ?? patch.effective_date ?? doc.effective_date);
+    const hasVersionLabel = Object.prototype.hasOwnProperty.call(patch, 'versionLabel')
+        || Object.prototype.hasOwnProperty.call(patch, 'version_label');
+    const nextVersionLabel = hasVersionLabel
+        ? normalizeRegulationField(patch.versionLabel ?? patch.version_label ?? '', 80)
+        : '';
     const next = {
         title: normalizeRegulationField(patch.title ?? doc.title, 120) || doc.title,
         category: normalizeRegulationField(patch.category ?? doc.category, 120),
         issuing_body: normalizeRegulationField(patch.issuingBody ?? patch.issuing_body ?? doc.issuing_body, 120),
         jurisdiction: normalizeRegulationField(patch.jurisdiction ?? doc.jurisdiction, 120),
-        effective_date: effectiveDate,
-        effective_date_normalized: normalizeRegulationDateValue(effectiveDate),
-        expire_date: normalizeRegulationDateValue(patch.expireDate ?? patch.expire_date ?? doc.expire_date),
         summary: normalizeRegulationSummary(patch.summary ?? doc.summary),
         status: normalizeRegulationStatus(patch.status ?? doc.status)
     };
@@ -1524,9 +1596,6 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
             category = ?,
             issuing_body = ?,
             jurisdiction = ?,
-            effective_date = ?,
-            effective_date_normalized = ?,
-            expire_date = ?,
             summary = ?,
             status = ?,
             updated_by_user = ?,
@@ -1537,34 +1606,46 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
         next.category,
         next.issuing_body,
         next.jurisdiction,
-        next.effective_date,
-        next.effective_date_normalized,
-        next.expire_date,
         next.summary,
         next.status,
         userId || 0,
         now,
         normalizedDocId
     );
+    if (hasVersionLabel && doc.current_version_id) {
+        db.prepare('UPDATE regulation_versions SET version_label = ?, updated_at = ? WHERE id = ?')
+            .run(nextVersionLabel, now, doc.current_version_id);
+    }
     return getRegulationDocumentById(normalizedDocId, { includeArchived: true });
 }
 
 // #2 为条文生成向量（可选，失败不阻断）
+// 复用知识库同一处向量模型配置（getEmbeddingConfig）；与知识库一致按小批发送，
+// 避免把整部法律的条文一次性塞进单个请求导致向量服务返回 400。
+const REGULATION_EMBED_BATCH_SIZE = 5;
+const REGULATION_EMBED_MAX_CHARS = 2000;
 async function embedRegulationArticles(articles, { userId = 0, source = 'regulations_import' } = {}) {
     if (!Array.isArray(articles) || !articles.length) return;
-    try {
-        const texts = articles.map(a => String(a.content || '').trim()).filter(Boolean);
-        if (!texts.length) return;
-        const vectors = await generateEmbeddings(texts, null, null, userId, { source, timeoutMs: 30000 });
-        articles.forEach((article, i) => {
-            if (vectors[i] && article.id) {
-                const embedding = JSON.stringify(vectors[i]);
-                db.prepare('UPDATE regulation_articles SET embedding = ? WHERE id = ?').run(embedding, article.id);
-            }
-        });
-    } catch (err) {
-        // 向量生成失败不阻断导入，降级为纯 BM25 检索
-        console.warn('[regulations] 向量生成失败，降级为 BM25 检索:', err.message);
+    // 仅对有 id、有正文的条文生成向量；单条截断以规避向量模型的最大 token 限制
+    const targets = articles
+        .filter(a => a && a.id && String(a.content || '').trim())
+        .map(a => ({ id: a.id, text: String(a.content).trim().slice(0, REGULATION_EMBED_MAX_CHARS) }));
+    if (!targets.length) return;
+    const updateEmbedding = db.prepare('UPDATE regulation_articles SET embedding = ? WHERE id = ?');
+    for (let i = 0; i < targets.length; i += REGULATION_EMBED_BATCH_SIZE) {
+        const batch = targets.slice(i, i + REGULATION_EMBED_BATCH_SIZE);
+        try {
+            const vectors = await generateEmbeddings(batch.map(t => t.text), null, null, userId, { source, timeoutMs: 30000 });
+            batch.forEach((t, idx) => {
+                if (Array.isArray(vectors?.[idx])) {
+                    updateEmbedding.run(JSON.stringify(vectors[idx]), t.id);
+                }
+            });
+        } catch (err) {
+            // 向量生成失败不阻断导入，降级为纯 BM25 检索；服务/配置类错误重试无意义，直接停止
+            console.warn('[regulations] 向量生成失败，降级为 BM25 检索:', err.message);
+            return;
+        }
     }
 }
 
@@ -1746,6 +1827,7 @@ module.exports = {
     createRegulationAnnotation,
     createRegulationDocumentFromUpload,
     createSavedSearch,
+    countActualRegulationArticles,
     deleteRegulationAnnotation,
     deleteRegulationDocument,
     deleteSavedSearch,
@@ -1754,6 +1836,8 @@ module.exports = {
     expandRegulationMatchesByLinks,
     extractRegulationLinks,
     findSimilarRegulationArticles,
+    deriveRegulationTitleFromFilename,
+    deriveRegulationVersionLabelFromFilename,
     rebuildRegulationCrossLinks,
     resolveRegulationCrossLinks,
     recordRegulationAccess,

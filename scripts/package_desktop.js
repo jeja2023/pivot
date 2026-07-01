@@ -1,8 +1,11 @@
-const cp = require('child_process');
+﻿const cp = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
+const electronBuilderInstallDeps = path.join(root, 'node_modules', 'electron-builder', 'install-app-deps.js');
+const projectVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 
 function run(command, args, options = {}) {
     console.log(`> ${[command, ...args].join(' ')}`);
@@ -32,15 +35,37 @@ function ensureElectronInstalled() {
     }
 }
 
-const DESKTOP_VERSION = '0.0.1';
+function cleanBuildOutputs() {
+    const targets = fs.readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory() && entry.name.startsWith('dist-electron'))
+        .map(entry => path.join(root, entry.name));
+
+    for (const target of targets) {
+        console.log(`> remove ${target}`);
+        fs.rmSync(target, { recursive: true, force: true });
+    }
+}
 
 function normalizeBuilderArgs(rawArgs) {
-    const extraArgs = [`-c.extraMetadata.version=${DESKTOP_VERSION}`];
+    const extraArgs = [`-c.extraMetadata.version=${projectVersion}`];
     if (!rawArgs.length) return ['--win', 'nsis', ...extraArgs];
     if (rawArgs.includes('--dir')) return ['--win', '--dir', ...extraArgs];
     return ['--win', ...rawArgs, ...extraArgs];
 }
 
-ensureElectronInstalled();
-run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
-run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(process.argv.slice(2))]);
+let runError = null;
+
+try {
+    ensureElectronInstalled();
+    cleanBuildOutputs();
+    run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
+    run(process.execPath, [electronBuilderInstallDeps]);
+    run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(process.argv.slice(2))]);
+} catch (err) {
+    runError = err;
+}
+
+if (runError) {
+    console.error(runError && runError.stack ? runError.stack : runError);
+    process.exit(runError.status || 1);
+}
