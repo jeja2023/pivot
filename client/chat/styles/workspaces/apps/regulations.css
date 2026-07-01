@@ -784,7 +784,7 @@
 }
 
 .workspace-modal.regulations-graph-dialog {
-    width: min(640px, calc(100vw - 32px));
+    width: min(1600px, calc(100vw - 24px));
 }
 
 .workspace-modal.regulations-similar-dialog {
@@ -1408,13 +1408,36 @@
 
 /* #4 条文引用网络 */
 .regulations-graph-dialog {
-    width: min(640px, calc(100vw - 32px));
+    width: min(1600px, calc(100vw - 24px));
 }
 
 .regulations-graph-body {
     padding: 14px;
-    overflow: auto;
-    max-height: calc(100vh - 160px);
+    overflow: hidden;
+    max-height: calc(100vh - 150px);
+}
+
+.regulations-graph-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.regulations-graph-summary span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border: 1px solid #dbe3ef;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.regulations-graph-summary strong {
+    color: var(--text-main);
 }
 
 .regulations-graph-legend {
@@ -1439,29 +1462,179 @@
     display: inline-block;
 }
 
+.regulations-graph-layout {
+    display: grid;
+    grid-template-columns: minmax(620px, 1fr) minmax(360px, 430px);
+    gap: 12px;
+    align-items: stretch;
+    min-height: 0;
+}
+
+.regulations-graph-canvas-wrap {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+}
+
+.regulations-graph-canvas-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+}
+
+.regulations-graph-canvas-head strong {
+    color: var(--text-main);
+    font-size: 0.82rem;
+}
+
+.regulations-graph-canvas-head span {
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+}
+
+.regulations-graph-canvas-scroll {
+    min-height: 430px;
+    max-height: calc(100vh - 315px);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
 .regulations-graph-svg {
     display: block;
-    margin: 0 auto;
-    background: #fafafa;
-    border-radius: 8px;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    background: #f8fafc;
 }
 
 .regulations-graph-node {
     cursor: pointer;
 }
 
-.regulations-graph-node:hover circle,
-.regulations-graph-node:focus circle {
-    r: 8;
-    fill: var(--primary);
+.regulations-graph-node rect {
+    fill: #fff;
+    stroke: rgba(16, 163, 127, 0.46);
+    stroke-width: 1.2;
+    filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.08));
+}
+
+.regulations-graph-node text {
+    fill: #25364a;
+    font-size: 10.5px;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.regulations-graph-node tspan {
+    dominant-baseline: middle;
+}
+
+.regulations-graph-node:hover rect,
+.regulations-graph-node:focus rect {
+    fill: rgba(16, 163, 127, 0.08);
+    stroke: var(--primary);
+    stroke-width: 2;
 }
 
 .regulations-graph-node:hover text,
 .regulations-graph-node:focus text {
-    font-weight: 700;
     fill: var(--primary);
 }
 
+.regulations-graph-note {
+    padding: 8px 10px;
+    border-top: 1px solid #e2e8f0;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.regulations-graph-edge-list {
+    max-height: calc(100vh - 255px);
+    min-height: 430px;
+    overflow: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.regulations-graph-edge-list-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 9px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.regulations-graph-edge-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid #eef2f7;
+}
+
+.regulations-graph-edge-item:last-child {
+    border-bottom: 0;
+}
+
+.regulations-graph-edge-link {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #1f3b57;
+    text-align: left;
+    font: inherit;
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.regulations-graph-edge-link:hover,
+.regulations-graph-edge-link:focus {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+.regulations-graph-edge-type {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--edge-color) 12%, white);
+    color: var(--edge-color);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+@media (max-width: 860px) {
+    .regulations-graph-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .regulations-graph-canvas-scroll,
+    .regulations-graph-edge-list {
+        max-height: 300px;
+        min-height: 260px;
+    }
+}
 /* 分条渲染：每条带锚点，便于精确跳转 */
 .regulations-article-block {
     margin-bottom: 18px;

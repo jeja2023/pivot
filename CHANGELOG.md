@@ -1,3 +1,35 @@
+## [v0.0.181] - 2026-07-01
+
+### 法规查询安全拆分与引用网络优化：前后端模块化、加载兼容修复、核心图与关系明细
+
+本次更新继续治理法规查询：拆分前后端大文件，修复“法规查询加载失败”，优化条文引用网络的核心图和关系明细，解决节点密集、标签重叠和文字溢出。
+
+#### 架构拆分
+
+- **前端**：`client/chat/apps-workbench-regulations.js` 改为法规查询加载入口，核心状态、渲染、动作和事件绑定已拆分到 `client/chat/regulations/` 下的 `core.js`、`render-*`、`actions-*` 和 `events.js`。
+- **兼容入口**：保留 `client/chat/regulations/render.js` 与 `client/chat/regulations/actions.js` 作为兼容桥接，避免旧缓存或历史脚本路径直接失效。
+- **后端路由**：`server/routes/apps/regulations.js` 改为兼容导出，实际路由拆分到 `server/routes/apps/regulations/` 下的 `documents.js`、`articles.js`、`ai.js`、`helpers.js` 和 `index.js`。
+- **后端服务**：`server/services/regulations.js` 改为兼容导出，法规服务按检索、解析、目录、引用关系、协作、分析和写入变更拆分到 `server/services/regulations/` 下的多个小模块。
+
+#### 问题修复
+
+- **加载失败修复**：修复拆分后 `bindEvents` 未挂载到共享命名空间，导致打开应用提示“法规查询加载失败”的问题。
+- **加载顺序兼容**：新增法规查询模块就绪等待逻辑，确保新入口和旧兼容入口都能稳定初始化。
+
+#### 引用网络优化
+
+- **核心图模式**：引用网络不再把大量条文强行压进环形图，大关系集优先显示高关联度核心条文。
+- **关系明细**：右侧列表保留全部内部引用关系，点击条文仍可跳转定位到对应条文。
+- **弹窗与滚动**：引用网络弹窗加宽，画布区和关系明细区独立滚动，并在窄屏下自动切换为单列布局。
+- **标签溢出修复**：节点标题改为两行截断显示，完整条文标题保留在悬浮提示中，解决长条文标题超出节点边框的问题。
+
+#### 验证
+
+- `node --check client\chat\regulations\actions-advanced.js`
+- `npm run check`
+- `npm run lint`
+- 已检查新旧加载入口运行时模拟和引用网络长标题样例。
+
 ## [v0.0.180] - 2026-07-01
 
 ### 法规查询修复与治理：文档名/版本号识别、条数精确化、AI 问答修复、生效/失效日期移除、删除弹窗与向量分批

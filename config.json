@@ -1,9 +1,9 @@
 {
   "mode": "remote",
   "environmentName": "",
-  "remoteUrl": "http://127.0.0.1:3000/",
+  "remoteUrl": "http://50.64.150.51:9006/",
   "partition": "persist:pivot-production",
-  "windowTitle": "智枢 Pivot",
+  "windowTitle": "Pivot 智枢",
   "allowExternalOpen": true,
   "autoUpdate": {
     "enabled": false,
