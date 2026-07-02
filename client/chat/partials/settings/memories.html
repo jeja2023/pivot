@@ -80,12 +80,11 @@
                             <div id="pagination-memories" class="pagination"></div>
                         </div>
                         <div id="memory-edit-modal" class="modal-overlay hidden" style="z-index: 5250;">
-                            <div class="modal memory-modal">
-                                <div class="memory-modal-header">
+                            <div class="modal model-modal memory-modal memory-edit-modal">
+                                <div class="model-modal-header memory-modal-header">
                                     <h3>编辑记忆</h3>
-                                    <button id="memory-edit-cancel" type="button" class="btn-secondary">关闭</button>
                                 </div>
-                                <form id="memory-edit-form" class="memory-edit-form">
+                                <form id="memory-edit-form" class="model-form memory-edit-form">
                                     <input type="hidden" id="memory-edit-id">
                                     <label class="form-item">
                                         <span>类型</span>
@@ -100,7 +99,7 @@
                                         <span>内容</span>
                                         <textarea id="memory-edit-content" class="form-input" rows="5" maxlength="800"></textarea>
                                     </label>
-                                    <div class="memory-edit-grid">
+                                    <div class="model-form-row memory-edit-grid">
                                         <label class="form-item">
                                             <span>重要度</span>
                                             <input id="memory-edit-salience" class="form-input" type="number" min="0" max="1" step="0.05">
@@ -110,19 +109,24 @@
                                             <input id="memory-edit-confidence" class="form-input" type="number" min="0" max="1" step="0.05">
                                         </label>
                                     </div>
-                                    <div class="memory-modal-actions">
+                                    <div class="model-modal-actions memory-modal-actions">
+                                        <button id="memory-edit-cancel" type="button" class="btn-secondary">取消</button>
                                         <button id="memory-edit-save" type="submit" class="btn-primary">保存</button>
                                     </div>
                                 </form>
                             </div>
                         </div>
                         <div id="memory-source-modal" class="modal-overlay hidden" style="z-index: 5260;">
-                            <div class="modal memory-modal memory-source-modal">
-                                <div class="memory-modal-header">
+                            <div class="modal model-modal memory-modal memory-source-modal">
+                                <div class="model-modal-header memory-modal-header">
                                     <h3>来源</h3>
-                                    <button id="memory-source-close" type="button" class="btn-secondary">关闭</button>
                                 </div>
-                                <div id="memory-source-body" class="memory-source-body"></div>
+                                <div class="model-form memory-source-form">
+                                    <div id="memory-source-body" class="memory-source-body"></div>
+                                    <div class="model-modal-actions memory-modal-actions">
+                                        <button id="memory-source-close" type="button" class="btn-secondary settings-close-btn">关闭</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </section>

@@ -4,6 +4,7 @@ const { aiSemaphore } = require('./concurrency');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { parsePositiveInt } = require('../number');
+const { getGlobalAiConcurrencyConfig } = require('./runtime-settings');
 
 const parseRatio = (value, fallback) => {
     const parsed = Number(value);
@@ -32,7 +33,10 @@ const state = {
         reject: VRAM_REJECT_THRESHOLD,
         recover: VRAM_RECOVER_THRESHOLD
     },
-    intervalMs: MONITOR_INTERVAL
+    intervalMs: MONITOR_INTERVAL,
+    configuredMaxConcurrent: null,
+    minConcurrentCap: MIN_CONCURRENT_CAP,
+    maxConcurrentCap: MAX_CONCURRENT_CAP
 };
 
 function getGpuMemoryUsage() {
@@ -77,28 +81,44 @@ function getGpuMemoryUsage() {
     });
 }
 
+function getConfiguredConcurrencyBounds() {
+    const configuredMax = parsePositiveInt(getGlobalAiConcurrencyConfig().maxConcurrent, 1);
+    const upper = Math.max(1, Math.min(MAX_CONCURRENT_CAP, configuredMax));
+    const lower = Math.max(1, Math.min(upper, MIN_CONCURRENT_CAP));
+    return { configuredMax, upper, lower };
+}
+
 async function refreshGpuStatus() {
     const result = await getGpuMemoryUsage();
+    const bounds = getConfiguredConcurrencyBounds();
     state.available = result.gpus.length > 0;
     state.updatedAt = getBeijingTimestamp();
     state.gpus = result.gpus;
     state.error = result.error;
     state.maxRatio = result.gpus.length ? Math.max(...result.gpus.map(g => g.ratio)) : 0;
-
-    if (!state.available) {
-        aiSemaphore.setRejectingNewRequests(false);
-        return state;
-    }
+    state.configuredMaxConcurrent = bounds.configuredMax;
+    state.minConcurrentCap = bounds.lower;
+    state.maxConcurrentCap = bounds.upper;
 
     const status = aiSemaphore.getStatus();
-    let nextMax = status.max;
+    const currentMax = Math.min(status.max, bounds.upper);
+    let nextMax = currentMax;
+
+    if (!state.available) {
+        state.overloaded = false;
+        aiSemaphore.setRejectingNewRequests(false);
+        if (status.max !== bounds.upper) {
+            aiSemaphore.updateMaxConcurrent(bounds.upper);
+        }
+        return state;
+    }
 
     if (state.maxRatio >= VRAM_REJECT_THRESHOLD) {
         state.overloaded = true;
         const reason = `GPU 显存占用已达到 ${(state.maxRatio * 100).toFixed(1)}%，系统正在保护模型服务。`;
         aiSemaphore.setRejectingNewRequests(true, reason);
         aiSemaphore.rejectQueuedRequests(reason, 'AI_OVERLOADED');
-        nextMax = Math.max(MIN_CONCURRENT_CAP, status.max - 2);
+        nextMax = Math.max(bounds.lower, currentMax - 2);
     } else {
         if (state.overloaded && state.maxRatio <= VRAM_RECOVER_THRESHOLD) {
             state.overloaded = false;
@@ -108,14 +128,16 @@ async function refreshGpuStatus() {
         }
 
         if (state.maxRatio > VRAM_CRITICAL_THRESHOLD) {
-            nextMax = Math.max(MIN_CONCURRENT_CAP, status.max - 2);
+            nextMax = Math.max(bounds.lower, currentMax - 2);
             logger.warn({ maxRatio: state.maxRatio, nextMax }, 'GPU 显存接近满载，正在下调 AI 并发');
         } else if (state.maxRatio > VRAM_SAFE_THRESHOLD) {
-            nextMax = Math.max(MIN_CONCURRENT_CAP, status.max - 1);
+            nextMax = Math.max(bounds.lower, currentMax - 1);
             logger.info({ maxRatio: state.maxRatio, nextMax }, 'GPU 显存较高，正在微调 AI 并发');
-        } else if (state.maxRatio < 0.7 && status.queued > 0) {
-            nextMax = Math.min(MAX_CONCURRENT_CAP, status.max + 1);
-            logger.info({ maxRatio: state.maxRatio, nextMax }, 'GPU 显存充足且有排队，请求提升 AI 并发');
+        } else {
+            nextMax = bounds.upper;
+            if (status.max < bounds.upper) {
+                logger.info({ maxRatio: state.maxRatio, nextMax }, 'GPU 显存恢复安全，正在恢复到全局配置的 AI 并发');
+            }
         }
     }
 
@@ -125,7 +147,6 @@ async function refreshGpuStatus() {
 
     return state;
 }
-
 async function startGpuMonitor() {
     logger.info({ intervalMs: MONITOR_INTERVAL }, 'GPU 动态负载监控服务已启动');
     await refreshGpuStatus();

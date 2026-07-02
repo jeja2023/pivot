@@ -218,6 +218,7 @@ test('管理员运行时设置接口可保存并发配置', async () => {
     const adminUser = { id: 1, username: 'admin', role: 'admin', unit: 'QA' };
     const keys = [
         RUNTIME_SETTING_KEYS.maxConcurrentAiRequests,
+        RUNTIME_SETTING_KEYS.modelEndpointDefaultConcurrency,
         RUNTIME_SETTING_KEYS.agentDagNodeConcurrency
     ];
     const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
@@ -232,6 +233,7 @@ test('管理员运行时设置接口可保存并发配置', async () => {
     const req = {
         body: {
             max_concurrent_ai_requests: 3,
+            model_endpoint_default_concurrency: 2,
             agent_dag_node_concurrency: 5
         },
         headers: {},
@@ -255,6 +257,7 @@ test('管理员运行时设置接口可保存并发配置', async () => {
         assert.equal(res.statusCode, 200);
         assert.equal(res.body.success, true);
         assert.equal(res.body.runtimeConfig.values.maxConcurrentAiRequests, 3);
+        assert.equal(res.body.runtimeConfig.values.modelEndpointDefaultConcurrency, 2);
         assert.equal(res.body.runtimeConfig.values.agentDagNodeConcurrency, 5);
     } finally {
         keys.forEach((key, index) => {

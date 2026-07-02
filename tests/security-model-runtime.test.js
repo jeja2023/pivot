@@ -1,11 +1,11 @@
-﻿const assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadModelRuntimeHarness({ pendingFirstRequest = false } = {}) {
+function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurrency = 1, modelMaxConcurrent = 1 } = {}) {
     const filename = path.resolve(__dirname, '../server/services/model-runtime.js');
     const source = fs.readFileSync(filename, 'utf8');
     const module = { exports: {} };
@@ -25,7 +25,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false } = {}) {
                             name: 'Model A',
                             url: 'https://api.example/v1',
                             monitor_url: 'https://monitor.example/status',
-                            max_concurrent: 1,
+                            max_concurrent: modelMaxConcurrent,
                             supports_vision: 0,
                             status: 'active'
                         }];
@@ -69,15 +69,29 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false } = {}) {
             if (request === './concurrency') {
                 return {
                     ConcurrencySemaphore: class {
-                        constructor() {}
-                        updateLimits() {}
+                        constructor(options = {}) {
+                            this.maxConcurrent = options.maxConcurrent || 1;
+                            this.maxQueueSize = options.maxQueueSize || 1;
+                            this.queueTimeoutMs = options.queueTimeoutMs || 1000;
+                        }
+                        updateLimits(options = {}) {
+                            if (Number.isFinite(Number(options.maxConcurrent)) && Number(options.maxConcurrent) > 0) {
+                                this.maxConcurrent = Number(options.maxConcurrent);
+                            }
+                            if (Number.isFinite(Number(options.maxQueueSize)) && Number(options.maxQueueSize) >= 0) {
+                                this.maxQueueSize = Number(options.maxQueueSize);
+                            }
+                            if (Number.isFinite(Number(options.queueTimeoutMs)) && Number(options.queueTimeoutMs) >= 1000) {
+                                this.queueTimeoutMs = Number(options.queueTimeoutMs);
+                            }
+                        }
                         getStatus() {
                             return {
                                 active: 0,
                                 queued: 0,
-                                max: 1,
-                                maxQueue: 1,
-                                queueTimeoutMs: 1000,
+                                max: this.maxConcurrent,
+                                maxQueue: this.maxQueueSize,
+                                queueTimeoutMs: this.queueTimeoutMs,
                                 rejectingNewRequests: false,
                                 rejectReason: '',
                                 oldestQueuedMs: 0
@@ -95,7 +109,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false } = {}) {
             if (request === './runtime-settings') {
                 return {
                     getModelEndpointRuntimeConfig: () => ({
-                        defaultConcurrency: 1,
+                        defaultConcurrency,
                         queueSize: 1,
                         queueTimeoutMs: 1000
                     })
@@ -163,4 +177,12 @@ test('model runtime starts monitor loop with setTimeout only', async () => {
     await runtime.startModelEndpointMonitor();
     assert.equal(setIntervalCalls.length, 0);
     assert.equal(setTimeoutCalls.length, 1);
+});
+
+test('model runtime uses runtime default concurrency when model endpoint does not override it', () => {
+    const { runtime } = loadModelRuntimeHarness({ defaultConcurrency: 2, modelMaxConcurrent: 0 });
+    const status = runtime.getModelEndpointRuntimeStatus();
+    assert.equal(status.length, 1);
+    assert.equal(status[0].configuredMaxConcurrent, 2);
+    assert.equal(status[0].concurrency.max, 2);
 });

@@ -959,46 +959,27 @@
     font-size: 0.82rem;
     line-height: 1.45;
 }
-.settings-workspace-view .memory-modal {
-    width: min(720px, calc(100vw - 32px));
+.settings-workspace-view .memory-edit-modal {
+    width: min(680px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 40px));
+}
+.settings-workspace-view .memory-source-modal {
+    width: min(820px, calc(100vw - 32px));
     max-height: min(780px, calc(100vh - 40px));
-    padding: 0;
-    overflow: hidden;
-}
-.settings-workspace-view .memory-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px;
-    border-bottom: 1px solid #e2e8f0;
-}
-.settings-workspace-view .memory-modal-header h3 {
-    margin: 0;
-    color: #0f172a;
-    font-size: 1rem;
-    font-weight: 800;
-}
-.settings-workspace-view .memory-edit-form,
-.settings-workspace-view .memory-source-body {
-    padding: 16px 18px 18px;
 }
 .settings-workspace-view .memory-edit-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
 }
-.settings-workspace-view .memory-edit-content textarea {
+.settings-workspace-view .memory-edit-content textarea.form-input {
+    height: 180px;
     min-height: 140px;
+    padding: 10px 12px;
+    line-height: 1.5;
     resize: vertical;
 }
 .settings-workspace-view .memory-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 14px;
-}
-.settings-workspace-view .memory-source-modal {
-    width: min(820px, calc(100vw - 32px));
+    margin-top: 4px;
 }
 .settings-workspace-view .memory-source-meta {
     display: flex;

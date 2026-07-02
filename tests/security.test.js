@@ -6,4 +6,5 @@ require('./security-agent.test');
 require('./security-chat.test');
 require('./security-sqlite-write-queue.test');
 require('./security-model-runtime.test');
+require('./security-gpu-monitor.test');
 require('./db-migration-snapshots.test');

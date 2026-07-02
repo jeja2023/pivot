@@ -409,7 +409,7 @@ test('viewing a session record scrolls to bottom', () => {
     assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
 });
 
-test('long-term memory table uses shared table and pagination controls', () => {
+test('long-term memory table and modals use shared controls', () => {
     const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
     const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
     const memoryPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'memories.html'), 'utf8');
@@ -417,6 +417,14 @@ test('long-term memory table uses shared table and pagination controls', () => {
 
     assert.match(memoryPartial, /<table class="data-table compact-table memories-table">/);
     assert.match(memoryPartial, /id="pagination-memories" class="pagination"/);
+    assert.match(memoryPartial, /class="modal model-modal memory-modal memory-edit-modal"/);
+    assert.match(memoryPartial, /class="modal model-modal memory-modal memory-source-modal"/);
+    assert.match(memoryPartial, /class="model-modal-header memory-modal-header"/);
+    assert.match(memoryPartial, /id="memory-edit-form" class="model-form memory-edit-form"/);
+    assert.match(memoryPartial, /class="model-form-row memory-edit-grid"/);
+    assert.match(memoryPartial, /class="model-form memory-source-form"/);
+    assert.match(memoryPartial, /class="model-modal-actions memory-modal-actions"/);
+    assert.match(memoryPartial, /id="memory-source-close" type="button" class="btn-secondary settings-close-btn"/);
     assert.match(adminCore, /window\.loadMemories\(page\)/);
     assert.match(adminSettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
     assert.match(adminSettings, /params\.set\('limit', String\(limit\)\)/);
@@ -425,6 +433,10 @@ test('long-term memory table uses shared table and pagination controls', () => {
     assert.match(adminSettings, /const memory = getCurrentMemory\(memoryId\);/);
     assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) body\.innerHTML = `<p class="muted">\$\{escapeHtml\(e\.message/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: none;\s*white-space: nowrap;/s);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-modal \{\s*width: min\(680px,/s);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-content textarea\.form-input \{\s*height: 180px;/s);
+    assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-modal-header \{/);
+    assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-edit-form,\s*\.settings-workspace-view \.memory-source-body \{/);
     assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-action-cell \{\s*display: flex;/);
 });
 test('buildFtsQuery 会把用户输入转义为短语项', () => {

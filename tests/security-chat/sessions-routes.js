@@ -360,11 +360,12 @@ test('聊天路由会把非流式上游 JSON 重放为聊天 SSE 内容', async 
 
         assert.ok(assistant);
         assert.equal(assistant.content, 'fallback streamed answer');
-        assert.equal(assistant.token_count, 4);
+        const expectedTokenCount = Math.max(4, estimateTokens(assistant.content));
+        assert.equal(assistant.token_count, expectedTokenCount);
         assert.ok(assistant.cost_time > 0);
         assert.ok(assistant.tokens_per_sec > 0);
         assert.ok(savedEvent);
-        assert.equal(savedEvent.tokenCount, 4);
+        assert.equal(savedEvent.tokenCount, expectedTokenCount);
         assert.equal(savedEvent.costTime, assistant.cost_time);
         assert.equal(savedEvent.tps, assistant.tokens_per_sec);
         assert.match(sseText, /fallback streamed answer/);
