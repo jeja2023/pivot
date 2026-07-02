@@ -65,29 +65,22 @@ function buildAssistantSpeedStats({
     streamedChartSpecs = [],
     apiUsage = null,
     requestStartedAt = Date.now(),
-    endedAt = Date.now(),
-    firstVisibleAnswerAt = null,
-    disableChatThinking = false
+    endedAt = Date.now()
 } = {}) {
     const finalContent = appendStreamedChartsToAssistantContent(assistantContent, streamedChartSpecs);
-    const assistantTokens = streamedChartSpecs.length > 0
-        ? estimateTokens(finalContent)
-        : (apiUsage && apiUsage.completion_tokens)
-            ? apiUsage.completion_tokens
-            : estimateTokens(finalContent);
+    const estimatedAssistantTokens = estimateTokens(finalContent);
+    const apiCompletionTokens = Number(apiUsage?.completion_tokens || 0);
+    const assistantTokens = apiCompletionTokens > 0
+        ? Math.max(apiCompletionTokens, estimatedAssistantTokens)
+        : estimatedAssistantTokens;
     const costTime = Math.max((endedAt - requestStartedAt) / 1000, 0.001);
     const answerTokens = estimateVisibleAnswerTokensForSpeed(finalContent);
-    // 如果关闭了思考过程，我们将整个请求时间作为生成时间，以使速率与用户体感一致
-    const answerStartAt = disableChatThinking
-        ? requestStartedAt
-        : (firstVisibleAnswerAt || (answerTokens > 0 ? requestStartedAt : null));
-    const answerCostTime = answerStartAt ? Math.max((endedAt - answerStartAt) / 1000, 0.001) : costTime;
-    const tokensPerSec = answerTokens > 0 ? answerTokens / answerCostTime : 0;
+    // t/s 使用完整输出 token 与完整请求耗时，避免把思考 token 或思考耗时排除后造成速率虚高。
+    const tokensPerSec = assistantTokens > 0 ? assistantTokens / costTime : 0;
     return {
         assistantContent: finalContent,
         assistantTokens,
         answerTokens,
-        answerCostTime,
         costTime,
         tokensPerSec
     };

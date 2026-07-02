@@ -66,13 +66,6 @@ window.sendMessage = async function(isRegenerate = false) {
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     let mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
-    if (!mcpEnabled && shouldAutoEnableMcpForPrompt(content)) {
-        mcpConfirmed = await ensureChatMcpConsent();
-        if (!mcpConfirmed) return;
-        mcpEnabled = true;
-        activateChatMcpToggle();
-        showToast?.('已为本轮启用工具箱工具', 'info');
-    }
     if (mcpEnabled) {
         mcpConfirmed = mcpConfirmed || await ensureChatMcpConsent();
         if (!mcpConfirmed) return;
@@ -88,9 +81,6 @@ window.sendMessage = async function(isRegenerate = false) {
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
     const assistantModelName = model?.name || model?.model_name || '';
-    const isReasoning = model && Number(model.supports_reasoning || 0) === 1;
-    const isThinkingEnabled = model && Number(model.chat_thinking_enabled || 0) === 1;
-    const disableChatThinking = isReasoning && !isThinkingEnabled;
 
     let userMsgEl = null;
     if (!shouldRegenerate) {
@@ -106,7 +96,6 @@ window.sendMessage = async function(isRegenerate = false) {
     let fullAiContent = '';
     let tokenCount = 0;
     let startTime = Date.now();
-    let firstTokenTime = null;
     let hasShownQueueToast = false;
     let renderTimer = null;
     let localReplayTimer = null;
@@ -115,19 +104,9 @@ window.sendMessage = async function(isRegenerate = false) {
     let hasServerFinalStats = false;
 
     const getElapsedSeconds = () => Math.max((Date.now() - startTime) / 1000, 0.001);
-    const getAnswerTokenCount = (content = fullAiContent) => {
-        if (typeof window.estimateStreamingAnswerTokenCount === 'function') {
-            return window.estimateStreamingAnswerTokenCount(content);
-        }
-        return estimateStreamingTokenCount(content);
-    };
-    const getAnswerElapsedSeconds = () => {
-        if (!firstTokenTime) return 0;
-        return Math.max((Date.now() - firstTokenTime) / 1000, 0.001);
-    };
-    const getAverageTps = (count = getAnswerTokenCount()) => {
+    const getAverageTps = (count = tokenCount) => {
         const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
-        const elapsed = getAnswerElapsedSeconds();
+        const elapsed = getElapsedSeconds();
         return safeCount > 0 && elapsed > 0 ? safeCount / elapsed : 0;
     };
 
@@ -188,7 +167,7 @@ window.sendMessage = async function(isRegenerate = false) {
             renderTimer = setTimeout(() => {
                 renderPending = false;
                 renderTimer = null;
-                renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+                renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime);
                 keepLatestCodeBlockPinned(textBody, wasNearBottom);
                 keepMessageContainerPinnedToBottom(wasNearBottom);
             }, interval);
@@ -198,7 +177,7 @@ window.sendMessage = async function(isRegenerate = false) {
             if (renderTimer) clearTimeout(renderTimer);
             renderPending = false;
             renderTimer = null;
-            renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime, firstTokenTime);
+            renderStreamingAssistantContent(textBody, statsEl, fullAiContent, tokenCount, startTime);
             keepLatestCodeBlockPinned(textBody, wasNearBottom);
             keepMessageContainerPinnedToBottom(wasNearBottom);
         };
@@ -207,9 +186,6 @@ window.sendMessage = async function(isRegenerate = false) {
             if (!content) return;
             fullAiContent += content;
             tokenCount = estimateStreamingTokenCount(fullAiContent);
-            if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                firstTokenTime = disableChatThinking ? startTime : Date.now();
-            }
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
                 flushStreamRender();
@@ -340,14 +316,11 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.content) {
                         fullAiContent = data.content;
                         tokenCount = estimateStreamingTokenCount(fullAiContent);
-                        if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                            firstTokenTime = disableChatThinking ? startTime : Date.now();
-                        }
                         if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
                     }
                     const elapsed = getElapsedSeconds();
                     const finalTokenCount = data.tokenCount ?? (data.content ? estimateStreamingTokenCount(data.content) : tokenCount);
-                    const finalTps = getAverageTps();
+                    const finalTps = getAverageTps(finalTokenCount);
                     renderFinalAssistantStats(statsEl, {
                         modelName: data.modelName || data.model_name || assistantModelName,
                         costTime: elapsed,
@@ -371,10 +344,6 @@ window.sendMessage = async function(isRegenerate = false) {
                 }
                 if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
-                    const nextStreamContent = [fullAiContent, pendingStreamChunks.join(''), data.content].filter(Boolean).join('');
-                    if (!firstTokenTime && getAnswerTokenCount(nextStreamContent) > 0) {
-                        firstTokenTime = disableChatThinking ? startTime : Date.now();
-                    }
                     enqueueStreamContent(data.content);
                 }
             }
@@ -434,9 +403,6 @@ window.sendMessage = async function(isRegenerate = false) {
             if (remainingStreamContent) {
                 fullAiContent += remainingStreamContent;
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
-                if (!firstTokenTime && getAnswerTokenCount(fullAiContent) > 0) {
-                    firstTokenTime = disableChatThinking ? startTime : Date.now();
-                }
             }
             fullAiContent += '\n\n[已由用户中断生成]';
             if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, true);

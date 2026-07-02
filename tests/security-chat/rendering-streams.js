@@ -23,7 +23,8 @@ const {
     splitStreamTextForDisplay,
     subscribeUserEvents,
     test,
-    vm
+    vm,
+    estimateTokens
 } = require('../security-helpers');
 
 test('DOMPurify 不可用时安全 HTML 兜底会转义输入', () => {
@@ -388,6 +389,44 @@ test('聊天图表 SSE 捕获会存储图表事件且不向前转发', () => {
     assert.deepEqual(forwarded, [notice]);
 });
 
+test('chat send does not auto-enable MCP when toolbox is off', () => {
+    const engine = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine.js'), 'utf8');
+
+    assert.doesNotMatch(engine, /shouldAutoEnableMcpForPrompt\s*\(/);
+    assert.doesNotMatch(engine, /activateChatMcpToggle\s*\(/);
+    assert.match(engine, /if \(mcpEnabled\) \{\s*mcpConfirmed = mcpConfirmed \|\| await ensureChatMcpConsent\(\);/s);
+});
+
+test('viewing a session record scrolls to bottom', () => {
+    const render = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'render.js'), 'utf8');
+    const sessions = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-sessions.js'), 'utf8');
+    const users = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'users.js'), 'utf8');
+
+    assert.match(render, /scrollMessagesToBottom = function\(options = \{\}\)/);
+    assert.match(render, /scrollMessagesToBottomUntil = Math\.max/);
+    assert.match(sessions, /scrollMessagesToBottom\?\.\(\{ duration: 1200 \}\)/);
+    assert.match(users, /const displayData = sessionId \? data\.slice\(\)\.reverse\(\) : data;/);
+    assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
+});
+
+test('long-term memory table uses shared table and pagination controls', () => {
+    const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
+    const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
+    const memoryPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'memories.html'), 'utf8');
+    const adminLayoutCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'admin', 'admin-layout.css'), 'utf8');
+
+    assert.match(memoryPartial, /<table class="data-table compact-table memories-table">/);
+    assert.match(memoryPartial, /id="pagination-memories" class="pagination"/);
+    assert.match(adminCore, /window\.loadMemories\(page\)/);
+    assert.match(adminSettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
+    assert.match(adminSettings, /params\.set\('limit', String\(limit\)\)/);
+    assert.match(adminSettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
+    assert.match(adminSettings, /renderPagination\('memories', total, requestedPage\)/);
+    assert.match(adminSettings, /const memory = getCurrentMemory\(memoryId\);/);
+    assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) body\.innerHTML = `<p class="muted">\$\{escapeHtml\(e\.message/s);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: none;\s*white-space: nowrap;/s);
+    assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-action-cell \{\s*display: flex;/);
+});
 test('buildFtsQuery 会把用户输入转义为短语项', () => {
     assert.equal(buildFtsQuery('hello world'), '"hello" AND "world"');
     assert.equal(buildFtsQuery('a"b NEAR c'), '"a""b" AND "NEAR" AND "c"');
@@ -460,35 +499,43 @@ test('createStreamAccumulator 包装推理增量并捕获用量', () => {
     assert.deepEqual(accumulator.getUsage(), { completion_tokens: 2 });
 });
 
-test('聊天回答速度只按可见答案片段计算', () => {
+test('聊天回答速度按完整输出 token 与总耗时计算', () => {
     const stats = buildAssistantSpeedStats({
         assistantContent: '<thought>思考 1000 token</thought>最终答案',
+        apiUsage: { completion_tokens: 140 },
         requestStartedAt: 1_000,
         endedAt: 71_000,
         firstVisibleAnswerAt: 61_000
     });
 
-    assert.equal(stats.assistantTokens > 0, true);
+    assert.equal(stats.assistantTokens, 140);
     assert.equal(stats.answerTokens > 0, true);
     assert.equal(stats.costTime, 70);
-    assert.equal(stats.answerCostTime, 10);
-    assert.equal(stats.tokensPerSec, stats.answerTokens / 10);
+    assert.equal(stats.tokensPerSec, 2);
 });
 
-test('关闭思考过程后聊天回答速率按总耗时计算', () => {
+test('聊天回答速度会用内容估算补足流式图表 token', () => {
     const stats = buildAssistantSpeedStats({
         assistantContent: '最终答案',
+        streamedChartSpecs: [{ type: 'bar', data: [1, 2, 3], title: '示例图表' }],
+        apiUsage: { completion_tokens: 1 },
         requestStartedAt: 1_000,
-        endedAt: 71_000,
-        firstVisibleAnswerAt: 61_000,
-        disableChatThinking: true
+        endedAt: 11_000
     });
 
-    assert.equal(stats.assistantTokens > 0, true);
+    assert.equal(stats.assistantTokens, estimateTokens(stats.assistantContent));
     assert.equal(stats.answerTokens > 0, true);
-    assert.equal(stats.costTime, 70);
-    assert.equal(stats.answerCostTime, 70);
-    assert.equal(stats.tokensPerSec, stats.answerTokens / 70);
+    assert.equal(stats.costTime, 10);
+    assert.equal(stats.tokensPerSec, stats.assistantTokens / 10);
+});
+
+test('前端实时速度统计按总 token 和总耗时计算', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8');
+
+    assert.match(source, /const elapsed = Math\.max\(\(Date\.now\(\) - startTime\) \/ 1000, 0\.001\);/);
+    assert.match(source, /safeTokenCount \/ elapsed/);
+    assert.doesNotMatch(source, /answerElapsed/);
+    assert.doesNotMatch(source, /firstStreamTime/);
 });
 
 test('前端流式速度统计会排除思考块 token', () => {

@@ -866,20 +866,59 @@
     font-weight: 700;
     white-space: nowrap;
 }
-.settings-workspace-view .memory-content-cell {
-    max-width: 520px;
-    white-space: normal;
-    line-height: 1.5;
+.settings-workspace-view .memories-table {
+    table-layout: fixed;
 }
+.settings-workspace-view .memories-table .memory-col-select { width: 42px; }
+.settings-workspace-view .memories-table .memory-col-type { width: 112px; }
+.settings-workspace-view .memories-table .memory-col-content { width: auto; }
+.settings-workspace-view .memories-table .memory-col-score { width: 88px; }
+.settings-workspace-view .memories-table .memory-col-status { width: 86px; }
+.settings-workspace-view .memories-table .memory-col-source { width: 82px; }
+.settings-workspace-view .memories-table .memory-col-used { width: 156px; }
+.settings-workspace-view .memories-table .memory-col-actions { width: 172px; }
+.settings-workspace-view .memories-table th,
 .settings-workspace-view .memories-table td {
-    vertical-align: top;
+    vertical-align: middle;
+}
+.settings-workspace-view .memories-table th:first-child,
+.settings-workspace-view .memories-table td:first-child,
+.settings-workspace-view .memories-table th:nth-child(4),
+.settings-workspace-view .memories-table td:nth-child(4),
+.settings-workspace-view .memories-table th:nth-child(5),
+.settings-workspace-view .memories-table td:nth-child(5),
+.settings-workspace-view .memories-table th:nth-child(6),
+.settings-workspace-view .memories-table td:nth-child(6),
+.settings-workspace-view .memories-table th:nth-child(7),
+.settings-workspace-view .memories-table td:nth-child(7) {
+    text-align: center;
+}
+.settings-workspace-view .memory-content-cell {
+    max-width: none;
+    white-space: nowrap;
+    line-height: 1.25;
 }
 .settings-workspace-view .memory-action-cell {
-    display: flex;
-    align-items: flex-start;
+    text-align: center;
+}
+.settings-workspace-view .memory-action-buttons {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-wrap: nowrap;
+    gap: 5px;
+    max-width: 100%;
+}
+.settings-workspace-view .memories-table .memory-source-btn,
+.settings-workspace-view .memory-action-buttons .btn-secondary,
+.settings-workspace-view .memory-action-buttons .btn-danger {
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    line-height: 1;
+    white-space: nowrap;
 }
 .settings-workspace-view .memory-source-btn:disabled {
     opacity: 0.5;

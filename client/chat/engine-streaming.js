@@ -333,7 +333,7 @@ function createBrowserSseParser({ onData, onDone } = {}) {
     return { write, end, isDone: () => done };
 }
 
-function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount, startTime, firstTokenTime) {
+function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount, startTime) {
     if (!textBody) return;
     const hasOpenThought = content.includes('<thought>') && !content.includes('</thought>');
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
@@ -351,9 +351,9 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     }
 
     const elapsed = Math.max((Date.now() - startTime) / 1000, 0.001);
-    const answerTokenCount = estimateStreamingAnswerTokenCount(content);
-    const answerElapsed = firstTokenTime ? Math.max((Date.now() - firstTokenTime) / 1000, 0.001) : 0;
-    const tps = firstTokenTime && answerTokenCount > 0 ? (answerTokenCount / answerElapsed).toFixed(1) : 0;
+    // 速率按完整请求窗口计算，分子使用包含思考在内的总 token 数，避免只按可见答案导致虚高。
+    const safeTokenCount = Number.isFinite(Number(tokenCount)) ? Math.max(0, Number(tokenCount)) : 0;
+    const tps = safeTokenCount > 0 ? (safeTokenCount / elapsed).toFixed(1) : 0;
     const modelName = String(statsEl?.dataset?.modelName || '').trim();
     const modelHtml = modelName
         ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeChatStatusHtml(modelName)}</span>`

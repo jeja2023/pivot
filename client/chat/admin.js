@@ -217,7 +217,7 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'stats' && window.loadStats) loadStats();
     if (tab === 'report' && window.loadReport) loadReport();
     if (tab === 'prompts' && window.loadPrompts) window.loadPrompts();
-    if (tab === 'memories' && window.loadMemories) window.loadMemories();
+    if (tab === 'memories' && window.loadMemories) window.loadMemories(page);
     if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
     if (tab === 'announcements' && window.loadAnnouncementsAdmin) window.loadAnnouncementsAdmin(page);
     if (tab === 'tool-policy' && window.loadToolPolicy) window.loadToolPolicy();

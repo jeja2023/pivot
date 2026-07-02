@@ -610,24 +610,14 @@ function createChatRouter({
                 });
             };
             const visibleReasoningFilter = disableChatThinking ? createVisibleReasoningStreamFilter() : null;
-            let firstVisibleAnswerAt = null;
-            const markFirstVisibleAnswer = () => {
-                if (!firstVisibleAnswerAt) firstVisibleAnswerAt = Date.now();
-            };
             const accumulator = createStreamAccumulator({
                 includeThoughtTags: !disableChatThinking,
                 includeThoughtContent: !disableChatThinking,
-                onContent(sendContent, meta = {}) {
+                onContent(sendContent, _meta = {}) {
                     if (disableChatThinking) {
                         const filteredContent = visibleReasoningFilter.push(sendContent);
-                        if (filteredContent) {
-                            markFirstVisibleAnswer();
-                            writeContentSse(filteredContent);
-                        }
+                        if (filteredContent) writeContentSse(filteredContent);
                         return;
-                    }
-                    if (!meta.isThought && String(meta.delta || '').trim()) {
-                        markFirstVisibleAnswer();
                     }
                     writeContentSse(sendContent);
                 }
@@ -681,7 +671,6 @@ function createChatRouter({
                     if (disableChatThinking) {
                         const filteredContent = visibleReasoningFilter.finish(assistantContent);
                         if (filteredContent) {
-                            markFirstVisibleAnswer();
                             writeContentSse(filteredContent);
                         }
                         assistantContent = stripVisibleReasoningScaffold(assistantContent);
@@ -692,9 +681,7 @@ function createChatRouter({
                         streamedChartSpecs,
                         apiUsage,
                         requestStartedAt,
-                        endedAt,
-                        firstVisibleAnswerAt,
-                        disableChatThinking
+                        endedAt
                     });
                     assistantContent = stats.assistantContent;
                     const assistantTokens = stats.assistantTokens;

@@ -132,12 +132,24 @@ async function mergeMemoryPair(targetId, sourceId) {
 
 window.openMemoryEditModal = function(memory) {
     const modal = document.getElementById('memory-edit-modal');
-    if (!modal || !memory) return;
-    document.getElementById('memory-edit-id').value = memory.id;
-    document.getElementById('memory-edit-type').value = memory.type || 'episode';
-    document.getElementById('memory-edit-content').value = memory.content || '';
-    document.getElementById('memory-edit-salience').value = Number(memory.salience || 0).toFixed(2);
-    document.getElementById('memory-edit-confidence').value = Number(memory.confidence || 0).toFixed(2);
+    const idInput = document.getElementById('memory-edit-id');
+    const typeInput = document.getElementById('memory-edit-type');
+    const contentInput = document.getElementById('memory-edit-content');
+    const salienceInput = document.getElementById('memory-edit-salience');
+    const confidenceInput = document.getElementById('memory-edit-confidence');
+    if (!modal || !idInput || !typeInput || !contentInput || !salienceInput || !confidenceInput) {
+        showToast('记忆编辑窗口加载异常，请刷新后重试', 'error');
+        return;
+    }
+    if (!memory) {
+        showToast('记忆数据已刷新，请重新加载后再编辑', 'error');
+        return;
+    }
+    idInput.value = memory.id;
+    typeInput.value = memory.type || 'episode';
+    contentInput.value = memory.content || '';
+    salienceInput.value = Number(memory.salience || 0).toFixed(2);
+    confidenceInput.value = Number(memory.confidence || 0).toFixed(2);
     modal.classList.remove('hidden');
 };
 
@@ -175,8 +187,13 @@ window.openMemorySourceModal = async function(memoryId) {
     const body = document.getElementById('memory-source-body');
     if (body) body.innerHTML = '<p class="muted">正在加载...</p>';
     modal.classList.remove('hidden');
-    const data = await fetchMemorySource(memoryId);
-    renderMemorySource(data);
+    try {
+        const data = await fetchMemorySource(memoryId);
+        renderMemorySource(data);
+    } catch (e) {
+        if (body) body.innerHTML = `<p class="muted">${escapeHtml(e.message || '记忆来源加载失败')}</p>`;
+        showToast(e.message || '记忆来源加载失败', 'error');
+    }
 };
 
 window.closeMemorySourceModal = function() {
@@ -216,10 +233,13 @@ window.loadMemoryMergeSuggestions = async function() {
     }
 };
 
-function memoryQueryParams() {
+function memoryQueryParams(page = pageState.memories || 1) {
     const params = new URLSearchParams();
+    const limit = Number(pageState.limit || 15);
+    const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
     params.set('status', document.getElementById('memory-status-filter')?.value || 'active');
-    params.set('limit', '200');
+    params.set('limit', String(limit));
+    params.set('offset', String((currentPage - 1) * limit));
     const type = document.getElementById('memory-type-filter')?.value || '';
     const search = document.getElementById('memory-search-input')?.value?.trim?.() || '';
     if (type) params.set('type', type);
@@ -293,11 +313,13 @@ function renderProductMemoryRows(memories = []) {
             </td>
             <td>${escapeHtml(memory.lastUsedAt || memory.updatedAt || '-')}</td>
             <td class="text-center memory-action-cell">
-                <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
-                ${memory.status === 'active'
-                    ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`
-                    : `<button class="btn-secondary" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`}
-                <button class="btn-danger" data-memory-action="delete" data-memory-id="${memory.id}">删除</button>
+                <div class="memory-action-buttons">
+                    <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
+                    ${memory.status === 'active'
+                        ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`
+                        : `<button class="btn-secondary" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`}
+                    <button class="btn-danger" data-memory-action="delete" data-memory-id="${memory.id}">删除</button>
+                </div>
             </td>
         </tr>
     `).join('');
@@ -361,19 +383,29 @@ async function archiveExpiredMemories() {
     return data;
 }
 
-window.loadMemories = async function() {
+window.loadMemories = async function(page = pageState.memories || 1) {
     const toggle = document.getElementById('long-term-memory-toggle');
+    const requestedPage = Math.max(1, Number.parseInt(page, 10) || 1);
+    pageState.memories = requestedPage;
     try {
-        const res = await apiFetch(`${API_BASE}/memories?${memoryQueryParams().toString()}`);
+        const res = await apiFetch(`${API_BASE}/memories?${memoryQueryParams(requestedPage).toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '长期记忆加载失败');
         if (toggle) toggle.checked = data.enabled !== false;
+        const total = Number(data.total || 0);
+        const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 15)));
+        if (total > 0 && requestedPage > totalPages) {
+            await window.loadMemories(totalPages);
+            return;
+        }
         currentLongTermMemories = Array.isArray(data.memories) ? data.memories : [];
         renderEnhancedMemorySummary(data.summary);
         renderProductMemoryRows(currentLongTermMemories);
+        renderPagination('memories', total, requestedPage);
         renderMemoryQualityPanel(await fetchMemoryQuality());
         renderMemoryJobsPanel(await fetchMemoryJobs());
     } catch (e) {
+        renderPagination('memories', 0, 1);
         showToast(e.message || '长期记忆加载失败', 'error');
     }
 };
@@ -634,10 +666,10 @@ document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click
 document.getElementById('memory-export-btn')?.addEventListener('click', () => window.exportMemories?.());
 document.getElementById('memory-search-input')?.addEventListener('input', () => {
     clearTimeout(window.memorySearchTimer);
-    window.memorySearchTimer = setTimeout(() => window.loadMemories?.(), 250);
+    window.memorySearchTimer = setTimeout(() => window.loadMemories?.(1), 250);
 });
-document.getElementById('memory-status-filter')?.addEventListener('change', () => window.loadMemories?.());
-document.getElementById('memory-type-filter')?.addEventListener('change', () => window.loadMemories?.());
+document.getElementById('memory-status-filter')?.addEventListener('change', () => window.loadMemories?.(1));
+document.getElementById('memory-type-filter')?.addEventListener('change', () => window.loadMemories?.(1));
 document.getElementById('memory-archive-expired-btn')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
@@ -708,7 +740,9 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
     button.disabled = true;
     try {
         if (action === 'edit') {
-            window.openMemoryEditModal?.(getCurrentMemory(memoryId));
+            const memory = getCurrentMemory(memoryId);
+            if (!memory) throw new Error('记忆数据已刷新，请重新加载后再编辑');
+            window.openMemoryEditModal?.(memory);
         } else if (action === 'source') {
             await window.openMemorySourceModal?.(memoryId);
         } else if (action === 'disable') {

@@ -50,6 +50,17 @@
                             <div id="memory-merge-panel" class="memory-merge-panel hidden"></div>
                             <div class="table-container memories-table-wrap">
                                 <table class="data-table compact-table memories-table">
+                                    <colgroup>
+                                        <col class="memory-col-select">
+                                        <col class="memory-col-type">
+                                        <col class="memory-col-content">
+                                        <col class="memory-col-score">
+                                        <col class="memory-col-score">
+                                        <col class="memory-col-status">
+                                        <col class="memory-col-source">
+                                        <col class="memory-col-used">
+                                        <col class="memory-col-actions">
+                                    </colgroup>
                                     <thead>
                                         <tr>
                                             <th><input id="memory-select-all" type="checkbox"></th>
@@ -66,6 +77,7 @@
                                     <tbody id="memory-list-body"></tbody>
                                 </table>
                             </div>
+                            <div id="pagination-memories" class="pagination"></div>
                         </div>
                         <div id="memory-edit-modal" class="modal-overlay hidden" style="z-index: 5250;">
                             <div class="modal memory-modal">

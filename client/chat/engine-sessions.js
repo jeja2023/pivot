@@ -82,6 +82,6 @@ window.selectSession = async function(id, title, options = {}) {
         });
     container.appendChild(fragment);
     assistantContentNodes.forEach(node => window.renderPivotCharts?.(node));
-    window.scrollMessagesToBottom?.();
+    window.scrollMessagesToBottom?.({ duration: 1200 });
     if (options.refreshSidebar && window.loadSessions) window.loadSessions();
 }

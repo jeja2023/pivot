@@ -211,6 +211,16 @@ window.exportUsers = () => downloadFileByFetch(`${API_BASE}/admin/users/export`,
 let userRecordsTarget = null;
 let userRecordsEventsBound = false;
 
+function scrollUserRecordsToBottom() {
+    const wrapper = document.querySelector('.user-records-table-wrap');
+    if (!wrapper) return;
+    const apply = () => { wrapper.scrollTop = wrapper.scrollHeight; };
+    apply();
+    requestAnimationFrame(apply);
+    setTimeout(apply, 80);
+    setTimeout(apply, 240);
+}
+
 function bindUserRecordsEvents() {
     if (userRecordsEventsBound) return;
     userRecordsEventsBound = true;
@@ -289,7 +299,8 @@ window.loadUserRecordMessages = async (page = 1) => {
         renderPagination('userRecords', total, page);
         return;
     }
-    body.innerHTML = data.map(record => {
+    const displayData = sessionId ? data.slice().reverse() : data;
+    body.innerHTML = displayData.map(record => {
         const userContent = escapeHtml(record.user_content || '');
         const assistantContent = escapeHtml(record.assistant_content || '');
         const sessionTitle = escapeHtml(record.session_title || '未命名会话');
@@ -309,6 +320,7 @@ window.loadUserRecordMessages = async (page = 1) => {
         `;
     }).join('');
     renderPagination('userRecords', total, page);
+    if (sessionId) scrollUserRecordsToBottom();
 };
 
 window.importUsers = async () => {
