@@ -4,6 +4,7 @@ This document records optimization work that is intentionally staged instead of 
 
 ## Release Snapshot
 
+- v0.0.189 (2026-07-04) 收口智能体“能力与结果”弹窗滚动问题：可用工具与结果沉淀改为独立受限面板，旧的 `overflow: visible` 兼容规则不再作用于弹窗，并通过 Playwright 布局指标与 `npm run check` 验证。
 - v0.0.188 (2026-07-03) completes the actionable follow-up pass: `chat.ui` / `chat.attachments` module migration, stored RAG debug history and observability warnings, runnable Playwright E2E smoke tests, desktop update feed policy validation, and enterprise/multi-node schema plus provider placeholders.
 - v0.0.187 (2026-07-03) completes the second-stage architecture pass: chat orchestration services, agent run state machine, RAG retrieval score and queue diagnostics, frozen `window.*` baseline guard, permission capability matrix, and deployment profile contract.
 - v0.0.186 (2026-07-03) shipped the completed guardrails from the full-project optimization pass: guarded uploads, safe outbound HTTP, runtime settings cache invalidation, agent lock renewal, chat observability, Electron origin hardening, `Pivot.modules` migration helpers, safe HTML rendering, and CI checks for raw `innerHTML` usage.
@@ -17,6 +18,7 @@ This document records optimization work that is intentionally staged instead of 
 - Agent queue workers renew running locks, validate run status transitions, record retry reasons, and expose active-run and oldest-queue-age metrics.
 - Chat generation is split into preflight, context assembly, model stream, and persistence services while emitting observability traces for slow or failed requests.
 - RAG debug query responses expose chunk ids, dense/fused/FTS/MMR score components, selected chunks, hybrid weights, applied scope, and index queue state; debug queries are now stored in `rag_debug_queries` and surfaced in the debug modal history.
+- 智能体“能力与结果”弹窗内容已使用受限面板，长工具列表和结果沉淀列表会在弹窗内滚动，不再向外撑开视口。
 - Frontend code can migrate from loose `window.*` globals into `Pivot.registerModule()` / `Pivot.getModule()` incrementally; `chat.ui` and `chat.attachments` now publish module APIs with legacy global aliases during migration.
 - Chat frontend rendering routes raw HTML updates through `PivotSafeHtml.setHtml()`, `npm run check:safe-html` blocks raw `innerHTML`, and `npm run check:window-globals` blocks new legacy `window.*` exposure.
 - Permission capability payloads now expose policy object types, data classification levels, and organization/team placeholders.

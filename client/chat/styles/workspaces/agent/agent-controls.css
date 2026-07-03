@@ -10,7 +10,7 @@
     padding: 10px 8px 10px 10px;
 }
 
-.agent-collapse-results[open] #agent-tool-list {
+.agent-config-section-store .agent-collapse-results[open] #agent-tool-list {
     max-height: none;
     overflow: visible;
 }

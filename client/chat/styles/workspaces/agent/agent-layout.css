@@ -416,6 +416,7 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    height: calc(100vh - 76px);
     max-height: calc(100vh - 76px);
 }
 
@@ -423,6 +424,15 @@
 #agent-config-modal[data-agent-config-section="results"] .agent-config-modal-body .agent-collapse-section {
     flex: 1;
     min-height: 0;
+}
+
+#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
 }
 
 .agent-config-modal-body .agent-collapse-results[open] .agent-collapse-body {
@@ -539,40 +549,61 @@
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body {
     display: grid;
+    flex: 1 1 auto;
     grid-template-columns: minmax(420px, 0.58fr) minmax(300px, 0.42fr);
-    grid-template-rows: max-content max-content minmax(0, 1fr);
+    grid-template-rows: max-content minmax(0, 1fr);
     grid-template-areas:
         "status status"
-        "tools-head art-head"
         "tools art";
     gap: 14px;
-    align-items: start;
+    align-items: stretch;
     padding: 12px;
-    height: 100%;
+    height: calc(100vh - 102px);
     min-height: 0;
-    overflow: visible;
+    max-height: calc(100vh - 102px);
+    overflow: hidden;
 }
 
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(1) {
+#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-runtime-status {
     grid-area: status;
 }
 
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(2) {
-    grid-area: tools-head;
+#agent-config-modal[data-agent-config-section="results"] .agent-results-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
+}
+
+#agent-config-modal[data-agent-config-section="results"] .agent-results-tools-panel {
+    grid-area: tools;
+}
+
+#agent-config-modal[data-agent-config-section="results"] .agent-results-artifacts-panel {
+    grid-area: art;
+}
+
+#agent-config-modal[data-agent-config-section="results"] .agent-results-panel .agent-tool-section-head.compact {
+    flex: 0 0 auto;
 }
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list {
-    grid-area: tools;
+    flex: 1 1 auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     justify-content: start;
     align-content: start;
     align-items: start;
     gap: 5px;
     min-height: 0;
-    height: 100%;
+    height: auto;
     max-height: none;
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding-right: 4px;
     scrollbar-gutter: stable;
 }
@@ -635,20 +666,18 @@
     white-space: nowrap;
 }
 
-#agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] .agent-collapse-body > :nth-child(4) {
-    grid-area: art-head;
-}
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-artifact-list {
-    grid-area: art;
+    flex: 1 1 auto;
     grid-template-columns: minmax(0, 1fr);
     justify-content: start;
     align-content: start;
     align-items: start;
     min-height: 0;
-    height: 100%;
+    height: auto;
     max-height: none;
     overflow: auto;
+    overscroll-behavior: contain;
 }
 
 #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list .empty-state,
