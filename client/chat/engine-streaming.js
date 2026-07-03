@@ -197,7 +197,7 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
     }
 
     item.className = `chat-answer-trace-item is-${normalizeAssistantTraceTone(copy.tone)}`;
-    item.innerHTML = '';
+    PivotSafeHtml.setHtml(item, '');
 
     const label = document.createElement('strong');
     label.textContent = copy.label;
@@ -227,7 +227,6 @@ function handleAssistantTraceAction(event) {
 }
 
 document.addEventListener('click', handleAssistantTraceAction);
-window.renderAssistantTraceEvent = renderAssistantTraceEvent;
 
 const STREAM_RENDER_INTERVAL_MS = 80;
 const STREAM_LOCAL_REPLAY_INTERVAL_MS = 24;
@@ -266,8 +265,6 @@ function estimateStreamingAnswerTokenCount(content) {
     return estimateStreamingTokenCount(stripStreamingThoughtContent(content));
 }
 
-window.stripStreamingThoughtContent = stripStreamingThoughtContent;
-window.estimateStreamingAnswerTokenCount = estimateStreamingAnswerTokenCount;
 
 function splitAssistantStreamDelta(delta) {
     const text = String(delta || '');
@@ -339,14 +336,14 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
 
     if (hasOpenThought && existingThoughtContent) {
-        existingThoughtContent.innerHTML = renderMarkdown(content.replace(/^<thought>/, ''), { deferPivotCharts: true });
+        PivotSafeHtml.setHtml(existingThoughtContent, renderMarkdown(content.replace(/^<thought>/, ''), { deferPivotCharts: true }));
         if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
             const inner = existingThoughtContent.closest('.thought-content-inner');
             inner.scrollTop = inner.scrollHeight;
         }
     } else {
         const thoughtState = rememberThoughtStateBeforeRender(textBody);
-        textBody.innerHTML = renderAiMessage(content, true, thoughtState.openStates);
+        PivotSafeHtml.setHtml(textBody, renderAiMessage(content, true, thoughtState.openStates));
         restoreThoughtStateAfterRender(textBody, thoughtState);
     }
 
@@ -358,12 +355,12 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     const modelHtml = modelName
         ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeChatStatusHtml(modelName)}</span>`
         : '';
-    statsEl.innerHTML = `
+    PivotSafeHtml.setHtml(statsEl, `
         ${modelHtml}
         <span class="stat-item">${ICONS.time}${elapsed.toFixed(1)}s</span>
         <span class="stat-item">${ICONS.token}${tokenCount} Tokens</span>
         <span class="stat-item">${ICONS.speed}${tps} t/s</span>
-    `;
+    `);
 }
 
 function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, tokenCount = 0, tps = 0 } = {}) {
@@ -377,12 +374,12 @@ function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, toke
     const safeCostTime = Number.isFinite(Number(costTime)) ? Number(costTime) : 0;
     const safeTokenCount = Number.isFinite(Number(tokenCount)) ? Math.max(0, Math.round(Number(tokenCount))) : 0;
     const safeTps = Number.isFinite(Number(tps)) ? Number(tps) : 0;
-    statsEl.innerHTML = `
+    PivotSafeHtml.setHtml(statsEl, `
         ${modelHtml}
         <span class="stat-item">${ICONS.time}${safeCostTime.toFixed(1)}s</span>
         <span class="stat-item">${ICONS.token}${safeTokenCount} Tokens</span>
         <span class="stat-item">${ICONS.speed}${safeTps.toFixed(1)} t/s</span>
-    `;
+    `);
     const footerEl = statsEl.closest('.message-footer');
     footerEl?.classList.remove('hidden');
     footerEl?.classList.remove('hover-time-only');
@@ -410,7 +407,7 @@ function isMessageContentInDocument(messageContent) {
     return Boolean(messageContent && document.body.contains(messageContent));
 }
 
-window.refreshCurrentContextUsage = async function(sessionId = currentSessionId) {
+async function refreshCurrentContextUsage(sessionId = currentSessionId) {
     if (!sessionId || !window.updateContextUsage) return null;
     try {
         const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/context`);
@@ -423,7 +420,7 @@ window.refreshCurrentContextUsage = async function(sessionId = currentSessionId)
         console.warn('刷新上下文用量失败', e);
     }
     return null;
-};
+}
 
 async function readChatErrorMessage(response) {
     const fallback = `服务器拒绝 (${response.status})`;
@@ -440,3 +437,25 @@ async function readChatErrorMessage(response) {
         return fallback;
     }
 }
+
+
+window.Pivot.exposeModule('chat.streaming', {
+    renderAssistantTraceEvent,
+    stripStreamingThoughtContent,
+    estimateStreamingAnswerTokenCount,
+    splitAssistantStreamDelta,
+    createBrowserSseParser,
+    renderStreamingAssistantContent,
+    renderFinalAssistantStats,
+    isMessageContainerNearBottom,
+    keepMessageContainerPinnedToBottom,
+    keepLatestCodeBlockPinned,
+    isMessageContentInDocument,
+    refreshCurrentContextUsage,
+    readChatErrorMessage
+}, [
+    'renderAssistantTraceEvent',
+    'stripStreamingThoughtContent',
+    'estimateStreamingAnswerTokenCount',
+    'refreshCurrentContextUsage'
+]);

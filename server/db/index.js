@@ -2,7 +2,7 @@ const { db, dataDir, dbPath } = require('./connection');
 const { initSchema } = require('./schema');
 const { runMigrations } = require('./migrate');
 const { runSeeds } = require('./seed');
-const { getBeijingTimestamp } = require('../time');
+const { ensureAppSetting } = require('../services/app-settings');
 const {
     RUNTIME_SETTING_DEFINITIONS,
     getRuntimeDefaultValue
@@ -21,7 +21,15 @@ runSeeds();
 const stmts = {
     insertLog: db.prepare('INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp) VALUES (?, ?, ?, ?, ?)'),
     getUserById: db.prepare('SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ? AND deleted_at IS NULL'),
-    getSettings: db.prepare('SELECT value FROM app_settings WHERE key = ?'),
+    getSettings: db.prepare(`
+        SELECT value FROM app_settings
+        WHERE key = ?
+        ORDER BY
+            CASE WHEN updated_at IS NULL OR updated_at = '' THEN 0 ELSE 1 END DESC,
+            updated_at DESC,
+            rowid DESC
+        LIMIT 1
+    `),
     // 会话与消息
     getSessions: db.prepare('SELECT * FROM sessions WHERE user_id = ? AND is_archived = ? AND deleted_at IS NULL ORDER BY is_pinned DESC, updated_at DESC'),
     getSessionById: db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL'),
@@ -48,11 +56,7 @@ stmts.getMessages = db.prepare(messageSql);
 stmts.getMessagesForContext = stmts.getMessages;
 
 const ensureSetting = (key, value) => {
-    db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO NOTHING
-    `).run(key, String(value), getBeijingTimestamp());
+    ensureAppSetting(key, value);
 };
 
 ensureSetting('rag_enabled', 'true');

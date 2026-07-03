@@ -1,5 +1,5 @@
 // 侧边栏会话列表与菜单操作 Sidebar session list and menu actions（拆自 sidebar.js）
-window.markActiveSessionInList = function(id) {
+function markActiveSessionInList(id) {
     const activeId = String(id || '');
     document.querySelectorAll('#session-list .session-item').forEach(item => {
         item.classList.toggle('active', String(item.dataset.sessionId || '') === activeId);
@@ -20,22 +20,22 @@ function updateSessionListStatus(text = '') {
     status.classList.toggle('hidden', !text);
 }
 
-window.loadSessions = async function(append = false) {
+async function loadSessions(append = false) {
     if (sidebarState.isLoading) return;
     ensureSessionTagTools();
-    
+
     const searchVal = document.getElementById('session-search-input')?.value || '';
     const tagMatch = searchVal.match(/#(\S+)/);
     const tag = tagMatch ? tagMatch[1] : '';
     const keyword = searchVal.replace(/#\S+/, '').trim();
-    
+
     if (!append) {
         sidebarState.page = 1;
         sidebarState.cursor = '';
         sidebarState.hasMore = true;
     }
     if (!sidebarState.hasMore) return;
-    
+
     sidebarState.isLoading = true;
     updateSessionListStatus(append ? '加载中...' : '');
     try {
@@ -49,25 +49,25 @@ window.loadSessions = async function(append = false) {
         if (append && sidebarState.cursor) params.set('cursor', sidebarState.cursor);
         else params.set('page', sidebarState.page);
         const res = await apiFetch(`${API_BASE}/sessions?${params.toString()}`);
-        
+
         const result = await res.json();
         const sessions = result.data || [];
         const hasMore = result.hasMore || false;
-        
+
         const list = document.getElementById('session-list');
-        if (!append) list.innerHTML = '';
-        
+        if (!append) PivotSafeHtml.setHtml(list, '');
+
         // 绑定无限滚动监听
         if (!list.dataset.boundLoadMore) {
             list.dataset.boundLoadMore = '1';
             list.addEventListener('scroll', () => {
                 if (sidebarState.isLoading || !sidebarState.hasMore) return;
                 if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) {
-                    window.loadSessions(true);
+                    loadSessions(true);
                 }
             }, { passive: true });
         }
-        
+
         sessions.forEach(s => {
             const title = s.title || '新对话';
             const safeHTMLTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -79,7 +79,7 @@ window.loadSessions = async function(append = false) {
             const sessionTimeTitle = window.formatChatDateTime ? window.formatChatDateTime(sessionRawTime) : String(sessionRawTime || '');
             const msgCount = Number(s.msg_count || 0);
             const sessionInfoTitle = escapeAttrValue([safeHTMLTitle, sessionTimeTitle, msgCount ? `${msgCount} 条消息` : ''].filter(Boolean).join(' · '));
-            
+
             const div = document.createElement('div');
             div.className = `session-item ${s.id === currentSessionId ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''} ${selectedSessionIds.has(String(s.id)) ? 'selected' : ''}`;
             div.dataset.sessionId = String(s.id);
@@ -91,7 +91,7 @@ window.loadSessions = async function(append = false) {
                 tags: String(s.tags || '')
             });
             const checked = selectedSessionIds.has(String(s.id)) ? 'checked' : '';
-            div.innerHTML = `
+            PivotSafeHtml.setHtml(div, `
                 <label class="session-select-box">
                     <input type="checkbox" data-session-select-id="${escapeAttrValue(String(s.id))}" ${checked} aria-label="选择会话">
                 </label>
@@ -111,10 +111,10 @@ window.loadSessions = async function(append = false) {
                     </button>
                     </div>
                 </div>
-            `;
+            `);
             list.appendChild(div);
         });
-        
+
         sidebarState.hasMore = hasMore;
         sidebarState.cursor = result.nextCursor || '';
         sidebarState.page++;
@@ -141,7 +141,7 @@ document.getElementById('session-list')?.addEventListener('click', (event) => {
         event.stopPropagation();
         const session = sessionMenuData.get(String(button.dataset.sessionMenuId));
         if (session) {
-            window.toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
+            toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
         }
         return;
     }
@@ -187,7 +187,7 @@ document.addEventListener('click', async (event) => {
         event.stopPropagation();
         const session = sessionMenuData.get(String(searchMenuButton.dataset.sessionMenuId));
         if (session) {
-            window.toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
+            toggleSessionMenu(event, session.id, session.title, session.isPinned, session.isArchived, session.tags);
         }
         return;
     }
@@ -247,7 +247,7 @@ document.addEventListener('click', async (event) => {
             body: JSON.stringify({ fromTag, toTag })
         });
         if (res.ok) {
-            await window.loadSessions();
+            await loadSessions();
             await loadSessionTagSummary();
             showToast('标签已重命名');
         }
@@ -264,7 +264,7 @@ document.addEventListener('click', async (event) => {
                 body: JSON.stringify({ tag })
             });
             if (res.ok) {
-                await window.loadSessions();
+                await loadSessions();
                 await loadSessionTagSummary();
                 showToast('标签已删除');
             }
@@ -287,7 +287,7 @@ document.getElementById('session-search-modal-input')?.addEventListener('keydown
     if (event.key === 'Escape') window.closeSessionSearchModal?.();
 });
 
-window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
+const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     e.stopPropagation();
     document.querySelector('.session-dropdown')?.remove();
     const menu = document.createElement('div');
@@ -315,7 +315,7 @@ window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     // 获取触发按钮的矩形区域
     const button = e.target.closest('[data-session-menu-id]');
     const rect = button ? button.getBoundingClientRect() : e.currentTarget.getBoundingClientRect();
-    
+
     // 计算初始位置
     let top = rect.bottom + 5;
     let left = rect.right - 130; // 菜单宽度约 130px
@@ -335,20 +335,20 @@ window.toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     setTimeout(() => document.addEventListener('click', close), 0);
 };
 
-window.toggleSidebar = () => document.querySelector('.sidebar').classList.toggle('collapsed');
-window.setArchiveFilter = (archived) => { 
-    sidebarState.archived = archived; 
+const toggleSidebar = () => document.querySelector('.sidebar').classList.toggle('collapsed');
+const setArchiveFilter = (archived) => {
+    sidebarState.archived = archived;
     document.getElementById('session-active-filter')?.classList.toggle('active', !archived);
     document.getElementById('session-archive-filter')?.classList.toggle('active', archived);
-    window.loadSessions(); 
+    loadSessions();
 };
 
-window.togglePinSession = async (id, currentPinned) => {
+const togglePinSession = async (id, currentPinned) => {
     const res = await apiFetch(`${API_BASE}/sessions/${id}/pin`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isPinned: !currentPinned }) });
-    if (res.ok) { showToast(!currentPinned ? '已置顶' : '已取消置顶'); await window.loadSessions(); }
+    if (res.ok) { showToast(!currentPinned ? '已置顶' : '已取消置顶'); await loadSessions(); }
 };
 
-window.toggleArchiveSession = async (id, currentArchived) => {
+const toggleArchiveSession = async (id, currentArchived) => {
     const res = await apiFetch(`${API_BASE}/sessions/${id}/archive`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: !currentArchived }) });
     if (res.ok) {
         showToast(!currentArchived ? '已归档' : '已恢复');
@@ -356,8 +356,27 @@ window.toggleArchiveSession = async (id, currentArchived) => {
             currentSessionId = null;
             window.persistActiveChatSession?.('');
             document.getElementById('current-title').innerText = '请选择或新建对话';
-            document.getElementById('message-container').innerHTML = '';
+            PivotSafeHtml.setHtml(document.getElementById('message-container'), '');
         }
-        await window.loadSessions();
+        await loadSessions();
     }
 };
+
+
+window.Pivot.exposeModule('chat.sidebar', {
+    markActiveSessionInList,
+    loadSessions,
+    toggleSessionMenu,
+    toggleSidebar,
+    setArchiveFilter,
+    togglePinSession,
+    toggleArchiveSession
+}, [
+    'markActiveSessionInList',
+    'loadSessions',
+    'toggleSessionMenu',
+    'toggleSidebar',
+    'setArchiveFilter',
+    'togglePinSession',
+    'toggleArchiveSession'
+]);

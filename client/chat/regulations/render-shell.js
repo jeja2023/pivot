@@ -17,7 +17,7 @@
 
                     function renderShell() {
                         const view = ensureView();
-                        view.innerHTML = buildViewHtml();
+                        PivotSafeHtml.setHtml(view, buildViewHtml());
                         bindEvents(view);
                         renderDocuments();
                         renderDetail();

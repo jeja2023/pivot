@@ -1,5 +1,6 @@
 const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
+const { enterpriseSchemaSql } = require('../schema/enterprise');
 
 const migrations = [
     {
@@ -28,6 +29,13 @@ const migrations = [
             }
             db.exec('DELETE FROM knowledge_chunks_fts');
             db.exec('INSERT INTO knowledge_chunks_fts(rowid, content) SELECT id, COALESCE(search_content, content) FROM knowledge_chunks');
+        }
+    },
+    {
+        id: '202607030001_rag_debug_enterprise_contracts',
+        description: 'Create RAG debug history and enterprise deployment contract tables.',
+        up(db) {
+            db.exec(enterpriseSchemaSql());
         }
     },
     ...regulationsMigrations

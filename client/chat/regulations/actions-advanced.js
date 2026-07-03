@@ -16,12 +16,12 @@
                         const body = document.getElementById('regulations-graph-body');
                         if (!panel || !body) return;
                         panel.classList.remove('hidden');
-                        body.innerHTML = '<div class="regulations-loading">正在加载引用网络…</div>';
+                        PivotSafeHtml.setHtml(body, '<div class="regulations-loading">正在加载引用网络…</div>');
                         try {
                             const resp = await fetchJson(`${API}/documents/${encodeURIComponent(docId)}/citation-graph`);
                             renderCitationGraph(body, resp.graph || null);
                         } catch (e) {
-                            body.innerHTML = `<div class="regulations-empty compact">${esc(e.message || '加载引用网络失败')}</div>`;
+                            PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(e.message || '加载引用网络失败')}</div>`);
                         }
                     }
 
@@ -56,7 +56,7 @@
                         const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
                         const edges = Array.isArray(graph?.edges) ? graph.edges : [];
                         if (!nodes.length) {
-                            container.innerHTML = '<div class="regulations-empty compact">\u8be5\u6587\u6863\u6682\u65e0\u6761\u6587\u8282\u70b9</div>';
+                            PivotSafeHtml.setHtml(container, '<div class="regulations-empty compact">\u8be5\u6587\u6863\u6682\u65e0\u6761\u6587\u8282\u70b9</div>');
                             return;
                         }
                         const nodeById = new Map(nodes.map(node => [String(node.id), node]));
@@ -66,7 +66,7 @@
                             return source && target && !edge.external && nodeById.has(source) && nodeById.has(target);
                         });
                         if (!internalEdges.length) {
-                            container.innerHTML = '<div class="regulations-empty compact">\u8be5\u6587\u6863\u6761\u6587\u4e4b\u95f4\u6682\u65e0\u5df2\u89e3\u6790\u7684\u5f15\u7528\u5173\u7cfb</div>';
+                            PivotSafeHtml.setHtml(container, '<div class="regulations-empty compact">\u8be5\u6587\u6863\u6761\u6587\u4e4b\u95f4\u6682\u65e0\u5df2\u89e3\u6790\u7684\u5f15\u7528\u5173\u7cfb</div>');
                             return;
                         }
 
@@ -183,7 +183,7 @@
                         const hiddenNodeCount = Math.max(involvedNodes.length - visibleNodes.length, 0);
                         const hiddenEdgeCount = Math.max(internalEdges.length - visibleEdges.length, 0);
 
-                        container.innerHTML = `
+                        PivotSafeHtml.setHtml(container, `
                             <div class="regulations-graph-summary">
                                 <span><strong>${internalEdges.length}</strong> \u6761\u5173\u7cfb</span>
                                 <span><strong>${involvedNodes.length}</strong> \u4e2a\u76f8\u5173\u6761\u6587</span>
@@ -211,7 +211,7 @@
                                     ${edgeList}
                                 </div>
                             </div>
-                        `;
+                        `);
                     }
                     // #7 导入预览：解析条文、展示并允许合并，最终回填到导入表单或直接入库
                     // #10 条文批注：打开面板、加载、提交、删除
@@ -221,18 +221,18 @@
                         if (!panel || !body) return;
                         panel.dataset.articleId = articleId;
                         panel.classList.remove('hidden');
-                        body.innerHTML = '<div class="regulations-loading">正在加载批注…</div>';
+                        PivotSafeHtml.setHtml(body, '<div class="regulations-loading">正在加载批注…</div>');
                         try {
                             const resp = await fetchJson(`${API}/articles/${encodeURIComponent(articleId)}/annotations`);
                             renderAnnotations(body, Array.isArray(resp.annotations) ? resp.annotations : [], articleId);
                         } catch (e) {
-                            body.innerHTML = `<div class="regulations-empty compact">${esc(e.message || '加载批注失败')}</div>`;
+                            PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(e.message || '加载批注失败')}</div>`);
                         }
                     }
 
                     function renderAnnotations(body, annotations, articleId) {
                         const currentUserId = (typeof currentUser !== 'undefined' ? currentUser : window.currentUser)?.id;
-                        body.innerHTML = `
+                        PivotSafeHtml.setHtml(body, `
                             <form class="regulations-annotation-form" data-annotation-article="${esc(articleId)}">
                                 <textarea class="form-input" name="content" rows="3" placeholder="输入内部理解、适用案例或注意事项…" required></textarea>
                                 <div class="regulations-admin-actions">
@@ -251,7 +251,7 @@
                                     </div>
                                 `).join('') : '<div class="regulations-empty compact">暂无批注，添加第一条吧</div>'}
                             </div>
-                        `;
+                        `);
                     }
 
                     async function submitAnnotation(form) {
@@ -351,7 +351,7 @@
                         if (!panel || !body) return;
                         const articles = Array.isArray(preview.articles) ? preview.articles : [];
                         const articleCount = Number(preview.articleCount || 0) || articles.length;
-                        body.innerHTML = `
+                        PivotSafeHtml.setHtml(body, `
                             <div class="regulations-preview-summary">
                                 <strong>${esc(preview.title || file.name)}</strong>
                                 <span>${articleCount} 条</span>
@@ -372,7 +372,7 @@
                                 <button type="button" class="btn-secondary" data-preview-merge>合并选中条文</button>
                                 <button type="button" class="btn-primary" data-preview-confirm>确认入库</button>
                             </div>
-                        `;
+                        `);
                         // 缓存预览数据供确认时提交
                         panel.dataset.previewFile = file.name;
                         panel.dataset.previewData = JSON.stringify({ articles, metadata, file: { name: file.name, size: file.size } });
@@ -388,9 +388,9 @@
                         // 按版本 id 升序（早→晚），版本标识多为施行日期
                         versions.sort((a, b) => Number(a.id) - Number(b.id));
                         if (!versions.length) {
-                            body.innerHTML = '<div class="regulations-empty compact">暂无版本</div>';
+                            PivotSafeHtml.setHtml(body, '<div class="regulations-empty compact">暂无版本</div>');
                         } else {
-                            body.innerHTML = `
+                            PivotSafeHtml.setHtml(body, `
                                 <div class="regulations-timeline">
                                     ${versions.map(v => `
                                         <button class="regulations-timeline-node ${Number(v.id) === Number(state.detail?.currentVersion?.id) ? 'active' : ''}" type="button" data-timeline-version="${esc(v.id)}" data-timeline-doc="${esc(docId)}">
@@ -400,7 +400,7 @@
                                         </button>
                                     `).join('')}
                                 </div>
-                            `;
+                            `);
                         }
                         panel.classList.remove('hidden');
                     }
@@ -414,7 +414,7 @@
                         const panel = document.getElementById('regulations-compare-panel');
                         const body = document.getElementById('regulations-compare-body');
                         if (!panel || !body) return;
-                        body.innerHTML = `
+                        PivotSafeHtml.setHtml(body, `
                             <form id="regulations-compare-form" data-doc-id="${esc(docId)}">
                                 <div class="regulations-admin-group">
                                     <label>从版本
@@ -434,7 +434,7 @@
                                 </div>
                             </form>
                             <div id="regulations-diff-result"></div>
-                        `;
+                        `);
                         panel.classList.remove('hidden');
                         focusFirstField(body);
                     }
@@ -458,22 +458,22 @@
                     function renderChangeImpact(container, impact) {
                         if (!container) return;
                         if (!impact) {
-                            container.innerHTML = '<div class="regulations-empty compact">无影响分析结果</div>';
+                            PivotSafeHtml.setHtml(container, '<div class="regulations-empty compact">无影响分析结果</div>');
                             return;
                         }
                         const impacts = Array.isArray(impact.impacts) ? impact.impacts : [];
                         const summary = impact.summary || {};
                         if (!impacts.length) {
-                            container.innerHTML = `
+                            PivotSafeHtml.setHtml(container, `
                                 <div class="regulations-diff-summary">
                                     <strong>变更影响分析</strong>
                                     <span>变更 ${summary.changed || 0} · 删除 ${summary.removed || 0}</span>
                                     <span>本次变更的条文未被库内其它条文引用，影响面较小。</span>
                                 </div>
-                            `;
+                            `);
                             return;
                         }
-                        container.innerHTML = `
+                        PivotSafeHtml.setHtml(container, `
                             <div class="regulations-diff-summary">
                                 <strong>变更影响分析</strong>
                                 <span>${impacts.length} 个变更条文被引用，需关注以下受影响条文</span>
@@ -495,7 +495,7 @@
                                     </div>
                                 </div>
                             `).join('')}
-                        `;
+                        `);
                     }
 
                     async function runCompare(form) {
@@ -561,14 +561,14 @@
                                 `).join('')}
                             </div>
                         ` : '';
-                        container.innerHTML = `
+                        PivotSafeHtml.setHtml(container, `
                             <div class="regulations-diff-summary">
                                 <strong>${esc(diff.document?.title || '文档')}</strong>
                                 <span>${esc(diff.from?.version_label || `版本 ${diff.from?.id}`)} → ${esc(diff.to?.version_label || `版本 ${diff.to?.id}`)}</span>
                                 <span>新增 ${summary.added || 0} · 删除 ${summary.removed || 0} · 变更 ${summary.changed || 0}</span>
                             </div>
                             ${addedHtml}${removedHtml}${changedHtml}
-                        `;
+                        `);
                     }
 
                     function syncImportHint(form) {

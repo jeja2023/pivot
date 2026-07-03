@@ -51,7 +51,7 @@
                             `${jurisdictions.size} 适用范围`,
                             getRegulationsPageSummary()
                         ];
-                        target.innerHTML = chips.map(text => `<span class="regulations-summary-pill">${esc(text)}</span>`).join('');
+                        PivotSafeHtml.setHtml(target, chips.map(text => `<span class="regulations-summary-pill">${esc(text)}</span>`).join(''));
                     }
 
                     function renderDocumentsPagination() {

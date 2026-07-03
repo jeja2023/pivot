@@ -71,7 +71,7 @@ window.loadDetails = async function(page = 1) {
     try {
         const res = await apiFetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
         const { data, total } = await res.json();
-        document.getElementById('details-list-body').innerHTML = data.map((d, i) => {
+        PivotSafeHtml.setHtml(document.getElementById('details-list-body'), data.map((d, i) => {
             const roleLabel = formatUsageRoleLabel(d.role);
             const username = d.username || '-';
             const displayName = d.nickname || d.username || '-';
@@ -88,21 +88,31 @@ window.loadDetails = async function(page = 1) {
                     <td class="text-center" title="${Number(d.token_count || 0).toLocaleString()}">${formatTokenCount(d.token_count)}</td>
                 </tr>
             `;
-        }).join('');
+        }).join(''));
         renderPagination('details', total, page);
     } catch (e) { showToast('加载明细失败', 'error'); }
 }
 
-window.loadStats = async function() {
+window.loadStats = async function(page = pageState.stats || 1) {
     ensureStatsExportActions();
+    const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
+    pageState.stats = requestedPage;
     const titleEl = document.getElementById('stats-title');
     if (titleEl) titleEl.innerText = '用量统计';
     try {
-        const res = await apiFetch(`${API_BASE}/stats/usage`, { headers: authHeaders() });
-        const data = await res.json();
-        document.getElementById('stats-list-body').innerHTML = data.map((s, idx) => `
+        const params = new URLSearchParams({
+            page: String(requestedPage),
+            limit: String(pageState.limit || 15)
+        });
+        const res = await apiFetch(`${API_BASE}/stats/usage?${params.toString()}`, { headers: authHeaders() });
+        const payload = await res.json();
+        const data = Array.isArray(payload) ? payload : (payload.data || []);
+        const total = Array.isArray(payload) ? data.length : Number(payload.total || data.length || 0);
+        const tbody = document.getElementById('stats-list-body');
+        if (!tbody) return;
+        PivotSafeHtml.setHtml(tbody, data.length ? data.map((s, idx) => `
             <tr>
-                <td class="text-center">${idx + 1}</td>
+                <td class="text-center">${(requestedPage - 1) * pageState.limit + idx + 1}</td>
                 <td title="${escapeHtml(s.username)}">${escapeHtml(s.username)}</td>
                 <td title="${escapeHtml(s.nickname || s.username)}">${escapeHtml(s.nickname || s.username)}</td>
                 <td title="${escapeHtml(s.model_name || '未知模型')}">${escapeHtml(s.model_name || '未知模型')}</td>
@@ -112,10 +122,13 @@ window.loadStats = async function() {
                 <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)} / <small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || '人民币'))}</small></td>
                 <td>${s.last_active || '-'}</td>
             </tr>
-        `).join('');
-    } catch (e) { showToast('加载统计失败', 'error'); }
+        `).join('') : '<tr><td colspan="9" class="text-center">暂无统计数据</td></tr>');
+        renderPagination('stats', total, requestedPage);
+    } catch (e) {
+        renderPagination('stats', 0, 1);
+        showToast('加载统计失败', 'error');
+    }
 }
-
 const trendChartRetryFrames = {};
 const trendChartRetryCounts = {};
 
@@ -245,16 +258,7 @@ window.closeMonitorRoutesModal = () => {
     document.getElementById('monitor-routes-modal')?.classList.add('hidden');
 };
 
-window.exportStats = () => {
-    const rows = Array.from(document.querySelectorAll('#stats-list-body tr'));
-    let csv = '\uFEFF用户,显示名,模型,消息数,输入Token,输出Token,总Token,最后活动\n';
-    rows.forEach(row => { 
-        const tds = Array.from(row.querySelectorAll('td')).slice(1); // 跳过序号列
-        csv += tds.map(td => escapeCsvValue(td.innerText)).join(',') + '\n'; 
-    });
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'usage_stats.csv'; a.click();
-};
+window.exportStats = () => downloadFileByFetch(`${API_BASE}/stats/usage/export`, 'usage_stats.csv');
 
 window.loadLogs = async function(page = 1) {
     try {
@@ -278,7 +282,7 @@ window.loadLogs = async function(page = 1) {
 
         const res = await apiFetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
         const { data, total } = await res.json();
-        document.getElementById('log-list-body').innerHTML = data.map((l, i) => {
+        PivotSafeHtml.setHtml(document.getElementById('log-list-body'), data.map((l, i) => {
             const username = l.username || '系统';
             const displayName = l.nickname || (l.username ? '-' : '系统');
             return `
@@ -292,7 +296,7 @@ window.loadLogs = async function(page = 1) {
                     <td title="${escapeHtml(l.details || '')}">${escapeHtml(l.details || '')}</td>
                 </tr>
             `;
-        }).join('');
+        }).join(''));
         renderPagination('logs', total, page);
     } catch (e) { showToast('加载日志失败', 'error'); }
 }

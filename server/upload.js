@@ -1,16 +1,27 @@
-/* File upload helpers */
+/* 文件上传辅助函数 */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { getUploadLimits } = require('./services/resource-limits');
+const { getKnowledgeLimits, getUploadLimits } = require('./services/resource-limits');
 const { clearDirSizeCache } = require('./services/dir-size-cache');
 
 const projectRoot = path.resolve(__dirname, '..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
     : path.join(projectRoot, 'uploads');
+const knowledgeUploadRoot = path.join(uploadRoot, 'docs');
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm', '.doc', '.docx', '.xls', '.xlsx']);
+const knowledgeExtensions = new Set(['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm']);
+
+const DEFAULT_MULTIPART_LIMITS = Object.freeze({
+    fieldNameSize: 80,
+    fieldSize: 256 * 1024,
+    fields: 20,
+    parts: 50,
+    headerPairs: 100
+});
+const MAX_MULTIPART_FIELD_DEPTH = 8;
 
 function scoreFilenameEncoding(value) {
     const text = String(value || '');
@@ -21,7 +32,7 @@ function scoreFilenameEncoding(value) {
         if (char === '\uFFFD') score -= 12;
         if (/[\u0080-\u009f]/u.test(char)) score -= 8;
     }
-    if (/[脙脗][\u0080-\u00bf]/u.test(text)) score -= 5;
+    if (/[鑴欒剹][\u0080-\u00bf]/u.test(text)) score -= 5;
     if (/[\u00e4-\u00e9][\u0080-\u00bf]/u.test(text)) score -= 5;
     return score;
 }
@@ -31,7 +42,7 @@ function shouldPreferLatin1DecodedName(original, decoded) {
     const originalScore = scoreFilenameEncoding(original);
     const decodedScore = scoreFilenameEncoding(decoded);
     const hasMojibakeSignal = /[\u0080-\u009f]/u.test(original)
-        || /[脙脗][\u0080-\u00bf]/u.test(original)
+        || /[鑴欒剹][\u0080-\u00bf]/u.test(original)
         || /[\u00e4-\u00e9][\u0080-\u00bf]/u.test(original);
     return hasMojibakeSignal && decodedScore > originalScore;
 }
@@ -44,11 +55,61 @@ function normalizeUploadedOriginalName(value) {
     return shouldPreferLatin1DecodedName(original, decoded) ? decoded : original;
 }
 
-function removeUploadedFile(file) {
-    if (!file?.path) return;
-    const target = path.resolve(file.path);
-    if (!target.startsWith(uploadRoot + path.sep)) return;
+function isPathInside(root, target) {
+    const resolvedRoot = path.resolve(root);
+    const resolvedTarget = path.resolve(target);
+    const relative = path.relative(resolvedRoot, resolvedTarget);
+    return relative === '' || (relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function createUploadError(message, code = 'UPLOAD_REJECTED') {
+    const err = new Error(message);
+    err.status = 400;
+    err.expose = true;
+    err.code = code;
+    return err;
+}
+
+function normalizeMulterError(error) {
+    if (!error) return null;
+    if (error instanceof multer.MulterError) {
+        error.status = 400;
+        error.expose = true;
+        return error;
+    }
+    if (!error.status) error.status = 400;
+    error.expose = true;
+    return error;
+}
+
+function trackUploadedPath(req, filePath) {
+    if (!req || !filePath) return;
+    if (!req._pivotUploadPaths) req._pivotUploadPaths = new Set();
+    req._pivotUploadPaths.add(path.resolve(filePath));
+}
+
+function removeUploadedPath(filePath, root = uploadRoot) {
+    if (!filePath) return;
+    const target = path.resolve(filePath);
+    if (!isPathInside(root, target)) return;
     fs.promises.unlink(target).then(() => clearDirSizeCache()).catch(() => {});
+}
+
+function removeUploadedFile(file, root = uploadRoot) {
+    if (!file?.path) return;
+    removeUploadedPath(file.path, root);
+}
+
+function collectRequestFiles(req) {
+    return [
+        ...(req.file ? [req.file] : []),
+        ...Object.values(req.files || {}).flat()
+    ];
+}
+
+function cleanupRequestUploads(req, root = uploadRoot) {
+    collectRequestFiles(req).forEach(file => removeUploadedFile(file, root));
+    Array.from(req._pivotUploadPaths || []).forEach(filePath => removeUploadedPath(filePath, root));
 }
 
 function verifyUploadedMagic(file) {
@@ -82,51 +143,152 @@ function verifyUploadedMagic(file) {
 }
 
 function uploadSecurityMiddleware(req, res, next) {
-    const files = [
-        ...(req.file ? [req.file] : []),
-        ...Object.values(req.files || {}).flat()
-    ];
+    const root = req._pivotUploadRoot || uploadRoot;
+    const files = collectRequestFiles(req);
     for (const file of files) {
         if (!verifyUploadedMagic(file)) {
-            files.forEach(removeUploadedFile);
+            cleanupRequestUploads(req, root);
             return res.status(400).json({ error: '文件内容与扩展名不匹配，已拒绝上传' });
         }
     }
     next();
 }
 
-function createUploadMiddleware() {
-    const storage = multer.diskStorage({
-        destination: (req, file, cb) => {
-            fs.mkdirSync(uploadRoot, { recursive: true });
-            cb(null, uploadRoot);
-        },
-        filename: (req, file, cb) => cb(null, Date.now() + '-' + crypto.randomUUID() + path.extname(normalizeUploadedOriginalName(file.originalname)))
-    });
+function countObjectDepth(value, depth = 0, seen = new Set()) {
+    if (!value || typeof value !== 'object') return depth;
+    if (seen.has(value)) return depth;
+    seen.add(value);
+    return Object.values(value).reduce((maxDepth, child) => Math.max(maxDepth, countObjectDepth(child, depth + 1, seen)), depth);
+}
 
-    const fileFilter = (req, file, cb) => {
+function validateMultipartBody(req) {
+    const body = req.body || {};
+    for (const key of Object.keys(body)) {
+        if (String(key).length > DEFAULT_MULTIPART_LIMITS.fieldNameSize) {
+            return createUploadError('上传表单字段名过长', 'LIMIT_FIELD_KEY');
+        }
+    }
+    if (countObjectDepth(body) > MAX_MULTIPART_FIELD_DEPTH) {
+        return createUploadError('上传表单字段嵌套过深', 'LIMIT_FIELD_DEPTH');
+    }
+    return null;
+}
+
+function createStorage(root) {
+    return multer.diskStorage({
+        destination: (req, file, cb) => {
+            fs.mkdirSync(root, { recursive: true });
+            req._pivotUploadRoot = root;
+            cb(null, root);
+        },
+        filename: (req, file, cb) => {
+            const ext = path.extname(normalizeUploadedOriginalName(file.originalname));
+            const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
+            trackUploadedPath(req, path.join(root, filename));
+            cb(null, filename);
+        }
+    });
+}
+
+function createFileFilter(extensions, errorMessage) {
+    return (req, file, cb) => {
         file.originalname = normalizeUploadedOriginalName(file.originalname);
         const ext = path.extname(file.originalname || '').toLowerCase();
-        if (!allowedExtensions.has(ext)) {
-            return cb(new Error(`不支持该文件类型 (${file.originalname}, 扩展名 ${ext})`));
+        if (!extensions.has(ext)) {
+            return cb(createUploadError(errorMessage || `不支持该文件类型 (${file.originalname}, 扩展名 ${ext})`, 'LIMIT_FILE_TYPE'));
         }
         cb(null, true);
     };
+}
 
-    const createInstance = () => multer({
-        storage,
-        limits: { fileSize: getUploadLimits().attachmentMaxBytes },
-        fileFilter
+function resolvePositiveInt(value, fallback) {
+    const parsed = typeof value === 'function' ? Number.parseInt(value(), 10) : Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function createUploadInstance(options = {}) {
+    const maxFiles = resolvePositiveInt(options.maxFiles, 1);
+    const maxFields = resolvePositiveInt(options.maxFields, DEFAULT_MULTIPART_LIMITS.fields);
+    const fileSize = resolvePositiveInt(options.fileSize, getUploadLimits().attachmentMaxBytes);
+    return multer({
+        storage: createStorage(options.root || uploadRoot),
+        limits: {
+            ...DEFAULT_MULTIPART_LIMITS,
+            fileSize,
+            files: maxFiles,
+            fields: maxFields,
+            parts: resolvePositiveInt(options.maxParts, maxFiles + maxFields + 4)
+        },
+        fileFilter: createFileFilter(options.extensions || allowedExtensions, options.errorMessage)
     });
+}
 
+function withUploadGuards(middleware, options = {}) {
+    return (req, res, next) => {
+        const root = options.root || uploadRoot;
+        req._pivotUploadRoot = root;
+        const cleanup = () => cleanupRequestUploads(req, root);
+        const onAborted = () => cleanup();
+        req.once('aborted', onAborted);
+        middleware(req, res, (err) => {
+            req.off?.('aborted', onAborted);
+            if (err) {
+                cleanup();
+                return next(normalizeMulterError(err));
+            }
+            const fieldError = validateMultipartBody(req);
+            if (fieldError) {
+                cleanup();
+                return next(fieldError);
+            }
+            return next();
+        });
+    };
+}
+
+function createSafeUpload(options = {}) {
+    const root = options.root || uploadRoot;
     return {
         single(field) {
-            return (req, res, next) => createInstance().single(field)(req, res, next);
+            return (req, res, next) => withUploadGuards(
+                createUploadInstance({ ...options, root, maxFiles: 1 }).single(field),
+                { root }
+            )(req, res, next);
         },
         array(field, maxCount) {
-            return (req, res, next) => createInstance().array(field, maxCount)(req, res, next);
+            const maxFiles = resolvePositiveInt(maxCount, options.maxFiles || 1);
+            return (req, res, next) => withUploadGuards(
+                createUploadInstance({ ...options, root, maxFiles }).array(field, maxFiles),
+                { root }
+            )(req, res, next);
         }
     };
 }
 
-module.exports = { createUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware };
+function createUploadMiddleware() {
+    return createSafeUpload({
+        root: uploadRoot,
+        extensions: allowedExtensions,
+        fileSize: () => getUploadLimits().attachmentMaxBytes,
+        maxFields: 20
+    });
+}
+
+function createKnowledgeUploadMiddleware() {
+    return createSafeUpload({
+        root: knowledgeUploadRoot,
+        extensions: knowledgeExtensions,
+        fileSize: () => getKnowledgeLimits().uploadMaxBytes,
+        maxFields: 6,
+        maxParts: 10,
+        errorMessage: '仅支持 txt、md、pdf、doc、docx、xls、xlsx、csv、json、html 文档'
+    });
+}
+
+module.exports = {
+    createKnowledgeUploadMiddleware,
+    createSafeUpload,
+    createUploadMiddleware,
+    normalizeUploadedOriginalName,
+    uploadSecurityMiddleware
+};

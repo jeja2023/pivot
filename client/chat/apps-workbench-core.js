@@ -212,7 +212,7 @@ function createOfficialWritingState(overrides = {}) {
 }
 
 // 多文档库：每篇公文为一条记录，包含独立的正文、原文、版本、批注、建议、发文要素等。
-// library = { activeId, docs: [{ id, title, updatedAt, state }] }
+// 文档库结构：{ activeId, docs: [{ id, title, updatedAt, state }] }
 let officialWritingLibrary = { activeId: '', docs: [] };
 
 function normalizeOfficialWritingMeta(meta) {
@@ -363,7 +363,7 @@ function renderAppsGrid() {
     if (!grid || !empty) return;
     const apps = PIVOT_APP_REGISTRY;
     empty.classList.toggle('hidden', apps.length > 0);
-    grid.innerHTML = apps.map(app => `
+    PivotSafeHtml.setHtml(grid, apps.map(app => `
         <button class="app-card" type="button" data-app-id="${escapeAppsHtml(app.id)}">
             <span class="app-card-icon">${getAppIconSvg(app.icon)}</span>
             <span class="app-card-main">
@@ -375,7 +375,7 @@ function renderAppsGrid() {
                 <span class="app-card-desc">${escapeAppsHtml(app.description)}</span>
             </span>
         </button>
-    `).join('');
+    `).join(''));
 }
 
 function setAppsTitle(title, desc) {

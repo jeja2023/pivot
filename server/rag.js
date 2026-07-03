@@ -1,12 +1,11 @@
-/* Knowledge base and RAG API facade */
+/* 知识库与 RAG API 门面 */
 const express = require('express');
-const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const { db } = require('./db');
 const { authMiddleware } = require('./auth');
 const { asyncHandler, getClientIp } = require('./http');
 const { getBeijingTimestamp } = require('./time');
-const { normalizeUploadedOriginalName } = require('./upload');
+const { createKnowledgeUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware } = require('./upload');
 const { clearRagCacheForUser } = require('./services/rag-cache');
 const {
     batchDeleteKnowledgeDocuments,
@@ -22,6 +21,7 @@ const {
     getKnowledgeDocumentForUser,
     getKnowledgeQualityReport,
     getKnowledgeDocumentSummaryForUser,
+    getKnowledgeIndexQueueStatus,
     getRagFeedbackSummary,
     recordRagFeedback,
     scheduleFailedKnowledgeDocumentsForUser,
@@ -53,7 +53,8 @@ const {
 } = require('./services/knowledge-graph');
 const { normalizeAuditAction } = require('./audit-actions');
 const { isSuperAdmin } = require('./permissions');
-const { getKnowledgeLimits } = require('./services/resource-limits');
+const { listRagDebugQueries, recordRagDebugQuery } = require('./services/rag-debug-history');
+const { recordObservabilityEvent, recordSlowRagRetrieval } = require('./services/observability');
 
 const ragRouter = express.Router();
 const debugQueryLimiter = rateLimit({
@@ -63,23 +64,7 @@ const debugQueryLimiter = rateLimit({
     legacyHeaders: false,
     message: { error: '召回测试请求过于频繁，请稍后再试' }
 });
-function createKnowledgeUpload() {
-    return multer({
-        dest: 'uploads/docs/',
-        limits: { fileSize: getKnowledgeLimits().uploadMaxBytes },
-        fileFilter: (req, file, cb) => {
-            file.originalname = normalizeUploadedOriginalName(file.originalname);
-            if (/\.(txt|md|pdf|doc|docx|xls|xlsx|csv|json|html|htm)$/i.test(file.originalname || '')) return cb(null, true);
-            cb(new Error('仅支持 txt、md、pdf、doc、docx、xls、xlsx、csv、json、html 文档'));
-        }
-    });
-}
-
-const upload = {
-    single(field) {
-        return (req, res, next) => createKnowledgeUpload().single(field)(req, res, next);
-    }
-};
+const upload = createKnowledgeUploadMiddleware();
 
 function auditRagAction(req, action, details) {
     try {
@@ -349,7 +334,7 @@ ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, r
     return res.json({ success: true, ...result });
 }));
 
-ragRouter.post('/upload', authMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
+ragRouter.post('/upload', authMiddleware, upload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请上传文件' });
 
     req.file.originalname = normalizeUploadedOriginalName(req.file.originalname);
@@ -392,22 +377,59 @@ ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, re
     return res.json({ success: true, ...result });
 }));
 
+ragRouter.get('/debug-query/history', authMiddleware, (req, res) => {
+    res.json({ data: listRagDebugQueries(req.user.id, { limit: req.query.limit }) });
+});
+
 ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(async (req, res) => {
     const query = String(req.body?.query || '').trim();
     if (!query) return res.status(400).json({ error: '请输入检索问题' });
 
     const startedAt = Date.now();
+    const scope = req.body?.ragScope || req.body?.scope || { collectionId: req.body?.collectionId };
+    const topK = req.body?.topK;
+    const candidateLimit = req.body?.candidateLimit;
+    const scoreThreshold = req.body?.scoreThreshold;
     const result = await debugRetrieveContext(req.user.id, query, {
-        topK: req.body?.topK,
-        candidateLimit: req.body?.candidateLimit,
-        scoreThreshold: req.body?.scoreThreshold,
-        scope: req.body?.ragScope || req.body?.scope || { collectionId: req.body?.collectionId },
+        topK,
+        candidateLimit,
+        scoreThreshold,
+        scope,
         user: req.user
     });
-    // 把检索耗时回填，给前端"检索可视化"展示用
-    return res.json({ ...result, elapsedMs: Date.now() - startedAt });
+    const queue = getKnowledgeIndexQueueStatus(req.user.id);
+    const elapsedMs = Date.now() - startedAt;
+    recordRagDebugQuery({
+        userId: req.user.id,
+        query,
+        scope,
+        topK,
+        candidateLimit,
+        scoreThreshold,
+        result,
+        queue,
+        elapsedMs
+    });
+    recordSlowRagRetrieval({
+        query,
+        durationMs: elapsedMs,
+        debug: true,
+        candidateCount: result.candidateCount || 0,
+        matchedCount: Array.isArray(result.matches) ? result.matches.filter(item => item.matched).length : 0,
+        queue
+    });
+    if (Number(queue.pending || 0) > 0 && Number(queue.running || 0) >= Math.max(1, Number(queue.maxConcurrent || 1))) {
+        recordObservabilityEvent({
+            type: 'rag',
+            source: 'rag.debug-query',
+            severity: 'warning',
+            durationMs: elapsedMs,
+            message: 'RAG index queue backlog during debug query',
+            details: { query: query.slice(0, 500), queue }
+        });
+    }
+    return res.json({ ...result, queue, elapsedMs });
 }));
-
 ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (req, res) => {
     const savedConfig = getEmbeddingConfig(req.user.id).http;
     const config = {

@@ -1,6 +1,6 @@
-// Agent 运行详情 Agent run detail
-// Split from agent-runs-list.js.
-// Agent run detail, preview polling, and audit modal rendering.
+// Agent 运行详情
+// 拆自 agent-runs-list.js。
+// Agent 运行详情、预览轮询和审计弹窗渲染。
 /* eslint-disable no-undef */
 function bindAgentRunTitleTooltip(list = document.getElementById('agent-runs-list')) {
     if (!list || list.dataset.boundAgentRunTitleTooltip === '1') return;
@@ -65,7 +65,7 @@ function closeAgentRunDetailModal() {
     const detail = document.getElementById('agent-run-detail');
     const closingPreview = activeAgentRunId === activeAgentWorkflowPreviewRunId;
     modal?.classList.add('hidden');
-    if (detail) detail.innerHTML = '';
+    if (detail) PivotSafeHtml.setHtml(detail, '');
     document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
     if (closingPreview) {
         stopAgentWorkflowPreviewPolling();
@@ -86,11 +86,11 @@ window.openAgentRun = async function(runId, options = {}) {
         row.classList.toggle('active', active);
     });
     modal?.classList.remove('hidden');
-    if (!options.silent) detail.innerHTML = '<div class="empty-state agent-empty-state">正在加载任务详情...</div>';
+    if (!options.silent) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
     const data = await res.json();
     if (!res.ok) {
-        detail.innerHTML = `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`;
+        PivotSafeHtml.setHtml(detail, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
         return null;
     }
     const run = data.run;
@@ -113,7 +113,7 @@ window.openAgentRun = async function(runId, options = {}) {
     const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
     if (title) title.textContent = isPreview ? `预览运行：${agentPreviewDisplayTitle(agentDisplayTitle(run))}` : agentDisplayTitle(run);
-    detail.innerHTML = `
+    PivotSafeHtml.setHtml(detail, `
         <div class="agent-progress-summary">
             <div class="agent-progress-bar"><span style="width: ${progressPercent}%"></span></div>
             <div class="agent-progress-meta">
@@ -150,7 +150,7 @@ window.openAgentRun = async function(runId, options = {}) {
         ${showDagNodeDetails ? '' : `<div class="agent-step-list">
             ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
         </div>`}
-    `;
+    `);
     detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
         if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
         return window.cancelAgentRun(run.id);
@@ -197,7 +197,7 @@ function ensureAgentAuditModal() {
     modal = document.createElement('div');
     modal.id = 'agent-audit-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
+    PivotSafeHtml.setHtml(modal, `
         <div class="modal rag-detail-modal agent-audit-modal">
             <div class="rag-detail-header">
                 <div>
@@ -224,7 +224,7 @@ function ensureAgentAuditModal() {
                 </table>
             </div>
         </div>
-    `;
+    `);
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#agent-audit-close-btn')) {

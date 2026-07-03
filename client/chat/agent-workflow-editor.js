@@ -1,6 +1,6 @@
-// Agent 工作流编辑器桥接 Agent workflow editor bridge
+// Agent 工作流编辑器桥接
 // 从 agent-workflows.js 拆分。
-// Agent workflow visual editor bridge, split from agent-workflows.js.
+// Agent 可视化工作流编辑器桥接，拆自 agent-workflows.js。
 /* eslint-disable no-undef */
 let dagEditorInstance = null;
 
@@ -66,12 +66,12 @@ function refreshAgentDagInputsPanel() {
     list.querySelectorAll('.agent-dag-input-item input').forEach(input => {
         existing[input.dataset.dagInputKey || input.name] = input.value;
     });
-    list.innerHTML = [...refs].map(key => `
+    PivotSafeHtml.setHtml(list, [...refs].map(key => `
         <label class="agent-dag-input-item">
             <span>${agentEscape(key)}</span>
             <input class="form-input" type="text" data-dag-input-key="${agentEscape(key)}" value="${agentEscape(existing[key] || '')}" placeholder="输入 ${agentEscape(key)} 的值">
         </label>
-    `).join('');
+    `).join(''));
 }
 
 function collectAgentDagInputs() {

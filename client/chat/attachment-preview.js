@@ -1,4 +1,4 @@
-/* Attachment Preview */
+/* 附件预览 */
 const ATTACHMENT_TEXT_LIMIT = 12000;
 
 const escapePreviewHtml = (value) => window.PivotSafeHtml
@@ -32,7 +32,7 @@ function setAttachmentPreviewMeta(modal, title, url, kind, mimeType) {
 }
 
 function renderAttachmentPreviewLoading(content, label = '\u6b63\u5728\u52a0\u8f7d\u9884\u89c8...') {
-    content.innerHTML = `<div class="attachment-preview-empty">${escapePreviewHtml(label)}</div>`;
+    PivotSafeHtml.setHtml(content, `<div class="attachment-preview-empty">${escapePreviewHtml(label)}</div>`);
 }
 
 async function renderAttachmentTextPreview(content, url) {
@@ -42,28 +42,28 @@ async function renderAttachmentTextPreview(content, url) {
     });
     if (!response.ok) throw new Error(`Preview failed (${response.status})`);
     const text = (await response.text()).slice(0, ATTACHMENT_TEXT_LIMIT);
-    content.innerHTML = `<pre class="attachment-preview-text">${escapePreviewHtml(text)}</pre>`;
+    PivotSafeHtml.setHtml(content, `<pre class="attachment-preview-text">${escapePreviewHtml(text)}</pre>`);
 }
 
 async function renderAttachmentPreview(content, url, kind) {
     if (kind === 'image') {
-        content.innerHTML = `<img class="attachment-preview-image" src="${escapePreviewHtml(url)}" alt="Attachment preview">`;
+        PivotSafeHtml.setHtml(content, `<img class="attachment-preview-image" src="${escapePreviewHtml(url)}" alt="Attachment preview">`);
         return;
     }
     if (kind === 'pdf') {
-        content.innerHTML = `<iframe class="attachment-preview-frame" src="${escapePreviewHtml(url)}" title="Attachment preview" loading="lazy"></iframe>`;
+        PivotSafeHtml.setHtml(content, `<iframe class="attachment-preview-frame" src="${escapePreviewHtml(url)}" title="Attachment preview" loading="lazy"></iframe>`);
         return;
     }
     if (kind === 'text') {
         await renderAttachmentTextPreview(content, url);
         return;
     }
-    content.innerHTML = `
+    PivotSafeHtml.setHtml(content, `
         <div class="attachment-preview-empty">
             <div>\u6682\u4e0d\u652f\u6301\u5728\u7ebf\u9884\u89c8\u8be5\u6587\u4ef6\u7c7b\u578b\u3002</div>
             <div><a href="${escapePreviewHtml(url)}" target="_blank" rel="noopener noreferrer">\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00</a></div>
         </div>
-    `;
+    `);
 }
 
 window.openAttachmentPreview = async function(url, title = '', mimeType = '') {
@@ -77,12 +77,12 @@ window.openAttachmentPreview = async function(url, title = '', mimeType = '') {
     try {
         await renderAttachmentPreview(content, url, kind);
     } catch (e) {
-        content.innerHTML = `
+        PivotSafeHtml.setHtml(content, `
             <div class="attachment-preview-empty">
                 <div>\u9884\u89c8\u5931\u8d25\uff1a${escapePreviewHtml(e.message || 'unknown error')}</div>
                 <div><a href="${escapePreviewHtml(url)}" target="_blank" rel="noopener noreferrer">\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00</a></div>
             </div>
-        `;
+        `);
     }
 };
 
@@ -90,7 +90,7 @@ window.closeAttachmentPreview = function() {
     const modal = document.getElementById('attachment-preview-modal');
     const content = document.getElementById('attachment-preview-content');
     if (modal) modal.classList.add('hidden');
-    if (content) content.innerHTML = '';
+    if (content) PivotSafeHtml.setHtml(content, '');
 };
 
 document.addEventListener('click', (event) => {

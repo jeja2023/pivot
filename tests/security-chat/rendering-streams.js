@@ -404,15 +404,45 @@ test('viewing a session record scrolls to bottom', () => {
 
     assert.match(render, /scrollMessagesToBottom = function\(options = \{\}\)/);
     assert.match(render, /scrollMessagesToBottomUntil = Math\.max/);
-    assert.match(sessions, /scrollMessagesToBottom\?\.\(\{ duration: 1200 \}\)/);
+    assert.match(render, /new ResizeObserver/);
+    assert.match(render, /requestAnimationFrame\(\(\) => requestAnimationFrame\(apply\)\)/);
+    assert.match(sessions, /scrollMessagesToBottom\?\.\(\{ duration: 2400 \}\)/);
+    assert.match(sessions, /setTimeout\(\(\) => window\.scrollMessagesToBottom\?\.\(\{ duration: 900 \}\), 320\)/);
     assert.match(users, /const displayData = sessionId \? data\.slice\(\)\.reverse\(\) : data;/);
     assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
+});
+
+test('usage statistics page has pagination controls and cache-bypassed monitor refresh', () => {
+    const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
+    const stats = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'stats.js'), 'utf8');
+    const statsMonitor = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'stats-monitor.js'), 'utf8');
+    const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
+    const reportPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'report.html'), 'utf8');
+    const adminStatsRoute = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'routes', 'admin-stats.js'), 'utf8');
+
+    assert.match(adminCore, /stats: 1/);
+    assert.match(adminCore, /if \(tab === 'stats' && window\.loadStats\) loadStats\(page\);/);
+    assert.match(reportPartial, /id="pagination-stats" class="pagination"/);
+    assert.match(stats, /window\.loadStats = async function\(page = pageState\.stats \|\| 1\)/);
+    assert.match(stats, /stats\/usage\?\$\{params\.toString\(\)\}/);
+    assert.match(stats, /renderPagination\('stats', total, requestedPage\)/);
+    assert.match(stats, /window\.exportStats = \(\) => downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export`, 'usage_stats\.csv'\)/);
+    assert.match(adminStatsRoute, /router\.get\('\/usage'[\s\S]*LIMIT @limit OFFSET @offset/);
+    assert.match(adminStatsRoute, /router\.get\('\/usage\/export'[\s\S]*filename=usage_stats\.csv/);
+    assert.match(adminStatsRoute, /res\.json\(\{ data: stats, total, page, limit \}\)/);
+    assert.match(adminStatsRoute, /const forceRefresh = req\.query\?\.refresh === '1'/);
+    assert.match(statsMonitor, /window\.loadMonitorSummary = async function\(options = \{\}\)/);
+    assert.match(statsMonitor, /\?refresh=1/);
+    assert.match(statsMonitor, /window\.refreshMonitorSummary = function\(options = \{\}\)/);
+    assert.match(adminSettings, /window\.refreshMonitorSummary\(\{ force: true \}\)/);
 });
 
 test('long-term memory table and modals use shared controls', () => {
     const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
     const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
     const memoryPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'memories.html'), 'utf8');
+    const preAppModals = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
+    const globalParamsPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'global-params.html'), 'utf8');
     const adminLayoutCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'admin', 'admin-layout.css'), 'utf8');
 
     assert.match(memoryPartial, /<table class="data-table compact-table memories-table">/);
@@ -424,18 +454,37 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(memoryPartial, /class="model-form-row memory-edit-grid"/);
     assert.match(memoryPartial, /class="model-form memory-source-form"/);
     assert.match(memoryPartial, /class="model-modal-actions memory-modal-actions"/);
-    assert.match(memoryPartial, /id="memory-source-close" type="button" class="btn-secondary settings-close-btn"/);
+    assert.match(memoryPartial, /<div class="model-modal-header memory-modal-header">\s*<h3>来源<\/h3>\s*<button id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close">关闭<\/button>\s*<\/div>/);
+    assert.match(memoryPartial, /id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close"/);
+    assert.doesNotMatch(memoryPartial, /<div class="model-form memory-source-form">[\s\S]*?model-modal-actions memory-modal-actions/);
     assert.match(adminCore, /window\.loadMemories\(page\)/);
     assert.match(adminSettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
+    assert.match(adminSettings, /function collectRuntimeSettingsPayload\(source = null\)/);
+    assert.match(adminSettings, /sourceEl\?\.closest\?\.\('#tab-content-global-params'\)/);
+    assert.doesNotMatch(adminSettings, /openRuntimeSettingsModal/);
+    assert.doesNotMatch(adminSettings, /closeRuntimeSettingsModal/);
+    assert.match(adminSettings, /const payload = collectRuntimeSettingsPayload\(source\);/);
+    assert.doesNotMatch(adminSettings, /runtime-settings-save/);
+    assert.doesNotMatch(preAppModals, /runtime-settings-modal/);
+    assert.doesNotMatch(preAppModals, /data-runtime-key=/);
+    assert.match(globalParamsPartial, /id="runtime-settings-page-save"/);
+    assert.match(globalParamsPartial, /data-runtime-key="model_endpoint_default_concurrency"/);
+    assert.doesNotMatch(adminSettings, /document\.querySelectorAll\('\[data-runtime-key\]'\)\)[\s\S]*visibleRuntimeInputs/);
     assert.match(adminSettings, /params\.set\('limit', String\(limit\)\)/);
     assert.match(adminSettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
     assert.match(adminSettings, /renderPagination\('memories', total, requestedPage\)/);
+    assert.match(adminSettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
+    assert.match(adminSettings, /formatMemoryStatusLabel\(memory\.status\)/);
+    assert.doesNotMatch(adminSettings, /escapeHtml\(memory\.status \|\| 'active'\)/);
     assert.match(adminSettings, /const memory = getCurrentMemory\(memoryId\);/);
-    assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) body\.innerHTML = `<p class="muted">\$\{escapeHtml\(e\.message/s);
+    assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) PivotSafeHtml\.setHtml\(body, `<p class="muted">\$\{escapeHtml\(e\.message/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: none;\s*white-space: nowrap;/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-modal \{\s*width: min\(680px,/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-content textarea\.form-input \{\s*height: 180px;/s);
-    assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-modal-header \{/);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-modal-header \{\s*display: flex;\s*align-items: center;\s*justify-content: space-between;/s);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-source-close \{\s*margin-left: auto;/s);
+    assert.doesNotMatch(adminLayoutCss, /runtime-settings-modal/);
+    assert.doesNotMatch(adminLayoutCss, /runtime-settings-grid/);
     assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-edit-form,\s*\.settings-workspace-view \.memory-source-body \{/);
     assert.doesNotMatch(adminLayoutCss, /\.settings-workspace-view \.memory-action-cell \{\s*display: flex;/);
 });

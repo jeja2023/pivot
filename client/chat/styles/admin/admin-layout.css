@@ -278,76 +278,6 @@
     padding: 0 12px;
     font-size: 0.78rem;
 }
-.model-modal.runtime-settings-modal {
-    width: min(900px, calc(100vw - 36px));
-    max-height: min(820px, calc(100vh - 36px));
-    padding: 0;
-    overflow: hidden;
-}
-.model-modal.runtime-settings-modal .runtime-settings-modal-header {
-    display: block;
-    padding: 16px 24px 12px;
-}
-.model-modal.runtime-settings-modal .runtime-settings-form {
-    padding: 0;
-    gap: 0;
-    overflow: hidden;
-}
-.model-modal.runtime-settings-modal .runtime-settings-grid {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    padding: 16px 24px;
-    overflow-y: auto;
-    scrollbar-gutter: stable;
-}
-.model-modal.runtime-settings-modal .runtime-settings-group {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 12px;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-}
-.model-modal.runtime-settings-modal .runtime-settings-group.runtime-settings-group-sampling {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.model-modal.runtime-settings-modal .runtime-settings-group h4 {
-    grid-column: 1 / -1;
-    margin: 2px 0 -1px;
-    color: var(--text-main);
-    font-size: 0.78rem;
-    font-weight: 800;
-    line-height: 1.2;
-    text-align: left;
-}
-.model-modal.runtime-settings-modal .runtime-settings-group .model-form-row {
-    display: contents;
-}
-.model-modal.runtime-settings-modal .runtime-settings-group .form-item {
-    min-width: 0;
-}
-.model-modal.runtime-settings-modal .runtime-settings-group .form-input {
-    height: 38px;
-    margin-bottom: 0;
-}
-.model-modal.runtime-settings-modal .runtime-settings-status {
-    min-height: 20px;
-    margin: 0;
-    padding: 0 24px 10px;
-    text-align: center;
-}
-.model-modal.runtime-settings-modal .model-modal-actions {
-    margin-top: 0;
-    padding: 12px 24px 14px;
-    border-top: 1px solid var(--border);
-    background: #fff;
-    box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.035);
-}
 .global-params-tab .global-params-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -453,14 +383,6 @@
     .global-params-tab .global-params-list {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
-}
-.model-modal.runtime-settings-modal .runtime-settings-group-desc {
-    grid-column: 1 / -1;
-    margin: -2px 0 4px;
-    color: #64748b;
-    font-size: 0.73rem;
-    line-height: 1.4;
-    text-align: left;
 }
 .settings-workspace-view .btn-primary,
 .settings-workspace-view .btn-secondary,
@@ -967,6 +889,15 @@
     width: min(820px, calc(100vw - 32px));
     max-height: min(780px, calc(100vh - 40px));
 }
+.settings-workspace-view .memory-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.settings-workspace-view .memory-source-close {
+    margin-left: auto;
+}
 .settings-workspace-view .memory-edit-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1050,22 +981,6 @@
     }
     .settings-workspace-view .memory-metrics-strip {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .model-modal.runtime-settings-modal .runtime-settings-grid,
-    .model-modal.runtime-settings-modal .runtime-settings-group {
-        grid-template-columns: 1fr;
-    }
-    .model-modal.runtime-settings-modal .runtime-settings-modal-header {
-        padding: 14px 16px 11px;
-    }
-    .model-modal.runtime-settings-modal .runtime-settings-grid {
-        padding: 14px 16px;
-    }
-    .model-modal.runtime-settings-modal .runtime-settings-status {
-        padding: 0 16px 10px;
-    }
-    .model-modal.runtime-settings-modal .model-modal-actions {
-        padding: 10px 16px 12px;
     }
     .settings-workspace-view .memory-edit-grid,
     .settings-workspace-view .memory-merge-row,

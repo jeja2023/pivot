@@ -901,3 +901,27 @@ test('api access disabled blocks api key creation', async () => {
         assert.equal(getApiAccessSetting(), previousValue);
     }
 });
+
+test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the file', async () => {
+    const { createKnowledgeUploadMiddleware, createUploadMiddleware, uploadSecurityMiddleware } = require('../server/upload');
+    assert.equal(typeof createUploadMiddleware().single('file'), 'function');
+    assert.equal(typeof createKnowledgeUploadMiddleware().single('file'), 'function');
+
+    const badPath = path.join(uploadRoot, `bad-magic-${Date.now()}.png`);
+    fs.mkdirSync(path.dirname(badPath), { recursive: true });
+    fs.writeFileSync(badPath, Buffer.from('not a real png'));
+    const req = { file: { path: badPath, originalname: 'bad.png' }, files: {} };
+    const res = {
+        statusCode: 200,
+        body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+    let nextCalled = false;
+    uploadSecurityMiddleware(req, res, () => { nextCalled = true; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /文件内容/);
+    assert.equal(fs.existsSync(badPath), false);
+});

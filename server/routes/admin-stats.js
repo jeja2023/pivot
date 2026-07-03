@@ -1,4 +1,4 @@
-/* 管理员运营统计路由 Admin Stats Routes */
+/* 管理员运营统计路由 */
 const express = require('express');
 const path = require('path');
 const os = require('os');
@@ -10,6 +10,7 @@ const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 const { getMaintenanceStatus } = require('../services/maintenance');
+const { getDeploymentProfile } = require('../services/deployment-profile');
 const {
     getObservabilitySettings,
     listObservabilityEvents,
@@ -217,7 +218,8 @@ function createAdminStatsRouter({
 
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const cacheNow = Date.now();
-        if (monitorSummaryCache.data && monitorSummaryCache.expires > cacheNow) {
+        const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1' || req.query?.cache === 'none';
+        if (!forceRefresh && monitorSummaryCache.data && monitorSummaryCache.expires > cacheNow) {
             return res.json(monitorSummaryCache.data);
         }
         const httpMetrics = getHttpMetricsSnapshot();
@@ -359,6 +361,7 @@ function createAdminStatsRouter({
             },
             health,
             maintenance,
+            deployment: getDeploymentProfile(),
             storage: {
                 db: dbSize,
                 uploads: uploadsSize,
@@ -401,7 +404,13 @@ function createAdminStatsRouter({
     
     router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const query = `
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+        const offset = (page - 1) * limit;
+        const filterParams = {};
+        const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
+        if (!canViewAll) filterParams.userId = req.user.id;
+        const groupedQuery = `
             SELECT u.username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
@@ -413,14 +422,60 @@ function createAdminStatsRouter({
             FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models m ON usage.model_id = m.id
-            ${canViewAll ? '' : 'WHERE usage.user_id = ?'}
+            ${whereClause}
+            GROUP BY u.id, usage.model_id
+        `;
+        const stats = db.prepare(`
+            ${groupedQuery}
+            ORDER BY last_active DESC
+            LIMIT @limit OFFSET @offset
+        `).all({ ...filterParams, limit, offset });
+        const totalStmt = db.prepare(`SELECT COUNT(*) AS count FROM (${groupedQuery}) grouped`);
+        const totalRow = Object.keys(filterParams).length ? totalStmt.get(filterParams) : totalStmt.get();
+        const total = totalRow?.count || 0;
+        res.json({ data: stats, total, page, limit });
+    }));
+    router.get('/usage/export', authMiddleware, asyncHandler(async (req, res) => {
+        const canViewAll = isSuperAdmin(req.user);
+        const params = {};
+        const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
+        if (!canViewAll) params.userId = req.user.id;
+        const usageExportStmt = db.prepare(`
+            SELECT u.username, u.nickname, m.name as model_name,
+                   COUNT(usage.id) as msg_count,
+                   COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
+                   COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
+                   COALESCE(SUM(usage.token_count), 0) as total_tokens,
+                   COALESCE(SUM(${usageCostSql('usage', 'm')}), 0) as estimated_cost,
+                   COALESCE(m.price_currency, '人民币') as price_currency,
+                   MAX(usage.created_at) as last_active
+            FROM (${tokenUsageSubquery()}) usage
+            JOIN users u ON usage.user_id = u.id
+            LEFT JOIN models m ON usage.model_id = m.id
+            ${whereClause}
             GROUP BY u.id, usage.model_id
             ORDER BY last_active DESC
-        `;
-        const stats = canViewAll ? db.prepare(query).all() : db.prepare(query).all(req.user.id);
-        res.json(stats);
+        `);
+        const rows = Object.keys(params).length ? usageExportStmt.all(params) : usageExportStmt.all();
+        let csv = '\uFEFF用户,显示名,模型,消息数,输入Token,输出Token,总Token,估算费用,最后活动\n';
+        rows.forEach(row => {
+            csv += [
+                row.username,
+                row.nickname || row.username || '',
+                row.model_name || '未知模型',
+                row.msg_count || 0,
+                row.input_tokens || 0,
+                row.output_tokens || 0,
+                row.total_tokens || 0,
+                `${row.price_currency || '人民币'} ${row.estimated_cost || 0}`,
+                row.last_active || ''
+            ].map(escapeCsvCell).join(',') + '\n';
+        });
+        logAction(req, '导出用量统计', `导出 ${rows.length} 条汇总`);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=usage_stats.csv');
+        res.send(csv);
     }));
-
     router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         // 把"最近 30 天"日期范围与可选的个人过滤下推到 UNION 各分支内部，命中 created_at / user_id 索引。
@@ -451,7 +506,7 @@ function createAdminStatsRouter({
         const params = {};
         if (start || end) {
             if (start) {
-                // date(usage.created_at) >= date(start) → created_at >= '<start> 00:00:00'
+                // 将 date(usage.created_at) >= date(start) 改写为 created_at >= '<start> 00:00:00'。
                 innerConditions.push('created_at >= @startTs');
                 params.startTs = `${String(start)} 00:00:00`;
             }
@@ -500,7 +555,7 @@ function createAdminStatsRouter({
             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC
         `).all(params);
 
-        // Filter out options for select dropdowns
+        // 过滤用于下拉选择框的选项。
         const units = db.prepare("SELECT DISTINCT unit FROM users WHERE unit IS NOT NULL AND unit != ''").all().map(r => r.unit);
 
         res.json({ trend, byUser, byUnit, units });
@@ -630,7 +685,7 @@ function createAdminStatsRouter({
         const innerConditions = [];
         const params = {};
         if (start) {
-            // date(usage.created_at) >= date(start) → created_at >= '<start> 00:00:00'
+            // 将 date(usage.created_at) >= date(start) 改写为 created_at >= '<start> 00:00:00'。
             innerConditions.push('created_at >= @startTs');
             params.startTs = `${start} 00:00:00`;
         }

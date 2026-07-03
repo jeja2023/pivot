@@ -78,7 +78,7 @@
         }
         const root = document.createElement('div');
         root.id = 'announcement-root';
-        root.innerHTML = `
+        PivotSafeHtml.setHtml(root, `
             <div id="announcement-banner" class="announcement-banner hidden"></div>
             <button id="announcement-bell" class="announcement-bell hidden" type="button" title="公告中心" aria-label="公告中心">
                 <span class="announcement-bell-dot hidden" id="announcement-bell-dot"></span>
@@ -102,7 +102,7 @@
                     <button id="announcement-ack-btn" class="btn-primary" type="button">我已知晓并确认</button>
                 </div>
             </div>
-        `;
+        `);
         document.body.appendChild(root);
         mountAnnouncementBell();
         document.getElementById('announcement-bell')?.addEventListener('click', () => {
@@ -145,7 +145,7 @@
         const top = visible[0];
         if (banner) {
             banner.className = `announcement-banner ${top ? `is-${top.priority || 'normal'}` : 'hidden'}`;
-            banner.innerHTML = top ? `
+            PivotSafeHtml.setHtml(banner, top ? `
                 <div>
                     <strong>${esc(top.title)}</strong>
                     <span>${esc(top.content)}</span>
@@ -154,14 +154,14 @@
                     ${top.requireAck && !top.acknowledgedAt ? `<button class="btn-primary" type="button" data-announcement-action="ack" data-announcement-id="${top.id}">确认</button>` : ''}
                     ${canDismissAnnouncement(top) ? `<button class="btn-secondary" type="button" data-announcement-action="dismiss" data-announcement-id="${top.id}">不再提示</button>` : ''}
                 </div>
-            ` : '';
+            ` : '');
         }
 
         if (list) {
             if (!visible.length) {
-                list.innerHTML = '<div class="announcement-empty">暂无有效公告</div>';
+                PivotSafeHtml.setHtml(list, '<div class="announcement-empty">暂无有效公告</div>');
             } else {
-                list.innerHTML = visible.map(item => `
+                PivotSafeHtml.setHtml(list, visible.map(item => `
                     <article class="announcement-card ${item.readAt ? '' : 'is-unread'} is-${esc(item.priority)}">
                         <div class="announcement-card-head">
                             <span class="announcement-chip">${TYPE_LABELS[item.type] || '公告'} · ${PRIORITY_LABELS[item.priority] || '普通'}</span>
@@ -175,7 +175,7 @@
                             ${canDismissAnnouncement(item) ? `<button class="btn-secondary" type="button" data-announcement-action="dismiss" data-announcement-id="${item.id}">不再提示</button>` : ''}
                         </div>
                     </article>
-                `).join('');
+                `).join(''));
             }
         }
 
@@ -314,7 +314,7 @@
         if (!panel) return;
         const items = state.loginItems || [];
         panel.classList.toggle('hidden', items.length === 0);
-        panel.innerHTML = items.length ? `
+        PivotSafeHtml.setHtml(panel, items.length ? `
             <div class="auth-announcements-head">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span>公告</span>
@@ -335,7 +335,7 @@
                     </article>
                 `).join('')}
             </div>
-        ` : '';
+        ` : '');
 
         if (items.length > 0) {
             const closeBtn = panel.querySelector('.auth-announcements-close');

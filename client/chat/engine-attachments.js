@@ -256,10 +256,6 @@ function clearPendingAttachments(message = '') {
     if (message) showToast(message, 'info');
 }
 
-window.isChatImageAttachment = isChatImageAttachment;
-window.getMaxPendingAttachments = getMaxPendingAttachments;
-window.setMaxPendingAttachments = setMaxPendingAttachments;
-window.syncPendingAttachmentsGlobal = syncPendingAttachmentsGlobal;
 
 function createUploadProgress(label) {
     const area = document.getElementById('attachment-preview');
@@ -268,12 +264,12 @@ function createUploadProgress(label) {
 
     const card = document.createElement('div');
     card.className = 'upload-progress-card';
-    card.innerHTML = `
+    PivotSafeHtml.setHtml(card, `
         <div class="upload-progress-ring" style="--progress:0">
             <span>0%</span>
         </div>
         <div class="upload-progress-name">${escapeChatStatusHtml(label)}</div>
-    `;
+    `);
     area.prepend(card);
 
     return {
@@ -321,9 +317,31 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     e.target.value = '';
 });
 
-window.removeAttachment = (index) => {
+function removeAttachment(index) {
     revokeAttachmentPreview(pendingAttachments[index]);
     pendingAttachments.splice(index, 1);
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();
-};
+}
+
+window.Pivot.exposeModule('chat.attachments', {
+    attachmentBelongsToSession,
+    buildAttachmentMarkdown,
+    clearPendingAttachments,
+    getMaxPendingAttachments,
+    getPendingAttachments: () => pendingAttachments,
+    isChatImageAttachment,
+    preparePendingAttachmentsForSend,
+    removeAttachment,
+    setMaxPendingAttachments,
+    syncPendingAttachmentsGlobal
+}, {
+    attachmentBelongsToSession: 'attachmentBelongsToSession',
+    clearPendingAttachments: 'clearPendingAttachments',
+    getMaxPendingAttachments: 'getMaxPendingAttachments',
+    isChatImageAttachment: 'isChatImageAttachment',
+    preparePendingAttachmentsForSend: 'preparePendingAttachmentsForSend',
+    removeAttachment: 'removeAttachment',
+    setMaxPendingAttachments: 'setMaxPendingAttachments',
+    syncPendingAttachmentsGlobal: 'syncPendingAttachmentsGlobal'
+});

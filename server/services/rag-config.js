@@ -1,4 +1,5 @@
 const { db } = require('../db');
+const { getAppSettingValue } = require('./app-settings');
 const { decryptSecret, encryptSecret } = require('../security');
 const { getRagLimits } = require('./resource-limits');
 
@@ -31,8 +32,7 @@ function clampInteger(value, fallback, min, max) {
 }
 
 function getSettingValue(key) {
-    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
-    return row?.value;
+    return getAppSettingValue(key);
 }
 
 function getUserSettingValue(userId, key) {
@@ -73,7 +73,7 @@ function getEmbeddingConfig(userId = null) {
     return {
         mode,
         http,
-        // Backward-compatible alias for older callers/tests while the app migrates.
+        // 迁移期间为旧调用方和测试保留向后兼容别名。
         cloud: http,
         source: {
             mode: userMode ? 'user' : (storedMode ? 'settings' : 'env'),

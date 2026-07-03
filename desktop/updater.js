@@ -1,5 +1,6 @@
 const { dialog, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const { assertAllowedUpdateFeedUrl } = require('./update-policy');
 
 let activeController = null;
 let ipcRegistered = false;
@@ -138,10 +139,15 @@ function setupAutoUpdater({ app, mainWindow, config }) {
         return activeController;
     }
 
+    const feedUrl = assertAllowedUpdateFeedUrl(updateConfig.url, {
+        allowedOrigins: updateConfig.allowedOrigins || [],
+        env: process.env
+    });
+
     autoUpdater.autoDownload = updateConfig.autoDownload !== false;
     autoUpdater.allowPrerelease = updateConfig.allowPrerelease === true;
     autoUpdater.autoInstallOnAppQuit = updateConfig.installOnQuit !== false;
-    autoUpdater.setFeedURL({ provider: 'generic', url: updateConfig.url });
+    autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
 
     autoUpdater.on('checking-for-update', () => {
         emitState({ status: 'checking', error: '', progress: null });

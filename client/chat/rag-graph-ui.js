@@ -160,11 +160,11 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
         const tooltip = ensureGraphNodeTooltip();
         cancelGraphNodeTooltipHide();
         const lines = text.split('\n').filter(Boolean);
-        tooltip.innerHTML = lines.map((line, index) => (
+        PivotSafeHtml.setHtml(tooltip, lines.map((line, index) => (
             index === 0
                 ? `<strong>${escapeHtml(line)}</strong>`
                 : `<span>${escapeHtml(line)}</span>`
-        )).join('');
+        )).join(''));
         tooltip.classList.remove('hidden');
         positionGraphNodeTooltip(eventOrRect);
     }
@@ -225,7 +225,7 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
             try {
                 map.releasePointerCapture(event.pointerId);
             } catch (error) {
-                // The pointer may already be released by the browser.
+                // 指针可能已被浏览器释放。
             }
         }
         return true;

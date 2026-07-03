@@ -1,4 +1,3 @@
-const axios = require('axios');
 const fs = require('fs');
 const { db } = require('./db');
 const { getBeijingTimestamp } = require('./time');
@@ -8,9 +7,7 @@ const { resolveUploadUrlPath, toProjectRelativePath } = require('./security');
 const { withTimeout, KeyedConcurrencyGuard } = require('./services/concurrency');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    buildModelHeaders
 } = require('./services/model-adapter');
 const {
     DEFAULT_MEMORY_THRESHOLD,
@@ -18,6 +15,8 @@ const {
     normalizeMemoryThreshold
 } = require('./services/memory-config');
 const { getBackgroundRuntimeConfig } = require('./services/runtime-settings');
+const { forwardChatCompletion } = require('./services/model-forwarder');
+const { getAppSettingValue } = require('./services/app-settings');
 const { getAttachmentContextLimit } = require('./services/resource-limits');
 
 const THRESHOLD = DEFAULT_MEMORY_THRESHOLD;
@@ -366,8 +365,7 @@ function getStoredMessageContextTokens(message = {}) {
 
 function getMemoryThreshold() {
     try {
-        const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(MEMORY_CONFIG_KEYS.threshold);
-        return normalizeMemoryThreshold(row?.value, DEFAULT_MEMORY_THRESHOLD);
+        return normalizeMemoryThreshold(getAppSettingValue(MEMORY_CONFIG_KEYS.threshold), DEFAULT_MEMORY_THRESHOLD);
     } catch (_err) {
         return DEFAULT_MEMORY_THRESHOLD;
     }
@@ -593,23 +591,22 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
     try {
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         // 调用时校验出站地址（含 DNS 解析），与其它模型出站点一致，阻断 SSRF / DNS rebinding
-        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
-        const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
-        const response = await axios.post(targetUrl, {
-            model: modelCfg.model_name,
-            messages: [
-                { role: 'system', content: '你负责将冗长的对话历史压缩为关键记忆片段。' },
-                { role: 'user', content: summaryPrompt }
-            ],
-            stream: false
-        }, {
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user: options.user || null,
+            url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
+            data: {
+                model: modelCfg.model_name,
+                messages: [
+                    { role: 'system', content: 'Compress the long conversation history into concise key memory fragments.' },
+                    { role: 'user', content: summaryPrompt }
+                ],
+                stream: false
+            },
             signal: options.signal,
-            timeout: MEMORY_COMPRESSION_TIMEOUT_MS,
-            proxy: false,
-            ...agents
+            timeout: MEMORY_COMPRESSION_TIMEOUT_MS
         });
-
         const summaryText = `【短期会话记忆摘要】： ${response.data.choices[0].message.content}`;
         const now = getBeijingTimestamp();
         const transaction = db.transaction(() => {

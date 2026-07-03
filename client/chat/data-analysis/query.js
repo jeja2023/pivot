@@ -41,7 +41,7 @@
         const filters = state.visualQuery.filters;
         
         if (filters.length === 0) {
-            container.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 10px; border: 1px dashed rgba(148, 163, 184, 0.16); border-radius: 6px;">无筛选条件，将查询全部数据</div>`;
+            PivotSafeHtml.setHtml(container, `<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 10px; border: 1px dashed rgba(148, 163, 184, 0.16); border-radius: 6px;">无筛选条件，将查询全部数据</div>`);
             return;
         }
         
@@ -58,7 +58,7 @@
             { value: 'not_null', label: '不为空' }
         ];
         
-        container.innerHTML = filters.map((filter, index) => {
+        PivotSafeHtml.setHtml(container, filters.map((filter, index) => {
             const fieldOptionsHtml = buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择字段' });
             const operatorOptionsHtml = opOptions.map(op => `<option value="${op.value}" ${filter.operator === op.value ? 'selected' : ''}>${esc(op.label)}</option>`).join('');
             const showValueInput = !['null', 'not_null'].includes(filter.operator);
@@ -75,7 +75,7 @@
                     <button type="button" class="btn-secondary data-analysis-query-filter-remove">删除</button>
                 </div>
             `;
-        }).join('');
+        }).join(''));
         
         // 分别为每个渲染出来的 field select 设置当前选中的 value
         filters.forEach((filter, index) => {
@@ -122,10 +122,10 @@
         const dataset = activeDataset();
         const columns = dataset?.columns || [];
         if (!columns.length) {
-            box.innerHTML = '';
+            PivotSafeHtml.setHtml(box, '');
             return;
         }
-        box.innerHTML = `<span class="data-analysis-query-fields-label">可用字段：</span>${columns.map(column => `<button type="button" class="data-analysis-query-field" data-data-analysis-query-field="${esc(column.name)}">${esc(column.name)}</button>`).join('')}`;
+        PivotSafeHtml.setHtml(box, `<span class="data-analysis-query-fields-label">可用字段：</span>${columns.map(column => `<button type="button" class="data-analysis-query-field" data-data-analysis-query-field="${esc(column.name)}">${esc(column.name)}</button>`).join('')}`);
     }
 
     async function runQuery() {
@@ -154,17 +154,17 @@
         const box = document.getElementById('data-analysis-query-result');
         if (!box) return;
         if (!state.query) {
-            box.innerHTML = '<div class="data-analysis-empty">编写并运行查询后在此查看结果</div>';
+            PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">编写并运行查询后在此查看结果</div>');
             return;
         }
         const result = state.query;
-        box.innerHTML = `
+        PivotSafeHtml.setHtml(box, `
             <div class="data-analysis-query-meta">返回 ${fmtNumber(result.rowCount)} 行${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</div>
             <div class="data-analysis-query-table" style="margin-bottom: 12px;">${buildTableFromRows(result.columns || [], result.rows || [])}</div>
             <div style="display: flex; justify-content: flex-end;">
                 <button id="data-analysis-query-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出查询结果 (CSV)</button>
             </div>
-        `;
+        `);
     }
 
     function buildSqlFromVisual() {

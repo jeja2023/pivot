@@ -73,12 +73,12 @@ function renderAgentWorkflowLifecycle() {
         ? '草稿/发布版'
         : '仅草稿';
     if (target) {
-        target.innerHTML = [
+        PivotSafeHtml.setHtml(target, [
             workflowLifecycleChip('草稿', draftText, draftMatchesSaved ? '' : 'is-draft'),
             workflowLifecycleChip('当前', currentText, workflow ? 'is-ready' : ''),
             workflowLifecycleChip('发布', publishedText, workflow?.published_version ? 'is-ready' : 'is-draft'),
             workflowLifecycleChip('运行', runText, workflow?.published_version ? 'is-ready' : '')
-        ].join('');
+        ].join(''));
     }
 }
 

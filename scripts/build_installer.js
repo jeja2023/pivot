@@ -1,7 +1,5 @@
 // 智枢 (Pivot AI) - 桌面端一键打包脚本
 const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 
 console.log("==========================================");
 console.log("      智枢 (Pivot AI) - 桌面端打包程序");

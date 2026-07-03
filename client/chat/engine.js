@@ -91,7 +91,7 @@ window.sendMessage = async function(isRegenerate = false) {
     const updateAssistantStatus = (message, type = 'queue') => {
         if (!textBody) return;
         const cls = type === 'error' ? 'error-detail' : 'queue-detail';
-        textBody.innerHTML = `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`;
+        PivotSafeHtml.setHtml(textBody, `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`);
     };
     let fullAiContent = '';
     let tokenCount = 0;
@@ -138,7 +138,7 @@ window.sendMessage = async function(isRegenerate = false) {
         if (responseType.includes('application/json')) {
             const data = await response.json();
             fullAiContent = data.content || data.error || '';
-            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+            if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
             if (window.loadSessions) window.loadSessions();
             return;
@@ -245,9 +245,9 @@ window.sendMessage = async function(isRegenerate = false) {
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             hasRenderedPersistedAssistantContent = true;
             if (textBody && isRequestMessageVisible()) {
-                // Dispose any echarts instances/listeners under the node before we replace its DOM.
+                // 替换 DOM 前释放节点下的 ECharts 实例和监听器。
                 window.teardownPivotCharts?.(textBody);
-                textBody.innerHTML = renderAiMessage(fullAiContent, false);
+                PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
                 window.renderPivotCharts?.(textBody);
             }
         };
@@ -316,7 +316,7 @@ window.sendMessage = async function(isRegenerate = false) {
                     if (data.content) {
                         fullAiContent = data.content;
                         tokenCount = estimateStreamingTokenCount(fullAiContent);
-                        if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+                        if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
                     }
                     const elapsed = getElapsedSeconds();
                     const finalTokenCount = data.tokenCount ?? (data.content ? estimateStreamingTokenCount(data.content) : tokenCount);
@@ -368,7 +368,7 @@ window.sendMessage = async function(isRegenerate = false) {
 
         const finalElapsed = getElapsedSeconds();
         const finalTps = getAverageTps();
-        // Post-success bookkeeping must not surface as a chat error if it fails.
+        // 成功后的收尾记录失败时不应显示为聊天错误。
         try {
             if (!hasServerFinalStats) {
                 await apiFetch(API_BASE + '/chat/stats', {
@@ -405,13 +405,13 @@ window.sendMessage = async function(isRegenerate = false) {
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
             }
             fullAiContent += '\n\n[已由用户中断生成]';
-            if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, true);
+            if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, true));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {
             if (e.messageId) window.setMessageActionId?.(aiMsgEl, e.messageId);
             if (e.persistedContent) {
                 fullAiContent = e.persistedContent;
-                if (textBody && isRequestMessageVisible()) textBody.innerHTML = renderAiMessage(fullAiContent, false);
+                if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
             } else if (isRequestMessageVisible()) {
                 updateAssistantStatus(e.message, 'error');
             }

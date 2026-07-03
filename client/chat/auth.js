@@ -30,10 +30,10 @@ window.toggleAuthPassword = (inputId, iconId) => {
     if (!input || !icon) return;
     if (input.type === 'password') {
         input.type = 'text';
-        icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+        PivotSafeHtml.setHtml(icon, '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>');
     } else {
         input.type = 'password';
-        icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />';
+        PivotSafeHtml.setHtml(icon, '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />');
     }
 };
 
@@ -228,7 +228,7 @@ window.loadApiKeys = async function() {
         if (keys.length === 0) {
             renderTableMessage(body, 9, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
         } else {
-            body.innerHTML = keys.map((k, index) => `
+            PivotSafeHtml.setHtml(body, keys.map((k, index) => `
                 <tr>
                     <td class="text-center">${index + 1}</td>
                     <td>${escapeHtml(k.name)}</td>
@@ -242,7 +242,7 @@ window.loadApiKeys = async function() {
                         <button class="btn-danger" type="button" title="删除" data-api-key-action="delete" data-api-key-id="${k.id}">删除</button>
                     </td>
                 </tr>
-            `).join('');
+            `).join(''));
         }
         // 同步加载可用模型信息
         window.loadAvailableModels();
@@ -284,7 +284,7 @@ window.loadApiCallLogs = async function(page = 1) {
             renderPagination('apiCallLogs', total, page);
             return;
         }
-        body.innerHTML = data.map((row, idx) => {
+        PivotSafeHtml.setHtml(body, data.map((row, idx) => {
             const requestText = row.request_messages || '';
             const responseText = row.response_text || row.error_message || '';
             const statusText = row.status === 'error' ? '失败' : '成功';
@@ -303,7 +303,7 @@ window.loadApiCallLogs = async function(page = 1) {
                     <td class="text-center" style="color:${statusColor};font-weight:600;" title="${escapeHtml(row.error_message || statusText)}">${statusText}</td>
                 </tr>
             `;
-        }).join('');
+        }).join(''));
         renderPagination('apiCallLogs', total, page);
     } catch (e) {
         renderTableMessage(body, 10, e.message, { color: 'var(--danger)' });
@@ -314,7 +314,7 @@ window.loadAvailableModels = async function() {
     const listEl = document.getElementById('available-models-list');
     if (!listEl) return;
     if (window.apiAccessEnabled === false) {
-        listEl.innerHTML = '<span style="color: var(--text-muted);">API 接入已关闭，暂无外部调用模型</span>';
+        PivotSafeHtml.setHtml(listEl, '<span style="color: var(--text-muted);">API 接入已关闭，暂无外部调用模型</span>');
         return;
     }
     try {
@@ -322,7 +322,7 @@ window.loadAvailableModels = async function() {
         if (!res.ok) throw new Error('加载可用模型失败');
         const models = await res.json();
         if (models.length === 0) {
-            listEl.innerHTML = '<span style="color: var(--text-muted);">暂无可用全局模型</span>';
+            PivotSafeHtml.setHtml(listEl, '<span style="color: var(--text-muted);">暂无可用全局模型</span>');
             return;
         }
         const renderCapabilityText = (model) => {
@@ -346,14 +346,14 @@ window.loadAvailableModels = async function() {
             `;
         };
         // 简化展示：只显示模型标识 (model 参数值)，使用标签形式排列
-        listEl.innerHTML = `
+        PivotSafeHtml.setHtml(listEl, `
             <div class="api-model-chip-list">
                 ${models.map(renderModelChip).join('')}
             </div>
             <p class="api-model-note">* 以上为外部调用时 model 参数需填写的具体值；聊天模型用于 /v1/chat/completions，向量模型用于 /v1/embeddings。</p>
-        `;
+        `);
     } catch (e) {
-        listEl.innerHTML = `<span style="color: var(--danger);">加载失败: ${escapeHtml(e.message)}</span>`;
+        PivotSafeHtml.setHtml(listEl, `<span style="color: var(--danger);">加载失败: ${escapeHtml(e.message)}</span>`);
     }
 }
 

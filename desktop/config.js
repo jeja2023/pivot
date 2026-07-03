@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { normalizeOriginList, normalizeUpdateFeedUrl } = require('./update-policy');
 
 const DEFAULT_AUTO_UPDATE = {
     enabled: false,
@@ -7,7 +8,8 @@ const DEFAULT_AUTO_UPDATE = {
     checkOnStart: true,
     autoDownload: true,
     allowPrerelease: false,
-    installOnQuit: true
+    installOnQuit: true,
+    allowedOrigins: []
 };
 
 const DEFAULT_CONFIG = {
@@ -17,6 +19,8 @@ const DEFAULT_CONFIG = {
     partition: '',
     windowTitle: '智枢 Pivot',
     allowExternalOpen: true,
+    allowedExternalOrigins: [],
+    sandbox: true,
     autoUpdate: DEFAULT_AUTO_UPDATE
 };
 
@@ -66,6 +70,10 @@ function candidateConfigPaths(app, argv = process.argv, env = process.env) {
     ].filter(item => item.path);
 }
 
+function normalizeStringList(value) {
+    const items = Array.isArray(value) ? value : String(value || '').split(',');
+    return items.map(item => String(item || '').trim()).filter(Boolean);
+}
 function normalizeMode(value) {
     const mode = String(value || '').trim().toLowerCase();
     if (mode === 'remote' || mode === 'local') return mode;
@@ -101,29 +109,31 @@ function normalizeRemoteUrl(value) {
     return normalizeHttpUrl(value, 'config.remoteUrl', true);
 }
 
-function normalizeUpdateUrl(value, required) {
-    const normalized = normalizeHttpUrl(value, 'config.autoUpdate.url', required);
-    if (!normalized) return '';
-    const url = new URL(normalized);
-    if (!url.pathname.endsWith('/')) url.pathname += '/';
-    return url.toString();
+function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env) {
+    return normalizeUpdateFeedUrl(value, {
+        required,
+        allowedOrigins,
+        env
+    });
 }
 
-function normalizeAutoUpdate(value) {
+function normalizeAutoUpdate(value, env = process.env) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const merged = { ...DEFAULT_AUTO_UPDATE, ...source };
     const enabled = merged.enabled === true;
+    const allowedOrigins = normalizeOriginList(merged.allowedOrigins);
     return {
         enabled,
-        url: normalizeUpdateUrl(merged.url, enabled),
+        url: normalizeUpdateUrl(merged.url, enabled, allowedOrigins, env),
         checkOnStart: merged.checkOnStart !== false,
         autoDownload: merged.autoDownload !== false,
         allowPrerelease: merged.allowPrerelease === true,
-        installOnQuit: merged.installOnQuit !== false
+        installOnQuit: merged.installOnQuit !== false,
+        allowedOrigins
     };
 }
 
-function normalizeConfig(raw, meta = {}) {
+function normalizeConfig(raw, meta = {}, env = process.env) {
     const input = raw || {};
     const merged = { ...DEFAULT_CONFIG, ...input };
     const mode = normalizeMode(merged.mode);
@@ -135,7 +145,9 @@ function normalizeConfig(raw, meta = {}) {
         partition: normalizePartition(merged.partition, mode, environmentName),
         windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : '智枢 Pivot',
         allowExternalOpen: merged.allowExternalOpen !== false,
-        autoUpdate: normalizeAutoUpdate(merged.autoUpdate),
+        allowedExternalOrigins: normalizeStringList(merged.allowedExternalOrigins),
+        sandbox: merged.sandbox !== false,
+        autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env),
         source: meta.source || 'default',
         path: meta.path || ''
     };
@@ -146,9 +158,9 @@ function normalizeConfig(raw, meta = {}) {
 function loadDesktopConfig(app, argv = process.argv, env = process.env) {
     const candidates = candidateConfigPaths(app, argv, env);
     const selected = candidates.find(item => existingFile(item.path));
-    if (!selected) return normalizeConfig(DEFAULT_CONFIG, { source: 'default', path: '' });
+    if (!selected) return normalizeConfig(DEFAULT_CONFIG, { source: 'default', path: '' }, env);
     const raw = readJsonFile(selected.path);
-    return normalizeConfig(raw, selected);
+    return normalizeConfig(raw, selected, env);
 }
 
 module.exports = {

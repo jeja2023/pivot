@@ -36,11 +36,11 @@
                         const searches = Array.isArray(state.savedSearches) ? state.savedSearches : [];
                         if (!searches.length) {
                             target.classList.add('hidden');
-                            target.innerHTML = '';
+                            PivotSafeHtml.setHtml(target, '');
                             return;
                         }
                         target.classList.remove('hidden');
-                        target.innerHTML = `
+                        PivotSafeHtml.setHtml(target, `
                             <div class="regulations-saved-searches-head">
                                 <strong>保存检索</strong>
                                 <span>${searches.length} 项</span>
@@ -56,7 +56,7 @@
                                     </div>
                                 `).join('')}
                             </div>
-                        `;
+                        `);
                     }
 
                     function renderSearchResults() {
@@ -78,21 +78,21 @@
                         `;
                         targets.forEach(target => {
                             target.classList.toggle('hidden', !hasQuery && !hasMatches);
-                            target.innerHTML = (!hasQuery && !hasMatches) ? '' : resultsHtml;
+                            PivotSafeHtml.setHtml(target, (!hasQuery && !hasMatches) ? '' : resultsHtml);
                         });
                     }
                     function renderAiAnswer() {
                         const target = document.getElementById('regulations-ai-answer');
                         if (!target) return;
                         if (state.aiBusy) {
-                            target.innerHTML = '<div class="regulations-loading">正在生成回答…</div>';
+                            PivotSafeHtml.setHtml(target, '<div class="regulations-loading">正在生成回答…</div>');
                             return;
                         }
                         if (!state.aiTurns.length) {
-                            target.innerHTML = '<div class="regulations-empty compact">AI 回答会显示在这里</div>';
+                            PivotSafeHtml.setHtml(target, '<div class="regulations-empty compact">AI 回答会显示在这里</div>');
                             return;
                         }
-                        target.innerHTML = state.aiTurns.map((turn, turnIndex) => {
+                        PivotSafeHtml.setHtml(target, state.aiTurns.map((turn, turnIndex) => {
                             const sources = Array.isArray(turn.sources) ? turn.sources : [];
                             const direct = sources.filter(s => !s.viaLink);
                             const related = sources.filter(s => s.viaLink);
@@ -126,7 +126,7 @@
                                     </div>
                                 </div>
                             `;
-                        }).join('');
+                        }).join(''));
                     }
 
         Object.assign(ns, {

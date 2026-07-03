@@ -12,10 +12,13 @@ function createAgentQueue({
     getTimestamp
 }) {
     const activeRunIds = new Set();
+    const activeStartedAt = new Map();
+    const lockRenewTimers = new Map();
     const queuedHints = new Set();
     let processScheduled = false;
     let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
+    const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
 
     const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
 
@@ -69,6 +72,42 @@ function createAgentQueue({
         return null;
     }
 
+    function renewRunLock(runId) {
+        const now = getTimestamp();
+        const result = db.prepare(`
+            UPDATE agent_runs
+            SET lock_expires_at = ?,
+                last_heartbeat_at = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND locked_by = ?
+              AND status = 'running'
+              AND deleted_at IS NULL
+        `).run(lockExpiresAt(), now, now, runId, instanceId);
+        if (result.changes === 0) {
+            logger.warn({ runId, instanceId }, 'Agent run lock renewal skipped; lock owner or status changed');
+        }
+        return result.changes;
+    }
+
+    function stopLockRenewal(runId) {
+        const timer = lockRenewTimers.get(runId);
+        if (timer) clearInterval(timer);
+        lockRenewTimers.delete(runId);
+    }
+
+    function startLockRenewal(runId) {
+        stopLockRenewal(runId);
+        const timer = setInterval(() => {
+            try {
+                renewRunLock(runId);
+            } catch (err) {
+                logger.warn({ err: err.message, runId }, 'Agent run lock renewal failed');
+            }
+        }, lockRenewIntervalMs);
+        timer.unref?.();
+        lockRenewTimers.set(runId, timer);
+    }
     function releaseRun(runId) {
         db.prepare(`
             UPDATE agent_runs
@@ -90,12 +129,16 @@ function createAgentQueue({
             }
 
             activeRunIds.add(runId);
+            activeStartedAt.set(runId, Date.now());
+            startLockRenewal(runId);
             queuedHints.delete(runId);
             runAgent(runId, user).catch(err => {
-                logger.error({ err: err.message, runId }, '鏅鸿兘浣撹繍琛屽湪杩愯鏃朵繚鎶ゅ澶辫触');
+                logger.error({ err: err.message, runId }, 'Agent run failed while protected by runtime lock');
                 markRunError(runId, err.message);
             }).finally(() => {
                 activeRunIds.delete(runId);
+                activeStartedAt.delete(runId);
+                stopLockRenewal(runId);
                 releaseRun(runId);
                 scheduleProcessQueue();
             });
@@ -128,12 +171,32 @@ function createAgentQueue({
             WHERE status = 'queued'
               AND deleted_at IS NULL
         `).get().count;
+        const oldestQueued = db.prepare(`
+            SELECT
+                id,
+                created_at,
+                CAST((julianday(datetime('now', '+8 hours')) - julianday(created_at)) * 86400000 AS INTEGER) AS age_ms
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+        `).get() || null;
+        const now = Date.now();
+        const activeRuns = Array.from(activeRunIds).map(runId => ({
+            runId,
+            activeMs: Math.max(0, now - (activeStartedAt.get(runId) || now)),
+            lockRenewing: lockRenewTimers.has(runId)
+        }));
         return {
             instanceId,
             active: activeRunIds.size,
+            activeRuns,
             queued,
             hinted: queuedHints.size,
-            maxConcurrent: safeMaxConcurrent
+            maxConcurrent: safeMaxConcurrent,
+            oldestQueuedRunId: oldestQueued?.id || null,
+            oldestQueuedAgeMs: Math.max(0, Number(oldestQueued?.age_ms || 0))
         };
     }
 

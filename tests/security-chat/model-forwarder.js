@@ -19,3 +19,23 @@ test('forwardChatCompletion 在发请求前对非法协议 URL 做安全校验�
 test('forwardChatCompletion 导出默认超时常量', () => {
     assert.equal(DEFAULT_FORWARD_TIMEOUT_MS, 180000);
 });
+
+test('safe HTTP helpers reject multipart-like payloads by default', () => {
+    const { assertJsonOnlyPayload } = require('../../server/services/safe-http-client');
+    assert.throws(
+        () => assertJsonOnlyPayload({ getBoundary() { return 'boundary'; } }),
+        /Multipart payloads must use the upload-specific client/
+    );
+});
+
+test('forwardChatCompletion rejects multipart-like payloads before axios dispatch', async () => {
+    await assert.rejects(
+        () => forwardChatCompletion({
+            modelCfg: { id: 1, user_id: null, url: 'https://model.example/v1' },
+            url: 'https://model.example/v1/chat/completions',
+            data: { getBoundary() { return 'boundary'; } },
+            headers: {}
+        }),
+        /Multipart payloads must use the upload-specific client/
+    );
+});

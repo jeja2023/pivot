@@ -95,6 +95,7 @@ const {
     withTimeout
 } = require('./runtime-env');
 const { getAgentRunTitle, getRunMetadata } = require('./metadata');
+const { assertAgentRunStatusTransition } = require('./state-machine');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { inferDagRunGoal, inferDagLlmRuntimeSettings } = require('./dag-run-config');
@@ -133,6 +134,11 @@ function updateRun(runId, fields = {}) {
     ];
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (entries.length === 0) return;
+    const statusEntry = entries.find(([key]) => key === 'status');
+    if (statusEntry) {
+        const currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+        assertAgentRunStatusTransition(currentStatus, statusEntry[1], { runId });
+    }
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
     const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
     if (info.changes > 0 && entries.some(([key]) => [
@@ -212,6 +218,24 @@ function setRunMetadata(runId, patch = {}) {
     const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
     const current = parseJsonObject(row.metadata) || {};
     updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
+}
+
+function appendRunMetadataList(runId, key, item, limit = 20) {
+    const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
+    const current = parseJsonObject(row.metadata) || {};
+    const list = Array.isArray(current[key]) ? current[key].slice(-(limit - 1)) : [];
+    list.push(item);
+    updateRun(runId, { metadata: JSON.stringify({ ...current, [key]: list }), updated_at: getBeijingTimestamp() });
+}
+
+function recordRunRetryReason(runId, input = {}) {
+    appendRunMetadataList(runId, 'retryReasons', {
+        at: getBeijingTimestamp(),
+        attempt: input.attempt || null,
+        limit: input.limit || null,
+        code: input.code || '',
+        reason: input.reason || input.error || 'unknown_error'
+    });
 }
 
 function isRunCancelled(runId) {
@@ -529,7 +553,7 @@ async function runAgent(runId, user) {
         };
         const initialModelCfg = getRunnableModelForUser(run.model_id, user);
         if (!initialModelCfg) throw new Error('No accessible model is available for this agent run.');
-        // run.model_router controls whether the initial model is fixed, routed up front, or escalated later.
+        // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
         if (routerStrategy !== 'fixed') {
@@ -579,14 +603,14 @@ async function runAgent(runId, user) {
             return;
         }
 
-        // Prefer streaming function calling when enabled so the model can issue tool_calls directly.
-        // If streaming does not complete, the JSON planner below continues from collected observations.
+        // 启用时优先使用流式函数调用，让模型可直接发出 tool_calls。
+        // 如果流式调用未完成，下方 JSON 规划器会基于已收集的观察继续执行。
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
             }, getAgentRuntimeDeps());
             if (streamingResult?.completed) return;
-            // Streaming emitted partial work but did not finish; continue with the JSON planner path.
+            // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
         for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
@@ -671,7 +695,7 @@ async function runAgent(runId, user) {
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
         let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
-        // v0.0.50 auto-escalate retries the final summary with a stronger model when confidence is low.
+        // v0.0.50 自动升级逻辑会在置信度较低时用更强模型重试最终总结。
         if (routerStrategy === 'auto-escalate') {
             const confidence = assessConfidence({ output: answer });
             if (!confidence.confident) {
@@ -721,6 +745,12 @@ async function runAgent(runId, user) {
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
+            recordRunRetryReason(runId, {
+                attempt: retryCount + 1,
+                limit: retryLimit,
+                code: e.code || '',
+                error: e.message
+            });
             updateRun(runId, {
                 status: 'queued',
                 error_message: e.message,
@@ -999,6 +1029,7 @@ module.exports = {
     restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     recoverAgentRuns,
+    recordRunRetryReason,
     runAgentScheduleNow,
     runDueAgentSchedules,
     runAgent,

@@ -1,4 +1,4 @@
-// --- 模型管理模块 Model Management ---
+// --- 模型管理模块 ---
 const pendingTests = new Set();
 
 function formatModelPriceCurrency(value) {
@@ -14,7 +14,7 @@ function ensureModelCostFields() {
     if (!anchorRow) return;
     const row = document.createElement('div');
     row.className = 'model-form-row model-cost-row';
-    row.innerHTML = `
+    PivotSafeHtml.setHtml(row, `
         <div class="form-item">
             <label>输入单价（每百万 Token）</label>
             <input type="number" id="m-input-price" class="form-input" min="0" step="0.000001" placeholder="0 表示不统计成本">
@@ -34,7 +34,7 @@ function ensureModelCostFields() {
                 <option value="英镑">英镑</option>
             </select>
         </div>
-    `;
+    `);
     anchorRow.insertAdjacentElement('afterend', row);
 }
 
@@ -79,7 +79,7 @@ window.loadModels = async function(page = 1) {
     
     if (page === 1) refreshModelSelector();
 
-    document.getElementById('model-list-body').innerHTML = data.map((m, idx) => {
+    PivotSafeHtml.setHtml(document.getElementById('model-list-body'), data.map((m, idx) => {
         const isGlobalModel = !m.user_id;
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
@@ -146,7 +146,7 @@ window.loadModels = async function(page = 1) {
                 </div>
             </td>
         </tr>
-    `; }).join('');
+    `; }).join(''));
 
     data.filter(model => !canTestModelConnection(model)).forEach(model => {
         document.querySelector(`#model-row-${model.id} [data-model-action="test"]`)?.remove();

@@ -1,5 +1,5 @@
-// Agent 计划任务 Agent schedules
-// Split from agents.js.
+// Agent 计划任务
+// 拆自 agents.js。
 /* eslint-disable no-undef */
 async function loadAgentSchedules() {
     const list = document.getElementById('agent-schedule-list');
@@ -8,7 +8,7 @@ async function loadAgentSchedules() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '计划队列加载失败');
     agentSchedulesCache = data.data || [];
-    list.innerHTML = agentSchedulesCache.length ? agentSchedulesCache.slice(0, 5).map(schedule => `
+    PivotSafeHtml.setHtml(list, agentSchedulesCache.length ? agentSchedulesCache.slice(0, 5).map(schedule => `
         <div class="agent-ops-item">
             <strong>${agentEscape(schedule.name)}</strong>
             <span>${agentEscape(schedule.frequency === 'daily' ? '每天' : schedule.frequency === 'weekly' ? '每周' : '手动')} · 下次 ${agentEscape(schedule.next_run_at || '-')}</span>
@@ -17,7 +17,7 @@ async function loadAgentSchedules() {
                 <button type="button" class="btn-danger-outline" data-agent-schedule-delete="${agentEscape(schedule.id)}">删除</button>
             </div>
         </div>
-    `).join('') : '<div class="empty-state agent-empty-state compact">暂无计划</div>';
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无计划</div>');
     list.querySelectorAll('[data-agent-schedule-run]').forEach(btn => {
         btn.addEventListener('click', () => runAgentSchedule(btn.dataset.agentScheduleRun));
     });
@@ -52,12 +52,12 @@ async function loadAgentNotifications() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '通知加载失败');
     const items = data.data || [];
-    list.innerHTML = items.length ? items.slice(0, 5).map(item => `
+    PivotSafeHtml.setHtml(list, items.length ? items.slice(0, 5).map(item => `
         <button type="button" class="agent-ops-item ${item.status === 'unread' ? 'unread' : ''}" data-agent-notification-id="${agentEscape(item.id)}" data-agent-notification-run="${agentEscape(item.run_id || '')}">
             <strong>${agentEscape(agentNotificationTitle(item))}</strong>
             <span>${agentEscape(agentNotificationBody(item))}</span>
         </button>
-    `).join('') : '<div class="empty-state agent-empty-state compact">暂无通知</div>';
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无通知</div>');
     list.querySelectorAll('[data-agent-notification-id]').forEach(btn => {
         btn.addEventListener('click', async () => {
             await apiFetch(`${API_BASE}/agents/notifications/${encodeURIComponent(btn.dataset.agentNotificationId)}/read`, { method: 'POST' });

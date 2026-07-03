@@ -32,7 +32,7 @@ function createDagWizardController(ctx) {
             const fieldMarkup = fields.length
                 ? fields.map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools)).join('')
                 : '<div class="pivot-dag-wizard-empty">当前工具不需要配置参数，直接应用即可。</div>';
-            modal.innerHTML = `
+            PivotSafeHtml.setHtml(modal, `
                 <div class="modal rag-detail-modal pivot-dag-input-wizard">
                     <div class="rag-detail-header pivot-dag-input-head">
                         <div>
@@ -66,17 +66,17 @@ function createDagWizardController(ctx) {
                         <button type="button" class="btn-primary" data-pivot-dag-wizard-apply="1">应用</button>
                     </div>
                 </div>
-            `;
+            `);
 
             const wizardHeader = modal.querySelector('.pivot-dag-input-head > div');
             if (wizardHeader) {
                 const meta = document.createElement('div');
                 meta.className = 'pivot-dag-wizard-meta';
-                meta.innerHTML = `
+                PivotSafeHtml.setHtml(meta, `
                     <span>${dagEscapeHtml(`${fields.length} 个参数`)}</span>
                     <span>${dagEscapeHtml(`${required.size} 个必填`)}</span>
                     <span>${dagEscapeHtml(`${dependencyNodes.length} 个依赖`)}</span>
-                `;
+                `);
                 wizardHeader.appendChild(meta);
             }
             const wizardDesc = modal.querySelector('.pivot-dag-input-head .model-modal-desc');
@@ -206,8 +206,8 @@ function createDagWizardController(ctx) {
                 if (label) label.textContent = databaseConnectionLabel(tool, serverId, wizardTools);
                 const tableList = modal.querySelector('#pivot-dag-assist-table-options');
                 const columnList = modal.querySelector('#pivot-dag-assist-column-options');
-                if (tableList) tableList.innerHTML = '';
-                if (columnList) columnList.innerHTML = '';
+                if (tableList) PivotSafeHtml.setHtml(tableList, '');
+                if (columnList) PivotSafeHtml.setHtml(columnList, '');
                 setAssistStatus(serverId ? '已切换数据库连接，可重新读取表或字段。' : '请选择数据库连接。', serverId ? '' : 'warn');
             };
 
@@ -223,7 +223,7 @@ function createDagWizardController(ctx) {
                     const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
                     const tables = [...new Set(rows.map(tableNameFromRow).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
                     const list = modal.querySelector('#pivot-dag-assist-table-options');
-                    if (list) list.innerHTML = tables.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join('');
+                    if (list) PivotSafeHtml.setHtml(list, tables.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join(''));
                     if (schemaValue) syncAssistValue('schema', schemaValue);
                     setAssistStatus(tables.length ? `已读取 ${tables.length} 个数据表，可在数据表输入框选择。` : '没有读取到数据表，可手动输入。', tables.length ? '' : 'warn');
                 } catch (e) {
@@ -249,7 +249,7 @@ function createDagWizardController(ctx) {
                     const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
                     const columns = [...new Set(rows.map(columnNameFromRow).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
                     const list = modal.querySelector('#pivot-dag-assist-column-options');
-                    if (list) list.innerHTML = columns.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join('');
+                    if (list) PivotSafeHtml.setHtml(list, columns.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join(''));
                     setAssistStatus(columns.length ? `已读取 ${columns.length} 个字段，可在字段输入框选择。` : '没有读取到字段，可手动输入。', columns.length ? '' : 'warn');
                 } catch (e) {
                     setAssistStatus(e.message || '读取字段失败。', 'error');

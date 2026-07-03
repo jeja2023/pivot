@@ -1,17 +1,13 @@
-/* 对话接口路由 Chat API Routes */
+/* 对话接口路由 */
 const express = require('express');
 const { asyncHandler } = require('../../http');
-const { db } = require('../../db');
 const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
 } = require('../../capabilities');
-const { createVisibleReasoningStreamFilter, estimateTokens, getContext, stripVisibleReasoningScaffold } = require('../../llm');
+const { createVisibleReasoningStreamFilter, estimateTokens, stripVisibleReasoningScaffold } = require('../../llm');
 const {
-    getAccessibleModel,
-    getModelDailyUsage,
     modelSupportsVision,
-    shouldDisableChatThinking,
     contentContainsVisionInput
 } = require('../../services/models');
 const { aiSemaphore } = require('../../services/concurrency');
@@ -21,18 +17,9 @@ const {
     recordModelFailure
 } = require('../../services/model-runtime');
 const { createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../../streaming');
-const {
-    buildModelHeaders,
-    buildResponsesUrl,
-    buildChatCompletionsUrl,
-    convertChatMessagesToResponsesInput,
-    normalizeModelBaseUrl,
-    shouldUseResponsesApi
-} = require('../../services/model-adapter');
-const { forwardChatCompletion } = require('../../services/model-forwarder');
+const { openChatModelStream } = require('../../services/model-stream-service');
 const {
     extractModelTextFromRawResponse,
-    getRequestOrigin,
     normalizeRegenerateFlag,
     resolveRagQueryContent
 } = require('../../services/chat-route-helpers');
@@ -42,47 +29,31 @@ const {
     summarizeRagContextSources
 } = require('../../services/chat-rag-context');
 const {
-    saveAssistantMessage,
     saveUserMessage,
     touchSession,
     updateLastAssistantStats
 } = require('../../services/chat-messages');
-const {
-    ContextLengthExceededError,
-    buildContextLengthExceededPayload,
-    estimateMessagesTokens,
-    fitMessagesToContextBudget,
-    getModelContextBudget
-} = require('../../services/context-budget');
-const { maybeGenerateTitle } = require('../../services/chat-title');
-const { getGlobalSamplingRuntimeConfig } = require('../../services/runtime-settings');
 const {
     buildPersistedChatErrorContent,
     readStreamErrorDetail,
     writeChatErrorSse
 } = require('../../services/chat-errors');
 const {
-    buildVisionHistory,
-    buildVisionUnsupportedMessage,
-    limitVisionImages
+    buildVisionUnsupportedMessage
 } = require('../../services/chat-vision');
-const { listCachedMcpTools } = require('../../services/mcp-client');
-const { filterMcpToolsByCapability } = require('../../services/capability-market');
 const {
     buildFallbackDataQueryInput,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
-    filterMcpToolsForPlanner,
-    maybeBuildMcpChatContext
+    filterMcpToolsForPlanner
 } = require('../../services/chat-mcp-context');
-const {
-    buildLongTermMemoryContextMessage,
-    injectLongTermMemoryBeforeLatestUser,
-    retrieveLongTermMemories,
-    scheduleMemoryExtraction
-} = require('../../services/long-term-memory');
+const { createObservabilityTrace, withObservabilitySpan } = require('../../services/observability');
+const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
+const { assembleChatContext } = require('../../services/chat-context-assembler');
+const { persistAssistantTurn } = require('../../services/chat-persistence');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
+const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
 
 
 const {
@@ -90,8 +61,7 @@ const {
     buildAssistantSpeedStats,
     createChartSseCapture,
     applyChatLanguageInstruction,
-    applyChatNoThinkSoftSwitch,
-    hasRagScopeFilter
+    applyChatNoThinkSoftSwitch
 } = require('./helpers');
 
 function createChatRouter({
@@ -111,17 +81,39 @@ function createChatRouter({
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
-        const { content, displayContent } = req.body;
-        const regenerate = normalizeRegenerateFlag(req.body.regenerate);
-        const mcpEnabled = Boolean(req.body.mcpEnabled) && Boolean(req.body.mcpConfirmed);
-        const ragEnabled = req.body.ragEnabled !== false;
-        const ragScope = req.body.ragScope && typeof req.body.ragScope === 'object' ? req.body.ragScope : {};
-        const sessionId = String(req.body.sessionId || '').trim();
-        const modelId = req.body.modelId ? parseInt(req.body.modelId) : null;
-        const userId = req.user.id;
-        const modelContent = String(content || '').trim();
-        const visibleContent = String(displayContent || modelContent).trim();
+        const chatState = buildChatRequestState(req);
+        const {
+            regenerate,
+            mcpEnabled,
+            ragEnabled,
+            sessionId,
+            modelId,
+            userId,
+            modelContent,
+            visibleContent
+        } = chatState;
         let userMessagePersisted = false;
+        const chatTrace = createObservabilityTrace({
+            type: 'chat',
+            source: 'api.chat',
+            thresholdMs: SLOW_CHAT_TRACE_MS,
+            message: 'Chat generation trace',
+            details: { sessionId, userId, modelId, regenerate, mcpEnabled, ragEnabled }
+        });
+        let chatTraceStatus = 'open';
+        const finishChatTrace = (status = 'closed', details = {}) => {
+            chatTraceStatus = status;
+            return chatTrace.finish({
+                status,
+                severity: status === 'error' ? 'warning' : 'info',
+                message: status === 'error' ? 'Chat generation failed' : 'Chat generation completed',
+                details
+            });
+        };
+        res.once('close', () => finishChatTrace(
+            chatTraceStatus === 'open' ? 'closed' : chatTraceStatus,
+            { writableEnded: res.writableEnded }
+        ));
 
         req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
@@ -169,48 +161,17 @@ function createChatRouter({
         res.flush?.();
 
         // --- 业务逻辑检查 ---
-        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
-        if (!session) {
-            writeSse(JSON.stringify({ error: '无权访问或会话不存在', code: 'FORBIDDEN' }));
+        const preflight = validateChatPreflight({
+            state: chatState,
+            user: req.user,
+            req,
+            logAction
+        });
+        if (preflight.error) {
+            writeSse(JSON.stringify(preflight.error));
             return res.end();
         }
-
-        const modelCfg = getAccessibleModel(modelId, req.user);
-        if (!modelCfg) {
-            writeSse(JSON.stringify({ error: '未找到可用的模型配置', code: 'MODEL_NOT_FOUND' }));
-            return res.end();
-        }
-
-        if (modelCfg.secret_error) {
-            writeSse(JSON.stringify({ error: `${modelCfg.secret_error}，请重新保存该模型的 API Key`, code: 'API_KEY_ERROR' }));
-            return res.end();
-        }
-
-        try {
-            fitMessagesToContextBudget([{ role: 'user', content: modelContent }], modelCfg);
-        } catch (e) {
-            if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
-                req.log.warn({
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    contentLength: modelContent.length,
-                    contextBudget: e.metadata
-                }, '聊天请求因当前输入超限被拦截');
-                writeSse(JSON.stringify(buildContextLengthExceededPayload(e)));
-                return res.end();
-            }
-            throw e;
-        }
-
-        if (modelCfg.daily_token_limit && modelCfg.daily_token_limit > 0) {
-            const usedToday = getModelDailyUsage(userId, modelCfg.id);
-            if (usedToday >= modelCfg.daily_token_limit) {
-                logAction(req, '模型额度拦截', `模型: ${modelCfg.name}，今日已用: ${usedToday}/${modelCfg.daily_token_limit}`);
-                writeSse(JSON.stringify({ error: `该模型今日额度已用完（${usedToday}/${modelCfg.daily_token_limit} Tokens）`, code: 'QUOTA_EXCEEDED' }));
-                return res.end();
-            }
-        }
+        const { modelCfg } = preflight;
 
         let userMessageId = null;
         if (!regenerate) {
@@ -233,19 +194,21 @@ function createChatRouter({
         touchSession(sessionId);
         logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
 
+        chatTrace.addSpan('preflight', { modelId: modelCfg.id });
+
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
-            scheduleMemoryExtraction({
-                userId,
+            const { assistantMessageResult } = persistAssistantTurn({
                 sessionId,
-                messageIds: [userMessageId, Number(assistantMessageResult.lastInsertRowid || 0)].filter(Boolean),
+                userId,
+                userMessageId,
                 user: req.user,
-                modelCfg
+                modelCfg,
+                visibleContent,
+                assistantContent,
+                assistantTokens
             });
-
-            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '模型多模态能力拦截', `模型: ${modelCfg.name}, 会话: ${sessionId}`);
 
             writeSse(JSON.stringify({
@@ -261,16 +224,16 @@ function createChatRouter({
         if (unsupportedCapability) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
-            const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
-            scheduleMemoryExtraction({
-                userId,
+            const { assistantMessageResult } = persistAssistantTurn({
                 sessionId,
-                messageIds: [userMessageId, Number(assistantMessageResult.lastInsertRowid || 0)].filter(Boolean),
+                userId,
+                userMessageId,
                 user: req.user,
-                modelCfg
+                modelCfg,
+                visibleContent,
+                assistantContent,
+                assistantTokens
             });
-
-            maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
             logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
             
             writeSse(JSON.stringify({
@@ -354,255 +317,30 @@ function createChatRouter({
             return res.end();
         }
 
-        let history = await getContext(sessionId, userId, modelCfg);
-        const disableChatThinking = shouldDisableChatThinking(modelCfg);
-        const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
-        const memoryQuery = effectiveUserPrompt || modelContent;
-        if (memoryQuery) {
-            try {
-                const memoryMatches = await retrieveLongTermMemories(userId, memoryQuery, { user: req.user });
-                const memoryMessage = buildLongTermMemoryContextMessage(memoryMatches, {
-                    inputBudget: getModelContextBudget(modelCfg).inputBudget
-                });
-                if (memoryMessage) {
-                    history = injectLongTermMemoryBeforeLatestUser(history, memoryMessage);
-                    writeSse(JSON.stringify({
-                        type: 'memory',
-                        status: 'hit',
-                        message: `已检索到 ${memoryMatches.length} 条相关长期记忆`,
-                        memoryCount: memoryMatches.length
-                    }));
-                }
-            } catch (err) {
-                req.log.warn({ sessionId, userId, err: err.message }, '长期记忆检索失败，已按普通上下文继续');
-            }
-        }
-        if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
-            const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : null;
-            const ragScoped = hasRagScopeFilter(ragScope);
-            const ragScopeText = ragScoped ? '（当前选择范围）' : '';
-            if (ragContext) {
-                const ragSourceSummary = summarizeRagContextSources(ragContext);
-                const sourceCount = Number(ragSourceSummary.sourceCount || 0);
-                const citationCount = Number(ragSourceSummary.citationCount || 0);
-                const ragHitCountText = sourceCount > 0
-                    ? `${sourceCount} 份可引用文档${citationCount > sourceCount ? `（${citationCount} 条引用片段）` : ''}`
-                    : `${citationCount} 条资料`;
-                history = injectRagContextBeforeLatestUser(history, ragContext);
-                writeSse(JSON.stringify({
-                    type: 'rag',
-                    status: 'hit',
-                    message: ragSourceSummary.sourceCount > 0
-                        ? `知识库${ragScopeText}已找到 ${ragHitCountText}，正在基于来源生成回答`
-                        : `知识库${ragScopeText}已找到相关资料，正在基于资料生成回答`,
-                    citationCount: ragSourceSummary.citationCount,
-                    sourceCount: ragSourceSummary.sourceCount,
-                    sources: ragSourceSummary.sources,
-                    scoped: ragScoped
-                }));
-            } else {
-                writeSse(JSON.stringify({
-                    type: 'rag',
-                    status: 'empty',
-                    message: `知识库${ragScopeText}未检索到足够相关内容，将按普通对话继续`,
-                    scoped: ragScoped
-                }));
-            }
-        }
-        let visionHistory = limitVisionImages(await buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
-        visionHistory = applyChatLanguageInstruction(visionHistory);
-        
-        if (visionHistory.length === 0) {
-            req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
-            // 如果历史为空，至少把当前消息塞进去（如果是刚发送的消息）
-            if (modelContent) {
-                req.log.info({ sessionId }, '执行补救措施：将丢失的用户消息存入数据库并加入当前上下文');
-                try {
-                    saveUserMessage({ sessionId, userId, content: modelContent, modelId });
-                } catch (dbErr) {
-                    req.log.error({ err: dbErr.message }, '补救消息入库失败');
-                }
+        const contextResult = await withObservabilitySpan(chatTrace, 'context_assembly', () => assembleChatContext({
+            req,
+            state: chatState,
+            modelCfg,
+            retrieveContext,
+            isRagEnabled,
+            publicUrl,
+            writeSse,
+            releaseSemaphore,
+            writeChatErrorSse,
+            persistOnError: userMessagePersisted || regenerate
+        }), { ragEnabled, mcpEnabled });
+        if (contextResult.errorEnded) return res.end();
+        let { visionHistory, disableChatThinking } = contextResult;
 
-                // 补救的消息也需要经过 buildVisionHistory 处理以支持多模态
-                const rescuedHistory = limitVisionImages(await buildVisionHistory([{ role: 'user', content: modelContent }], getRequestOrigin(req, publicUrl), userId, sessionId));
-                visionHistory.push(...rescuedHistory);
-            } else {
-                releaseSemaphore();
-                writeChatErrorSse({
-                    writeSse,
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    error: '对话内容不能为空',
-                    code: 'EMPTY_MESSAGE',
-                    persist: userMessagePersisted || regenerate,
-                    log: req.log
-                });
-                return res.end();
-            }
-        }
-
-        if (mcpEnabled) {
-            const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user);
-            const mcpContext = await maybeBuildMcpChatContext({
+        try {
+            const { response } = await withObservabilitySpan(chatTrace, 'model_stream_open', () => openChatModelStream({
                 modelCfg,
-                history: visionHistory,
-                userPrompt: effectiveUserPrompt || modelContent,
-                tools: mcpTools,
                 user: req.user,
-                writeSse,
-                log: req.log
-            });
-            if (mcpContext) {
-                visionHistory.push({ role: 'system', content: mcpContext });
-            }
-        }
-
-        visionHistory = applyChatNoThinkSoftSwitch(visionHistory, modelCfg);
-
-        try {
-            const budgetResult = fitMessagesToContextBudget(visionHistory, modelCfg);
-            visionHistory = budgetResult.messages;
-            if (budgetResult.metadata.adjusted) {
-                req.log.warn({
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    contextBudget: budgetResult.metadata
-                }, '聊天上下文已按模型窗口自动裁剪');
-                writeSse(JSON.stringify({
-                    type: 'context_budget',
-                    status: 'trimmed',
-                    message: '本次请求内容较长，已自动减少较早历史或知识库片段后继续生成。',
-                    contextBudget: budgetResult.metadata
-                }));
-            } else {
-                req.log.info({
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    inputTokens: budgetResult.metadata.inputTokensAfter,
-                    inputBudget: budgetResult.metadata.budget.inputBudget
-                }, '聊天上下文预算检查通过');
-            }
-        } catch (e) {
-            releaseSemaphore();
-            if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
-                req.log.warn({
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    contextBudget: e.metadata
-                }, '聊天请求因上下文超限被拦截');
-                const payload = buildContextLengthExceededPayload(e);
-                writeChatErrorSse({
-                    writeSse,
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    error: payload.error,
-                    detail: payload.detail,
-                    code: payload.code,
-                    persist: userMessagePersisted || regenerate,
-                    log: req.log
-                });
-                return res.end();
-            }
-            throw e;
-        }
-
-        let baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
-
-        const modelName = modelCfg.model_name || 'default';
-        const isResponsesApi = shouldUseResponsesApi(modelName);
-
-        let targetUrl = isResponsesApi
-            ? buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false })
-            : buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-
-        req.log.info({
-            userId,
-            model: modelCfg.name,
-            modelName,
-            targetUrl,
-            mode: isResponsesApi ? 'Responses API' : 'Chat Completions API'
-        }, '发起对话请求');
-
-        const headers = buildModelHeaders(modelCfg, { acceptJson: true });
-
-        try {
-            let response;
-
-            // 将 Chat Completions 格式转换为 Responses API 格式
-            const responsesHistory = convertChatMessagesToResponsesInput(visionHistory);
-            const runtimeSampling = getGlobalSamplingRuntimeConfig();
-
-            const requestData = { 
-                model: modelName, 
-                stream: true,
-                temperature: modelCfg.temperature ?? runtimeSampling.temperature,
-                top_p: runtimeSampling.topP,
-                presence_penalty: runtimeSampling.presencePenalty,
-                frequency_penalty: runtimeSampling.frequencyPenalty
-            };
-            // 网页聊天有意不强制 max_tokens 兜底：未配置时不下发输出上限，让上游用自身默认，
-            // 避免把交互式回复人为截断在某个固定值（与 openai/apps 接口的 2000 兜底口径不同，属刻意设计）。
-            if (modelCfg.max_tokens !== null && modelCfg.max_tokens !== undefined) {
-                requestData.max_completion_tokens = modelCfg.max_tokens;
-                requestData.max_tokens = modelCfg.max_tokens; // Some APIs use this instead
-            }
-            if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
-                requestData.max_input_tokens = modelCfg.max_input_tokens;
-            }
-            req.log.info({
+                visionHistory,
+                log: req.log,
                 sessionId,
-                userId,
-                modelId: modelCfg.id,
-                estimatedInputTokens: estimateMessagesTokens(visionHistory)
-            }, '准备发送模型请求');
-
-            if (isResponsesApi) {
-                req.log.info('正在建立连接 (Responses API, 流式)');
-                // 记录多模态内容的结构信息
-                const inputSummary = responsesHistory.map(m => ({
-                    role: m.role,
-                    contentType: Array.isArray(m.content) ? m.content.map(p => p.type).join('+') : 'text'
-                }));
-                req.log.info({ inputSummary }, '请求体结构');
-                try {
-                    requestData.input = responsesHistory;
-                    response = await forwardChatCompletion({
-                        modelCfg, user: req.user, url: targetUrl, headers,
-                        data: requestData, stream: true, timeout: 180000
-                    });
-                    req.log.info('连接成功 (Responses API)');
-                } catch (err) {
-                    const status = err.response?.status;
-                    if ([404, 405, 502, 503].includes(status)) {
-                        req.log.warn({ status }, 'Responses API 暂不可用，正在自动回退到常规接口');
-                        targetUrl = buildChatCompletionsUrl(baseUrl, { appendV1ForLocal: false });
-                        
-                        delete requestData.input;
-                        requestData.messages = visionHistory;
-
-                        response = await forwardChatCompletion({
-                            modelCfg, user: req.user, url: targetUrl, headers,
-                            data: requestData, stream: true, timeout: 300000
-                        });
-                        req.log.info('降级连接成功 (Chat Completions)');
-                    } else {
-                        throw err;
-                    }
-                }
-            } else {
-                req.log.info('正在建立连接 (Chat Completions API, 流式)');
-                requestData.messages = visionHistory;
-                response = await forwardChatCompletion({
-                    modelCfg, user: req.user, url: targetUrl, headers,
-                    data: requestData, stream: true, timeout: 300000
-                });
-                req.log.info('连接成功');
-            }
+                userId
+            }), { modelId: modelCfg.id, messageCount: visionHistory.length });
 
             const writeContentSse = (content) => {
                 splitStreamTextForDisplay(content).forEach(chunk => {
@@ -685,23 +423,29 @@ function createChatRouter({
                     });
                     assistantContent = stats.assistantContent;
                     const assistantTokens = stats.assistantTokens;
-                    const assistantMessageResult = saveAssistantMessage({ sessionId, userId, content: assistantContent, tokenCount: assistantTokens, modelId: modelCfg.id });
-                    const assistantMessageId = Number(assistantMessageResult.lastInsertRowid || 0) || null;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
-                    updateLastAssistantStats({ sessionId, userId, costTime, tps: tokensPerSec });
-                    scheduleMemoryExtraction({
-                        userId,
+                    const { assistantMessageResult } = persistAssistantTurn({
                         sessionId,
-                        messageIds: [userMessageId, assistantMessageId].filter(Boolean),
+                        userId,
+                        userMessageId,
                         user: req.user,
-                        modelCfg
+                        modelCfg,
+                        visibleContent,
+                        assistantContent,
+                        assistantTokens,
+                        costTime,
+                        tps: tokensPerSec
                     });
-
-                    maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, req.user);
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     recordModelSuccess(modelCfg, endedAt - requestStartedAt);
+                    finishChatTrace('completed', {
+                        modelId: modelCfg.id,
+                        assistantTokens,
+                        costTime,
+                        tps: tokensPerSec
+                    });
                     writeSse(JSON.stringify({
                         type: 'message_saved',
                         role: 'assistant',
@@ -748,6 +492,7 @@ function createChatRouter({
                     res.end();
                 }
                 recordModelFailure(modelCfg, err);
+                finishChatTrace('error', { phase: 'stream', error: err.message });
                 releaseSemaphore(); // 传输错误释放
             });
 
@@ -788,6 +533,7 @@ function createChatRouter({
                 }
             }
 
+            finishChatTrace('error', { phase: 'model_request', error: e.message, statusCode });
             writeChatErrorSse({
                 writeSse,
                 sessionId,

@@ -1,4 +1,4 @@
-// --- 管理员面板核心逻辑 Admin Core ---
+// --- 管理员面板核心逻辑 ---
 /* exported formatDateToCN, escapeHtml, renderTableMessage, escapeCsvValue, formatTokenAmount, formatTokenCount, formatTokenInputValue, parseTokenAmount, encodeActionArg, downloadFileByFetch, renderPagination */
 const formatDateToCN = (dateStr) => {
     if (!dateStr) return '-';
@@ -6,8 +6,8 @@ const formatDateToCN = (dateStr) => {
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
     const date = new Date(text);
     if (Number.isNaN(date.getTime())) return text;
-    return date.toLocaleString('zh-CN', { 
-        timeZone: 'Asia/Shanghai', 
+    return date.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
         hour12: false,
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit'
@@ -104,7 +104,7 @@ const downloadFileByFetch = async (url, filename) => {
     }
 };
 
-let pageState = { models: 1, users: 1, logs: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
+let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
 const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'report', 'announcements']);
@@ -173,7 +173,7 @@ window.openAdminPanel = async (options = {}) => {
     if (descEl) descEl.innerText = isAdmin
         ? '集中管理模型、用户、审计、监控、用量、API 接入与账号安全。'
         : '管理你的模型、提示词库、附件、用量、API 接入与账号安全。';
-    
+
     if (isAdmin) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
     } else {
@@ -196,7 +196,7 @@ window.switchTab = async (tab) => {
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
-    
+
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
     window.persistSettingsTab?.(tab);
@@ -214,7 +214,7 @@ async function loadTabData(tab, page = 1) {
     }
     if (tab === 'logs' && window.loadLogs) loadLogs(page);
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
-    if (tab === 'stats' && window.loadStats) loadStats();
+    if (tab === 'stats' && window.loadStats) loadStats(page);
     if (tab === 'report' && window.loadReport) loadReport();
     if (tab === 'prompts' && window.loadPrompts) window.loadPrompts();
     if (tab === 'memories' && window.loadMemories) window.loadMemories(page);
@@ -244,7 +244,7 @@ window.fetchRemoteModels = async function() {
     const id = document.getElementById('m-id').value;
     const selectContainer = document.getElementById('m-model-select-container');
     const selectEl = document.getElementById('m-model-select');
-    
+
     if (!url) return showToast('请先填写接口地址', 'error');
 
     try {
@@ -255,14 +255,14 @@ window.fetchRemoteModels = async function() {
             body: JSON.stringify({ url, api_key: apiKey, id })
         });
         const data = await res.json();
-        
+
         if (!data.success) throw new Error(data.error);
         if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
 
         // 填充下拉框
-        selectEl.innerHTML = '<option value="">-- 请选择获取到的模型 --</option>' + 
-            data.models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-        
+        PivotSafeHtml.setHtml(selectEl, '<option value="">-- 请选择获取到的模型 --</option>' +
+            data.models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join(''));
+
         selectContainer.classList.remove('hidden');
         showToast(`成功获取 ${data.models.length} 个模型`);
 

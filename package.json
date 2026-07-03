@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.183",
+  "version": "0.0.188",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -12,15 +12,20 @@
     "lint": "eslint . --ext .js",
     "check:text": "node scripts/check_text_integrity.js",
     "check:external": "node scripts/check_external_links.js",
+    "audit:policy": "node scripts/check_audit_policy.js",
+    "check:safe-html": "node scripts/check_safe_html_usage.js",
     "version:sync": "node scripts/sync_version.js",
-    "check": "npm run check:text && node scripts/check_syntax.js && node scripts/check_chat_assets.js",
+    "check": "npm run check:text && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:window-globals && npm run check:e2e-smoke",
     "test": "npm run check && npm run lint && node tests/security.test.js",
     "verify": "npm test",
     "backup": "node scripts/backup_db.js",
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
     "dist:win": "node scripts/package_desktop.js nsis",
-    "desktop:icon": "node scripts/build_desktop_icon.js"
+    "desktop:icon": "node scripts/build_desktop_icon.js",
+    "check:window-globals": "node scripts/check_window_globals_usage.js",
+    "check:e2e-smoke": "node scripts/check_e2e_smoke.js",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.js"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.4-r.1",
@@ -50,6 +55,7 @@
     "word-extractor": "^1.0.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "electron": "^38.4.0",
     "electron-builder": "^26.0.12",
     "eslint": "^10.3.0",
@@ -69,7 +75,7 @@
       "package.json",
       "package-lock.json",
       "README.md",
-      "使用帮助.md",
+      "浣跨敤甯姪.md",
       "node_modules/**",
       "!data/**",
       "!uploads/**",
@@ -107,8 +113,8 @@
         "to": "config.example.json"
       },
       {
-        "from": "docs/远程模式部署说明.md",
-        "to": "docs/远程模式部署说明.md"
+        "from": "docs/杩滅▼妯″紡閮ㄧ讲璇存槑.md",
+        "to": "docs/杩滅▼妯″紡閮ㄧ讲璇存槑.md"
       }
     ],
     "nodeGypRebuild": false,

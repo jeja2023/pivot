@@ -1,4 +1,4 @@
-/* 工作流库与版本辅助函数（Agent workflow library and version helpers），拆自 agents.js。 */
+/* 工作流库与版本辅助函数，拆自 agents.js。 */
 
 
 
@@ -106,14 +106,14 @@ function renderAgentWorkflowPicker() {
         : (agentWorkflowsCache.length ? `${agentWorkflowsCache.length} 个可用 · 支持搜索筛选` : '暂无已保存工作流');
     if (search && search.value !== agentWorkflowPickerQuery) search.value = agentWorkflowPickerQuery;
     if (!agentWorkflowsCache.length) {
-        list.innerHTML = '<div class="agent-workflow-picker-empty">保存当前画布后，会在这里选择、搜索和加载工作流。</div>';
+        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-picker-empty">保存当前画布后，会在这里选择、搜索和加载工作流。</div>');
         return;
     }
     if (!filtered.length) {
-        list.innerHTML = `<div class="agent-workflow-picker-empty">没有匹配“${agentEscape(agentWorkflowPickerQuery)}”的工作流</div>`;
+        PivotSafeHtml.setHtml(list, `<div class="agent-workflow-picker-empty">没有匹配“${agentEscape(agentWorkflowPickerQuery)}”的工作流</div>`);
         return;
     }
-    list.innerHTML = filtered.map(item => agentWorkflowPickerOptionMarkup(item, activeAgentWorkflowId)).join('');
+    PivotSafeHtml.setHtml(list, filtered.map(item => agentWorkflowPickerOptionMarkup(item, activeAgentWorkflowId)).join(''));
     list.querySelectorAll('[data-agent-workflow-picker-id]').forEach(option => {
         option.addEventListener('click', () => selectAgentWorkflowFromPicker(option.dataset.agentWorkflowPickerId));
     });
@@ -132,7 +132,7 @@ function renderAgentWorkflowLibrary() {
     ].join('');
     const nextValue = agentWorkflowsCache.some(item => String(item.id) === String(current)) ? String(current) : '';
     if (select) {
-        select.innerHTML = editorOptions;
+        PivotSafeHtml.setHtml(select, editorOptions);
         select.value = nextValue;
     }
     activeAgentWorkflowId = nextValue;
@@ -172,7 +172,7 @@ function clearAgentWorkflowLocalSnapshots() {
         localStorage.removeItem(AGENT_WORKFLOW_DRAFT_KEY);
         localStorage.removeItem(AGENT_WORKFLOW_SAVED_KEY);
     } catch (e) {
-        // ignore storage cleanup failures
+        // 忽略存储清理失败
     }
 }
 
@@ -339,7 +339,7 @@ function deleteSelectedAgentWorkflow() {
         showToast(`工作流「${deletedInfo.name}」已删除，30 天内可恢复`, 'success');
         const lifecycle = document.getElementById('agent-workflow-lifecycle');
         if (lifecycle) {
-            lifecycle.innerHTML = `<button type="button" class="btn-secondary agent-workflow-undo-delete" title="恢复已删除的工作流">撤销删除：${agentEscape(deletedInfo.name)}</button>`;
+            PivotSafeHtml.setHtml(lifecycle, `<button type="button" class="btn-secondary agent-workflow-undo-delete" title="恢复已删除的工作流">撤销删除：${agentEscape(deletedInfo.name)}</button>`);
             lifecycle.querySelector('.agent-workflow-undo-delete')?.addEventListener('click', async () => {
                 const restoreRes = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(deletedInfo.id)}/restore`, { method: 'PATCH' });
                 const restoreData = await restoreRes.json().catch(() => ({}));
@@ -409,7 +409,7 @@ window.saveAgentWorkflow = async function() {
     try {
         localStorage.removeItem(AGENT_WORKFLOW_DRAFT_KEY);
     } catch (e) {
-        // ignore storage cleanup failures
+        // 忽略存储清理失败
     }
     await saveAgentWorkflowToLibrary();
 };

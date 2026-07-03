@@ -2,14 +2,13 @@ const express = require('express');
 const { db } = require('../../db');
 const { asyncHandler } = require('../../http');
 const { getBeijingTimestamp } = require('../../time');
-const axios = require('axios');
 const {
     decryptSecret,
     encryptSecret,
-    assertSafeMcpOutboundUrl,
-    createSafeHttpAgentsForUser
+    assertSafeMcpOutboundUrl
 } = require('../../security');
 const { getSystemHealthSnapshot } = require('../../services/system-health');
+const { safeJsonGet } = require('../../services/safe-http-client');
 const { debugRetrieveContext } = require('../../services/rag-index');
 const {
     executeMcpTool,
@@ -698,16 +697,15 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 message: '未配置健康检查 URL。'
             });
         }
-        await assertSafeMcpOutboundUrl(healthUrl, req.user);
-        const agents = createSafeHttpAgentsForUser(req.user, {
-            allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
-            allowExplicitLoopbackForAdmin: true
-        });
         const startedAt = Date.now();
-        const response = await axios.get(healthUrl, {
+        const response = await safeJsonGet(healthUrl, {
+            user: req.user,
+            assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
             timeout: Math.max(1000, Math.min(Number(config.timeoutMs || 20000) || 20000, 120000)),
-            proxy: false,
-            ...agents,
+            agentOptions: {
+                allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+                allowExplicitLoopbackForAdmin: true
+            },
             validateStatus: () => true
         });
         res.json({

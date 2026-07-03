@@ -1,5 +1,5 @@
-// Agent 模板管理 Agent templates
-// Split from agents.js.
+// Agent 模板管理
+// 拆自 agents.js。
 /* eslint-disable no-undef */
 function applyAgentTemplate(template) {
     if (!template) return;
@@ -40,7 +40,7 @@ async function loadAgentTemplates() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '模板库加载失败');
     agentTemplatesCache = data.data || [];
-    list.innerHTML = agentTemplatesCache.length ? agentTemplatesCache.slice(0, 8).map(template => `
+    PivotSafeHtml.setHtml(list, agentTemplatesCache.length ? agentTemplatesCache.slice(0, 8).map(template => `
         <div class="agent-template-item" title="${agentEscape(template.description || template.goal_template)}">
             <button type="button" class="agent-template-apply" data-agent-template-id="${agentEscape(template.id)}">
                 <strong>${agentEscape(template.name)}</strong>
@@ -48,7 +48,7 @@ async function loadAgentTemplates() {
             </button>
             ${template.scope === 'personal' ? `<button type="button" class="agent-mini-danger" data-agent-template-delete="${agentEscape(template.id)}">删除</button>` : ''}
         </div>
-    `).join('') : '<div class="empty-state agent-empty-state compact">暂无模板</div>';
+    `).join('') : '<div class="empty-state agent-empty-state compact">暂无模板</div>');
     list.querySelectorAll('[data-agent-template-id]').forEach(btn => {
         btn.addEventListener('click', () => applyAgentTemplate(agentTemplatesCache.find(item => String(item.id) === String(btn.dataset.agentTemplateId))));
     });

@@ -49,10 +49,10 @@ function renderSessionSearchResults(sessions) {
     const { results } = getSessionSearchEls();
     if (!results) return;
     if (!sessions.length) {
-        results.innerHTML = '<div class="session-search-empty">没有找到匹配的会话</div>';
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的会话</div>');
         return;
     }
-    results.innerHTML = sessions.map(s => {
+    PivotSafeHtml.setHtml(results, sessions.map(s => {
         const title = s.title || '新对话';
         const sessionId = String(s.id);
         sessionMenuData.set(sessionId, {
@@ -98,7 +98,7 @@ function renderSessionSearchResults(sessions) {
                 </div>
             </div>
         `;
-    }).join('');
+    }).join(''));
 }
 
 async function loadSessionSearchResults() {
@@ -136,7 +136,7 @@ async function loadSessionSearchResults() {
         setSessionSearchStatus(sessions.length ? `共找到 ${sessions.length} 个会话` : '');
     } catch (error) {
         console.error('搜索会话失败:', error);
-        results.innerHTML = '<div class="session-search-empty">搜索失败，请稍后重试</div>';
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">搜索失败，请稍后重试</div>');
         setSessionSearchStatus('');
     }
 }
@@ -179,7 +179,7 @@ function ensureSessionTagTools() {
     const tools = document.createElement('div');
     tools.id = 'session-tag-tools';
     tools.className = 'session-tag-tools';
-    tools.innerHTML = `
+    PivotSafeHtml.setHtml(tools, `
         <div id="session-batch-tags" class="session-batch-tags hidden">
             <span id="session-batch-count">已选择 0 个</span>
             <button type="button" data-session-batch-action="add">添加标签</button>
@@ -188,7 +188,7 @@ function ensureSessionTagTools() {
             <button type="button" data-session-batch-action="clear">取消选择</button>
             <button type="button" data-session-batch-action="done">完成</button>
         </div>
-    `;
+    `);
     controls.insertAdjacentElement('afterend', tools);
 }
 

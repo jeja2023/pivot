@@ -122,7 +122,7 @@ function renderOfficialWritingDiffRows() {
     const list = document.getElementById('official-writing-diff-rows');
     if (!list || !officialWritingDiffState) return;
     const rows = officialWritingDiffState.rows;
-    list.innerHTML = rows.map(row => {
+    PivotSafeHtml.setHtml(list, rows.map(row => {
         if (row.type === 'same') {
             return `<div class="official-writing-diff-pair is-same"><div class="official-writing-diff-cell"><p>${escapeAppsHtml(row.original)}</p></div></div>`;
         }
@@ -141,7 +141,7 @@ function renderOfficialWritingDiffRows() {
                     <button type="button" data-official-writing-diff-reject="${escapeAppsHtml(row.id)}" class="${row.accepted ? '' : 'active'}">保留原文</button>
                 </div>
             </div>`;
-    }).join('') || '<div class="official-writing-empty-note">无差异</div>';
+    }).join('') || '<div class="official-writing-empty-note">无差异</div>');
     const changed = rows.filter(r => r.type !== 'same').length;
     const accepted = rows.filter(r => r.type !== 'same' && r.accepted).length;
     setText('official-writing-diff-stat', `${changed} 处差异，已接受 ${accepted} 处`);

@@ -149,13 +149,13 @@ function renderOfficialWritingProofread() {
     setText('official-writing-proofread-count', `${issues.length} 项`);
     setText('official-writing-proofread-badge', String(issues.length));
     if (!list) return;
-    list.innerHTML = issues.map(issue => `
+    PivotSafeHtml.setHtml(list, issues.map(issue => `
         <article class="official-writing-check-item" ${issue.end > issue.start ? `data-official-writing-proof-start="${issue.start}" data-official-writing-proof-end="${issue.end}"` : ''}>
             <strong>${escapeAppsHtml(issue.kind)}<span>${escapeAppsHtml(issue.level)}</span></strong>
             <p>${escapeAppsHtml(issue.excerpt || '')}</p>
             <em>${escapeAppsHtml(issue.suggestion)}</em>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">未发现敏感词、易错字、标点或文种一致性问题</div>';
+    `).join('') || '<div class="official-writing-empty-note">未发现敏感词、易错字、标点或文种一致性问题</div>');
 }
 
 function applyOfficialWritingViewMode(mode = 'document') {
@@ -428,13 +428,13 @@ function compareOfficialWritingVersions() {
     const result = document.getElementById('official-writing-diff-result');
     if (summary) summary.textContent = `共 ${diff.total} 段，${diff.changed} 段存在差异`;
     if (!result) return;
-    result.innerHTML = diff.rows.map(row => `
+    PivotSafeHtml.setHtml(result, diff.rows.map(row => `
         <div class="official-writing-diff-row is-${row.type}">
             <span>段 ${row.line}</span>
             <p>${escapeAppsHtml(row.before || ' ')}</p>
             <p>${escapeAppsHtml(row.after || ' ')}</p>
         </div>
-    `).join('');
+    `).join(''));
 }
 
 async function copyAppsText(text) {

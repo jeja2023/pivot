@@ -43,17 +43,17 @@ const {
     cosineSimilarity
 } = require('./embedding-client');
 
-// Bounded cache for parsed chunk embeddings on the chat hot path: re-parsing the
-// same TEXT-JSON vectors (and recomputing their L2 norm) on every query is costly.
-// Keyed by knowledge_chunks.id -> { vec: Float64Array, norm }. Chunk ids come from
-// an AUTOINCREMENT PK and are never reused, and embeddings are never UPDATEd in
-// place (reindex = DELETE + re-INSERT with fresh ids), so a cached id can never map
-// to a different embedding. Cache is still invalidated on reindex for defensiveness.
+// 为聊天热路径中的已解析 chunk embedding 设置有界缓存：反复解析
+// 同一批 TEXT-JSON 向量并重新计算 L2 范数成本较高。
+// 缓存键为 knowledge_chunks.id -> { vec: Float64Array, norm }。chunk id 来自
+// 自增主键且不会复用，embedding 也不会原地 UPDATE；
+// 重建索引会 DELETE 后用新 id 重新 INSERT，因此缓存 id 不会映射到
+// 另一个 embedding。重建索引时仍会防御性地清空缓存。
 const CHUNK_EMBEDDING_CACHE_MAX = 2000;
 const chunkEmbeddingCache = new Map();
 
-// Parse + norm a chunk's embedding, caching the result. Returns null when the
-// embedding is missing/invalid or its dimension does not match the expected length.
+// 解析并计算 chunk embedding 的范数，同时缓存结果；当
+// embedding 缺失、无效或维度与预期长度不匹配时返回 null。
 function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
     if (chunkId != null) {
         const cached = chunkEmbeddingCache.get(chunkId);
@@ -80,7 +80,7 @@ function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
     const entry = { vec, norm: Math.sqrt(norm) };
     if (chunkId != null) {
         if (chunkEmbeddingCache.size >= CHUNK_EMBEDDING_CACHE_MAX) {
-            // Evict oldest (Map preserves insertion order).
+            // 淘汰最旧项（Map 会保留插入顺序）。
             const oldestKey = chunkEmbeddingCache.keys().next().value;
             chunkEmbeddingCache.delete(oldestKey);
         }
@@ -89,7 +89,7 @@ function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
     return entry.vec.length === expectedLength ? entry : null;
 }
 
-// Cosine similarity against a cached chunk vector using a precomputed query norm.
+// 使用预先计算的查询范数，与缓存的 chunk 向量计算余弦相似度。
 function cosineSimilarityCached(queryVector, queryNorm, chunkEntry) {
     if (queryNorm === 0 || chunkEntry.norm === 0) return 0;
     const vec = chunkEntry.vec;
@@ -439,12 +439,30 @@ function buildRagCacheScope(userId, config = {}, scope = {}) {
     ].join('|');
 }
 
-function normalizeRetrievalDebugMatch(match, scoreThreshold) {
+function roundDebugScore(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? Number(num.toFixed(6)) : 0;
+}
+
+function normalizeRetrievalDebugMatch(match, scoreThreshold, rank = 0, selectedIds = new Set()) {
+    const denseScore = match.denseScore != null ? match.denseScore : match.score;
+    const fusedScore = match.fused != null ? match.fused : denseScore;
+    const selected = selectedIds.has(match.chunkId);
     return {
         chunkId: match.chunkId,
         source: match.source,
-        score: Number(match.score.toFixed(6)),
-        matched: match.score > scoreThreshold,
+        score: roundDebugScore(denseScore),
+        fusedScore: roundDebugScore(fusedScore),
+        matched: Number(denseScore || 0) > scoreThreshold,
+        selected,
+        rank: rank + 1,
+        scores: {
+            dense: roundDebugScore(denseScore),
+            fused: roundDebugScore(fusedScore),
+            denseRank: Number.isInteger(match.denseRank) ? match.denseRank + 1 : null,
+            ftsRank: Number.isInteger(match.ftsRank) ? match.ftsRank + 1 : null,
+            mmrSelected: selected
+        },
         text: String(match.text || '').slice(0, 800)
     };
 }
@@ -466,7 +484,9 @@ async function debugRetrieveContext(userId, query, {
             threshold: config.scoreThreshold,
             topK: config.topK,
             candidateCount: 0,
-            matches: []
+            matches: [],
+            hybrid: getHybridRetrievalConfig(),
+            ranking: { mode: 'empty_query', selectedChunkIds: [] }
         };
     }
 
@@ -492,17 +512,21 @@ async function debugRetrieveContext(userId, query, {
             matches: [],
             graph: graphContext,
             scope: normalizedScope,
+            hybrid: getHybridRetrievalConfig(),
+            ranking: { mode: 'no_candidates', selectedChunkIds: [] },
             injectedContext: formatInjectedContext([])
         };
     }
     const hybrid = getHybridRetrievalConfig();
     let scored = [];
     let gated = [];
+    let usedKeywordFallback = false;
     try {
         const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
         scored = scoreCandidatesHybrid(candidates, vector, hybrid);
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
     } catch (e) {
+        usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
         scored = scoreKeywordChunks(candidates, normalizedQuery)
             .sort((a, b) => b.score - a.score)
@@ -520,12 +544,11 @@ async function debugRetrieveContext(userId, query, {
     }
     // matches 展示全部候选评分（便于调参）；注入上下文只取门控+MMR 结果。
     const selected = applyMMR(gated, safeTopK, hybrid.mmrLambda);
-    const matches = scored.map(match => normalizeRetrievalDebugMatch({
-        chunkId: match.chunkId,
-        source: match.headingPath || match.source,
-        score: match.denseScore != null ? match.denseScore : (match.fused || 0),
-        text: match.text
-    }, config.scoreThreshold));
+    const selectedIds = new Set(selected.map(match => match.chunkId));
+    const matches = scored.map((match, index) => normalizeRetrievalDebugMatch({
+        ...match,
+        source: match.headingPath || match.source
+    }, config.scoreThreshold, index, selectedIds));
 
     return {
         query: normalizedQuery,
@@ -536,6 +559,12 @@ async function debugRetrieveContext(userId, query, {
         matches,
         graph: graphContext,
         scope: normalizedScope,
+        hybrid,
+        ranking: {
+            mode: usedKeywordFallback ? 'keyword_fallback' : 'hybrid_rrf_mmr',
+            selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
+            gatedCount: gated.length
+        },
         injectedContext: formatInjectedContext(selected) + (graphContext.context || '')
     };
 }
@@ -674,9 +703,9 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         if (chunks.length === 0) {
             throw new Error('文档未解析出可索引文本，请检查文件内容后重新上传。');
         }
-        // A (re)index for this doc may have deleted/replaced chunk rows elsewhere
-        // (rag-documents delete path). Clear the embedding cache so no stale entry
-        // can be served; correctness over precision (a full clear is cheap here).
+        // 该文档的重建索引可能已在其他路径删除或替换 chunk 行
+        // （例如 rag-documents 删除路径）。清空 embedding 缓存，避免旧条目
+        // 被继续使用；这里优先保证正确性，完整清空成本也很低。
         clearChunkEmbeddingCache();
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);

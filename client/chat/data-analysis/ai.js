@@ -16,7 +16,7 @@
             // 用户偏好减少动效时直接整段渲染，不做打字机。
             const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             if (reduceMotion || text.length <= 12) {
-                el.innerHTML = render(text);
+                PivotSafeHtml.setHtml(el, render(text));
                 resolve();
                 return;
             }
@@ -24,7 +24,7 @@
             let i = 0;
             const step = () => {
                 i = Math.min(text.length, i + chunkSize);
-                el.innerHTML = render(text.slice(0, i));
+                PivotSafeHtml.setHtml(el, render(text.slice(0, i)));
                 if (i >= text.length) { resolve(); return; }
                 setTimeout(step, 18);
             };
@@ -36,7 +36,7 @@
     async function replayAgentResult(box, data) {
         if (!box) return;
         const answer = String(data && data.answer ? data.answer : 'AI 未返回有效内容');
-        box.innerHTML = '<div class="data-analysis-ai-answer"></div>';
+        PivotSafeHtml.setHtml(box, '<div class="data-analysis-ai-answer"></div>');
         const answerEl = box.querySelector('.data-analysis-ai-answer');
         await typewriterReplay(answerEl, answer, text => renderMarkdown(text));
         // 最终完整渲染：答案 + 图表 + 执行过程，并初始化图表（图表需在 DOM 落定后挂载）。
@@ -46,7 +46,7 @@
     // 深度分析：调用后端 ReAct 工具调用接口，渲染答案 + 执行过程 + 内联图表。
     async function runAiAgent(dataset, prompt, model, result) {
         state.aiBusy = true;
-        if (result) result.innerHTML = '<div class="data-analysis-ai-thinking">AI 正在查询数据并分析…</div>';
+        if (result) PivotSafeHtml.setHtml(result, '<div class="data-analysis-ai-thinking">AI 正在查询数据并分析…</div>');
         await guardButton('data-analysis-ai-run', '分析中…', async () => {
             try {
                 const data = await fetchJson(`${API}/ai`, {
@@ -56,7 +56,7 @@
                 });
                 await replayAgentResult(result, data);
             } catch (e) {
-                if (result) result.innerHTML = `<div class="data-analysis-empty">深度分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+                if (result) PivotSafeHtml.setHtml(result, `<div class="data-analysis-empty">深度分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);
                 toast(e && e.message ? e.message : '深度分析失败', 'error');
             } finally {
                 state.aiBusy = false;
@@ -94,11 +94,11 @@
                 <pre class="pivot-echart-error-text"></pre>
             </div>
         `).join('')}</div>` : '';
-        box.innerHTML = `
+        PivotSafeHtml.setHtml(box, `
             <div class="data-analysis-ai-answer">${renderMarkdown(data.answer || 'AI 未返回有效内容')}</div>
             ${chartsHtml}
             ${stepsHtml}
-        `;
+        `);
         if (charts.length) window.renderPivotCharts?.(box);
     }
 
@@ -124,7 +124,7 @@
         // 环境支持时走 SSE 流式逐字输出，否则回退一次性请求。
         const useStream = typeof createBrowserSseParser === 'function' && typeof apiFetch === 'function';
         state.aiBusy = true;
-        if (result) result.innerHTML = '<div class="data-analysis-ai-thinking">AI 正在分析...</div>';
+        if (result) PivotSafeHtml.setHtml(result, '<div class="data-analysis-ai-thinking">AI 正在分析...</div>');
         await guardButton('data-analysis-ai-run', '分析中…', async () => {
             try {
                 if (!useStream) {
@@ -133,7 +133,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ datasetId: dataset.id, prompt, model })
                     });
-                    if (result) result.innerHTML = renderMarkdown(data.content || 'AI 未返回有效内容');
+                    if (result) PivotSafeHtml.setHtml(result, renderMarkdown(data.content || 'AI 未返回有效内容'));
                     return;
                 }
                 const res = await apiFetch(`${API}/ai`, {
@@ -155,7 +155,7 @@
                         const chunk = data?.content ?? data?.choices?.[0]?.delta?.content ?? '';
                         if (chunk) {
                             full += chunk;
-                            if (result) result.innerHTML = renderMarkdown(full);
+                            if (result) PivotSafeHtml.setHtml(result, renderMarkdown(full));
                         }
                     }
                 });
@@ -168,9 +168,9 @@
                     }
                     parser.write(decoder.decode(value, { stream: true }));
                 }
-                if (result) result.innerHTML = renderMarkdown(full.trim() || 'AI 未返回有效内容');
+                if (result) PivotSafeHtml.setHtml(result, renderMarkdown(full.trim() || 'AI 未返回有效内容'));
             } catch (e) {
-                if (result) result.innerHTML = `<div class="data-analysis-empty">AI 分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+                if (result) PivotSafeHtml.setHtml(result, `<div class="data-analysis-empty">AI 分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);
                 toast(e && e.message ? e.message : 'AI 分析失败', 'error');
             } finally {
                 state.aiBusy = false;

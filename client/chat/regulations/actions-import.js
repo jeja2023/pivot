@@ -68,7 +68,7 @@
                                 `).join('')}
                             </div>
                         ` : '';
-                        body.innerHTML = createdHtml + failedHtml;
+                        PivotSafeHtml.setHtml(body, createdHtml + failedHtml);
                         panel.classList.remove('hidden');
                     }
 
@@ -172,8 +172,8 @@
                             state.facets.jurisdictions = Array.isArray(data.jurisdictions) ? data.jurisdictions : [];
                             const catList = document.getElementById('regulations-category-list');
                             const jurList = document.getElementById('regulations-jurisdiction-list');
-                            if (catList) catList.innerHTML = state.facets.categories.map(c => `<option value="${esc(c)}">`).join('');
-                            if (jurList) jurList.innerHTML = state.facets.jurisdictions.map(j => `<option value="${esc(j)}">`).join('');
+                            if (catList) PivotSafeHtml.setHtml(catList, state.facets.categories.map(c => `<option value="${esc(c)}">`).join(''));
+                            if (jurList) PivotSafeHtml.setHtml(jurList, state.facets.jurisdictions.map(j => `<option value="${esc(j)}">`).join(''));
                         } catch (_e) {
                             // facets 失败不影响主流程
                         }

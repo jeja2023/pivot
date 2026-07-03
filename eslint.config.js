@@ -50,6 +50,7 @@ const browserGlobals = {
     Node: 'readonly',
     NodeFilter: 'readonly',
     requestAnimationFrame: 'readonly',
+    ResizeObserver: 'readonly',
     self: 'readonly',
     sessionStorage: 'readonly',
     setTimeout: 'readonly',

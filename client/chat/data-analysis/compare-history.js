@@ -72,11 +72,11 @@
         const box = document.getElementById('data-analysis-compare-result');
         if (!box) return;
         if (!state.compare) {
-            box.innerHTML = '<div class="data-analysis-empty">选择两个数据集和主键后开始比对</div>';
+            PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">选择两个数据集和主键后开始比对</div>');
             return;
         }
         const result = state.compare;
-        box.innerHTML = `
+        PivotSafeHtml.setHtml(box, `
             <div style="display: flex; justify-content: flex-end; margin: 12px 10px 6px;">
                 <button id="data-analysis-compare-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出结果</button>
             </div>
@@ -87,7 +87,7 @@
                 ${renderCompareList(`仅右侧存在 (${fmtNumber(result.onlyRight?.length || 0)})`, result.onlyRight, 'onlyRight')}
                 ${renderChangedList(`字段差异 (${fmtNumber(result.changed?.length || 0)})`, result.changed)}
             </div>
-        `;
+        `);
     }
 
     function renderDuplicateKeys(result = {}) {
@@ -171,7 +171,7 @@
         }
 
         titleEl.textContent = title;
-        contentEl.innerHTML = htmlContent;
+        PivotSafeHtml.setHtml(contentEl, htmlContent);
         modal.classList.remove('hidden');
     }
 
@@ -183,14 +183,14 @@
             renderHistory();
             return;
         }
-        if (box) box.innerHTML = '<div class="data-analysis-empty">加载中…</div>';
+        if (box) PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">加载中…</div>');
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/artifacts?limit=30`);
             state.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
             renderHistory();
         } catch (e) {
             state.artifacts = [];
-            if (box) box.innerHTML = `<div class="data-analysis-empty">历史加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`;
+            if (box) PivotSafeHtml.setHtml(box, `<div class="data-analysis-empty">历史加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);
         }
     }
 
@@ -199,11 +199,11 @@
         if (!box) return;
         const items = state.artifacts || [];
         if (!items.length) {
-            box.innerHTML = '<div class="data-analysis-empty">暂无历史记录，生成图表 / 数据透视 / 比对 / 导出后会显示在这里</div>';
+            PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">暂无历史记录，生成图表 / 数据透视 / 比对 / 导出后会显示在这里</div>');
             return;
         }
         const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询' };
-        box.innerHTML = items.map((item, index) => {
+        PivotSafeHtml.setHtml(box, items.map((item, index) => {
             const clickable = item.type === 'chart' && item.chart;
             const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
             return `
@@ -213,7 +213,7 @@
                     <small>${esc(item.createdAt || '')}${clickable ? ' · 点击重新查看' : ''}</small>
                 </div>
             `;
-        }).join('');
+        }).join(''));
     }
 
     Object.assign(app, {

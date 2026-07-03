@@ -114,11 +114,11 @@ function updateMcpConfigHelper(mode = 'create') {
     const note = sourceType === 'database'
         ? `${config.note} ${MCP_DATABASE_TYPE_TIPS[dbType] || ''}`.trim()
         : config.note;
-    helper.innerHTML = `
+    PivotSafeHtml.setHtml(helper, `
         <strong>${mcpEscape(config.title)}配置助手</strong>
         <div>${config.steps.map(step => `<span>${mcpEscape(step)}</span>`).join('')}</div>
         <small>${mcpEscape(note)}</small>
-    `;
+    `);
 }
 
 function setMcpPlaceholder(id, value, mode = 'create') {

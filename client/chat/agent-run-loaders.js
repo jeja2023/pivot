@@ -1,6 +1,6 @@
-// Agent 运行加载器 Agent run loaders
-// Split from agent-runs-list.js.
-// Agent run model/tool loaders and run list rendering.
+// Agent 运行加载器
+// 拆自 agent-runs-list.js。
+// Agent 模型、工具加载器和运行列表渲染。
 /* eslint-disable no-undef */
 async function loadAgentModels() {
     const loaded = typeof window.loadSelectableModels === 'function'
@@ -25,12 +25,12 @@ async function loadAgentModels() {
     const select = document.getElementById('agent-model-select');
     if (select) {
         const previousId = select.value;
-        select.innerHTML = optionHtml;
+        PivotSafeHtml.setHtml(select, optionHtml);
         select.value = nextModels.some(model => String(model.id) === String(previousId)) ? previousId : initialId;
     }
     const list = document.getElementById('agent-model-list');
     if (list) {
-        list.innerHTML = nextModels.length ? nextModels.map(model => {
+        PivotSafeHtml.setHtml(list, nextModels.length ? nextModels.map(model => {
             const meta = [];
             meta.push(model.user_id ? '个人模型' : '全局模型');
             if (model.model_name && model.model_name !== model.name) meta.push(model.model_name);
@@ -44,7 +44,7 @@ async function loadAgentModels() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>';
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>');
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -77,12 +77,12 @@ async function _loadAgentModelsLegacy() {
         : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
     const nextModels = (await res.json()).filter(model => model.type !== 'embedding' && canSelectModel(model));
     window._cachedAgentModels = nextModels;
-    select.innerHTML = nextModels
+    PivotSafeHtml.setHtml(select, nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
-        .join('');
+        .join(''));
     const list = document.getElementById('agent-model-list');
     if (list) {
-        list.innerHTML = nextModels.length ? nextModels.map(model => {
+        PivotSafeHtml.setHtml(list, nextModels.length ? nextModels.map(model => {
             const meta = [];
             meta.push(model.user_id ? '个人模型' : '全局模型');
             if (model.model_name && model.model_name !== model.name) meta.push(model.model_name);
@@ -96,7 +96,7 @@ async function _loadAgentModelsLegacy() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>';
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>');
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -130,11 +130,11 @@ async function loadAgentModelRouters() {
         if (!res.ok) throw new Error(data.error || '模型路由加载失败');
         const strategies = Array.isArray(data.strategies) ? data.strategies : [];
         if (!strategies.length) return;
-        select.innerHTML = strategies.map(strategy => `
+        PivotSafeHtml.setHtml(select, strategies.map(strategy => `
             <option value="${agentEscape(strategy.code)}" title="${agentEscape(strategy.description || '')}">
                 ${agentEscape(strategy.label || strategy.code)}
             </option>
-        `).join('');
+        `).join(''));
         select.value = strategies.some(strategy => String(strategy.code) === String(current)) ? current : 'fixed';
     } catch (e) {
         // 保留 HTML 中的默认策略，避免路由接口异常影响自由任务工作台打开。
@@ -162,7 +162,7 @@ async function loadAgentTools() {
         mountAgentDagEditor();
     }
     if (!list) return;
-    list.innerHTML = `
+    PivotSafeHtml.setHtml(list, `
         ${visibleTools.map(tool => {
             const title = agentToolTitle(tool);
             const description = agentToolDescription(tool);
@@ -191,7 +191,7 @@ async function loadAgentTools() {
             </label>
         `;
         }).join('') || '<div class="empty-state">暂无可用能力</div>'}
-    `;
+    `);
 }
 
 async function loadAgentRuntimeStatus() {
@@ -200,14 +200,14 @@ async function loadAgentRuntimeStatus() {
     const res = await apiFetch(`${API_BASE}/agents/runtime`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        target.innerHTML = '';
+        PivotSafeHtml.setHtml(target, '');
         return;
     }
-    target.innerHTML = `
+    PivotSafeHtml.setHtml(target, `
         <span>并发 ${Number(data.active || 0)} / ${Number(data.maxConcurrent || 0)}</span>
         <span>队列 ${Number(data.databaseQueued || data.queued || 0)}</span>
         <span>我的排队 ${Number(data.userQueued || 0)}</span>
-    `;
+    `);
 }
 
 async function loadAgentMetrics() {
@@ -216,15 +216,15 @@ async function loadAgentMetrics() {
     const res = await apiFetch(`${API_BASE}/agents/metrics?days=7`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        target.innerHTML = '';
+        PivotSafeHtml.setHtml(target, '');
         return;
     }
-    target.innerHTML = `
+    PivotSafeHtml.setHtml(target, `
         <span>7日任务 ${Number(data.total || 0)}</span>
         <span>成功率 ${Number(data.successRate || 0)}%</span>
         <span>失败 ${Number(data.error || 0)}</span>
         <span>Token ${agentEscape(formatAgentCompactCount(data.totalTokens || 0))}</span>
-    `;
+    `);
 }
 
 function renderAgentPreflight(data) {
@@ -237,7 +237,7 @@ function renderAgentPreflight(data) {
         : '自由任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
     const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || []), deploymentTip].slice(0, 5);
     target.className = `workspace-governance-panel agent-preflight-panel ${agentEscape(data.status || 'ready')}`;
-    target.innerHTML = `
+    PivotSafeHtml.setHtml(target, `
         <div class="governance-head">
             <strong>任务预检：${agentEscape(statusText)}</strong>
             <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具箱 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
@@ -251,14 +251,14 @@ function renderAgentPreflight(data) {
         <div class="governance-list">
             ${messages.map(item => `<span>${agentEscape(item)}</span>`).join('') || '<span>预检通过。</span>'}
         </div>
-    `;
+    `);
 }
 
 async function preflightAgentPayload(payload) {
     const target = document.getElementById('agent-preflight-panel');
     if (target) {
         target.className = 'workspace-governance-panel agent-preflight-panel';
-        target.innerHTML = '<div class="governance-head"><strong>任务预检中...</strong></div>';
+        PivotSafeHtml.setHtml(target, '<div class="governance-head"><strong>任务预检中...</strong></div>');
     }
     const res = await apiFetch(`${API_BASE}/agents/preflight`, {
         method: 'POST',
@@ -309,24 +309,24 @@ async function loadAgentRuns(page = agentRunsPage) {
     renderAgentRunsPagination(agentRunsPage, agentRunsTotal, pageSize);
     const displayRuns = agentRunsCache;
     if (agentRunsTotal === 0 && !status && !runType && !query) {
-        list.innerHTML = '';
+        PivotSafeHtml.setHtml(list, '');
         activeAgentRunId = '';
         closeAgentRunDetailModal();
-        list.innerHTML = `
+        PivotSafeHtml.setHtml(list, `
             <div class="agent-empty-state agent-empty-hero">
                 <strong>还没有自由任务</strong>
                 <span>在左侧输入目标并点击运行后，这里会显示统一任务记录。自由任务可继续生成工作流草稿。</span>
             </div>
-        `;
+        `);
         return;
     }
     if (displayRuns.length === 0) {
-        list.innerHTML = '<div class="empty-state agent-empty-state">没有匹配的任务记录。</div>';
+        PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state">没有匹配的任务记录。</div>');
         return;
     }
     const hasSelectedRun = activeAgentRunId && displayRuns.some(run => run.id === activeAgentRunId);
     if (!hasSelectedRun && !isAgentRunDetailModalOpen()) activeAgentRunId = '';
-    list.innerHTML = `
+    PivotSafeHtml.setHtml(list, `
         <div class="agent-runs-table-wrap">
             <table class="data-table agent-runs-table">
                 <thead>
@@ -393,7 +393,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 </tbody>
             </table>
         </div>
-    `;
+    `);
     list.querySelectorAll('[data-agent-run-detail]').forEach(btn => {
         btn.addEventListener('click', () => window.openAgentRun(btn.dataset.agentRunDetail));
     });

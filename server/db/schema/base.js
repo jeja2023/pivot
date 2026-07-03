@@ -1,5 +1,6 @@
 const { db } = require('../connection');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
+const { enterpriseSchemaSql } = require('./enterprise');
 
 function initSchema() {
     applyLegacySchemaPreflight();
@@ -882,6 +883,8 @@ function initSchema() {
             acknowledged_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
         );
+
+        ${enterpriseSchemaSql()}
 
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);

@@ -1,5 +1,7 @@
 // 模型上下文设置单测：context_window_tokens、全局上下文窗口、无界判定、Agent 输出上限解析。
 // 由 security-chat.test.js 统一加载。
+const fs = require('node:fs');
+const path = require('node:path');
 const { assert, createSettingsRouter, db, runExpressHandlers, test } = require('../security-helpers');
 const { getModelContextBudget } = require('../../server/services/context-budget');
 const { resolveAgentMaxTokens } = require('../../server/services/agent-model');
@@ -13,6 +15,7 @@ const {
 } = require('../../server/services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
 const { syncAgentRuntimeConcurrency } = require('../../server/services/agent-runtime');
+const { ensureAppSetting, getAppSettingRow, getAppSettingsMap, setAppSetting } = require('../../server/services/app-settings');
 
 function createJsonResponse() {
     return {
@@ -348,5 +351,54 @@ test('全局运行时资源参数可通过设置接口保存', async () => {
         });
         syncGlobalAiConcurrencySettings();
         syncAgentRuntimeConcurrency();
+    }
+});
+
+test('runtime settings save path handles legacy app_settings rows and syncs endpoint runtimes', () => {
+    const runtimeSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'services', 'runtime-settings.js'), 'utf8');
+    const settingsRoute = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'routes', 'settings.js'), 'utf8');
+
+    assert.match(runtimeSettings, /ORDER BY[\s\S]*updated_at DESC,[\s\S]*rowid DESC[\s\S]*LIMIT 1/);
+    assert.match(runtimeSettings, /function isLegacyAppSettingsConflictError\(error\)/);
+    assert.match(runtimeSettings, /legacyAppSettingsMode = true/);
+    assert.match(runtimeSettings, /DELETE FROM app_settings WHERE key = \?/);
+    assert.match(settingsRoute, /const \{ getModelEndpointRuntimeStatus, syncConfiguredRuntimes \} = require\('\.\.\/services\/model-runtime'\);/);
+    assert.match(settingsRoute, /globalAiConcurrency = syncGlobalAiConcurrencySettings\(\);\s*syncConfiguredRuntimes\(\);\s*modelEndpointRuntime = getModelEndpointRuntimeStatus\(\);/);
+});
+
+test('app_settings helper supports legacy production table without key uniqueness', () => {
+    const backupTable = `app_settings_backup_${Date.now()}`;
+    const key = RUNTIME_SETTING_KEYS.maxConcurrentAiRequests;
+    let renamed = false;
+    try {
+        db.exec(`ALTER TABLE app_settings RENAME TO ${backupTable}`);
+        renamed = true;
+        db.exec(`
+            CREATE TABLE app_settings (
+                key TEXT,
+                value TEXT NOT NULL,
+                updated_at DATETIME,
+                updated_by INTEGER
+            )
+        `);
+
+        ensureAppSetting(key, '1', { updatedAt: '2026-01-01 00:00:00' });
+        ensureAppSetting(key, '9', { updatedAt: '2026-01-04 00:00:00' });
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_settings WHERE key = ?').get(key).count, 1);
+        assert.equal(getAppSettingRow(key).value, '1');
+
+        db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
+            .run(key, '2', '2026-01-02 00:00:00', null);
+        db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
+            .run(key, '3', '2026-01-02 00:00:00', null);
+        assert.equal(getAppSettingRow(key).value, '3');
+        assert.equal(getAppSettingsMap()[key].value, '3');
+
+        setAppSetting(key, '4', { updatedAt: '2026-01-03 00:00:00', updatedBy: 1 });
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_settings WHERE key = ?').get(key).count, 1);
+        assert.equal(getAppSettingRow(key).value, '4');
+    } finally {
+        db.exec('DROP TABLE IF EXISTS app_settings');
+        if (renamed) db.exec(`ALTER TABLE ${backupTable} RENAME TO app_settings`);
     }
 });

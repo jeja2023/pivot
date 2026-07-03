@@ -1,5 +1,5 @@
 // --- 对话会话引擎模块 ---
-window.createSession = async function(title) {
+async function createSession(title) {
     try {
         const res = await apiFetch(API_BASE + '/sessions', {
             method: 'POST',
@@ -24,7 +24,7 @@ window.createSession = async function(title) {
     }
 }
 
-window.selectSession = async function(id, title, options = {}) {
+async function selectSession(id, title, options = {}) {
     window.showMainWorkspace?.('chat');
     if (String(currentSessionId || '') !== String(id || '')) {
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
@@ -63,9 +63,9 @@ window.selectSession = async function(id, title, options = {}) {
     if (session && session.title) document.getElementById('current-title').innerText = session.title;
 
     const container = document.getElementById('message-container');
-    container.innerHTML = '';
-    // Build all messages into a fragment, append once, then render charts + scroll
-    // once at the end to avoid O(n) reflows during session switch.
+    PivotSafeHtml.setHtml(container, '');
+    // 先把全部消息构建到 fragment 中并一次性追加，再渲染图表和滚动，
+    // 避免会话切换时出现 O(n) 次回流。
     const fragment = document.createDocumentFragment();
     const assistantContentNodes = [];
     messages
@@ -82,6 +82,13 @@ window.selectSession = async function(id, title, options = {}) {
         });
     container.appendChild(fragment);
     assistantContentNodes.forEach(node => window.renderPivotCharts?.(node));
-    window.scrollMessagesToBottom?.({ duration: 1200 });
-    if (options.refreshSidebar && window.loadSessions) window.loadSessions();
+    window.scrollMessagesToBottom?.({ duration: 2400 });
+    setTimeout(() => window.scrollMessagesToBottom?.({ duration: 900 }), 320);
+    if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
 }
+
+
+window.Pivot.exposeModule('chat.sessions', {
+    createSession,
+    selectSession
+}, ['createSession', 'selectSession']);

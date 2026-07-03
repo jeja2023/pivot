@@ -8,3 +8,7 @@ require('./security-sqlite-write-queue.test');
 require('./security-model-runtime.test');
 require('./security-gpu-monitor.test');
 require('./db-migration-snapshots.test');
+
+require('./security-rag-debug-history.test');
+require('./security-desktop-update.test');
+require('./enterprise-deployment.test');

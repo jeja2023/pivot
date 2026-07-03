@@ -1,4 +1,3 @@
-const axios = require('axios');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const {
@@ -8,6 +7,7 @@ const {
     createSafeHttpAgentsForUser,
     redactSecrets
 } = require('../security');
+const { safeJsonPost } = require('./safe-http-client');
 const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServer,
@@ -53,7 +53,7 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
             createdAt: getBeijingTimestamp()
         });
     } catch (e) {
-        // Audit logging must never block the tool call path.
+        // 审计日志绝不能阻塞工具调用路径。
     }
 }
 
@@ -183,12 +183,6 @@ async function callMcpJsonRpc(server, method, params = {}, user = null) {
     }
     const timeoutMs = Math.max(1000, Math.min(Number(config.timeoutMs || config.timeout_ms || MCP_TIMEOUT_MS) || MCP_TIMEOUT_MS, 120000));
     const authMode = String(config.authMode || config.auth_mode || 'auto').toLowerCase();
-    // 调用时再次校验出站地址，拦截 loopback/link-local/云元数据等 SSRF 目标（含 DNS rebinding）。
-    await assertSafeMcpOutboundUrl(url, user);
-    const agents = createSafeHttpAgentsForUser(user, {
-        allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
-        allowExplicitLoopbackForAdmin: true
-    });
     const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -202,16 +196,21 @@ async function callMcpJsonRpc(server, method, params = {}, user = null) {
             headers['x-api-key'] = server.api_key;
         }
     }
-    const response = await axios.post(url, {
+    // 调用时再次校验出站地址，拦截 loopback/link-local/云元数据等 SSRF 目标（含 DNS rebinding）。
+    const response = await safeJsonPost(url, {
         jsonrpc: '2.0',
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         method,
         params
     }, {
+        user,
+        assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
+        createAgents: (targetUser) => createSafeHttpAgentsForUser(targetUser, {
+            allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+            allowExplicitLoopbackForAdmin: true
+        }),
         headers,
-        timeout: timeoutMs,
-        proxy: false,
-        ...agents
+        timeout: timeoutMs
     });
     if (response.data?.error) {
         throw new Error(response.data.error.message || JSON.stringify(response.data.error));

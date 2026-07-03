@@ -1,11 +1,11 @@
-/* 系统设置路由 System Settings Routes */
+/* 系统设置路由 */
 const express = require('express');
-const axios = require('axios');
 const { db, stmts } = require('../db');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { clearAllRagCache } = require('../services/rag-cache');
-const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
+const { getAppSettingsMap, getAppSettingValue, setAppSetting } = require('../services/app-settings');
+const { assertSafeOutboundUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
@@ -28,11 +28,13 @@ const {
     saveRuntimeConfig
 } = require('../services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../services/concurrency');
-const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
+const { getModelEndpointRuntimeStatus, syncConfiguredRuntimes } = require('../services/model-runtime');
 const { syncAgentRuntimeConcurrency } = require('../services/agent-runtime');
 const { syncKnowledgeDocumentIndexConcurrency } = require('../services/rag-documents');
 const { syncMemoryCompressionConcurrency } = require('../llm');
-const { isAdmin, isSuperAdmin } = require('../permissions');
+const { getDeploymentProfile } = require('../services/deployment-profile');
+const { getPermissionCapabilities, isAdmin, isSuperAdmin } = require('../permissions');
+const { safeJsonGet } = require('../services/safe-http-client');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -106,17 +108,7 @@ const toSettingValue = (key, value) => {
 };
 
 function getSettings() {
-    const rows = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings').all();
-    const settings = {};
-    rows.forEach(row => {
-        settings[row.key] = {
-            value: row.value,
-            enabled: row.value === 'true',
-            updatedAt: row.updated_at,
-            updatedBy: row.updated_by
-        };
-    });
-    return settings;
+    return getAppSettingsMap();
 }
 
 async function saveUserEmbeddingSettings(req, updates) {
@@ -167,10 +159,12 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             },
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
+            permissions: getPermissionCapabilities(req.user),
             settings
         };
         if (isAdmin(req.user)) {
             payload.runtimeConfig = buildRuntimeConfigSnapshot();
+            payload.deploymentProfile = getDeploymentProfile();
         }
         res.json(payload);
     });
@@ -198,17 +192,14 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         let lastError = null;
         for (const modelsUrl of candidates) {
             try {
-                await assertSafeOutboundUrl(modelsUrl, req.user);
-                const agents = createSafeHttpAgentsForUser(req.user);
-                const response = await axios.get(modelsUrl, {
+                const response = await safeJsonGet(modelsUrl, {
+                    user: req.user,
                     headers: {
                         Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                         'x-api-key': apiKey || undefined,
                         'User-Agent': 'Pivot-AI-Client/1.0'
                     },
-                    timeout: 10000,
-                    proxy: false,
-                    ...agents
+                    timeout: 10000
                 });
                 const models = extractEmbeddingModelIds(response.data);
                 if (models.length === 0) {
@@ -268,14 +259,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/admin/settings/memory', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const value = toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, req.body?.memory_threshold ?? req.body?.threshold);
-        db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at, updated_by)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at,
-                updated_by = excluded.updated_by
-        `).run(MEMORY_CONFIG_KEYS.threshold, value, getBeijingTimestamp(), req.user.id);
+        setAppSetting(MEMORY_CONFIG_KEYS.threshold, value, { updatedBy: req.user.id });
 
         logAction(req, 'UPDATE_MEMORY_THRESHOLD', `${MEMORY_CONFIG_KEYS.threshold}=${value}`);
         const settings = getSettings();
@@ -303,6 +287,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         try {
             globalAiConcurrency = syncGlobalAiConcurrencySettings();
+            syncConfiguredRuntimes();
             modelEndpointRuntime = getModelEndpointRuntimeStatus();
             agentQueue = syncAgentRuntimeConcurrency();
             knowledgeIndexQueue = syncKnowledgeDocumentIndexConcurrency();
@@ -332,15 +317,6 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             return res.status(403).json({ error: '只有 admin 权限层级可以修改系统全局设置。' });
         }
         const updates = req.body || {};
-        const stmt = db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at, updated_by)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at,
-                updated_by = excluded.updated_by
-        `);
-
         const changed = [];
         for (const key of Object.keys(updates)) {
             if (!allowedSettings.has(key)) continue;
@@ -355,7 +331,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
                 await assertSafeOutboundUrl(value, req.user);
             }
             if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
-            stmt.run(key, value, getBeijingTimestamp(), req.user.id);
+            setAppSetting(key, value, { updatedBy: req.user.id });
             changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
         }
 
@@ -414,8 +390,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 }
 
 function isSettingEnabled(key) {
-    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
-    return row?.value === 'true';
+    return getAppSettingValue(key) === 'true';
 }
 
 module.exports = {

@@ -1,12 +1,9 @@
-const axios = require('axios');
 const {
     buildModelHeaders,
     buildResponsesUrl,
     buildChatCompletionsUrl,
     convertChatMessagesToResponsesInput,
-    shouldUseResponsesApi,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    shouldUseResponsesApi
 } = require('./model-adapter');
 const { executeMcpTool } = require('./mcp-client');
 const {
@@ -17,6 +14,7 @@ const {
     isDataResultMcpTool,
     parsePlannerJson
 } = require('./chat-route-helpers');
+const { forwardChatCompletion } = require('./model-forwarder');
 
 const MCP_CHAT_TOOL_TITLES = {
     'db.list_tables': '列出数据表',
@@ -411,10 +409,9 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
     if (shouldUseResponsesApi(modelName)) {
         try {
             const targetUrl = buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false });
-            await assertSafeModelRuntimeUrl(modelCfg, targetUrl, user);
-            const agents = createSafeModelHttpAgents(modelCfg, user);
-            const response = await axios({
-                method: 'post',
+            const response = await forwardChatCompletion({
+                modelCfg,
+                user,
                 url: targetUrl,
                 headers,
                 data: {
@@ -424,10 +421,7 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
                     temperature: 0,
                     max_output_tokens: 600
                 },
-                responseType: 'json',
-                timeout: 120000,
-                proxy: false,
-                ...agents
+                timeout: 120000
             });
             return extractModelText(response.data);
         } catch (e) {
@@ -435,10 +429,9 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
         }
     }
     const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-    await assertSafeModelRuntimeUrl(modelCfg, targetUrl, user);
-    const agents = createSafeModelHttpAgents(modelCfg, user);
-    const response = await axios({
-        method: 'post',
+    const response = await forwardChatCompletion({
+        modelCfg,
+        user,
         url: targetUrl,
         headers,
         data: {
@@ -448,10 +441,7 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
             temperature: 0,
             max_tokens: 600
         },
-        responseType: 'json',
-        timeout: 120000,
-        proxy: false,
-        ...agents
+        timeout: 120000
     });
     return extractModelText(response.data);
 }

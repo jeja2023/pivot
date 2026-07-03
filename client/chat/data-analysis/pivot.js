@@ -245,11 +245,11 @@
         const result = state.pivot;
         if (!result) {
             document.getElementById('data-analysis-pivot-export-btn')?.classList.add('hidden');
-            box.innerHTML = `
+            PivotSafeHtml.setHtml(box, `
                 <div class="data-analysis-empty data-analysis-pivot-empty">
                     选择行维度和值字段后生成透视表。系统会优先推荐适合分组的字段，并可按 Top N 控制结果规模。
                 </div>
-            `;
+            `);
             return;
         }
         document.getElementById('data-analysis-pivot-export-btn')?.classList.remove('hidden');
@@ -280,7 +280,7 @@
         const truncateText = result.truncated
             ? `当前展示 ${fmtNumber(result.displayedRowCount || rows.length)} / ${fmtNumber(result.totalRowCount || rows.length)} 个行项、${fmtNumber(result.displayedColumnCount || cols.length)} / ${fmtNumber(result.totalColumnCount || cols.length)} 个列项；${esc(totalLabel)}仍按全量数据计算。`
             : `已展示全部 ${fmtNumber(rows.length)} 个行项${result.colField ? `、${fmtNumber(cols.length)} 个列项` : ''}。`;
-        box.innerHTML = `
+        PivotSafeHtml.setHtml(box, `
             <div class="data-analysis-pivot-result-head">
                 <div class="data-analysis-pivot-summary">
                     <div class="data-analysis-pivot-stat"><span>口径</span><strong>${esc(result.aggregationLabel || AGGREGATION_LABELS[result.aggregation] || result.aggregation)} / ${esc(valueName)}</strong></div>
@@ -303,7 +303,7 @@
             <div class="data-analysis-pivot-actions">
                 <span>${esc(SORT_LABELS[result.display?.sortBy] || '按指标降序')}；空值显示为「${esc(result.display?.emptyLabel || '(空值)')}」。</span>
             </div>
-        `;
+        `);
     }
 
     Object.assign(app, {

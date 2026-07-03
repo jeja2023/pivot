@@ -533,6 +533,36 @@ function createChatRenderSandbox() {
         },
         sanitizeHtml(html) {
             return html;
+        },
+        setHtml(element, html) {
+            if (element) element.innerHTML = String(html ?? '');
+        }
+    };
+    sandbox.Pivot = {
+        modules: Object.create(null),
+        registerModule(name, api = {}) {
+            const key = String(name || '').trim();
+            this.modules[key] = api;
+            return api;
+        },
+        getModule(name) {
+            return this.modules[String(name || '').trim()] || null;
+        },
+        exposeModule(name, api = {}, aliases = []) {
+            const current = this.getModule(name) || {};
+            const moduleApi = this.registerModule(name, { ...current, ...api });
+            (Array.isArray(aliases) ? aliases : []).forEach(alias => {
+                const globalName = typeof alias === 'string' ? alias : alias.globalName;
+                const exportName = typeof alias === 'string' ? alias : (alias.exportName || alias.globalName);
+                if (globalName && exportName && moduleApi[exportName] !== undefined) sandbox[globalName] = moduleApi[exportName];
+            });
+            return moduleApi;
+        },
+        moduleApi(name) {
+            return this.getModule(name) || {};
+        },
+        chooseStreamInterval() {
+            return 80;
         }
     };
 

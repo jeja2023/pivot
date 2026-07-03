@@ -1,4 +1,4 @@
-/* Shared frontend HTML safety helpers */
+/* 前端 HTML 安全辅助函数 */
 (function () {
     const escapeHtml = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -15,17 +15,35 @@
         return DOMPurify.sanitize(raw, options);
     };
 
+    function createContextElement(element) {
+        const tagName = String(element?.tagName || 'div').toLowerCase();
+        if (element?.namespaceURI && element.namespaceURI !== 'http://www.w3.org/1999/xhtml') {
+            return document.createElementNS(element.namespaceURI, tagName);
+        }
+        return document.createElement(tagName || 'div');
+    }
+
     const setHtml = (element, html, options = {}) => {
         if (!element) return;
-        element.innerHTML = sanitizeHtml(html, options);
+        const raw = String(html ?? '');
+        if (!window.DOMPurify) {
+            element.textContent = raw;
+            return;
+        }
+        const scratch = createContextElement(element);
+        scratch.innerHTML = raw;
+        DOMPurify.sanitize(scratch, { ...options, IN_PLACE: true });
+        element.replaceChildren(...Array.from(scratch.childNodes));
     };
 
-    window.PivotSafeHtml = {
+    const api = {
         escapeHtml,
         escapeAttr,
         sanitizeHtml,
         setHtml
     };
+
+    window.PivotSafeHtml = api;
     window.Pivot = window.Pivot || {};
-    window.Pivot.html = window.PivotSafeHtml;
+    window.Pivot.html = api;
 })();

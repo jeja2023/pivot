@@ -1,3 +1,153 @@
+## [v0.0.188] - 2026-07-03
+
+### 可落地优先：前端迁移、RAG 观测、E2E、桌面更新与企业化骨架
+
+本版本继续把上一轮规划推进到可运行、可检查、可扩展的工程形态：前端继续收敛到 `Pivot.modules`，RAG 召回调试增加历史落库与观测事件，E2E 建立可直接运行的 Playwright smoke runner，桌面端更新源加入 HTTPS/来源校验，企业化与多节点方向补齐迁移表、provider 接口占位和测试。
+
+#### 前端状态收敛
+
+- **聊天 UI 模块迁移**：`client/chat/ui.js` 将分页、上下文压缩、模型选择器、上传运行时限制和图片预览等入口注册到 `Pivot.modules['chat.ui']`，旧 `window.*` 入口由 `Pivot.exposeModule()` 兼容发布。
+- **附件模块迁移**：`client/chat/engine-attachments.js` 注册 `Pivot.modules['chat.attachments']`，集中暴露附件数量限制、会话归属校验、待发送附件读取、上传前准备、清理和移除等 API，减少散落全局赋值。
+- **全局暴露门禁继续生效**：`check:window-globals` 仍阻止新增直接 `window.* =`，新 API 继续走 `Pivot.exposeModule()` / `Pivot.modules.*` 路径。
+
+#### RAG 调试与观测
+
+- **调试历史落库**：新增 `rag_debug_queries` 表与 `server/services/rag-debug-history.js`，记录 query、scope、topK、candidateLimit、scoreThreshold、候选数、命中数、selected chunk ids、分数摘要、队列状态和耗时。
+- **调试历史接口**：新增 `GET /api/rag/debug-query/history`，前端 RAG 调试弹窗展示“最近调试”，可点击历史问题回填输入框。
+- **观测事件补强**：`POST /api/rag/debug-query` 在成功后写入历史，并记录慢检索；当索引队列出现积压且并发已满时写入 RAG warning observability event。
+
+#### E2E 与质量门禁
+
+- **E2E runner**：新增 `@playwright/test`、`npm run test:e2e`、`tests/e2e/playwright.config.js` 与 `tests/e2e/smoke.spec.js`，覆盖聊天壳加载、`Pivot.modules` 命名空间、RAG 调试弹窗与历史容器。
+- **静态门禁与浏览器实跑并存**：`scripts/check_e2e_smoke.js` / `npm run check:e2e-smoke` 纳入 `npm run check`，负责校验 E2E 资产、runner 脚本与依赖；完整浏览器 smoke 可通过 `npm run test:e2e` 执行。
+
+#### 桌面端更新安全
+
+- **更新源策略模块**：新增 `desktop/update-policy.js`，强制远程自动更新源使用 HTTPS；仅在显式 `PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED=true` 且 loopback 地址时允许 HTTP 开发源。
+- **允许来源校验**：`desktop/config.js` 新增 `autoUpdate.allowedOrigins` 标准化配置，配置加载阶段拒绝不在允许列表中的更新源。
+- **运行时二次断言**：`desktop/updater.js` 在 `autoUpdater.setFeedURL()` 前再次校验 feed URL，避免后续直接调用绕过配置阶段策略。
+
+#### 企业化与多节点骨架
+
+- **迁移与基础 schema 同步**：新增共享 schema 片段 `server/db/schema/enterprise.js`，基础 schema 与版本化迁移 `202607030001_rag_debug_enterprise_contracts` 同步创建 RAG 调试历史、组织、团队、团队成员、资源权限、策略对象和部署 provider 配置表。
+- **Provider registry**：新增 `server/services/deployment-providers.js`，定义 database/objectStorage/queue/lock 四类 provider 接口占位，内置 SQLite/local_fs/in_process/in_process_or_sqlite 与 Postgres/S3-compatible/distributed queue/distributed lock 的 planned 扩展合约。
+- **部署画像扩展**：`server/services/deployment-profile.js` 返回 `providers` 字段，管理端可直接看到当前 provider key、接口名、单机/多节点能力和是否仍需 adapter。
+- **企业访问上下文占位**：新增 `server/services/enterprise-access.js`，提供资源/主体类型归一化、用户组织/团队上下文读取和资源权限列表读取，为后续知识库/MCP/模型/Agent 权限扩展预留稳定入口。
+
+#### 测试
+
+- 新增 `tests/security-desktop-update.test.js` 覆盖桌面更新源 HTTPS、loopback 例外和 allowedOrigins。
+- 新增 `tests/enterprise-deployment.test.js` 覆盖迁移建表、provider registry、部署画像和企业访问 helper。
+- 新增 `tests/security-rag-debug-history.test.js` 覆盖 RAG debug history 写入与读取。
+## [v0.0.187] - 2026-07-03
+
+### 架构拆分、调试可观测与扩展契约收口
+
+本版本继续完成上一轮全面优化中尚未完全产品化的中期计划：聊天主链路拆分为可维护服务层，Agent 运行状态进入显式状态机，RAG 调试面板补齐混合排序与队列状态，前端 `window.*` 暴露增加静态基线门禁，并为组织/团队权限与多节点部署抽象建立后端契约。
+
+#### 后端架构与运行时
+
+- **聊天主链路服务化**：`server/routes/chat/index.js` 进一步瘦身，预检、上下文组装、模型流打开、助手消息持久化分别下沉到 `chat-preflight`、`chat-context-assembler`、`model-stream-service` 和 `chat-persistence`，保留路由专注 SSE 传输与错误边界。
+- **Agent 状态机与重试审计**：新增 `server/services/agent-runtime/state-machine.js`，所有 run 状态写入统一校验合法迁移；失败重试会记录 `retryReasons` metadata，包含尝试次数、上限、错误码与原因。
+- **部署画像契约**：新增 `server/services/deployment-profile.js`，明确当前 SQLite WAL 单机能力、对象存储/分布式队列/分布式锁的多节点前置条件，并在设置与监控摘要中返回部署画像。
+- **权限能力矩阵**：`server/permissions.js` 增加 capability matrix、数据分级、策略对象类型和组织/团队扩展占位，登录用户与设置接口可直接返回可审计能力边界。
+
+#### RAG 调试与观测
+
+- **检索分数拆解**：RAG debug query 返回 dense score、fused score、dense rank、FTS rank、MMR selected、gated count、hybrid RRF/MMR 参数和 selected chunk ids。
+- **索引队列状态可见**：知识库索引队列新增 `getKnowledgeIndexQueueStatus()`，RAG 调试接口返回 running/pending/active/maxConcurrent/userPending 等状态，帮助判断刚上传文档未命中的原因。
+- **调试面板增强**：前端 RAG 调试结果展示 retrieval mode、Hybrid 权重、队列状态和每个 chunk 的分数分解，便于调优阈值、候选数量、RRF 与 MMR 行为。
+
+#### 前端状态治理与门禁
+
+- **`window.*` 暴露静态基线**：新增 `scripts/check_window_globals_usage.js` 和 `scripts/window_globals_baseline.json`，冻结当前 `client/chat` 历史全局暴露数量；新增或扩张 `window.* =` 会在 `npm run check` 中失败，后续新 API 必须走 `Pivot.exposeModule()` / `Pivot.modules.*`。
+- **质量门禁串联**：`npm run check` 现在同时执行文本完整性、语法、聊天资源、安全 HTML 和 window 全局暴露扫描，避免前端迁移过程中回退到散乱全局状态。
+
+#### 验证
+
+- 已通过 `npm run check`、`npm run lint`、`npm test`（273/273）、`npm run audit:policy` 和 `git diff --check`。
+## [v0.0.186] - 2026-07-03
+
+### 全面安全加固、前端状态收口与渲染治理
+
+本版本集中发布前一轮全面审计后的落地修复：后端上传、RAG/模型出网、运行时配置、Agent 队列、聊天观测、Electron 外链和前端 HTML 渲染均纳入统一安全边界；同时开始降低 `client/chat` 的全局状态复杂度，建立 `window.Pivot.modules.*` 兼容迁移路径，并通过静态检查阻断未净化的 `innerHTML` 写入。
+
+#### 后端安全与运行时治理
+
+- **上传链路深度加固**：统一 `server/upload.js` 的上传中间件，增加 multipart 限制、异常/中止清理、文件魔数校验、知识库上传专用包装和上传安全检查，降低伪造类型、超限上传与临时文件残留风险。
+- **RAG 与知识库上传收口**：`server/rag.js` 改用知识库上传中间件和统一上传安全校验，让知识库导入与通用上传共享同一套防护策略。
+- **安全 HTTP 出网统一入口**：新增 `server/services/safe-http-client.js`，模型转发、RAG、网络搜索和外部 API 调用逐步切换到安全 JSON 请求 helper，集中处理 URL 校验、超时、代理和响应限制。
+- **模型转发防护增强**：`server/services/model-forwarder.js` 拒绝 multipart 类 payload，模型请求统一走安全 URL 与 agent 处理，减少 SSRF、越权转发和大体积请求风险。
+- **运行时配置缓存优化**：全局运行时设置增加缓存与强制刷新路径，减少频繁读取旧库参数，同时保持保存后立即同步到运行时。
+- **Agent 队列锁续期**：长任务执行期间增加锁续期与状态保护，降低队列任务被误判超时、重复执行或长时间占用的风险。
+- **聊天观测追踪补齐**：聊天请求链路补充 trace/observability 字段，便于排查模型请求、流式输出和异常路径。
+- **Electron 安全默认值加固**：收口外链打开策略、外部来源和窗口安全边界，降低桌面端加载非预期地址的风险。
+
+#### 前端全局状态与 HTML 安全
+
+- **`Pivot.modules` 命名空间上线**：`client/chat/pivot-core.js` 新增 `Pivot.modules`、`registerModule()`、`getModule()`、`exposeModule()` 与兼容 API，为逐步迁出大量 `window.*` 暴露提供统一入口。
+- **首批聊天模块迁移**：`engine-sessions.js`、`sidebar.js`、`engine-streaming.js` 分别迁到 `chat.sessions`、`chat.sidebar`、`chat.streaming` 模块，同时保留旧全局别名，确保现有调用不被打断。
+- **HTML 渲染统一净化**：`client/chat/safe-html.js` 强化 `PivotSafeHtml.setHtml()`，改用 DOMPurify 的上下文净化结果并通过 `replaceChildren()` 写入 DOM。
+- **`innerHTML` 调用面清零**：`client/chat` 中 285 处直接 `innerHTML =` 写入已迁到 `PivotSafeHtml.setHtml(...)`，仅保留安全工具内部的受控解析点。
+- **静态检查默认阻断**：`scripts/check_safe_html_usage.js` 默认禁止未经 `PivotSafeHtml` 或 DOMPurify 包装的 `.innerHTML =`、`.innerHTML +=`、`['innerHTML'] =` 和 `['innerHTML'] +=` 写入，并纳入 `npm run check`。
+
+#### CI、测试与文档
+
+- **审计策略脚本化**：新增并接入安全审计策略检查，CI 会覆盖上传、出网、Electron、前端安全 HTML 和全局状态迁移相关约束。
+- **测试桩与断言同步**：更新前端安全 HTML、Pivot 模块注册、上传安全、模型转发、聊天链路和运行时配置相关测试，覆盖本轮迁移后的兼容行为。
+- **优化路线图同步**：`docs/optimization-roadmap.md` 已记录本轮已完成项、仍保留的兼容别名和后续继续迁移 `window.*` 的方向。
+
+#### 验证
+
+- 已通过 `npm test`（273/273）、`npm run lint`、`npm run check`、`npm run audit:policy` 和 `node tests/security-chat.test.js`。
+
+## [v0.0.185] - 2026-07-03
+
+### 生产旧库全局参数读写深度加固
+
+本版本在 v0.0.184 的全局参数修复基础上继续收口生产兼容风险：针对历史 `app_settings` 表缺少 `key` 唯一约束、存在重复 key、启动默认值写入依赖 `ON CONFLICT(key)` 的情况，统一抽出 `app_settings` 读写 helper，确保生产保存、刷新、重启和其他系统开关读取都使用最新值。
+
+#### 生产兼容加固
+
+- **`app_settings` 读写统一入口**：新增 `server/services/app-settings.js`，集中处理读取最新值、默认值初始化、设置写入和旧库 fallback，所有读取统一按 `updated_at` / `rowid` 取最新记录。
+- **旧生产表无唯一约束兼容**：启动默认值初始化不再依赖 `ON CONFLICT(key)`；写入遇到旧表约束异常时删除同 key 旧行再插入最新值，顺带清理重复 key，避免刷新或重启后读回旧值。
+- **全局设置路径统一读最新**：全局设置、RAG、API 接入开关、开放注册、记忆阈值、观测告警配置和 `stmts.getSettings` 都改为最新值读取，避免旧重复行把页面显示或运行时配置拉回旧值。
+- **生产重启风险收口**：服务启动时默认设置填充通过 `ensureAppSetting` 保持“已有数据库值优先”，防止生产重启时 `.env` 默认值或旧表结构干扰已保存配置。
+
+#### 回归测试
+
+- 补充旧生产 `app_settings` 无唯一约束模拟测试，覆盖默认值初始化、重复 key 取最新和保存后去重。
+- 已验证 `node tests\security-chat.test.js`、`node tests\security-model-runtime.test.js`、`npm run check` 与 `git diff --check` 通过。
+
+## [v0.0.184] - 2026-07-03
+
+### 全局参数持久化、用量统计分页与长会话定位修复
+
+本版本针对生产环境反馈的三类问题做集中修复：全局参数保存后刷新回退、共享模型端点并发被低值模型拉回、用量统计页缺少分页控件，以及长消息会话切换后未稳定定位到底部。修复同时覆盖运行时同步、监控缓存强制刷新、统计导出语义和长会话异步渲染后的贴底行为。
+
+#### 生产问题修复
+
+- **全局参数保存持久化加固**：运行时参数读取改为按 `updated_at` 与 `rowid` 取最新记录，并在保存后刷新前端与运行时快照，避免“保存成功但刷新后没有了”。
+- **保存后立即同步运行时并发**：`/api/admin/settings/runtime` 保存成功后会主动同步全局 AI 并发、模型端点运行时、Agent 队列、知识库索引队列和记忆压缩队列，并返回最新运行时快照。
+- **模型端点共享并发稳定化**：同一模型服务地址下的多个模型会按全局端点默认并发与模型覆盖值聚合出稳定上限；请求路径也会纳入已存在的运行时模型，避免某个 `max_concurrent=1` 的模型在生产请求或监控刷新时把共享端点从 2 拉回 1。
+- **监控摘要缓存可强制刷新**：系统监控摘要接口支持 `refresh=1` 绕过 5 秒缓存；全局参数保存后前端会强制刷新监控摘要，避免刚保存的并发配置被旧缓存遮住。
+- **旧运行时参数入口继续收口**：全局参数保存入口只从“设置 > 全局参数”页采集当前表单输入，旧弹窗控件不会再参与提交，避免重复控件把旧值混入保存请求。
+
+#### 管理端体验优化
+
+- **用量统计补齐分页**：`/stats/usage` 改为返回 `{ data, total, page, limit }`，前端新增 `pagination-stats` 分页控件并把页码状态纳入 `pageState.stats`，大量用户/模型聚合记录不再一次性铺满页面。
+- **用量统计导出保持全量语义**：新增 `/stats/usage/export` 汇总导出接口，前端“导出用量统计”改为下载后端全量 CSV，避免分页后误导出当前页。
+- **长会话切换稳定贴底**：会话切换后贴底窗口延长，并增加双层 `requestAnimationFrame`、延迟二次贴底和短时 `ResizeObserver` 监听，处理大量消息、图表、图片或代码块后渲染导致的高度变化。
+- **分页与空状态兼容旧返回**：用量统计前端兼容旧数组响应和新分页响应；当当前页为空时显示空状态并清理分页控件。
+
+#### 回归测试
+
+- 补充模型端点共享并发测试，覆盖“同一 endpoint 下一个模型跟随全局默认 2、另一个模型配置 1 时，端点仍保持 2”的场景。
+- 补充请求路径并发回归测试，覆盖活动模型列表短暂不完整时，低并发模型请求不会把已有共享端点运行时拉低。
+- 补充全局参数读取顺序和保存后同步端点运行时的源码断言。
+- 补充用量统计分页控件、后端分页接口、全量导出接口、监控强刷和长会话贴底增强的前端/路由断言。
+- 已验证 `node tests\security-model-runtime.test.js`、`node tests\security-chat.test.js`、`npm run check` 与 `git diff --check` 通过。
+
 ## [v0.0.183] - 2026-07-02
 
 ### 长期记忆样式统一与并发降档恢复修复
@@ -7,8 +157,9 @@
 #### 体验优化
 
 - **长期记忆表格统一样式**：长期记忆页改用全局统一的数据表格与分页控件，行高、列宽和操作按钮尺寸与其他管理页保持一致，避免内容列和按钮把表格撑得过高。
+- **长期记忆状态中文化**：列表状态列统一显示“活跃/禁用/已删除”等中文文案，避免把后端状态值 `active` 直接展示给用户。
 - **来源与编辑弹窗容错**：修复长期记忆“来源”“编辑”按钮点击后空白的问题；来源加载失败会直接提示，编辑时会校验当前缓存是否仍有效，避免静默失效。
-- **编辑记忆弹窗统一样式**：编辑与来源弹窗复用全局 `model-modal`、`model-form` 和 `model-modal-actions` 结构，标题、标签、输入框、内容区和底部按钮与系统管理弹窗保持一致；来源弹窗关闭按钮使用设置页统一的红色文字与红色边框样式。
+- **编辑与来源弹窗统一样式**：编辑弹窗复用全局 `model-modal`、`model-form` 和 `model-modal-actions` 结构；来源弹窗内容区复用全局表单样式，关闭按钮移至弹窗右上角，并使用设置页统一的红色文字与红色边框样式。
 - **会话记录默认到底部**：查看普通会话或管理员用户会话记录时，页面会持续贴底并按阅读顺序展示当前页内容，确保打开记录后直接看到最新位置。
 
 #### 并发治理
@@ -16,12 +167,15 @@
 - **GPU 降档后自动恢复**：修复 GPU 显存保护把全局 AI 并发临时降到 1 后不会主动恢复的问题；现在每轮 GPU 状态刷新都会读取数据库中的全局 AI 并发配置，显存恢复安全后自动回到保存值（如 2），不再依赖重新保存全局参数触发恢复。
 - **运行态上限不再越过全局配置**：GPU 自适应并发的上限改为“全局 AI 并发”和 `GPU_CONCURRENT_MAX` 的较小值，避免 `GPU_CONCURRENT_MAX` 把运行态拉高到超过设置页保存值；`GPU_CONCURRENT_MIN` 也会被限制在该上限内。
 - **配置来源说明**：`.env` 中的 `MAX_CONCURRENT_AI_REQUESTS=1` 与 `MODEL_ENDPOINT_DEFAULT_CONCURRENCY=1` 只作为数据库没有保存值时的启动默认值；设置页保存的运行时参数写入 `app_settings`，前端不会也不应该覆盖 `.env` 文件。生产更新部署时需保持 `DATA_DIR` / Docker 数据卷不变，否则会重新读取 `.env` 默认值。
+- **全局参数刷新回退深度修复**：保存全局参数时只收集当前页面或当前弹窗内的参数输入，避免页面与旧弹窗的重复控件把旧值一起提交；同一模型服务地址下多个模型共享端点时，端点并发按全局默认与模型覆盖值聚合为稳定上限，避免某个 `max_concurrent=1` 的模型在监控刷新或请求触发时把端点从 2 拉回 1。
+- **全局参数唯一表单源**：移除旧的运行时参数弹窗表单和旧入口函数，保留“设置 > 全局参数”作为唯一编辑入口，避免两套输入控件再次出现保存值不一致。
 - **模型端点默认并发校验**：补充模型端点运行时回归测试，确认模型自身 `max_concurrent=0` 时会跟随设置页保存的“端点默认并发”，避免端点状态从 0/2 回退到 0/1。
-
 #### 回归测试
 
 - 新增 GPU 监控回归测试，覆盖显存偏高时降到 1、显存恢复安全后自动回到全局配置 2 的行为。
 - 补充模型端点运行时测试，覆盖模型 `max_concurrent=0` 时跟随设置页保存的端点默认并发。
+- 补充同端点多模型并发聚合测试，覆盖一个模型跟随全局默认 2、另一个模型配置 1 时端点仍稳定显示 0/2。
+- 补充全局参数唯一表单源前端回归断言，确认旧运行时参数弹窗不再包含 `data-runtime-key` 控件，保存入口只来自全局参数页。
 - 补充全局运行参数保存测试，确认 `model_endpoint_default_concurrency` 会随设置接口写入并返回配置快照。
 - 同步非流式 JSON 回放测试的 token 统计口径，保存值使用上游 `completion_tokens` 与本地完整内容估算值的较大值。
 - 已验证 `npm run check` 与 `node tests/security.test.js` 通过。

@@ -69,11 +69,11 @@ function renderToolPolicyMessage(message, options = {}) {
     if (!body) return;
     if (pagination) pagination.replaceChildren();
     body.className = 'tool-policy-tool-grid has-message';
-    body.innerHTML = `
+    PivotSafeHtml.setHtml(body, `
         <div class="tool-policy-empty${options.error ? ' is-error' : ''}">
             ${toolPolicyEscape(message)}
         </div>
-    `;
+    `);
 }
 
 function updateToolPolicyCount() {
@@ -144,7 +144,7 @@ function renderToolPolicyGovernancePanel(entry = null) {
     if (shell) shell.classList.toggle('has-governance-open', open);
     if (!open) {
         panel.hidden = true;
-        panel.innerHTML = '';
+        PivotSafeHtml.setHtml(panel, '');
         return;
     }
     const { item, tool, key } = entry;
@@ -155,7 +155,7 @@ function renderToolPolicyGovernancePanel(entry = null) {
     const name = toolPolicyToolName(tool);
     const title = tool.title || name;
     panel.hidden = false;
-    panel.innerHTML = `
+    PivotSafeHtml.setHtml(panel, `
         <div class="tool-policy-governance-head">
             <div>
                 <strong>${toolPolicyEscape(title)}</strong>
@@ -190,7 +190,7 @@ function renderToolPolicyGovernancePanel(entry = null) {
                 <button type="button" class="btn-primary tool-policy-save-governance" data-tool-policy-save="${toolPolicyEscape(key)}" ${editable ? '' : 'disabled'}>保存</button>
             </div>
         </div>
-    `;
+    `);
     panel.querySelector('[data-tool-policy-close]')?.addEventListener('click', () => window.closeToolPolicyGovernancePanel());
     panel.querySelector('[data-tool-policy-save]')?.addEventListener('click', event => window.saveToolPolicyTool(event.currentTarget));
 }
@@ -211,7 +211,7 @@ function renderToolPolicyTools() {
         toolPolicySelectedToolKey = '';
     }
     body.className = 'tool-policy-tool-grid';
-    body.innerHTML = entries.map(entry => {
+    PivotSafeHtml.setHtml(body, entries.map(entry => {
         const { item, tool, key } = entry;
         const editable = toolPolicyCanEditPackage(item);
         const governance = toolPolicyGovernance(tool);
@@ -243,7 +243,7 @@ function renderToolPolicyTools() {
                 </footer>
             </article>
         `;
-    }).join('');
+    }).join(''));
     body.querySelectorAll('[data-tool-policy-edit]').forEach(button => {
         button.addEventListener('click', () => window.openToolPolicyGovernancePanel(button.dataset.toolPolicyEdit));
     });

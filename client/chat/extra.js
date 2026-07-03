@@ -81,7 +81,7 @@ function renderPromptGrid() {
         query: document.getElementById('prompt-search-input')?.value || ''
     };
     const prompts = promptLibraryCache.filter(prompt => promptMatchesFilters(prompt, filters));
-    grid.innerHTML = prompts.length ? prompts.map(prompt => `
+    PivotSafeHtml.setHtml(grid, prompts.length ? prompts.map(prompt => `
         <div class="prompt-card">
             <div class="prompt-card-head">
                 <h4 title="${escapeHtml(prompt.name)}">${escapeHtml(prompt.name)}</h4>
@@ -95,7 +95,7 @@ function renderPromptGrid() {
                 ${(prompt.scope !== 'global' || isSuperAdminUser()) ? `<button type="button" class="btn-secondary" data-prompt-action="edit" data-prompt-id="${prompt.id}">编辑</button><button type="button" class="btn-danger" data-prompt-action="delete" data-prompt-id="${prompt.id}">删除</button>` : ''}
             </div>
         </div>
-    `).join('') : '<div class="prompt-empty-state">暂无可用提示词</div>';
+    `).join('') : '<div class="prompt-empty-state">暂无可用提示词</div>');
 }
 
 window.loadPrompts = async function() {
@@ -234,7 +234,7 @@ function renderPromptApplyList() {
     const query = document.getElementById('prompt-apply-search')?.value || '';
     const type = document.getElementById('prompt-apply-type-filter')?.value || '';
     const prompts = promptLibraryCache.filter(prompt => promptMatchesFilters(prompt, { target: promptApplyTarget, query, type }));
-    list.innerHTML = prompts.length ? prompts.map(prompt => `
+    PivotSafeHtml.setHtml(list, prompts.length ? prompts.map(prompt => `
         <button type="button" class="prompt-apply-item" data-prompt-apply-id="${prompt.id}">
             <span class="prompt-apply-main">
                 <strong>${escapeHtml(prompt.name)}</strong>
@@ -245,7 +245,7 @@ function renderPromptApplyList() {
                 <small>${escapeHtml(prompt.category || '通用')}</small>
             </span>
         </button>
-    `).join('') : '<div class="prompt-empty-state">当前入口暂无可用提示词</div>';
+    `).join('') : '<div class="prompt-empty-state">当前入口暂无可用提示词</div>');
     const status = document.getElementById('prompt-apply-status');
     if (status) status.textContent = `${promptTargetLabel(promptApplyTarget)} · ${prompts.length} 条可用`;
 }
@@ -417,7 +417,7 @@ window.loadAttachments = async function(page = 1) {
         }
     }
     ownerHeader?.classList.toggle('hidden', !showOwner);
-    document.getElementById('attachment-list-body').innerHTML = data.map((item, idx) => {
+    PivotSafeHtml.setHtml(document.getElementById('attachment-list-body'), data.map((item, idx) => {
         const typeDisplay = MIME_TYPE_MAP[item.file_type] || item.file_type || '未知类型';
         const ownerName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
         return `
@@ -436,7 +436,7 @@ window.loadAttachments = async function(page = 1) {
                 </div>
             </td>
         </tr>
-    `}).join('');
+    `}).join(''));
     renderPagination('attachments', total, page);
 }
 

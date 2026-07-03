@@ -17,7 +17,7 @@ const escapeSelectorText = (str) => {
         .replace(/"/g, '&quot;');
 };
 
-window.renderWorkspacePagination = function(containerOrId, options = {}) {
+function renderWorkspacePagination(containerOrId, options = {}) {
     const container = typeof containerOrId === 'string' ? document.getElementById(containerOrId) : containerOrId;
     if (!container) return;
     const total = Math.max(Number(options.total || 0), 0);
@@ -69,7 +69,7 @@ const describeSelectorModel = (model, simple = false) => {
     return parts.join(' | ');
 };
 
-window.updateContextUsage = (meta = null) => {
+function updateContextUsage(meta = null) {
     const pill = document.getElementById('context-usage-pill');
     const ring = document.getElementById('context-usage-ring');
     if (!pill || !ring) return;
@@ -103,7 +103,7 @@ window.updateContextUsage = (meta = null) => {
     else if (meta.status === 'warn') pill.classList.add('is-warn');
 };
 
-window.compactCurrentSessionContext = async function() {
+async function compactCurrentSessionContext() {
     const pill = document.getElementById('context-usage-pill');
     if (!currentSessionId) return showToast('请先选择一个会话', 'warning');
     if (pill?.classList.contains('is-busy')) return;
@@ -121,7 +121,7 @@ window.compactCurrentSessionContext = async function() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '上下文压缩失败');
-        window.updateContextUsage(data.contextMeta || null);
+        updateContextUsage(data.contextMeta || null);
         showToast(data.message || (data.compressed ? '上下文已压缩' : '当前没有可压缩内容'), data.compressed ? 'success' : (data.inProgress ? 'warning' : 'info'));
         if (data.compressed && currentSessionId) await window.selectSession?.(currentSessionId);
     } catch (e) {
@@ -138,9 +138,8 @@ function isSelectableModelForCurrentUser(model) {
     return String(model.user_id) === String(currentUser?.id);
 }
 
-window.isSelectableModelForCurrentUser = isSelectableModelForCurrentUser;
 
-window.applyUploadRuntimeLimits = function(limits = {}) {
+function applyUploadRuntimeLimits(limits = {}) {
     const maxAttachments = limits?.maxAttachmentsPerMessage;
     if (maxAttachments !== undefined && typeof window.setMaxPendingAttachments === 'function') {
         window.setMaxPendingAttachments(maxAttachments);
@@ -149,7 +148,7 @@ window.applyUploadRuntimeLimits = function(limits = {}) {
     }
 };
 
-window.loadSelectableModels = async function() {
+async function loadSelectableModels() {
     const [modelRes, settingsRes] = await Promise.all([
         apiFetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
         apiFetch(`${API_BASE}/settings`, { headers: authHeaders() })
@@ -159,7 +158,7 @@ window.loadSelectableModels = async function() {
     const { data = [] } = await modelRes.json();
     window._cachedModels = data;
     const settings = settingsRes.ok ? await settingsRes.json() : {};
-    window.applyUploadRuntimeLimits(settings.uploadLimits);
+    applyUploadRuntimeLimits(settings.uploadLimits);
     const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
 
     const models = data.filter(isSelectableModelForCurrentUser);
@@ -167,22 +166,22 @@ window.loadSelectableModels = async function() {
     return { models, defaultModelId, settings };
 };
 
-window.refreshModelSelector = async function() {
+async function refreshModelSelector() {
     const hiddenInput = document.getElementById('model-selector');
     const triggerBtn = document.getElementById('model-selector-btn');
     const dropdownList = document.getElementById('model-dropdown-list');
     if (!hiddenInput || !triggerBtn || !dropdownList) return;
 
     try {
-        const { models, defaultModelId } = await window.loadSelectableModels();
+        const { models, defaultModelId } = await loadSelectableModels();
 
         if (models.length === 0) {
-            triggerBtn.innerHTML = '<span>暂无可用模型</span>';
+            PivotSafeHtml.setHtml(triggerBtn, '<span>暂无可用模型</span>');
             triggerBtn.disabled = true;
             return;
         }
 
-        dropdownList.innerHTML = models.map(model => {
+        PivotSafeHtml.setHtml(dropdownList, models.map(model => {
             const hasVision = Number(model.supports_vision || 0) === 1;
             const hasReasoning = Number(model.supports_reasoning || 0) === 1;
             const meta = describeSelectorModel(model, false).split(' | ').slice(1).join(' | ');
@@ -212,20 +211,20 @@ window.refreshModelSelector = async function() {
                     <div class="model-item-meta">${escapeSelectorText(meta)}</div>
                 </div>
             `;
-        }).join('');
+        }).join(''));
         dropdownList.querySelectorAll('.model-item').forEach(item => {
-            item.addEventListener('click', () => window.selectDropdownModel(item.dataset.id));
+            item.addEventListener('click', () => selectDropdownModel(item.dataset.id));
         });
 
         let initialId = hiddenInput.value;
         if (!initialId || !models.some(m => String(m.id) === String(initialId))) {
             initialId = (defaultModelId && models.some(m => String(m.id) === String(defaultModelId))) ? defaultModelId : models[0].id;
         }
-        window.selectDropdownModel(initialId, false);
+        selectDropdownModel(initialId, false);
         
     } catch (e) {
         console.error('刷新模型列表失败:', e);
-        triggerBtn.innerHTML = '<span>列表加载失败</span>';
+        PivotSafeHtml.setHtml(triggerBtn, '<span>列表加载失败</span>');
     }
 };
 
@@ -258,7 +257,7 @@ function moveModelDropdownActive(delta) {
     items[nextIndex].scrollIntoView({ block: 'nearest' });
 }
 
-window.selectDropdownModel = function(id, shouldClose = true) {
+function selectDropdownModel(id, shouldClose = true) {
     const hiddenInput = document.getElementById('model-selector');
     const models = window._cachedModels || [];
     const model = models.find(m => String(m.id) === String(id));
@@ -284,7 +283,7 @@ window.selectDropdownModel = function(id, shouldClose = true) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg>
         </div>` : '';
     
-    document.getElementById('selected-model-caps').innerHTML = textIcon + visionIcon + reasoningIcon;
+    PivotSafeHtml.setHtml(document.getElementById('selected-model-caps'), textIcon + visionIcon + reasoningIcon);
 
     document.querySelectorAll('.model-item').forEach(el => {
         el.classList.toggle('active', String(el.dataset.id) === String(id));
@@ -346,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 const active = dropdown.querySelector('.model-item.is-keyboard-active') || dropdown.querySelector('.model-item.active');
-                if (active) window.selectDropdownModel(active.dataset.id);
+                if (active) selectDropdownModel(active.dataset.id);
                 return;
             }
             if (e.key === 'Escape') {
@@ -370,10 +369,33 @@ function renderCopyright() {
 }
 
 // --- 全局图片预览 (支持聊天记录中点击放大) ---
-window.closeImageViewer = () => {
+function closeImageViewer() {
     document.getElementById('image-viewer-modal').classList.add('hidden');
     document.getElementById('viewer-img').src = '';
-};
+}
+
+window.Pivot.exposeModule('chat.ui', {
+    applyUploadRuntimeLimits,
+    closeImageViewer,
+    compactCurrentSessionContext,
+    describeSelectorModel,
+    isSelectableModelForCurrentUser,
+    loadSelectableModels,
+    refreshModelSelector,
+    renderWorkspacePagination,
+    selectDropdownModel,
+    updateContextUsage
+}, {
+    applyUploadRuntimeLimits: 'applyUploadRuntimeLimits',
+    closeImageViewer: 'closeImageViewer',
+    compactCurrentSessionContext: 'compactCurrentSessionContext',
+    isSelectableModelForCurrentUser: 'isSelectableModelForCurrentUser',
+    loadSelectableModels: 'loadSelectableModels',
+    refreshModelSelector: 'refreshModelSelector',
+    renderWorkspacePagination: 'renderWorkspacePagination',
+    selectDropdownModel: 'selectDropdownModel',
+    updateContextUsage: 'updateContextUsage'
+});
 
 // 使用事件委托，监听聊天区域内所有的图片点击
 document.addEventListener('DOMContentLoaded', () => {

@@ -4,7 +4,7 @@ function renderOfficialWritingDocList() {
     const list = document.getElementById('official-writing-doc-list');
     if (!list) return;
     const docs = [...officialWritingLibrary.docs].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    list.innerHTML = docs.map(doc => `
+    PivotSafeHtml.setHtml(list, docs.map(doc => `
         <div class="official-writing-doc-item ${doc.id === officialWritingLibrary.activeId ? 'active' : ''}" data-official-writing-doc-id="${escapeAppsHtml(doc.id)}" role="listitem">
             <button type="button" class="official-writing-doc-open" data-official-writing-doc-open="${escapeAppsHtml(doc.id)}" title="${escapeAppsHtml(doc.title)}">
                 <strong>${escapeAppsHtml(doc.title || '未命名公文')}</strong>
@@ -15,7 +15,7 @@ function renderOfficialWritingDocList() {
                 <button type="button" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}" title="删除" aria-label="删除">删除</button>
             </span>
         </div>
-    `).join('') || '<div class="official-writing-empty-note">暂无公文，点击“新建公文”开始。</div>';
+    `).join('') || '<div class="official-writing-empty-note">暂无公文，点击“新建公文”开始。</div>');
     setText('official-writing-doc-count', `${officialWritingLibrary.docs.length} 篇`);
 }
 
@@ -299,7 +299,7 @@ function renderOfficialWritingSurface(target = 'draft', { force = false } = {}) 
     const activeClass = surface.classList.contains('is-active') ? ' is-active' : '';
     const hiddenClass = surface.classList.contains('is-document-hidden') ? ' is-document-hidden' : '';
     surface.className = `official-writing-document-surface official-writing-editable-surface official-writing-surface-${target}${activeClass}${hiddenClass}`;
-    surface.innerHTML = '';
+    PivotSafeHtml.setHtml(surface, '');
     if (!value.trim()) {
         surface.dataset.empty = 'true';
         surface.dataset.placeholder = textarea.placeholder || surface.dataset.placeholder || '请输入正文';
@@ -964,7 +964,7 @@ function renderOfficialWritingStats() {
 function renderOfficialWritingComments() {
     const list = document.getElementById('official-writing-comments-list');
     if (!list) return;
-    list.innerHTML = officialWritingState.comments.map(comment => `
+    PivotSafeHtml.setHtml(list, officialWritingState.comments.map(comment => `
         <article class="official-writing-comment" data-comment-id="${escapeAppsHtml(comment.id)}">
             <div>
                 <strong>${comment.target === 'draft' ? '正文稿' : '原文'}</strong>
@@ -973,7 +973,7 @@ function renderOfficialWritingComments() {
             <p>${escapeAppsHtml(comment.text)}</p>
             <button type="button" class="btn-secondary" data-comment-delete="${escapeAppsHtml(comment.id)}">删除</button>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">暂无批注</div>';
+    `).join('') || '<div class="official-writing-empty-note">暂无批注</div>');
 }
 
 function versionOption(version, fallbackName) {
@@ -990,7 +990,7 @@ function renderOfficialWritingVersions() {
     if (list) {
         const saved = officialWritingState.versions.map(version => ({ ...version, kind: version.stage || '保存版本' }));
         const auto = (officialWritingState.autoSaves || []).map(version => ({ ...version, kind: '自动草稿' }));
-        list.innerHTML = [...saved, ...auto].map(version => `
+        PivotSafeHtml.setHtml(list, [...saved, ...auto].map(version => `
             <button type="button" class="official-writing-version-item" data-version-load="${escapeAppsHtml(version.id)}">
                 <span>
                     <strong>${escapeAppsHtml(version.name || '未命名版本')}</strong>
@@ -998,14 +998,14 @@ function renderOfficialWritingVersions() {
                 </span>
                 <small>${escapeAppsHtml(formatVersionTime(version.createdAt))}</small>
             </button>
-        `).join('') || '<div class="official-writing-empty-note">暂无版本，保存当前正文稿后可进行对比。</div>';
+        `).join('') || '<div class="official-writing-empty-note">暂无版本，保存当前正文稿后可进行对比。</div>');
     }
     if (base && target) {
         const sourceOption = '<option value="source">当前原文</option>';
         const draftOption = '<option value="draft">当前正文稿</option>';
         const savedOptions = officialWritingState.versions.map((version, index) => versionOption(version, `版本 ${index + 1}`)).join('');
-        base.innerHTML = `${sourceOption}${draftOption}${savedOptions}`;
-        target.innerHTML = `${draftOption}${sourceOption}${savedOptions}`;
+        PivotSafeHtml.setHtml(base, `${sourceOption}${draftOption}${savedOptions}`);
+        PivotSafeHtml.setHtml(target, `${draftOption}${sourceOption}${savedOptions}`);
         base.value = Array.from(base.options).some(option => option.value === currentBaseValue) ? currentBaseValue : 'source';
         target.value = Array.from(target.options).some(option => option.value === currentTargetValue) ? currentTargetValue : 'draft';
     }
@@ -1015,13 +1015,13 @@ function renderOfficialWritingCompliance() {
     const list = document.getElementById('official-writing-compliance-list');
     if (!list) return;
     const risks = getOfficialWritingComplianceRisks();
-    list.innerHTML = risks.map(risk => `
+    PivotSafeHtml.setHtml(list, risks.map(risk => `
         <article class="official-writing-check-item" data-official-writing-risk-id="${escapeAppsHtml(risk.id)}">
             <strong>${escapeAppsHtml(risk.title)}<span>${escapeAppsHtml(risk.level)}</span></strong>
             <p>${escapeAppsHtml(risk.detail)}</p>
             <em>${escapeAppsHtml(risk.suggestion || '建议核对该处内容。')}</em>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">未识别明显规范风险</div>';
+    `).join('') || '<div class="official-writing-empty-note">未识别明显规范风险</div>');
 }
 
 function renderOfficialWritingSuggestions() {
@@ -1029,7 +1029,7 @@ function renderOfficialWritingSuggestions() {
     const pending = officialWritingState.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected');
     setText('official-writing-suggestion-count', `${pending.length} 条待处理`);
     if (!list) return;
-    list.innerHTML = officialWritingState.suggestions.map(suggestion => {
+    PivotSafeHtml.setHtml(list, officialWritingState.suggestions.map(suggestion => {
         // 流式生成中：展示“AI 生成中…”指示，隐藏操作按钮（避免对未完成文本执行接受/替换）。
         const streaming = !!suggestion.streaming;
         const statusLabel = streaming
@@ -1059,7 +1059,7 @@ function renderOfficialWritingSuggestions() {
             <p class="official-writing-suggestion-text">${escapeAppsHtml(suggestion.replacement || suggestion.detail || '')}</p>
             ${actions}
         </article>`;
-    }).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>';
+    }).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>');
 }
 
 function renderOfficialWritingReferences() {
@@ -1067,13 +1067,13 @@ function renderOfficialWritingReferences() {
     const matches = getOfficialWritingReferenceMatches();
     setText('official-writing-reference-count', `${matches.length} 处引用`);
     if (!list) return;
-    list.innerHTML = matches.map(match => `
+    PivotSafeHtml.setHtml(list, matches.map(match => `
         <article class="official-writing-reference-item">
             <span>原文材料${match.kind === 'fuzzy' ? `（相近 ${Math.round((match.score || 0) * 100)}%）` : ''}</span>
             <p>${escapeAppsHtml(match.source)}</p>
             <strong>正文引用：${escapeAppsHtml(match.draft)}</strong>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">暂未识别到正文与原文材料的直接引用</div>';
+    `).join('') || '<div class="official-writing-empty-note">暂未识别到正文与原文材料的直接引用</div>');
 }
 
 function renderOfficialWritingMaterials() {
@@ -1082,17 +1082,17 @@ function renderOfficialWritingMaterials() {
     const outline = document.getElementById('official-writing-outline-list');
     if (outline) {
         const paragraphs = splitOfficialWritingParagraphs(officialWritingState.draft);
-        outline.innerHTML = paragraphs.map((item, index) => `
+        PivotSafeHtml.setHtml(outline, paragraphs.map((item, index) => `
             <button type="button" class="official-writing-outline-item" data-official-writing-jump="${item.start}" data-official-writing-target="draft" title="${escapeAppsHtml(item.text)}" data-full-text="${escapeAppsHtml(item.text)}">
                 <span>${index + 1}</span>
                 <strong>${escapeAppsHtml(compactTextPreview(item.text, 52))}</strong>
             </button>
-        `).join('') || '<div class="official-writing-empty-note">正文生成后自动形成大纲</div>';
+        `).join('') || '<div class="official-writing-empty-note">正文生成后自动形成大纲</div>');
     }
     const materialCards = document.getElementById('official-writing-material-card-list');
     if (materialCards) {
         const segments = getOfficialWritingMaterialSegments();
-        materialCards.innerHTML = segments.map(segment => `
+        PivotSafeHtml.setHtml(materialCards, segments.map(segment => `
             <article class="official-writing-material-card" data-material-id="${escapeAppsHtml(segment.id)}">
                 <p>${escapeAppsHtml(compactTextPreview(segment.text, 82))}</p>
                 <div>
@@ -1101,18 +1101,18 @@ function renderOfficialWritingMaterials() {
                     <button type="button" data-material-action="view">查看来源</button>
                 </div>
             </article>
-        `).join('') || '<div class="official-writing-empty-note">粘贴原文材料后可建立引用链</div>';
+        `).join('') || '<div class="official-writing-empty-note">粘贴原文材料后可建立引用链</div>');
     }
     const history = document.getElementById('official-writing-history-list');
     if (history) {
         const saved = officialWritingState.versions.map(version => ({ ...version, kind: version.stage || '保存版本' }));
         const auto = (officialWritingState.autoSaves || []).map(version => ({ ...version, kind: '自动草稿' }));
-        history.innerHTML = [...saved, ...auto].map(version => `
+        PivotSafeHtml.setHtml(history, [...saved, ...auto].map(version => `
             <button type="button" class="official-writing-history-item" data-version-load="${escapeAppsHtml(version.id)}">
                 <strong>${escapeAppsHtml(version.name || '未命名版本')}</strong>
                 <span>${escapeAppsHtml(version.kind)} · ${escapeAppsHtml(formatVersionTime(version.createdAt))}</span>
             </button>
-        `).join('') || '<div class="official-writing-empty-note">暂无历史稿件</div>';
+        `).join('') || '<div class="official-writing-empty-note">暂无历史稿件</div>');
     }
 }
 

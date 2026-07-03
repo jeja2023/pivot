@@ -20,7 +20,7 @@
         view = document.createElement('div');
         view.id = 'data-analysis-view';
         view.className = 'data-analysis-view hidden';
-        view.innerHTML = `
+        PivotSafeHtml.setHtml(view, `
             <div class="workspace-panel data-analysis-panel">
                 <aside class="data-analysis-sidebar">
                     <nav class="data-analysis-tabs" role="tablist" aria-label="数据分析视图" aria-orientation="vertical">
@@ -310,7 +310,7 @@
                     </div>
                 </div>
             </div>
-        `;
+        `);
         body.appendChild(view);
         bindEvents(view);
         return view;
@@ -357,14 +357,14 @@
         titleEl.textContent = header.title;
         metaEl.textContent = header.desc;
         if (actionsEl) {
-            actionsEl.innerHTML = tab === 'overview' ? `
+            PivotSafeHtml.setHtml(actionsEl, tab === 'overview' ? `
                 <label class="btn-secondary data-analysis-upload-action">
                     <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls">
                     <span>\u4e0a\u4f20 Excel / CSV</span>
                 </label>
                 <button id="data-analysis-import-db" class="btn-secondary" type="button">\u4ece\u6570\u636e\u5e93\u5bfc\u5165</button>
                 <button id="data-analysis-overview-refresh" class="btn-secondary" type="button">\u5237\u65b0\u5217\u8868</button>
-            ` : '';
+            ` : '');
         }
     }
 
@@ -383,13 +383,13 @@
         const pageCount = Math.max(Math.ceil(total / pageSize), 1);
         state.overviewPage = Math.min(Math.max(Number(state.overviewPage) || 1, 1), pageCount);
         if (!total) {
-            body.innerHTML = '<tr><td colspan="7" class="text-center data-analysis-empty-cell">\u6682\u65e0\u6570\u636e\u96c6\uff0c\u8bf7\u4e0a\u4f20\u6216\u5bfc\u5165\u3002</td></tr>';
-            if (pager) pager.innerHTML = '';
+            PivotSafeHtml.setHtml(body, '<tr><td colspan="7" class="text-center data-analysis-empty-cell">\u6682\u65e0\u6570\u636e\u96c6\uff0c\u8bf7\u4e0a\u4f20\u6216\u5bfc\u5165\u3002</td></tr>');
+            if (pager) PivotSafeHtml.setHtml(pager, '');
             return;
         }
         const startIndex = (state.overviewPage - 1) * pageSize;
         const pageRows = state.datasets.slice(startIndex, startIndex + pageSize);
-        body.innerHTML = pageRows.map((dataset, offset) => {
+        PivotSafeHtml.setHtml(body, pageRows.map((dataset, offset) => {
             const rowIndex = startIndex + offset;
             return (
                 '<tr>' +
@@ -406,7 +406,7 @@
                     '</div></td>' +
                 '</tr>'
             );
-        }).join('');
+        }).join(''));
         if (!pager) return;
         if (typeof window.renderWorkspacePagination === 'function') {
             window.renderWorkspacePagination(pager, {
@@ -420,7 +420,7 @@
             });
             return;
         }
-        pager.innerHTML = '';
+        PivotSafeHtml.setHtml(pager, '');
     }
 
     async function previewDataset(id) {
@@ -447,7 +447,7 @@
             const content = document.getElementById('data-analysis-preview-modal-content');
             if (modal && content && title) {
                 title.textContent = `数据预览 - ${dataset.name}`;
-                content.innerHTML = buildTable(dataset.previewRows || [], dataset.columns || []);
+                PivotSafeHtml.setHtml(content, buildTable(dataset.previewRows || [], dataset.columns || []));
                 modal.classList.remove('hidden');
             }
         }
@@ -465,7 +465,7 @@
         const el = document.getElementById(id);
         if (!el) return;
         const previous = value !== undefined ? value : el.value;
-        el.innerHTML = htmlText;
+        PivotSafeHtml.setHtml(el, htmlText);
         if (Array.from(el.options).some(option => option.value === previous)) {
             el.value = previous;
         } else {

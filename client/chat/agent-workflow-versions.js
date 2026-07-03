@@ -8,7 +8,7 @@ function ensureAgentWorkflowVersionsModal() {
     modal = document.createElement('div');
     modal.id = 'agent-workflow-versions-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
+    PivotSafeHtml.setHtml(modal, `
         <div class="modal rag-detail-modal agent-workflow-versions-modal">
             <div class="rag-detail-header">
                 <div>
@@ -19,7 +19,7 @@ function ensureAgentWorkflowVersionsModal() {
             </div>
             <div id="agent-workflow-versions-body" class="agent-workflow-versions-body"></div>
         </div>
-    `;
+    `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
         if (event.target === modal || event.target.closest('#agent-workflow-versions-close-btn')) {
@@ -125,17 +125,17 @@ async function openAgentWorkflowVersions() {
     const modal = ensureAgentWorkflowVersionsModal();
     const body = document.getElementById('agent-workflow-versions-body');
     modal.classList.remove('hidden');
-    body.innerHTML = '<div class="empty-state agent-empty-state">正在加载版本...</div>';
+    PivotSafeHtml.setHtml(body, '<div class="empty-state agent-empty-state">正在加载版本...</div>');
     const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/versions`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        body.innerHTML = `<div class="empty-state agent-empty-state">${agentEscape(data.error || '版本加载失败')}</div>`;
+        PivotSafeHtml.setHtml(body, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '版本加载失败')}</div>`);
         return;
     }
     const versions = data.data || [];
-    body.innerHTML = versions.length
+    PivotSafeHtml.setHtml(body, versions.length
         ? versions.map(item => agentWorkflowVersionMarkup(item, workflow)).join('')
-        : '<div class="empty-state agent-empty-state">暂无版本</div>';
+        : '<div class="empty-state agent-empty-state">暂无版本</div>');
     body.querySelectorAll('[data-agent-workflow-version-diff]').forEach(btn => {
         btn.addEventListener('click', () => showAgentWorkflowVersionDiff(workflow, btn.dataset.agentWorkflowVersionDiff));
     });

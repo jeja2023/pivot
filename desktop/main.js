@@ -138,13 +138,20 @@ async function resolveTargetUrl(config) {
 
 function shouldOpenExternal(targetUrl) {
     if (!runtimeConfig || !runtimeConfig.allowExternalOpen) return false;
-    if (!currentTargetUrl) return true;
     try {
         const target = new URL(targetUrl);
-        const current = new URL(currentTargetUrl);
-        return target.origin !== current.origin;
+        if (!['http:', 'https:'].includes(target.protocol)) return false;
+        if (currentTargetUrl) {
+            const current = new URL(currentTargetUrl);
+            if (target.origin === current.origin) return false;
+        }
+        const allowed = Array.isArray(runtimeConfig.allowedExternalOrigins)
+            ? runtimeConfig.allowedExternalOrigins
+            : [];
+        if (allowed.length === 0) return true;
+        return allowed.some(item => item === target.origin || item === target.hostname);
     } catch (_err) {
-        return true;
+        return false;
     }
 }
 
@@ -161,7 +168,7 @@ function createMainWindow(config) {
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false,
+            sandbox: config.sandbox !== false,
             preload: path.join(__dirname, 'preload.js'),
             partition: config.partition
         }

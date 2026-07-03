@@ -1,6 +1,6 @@
-// RAG 文档面板与诊断 RAG document panels and diagnostics
+// RAG 文档面板与诊断
 // RAG 文档面板功能从 rag-documents.js 拆分而来。
-// RAG document panels and diagnostics, split from rag-documents.js.
+// RAG 文档面板与诊断，拆自 rag-documents.js。
 /* eslint-disable no-undef */
 const ensureRagDetailModal = () => {
     let modal = document.getElementById('rag-detail-modal');
@@ -9,7 +9,7 @@ const ensureRagDetailModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-detail-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
+    PivotSafeHtml.setHtml(modal, `
         <div class="modal rag-detail-modal">
             <div class="rag-detail-header">
                 <div>
@@ -21,7 +21,7 @@ const ensureRagDetailModal = () => {
             <div id="rag-detail-meta" class="rag-detail-meta"></div>
             <div id="rag-detail-chunks" class="rag-detail-chunks"></div>
         </div>
-    `;
+    `);
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-detail-close-btn')) {
@@ -38,7 +38,7 @@ const ensureRagAuditModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-audit-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = `
+    PivotSafeHtml.setHtml(modal, `
         <div class="modal rag-detail-modal">
             <div class="rag-detail-header">
                 <div>
@@ -64,7 +64,7 @@ const ensureRagAuditModal = () => {
                 </table>
             </div>
         </div>
-    `;
+    `);
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-audit-close-btn')) {
@@ -129,15 +129,15 @@ const showRagDetailModal = (data) => {
             { icon: RAG_ICONS.time, label: '创建时间', value: formatRagDateToCN(doc.created_at) },
             { icon: RAG_ICONS.time, label: '更新时间', value: formatRagDateToCN(doc.updated_at || doc.processed_at) }
         ];
-        meta.innerHTML = items.map(item => `
+        PivotSafeHtml.setHtml(meta, items.map(item => `
             <div class="rag-meta-card ${item.class || ''}">
                 <div class="rag-meta-label">${item.icon}<span>${escapeRagHtml(item.label)}</span></div>
                 <div class="rag-meta-value" title="${escapeRagAttr(item.value)}">${escapeRagHtml(item.value)}</div>
             </div>
-        `).join('');
+        `).join(''));
     }
     if (chunkList) {
-        chunkList.innerHTML = chunks.length
+        PivotSafeHtml.setHtml(chunkList, chunks.length
             ? chunks.map((chunk, index) => `
                 <article class="rag-detail-chunk">
                     <header>
@@ -147,7 +147,7 @@ const showRagDetailModal = (data) => {
                     <p>${escapeRagHtml(chunk.content || '')}</p>
                 </article>
             `).join('')
-            : '<div class="rag-debug-empty">暂无可预览分块</div>';
+            : '<div class="rag-debug-empty">暂无可预览分块</div>');
     }
     modal.classList.remove('hidden');
 };
@@ -163,7 +163,7 @@ window.showKnowledgeDocAudit = async () => {
         if (!res.ok || data.error) throw new Error(data.error || '删除审计加载失败');
         const modal = ensureRagAuditModal();
         const body = modal.querySelector('#rag-audit-body');
-        if (body) body.innerHTML = renderRagAuditRows(data.data || []);
+        if (body) PivotSafeHtml.setHtml(body, renderRagAuditRows(data.data || []));
         modal.classList.remove('hidden');
     } catch (e) {
         showToast(e.message || '删除审计加载失败', 'error');
@@ -196,12 +196,12 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const lastError = summary.lastError?.error_message
         ? `<span class="rag-summary-error" title="${escapeRagHtml(summary.lastError.error_message)}">最近错误：${escapeRagHtml(summary.lastError.name || '文档')}</span>`
         : '';
-    el.innerHTML = `
+    PivotSafeHtml.setHtml(el, `
         <div class="rag-summary-items">
             ${items.map(([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`).join('')}
         </div>
         ${lastError}
-    `;
+    `);
 
     const retryBtn = document.getElementById('rag-retry-failed-btn');
     if (retryBtn) retryBtn.disabled = !(summary.retryableErrors > 0);
@@ -225,10 +225,10 @@ const renderRagQualityReport = (report) => {
         ['空分块', Number(overview.emptyReady || 0)]
     ].filter(([, value]) => value > 0);
     if (!issueItems.length && !visibleProblems.length) {
-        el.innerHTML = '';
+        PivotSafeHtml.setHtml(el, '');
         return;
     }
-    el.innerHTML = `
+    PivotSafeHtml.setHtml(el, `
         <div class="governance-head">
             <strong>质量诊断</strong>
             <span>${visibleProblems.length ? `发现 ${visibleProblems.length} 个需处理文档` : '存在需关注指标'}</span>
@@ -247,9 +247,40 @@ const renderRagQualityReport = (report) => {
                 `).join('')}
             </div>
         ` : ''}
-    `;
+    `);
 };
 
+const renderRagDebugHistory = (items = []) => {
+    const el = document.getElementById('rag-debug-history');
+    if (!el) return;
+    const rows = Array.isArray(items) ? items.slice(0, 8) : [];
+    if (rows.length === 0) {
+        PivotSafeHtml.setHtml(el, '<div class="rag-debug-history-empty">暂无调试历史</div>');
+        return;
+    }
+    PivotSafeHtml.setHtml(el, `
+        <div class="rag-debug-history-head">
+            <strong>最近调试</strong>
+            <span>点击问题可带回输入框</span>
+        </div>
+        <div class="rag-debug-history-list">
+            ${rows.map(item => {
+                const top = (Array.isArray(item.scores) ? item.scores : [])
+                    .reduce((acc, score) => Math.max(acc, Number(score.score || 0)), 0);
+                const queue = item.queue || {};
+                const queueLabel = queue.maxConcurrent !== undefined
+                    ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)}`
+                    : '-';
+                return `
+                    <button type="button" class="rag-debug-history-item" data-rag-debug-sample="${escapeRagAttr(item.query || '')}">
+                        <span class="rag-debug-history-query">${escapeRagHtml(item.query || '-')}</span>
+                        <span class="rag-debug-history-meta">命中 ${Number(item.matchedCount || 0)} / 候选 ${Number(item.candidateCount || 0)} / 最高 ${top.toFixed(3)} / 队列 ${escapeRagHtml(queueLabel)} / ${Number(item.elapsedMs || 0)} ms</span>
+                    </button>
+                `;
+            }).join('')}
+        </div>
+    `);
+};
 const renderRagDebugResults = (data) => {
     const el = document.getElementById('rag-debug-results');
     if (!el) return;
@@ -295,6 +326,16 @@ const renderRagDebugResults = (data) => {
     const elapsed = Number(data.elapsedMs || data.elapsed || 0);
     const matchedCount = matches.filter(m => m.matched).length;
     const topScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0);
+    const queue = data.queue || {};
+    const hybrid = data.hybrid || {};
+    const ranking = data.ranking || {};
+    const rankingMode = ranking.mode ? String(ranking.mode).replace(/_/g, ' ') : '';
+    const queueLabel = queue.maxConcurrent !== undefined
+        ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)} pending, max ${Number(queue.maxConcurrent || 0)}`
+        : '';
+    const hybridLabel = hybrid.rrfK !== undefined
+        ? `dense ${Number(hybrid.wDense || 0).toFixed(2)} / fts ${Number(hybrid.wFts || 0).toFixed(2)} / mmr ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
+        : '';
     const debugVerdict = (() => {
         if (matchedCount > 0 && topScore >= Number(data.threshold || 0)) {
             return {
@@ -320,7 +361,7 @@ const renderRagDebugResults = (data) => {
         };
     })();
 
-    el.innerHTML = `
+    PivotSafeHtml.setHtml(el, `
         <div class="rag-debug-verdict is-${escapeRagHtml(debugVerdict.tone)}">
             <div>
                 <strong>${escapeRagHtml(debugVerdict.title)}</strong>
@@ -332,6 +373,9 @@ const renderRagDebugResults = (data) => {
             <span>关键词：${escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
             <span>候选：${Number(data.candidateCount || 0)}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
+            ${rankingMode ? `<span>Mode: ${escapeRagHtml(rankingMode)}</span>` : ''}
+            ${hybridLabel ? `<span>Hybrid: ${escapeRagHtml(hybridLabel)}</span>` : ''}
+            ${queueLabel ? `<span>Queue: ${escapeRagHtml(queueLabel)}</span>` : ''}
             ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
         </div>
         ${groupedList.length > 1 ? `
@@ -347,16 +391,28 @@ const renderRagDebugResults = (data) => {
         <div class="rag-debug-list">
             ${matches.map((m, index) => {
                 const score = Number(m.score || 0);
+                const fusedScore = Number(m.fusedScore ?? m.scores?.fused ?? score);
+                const denseRank = m.scores?.denseRank || null;
+                const ftsRank = m.scores?.ftsRank || null;
                 const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
+                const scoreDetails = [
+                    `rank #${Number(m.rank || index + 1)}`,
+                    `dense ${score.toFixed(3)}`,
+                    `fused ${fusedScore.toFixed(3)}`,
+                    denseRank ? `dense-rank #${denseRank}` : '',
+                    ftsRank ? `fts #${ftsRank}` : '',
+                    m.selected ? 'MMR selected' : ''
+                ].filter(Boolean).join(' | ');
                 return `
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
                         <strong>#${index + 1} ${escapeRagHtml(m.source || '-')}</strong>
-                        <span class="rag-debug-score" title="原始相似度">${score.toFixed(3)}${m.matched ? ' 命中' : ''}</span>
+                        <span class="rag-debug-score" title="Dense / fused / FTS / MMR breakdown">${score.toFixed(3)}${m.matched ? ' HIT' : ''}${m.selected ? ' | MMR' : ''}</span>
                     </div>
                     <div class="rag-debug-score-bar" aria-hidden="true">
                         <div class="rag-debug-score-bar-fill" style="width:${percent.toFixed(1)}%"></div>
                     </div>
+                    <div class="rag-debug-score-breakdown">${escapeRagHtml(scoreDetails)}</div>
                     <p>${highlightChunk(m.text || '')}</p>
                     <div class="rag-feedback-actions">
                         <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${score}">有用</button>
@@ -366,5 +422,5 @@ const renderRagDebugResults = (data) => {
                 `;
             }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
         </div>
-    `;
+    `);
 };

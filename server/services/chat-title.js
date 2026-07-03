@@ -1,13 +1,11 @@
-const axios = require('axios');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    buildModelHeaders
 } = require('./model-adapter');
 const { countVisibleConversationMessages } = require('./chat-messages');
+const { forwardChatCompletion } = require('./model-forwarder');
 
 function normalizeTitleText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -80,11 +78,9 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
     try {
         logger.info({ sessionId }, '正在生成会话标题');
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, user);
-        const agents = createSafeModelHttpAgents(modelCfg, user);
-
-        const response = await axios({
-            method: 'post',
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user,
             url: targetUrl,
             headers: buildModelHeaders(modelCfg),
             data: {
@@ -93,22 +89,19 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
                     {
                         role: 'user',
                         content: [
-                            '请根据以下对话内容，生成一个简短、具体、自然的中文标题。',
-                            '要求：4-12 个字；不要引号；不要解释；不要使用“新对话”“聊天记录”等泛泛标题。',
+                            'Generate a short, natural Chinese title for the dialogue below.',
+                            'Requirements: 4-12 Chinese characters, no quotes, no explanation, and no generic titles like new chat or chat log.',
                             '',
-                            `用户：${stripTitleSourceText(userMsg).slice(0, 600)}`,
-                            `助手：${stripTitleSourceText(aiMsg).slice(0, 600)}`
+                            `User: ${stripTitleSourceText(userMsg).slice(0, 600)}`,
+                            `Assistant: ${stripTitleSourceText(aiMsg).slice(0, 600)}`
                         ].join('\n')
                     }
                 ],
                 max_tokens: 32,
                 temperature: 0.2
             },
-            timeout: 60000,
-            proxy: false,
-            ...agents
+            timeout: 60000
         });
-
         newTitle = sanitizeGeneratedTitle(response.data.choices[0]?.message?.content, fallbackTitle);
     } catch (e) {
         logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');

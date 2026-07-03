@@ -41,7 +41,7 @@ function createDagInspectorController(ctx) {
                 { label: `${dep} 状态`, token: `{{nodes.${dep}.status}}` }
             ]))
         ];
-        modal.innerHTML = `
+        PivotSafeHtml.setHtml(modal, `
             <div class="modal rag-detail-modal pivot-dag-json-input-editor">
                 <div class="rag-detail-header pivot-dag-input-head">
                     <div>
@@ -73,7 +73,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-primary" data-pivot-dag-json-apply="1">应用</button>
                 </div>
             </div>
-        `;
+        `);
         const textareaEl = modal.querySelector('[data-pivot-dag-json-input]');
         const errorEl = modal.querySelector('[data-pivot-dag-json-error]');
         const setError = message => {
@@ -146,11 +146,11 @@ function createDagInspectorController(ctx) {
                 focusSnapshot.start = active.selectionStart;
                 focusSnapshot.end = active.selectionEnd;
             } catch (e) {
-                // Some input types do not expose text selection.
+                // 部分输入类型不支持文本选区。
             }
         }
         if (!node) {
-            inspector.innerHTML = '<div class="pivot-dag-inspector-empty">选中节点后可在此编辑标题、工具与输入。</div>';
+            PivotSafeHtml.setHtml(inspector, '<div class="pivot-dag-inspector-empty">选中节点后可在此编辑标题、工具与输入。</div>');
             notifySelectionChange(null);
             return;
         }
@@ -168,7 +168,7 @@ function createDagInspectorController(ctx) {
             </label>
         `).join('') || '<span class="pivot-dag-inspector-empty">这是起始节点，没有可选上游节点。</span>';
         const toolOptions = renderToolOptions(tools, node.tool);
-        inspector.innerHTML = `
+        PivotSafeHtml.setHtml(inspector, `
             <div class="pivot-dag-inspector-row pivot-dag-inspector-row-main">
                 <label class="pivot-dag-node-id-field">
                     <span>节点 ID</span>
@@ -221,7 +221,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
                 </div>
             </div>
-        `;
+        `);
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
         inspector.querySelector('[data-pivot-dag-open-json]')?.addEventListener('click', () => openNodeJsonEditor(node.id));
 
@@ -240,7 +240,7 @@ function createDagInspectorController(ctx) {
                 try {
                     next.setSelectionRange(focusSnapshot.start, focusSnapshot.end ?? focusSnapshot.start);
                 } catch (e) {
-                    // Ignore controls that cannot restore a cursor range.
+                    // 忽略无法恢复光标范围的控件。
                 }
             }
         } else if (focusSnapshot?.depend) {

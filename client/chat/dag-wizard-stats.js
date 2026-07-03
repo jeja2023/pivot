@@ -27,7 +27,7 @@ function createDagWizardStatsController(ctx) {
             modal.className = 'modal-overlay hidden pivot-dag-stats-wizard-overlay';
             document.body.appendChild(modal);
         }
-        modal.innerHTML = `
+        PivotSafeHtml.setHtml(modal, `
             <div class="modal rag-detail-modal pivot-dag-stats-wizard">
                 <div class="rag-detail-header pivot-dag-stats-head">
                     <div>
@@ -69,7 +69,7 @@ function createDagWizardStatsController(ctx) {
                     </div>
                 </div>
             </div>
-        `;
+        `);
         const status = modal.querySelector('[data-stats-status]');
         const setStatus = (text, type = '') => {
             status.textContent = text || '';
@@ -88,7 +88,7 @@ function createDagWizardStatsController(ctx) {
                 const result = await callWizardTool(entry.tools['db.list_tables'], schema ? { schema } : {});
                 const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
                 const tables = [...new Set(rows.map(tableNameFromRow).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
-                modal.querySelector('#pivot-stats-table-options').innerHTML = tables.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join('');
+                PivotSafeHtml.setHtml(modal.querySelector('#pivot-stats-table-options'), tables.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join(''));
                 setStatus(tables.length ? `已读取 ${tables.length} 个数据表。` : '没有读取到数据表，可手动输入。', tables.length ? '' : 'warn');
             } catch (e) {
                 setStatus(e.message || '读取数据表失败，可手动输入表名。', 'error');
@@ -111,7 +111,7 @@ function createDagWizardStatsController(ctx) {
                 const result = await callWizardTool(entry.tools['db.describe_table'], { table, ...(schema ? { schema } : {}) });
                 const rows = Array.isArray(result) ? result : (Array.isArray(result?.rows) ? result.rows : []);
                 const columns = [...new Set(rows.map(columnNameFromRow).filter(Boolean))];
-                modal.querySelector('#pivot-stats-column-options').innerHTML = columns.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join('');
+                PivotSafeHtml.setHtml(modal.querySelector('#pivot-stats-column-options'), columns.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join(''));
                 setStatus(columns.length ? `已读取 ${columns.length} 个字段。` : '没有读取到字段，可手动输入。', columns.length ? '' : 'warn');
             } catch (e) {
                 setStatus(e.message || '读取字段失败，可手动输入字段名。', 'error');

@@ -1,6 +1,6 @@
-// Agent 运行实时刷新 Agent run realtime
-// Split from agent-runs-list.js.
-// Agent run auto-refresh, realtime events, and streaming panel.
+// Agent 运行实时刷新
+// 拆自 agent-runs-list.js。
+// Agent 自动刷新、实时事件和流式面板。
 /* eslint-disable no-undef */
 function updateAgentAutoRefresh() {
     const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
@@ -108,7 +108,7 @@ function renderAgentStreamingPanel(payload) {
                 </div>
             `;
         }).join('');
-    panel.innerHTML = `
+    PivotSafeHtml.setHtml(panel, `
         <header class="agent-streaming-head">
             <strong>流式生成（实验）</strong>
             <span>第 ${step} 步 · finish_reason: ${finish}${completed ? ' · 已完成' : ''}</span>
@@ -117,7 +117,7 @@ function renderAgentStreamingPanel(payload) {
             <div class="agent-streaming-content">${agentEscape(content) || '<em>等待第一个 token…</em>'}</div>
             <div class="agent-streaming-tools">${toolHtml}</div>
         </div>
-    `;
+    `);
     // 任务终态时延迟收起面板：5s 后淡出，避免长期占据视野
     if (completed && payload.finishReason && payload.finishReason !== 'tool_calls') {
         setTimeout(() => panel?.classList.add('is-fading'), 5000);

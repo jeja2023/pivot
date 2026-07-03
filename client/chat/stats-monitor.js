@@ -23,7 +23,7 @@ window.loadOpsSummary = async function() {
             : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
         const gridEl = document.getElementById('ops-summary-grid');
         gridEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(132px, 1fr))';
-        gridEl.innerHTML = cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join('');
+        PivotSafeHtml.setHtml(gridEl, cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join(''));
         renderTrendChart('usage-trend-chart', trend);
         window.scheduleSettingsWorkspaceScale?.();
     } catch (e) { showToast('加载概览失败', 'error'); }
@@ -31,10 +31,12 @@ window.loadOpsSummary = async function() {
 
 let monitorTimer = null;
 
-window.loadMonitorSummary = async function() {
+window.loadMonitorSummary = async function(options = {}) {
     if (!isAdminUser()) return;
     try {
-        const res = await apiFetch(`${API_BASE}/stats/monitor-summary`);
+        const forceRefresh = options?.force === true || options?.refresh === true;
+        const suffix = forceRefresh ? '?refresh=1' : '';
+        const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`);
         if (!res.ok) throw new Error('系统监控加载失败');
         const data = await res.json();
         const memoryUsedRate = data.system.memory.total > 0 ? data.system.memory.used / data.system.memory.total : 0;
@@ -67,7 +69,7 @@ window.loadMonitorSummary = async function() {
             '维护任务': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.9 7.9l-6.8 6.8a2.1 2.1 0 0 1-3-3l6.8-6.8a6 6 0 0 1 7.9-7.9l-3.1 3.1z"/></svg>'
         };
 
-        document.getElementById('monitor-summary-grid').innerHTML = cards.map(([label, value, hint]) => `
+        PivotSafeHtml.setHtml(document.getElementById('monitor-summary-grid'), cards.map(([label, value, hint]) => `
             <div class="monitor-card">
                 <div class="monitor-card-head">
                     <span>${escapeHtml(label)}</span>
@@ -76,7 +78,7 @@ window.loadMonitorSummary = async function() {
                 <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
                 <small title="${escapeHtml(hint)}">${escapeHtml(hint)}</small>
             </div>
-        `).join('');
+        `).join(''));
 
         const memBarWidth = Math.min(100, Math.round(memoryUsedRate * 100));
         const memBarColor = memBarWidth > 90 ? '#ef4444' : (memBarWidth > 75 ? '#f59e0b' : '#10b981');
@@ -84,7 +86,7 @@ window.loadMonitorSummary = async function() {
         const diskBarColor = diskBarWidth > 90 ? '#ef4444' : (diskBarWidth > 75 ? '#f59e0b' : '#10b981');
 
         // 恢复详细资源展示 (9行)
-        document.getElementById('monitor-resource-list').innerHTML = [
+        PivotSafeHtml.setHtml(document.getElementById('monitor-resource-list'), [
             ['运行主机', `<strong>${escapeHtml(data.system.hostname)}</strong>`],
             ['操作系统', `<strong>${escapeHtml(`${data.system.type} ${data.system.release}`)}</strong>`],
             ['Node 版本', `<strong>${escapeHtml(`${data.process.version} (${data.process.arch})`)}</strong>`],
@@ -106,7 +108,7 @@ window.loadMonitorSummary = async function() {
             ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free)}</strong>`],
             ['进程 CPU', `<strong>${data.process.cpuSeconds.user.toFixed(1)}s U / ${data.process.cpuSeconds.system.toFixed(1)}s S</strong>`],
             ['运行平台', `<strong>${escapeHtml(data.system.platform)}</strong>`]
-        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join('');
+        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
 
         const healthEl = document.getElementById('monitor-health-maintenance-list');
         if (healthEl) {
@@ -137,7 +139,7 @@ window.loadMonitorSummary = async function() {
                 <span>${escapeHtml(label)}</span>
                 <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
             </div>`);
-            healthEl.innerHTML = [...healthRows, ...maintenanceRows].join('');
+            PivotSafeHtml.setHtml(healthEl, [...healthRows, ...maintenanceRows].join(''));
         }
 
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
@@ -163,7 +165,7 @@ window.loadMonitorSummary = async function() {
 
         const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>本机指标：</strong>仅显示 Pivot 部署服务器上的 NVIDIA GPU 与全局并发保护；模型端点本地/远端状态请查看“模型端点状态”。</div>';
 
-        document.getElementById('monitor-gpu-list').innerHTML = [
+        PivotSafeHtml.setHtml(document.getElementById('monitor-gpu-list'), [
             gpuScopeNotice,
             `<div class="monitor-row monitor-split-row">
                 <div>
@@ -176,10 +178,10 @@ window.loadMonitorSummary = async function() {
                 </div>
             </div>`,
             gpuRows
-        ].join('');
+        ].join(''));
 
         const models = data.tokens.byModel || [];
-        document.getElementById('monitor-model-list').innerHTML = models.length
+        PivotSafeHtml.setHtml(document.getElementById('monitor-model-list'), models.length
             ? models.map(item => {
                 const modelName = item.model_name || '未知模型';
                 return `<div class="monitor-row monitor-model-token-row">
@@ -187,12 +189,12 @@ window.loadMonitorSummary = async function() {
                     <strong class="monitor-model-token-value" title="${Number(item.tokens || 0).toLocaleString()} Tokens">${formatTokenCount(item.tokens)}</strong>
                 </div>`;
             }).join('')
-            : '<div class="monitor-empty">今日暂无 Token 消耗</div>';
+            : '<div class="monitor-empty">今日暂无 Token 消耗</div>');
 
         // 4. 数据与知识库渲染
         const ragStorageEl = document.getElementById('monitor-rag-storage-list');
         if (ragStorageEl) {
-            ragStorageEl.innerHTML = [
+            PivotSafeHtml.setHtml(ragStorageEl, [
                 ['检索总数', `<strong>${formatMetricNumber(data.rag.retrievals)} 次</strong>`],
                 ['命中率', `<strong>${(Number(data.rag.hitRate || 0) * 100).toFixed(1)}%</strong>`],
                 ['缓存命中率', `<strong>${(Number(data.rag.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
@@ -200,7 +202,7 @@ window.loadMonitorSummary = async function() {
                 ['索引分片', `<strong>${formatMetricNumber(data.rag.chunksIndexed)}</strong>`],
                 ['数据库大小', `<strong>${formatBytes(data.storage.db)}</strong>`],
                 ['附件总存储', `<strong>${formatBytes(data.storage.uploads)}</strong>`]
-            ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join('');
+            ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
         }
 
         const observability = data.observability || {};
@@ -211,7 +213,7 @@ window.loadMonitorSummary = async function() {
         }
         if (observabilityEl) {
             const events = observability.events || [];
-            observabilityEl.innerHTML = events.length ? events.map(item => {
+            PivotSafeHtml.setHtml(observabilityEl, events.length ? events.map(item => {
                 const typeLabel = observabilityTypeLabels[item.type] || item.type || '-';
                 const severityLabel = observabilitySeverityLabels[item.severity] || item.severity || '-';
                 const title = item.message || item.source || '异常事件';
@@ -235,7 +237,7 @@ window.loadMonitorSummary = async function() {
                     </div>
                 </div>
             `;
-            }).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>';
+            }).join('') : '<div class="monitor-empty">暂无慢查询或异常告警</div>');
         }
 
         renderMonitorEndpointLists(endpoints);
@@ -258,7 +260,7 @@ window.loadMonitorSummary = async function() {
             : '<tr><td colspan="7" class="text-center">暂无请求数据</td></tr>';
 
         const modalBody = document.getElementById('monitor-routes-modal-body');
-        if (modalBody) modalBody.innerHTML = routesHtml;
+        if (modalBody) PivotSafeHtml.setHtml(modalBody, routesHtml);
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();
@@ -268,6 +270,9 @@ window.loadMonitorSummary = async function() {
     }
 };
 
+window.refreshMonitorSummary = function(options = {}) {
+    return window.loadMonitorSummary({ ...options, force: true });
+};
 function scheduleMonitorRefresh() {
     clearTimeout(monitorTimer);
     const visible = !document.getElementById('tab-content-monitor')?.classList.contains('hidden');

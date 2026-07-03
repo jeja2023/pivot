@@ -745,10 +745,29 @@ function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null }) {
 
 function syncKnowledgeDocumentIndexConcurrency() {
     drainKnowledgeDocumentIndexQueue();
+    return getKnowledgeIndexQueueStatus();
+}
+
+function getKnowledgeIndexQueueStatus(userId = null) {
+    const normalizedUserId = Number.parseInt(userId, 10);
+    const hasUserFilter = Number.isSafeInteger(normalizedUserId) && normalizedUserId > 0;
+    const pendingJobs = Array.from(pendingIndexes.values());
+    const activeKeys = Array.from(activeIndexes.values());
+    const userPendingDocs = hasUserFilter
+        ? pendingJobs.filter(job => Number(job.userId) === normalizedUserId).map(job => job.docId).slice(0, 20)
+        : [];
+    const userActive = hasUserFilter
+        ? activeKeys.filter(key => String(key).startsWith(String(normalizedUserId) + ':')).length
+        : 0;
     return {
         running: runningIndexCount,
         pending: pendingIndexes.size,
-        maxConcurrent: getMaxConcurrentIndexes()
+        active: activeIndexes.size,
+        maxConcurrent: getMaxConcurrentIndexes(),
+        saturated: runningIndexCount >= getMaxConcurrentIndexes(),
+        userPending: userPendingDocs.length,
+        userActive,
+        userPendingDocIds: userPendingDocs
     };
 }
 
@@ -917,6 +936,7 @@ module.exports = {
     getKnowledgeDocumentTags,
     getKnowledgeSourcePath,
     getKnowledgeDocumentSummaryForUser,
+    getKnowledgeIndexQueueStatus,
     getKnowledgeQualityReport,
     getRagFeedbackSummary,
     listKnowledgeCollections,

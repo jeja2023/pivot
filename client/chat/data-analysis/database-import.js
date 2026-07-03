@@ -22,7 +22,7 @@
         // 渲染连接下拉选项
         const connSelect = document.getElementById('data-analysis-db-conn');
         if (connSelect) {
-            connSelect.innerHTML = connections.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
+            PivotSafeHtml.setHtml(connSelect, connections.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join(''));
         }
 
         // 重置/清除表单输入内容

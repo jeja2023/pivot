@@ -1,4 +1,4 @@
-/* 智枢前端主程序 Main Entry */
+/* 智枢前端主程序 */
 /* exported handleUnauthorized */
 function handleUnauthorized() {
     localStorage.removeItem('pivot_token');
@@ -144,7 +144,7 @@ function buildChatToolStatusItem({ tool, tone, text, action }) {
 function renderChatToolStatus(items = []) {
     const status = document.getElementById('chat-tool-status');
     if (!status) return;
-    status.innerHTML = '';
+    PivotSafeHtml.setHtml(status, '');
     status.classList.toggle('hidden', items.length === 0);
     status.classList.toggle('has-warning', items.some(item => item.tone === 'warning'));
     status.classList.toggle('has-error', items.some(item => item.tone === 'error'));

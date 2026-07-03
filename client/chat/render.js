@@ -181,28 +181,55 @@ window.formatSessionGroupDate = formatSessionGroupDate;
 
 let scrollMessagesToBottomTimer = null;
 let scrollMessagesToBottomUntil = 0;
+let scrollMessagesToBottomObserver = null;
+let scrollMessagesToBottomObserved = null;
+
+function disconnectScrollMessagesToBottomObserver() {
+    if (scrollMessagesToBottomObserver) scrollMessagesToBottomObserver.disconnect();
+    scrollMessagesToBottomObserver = null;
+    scrollMessagesToBottomObserved = null;
+}
+
+function observeScrollMessagesToBottom(container) {
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    if (scrollMessagesToBottomObserver && scrollMessagesToBottomObserved === container) return;
+    disconnectScrollMessagesToBottomObserver();
+    scrollMessagesToBottomObserved = container;
+    scrollMessagesToBottomObserver = new ResizeObserver(() => {
+        if (Date.now() > scrollMessagesToBottomUntil) return;
+        const currentContainer = document.getElementById('message-container');
+        if (currentContainer) currentContainer.scrollTop = currentContainer.scrollHeight;
+    });
+    scrollMessagesToBottomObserver.observe(container);
+    Array.from(container.children || []).forEach(child => scrollMessagesToBottomObserver.observe(child));
+}
 
 window.scrollMessagesToBottom = function(options = {}) {
     const container = document.getElementById('message-container');
     if (!container) return;
-    const apply = () => { container.scrollTop = container.scrollHeight; };
+    const apply = () => {
+        const currentContainer = document.getElementById('message-container');
+        if (currentContainer) currentContainer.scrollTop = currentContainer.scrollHeight;
+    };
     apply();
     requestAnimationFrame(apply);
+    requestAnimationFrame(() => requestAnimationFrame(apply));
     setTimeout(apply, 80);
+    setTimeout(apply, 240);
 
     const duration = Number.isFinite(Number(options.duration)) ? Math.max(0, Number(options.duration)) : 120;
     if (duration <= 0) return;
     scrollMessagesToBottomUntil = Math.max(scrollMessagesToBottomUntil, Date.now() + duration);
+    observeScrollMessagesToBottom(container);
     if (scrollMessagesToBottomTimer) return;
     scrollMessagesToBottomTimer = setInterval(() => {
-        const currentContainer = document.getElementById('message-container');
-        if (currentContainer) currentContainer.scrollTop = currentContainer.scrollHeight;
+        apply();
         if (Date.now() < scrollMessagesToBottomUntil) return;
         clearInterval(scrollMessagesToBottomTimer);
         scrollMessagesToBottomTimer = null;
+        disconnectScrollMessagesToBottomObserver();
     }, 80);
 };
-
 const customRenderer = new marked.Renderer();
 customRenderer.code = (code, infostring, _escaped) => {
     if (typeof code === 'object' && code !== null) {

@@ -22,7 +22,7 @@ async function loadMcpServers() {
         .filter(server => mcpPersonalBuiltinServices.some(item => item.type === server.server_type))
         .map(server => [server.server_type, server]));
     const databaseCount = userManagedServers.filter(server => server.server_type === 'database').length;
-    list.innerHTML = `
+    PivotSafeHtml.setHtml(list, `
         <div class="mcp-system-head">
             <div>
                 <strong>个人连接</strong>
@@ -95,7 +95,7 @@ async function loadMcpServers() {
                 <span>可以先配置一个数据库连接。</span>
             </div>
         `}
-    `;
+    `);
     list.querySelectorAll('[data-mcp-create]').forEach(btn => {
         btn.addEventListener('click', () => window.openMcpCreateModal(btn.dataset.mcpCreate));
     });
@@ -122,7 +122,7 @@ function renderMcpSystemServices() {
     const byType = new Map(mcpServersCache
         .filter(server => mcpSystemServices.some(item => item.type === server.server_type))
         .map(server => [server.server_type, server]));
-    box.innerHTML = `
+    PivotSafeHtml.setHtml(box, `
         <div class="mcp-system-head">
             <div>
                 <strong>系统工具</strong>
@@ -135,7 +135,7 @@ function renderMcpSystemServices() {
                 return renderMcpServiceCard({ service, server });
             }).join('')}
         </div>
-    `;
+    `);
     box.querySelectorAll('[data-mcp-system-enable]').forEach(btn => {
         btn.addEventListener('click', () => window.ensureMcpSystemService(btn.dataset.mcpSystemEnable, btn));
     });
@@ -209,7 +209,7 @@ window.openMcpToolsModal = async function(serverId) {
         refreshButton.disabled = server.status === 'paused';
         refreshButton.textContent = server.status === 'paused' ? '已停用' : '刷新工具';
     }
-    list.innerHTML = tools.length ? `
+    PivotSafeHtml.setHtml(list, tools.length ? `
         <div class="mcp-tools-grid">
             ${tools.map(tool => {
                 const governance = tool.governance || {};
@@ -236,7 +236,7 @@ window.openMcpToolsModal = async function(serverId) {
             `;
             }).join('')}
         </div>
-    ` : '<div class="mcp-empty-panel compact"><strong>暂无可用工具</strong><span>请先刷新该服务，或确认它已启用并完成连接。</span></div>';
+    ` : '<div class="mcp-empty-panel compact"><strong>暂无可用工具</strong><span>请先刷新该服务，或确认它已启用并完成连接。</span></div>');
     modal.classList.remove('hidden');
 };
 
@@ -271,7 +271,7 @@ async function loadMcpTools() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '工具加载失败');
     mcpToolsCache = data.tools || [];
-    if (box) box.innerHTML = '';
+    if (box) PivotSafeHtml.setHtml(box, '');
 }
 
 async function loadMcpGovernance() {
@@ -284,7 +284,7 @@ async function loadMcpGovernance() {
     const gov = await govRes.json().catch(() => ({}));
     const logs = await logsRes.json().catch(() => ({}));
     if (!govRes.ok || !logsRes.ok) {
-        panel.innerHTML = '';
+        PivotSafeHtml.setHtml(panel, '');
         return;
     }
     panel.className = 'workspace-governance-panel mcp-governance-panel';
@@ -298,7 +298,7 @@ async function loadMcpGovernance() {
     const notes = (Array.isArray(health.recommendations) ? health.recommendations : [])
         .filter(Boolean)
         .slice(0, 3);
-    panel.innerHTML = `
+    PivotSafeHtml.setHtml(panel, `
         <div class="mcp-governance-title">
             <div>
                 <strong>工具治理</strong>
@@ -314,7 +314,7 @@ async function loadMcpGovernance() {
             <span><b>${Number(s.callErrorRate ?? health.callErrorRate ?? 0)}%</b>调用错误率</span>
         </div>
         ${notes.length ? `<div class="governance-list mcp-safety-notes">${notes.map(item => `<span>${mcpEscape(item)}</span>`).join('')}</div>` : ''}
-    `;
+    `);
     panel.querySelector('#mcp-refresh-btn')?.addEventListener('click', () => window.loadMcpWorkbench?.());
 }
 

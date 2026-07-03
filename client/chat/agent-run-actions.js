@@ -1,6 +1,6 @@
-// Agent 运行操作 Agent run actions
-// Split from agent-runs-list.js.
-// Agent run payload assembly and mutating actions.
+// Agent 运行操作
+// 拆自 agent-runs-list.js。
+// Agent 运行载荷组装与变更操作。
 /* eslint-disable no-undef */
 function getSelectedAgentToolAllowlist() {
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
@@ -180,7 +180,7 @@ window.showAgentRunAudit = async function() {
         if (!res.ok || data.error) throw new Error(data.error || '删除审计加载失败');
         const modal = ensureAgentAuditModal();
         const body = modal.querySelector('#agent-audit-body');
-        if (body) body.innerHTML = renderAgentAuditRows(data.data || []);
+        if (body) PivotSafeHtml.setHtml(body, renderAgentAuditRows(data.data || []));
         modal.classList.remove('hidden');
     } catch (e) {
         showToast(e.message || '删除审计加载失败', 'error');

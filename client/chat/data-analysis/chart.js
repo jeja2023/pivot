@@ -95,7 +95,7 @@
         if (!box) return;
         if (!state.chart) {
             const suggestions = state.summary?.suggestions || [];
-            box.innerHTML = suggestions.length ? `
+            PivotSafeHtml.setHtml(box, suggestions.length ? `
                 <div class="data-analysis-suggestions">
                     ${suggestions.map((item, index) => `
                         <button type="button" data-data-analysis-chart-suggestion="${index}">
@@ -104,10 +104,10 @@
                         </button>
                     `).join('')}
                 </div>
-            ` : '<div class="data-analysis-empty">选择字段后生成图表</div>';
+            ` : '<div class="data-analysis-empty">选择字段后生成图表</div>');
             return;
         }
-        box.innerHTML = `
+        PivotSafeHtml.setHtml(box, `
             <div class="data-analysis-chart-actions">
                 <button id="data-analysis-chart-png" class="btn-secondary" type="button">保存为图片</button>
                 <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button">导出图表数据 (CSV)</button>
@@ -118,7 +118,7 @@
                 <canvas height="300"></canvas>
                 <pre class="pivot-echart-error-text"></pre>
             </div>
-        `;
+        `);
         window.renderPivotCharts?.(box);
     }
 

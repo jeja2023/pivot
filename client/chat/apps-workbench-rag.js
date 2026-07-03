@@ -11,11 +11,11 @@ async function ensureOfficialWritingRagCollections() {
     try {
         collections = await window.loadKnowledgeCollections();
     } catch (e) {
-        // Leave the flag false so a later call retries the load.
+        // 加载失败时保持标记为 false，便于后续调用重试。
         return;
     }
     if (!Array.isArray(collections)) return;
-    // Mark as loaded only after a successful fetch so failures can retry.
+    // 仅在 fetch 成功后标记已加载，失败后仍可重试。
     officialWritingRagCollectionsLoaded = true;
     ['official-writing-kb-history-collection', 'official-writing-kb-standards-collection'].forEach(id => {
         const select = document.getElementById(id);
@@ -23,7 +23,7 @@ async function ensureOfficialWritingRagCollections() {
         const current = select.value;
         const options = ['<option value="">全部专题库</option>']
             .concat(collections.map(c => `<option value="${escapeAppsHtml(String(c.id))}">${escapeAppsHtml(c.name || ('专题库 ' + c.id))}</option>`));
-        select.innerHTML = options.join('');
+        PivotSafeHtml.setHtml(select, options.join(''));
         if (current) select.value = current;
     });
 }
@@ -32,7 +32,7 @@ function renderOfficialWritingRagResults(scopeKey) {
     const list = document.getElementById(`official-writing-kb-${scopeKey}-results`);
     if (!list) return;
     const matches = officialWritingRagResults[scopeKey] || [];
-    list.innerHTML = matches.map((match, index) => `
+    PivotSafeHtml.setHtml(list, matches.map((match, index) => `
         <article class="official-writing-kb-result">
             <div class="official-writing-kb-result-head">
                 <span>${escapeAppsHtml(match.source || '知识库')}</span>
@@ -44,7 +44,7 @@ function renderOfficialWritingRagResults(scopeKey) {
                 <button type="button" data-official-writing-rag-ref="${index}" data-official-writing-rag-scope="${escapeAppsHtml(scopeKey)}">作为依据</button>
             </div>
         </article>
-    `).join('') || '<div class="official-writing-empty-note">输入关键词后点击“检索”，从知识库查找参考资料。</div>';
+    `).join('') || '<div class="official-writing-empty-note">输入关键词后点击“检索”，从知识库查找参考资料。</div>');
 }
 
 async function runOfficialWritingRagSearch(scopeKey) {

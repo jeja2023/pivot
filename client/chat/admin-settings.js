@@ -47,6 +47,16 @@ const ENHANCED_MEMORY_TYPE_LABELS = {
     decision: '长期决策',
     episode: '历史片段'
 };
+const MEMORY_STATUS_LABELS = {
+    active: '活跃',
+    disabled: '禁用',
+    deleted: '已删除'
+};
+
+function formatMemoryStatusLabel(status) {
+    const normalized = String(status || 'active').trim();
+    return MEMORY_STATUS_LABELS[normalized] || '未知状态';
+}
 
 function getCurrentMemory(memoryId) {
     return currentLongTermMemories.find(memory => String(memory.id) === String(memoryId)) || null;
@@ -64,12 +74,12 @@ function renderEnhancedMemorySummary(summary = {}) {
         ['长期决策', Number(byType.decision || 0)],
         ['历史片段', Number(byType.episode || 0)]
     ];
-    grid.innerHTML = items.map(([label, value]) => `
+    PivotSafeHtml.setHtml(grid, items.map(([label, value]) => `
         <div class="memory-summary-card">
             <span>${escapeHtml(label)}</span>
             <strong>${escapeHtml(String(value))}</strong>
         </div>
-    `).join('');
+    `).join(''));
 }
 
 window.updateLongTermMemoryEnabled = async function(enabled) {
@@ -162,7 +172,7 @@ function renderMemorySource(data = {}) {
     if (!body) return;
     const session = data.session || {};
     const messages = Array.isArray(data.messages) ? data.messages : [];
-    body.innerHTML = `
+    PivotSafeHtml.setHtml(body, `
         <div class="memory-source-meta">
             <strong>${escapeHtml(session.title || session.id || '-')}</strong>
             <span>${escapeHtml(session.updatedAt || session.createdAt || '')}</span>
@@ -178,20 +188,20 @@ function renderMemorySource(data = {}) {
                 </article>
             `).join('') : '<p class="muted">暂无可追溯消息</p>'}
         </div>
-    `;
+    `);
 }
 
 window.openMemorySourceModal = async function(memoryId) {
     const modal = document.getElementById('memory-source-modal');
     if (!modal) return;
     const body = document.getElementById('memory-source-body');
-    if (body) body.innerHTML = '<p class="muted">正在加载...</p>';
+    if (body) PivotSafeHtml.setHtml(body, '<p class="muted">正在加载...</p>');
     modal.classList.remove('hidden');
     try {
         const data = await fetchMemorySource(memoryId);
         renderMemorySource(data);
     } catch (e) {
-        if (body) body.innerHTML = `<p class="muted">${escapeHtml(e.message || '记忆来源加载失败')}</p>`;
+        if (body) PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(e.message || '记忆来源加载失败')}</p>`);
         showToast(e.message || '记忆来源加载失败', 'error');
     }
 };
@@ -205,10 +215,10 @@ function renderMemoryMergeSuggestions(suggestions = []) {
     if (!panel) return;
     panel.classList.remove('hidden');
     if (!suggestions.length) {
-        panel.innerHTML = '<div class="memory-merge-empty">暂无合并建议</div>';
+        PivotSafeHtml.setHtml(panel, '<div class="memory-merge-empty">暂无合并建议</div>');
         return;
     }
-    panel.innerHTML = suggestions.map(item => `
+    PivotSafeHtml.setHtml(panel, suggestions.map(item => `
         <div class="memory-merge-row">
             <div class="memory-merge-copy">
                 <span>${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[item.primary?.type] || item.primary?.type || '记忆')}</span>
@@ -218,7 +228,7 @@ function renderMemoryMergeSuggestions(suggestions = []) {
             </div>
             <button class="btn-primary" data-memory-merge-target="${item.primary?.id}" data-memory-merge-source="${item.duplicate?.id}">合并</button>
         </div>
-    `).join('');
+    `).join(''));
 }
 
 window.loadMemoryMergeSuggestions = async function() {
@@ -267,12 +277,12 @@ function renderMemoryQualityPanel(summary = {}) {
         ['任务积压', Number(jobs.queued || 0) + Number(jobs.running || 0)],
         ['失败任务', Number(jobs.failed || 0)]
     ];
-    panel.innerHTML = items.map(([label, value]) => `
+    PivotSafeHtml.setHtml(panel, items.map(([label, value]) => `
         <div class="memory-quality-card">
             <span>${escapeHtml(label)}</span>
             <strong>${escapeHtml(String(value))}</strong>
         </div>
-    `).join('');
+    `).join(''));
 }
 
 function renderMemoryJobsPanel(jobsData = {}) {
@@ -282,14 +292,14 @@ function renderMemoryJobsPanel(jobsData = {}) {
     const running = Number(summary.running || 0);
     const queued = Number(summary.queued || 0);
     const failed = Number(summary.failed || 0);
-    panel.innerHTML = `
+    PivotSafeHtml.setHtml(panel, `
         <div class="memory-jobs-line">
             <span>抽取任务</span>
             <strong>${queued} 排队 / ${running} 执行 / ${failed} 失败</strong>
             <button id="memory-jobs-retry-btn" class="btn-secondary" type="button" ${failed ? '' : 'disabled'}>重试失败</button>
             <button id="memory-jobs-cleanup-btn" class="btn-secondary" type="button">清理旧任务</button>
         </div>
-    `;
+    `);
 }
 
 function renderProductMemoryRows(memories = []) {
@@ -297,17 +307,17 @@ function renderProductMemoryRows(memories = []) {
     if (!body) return;
     const colspan = 9;
     if (!memories.length) {
-        body.innerHTML = `<tr><td colspan="${colspan}" class="text-center muted">暂无长期记忆</td></tr>`;
+        PivotSafeHtml.setHtml(body, `<tr><td colspan="${colspan}" class="text-center muted">暂无长期记忆</td></tr>`);
         return;
     }
-    body.innerHTML = memories.map(memory => `
+    PivotSafeHtml.setHtml(body, memories.map(memory => `
         <tr>
             <td><input type="checkbox" data-memory-select value="${memory.id}"></td>
             <td><span class="memory-type-badge">${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[memory.type] || memory.type || '记忆')}</span></td>
             <td class="memory-content-cell">${escapeHtml(memory.content || '')}</td>
             <td>${Number(memory.salience || 0).toFixed(2)}</td>
             <td>${Number(memory.confidence || 0).toFixed(2)}</td>
-            <td>${escapeHtml(memory.status || 'active')}</td>
+            <td>${escapeHtml(formatMemoryStatusLabel(memory.status))}</td>
             <td>
                 <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
             </td>
@@ -322,7 +332,7 @@ function renderProductMemoryRows(memories = []) {
                 </div>
             </td>
         </tr>
-    `).join('');
+    `).join(''));
 }
 
 async function fetchMemoryQuality() {
@@ -497,13 +507,31 @@ function updateRuntimeEditState() {
         input.disabled = !canEdit;
     });
     [
-        document.getElementById('runtime-settings-save'),
         document.getElementById('runtime-settings-page-save')
     ].filter(Boolean).forEach(btn => {
         btn.classList.toggle('hidden', !canEdit);
         btn.disabled = !canEdit;
         btn.title = canEdit ? '' : '只有 admin 权限层级可以修改全局参数';
     });
+}
+
+function getRuntimeSettingsFormRoot(source = null) {
+    const sourceEl = source?.currentTarget || source?.target || source || document.activeElement;
+    return sourceEl?.closest?.('#tab-content-global-params')
+        || document.getElementById('tab-content-global-params')
+        || document;
+}
+
+function collectRuntimeSettingsPayload(source = null) {
+    const root = getRuntimeSettingsFormRoot(source);
+    const payload = {};
+    Array.from(root.querySelectorAll('[data-runtime-key]')).forEach(input => {
+        const key = input.dataset.runtimeKey;
+        if (!key || Object.prototype.hasOwnProperty.call(payload, key)) return;
+        const rawValue = String(input.value || '').trim();
+        payload[key] = isRuntimeHumanIntKey(key) ? parseTokenAmount(rawValue) : Number(rawValue);
+    });
+    return payload;
 }
 
 function updateRuntimeSettingsForm(runtimeConfig = {}) {
@@ -532,20 +560,8 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
     updateRuntimeStatusMirrors([updatedText, readOnlyHint].filter(Boolean).join(' · '));
 }
 
-window.openRuntimeSettingsModal = async function() {
-    const modal = document.getElementById('runtime-settings-modal');
-    if (!modal) return;
-    if (!window.currentRuntimeConfig?.items?.length) {
-        await loadSettings();
-    }
-    modal.classList.remove('hidden');
-};
 
-window.closeRuntimeSettingsModal = function() {
-    document.getElementById('runtime-settings-modal')?.classList.add('hidden');
-};
-
-window.saveRuntimeSettings = async function() {
+window.saveRuntimeSettings = async function(source = null) {
     if (!isSuperAdminUser()) {
         const message = '只有 admin 权限层级可以修改全局参数';
         updateRuntimeStatusMirrors(message);
@@ -553,20 +569,10 @@ window.saveRuntimeSettings = async function() {
         return;
     }
     const saveButtons = [
-        document.getElementById('runtime-settings-save'),
         document.getElementById('runtime-settings-page-save')
     ].filter(Boolean);
     const oldTexts = new Map(saveButtons.map(btn => [btn, btn.innerText]));
-    const allRuntimeInputs = Array.from(document.querySelectorAll('[data-runtime-key]'));
-    const visibleRuntimeInputs = allRuntimeInputs.filter(input => input.offsetParent !== null);
-    const inputs = [...visibleRuntimeInputs, ...allRuntimeInputs];
-    const payload = {};
-    inputs.forEach(input => {
-        const key = input.dataset.runtimeKey;
-        if (Object.prototype.hasOwnProperty.call(payload, key)) return;
-        const rawValue = String(input.value || '').trim();
-        payload[key] = isRuntimeHumanIntKey(key) ? parseTokenAmount(rawValue) : Number(rawValue);
-    });
+    const payload = collectRuntimeSettingsPayload(source);
     saveButtons.forEach(btn => {
         btn.disabled = true;
         btn.innerText = '正在保存...';
@@ -582,8 +588,8 @@ window.saveRuntimeSettings = async function() {
         if (!res.ok) throw new Error(data.error || '运行时配置保存失败');
         updateRuntimeSettingsForm(data.runtimeConfig);
         showToast('并发与上下文配置已保存');
-        window.refreshMonitorSummary?.();
-        window.closeRuntimeSettingsModal();
+        if (window.refreshMonitorSummary) window.refreshMonitorSummary({ force: true });
+        else window.loadMonitorSummary?.({ force: true });
     } catch (e) {
         const message = e.message || '运行时配置保存失败';
         updateRuntimeStatusMirrors(message);
@@ -650,16 +656,11 @@ function getEmbeddingModelValue() {
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
 
-document.getElementById('runtime-settings-cancel')?.addEventListener('click', () => window.closeRuntimeSettingsModal?.());
-document.getElementById('runtime-settings-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
-document.getElementById('runtime-settings-page-save')?.addEventListener('click', () => window.saveRuntimeSettings?.());
+document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.saveRuntimeSettings?.(event));
 document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => loadSettings());
 document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.loadMemories?.());
 document.getElementById('long-term-memory-toggle')?.addEventListener('change', (event) => {
     window.updateLongTermMemoryEnabled?.(event.target.checked === true);
-});
-document.getElementById('runtime-settings-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'runtime-settings-modal') window.closeRuntimeSettingsModal?.();
 });
 
 document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.loadMemoryMergeSuggestions?.());
@@ -843,8 +844,8 @@ window.fetchEmbeddingModels = async () => {
         if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
 
         const currentModel = embeddingModelInput?.value.trim() || '';
-        selectEl.innerHTML = '<option value="">-- 请选择获取到的向量模型 --</option>' +
-            data.models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+        PivotSafeHtml.setHtml(selectEl, '<option value="">-- 请选择获取到的向量模型 --</option>' +
+            data.models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join(''));
         if (currentModel && data.models.includes(currentModel)) {
             selectEl.value = currentModel;
         }
@@ -877,7 +878,7 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
         embeddingKeyInput.value = '';
         embeddingKeyInput.placeholder = embeddingConfig?.hasApiKey ? '•••••••• (已配置，输入新密钥可覆盖)' : '输入 API Key (留空则保留原配置)';
     }
-    if (embeddingModelSelect) embeddingModelSelect.innerHTML = '';
+    if (embeddingModelSelect) PivotSafeHtml.setHtml(embeddingModelSelect, '');
     if (embeddingModelSelectContainer) embeddingModelSelectContainer.classList.add('hidden');
     if (embeddingStatusEl) {
         const keyStatus = embeddingConfig?.hasApiKey ? '已配置 API Key' : '未配置 API Key';
@@ -1077,6 +1078,7 @@ window.bindRagDebugModalEvents = function() {
         modal.classList.remove('hidden');
         // 如果是空的，自动填充默认参数
         if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
+        window.loadRagDebugHistory?.();
     };
     
     if (closeBtn) {

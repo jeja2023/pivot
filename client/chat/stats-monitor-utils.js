@@ -31,7 +31,7 @@ function renderMonitorEndpointLists(endpoints = {}) {
         }).join('')
         : '<div class="monitor-empty">暂无模型端点运行数据</div>';
 
-    listEls.forEach(el => { el.innerHTML = html; });
+    listEls.forEach(el => { PivotSafeHtml.setHtml(el, html); });
 }
 
 const formatMetricNumber = (value, digits = 0) => Number(value || 0).toLocaleString(undefined, {

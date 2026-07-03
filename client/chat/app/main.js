@@ -30,7 +30,7 @@ window.deleteSession = (id) => {
                 currentSessionId = null;
                 window.persistActiveChatSession?.('');
                 document.getElementById('current-title').innerText = '请选择或新建对话';
-                document.getElementById('message-container').innerHTML = '';
+                PivotSafeHtml.setHtml(document.getElementById('message-container'), '');
             }
             window.loadSessions();
             showToast('会话已删除');
@@ -41,7 +41,7 @@ window.deleteSession = (id) => {
 window.regenerateMsg = async (id) => {
     const res = await apiFetch(`${API_BASE}/messages/${id}`, { method: 'DELETE' });
     if (res.ok) {
-        document.getElementById('message-container').innerHTML = '';
+        PivotSafeHtml.setHtml(document.getElementById('message-container'), '');
         await selectSession(currentSessionId);
         window.sendMessage(true);
     } else {

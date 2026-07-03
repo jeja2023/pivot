@@ -114,7 +114,7 @@
             const targetText = row.targetType === 'all'
                 ? '全员'
                 : `${TARGET_LABELS[row.targetType] || row.targetType || '范围'}：${row.targetValue || '-'}`;
-            meta.innerHTML = [
+            PivotSafeHtml.setHtml(meta, [
                 ['投放范围', targetText],
                 ['登录页展示', row.showOnLogin ? '是' : '否'],
                 ['确认要求', row.requireAck ? `需要确认，已确认 ${row.ackCount || 0} 人` : '无需确认'],
@@ -129,7 +129,7 @@
                     <span>${esc(label)}</span>
                     <strong>${esc(value)}</strong>
                 </div>
-            `).join('');
+            `).join(''));
         }
         if (content) content.textContent = row.content || '';
         document.getElementById('announcement-detail-modal')?.classList.remove('hidden');
@@ -154,7 +154,7 @@
             if (!state.adminRows.length) {
                 renderTableMessage(body, 10, '暂无公告', { color: 'var(--text-muted)' });
             } else {
-                body.innerHTML = state.adminRows.map((row, index) => {
+                PivotSafeHtml.setHtml(body, state.adminRows.map((row, index) => {
                     const typeClass = esc(row.type);
                     const priorityClass = esc(row.priority);
                     const isAll = row.targetType === 'all';
@@ -192,7 +192,7 @@
                             </td>
                         </tr>
                     `;
-                }).join('');
+                }).join(''));
             }
             renderPagination?.('announcements', data.total || 0, page);
             window.scheduleSettingsWorkspaceScale?.();

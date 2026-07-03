@@ -1,4 +1,3 @@
-const axios = require('axios');
 const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -7,6 +6,7 @@ const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency')
 const { recordSlowModelResponse } = require('./observability');
 const { parsePositiveInt } = require('../number');
 const { getModelEndpointRuntimeConfig } = require('./runtime-settings');
+const { safeJsonGet } = require('./safe-http-client');
 
 const FAILURE_THRESHOLD = parsePositiveInt(process.env.MODEL_ENDPOINT_FAILURE_THRESHOLD, 3);
 const CIRCUIT_OPEN_MS = parsePositiveInt(process.env.MODEL_ENDPOINT_CIRCUIT_OPEN_MS, 60000);
@@ -35,14 +35,39 @@ function normalizeEndpointKey(modelCfg) {
     }
 }
 
-function normalizeMaxConcurrent(modelCfg) {
-    return parsePositiveInt(modelCfg?.max_concurrent, getModelEndpointRuntimeConfig().defaultConcurrency);
+function getActiveEndpointModelsForKey(endpointKey) {
+    return getActiveEndpointModels().filter(model => normalizeEndpointKey(model) === endpointKey);
 }
 
-function ensureRuntime(modelCfg) {
+function normalizeMaxConcurrent(modelCfg, runtimeConfig = getModelEndpointRuntimeConfig()) {
+    return parsePositiveInt(modelCfg?.max_concurrent, runtimeConfig.defaultConcurrency);
+}
+
+function resolveEndpointMaxConcurrent(models = [], runtimeConfig = getModelEndpointRuntimeConfig()) {
+    const defaultConcurrency = parsePositiveInt(runtimeConfig.defaultConcurrency, 1);
+    const modelLimits = models.map(model => normalizeMaxConcurrent(model, runtimeConfig));
+    return modelLimits.length ? Math.max(...modelLimits) : defaultConcurrency;
+}
+
+function getRuntimeModelsForKey(endpointKey, modelCfg) {
+    const existing = runtimes.get(endpointKey);
+    const existingModels = existing ? Array.from(existing.models.values()) : [];
+    const candidates = getActiveEndpointModelsForKey(endpointKey).concat(existingModels, modelCfg).filter(Boolean);
+    const byId = new Map();
+    candidates.forEach((model, index) => {
+        const id = model?.id === null || model?.id === undefined ? `inline:${index}` : String(model.id);
+        byId.set(id, model);
+    });
+    return Array.from(byId.values());
+}
+
+function ensureRuntime(modelCfg, options = {}) {
     const key = normalizeEndpointKey(modelCfg);
-    const maxConcurrent = normalizeMaxConcurrent(modelCfg);
-    const runtimeConfig = getModelEndpointRuntimeConfig();
+    const runtimeConfig = options.runtimeConfig || getModelEndpointRuntimeConfig();
+    const optionMax = Number.parseInt(options.maxConcurrent, 10);
+    const maxConcurrent = Number.isFinite(optionMax) && optionMax > 0
+        ? optionMax
+        : resolveEndpointMaxConcurrent(getRuntimeModelsForKey(key, modelCfg), runtimeConfig);
     let runtime = runtimes.get(key);
     if (!runtime) {
         runtime = {
@@ -101,15 +126,23 @@ function ensureRuntime(modelCfg) {
 
 function syncConfiguredRuntimes(models = getActiveEndpointModels()) {
     const activeModelIdsByKey = new Map();
+    const modelsByKey = new Map();
 
     models.forEach(model => {
         const key = normalizeEndpointKey(model);
         if (!activeModelIdsByKey.has(key)) {
             activeModelIdsByKey.set(key, new Set());
+            modelsByKey.set(key, []);
         }
         activeModelIdsByKey.get(key).add(String(model.id));
-        ensureRuntime(model);
+        modelsByKey.get(key).push(model);
     });
+
+    const runtimeConfig = getModelEndpointRuntimeConfig();
+    for (const endpointModels of modelsByKey.values()) {
+        const maxConcurrent = resolveEndpointMaxConcurrent(endpointModels, runtimeConfig);
+        endpointModels.forEach(model => ensureRuntime(model, { runtimeConfig, maxConcurrent }));
+    }
 
     for (const [key, runtime] of runtimes.entries()) {
         const activeModelIds = activeModelIdsByKey.get(key);
@@ -129,7 +162,6 @@ function syncConfiguredRuntimes(models = getActiveEndpointModels()) {
         }
     }
 }
-
 async function acquireModelSlot(modelCfg, options = {}) {
     const runtime = ensureRuntime(modelCfg);
     const now = Date.now();
@@ -198,12 +230,10 @@ async function refreshEndpointMonitor(runtime) {
 
     const start = Date.now();
     try {
-        await assertSafeModelRuntimeUrl(model, runtime.monitor.url);
-        const agents = createSafeModelHttpAgents(model);
-        const response = await axios.get(runtime.monitor.url, {
+        const response = await safeJsonGet(runtime.monitor.url, {
+            assertUrl: (url) => assertSafeModelRuntimeUrl(model, url),
+            createAgents: () => createSafeModelHttpAgents(model),
             timeout: MONITOR_TIMEOUT_MS,
-            proxy: false,
-            ...agents,
             validateStatus: status => status < 500
         });
         runtime.monitor.updatedAt = getBeijingTimestamp();

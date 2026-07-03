@@ -8,10 +8,10 @@
                         const target = document.getElementById('regulations-doc-list');
                         if (!target) return;
                         if (!state.documents.length) {
-                            target.innerHTML = '<tr><td colspan="11" class="text-center">暂无法规文档</td></tr>';
+                            PivotSafeHtml.setHtml(target, '<tr><td colspan="11" class="text-center">暂无法规文档</td></tr>');
                         } else {
                             const startIndex = (Math.max(Number(state.page || 1), 1) - 1) * Math.max(Number(state.pageSize || REGULATIONS_PAGE_SIZE), 1);
-                            target.innerHTML = state.documents.map((doc, index) => {
+                            PivotSafeHtml.setHtml(target, state.documents.map((doc, index) => {
                                 const title = esc(cleanDisplayTitle(doc.title || '未命名法规'));
                                 const rowIndex = startIndex + index + 1;
                                 return `
@@ -29,7 +29,7 @@
                                     <td title="${esc(fmtDate(doc.updated_at || doc.current_version_updated_at || doc.created_at))}">${esc(fmtDate(doc.updated_at || doc.current_version_updated_at || doc.created_at))}</td>
                                     <td class="text-center">${renderRegulationActions(doc)}</td>
                                 </tr>`;
-                            }).join('');
+                            }).join(''));
                         }
                         renderRegulationsSummary();
                         renderDocumentsPagination();
@@ -41,9 +41,9 @@
                         const adminActions = document.getElementById('regulations-detail-admin-actions');
                         const formsHost = document.getElementById('regulations-detail-forms');
                         if (!detail?.document) {
-                            target.innerHTML = '<div class="regulations-placeholder">请选择法规文档查看正文。</div>';
-                            if (adminActions) adminActions.innerHTML = '';
-                            if (formsHost) formsHost.innerHTML = '';
+                            PivotSafeHtml.setHtml(target, '<div class="regulations-placeholder">请选择法规文档查看正文。</div>');
+                            if (adminActions) PivotSafeHtml.setHtml(adminActions, '');
+                            if (formsHost) PivotSafeHtml.setHtml(formsHost, '');
                             return;
                         }
                         const doc = detail.document;
@@ -54,13 +54,13 @@
                             const graphBtn = `<button class="btn-secondary" type="button" data-regulation-graph="${esc(doc.id)}">引用网络</button>`;
                             const timelineBtn = (Array.isArray(detail.versions) && detail.versions.length >= 1)
                                 ? `<button class="btn-secondary" type="button" data-regulation-timeline="${esc(doc.id)}">修订时间线</button>` : '';
-                            adminActions.innerHTML = graphBtn + timelineBtn + (canManage() ? `
+                            PivotSafeHtml.setHtml(adminActions, graphBtn + timelineBtn + (canManage() ? `
                                 <button class="btn-secondary" type="button" data-regulation-edit="${esc(doc.id)}">编辑信息</button>
                                 <button class="btn-secondary" type="button" data-regulation-add-version="${esc(doc.id)}">追加版本</button>
-                            ` : '');
+                            ` : ''));
                         }
                         if (formsHost) {
-                            formsHost.innerHTML = canManage() ? renderInlineEditor(doc) + renderVersionUploader(doc) : '';
+                            PivotSafeHtml.setHtml(formsHost, canManage() ? renderInlineEditor(doc) + renderVersionUploader(doc) : '');
                         }
                         // #5 废止/修订提醒横幅：汇总被其它法律 supersede 的条文
                         const superseded = articles.filter(a => Array.isArray(a.supersededBy) && a.supersededBy.length);
@@ -119,9 +119,9 @@
                                 `;
                             }).filter(Boolean).join('');
                         }
-                        target.innerHTML = bodyHtml
+                        PivotSafeHtml.setHtml(target, bodyHtml
                             ? `${supersedeBanner}${bodyHtml}`
-                            : `${supersedeBanner}<div class="regulations-empty compact">${esc(title)} 暂无可查看的法规原文</div>`;
+                            : `${supersedeBanner}<div class="regulations-empty compact">${esc(title)} 暂无可查看的法规原文</div>`);
                     }
 
                     // #8 条文状态徽章：amended（已修正）/ repealed（已废止），active 不显示

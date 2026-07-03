@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { assertJsonOnlyPayload } = require('./safe-http-client');
 const {
     assertSafeModelRuntimeUrl,
     createSafeModelHttpAgents
@@ -18,20 +19,20 @@ async function forwardChatCompletion({
     data,
     headers,
     stream = false,
-    timeout = DEFAULT_FORWARD_TIMEOUT_MS
+    timeout = DEFAULT_FORWARD_TIMEOUT_MS,
+    signal = null
 } = {}) {
     if (!modelCfg) throw new Error('forwardChatCompletion: modelCfg is required');
     if (!url) throw new Error('forwardChatCompletion: url is required');
     await assertSafeModelRuntimeUrl(modelCfg, url, user);
+    assertJsonOnlyPayload(data);
     const agents = createSafeModelHttpAgents(modelCfg, user);
-    return axios({
-        method: 'post',
-        url,
-        data,
+    return axios.post(url, data, {
         headers,
         responseType: stream ? 'stream' : 'json',
         timeout,
         proxy: false,
+        signal,
         ...agents
     });
 }

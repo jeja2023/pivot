@@ -1,33 +1,20 @@
-const { getBeijingTimestamp } = require('../time');
+const { getAppSettingValue, setAppSetting } = require('./app-settings');
 
 const API_ACCESS_SETTING_KEY = 'api_access_enabled';
-
-function getDb() {
-    return require('../db').db;
-}
 
 function parseBooleanSetting(value) {
     return String(value || '').trim().toLowerCase() === 'true';
 }
 
 function getApiAccessSetting() {
-    const db = getDb();
-    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(API_ACCESS_SETTING_KEY);
-    if (row) return parseBooleanSetting(row.value);
+    const value = getAppSettingValue(API_ACCESS_SETTING_KEY);
+    if (value !== undefined) return parseBooleanSetting(value);
     return process.env.API_ACCESS_ENABLED !== 'false';
 }
 
 function setApiAccessSetting(enabled, updatedBy) {
-    const db = getDb();
     const value = enabled ? 'true' : 'false';
-    db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at, updated_by)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at,
-            updated_by = excluded.updated_by
-    `).run(API_ACCESS_SETTING_KEY, value, getBeijingTimestamp(), updatedBy || null);
+    setAppSetting(API_ACCESS_SETTING_KEY, value, { updatedBy: updatedBy || null });
     return getApiAccessSetting();
 }
 

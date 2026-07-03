@@ -1,9 +1,8 @@
-/* 内置 MCP 能力 - 局域网消息通知 Built-in IM MCP
+/* 内置 MCP 能力 - 局域网消息通知
  *
  * 对接内网即时聊天工具的 Webhook/API，向允许的目标用户或群组发送
  * 文本/Markdown 通知。由 builtin-mcp.js 拆分而来，逻辑保持不变。
  */
-const axios = require('axios');
 const {
     getRequiredBuiltinConfig,
     IM_TIMEOUT_MS
@@ -12,6 +11,7 @@ const {
     assertSafeMcpOutboundUrl,
     createSafeHttpAgentsForUser
 } = require('../security');
+const { safeJsonRequest } = require('./safe-http-client');
 
 function listImTools() {
     return [
@@ -94,19 +94,18 @@ async function sendIm(config, secret, payload, user = null) {
         'User-Agent': 'Pivot-IM-MCP/1.0'
     };
     if (secret && config.authHeader) headers[config.authHeader] = secret;
-    await assertSafeMcpOutboundUrl(config.endpointUrl, user);
-    const agents = createSafeHttpAgentsForUser(user, {
-        allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
-        allowExplicitLoopbackForAdmin: true
-    });
-    const response = await axios({
+    const response = await safeJsonRequest({
         url: config.endpointUrl,
         method: config.method,
+        user,
+        assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
+        createAgents: (targetUser) => createSafeHttpAgentsForUser(targetUser, {
+            allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+            allowExplicitLoopbackForAdmin: true
+        }),
         headers,
         data: payload,
         timeout: IM_TIMEOUT_MS,
-        proxy: false,
-        ...agents,
         validateStatus: status => status >= 200 && status < 300
     });
     return {

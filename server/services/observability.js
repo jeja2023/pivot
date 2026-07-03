@@ -1,10 +1,12 @@
-const axios = require('axios');
+const crypto = require('crypto');
 const { db } = require('../db/connection');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
+const { assertSafeOutboundUrl } = require('../security');
+const { safeJsonPost } = require('./safe-http-client');
+const { getAppSettingValue, setAppSetting } = require('./app-settings');
 
-const EVENT_TYPES = new Set(['sql', 'model', 'rag', 'agent', 'system']);
+const EVENT_TYPES = new Set(['sql', 'model', 'rag', 'agent', 'chat', 'upload', 'system']);
 const EVENT_STATUSES = new Set(['open', 'ack', 'resolved']);
 const SEVERITIES = new Set(['info', 'warning', 'critical']);
 const SLOW_SQL_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '500', 10) || 500, 1);
@@ -24,12 +26,75 @@ function safeJson(value) {
 
 function getSetting(key) {
     try {
-        return db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)?.value || '';
+        return getAppSettingValue(key) || '';
     } catch (e) {
         return '';
     }
 }
 
+
+function createObservabilityTrace(input = {}) {
+    const traceId = input.traceId || crypto.randomUUID();
+    const startedAt = Date.now();
+    const thresholdMs = Math.max(0, Number(input.thresholdMs || input.threshold_ms || 0));
+    const spans = [];
+    let finished = false;
+
+    const trace = {
+        traceId,
+        get finished() { return finished; },
+        addSpan(name, details = {}, durationMs = 0) {
+            if (spans.length >= 80) return null;
+            const span = {
+                name: String(name || 'span').slice(0, 120),
+                atMs: Date.now() - startedAt,
+                durationMs: Math.max(0, Math.round(Number(durationMs || 0))),
+                details
+            };
+            spans.push(span);
+            return span;
+        },
+        finish(result = {}) {
+            if (finished) return null;
+            finished = true;
+            const durationMs = Date.now() - startedAt;
+            const severity = result.severity || (result.error ? 'warning' : 'info');
+            const shouldRecord = result.record === true
+                || severity !== 'info'
+                || (thresholdMs > 0 && durationMs >= thresholdMs)
+                || input.recordSuccess === true;
+            if (!shouldRecord) return null;
+            return recordObservabilityEvent({
+                type: input.type || 'system',
+                source: input.source || '',
+                severity,
+                durationMs,
+                thresholdMs,
+                message: result.message || input.message || 'Operation trace',
+                details: {
+                    ...(input.details || {}),
+                    ...(result.details || {}),
+                    traceId,
+                    status: result.status || 'finished',
+                    spans
+                }
+            });
+        }
+    };
+    return trace;
+}
+
+async function withObservabilitySpan(trace, name, operation, details = {}) {
+    const startedAt = Date.now();
+    try {
+        const result = await operation();
+        trace?.addSpan?.(name, details, Date.now() - startedAt);
+        return result;
+    } catch (error) {
+        trace?.addSpan?.(name, { ...details, error: error.message || String(error) }, Date.now() - startedAt);
+        throw error;
+    }
+}
 function normalizeSeverity(severity, durationMs, thresholdMs) {
     if (SEVERITIES.has(severity)) return severity;
     if (Number(durationMs || 0) >= Number(thresholdMs || 1) * 4) return 'critical';
@@ -41,9 +106,7 @@ async function sendWebhookAlert(event) {
     if (!url) return;
     try {
         const guardUser = { username: 'admin', role: 'admin' };
-        await assertSafeOutboundUrl(url, guardUser);
-        const agents = createSafeHttpAgentsForUser(guardUser);
-        await axios.post(url, {
+        await safeJsonPost(url, {
             source: 'pivot',
             type: event.type,
             severity: event.severity,
@@ -53,9 +116,8 @@ async function sendWebhookAlert(event) {
             details: event.details ? JSON.parse(event.details) : null,
             createdAt: event.created_at
         }, {
+            user: guardUser,
             timeout: WEBHOOK_TIMEOUT_MS,
-            proxy: false,
-            ...agents,
             headers: { 'Content-Type': 'application/json', 'User-Agent': 'Pivot-Alert/1.0' }
         });
         db.prepare('UPDATE observability_events SET alerted_at = ? WHERE id = ?')
@@ -202,18 +264,12 @@ function getObservabilitySettings() {
 async function saveObservabilitySettings(body = {}, user = null) {
     const value = String(body.webhookUrl || body.webhook_url || '').trim();
     if (value) await assertSafeOutboundUrl(value, user || { username: 'admin', role: 'admin' });
-    db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at, updated_by)
-        VALUES ('observability_webhook_url', ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at,
-            updated_by = excluded.updated_by
-    `).run(value, getBeijingTimestamp(), user?.id || null);
+    setAppSetting('observability_webhook_url', value, { updatedBy: user?.id || null });
     return getObservabilitySettings();
 }
 
 module.exports = {
+    createObservabilityTrace,
     getObservabilitySettings,
     listObservabilityEvents,
     recordObservabilityEvent,
@@ -221,5 +277,6 @@ module.exports = {
     recordSlowRagRetrieval,
     recordSlowSql,
     saveObservabilitySettings,
-    updateObservabilityEventStatus
+    updateObservabilityEventStatus,
+    withObservabilitySpan
 };

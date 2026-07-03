@@ -145,6 +145,38 @@
     }
 
     const scriptLoadPromises = existingPivot._scriptLoadPromises || new Map();
+    const modules = existingPivot.modules || Object.create(null);
+
+    function registerModule(name, api = {}) {
+        const key = String(name || '').trim();
+        if (!key) throw new Error('Pivot.registerModule requires a module name');
+        modules[key] = api;
+        return api;
+    }
+
+    function getModule(name) {
+        return modules[String(name || '').trim()] || null;
+    }
+
+    function exposeModule(name, api = {}, aliases = []) {
+        const current = getModule(name) || {};
+        const moduleApi = registerModule(name, { ...current, ...api });
+        const legacyAliases = Array.isArray(aliases) ? aliases : Object.entries(aliases || {}).map(([globalName, exportName]) => ({
+            globalName,
+            exportName
+        }));
+        legacyAliases.forEach(alias => {
+            const globalName = typeof alias === 'string' ? alias : alias.globalName;
+            const exportName = typeof alias === 'string' ? alias : (alias.exportName || alias.globalName);
+            if (!globalName || !exportName || moduleApi[exportName] === undefined) return;
+            window[globalName] = moduleApi[exportName];
+        });
+        return moduleApi;
+    }
+
+    function moduleApi(name, fallback = {}) {
+        return getModule(name) || fallback;
+    }
 
     function versionedAssetUrl(src) {
         const text = String(src || '').trim();
@@ -223,6 +255,11 @@
     existingPivot.versionedAssetUrl = versionedAssetUrl;
     existingPivot.loadScriptOnce = loadScriptOnce;
     existingPivot.loadScripts = loadScripts;
+    existingPivot.modules = modules;
+    existingPivot.registerModule = registerModule;
+    existingPivot.getModule = getModule;
+    existingPivot.exposeModule = exposeModule;
+    existingPivot.moduleApi = moduleApi;
     existingPivot._scriptLoadPromises = scriptLoadPromises;
     existingPivot.chooseStreamInterval = chooseStreamInterval;
     existingPivot.html = window.PivotSafeHtml || existingPivot.html || null;

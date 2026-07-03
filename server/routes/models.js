@@ -1,12 +1,10 @@
-/* 模型管理路由 Model Management Routes */
+/* 模型管理路由 */
 const express = require('express');
 const crypto = require('crypto');
-const axios = require('axios');
 const { db } = require('../db');
 const { asyncHandler } = require('../http');
 const {
     assertSafeOutboundUrl,
-    createSafeHttpAgentsForUser,
     encryptSecret,
     decryptSecret,
     validateModelUrl
@@ -24,6 +22,7 @@ const {
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
+const { safeJsonGet } = require('../services/safe-http-client');
 
 function clearModelDefaultReferences(modelId) {
     const id = String(modelId || '').trim();
@@ -172,16 +171,14 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let modelsUrl = buildModelsListUrl(url);
 
         try {
-            const agents = createSafeHttpAgentsForUser(req.user);
-            const response = await axios.get(modelsUrl, {
+            const response = await safeJsonGet(modelsUrl, {
+                user: req.user,
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
                     'x-api-key': api_key || undefined,
                     'User-Agent': 'Pivot-AI-Client/1.0'
                 },
-                timeout: 10000,
-                proxy: false,
-                ...agents
+                timeout: 10000
             });
             const rawModels = response.data.data || [];
             const modelIds = rawModels.map(m => m.id);
@@ -243,16 +240,14 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             const testUrl = chatUrl.replace('/chat/completions', '/models');
             req.log.debug({ testId, testUrl }, '探测模型路径');
             await assertSafeOutboundUrl(testUrl, req.user);
-            const agents = createSafeHttpAgentsForUser(req.user);
-            await axios.get(testUrl, {
+            await safeJsonGet(testUrl, {
+                user: req.user,
                 headers: {
                     'Authorization': api_key ? `Bearer ${api_key}` : undefined,
                     'x-api-key': api_key || undefined,
                     'User-Agent': 'Pivot-AI-Client/1.0'
                 },
-                timeout: 10000,
-                proxy: false,
-                ...agents
+                timeout: 10000
             });
             req.log.info(`模型测试成功: ${testLabel} (ID: ${testId})`);
             logAction(req, '测试模型', `模型连接成功: ${model_name || url}`);

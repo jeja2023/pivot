@@ -1,6 +1,6 @@
-// Agent 工具标签 Agent run tool labels
-// Split from agent-run-renderers.js.
-// Agent model capability and tool label helpers.
+// Agent 工具标签
+// 拆自 agent-run-renderers.js。
+// Agent 模型能力与工具标签辅助函数。
 function agentModelCapabilityMarkup(model) {
     const textIcon = '<span class="cap-icon text" title="文本模型"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>';
     if (!model) return textIcon;
@@ -19,7 +19,7 @@ function updateAgentModelCaps() {
     if (!select || !caps || !name) return;
     const model = (window._cachedAgentModels || []).find(item => String(item.id) === String(select.value));
     name.textContent = model ? `${model.name}${model.user_id ? ' (个人)' : ''}` : '请选择模型';
-    caps.innerHTML = agentModelCapabilityMarkup(model);
+    PivotSafeHtml.setHtml(caps, agentModelCapabilityMarkup(model));
 }
 
 function setAgentModelListOpen(open) {

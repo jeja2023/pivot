@@ -5,13 +5,14 @@ const Module = require('node:module');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurrency = 1, modelMaxConcurrent = 1 } = {}) {
+function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurrency = 1, modelMaxConcurrent = 1, models = null } = {}) {
     const filename = path.resolve(__dirname, '../server/services/model-runtime.js');
     const source = fs.readFileSync(filename, 'utf8');
     const module = { exports: {} };
     const localRequire = Module.createRequire(filename);
     const setTimeoutCalls = [];
     const setIntervalCalls = [];
+    const semaphores = [];
     let axiosCalls = 0;
     let resolvePending = null;
 
@@ -20,7 +21,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
             if (sql.includes('FROM models')) {
                 return {
                     all() {
-                        return [{
+                        return models || [{
                             id: 1,
                             name: 'Model A',
                             url: 'https://api.example/v1',
@@ -73,6 +74,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
                             this.maxConcurrent = options.maxConcurrent || 1;
                             this.maxQueueSize = options.maxQueueSize || 1;
                             this.queueTimeoutMs = options.queueTimeoutMs || 1000;
+                            semaphores.push(this);
                         }
                         updateLimits(options = {}) {
                             if (Number.isFinite(Number(options.maxConcurrent)) && Number(options.maxConcurrent) > 0) {
@@ -105,6 +107,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
                 };
             }
             if (request === './observability') return { recordSlowModelResponse() {} };
+            if (request === './safe-http-client') return { safeJsonGet: async (url, options = {}) => axios.get(url, options) };
             if (request === '../number') return { parsePositiveInt: (value, fallback) => Number.parseInt(value, 10) || fallback };
             if (request === './runtime-settings') {
                 return {
@@ -120,6 +123,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
         console,
         process,
         Buffer,
+        URL,
         setTimeout(fn, delay) {
             const timer = {
                 fn,
@@ -148,6 +152,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
         runtime: module.exports,
         getAxiosCalls: () => axiosCalls,
         getPendingResolve: () => resolvePending,
+        getSemaphores: () => semaphores,
         setTimeoutCalls,
         setIntervalCalls
     };
@@ -185,4 +190,71 @@ test('model runtime uses runtime default concurrency when model endpoint does no
     assert.equal(status.length, 1);
     assert.equal(status[0].configuredMaxConcurrent, 2);
     assert.equal(status[0].concurrency.max, 2);
+});
+
+test('model runtime keeps shared endpoint at saved runtime concurrency when one model has a lower override', () => {
+    const { runtime } = loadModelRuntimeHarness({
+        defaultConcurrency: 2,
+        models: [
+            {
+                id: 1,
+                name: 'Model A',
+                url: 'https://api.example/v1',
+                monitor_url: 'https://monitor.example/status',
+                max_concurrent: 0,
+                supports_vision: 0,
+                status: 'active'
+            },
+            {
+                id: 2,
+                name: 'Model B',
+                url: 'https://api.example/v1',
+                monitor_url: '',
+                max_concurrent: 1,
+                supports_vision: 0,
+                status: 'active'
+            }
+        ]
+    });
+    const status = runtime.getModelEndpointRuntimeStatus();
+    assert.equal(status.length, 1);
+    assert.equal(status[0].models.length, 2);
+    assert.equal(status[0].configuredMaxConcurrent, 2);
+    assert.equal(status[0].concurrency.max, 2);
+});
+
+test('model runtime request path preserves shared endpoint max while active rows are briefly incomplete', async () => {
+    const highModel = {
+        id: 1,
+        name: 'Model A',
+        url: 'https://api.example/v1',
+        monitor_url: 'https://monitor.example/status',
+        max_concurrent: 0,
+        supports_vision: 0,
+        status: 'active'
+    };
+    const lowModel = {
+        id: 2,
+        name: 'Model B',
+        url: 'https://api.example/v1',
+        monitor_url: '',
+        max_concurrent: 1,
+        supports_vision: 0,
+        status: 'active'
+    };
+    const activeModels = [highModel, lowModel];
+    const { runtime, getSemaphores } = loadModelRuntimeHarness({
+        defaultConcurrency: 2,
+        models: activeModels
+    });
+
+    const initialStatus = runtime.getModelEndpointRuntimeStatus();
+    assert.equal(initialStatus[0].concurrency.max, 2);
+    assert.equal(getSemaphores()[0].maxConcurrent, 2);
+
+    activeModels.splice(0, activeModels.length, lowModel);
+    const release = await runtime.acquireModelSlot(lowModel);
+    release();
+
+    assert.equal(getSemaphores()[0].maxConcurrent, 2);
 });

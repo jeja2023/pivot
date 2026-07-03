@@ -1,6 +1,5 @@
-const axios = require('axios');
+const { safeJsonPost } = require('../safe-http-client');
 const { EMBEDDING_MODES, normalizeEmbeddingMode, getEmbeddingConfig } = require('../rag-config');
-const { assertSafeOutboundUrl, createSafeHttpAgentsForUser } = require('../../security');
 const { getOrCreateEmbeddingUsageModel, recordModelTokenUsage } = require('../models');
 const { estimateEmbeddingTokens } = require('../token-accounting');
 const { estimateTokens } = require('../../llm');
@@ -142,16 +141,13 @@ async function requestEmbedding(text, httpConfig, options = {}) {
     const targetUrl = resolveEmbeddingUrl(url);
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     try {
-        await assertSafeOutboundUrl(targetUrl, options.user || {});
-        const agents = createSafeHttpAgentsForUser(options.user || {});
-        const res = await axios.post(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        const res = await safeJsonPost(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
-            timeout: timeoutMs,
-            proxy: false,
-            ...agents
+            timeout: timeoutMs
         });
         return normalizeEmbeddingVector(res.data);
     } catch (e) {
@@ -171,16 +167,13 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     const requestOne = async (input) => {
         try {
-            await assertSafeOutboundUrl(targetUrl, options.user || {});
-            const agents = createSafeHttpAgentsForUser(options.user || {});
-            const res = await axios.post(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            const res = await safeJsonPost(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+                user: options.user || {},
                 headers: {
                     Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                     'Content-Type': 'application/json'
                 },
-                timeout: timeoutMs,
-                proxy: false,
-                ...agents
+                timeout: timeoutMs
             });
             return normalizeEmbeddingVector(res.data);
         } catch (e) {
@@ -198,16 +191,13 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
 
     let res;
     try {
-        await assertSafeOutboundUrl(targetUrl, options.user || {});
-        const agents = createSafeHttpAgentsForUser(options.user || {});
-        res = await axios.post(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        res = await safeJsonPost(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
-            timeout: timeoutMs,
-            proxy: false,
-            ...agents
+            timeout: timeoutMs
         });
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);

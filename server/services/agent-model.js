@@ -1,14 +1,10 @@
-const axios = require('axios');
-
 const { db } = require('../db');
 const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders,
-    assertSafeModelRuntimeUrl,
-    createSafeModelHttpAgents
+    buildModelHeaders
 } = require('./model-adapter');
 const { aiSemaphore } = require('./concurrency');
 const {
@@ -18,6 +14,7 @@ const {
 } = require('./model-runtime');
 const { createSseEventParser } = require('../streaming');
 const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./streaming-tools');
+const { forwardChatCompletion } = require('./model-forwarder');
 
 // Agent 调用的输出上限：优先调用方显式值，其次模型配置的 max_tokens，最后回退 1200。
 // 与 chat/openai/apps 一致地尊重模型配置，避免推理型模型（如 Qwen3）被 1200 写死后思考耗尽、正文为空。
@@ -51,21 +48,21 @@ async function withAgentModelConcurrency(modelCfg, operation) {
 async function callModelJson(modelCfg, messages, options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
-        const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
         const maxTokens = resolveAgentMaxTokens(modelCfg, options);
-        const response = await axios.post(targetUrl, {
-            model: modelCfg.model_name || modelCfg.name,
-            messages,
-            stream: false,
-            temperature,
-            max_tokens: maxTokens
-        }, {
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user: options.user || null,
+            url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
-            timeout: 180000,
-            proxy: false,
-            ...agents
+            data: {
+                model: modelCfg.model_name || modelCfg.name,
+                messages,
+                stream: false,
+                temperature,
+                max_tokens: maxTokens
+            },
+            timeout: 180000
         });
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     });
@@ -121,14 +118,14 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             }
         });
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-        await assertSafeModelRuntimeUrl(modelCfg, targetUrl, options.user || null);
-        const agents = createSafeModelHttpAgents(modelCfg, options.user || null);
-        const response = await axios.post(targetUrl, payload, {
+        const response = await forwardChatCompletion({
+            modelCfg,
+            user: options.user || null,
+            url: targetUrl,
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
-            responseType: 'stream',
-            timeout: 180000,
-            proxy: false,
-            ...agents
+            data: payload,
+            stream: true,
+            timeout: 180000
         });
         await new Promise((resolve, reject) => {
             response.data.on('data', chunk => {

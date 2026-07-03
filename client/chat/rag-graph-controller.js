@@ -1,5 +1,5 @@
 // RAG 知识图谱控制器 RAG graph controller
-// Split from rag.js.
+// 拆自 rag.js。
 /* eslint-disable no-undef */
 let ragGraphState = {
     selectedEntityId: null,
@@ -55,7 +55,7 @@ const setKnowledgeGraphRestoreState = (active, docId = '') => {
             sessionStorage.removeItem(RAG_GRAPH_DOC_STORAGE_KEY);
         }
     } catch (e) {
-        // sessionStorage may be blocked; restoring the subpage is best effort.
+        // sessionStorage 可能被阻止，子页面恢复按尽力原则处理。
     }
 };
 
@@ -154,7 +154,7 @@ const ensureRagGraphModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-graph-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
-    modal.innerHTML = buildGraphModalShellHtml({
+    PivotSafeHtml.setHtml(modal, buildGraphModalShellHtml({
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
         messages: {
@@ -180,7 +180,7 @@ const ensureRagGraphModal = () => {
         },
         relationFilterOptionsHtml: graphRelationFilterOptionsHtml(),
         typeFilterOptionsHtml: graphTypeFilterOptionsHtml()
-    });
+    }));
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-graph-close-btn')) {
@@ -196,13 +196,13 @@ const ensureRagGraphEditorModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-graph-editor-modal';
     modal.className = 'modal-overlay hidden rag-graph-editor-modal-overlay';
-    modal.innerHTML = buildGraphEditorModalShellHtml({
+    PivotSafeHtml.setHtml(modal, buildGraphEditorModalShellHtml({
         escapeHtml: escapeRagHtml,
         messages: {
             closeLabel: '关闭',
             title: '实体校准'
         }
-    });
+    }));
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-graph-editor-close-btn')) {
@@ -215,7 +215,7 @@ const ensureRagGraphEditorModal = () => {
 const renderGraphSummary = (summary = {}) => {
     const el = document.getElementById('rag-graph-summary');
     if (!el) return;
-    el.innerHTML = buildGraphSummaryHtml(summary, {
+    PivotSafeHtml.setHtml(el, buildGraphSummaryHtml(summary, {
         escapeHtml: escapeRagHtml,
         graphTypeLabel,
         labels: {
@@ -226,7 +226,7 @@ const renderGraphSummary = (summary = {}) => {
             pending: '待确认',
             quality: '质量分'
         }
-    });
+    }));
 };
 
 const renderGraphEntities = (payload = {}) => {
@@ -236,7 +236,7 @@ const renderGraphEntities = (payload = {}) => {
     ragGraphState.entities = entities;
     if (count) count.textContent = String(Number(payload.total || entities.length));
     if (!list) return;
-    list.innerHTML = buildGraphEntitiesHtml(entities, {
+    PivotSafeHtml.setHtml(list, buildGraphEntitiesHtml(entities, {
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
         buildGraphNodeTooltip,
@@ -249,7 +249,7 @@ const renderGraphEntities = (payload = {}) => {
             ),
             formatConfidence: (entity) => `可信度 ${Number(entity.confidence || 0).toFixed(2)}`
         }
-    });
+    }));
 };
 
 const renderGraphCanvas = (graph = {}) => {
@@ -279,11 +279,11 @@ const renderGraphCanvas = (graph = {}) => {
     });
     if (!hasNodes) {
         editEntityBtn?.classList.add('hidden');
-        el.innerHTML = html;
+        PivotSafeHtml.setHtml(el, html);
         return;
     }
     editEntityBtn?.classList.toggle('hidden', !ragGraphState.selectedEntity);
-    el.innerHTML = html;
+    PivotSafeHtml.setHtml(el, html);
     resetGraphMapView();
 };
 
@@ -294,7 +294,7 @@ const renderGraphRelations = (payload = {}) => {
     ragGraphState.relations = relations;
     if (count) count.textContent = String(Number(payload.total || relations.length));
     if (!list) return;
-    list.innerHTML = buildGraphRelationsHtml(relations, {
+    PivotSafeHtml.setHtml(list, buildGraphRelationsHtml(relations, {
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
         buildGraphRelationTooltip,
@@ -308,7 +308,7 @@ const renderGraphRelations = (payload = {}) => {
             formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`,
             statusLabel: (value) => ({ active: '已确认', pending: '待确认', deleted: '已删除' })[value] || value
         }
-    });
+    }));
 };
 
 const loadGraphSummary = async () => {
@@ -364,7 +364,7 @@ const refreshGraphSearch = async () => {
 const renderGraphQueryResult = (result = {}) => {
     const el = document.getElementById('rag-graph-query-results');
     if (!el) return;
-    el.innerHTML = buildGraphQueryResultHtml(result, {
+    PivotSafeHtml.setHtml(el, buildGraphQueryResultHtml(result, {
         escapeHtml: escapeRagHtml,
         graphRelationLabel,
         messages: {
@@ -374,7 +374,7 @@ const renderGraphQueryResult = (result = {}) => {
             hintLabel: '',
             pathLabel: '路径 '
         }
-    });
+    }));
 };
 
 window.openKnowledgeGraph = async (docId = null) => {
@@ -436,7 +436,7 @@ window.showKnowledgeGraphEntityEditor = (entity) => {
     const mergeCandidates = ragGraphState.entities
         .filter(item => Number(item.id) !== Number(entity.id))
         .slice(0, 80);
-    body.innerHTML = buildGraphEntityEditorHtml(entity, {
+    PivotSafeHtml.setHtml(body, buildGraphEntityEditorHtml(entity, {
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
         graphTypeLabel,
@@ -452,7 +452,7 @@ window.showKnowledgeGraphEntityEditor = (entity) => {
             saveLabel: '保存实体',
             typeLabel: '实体类型'
         }
-    });
+    }));
     modal.classList.remove('hidden');
 };
 
@@ -508,7 +508,7 @@ window.showKnowledgeGraphRelationEditor = (relation) => {
     if (!body) return;
     if (title) title.textContent = '关系校准';
     if (subtitle) subtitle.textContent = `#${Number(relation.id)} · 可信度 ${Number(relation.confidence || 0).toFixed(2)}`;
-    body.innerHTML = buildGraphRelationEditorHtml(relation, {
+    PivotSafeHtml.setHtml(body, buildGraphRelationEditorHtml(relation, {
         escapeAttr: escapeRagAttr,
         escapeHtml: escapeRagHtml,
         messages: {
@@ -520,7 +520,7 @@ window.showKnowledgeGraphRelationEditor = (relation) => {
             typeLabel: '关系类型'
         },
         relationOptionsHtml: graphRelationOptionsHtml(relation.relation_type || 'related_to')
-    });
+    }));
     modal.classList.remove('hidden');
 };
 

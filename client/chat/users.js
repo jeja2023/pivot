@@ -39,7 +39,7 @@ window.loadUsers = async function(page = 1) {
     const canViewUserRecords = isSuperAdmin === true || isSuperAdminUser();
     setPublicRegistrationToggle(allowPublicRegistration === true);
     userActionCache.clear();
-    document.getElementById('user-list-body').innerHTML = data.map(u => {
+    PivotSafeHtml.setHtml(document.getElementById('user-list-body'), data.map(u => {
         const permissionTier = u.permissionTier || u.permission_tier || getPermissionTier(u);
         const permissionLabel = u.permissionLabel || u.permission_label || getPermissionLabel(u);
         return `
@@ -62,7 +62,7 @@ window.loadUsers = async function(page = 1) {
             </td>
         </tr>
     `;
-    }).join('');
+    }).join(''));
     renderPagination('users', totalCount, requestedPage);
     window.scheduleSettingsWorkspaceScale?.();
 }
@@ -255,7 +255,7 @@ window.openUserRecords = async (user) => {
 window.closeUserRecordsModal = () => {
     document.getElementById('user-records-modal')?.classList.add('hidden');
     const pagination = document.getElementById('pagination-userRecords');
-    if (pagination) pagination.innerHTML = '';
+    if (pagination) PivotSafeHtml.setHtml(pagination, '');
     userRecordsTarget = null;
 };
 
@@ -267,12 +267,12 @@ window.loadUserRecordSessions = async () => {
     const previous = select.value;
     const res = await apiFetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/sessions?includeDeleted=${includeDeleted}`, { headers: authHeaders() });
     const { data = [] } = await res.json();
-    select.innerHTML = '<option value="">全部会话</option>' + data.map(s => {
+    PivotSafeHtml.setHtml(select, '<option value="">全部会话</option>' + data.map(s => {
         const title = escapeHtml(s.title || '未命名会话');
         const deleted = s.deleted_at ? '（已删除）' : '';
         const msgCount = Number(s.msg_count || 0);
         return `<option value="${escapeHtml(s.id)}">${title}${deleted} - ${msgCount} 条</option>`;
-    }).join('');
+    }).join(''));
     if (previous && data.some(s => String(s.id) === previous)) select.value = previous;
 };
 
@@ -300,7 +300,7 @@ window.loadUserRecordMessages = async (page = 1) => {
         return;
     }
     const displayData = sessionId ? data.slice().reverse() : data;
-    body.innerHTML = displayData.map(record => {
+    PivotSafeHtml.setHtml(body, displayData.map(record => {
         const userContent = escapeHtml(record.user_content || '');
         const assistantContent = escapeHtml(record.assistant_content || '');
         const sessionTitle = escapeHtml(record.session_title || '未命名会话');
@@ -318,7 +318,7 @@ window.loadUserRecordMessages = async (page = 1) => {
                 <td class="user-record-content" title="${assistantContent}">${assistantContent || '-'}</td>
             </tr>
         `;
-    }).join('');
+    }).join(''));
     renderPagination('userRecords', total, page);
     if (sessionId) scrollUserRecordsToBottom();
 };

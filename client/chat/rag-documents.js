@@ -87,7 +87,7 @@ function renderRagTagCheckboxes(selectedTags = [], collectionId = '') {
 
 function setRagTagCheckboxes(container, selectedTags = [], collectionId = '') {
     if (!container) return;
-    container.innerHTML = renderRagTagCheckboxes(selectedTags, collectionId);
+    PivotSafeHtml.setHtml(container, renderRagTagCheckboxes(selectedTags, collectionId));
 }
 
 function refreshRagTagCheckboxControls() {
@@ -142,7 +142,7 @@ function getRagCollectionOptionsHtml(selectedId = '', {
 function setSelectOptions(select, html, fallback = '') {
     if (!select) return;
     const previous = select.value || fallback || '';
-    select.innerHTML = html;
+    PivotSafeHtml.setHtml(select, html);
     select.value = Array.from(select.options).some(option => option.value === previous) ? previous : fallback;
 }
 
@@ -439,7 +439,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
         updateRagDebugSamples(docs);
         
         const body = document.getElementById('rag-docs-body');
-        body.innerHTML = docs.map((d, index) => `
+        PivotSafeHtml.setHtml(body, docs.map((d, index) => `
             <tr>
                 <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
                 <td class="text-center">${(pageNo - 1) * pageSize + index + 1}</td>
@@ -460,7 +460,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="12" class="text-center">暂无知识库文档</td></tr>';
+        `).join('') || '<tr><td colspan="12" class="text-center">暂无知识库文档</td></tr>');
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
     } catch (e) {
@@ -507,7 +507,7 @@ function ensureKnowledgeUploadModal() {
         modal = document.createElement('div');
         modal.id = 'knowledge-upload-modal';
         modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-upload-modal-overlay';
-        modal.innerHTML = `
+        PivotSafeHtml.setHtml(modal, `
             <div class="modal rag-detail-modal knowledge-upload-modal">
                 <div class="rag-detail-header">
                     <div>
@@ -541,7 +541,7 @@ function ensureKnowledgeUploadModal() {
                     </div>
                 </div>
             </div>
-        `;
+        `);
         document.body.appendChild(modal);
         modal.addEventListener('click', (event) => {
             if (event.target === modal || event.target.closest('#knowledge-upload-close-btn')) {
@@ -578,7 +578,7 @@ function ensureKnowledgeDocMetaModal() {
         modal = document.createElement('div');
         modal.id = 'knowledge-doc-meta-modal';
         modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-doc-meta-modal-overlay';
-        modal.innerHTML = `
+        PivotSafeHtml.setHtml(modal, `
             <div class="modal model-modal knowledge-doc-meta-modal">
                 <div class="model-modal-header">
                     <h3>整理文档</h3>
@@ -602,7 +602,7 @@ function ensureKnowledgeDocMetaModal() {
                     <button type="button" id="knowledge-doc-meta-save-btn" class="btn-primary">保存</button>
                 </div>
             </div>
-        `;
+        `);
         document.body.appendChild(modal);
         modal.addEventListener('click', (event) => {
             if (event.target === modal || event.target.closest('#knowledge-doc-meta-close-btn') || event.target.closest('#knowledge-doc-meta-cancel-btn')) {
@@ -630,7 +630,7 @@ window.openKnowledgeDocMetaModal = async function(id) {
     if (idInput) idInput.value = String(doc.id);
     if (nameEl) nameEl.innerText = doc.name || '';
     if (collectionSelect) {
-        collectionSelect.innerHTML = getRagCollectionOptionsHtml(doc.collection_id, { includeAll: false, unassignedLabel: '不归类' });
+        PivotSafeHtml.setHtml(collectionSelect, getRagCollectionOptionsHtml(doc.collection_id, { includeAll: false, unassignedLabel: '不归类' }));
         collectionSelect.value = normalizeRagCollectionId(doc.collection_id);
     }
     const collectionId = normalizeRagCollectionId(doc.collection_id);
@@ -810,6 +810,24 @@ window.sendRagFeedback = async (button) => {
     }
 };
 
+async function loadRagDebugHistory() {
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/debug-query/history?limit=8`, { headers: authHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '调试历史加载失败');
+        renderRagDebugHistory(data.data || []);
+    } catch (e) {
+        const history = document.getElementById('rag-debug-history');
+        if (history) PivotSafeHtml.setHtml(history, '<div class="rag-debug-history-empty">调试历史暂不可用</div>');
+    }
+}
+
+window.Pivot.exposeModule('rag.debug', {
+    loadRagDebugHistory
+}, {
+    loadRagDebugHistory: 'loadRagDebugHistory'
+});
+
 window.debugRagQuery = async () => {
     const input = document.getElementById('rag-debug-query');
     const button = document.getElementById('rag-debug-btn');
@@ -829,13 +847,13 @@ window.debugRagQuery = async () => {
             button.setAttribute('aria-busy', 'true');
         }
         if (results) {
-            results.innerHTML = `
+            PivotSafeHtml.setHtml(results, `
                 <div class="rag-debug-loading">
                     <span class="rag-debug-spinner"></span>
                     <strong>正在测试召回效果</strong>
                     <small>正在检索知识库分块，请稍候</small>
                 </div>
-            `;
+            `);
         }
         const res = await apiFetch(`${API_BASE}/rag/debug-query`, {
             method: 'POST',
@@ -854,10 +872,11 @@ window.debugRagQuery = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '检索测试失败');
         renderRagDebugResults(data);
+        window.loadRagDebugHistory?.();
     } catch (e) {
         showToast(e.message || '检索测试失败', 'error');
         if (results) {
-            results.innerHTML = `<div class="rag-debug-empty">检索测试失败，请调整问题或稍后重试</div>`;
+            PivotSafeHtml.setHtml(results, `<div class="rag-debug-empty">检索测试失败，请调整问题或稍后重试</div>`);
         }
     } finally {
         if (button) {
@@ -993,7 +1012,7 @@ function renderKnowledgeUploadQueue() {
 
     if (listEl) {
         listEl.hidden = count === 0;
-        listEl.innerHTML = '';
+        PivotSafeHtml.setHtml(listEl, '');
         // 用 DOM 构建，文件名以 textContent 写入，避免任何转义/注入问题。
         knowledgeUploadQueue.forEach((entry, index) => {
             const meta = KNOWLEDGE_UPLOAD_STATUS[entry.status] || KNOWLEDGE_UPLOAD_STATUS.pending;

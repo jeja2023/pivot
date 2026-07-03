@@ -101,7 +101,7 @@
                         if (!id) return;
                         openDetailDialog();
                         const detailEl = document.getElementById('regulations-detail-body');
-                        if (detailEl) detailEl.innerHTML = '<div class="regulations-loading">正在加载法规详情…</div>';
+                        if (detailEl) PivotSafeHtml.setHtml(detailEl, '<div class="regulations-loading">正在加载法规详情…</div>');
                         const params = new URLSearchParams();
                         if (versionId) params.set('versionId', versionId);
                         const url = `${API}/documents/${encodeURIComponent(id)}${params.toString() ? `?${params.toString()}` : ''}`;
@@ -254,7 +254,7 @@
                     function renderSimilarArticles(body, similar, articleId) {
                         if (!body) return;
                         const sourceArticle = state.detail?.articles?.find(article => String(article.id) === String(articleId));
-                        body.innerHTML = `
+                        PivotSafeHtml.setHtml(body, `
                             <div class="regulations-similar-source">
                                 <strong>${esc(sourceArticle?.article_label || '当前条文')}</strong>
                                 <span>${esc(cleanArticleTitle(sourceArticle?.article_title || ''))}</span>
@@ -268,7 +268,7 @@
                                     </button>
                                 `).join('') : '<div class="regulations-empty compact">暂无相似条文</div>'}
                             </div>
-                        `;
+                        `);
                     }
 
                     async function showSimilarArticles(articleId) {
@@ -276,12 +276,12 @@
                         const body = document.getElementById('regulations-similar-body');
                         if (!panel || !body) return;
                         panel.classList.remove('hidden');
-                        body.innerHTML = '<div class="regulations-loading">正在查找相似条文…</div>';
+                        PivotSafeHtml.setHtml(body, '<div class="regulations-loading">正在查找相似条文…</div>');
                         try {
                             const resp = await fetchJson(`${API}/articles/${encodeURIComponent(articleId)}/similar?limit=8`);
                             renderSimilarArticles(body, Array.isArray(resp.similar) ? resp.similar : [], articleId);
                         } catch (e) {
-                            body.innerHTML = `<div class="regulations-empty compact">${esc(e.message || '加载相似条文失败')}</div>`;
+                            PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(e.message || '加载相似条文失败')}</div>`);
                         }
                     }
 

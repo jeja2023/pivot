@@ -293,7 +293,7 @@ function disposePivotEchart(block) {
         try { block._pivotEchart.dispose(); } catch (_error) { /* noop */ }
         block._pivotEchart = null;
     }
-    // Safety net: dispose any echarts instance still bound to the mount node.
+    // 兜底释放仍绑定在挂载节点上的 ECharts 实例。
     if (window.echarts) {
         const mount = block.querySelector?.('.pivot-echart-canvas');
         if (mount) {
@@ -312,11 +312,11 @@ function teardownPivotCharts(root = document) {
 function renderEcharts(block, spec) {
     const mount = block.querySelector('.pivot-echart-canvas');
     if (!mount || !window.echarts) return false;
-    // Dispose any prior instance/listener bound to this block before re-initializing.
+    // 重新初始化前释放绑定到该块的旧实例和监听器。
     disposePivotEchart(block);
     mount.hidden = false;
     mount.style.height = '340px';
-    mount.innerHTML = '';
+    PivotSafeHtml.setHtml(mount, '');
     try {
         const chart = window.echarts.init(mount, null, { renderer: 'canvas' });
         chart.setOption(buildEchartsOptionFromPivotSpec(spec), true);
@@ -327,7 +327,7 @@ function renderEcharts(block, spec) {
         return true;
     } catch (_error) {
         mount.hidden = true;
-        mount.innerHTML = '';
+        PivotSafeHtml.setHtml(mount, '');
         return false;
     }
 }
