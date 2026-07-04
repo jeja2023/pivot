@@ -364,6 +364,7 @@ test('runtime settings save path handles legacy app_settings rows and syncs endp
     assert.match(runtimeSettings, /DELETE FROM app_settings WHERE key = \?/);
     assert.match(settingsRoute, /const \{ getModelEndpointRuntimeStatus, syncConfiguredRuntimes \} = require\('\.\.\/services\/model-runtime'\);/);
     assert.match(settingsRoute, /globalAiConcurrency = syncGlobalAiConcurrencySettings\(\);\s*syncConfiguredRuntimes\(\);\s*modelEndpointRuntime = getModelEndpointRuntimeStatus\(\);/);
+    assert.match(settingsRoute, /invalidateMonitorSummaryCache\(\);/);
 });
 
 test('app_settings helper supports legacy production table without key uniqueness', () => {

@@ -14,6 +14,7 @@ class ConcurrencyLimitError extends Error {
 class ConcurrencySemaphore {
     constructor(options = {}) {
         this.maxConcurrent = Math.max(1, options.maxConcurrent || 10);
+        this.configuredMaxConcurrent = this.maxConcurrent;
         this.maxQueueSize = Math.max(0, options.maxQueueSize ?? 20);
         this.queueTimeoutMs = Math.max(1000, options.queueTimeoutMs || 300000);
         this.currentConcurrent = 0;
@@ -139,7 +140,10 @@ class ConcurrencySemaphore {
         const nextQueue = Number.parseInt(options.maxQueueSize, 10);
         const nextTimeout = Number.parseInt(options.queueTimeoutMs, 10);
 
-        if (Number.isFinite(nextMax) && nextMax > 0) this.maxConcurrent = nextMax;
+        if (Number.isFinite(nextMax) && nextMax > 0) {
+            this.maxConcurrent = nextMax;
+            this.configuredMaxConcurrent = nextMax;
+        }
         if (Number.isFinite(nextQueue) && nextQueue >= 0) this.maxQueueSize = nextQueue;
         if (Number.isFinite(nextTimeout) && nextTimeout >= 1000) this.queueTimeoutMs = nextTimeout;
 
@@ -161,6 +165,8 @@ class ConcurrencySemaphore {
             active: this.currentConcurrent,
             queued: this.queue.length,
             max: this.maxConcurrent,
+            effectiveMax: this.maxConcurrent,
+            configuredMax: this.configuredMaxConcurrent,
             maxQueue: this.maxQueueSize,
             queueTimeoutMs: this.queueTimeoutMs,
             rejectingNewRequests: this.rejectingNewRequests,

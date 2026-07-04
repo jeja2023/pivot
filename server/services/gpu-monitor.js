@@ -26,6 +26,8 @@ const state = {
     gpus: [],
     maxRatio: 0,
     overloaded: false,
+    throttled: false,
+    protectionReason: '',
     error: null,
     thresholds: {
         safe: VRAM_SAFE_THRESHOLD,
@@ -35,6 +37,7 @@ const state = {
     },
     intervalMs: MONITOR_INTERVAL,
     configuredMaxConcurrent: null,
+    effectiveMaxConcurrent: null,
     minConcurrentCap: MIN_CONCURRENT_CAP,
     maxConcurrentCap: MAX_CONCURRENT_CAP
 };
@@ -88,6 +91,12 @@ function getConfiguredConcurrencyBounds() {
     return { configuredMax, upper, lower };
 }
 
+function updateAdaptiveConcurrencyState(nextMax, bounds, reason = '') {
+    state.effectiveMaxConcurrent = nextMax;
+    state.throttled = nextMax < bounds.upper;
+    state.protectionReason = state.throttled ? (reason || 'GPU_CONCURRENCY_THROTTLED') : '';
+}
+
 async function refreshGpuStatus() {
     const result = await getGpuMemoryUsage();
     const bounds = getConfiguredConcurrencyBounds();
@@ -106,6 +115,7 @@ async function refreshGpuStatus() {
 
     if (!state.available) {
         state.overloaded = false;
+        updateAdaptiveConcurrencyState(bounds.upper, bounds);
         aiSemaphore.setRejectingNewRequests(false);
         if (status.max !== bounds.upper) {
             aiSemaphore.updateMaxConcurrent(bounds.upper);
@@ -141,6 +151,7 @@ async function refreshGpuStatus() {
         }
     }
 
+    updateAdaptiveConcurrencyState(nextMax, bounds, state.overloaded ? 'GPU_VRAM_REJECT' : 'GPU_VRAM_THROTTLE');
     if (nextMax !== status.max) {
         aiSemaphore.updateMaxConcurrent(nextMax);
     }

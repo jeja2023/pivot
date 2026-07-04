@@ -35,6 +35,7 @@ const { syncMemoryCompressionConcurrency } = require('../llm');
 const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getPermissionCapabilities, isAdmin, isSuperAdmin } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
+const { invalidateMonitorSummaryCache } = require('./admin-stats');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -295,6 +296,8 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         } catch (e) {
             req.log?.warn({ err: e.message }, '运行时配置保存后的同步刷新失败');
         }
+
+        invalidateMonitorSummaryCache();
 
         if (result.changed.length > 0) {
             logAction(req, 'UPDATE_RUNTIME_SETTINGS', result.changed.join('；'));

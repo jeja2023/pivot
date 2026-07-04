@@ -4,6 +4,7 @@ This document records optimization work that is intentionally staged instead of 
 
 ## Release Snapshot
 
+- v0.0.190 (2026-07-04) 收口系统监控 AI 并发口径：区分全局保存配置上限与 GPU 临时保护下的当前有效上限，保存全局参数后清理监控摘要缓存，并补充并发/GPU/运行时设置回归测试。
 - v0.0.189 (2026-07-04) 收口智能体“能力与结果”弹窗滚动问题：可用工具与结果沉淀改为独立受限面板，旧的 `overflow: visible` 兼容规则不再作用于弹窗，并通过 Playwright 布局指标与 `npm run check` 验证。
 - v0.0.188 (2026-07-03) completes the actionable follow-up pass: `chat.ui` / `chat.attachments` module migration, stored RAG debug history and observability warnings, runnable Playwright E2E smoke tests, desktop update feed policy validation, and enterprise/multi-node schema plus provider placeholders.
 - v0.0.187 (2026-07-03) completes the second-stage architecture pass: chat orchestration services, agent run state machine, RAG retrieval score and queue diagnostics, frozen `window.*` baseline guard, permission capability matrix, and deployment profile contract.

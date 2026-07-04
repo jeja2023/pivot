@@ -59,6 +59,26 @@ test('ConcurrencySemaphore 会报告等待请求的队列位置', async () => {
     semaphore.release();
 });
 
+test('ConcurrencySemaphore keeps configured max while adaptive max changes', () => {
+    const semaphore = new ConcurrencySemaphore({
+        maxConcurrent: 3,
+        maxQueueSize: 2,
+        queueTimeoutMs: 5000
+    });
+
+    assert.equal(semaphore.getStatus().max, 3);
+    assert.equal(semaphore.getStatus().configuredMax, 3);
+
+    semaphore.updateMaxConcurrent(1);
+    assert.equal(semaphore.getStatus().max, 1);
+    assert.equal(semaphore.getStatus().effectiveMax, 1);
+    assert.equal(semaphore.getStatus().configuredMax, 3);
+
+    semaphore.updateLimits({ maxConcurrent: 4 });
+    assert.equal(semaphore.getStatus().max, 4);
+    assert.equal(semaphore.getStatus().configuredMax, 4);
+});
+
 test('模型视觉能力辅助函数可检测视觉输入和标记', () => {
     assert.equal(modelSupportsVision({ supports_vision: 1 }), true);
     assert.equal(modelSupportsVision({ supports_vision: 0 }), false);

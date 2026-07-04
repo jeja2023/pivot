@@ -114,11 +114,17 @@ test('gpu monitor restores AI concurrency to runtime config after temporary down
     assert.equal(state.available, true);
     assert.equal(state.configuredMaxConcurrent, 2);
     assert.equal(state.maxConcurrentCap, 2);
+    assert.equal(state.effectiveMaxConcurrent, 1);
+    assert.equal(state.throttled, true);
+    assert.equal(state.protectionReason, 'GPU_VRAM_THROTTLE');
     assert.equal(getMaxConcurrent(), 1);
 
     state = await gpuMonitor.refreshGpuStatus();
     assert.equal(state.available, true);
     assert.equal(state.maxConcurrentCap, 2);
+    assert.equal(state.effectiveMaxConcurrent, 2);
+    assert.equal(state.throttled, false);
+    assert.equal(state.protectionReason, '');
     assert.equal(getMaxConcurrent(), 2);
     assert.deepEqual(getUpdates(), [1, 2]);
 });

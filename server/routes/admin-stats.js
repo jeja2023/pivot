@@ -201,6 +201,13 @@ function getMonitorKnowledgeChunkCount() {
     return Number(row?.count || 0);
 }
 
+const MONITOR_SUMMARY_CACHE_TTL_MS = 5000;
+let monitorSummaryCache = { data: null, expires: 0 };
+
+function invalidateMonitorSummaryCache() {
+    monitorSummaryCache = { data: null, expires: 0 };
+}
+
 function createAdminStatsRouter({
     authMiddleware,
     adminMiddleware,
@@ -213,9 +220,6 @@ function createAdminStatsRouter({
 
     // /monitor-summary 整体快照缓存：该处理器每次都执行较重的 SQL + DNS 解析，且仪表盘会高频轮询。
     // 用 5s TTL 缓存装配好的成功响应对象，命中时直接返回，显著降低重复开销。错误响应不缓存。
-    const MONITOR_SUMMARY_CACHE_TTL_MS = 5000;
-    let monitorSummaryCache = { data: null, expires: 0 };
-
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const cacheNow = Date.now();
         const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1' || req.query?.cache === 'none';
@@ -823,6 +827,7 @@ function createAdminStatsRouter({
 
 module.exports = {
     createAdminStatsRouter,
+    invalidateMonitorSummaryCache,
     getMonitorKnowledgeChunkCount,
     getLocalHostnames,
     getResolvedLocalHostnames,

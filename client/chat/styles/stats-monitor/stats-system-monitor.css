@@ -390,6 +390,9 @@
     border-radius: 8px;
     overflow: hidden;
 }
+.settings-workspace-view #tab-content-monitor .monitor-split-row.is-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .settings-workspace-view #tab-content-monitor .monitor-split-row > div {
     display: flex;
     align-items: center;

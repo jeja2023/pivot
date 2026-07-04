@@ -48,8 +48,17 @@ window.loadMonitorSummary = async function(options = {}) {
         const endpoints = data.modelEndpoints || {};
         const health = data.health || {};
         const maintenance = data.maintenance || {};
+        const concurrencyEffectiveMax = Number(concurrency.effectiveMax ?? concurrency.max ?? 0) || 0;
+        const concurrencyConfiguredMax = Number(concurrency.configuredMax ?? gpu.configuredMaxConcurrent ?? concurrencyEffectiveMax) || concurrencyEffectiveMax;
+        const concurrencyIsThrottled = Boolean(gpu.throttled) || concurrencyConfiguredMax > concurrencyEffectiveMax;
+        const concurrencyHintParts = [`排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`];
+        if (concurrencyIsThrottled) {
+            if (concurrencyConfiguredMax > concurrencyEffectiveMax) concurrencyHintParts.push(`配置 ${formatMetricNumber(concurrencyConfiguredMax)}`);
+            concurrencyHintParts.push('GPU 临时保护');
+        }
+        const gpuProtectionStatus = gpu.overloaded ? '保护中' : (gpu.throttled ? '降档中' : '正常');
         const cards = [
-            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrency.max)}`, `排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`],
+            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrencyEffectiveMax)}`, concurrencyHintParts.join(' \u00b7 ')],
             ['今日 Token', formatTokenCount(data.tokens.today), '累计 ' + formatTokenCount(data.tokens.total)],
             ['今日消息', formatMetricNumber(data.tokens.todayMessages), `15min 活跃用户: ${data.activeUsers}`],
             ['请求总数', formatMetricNumber(data.http.requests), `错误率 ${errorRate.toFixed(2)}%`],
@@ -167,10 +176,14 @@ window.loadMonitorSummary = async function(options = {}) {
 
         PivotSafeHtml.setHtml(document.getElementById('monitor-gpu-list'), [
             gpuScopeNotice,
-            `<div class="monitor-row monitor-split-row">
+            `<div class="monitor-row monitor-split-row is-three">
                 <div>
                     <span>保护状态</span>
-                    <strong>${escapeHtml(gpu.overloaded ? '保护中' : '正常')}</strong>
+                    <strong>${escapeHtml(gpuProtectionStatus)}</strong>
+                </div>
+                <div>
+                    <span>AI上限</span>
+                    <strong title="当前 / 配置">${escapeHtml(`${formatMetricNumber(concurrencyEffectiveMax)}/${formatMetricNumber(concurrencyConfiguredMax)}`)}</strong>
                 </div>
                 <div>
                     <span>拒绝阈值</span>
