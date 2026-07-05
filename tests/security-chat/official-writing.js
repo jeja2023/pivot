@@ -32,6 +32,15 @@ test('公文写作批注只在全文类模式注入，起草模式不带批注',
     assert.ok(!draft.messages[1].content.includes('批注甲'));
 });
 
+test('公文写作全文类模式会携带本篇材料作为事实依据', () => {
+    const review = buildOfficialWritingMessages({ mode: 'review', draft: '正文内容', source: '知识库引用内容' });
+    assert.ok(review.messages[1].content.includes('本篇材料/知识库引用'));
+    assert.ok(review.messages[1].content.includes('知识库引用内容'));
+    const polish = buildOfficialWritingMessages({ mode: 'polish', draft: '正文内容', source: '事实材料' });
+    assert.ok(polish.messages[1].content.includes('参考材料'));
+    assert.ok(polish.messages[1].content.includes('事实材料'));
+});
+
 test('公文写作选区模式按动作注入指令，缺片段或非法动作抛错', () => {
     const sel = buildOfficialWritingMessages({ mode: 'selection', action: 'compress', selection: { text: '一段冗长的话' } });
     assert.ok(sel.messages[1].content.includes('精炼压缩'));

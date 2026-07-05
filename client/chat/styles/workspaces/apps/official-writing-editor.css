@@ -426,13 +426,6 @@
     transform: translateX(-50%);
 }
 
-.official-writing-selection-toolbar::before {
-    content: "选区";
-    color: #64748b;
-    font-size: 0.68rem;
-    font-weight: 900;
-    padding: 0 3px;
-}
 
 .official-writing-selection-toolbar.hidden {
     display: none;

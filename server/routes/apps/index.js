@@ -62,6 +62,15 @@ const {
     resolveAppsModel
 } = require('./helpers');
 
+function buildModelSecretErrorPayload(modelCfg) {
+    return {
+        error: {
+            message: `${modelCfg.secret_error}，请在模型管理中重新保存该模型的 API Key，或恢复原 DATA_ENCRYPTION_KEY/JWT_SECRET 后重启服务。`,
+            type: 'invalid_request_error',
+            code: 'api_key_decrypt_failed'
+        }
+    };
+}
 async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null }) {
     const modelCfg = resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
@@ -74,7 +83,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         });
     }
     if (modelCfg.secret_error) {
-        return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+        return res.status(400).json(buildModelSecretErrorPayload(modelCfg));
     }
 
     const userId = req.user.id;
@@ -286,7 +295,7 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
         return res.status(404).json({ error: { message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。', type: 'invalid_request_error', code: 'model_not_found' } });
     }
     if (modelCfg.secret_error) {
-        return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+        return res.status(400).json(buildModelSecretErrorPayload(modelCfg));
     }
     if (modelCfg.daily_token_limit > 0 && getModelDailyUsage(req.user.id, modelCfg.id) >= modelCfg.daily_token_limit) {
         return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
@@ -541,7 +550,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             });
         }
         if (modelCfg.secret_error) {
-            return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
+            return res.status(400).json(buildModelSecretErrorPayload(modelCfg));
         }
 
         const userId = req.user.id;

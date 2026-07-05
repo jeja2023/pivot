@@ -1,26 +1,287 @@
 // ===== 多文档库管理 =====
 
-function renderOfficialWritingDocList() {
-    const list = document.getElementById('official-writing-doc-list');
-    if (!list) return;
-    const docs = [...officialWritingLibrary.docs].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    PivotSafeHtml.setHtml(list, docs.map(doc => `
-        <div class="official-writing-doc-item ${doc.id === officialWritingLibrary.activeId ? 'active' : ''}" data-official-writing-doc-id="${escapeAppsHtml(doc.id)}" role="listitem">
+function getOfficialWritingDocSummary(doc) {
+    const state = doc?.state || {};
+    const sourceCount = getTextCount(state.source);
+    const draftCount = getTextCount(state.draft);
+    const pendingSuggestions = Array.isArray(state.suggestions)
+        ? state.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected').length
+        : 0;
+    const commentCount = Array.isArray(state.comments) ? state.comments.length : 0;
+    let status = '待起草';
+    if (draftCount > 0) status = pendingSuggestions > 0 ? '可审阅' : '可导出';
+    else if (sourceCount > 0) status = '可起草';
+    return {
+        docType: state.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType,
+        sourceCount,
+        draftCount,
+        pendingSuggestions,
+        commentCount,
+        status
+    };
+}
+
+function renderOfficialWritingDocItems(docs) {
+    return docs.map(doc => {
+        const summary = getOfficialWritingDocSummary(doc);
+        const active = doc.id === officialWritingLibrary.activeId;
+        const itemClass = ['official-writing-doc-item', active ? 'active' : '']
+            .filter(Boolean)
+            .join(' ');
+        const meta = `${summary.docType} · ${summary.status} · ${formatVersionTime(doc.updatedAt)}`;
+        return `
+        <div class="${itemClass}" data-official-writing-doc-id="${escapeAppsHtml(doc.id)}" role="listitem">
             <button type="button" class="official-writing-doc-open" data-official-writing-doc-open="${escapeAppsHtml(doc.id)}" title="${escapeAppsHtml(doc.title)}">
                 <strong>${escapeAppsHtml(doc.title || '未命名公文')}</strong>
-                <small>${escapeAppsHtml(formatVersionTime(doc.updatedAt))}</small>
+                <small>${escapeAppsHtml(meta)}</small>
             </button>
             <span class="official-writing-doc-actions">
                 <button type="button" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}" title="重命名" aria-label="重命名">重命名</button>
                 <button type="button" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}" title="删除" aria-label="删除">删除</button>
             </span>
-        </div>
-    `).join('') || '<div class="official-writing-empty-note">暂无公文，点击“新建公文”开始。</div>');
-    setText('official-writing-doc-count', `${officialWritingLibrary.docs.length} 篇`);
+        </div>`;
+    }).join('');
 }
 
-function switchOfficialWritingDoc(docId) {
-    if (!docId || docId === officialWritingLibrary.activeId) return;
+function getOfficialWritingStatusClass(summary) {
+    if (summary.draftCount > 0 && summary.pendingSuggestions > 0) return 'review';
+    if (summary.draftCount > 0) return 'ready';
+    if (summary.sourceCount > 0) return 'draftable';
+    return 'empty';
+}
+
+function getOfficialWritingLibraryPageInfo(total) {
+    const limit = Math.max(Number(officialWritingUiState.libraryPageSize || 10), 1);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const page = Math.min(Math.max(Number(officialWritingUiState.libraryPage || 1), 1), totalPages);
+    officialWritingUiState.libraryPage = page;
+    officialWritingUiState.libraryPageSize = limit;
+    return {
+        total,
+        limit,
+        totalPages,
+        page,
+        startIndex: (page - 1) * limit
+    };
+}
+
+function renderOfficialWritingHomeSummary(docs, pageDocs) {
+    const target = document.getElementById('official-writing-home-summary');
+    if (!target) return;
+    const summaries = docs.map(getOfficialWritingDocSummary);
+    const total = docs.length;
+    const currentPageCount = Array.isArray(pageDocs) ? pageDocs.length : docs.length;
+    const draftable = summaries.filter(item => item.status === '可起草').length;
+    const review = summaries.filter(item => item.status === '可审阅').length;
+    const ready = summaries.filter(item => item.status === '可导出').length;
+    const draftChars = summaries.reduce((sum, item) => sum + item.draftCount, 0);
+    const chips = [
+        `${total} 篇公文`,
+        `${currentPageCount} 本页`,
+        `${draftable} 篇可起草`,
+        `${review} 篇待审阅`,
+        `${ready} 篇可导出`,
+        `${draftChars} 正文字数`,
+    ];
+    PivotSafeHtml.setHtml(target, chips.map(text => `<span class="regulations-summary-pill">${escapeAppsHtml(text)}</span>`).join(''));
+}
+
+function renderOfficialWritingDocTableRows(docs, startIndex = 0) {
+    if (!docs.length) {
+        return '<tr><td colspan="9" class="text-center official-writing-table-empty">暂无公文</td></tr>';
+    }
+    return docs.map((doc, index) => {
+        const summary = getOfficialWritingDocSummary(doc);
+        const statusClass = getOfficialWritingStatusClass(summary);
+        return `
+            <tr data-official-writing-doc-id="${escapeAppsHtml(doc.id)}">
+                <td class="text-center">${startIndex + index + 1}</td>
+                <td><span class="official-writing-table-name">${escapeAppsHtml(doc.title || '未命名公文')}</span></td>
+                <td>${escapeAppsHtml(summary.docType)}</td>
+                <td class="text-center"><span class="official-writing-status-pill ${statusClass}">${escapeAppsHtml(summary.status)}</span></td>
+                <td class="text-center">${summary.draftCount} 字</td>
+                <td class="text-center">${summary.sourceCount} 字</td>
+                <td class="text-center">${summary.pendingSuggestions} 建议 / ${summary.commentCount} 批注</td>
+                <td>${escapeAppsHtml(formatVersionTime(doc.updatedAt))}</td>
+                <td class="text-center">
+                    <span class="official-writing-row-actions">
+                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-open="${escapeAppsHtml(doc.id)}">编辑</button>
+                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}">重命名</button>
+                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}">删除</button>
+                    </span>
+                </td>
+            </tr>`;
+    }).join('');
+}
+
+function renderOfficialWritingDocPagination(pageInfo) {
+    const pager = document.getElementById('official-writing-pagination');
+    if (!pager) return;
+    if (typeof window.renderWorkspacePagination !== 'function') {
+        pager.replaceChildren();
+        return;
+    }
+    window.renderWorkspacePagination(pager, {
+        total: pageInfo.total,
+        page: pageInfo.page,
+        limit: pageInfo.limit,
+        onPageChange: targetPage => {
+            officialWritingUiState.libraryPage = targetPage;
+            renderOfficialWritingDocList();
+        }
+    });
+}
+
+function renderOfficialWritingDetailHeader() {
+    const doc = getActiveOfficialWritingDoc();
+    if (!doc) return;
+    const summary = getOfficialWritingDocSummary(doc);
+    setText('official-writing-active-doc-title', doc.title || '未命名公文');
+    setText('official-writing-active-doc-meta', `${summary.docType} · ${summary.status} · ${summary.draftCount} 字正文`);
+    const renameBtn = document.getElementById('official-writing-current-rename-btn');
+    const deleteBtn = document.getElementById('official-writing-current-delete-btn');
+    if (renameBtn) renameBtn.dataset.officialWritingDocRename = doc.id;
+    if (deleteBtn) deleteBtn.dataset.officialWritingDocDelete = doc.id;
+}
+
+function renderOfficialWritingDocList() {
+    const docs = [...officialWritingLibrary.docs].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    const pageInfo = getOfficialWritingLibraryPageInfo(docs.length);
+    const pageDocs = docs.slice(pageInfo.startIndex, pageInfo.startIndex + pageInfo.limit);
+    const listHtml = renderOfficialWritingDocItems(docs);
+    const empty = '<div class="official-writing-empty-note">暂无公文</div>';
+    const list = document.getElementById('official-writing-doc-list');
+    if (list) PivotSafeHtml.setHtml(list, listHtml || empty);
+    const tableBody = document.getElementById('official-writing-home-doc-table-body');
+    if (tableBody) PivotSafeHtml.setHtml(tableBody, renderOfficialWritingDocTableRows(pageDocs, pageInfo.startIndex));
+    renderOfficialWritingHomeSummary(docs, pageDocs);
+    renderOfficialWritingDocPagination(pageInfo);
+    setText('official-writing-doc-count', `${officialWritingLibrary.docs.length} 篇`);
+    renderOfficialWritingDetailHeader();
+}
+
+function setOfficialWritingScreen(screen) {
+    const normalized = screen === 'editor' ? 'editor' : 'library';
+    officialWritingUiState.screen = normalized;
+    const panel = document.querySelector('.official-writing-panel');
+    if (panel) panel.dataset.officialWritingScreen = normalized;
+    if (normalized === 'library') {
+        renderOfficialWritingDocList();
+        return;
+    }
+    renderOfficialWritingDetailHeader();
+    resizeOfficialWritingDraftPage();
+}
+
+function showOfficialWritingLibrary() {
+    if (officialWritingUiState.screen === 'editor') syncOfficialWritingStateFromInputs();
+    setOfficialWritingScreen('library');
+}
+
+function setOfficialWritingCreateDialogError(message = '') {
+    const error = document.getElementById('official-writing-create-error');
+    if (!error) return;
+    error.textContent = message || '公文名称不能为空';
+    error.classList.toggle('hidden', !message);
+}
+
+function openOfficialWritingCreateDialog() {
+    const modal = document.getElementById('official-writing-create-modal');
+    if (!modal) return;
+    const activeState = getActiveOfficialWritingDoc()?.state || officialWritingState || OFFICIAL_WRITING_DEFAULT_FORM_STATE;
+    const title = document.getElementById('official-writing-create-title');
+    const type = document.getElementById('official-writing-create-type');
+    const standard = document.getElementById('official-writing-create-standard');
+    if (title) title.value = '';
+    if (type) type.value = activeState.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType;
+    if (standard) standard.value = activeState.standard || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard;
+    setOfficialWritingCreateDialogError('');
+    modal.classList.remove('hidden');
+    window.setTimeout(() => title?.focus(), 0);
+}
+
+function closeOfficialWritingCreateDialog() {
+    document.getElementById('official-writing-create-modal')?.classList.add('hidden');
+    setOfficialWritingCreateDialogError('');
+}
+
+function setOfficialWritingDraftDialogError(message = '') {
+    const error = document.getElementById('official-writing-draft-error');
+    if (!error) return;
+    error.textContent = message || '请输入起草要求';
+    error.classList.toggle('hidden', !message);
+}
+
+function openOfficialWritingDraftDialog() {
+    const modal = document.getElementById('official-writing-draft-modal');
+    const input = document.getElementById('official-writing-draft-instruction');
+    if (!modal) return;
+    syncOfficialWritingStateFromInputs();
+    if (input) {
+        const defaultPlaceholder = input.dataset.officialWritingDefaultPlaceholder || input.getAttribute('placeholder') || '';
+        const requirements = officialWritingState.requirements || '';
+        const standardHints = Array.from(document.querySelectorAll('[data-official-writing-requirement]'))
+            .map(button => String(button.dataset.officialWritingRequirement || '').trim())
+            .filter(Boolean);
+        const shouldClearOnFocus = !!requirements.trim() && standardHints.includes(requirements.trim());
+        input.dataset.officialWritingDefaultPlaceholder = defaultPlaceholder;
+        input.dataset.officialWritingInitialHint = shouldClearOnFocus ? requirements : '';
+        input.dataset.officialWritingClearOnFocus = shouldClearOnFocus ? 'true' : 'false';
+        input.value = requirements;
+        input.placeholder = defaultPlaceholder;
+    }
+    setOfficialWritingDraftDialogError('');
+    modal.classList.remove('hidden');
+    window.setTimeout(() => input?.focus(), 0);
+}
+
+function closeOfficialWritingDraftDialog() {
+    document.getElementById('official-writing-draft-modal')?.classList.add('hidden');
+    setOfficialWritingDraftDialogError('');
+}
+
+function submitOfficialWritingDraftDialog(event) {
+    if (event) event.preventDefault();
+    const input = document.getElementById('official-writing-draft-instruction');
+    const requirements = String(input?.value || '').trim();
+    if (!requirements) {
+        setOfficialWritingDraftDialogError('请输入起草要求');
+        input?.focus();
+        return;
+    }
+    const target = document.getElementById('official-writing-requirements');
+    if (target) target.value = requirements;
+    closeOfficialWritingDraftDialog();
+    closeOfficialWritingDrawer();
+    runOfficialWritingMode('draft');
+}
+
+function submitOfficialWritingCreateDialog(event) {
+    if (event) event.preventDefault();
+    const title = document.getElementById('official-writing-create-title');
+    const docType = document.getElementById('official-writing-create-type');
+    const standard = document.getElementById('official-writing-create-standard');
+    const rawTitle = String(title?.value || '').trim();
+    if (!rawTitle) {
+        setOfficialWritingCreateDialogError('请输入公文名称');
+        title?.focus();
+        return;
+    }
+    closeOfficialWritingCreateDialog();
+    createOfficialWritingDoc({
+        title: rawTitle,
+        docType: docType?.value,
+        standard: standard?.value
+    });
+}
+
+function switchOfficialWritingDoc(docId, options = {}) {
+    const openEditor = options.openEditor !== false;
+    if (!docId) return;
+    if (docId === officialWritingLibrary.activeId) {
+        if (openEditor) setOfficialWritingScreen('editor');
+        return;
+    }
     const target = officialWritingLibrary.docs.find(doc => doc.id === docId);
     if (!target) return;
     // 切换前先把当前编辑器内容写回当前活动文档。
@@ -35,17 +296,24 @@ function switchOfficialWritingDoc(docId) {
     saveOfficialWritingState();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
+    if (openEditor) setOfficialWritingScreen('editor');
 }
 
-function createOfficialWritingDoc() {
-    syncOfficialWritingStateFromInputs();
+function createOfficialWritingDoc(options = {}) {
+    if (officialWritingLibrary.docs.length) syncOfficialWritingStateFromInputs();
+    const docType = String(options.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType).trim() || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType;
+    const standard = String(options.standard || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard).trim() || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard;
+    const rawTitle = String(options.title ?? '').trim();
+    const title = compactTextPreview(rawTitle || `${docType}草稿`, 40);
     const doc = {
         id: generateOfficialWritingDocId(),
-        title: '新公文',
+        title,
+        manualTitle: Boolean(rawTitle),
         updatedAt: new Date().toISOString(),
-        state: createOfficialWritingState()
+        state: createOfficialWritingState({ docType, standard })
     };
     officialWritingLibrary.docs.unshift(doc);
+    officialWritingUiState.libraryPage = 1;
     officialWritingLibrary.activeId = doc.id;
     officialWritingState = doc.state;
     officialWritingUndoStack.length = 0;
@@ -56,6 +324,7 @@ function createOfficialWritingDoc() {
     saveOfficialWritingState();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
+    setOfficialWritingScreen('editor');
     if (typeof showToast === 'function') showToast('已新建公文');
     getOfficialWritingSurface('draft')?.focus();
 }
@@ -75,6 +344,7 @@ async function renameOfficialWritingDoc(docId) {
     const trimmed = next.trim();
     if (!trimmed) return;
     doc.title = compactTextPreview(trimmed, 40);
+    doc.manualTitle = true;
     doc.updatedAt = new Date().toISOString();
     saveOfficialWritingState();
     renderOfficialWritingDocList();
@@ -90,18 +360,19 @@ async function deleteOfficialWritingDoc(docId) {
             ?? Promise.resolve(window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)));
         if (!confirmed) return;
     }
+    const wasActive = officialWritingLibrary.activeId === docId;
     officialWritingLibrary.docs.splice(index, 1);
     if (!officialWritingLibrary.docs.length) {
-        // 删空后自动新建一篇空白公文，保证始终有活动文档。
         const fresh = {
             id: generateOfficialWritingDocId(),
             title: '新公文',
+            manualTitle: false,
             updatedAt: new Date().toISOString(),
             state: createOfficialWritingState()
         };
         officialWritingLibrary.docs.push(fresh);
         officialWritingLibrary.activeId = fresh.id;
-    } else if (officialWritingLibrary.activeId === docId) {
+    } else if (wasActive) {
         officialWritingLibrary.activeId = officialWritingLibrary.docs[0].id;
     }
     officialWritingState = getActiveOfficialWritingDoc().state;
@@ -112,9 +383,9 @@ async function deleteOfficialWritingDoc(docId) {
     saveOfficialWritingState();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
+    if (wasActive) setOfficialWritingScreen('library');
     if (typeof showToast === 'function') showToast('已删除公文');
 }
-
 function hydrateOfficialWritingForm() {
     const type = document.getElementById('official-writing-type');
     const standard = document.getElementById('official-writing-standard');
@@ -456,7 +727,7 @@ function getOfficialWritingWorkspaceSummary() {
             statusTitle = pendingSuggestions > 0 ? '可审阅' : '可导出';
             statusDetail = pendingSuggestions > 0
                 ? `正文已成稿，还有 ${pendingSuggestions} 条建议待处理。`
-                : '正文已成稿，可直接导出或带入聊天复核。';
+                : '正文已成稿，可继续审校或直接导出。';
         } else if (risks.length <= 2) {
             statusTitle = '待确认';
             statusDetail = `正文还有 ${risks.length} 项风险需要处理后再正式流转。`;
@@ -697,54 +968,13 @@ function setOfficialWritingTextareaValue(target, value) {
     }
 }
 
-// 撤销/重做：仅快照正文与原文文本，覆盖破坏性操作（建议替换/插入、模板套用、载入版本、同步原文）。
-function captureOfficialWritingSnapshot() {
-    return {
-        source: getOfficialWritingText('official-writing-source'),
-        draft: getOfficialWritingText('official-writing-draft')
-    };
-}
-
+// 自定义操作历史暂不启用；保留调用点，避免 AI/模板/建议流程产生额外耦合。
 function pushOfficialWritingUndoSnapshot() {
-    const snapshot = captureOfficialWritingSnapshot();
-    const last = officialWritingUndoStack[officialWritingUndoStack.length - 1];
-    if (last && last.source === snapshot.source && last.draft === snapshot.draft) return;
-    officialWritingUndoStack.push(snapshot);
-    if (officialWritingUndoStack.length > OFFICIAL_WRITING_HISTORY_LIMIT) officialWritingUndoStack.shift();
-    officialWritingRedoStack.length = 0;
-    updateOfficialWritingUndoRedoButtons();
-}
-
-function applyOfficialWritingSnapshot(snapshot) {
-    setOfficialWritingTextareaValue('source', snapshot.source || '');
-    setOfficialWritingTextareaValue('draft', snapshot.draft || '');
-    syncOfficialWritingStateFromInputs();
-    renderOfficialWritingWorkspace();
-}
-
-function undoOfficialWriting() {
-    if (!officialWritingUndoStack.length) return;
-    officialWritingRedoStack.push(captureOfficialWritingSnapshot());
-    const snapshot = officialWritingUndoStack.pop();
-    applyOfficialWritingSnapshot(snapshot);
-    updateOfficialWritingUndoRedoButtons();
-    if (typeof showToast === 'function') showToast('已撤销');
-}
-
-function redoOfficialWriting() {
-    if (!officialWritingRedoStack.length) return;
-    officialWritingUndoStack.push(captureOfficialWritingSnapshot());
-    const snapshot = officialWritingRedoStack.pop();
-    applyOfficialWritingSnapshot(snapshot);
-    updateOfficialWritingUndoRedoButtons();
-    if (typeof showToast === 'function') showToast('已重做');
+    // 暂不记录自定义操作历史。
 }
 
 function updateOfficialWritingUndoRedoButtons() {
-    const undoBtn = document.getElementById('official-writing-undo-btn');
-    const redoBtn = document.getElementById('official-writing-redo-btn');
-    if (undoBtn) undoBtn.disabled = officialWritingUndoStack.length === 0;
-    if (redoBtn) redoBtn.disabled = officialWritingRedoStack.length === 0;
+    // 撤销/重做按钮已暂时下线。
 }
 
 function replaceTextareaRange(textarea, start, end, replacement, { skipSnapshot } = {}) {
@@ -1029,6 +1259,16 @@ function renderOfficialWritingSuggestions() {
     const pending = officialWritingState.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected');
     setText('official-writing-suggestion-count', `${pending.length} 条待处理`);
     if (!list) return;
+    if (officialWritingAiBusy && !officialWritingState.suggestions.length) {
+        const busyLabel = typeof officialWritingAiBusyLabel === 'string' && officialWritingAiBusyLabel ? officialWritingAiBusyLabel : 'AI 处理中…';
+        PivotSafeHtml.setHtml(list, `
+            <div class="official-writing-empty-note official-writing-ai-empty-state">
+                <span class="official-writing-ai-indicator">${escapeAppsHtml(busyLabel)}</span>
+                <em>正在分析正文并生成可应用修改意见</em>
+            </div>
+        `);
+        return;
+    }
     PivotSafeHtml.setHtml(list, officialWritingState.suggestions.map(suggestion => {
         // 流式生成中：展示“AI 生成中…”指示，隐藏操作按钮（避免对未完成文本执行接受/替换）。
         const streaming = !!suggestion.streaming;
@@ -1038,17 +1278,14 @@ function renderOfficialWritingSuggestions() {
         const statusClass = streaming ? 'streaming' : (suggestion.status || 'pending');
         const actions = streaming ? '' : `
             <div class="official-writing-suggestion-actions">
-                <button type="button" class="btn-secondary" data-suggestion-action="replace">替换选区</button>
+                <button type="button" class="btn-primary" data-suggestion-action="replace">替换正文</button>
                 <button type="button" class="btn-secondary" data-suggestion-action="insert">插入下方</button>
-                <button type="button" class="btn-secondary" data-suggestion-action="comment">作为批注</button>
-                <button type="button" class="btn-secondary" data-suggestion-action="version">生成版本</button>
-                <button type="button" class="btn-primary" data-suggestion-action="accept">接受</button>
-                <button type="button" class="btn-secondary" data-suggestion-action="reject">拒绝</button>
+                <button type="button" class="btn-secondary" data-suggestion-action="reject">忽略</button>
             </div>`;
         return `
         <article class="official-writing-suggestion-item is-${escapeAppsHtml(suggestion.status || 'pending')}${streaming ? ' is-streaming' : ''}" data-suggestion-id="${escapeAppsHtml(suggestion.id)}">
             <div>
-                <strong>${escapeAppsHtml(suggestion.title || '修改建议')}</strong>
+                <strong>${escapeAppsHtml(suggestion.title || '审校建议')}</strong>
                 <span>${escapeAppsHtml(suggestion.type || '建议')}</span>
             </div>
             <div class="official-writing-suggestion-meta">
@@ -1059,7 +1296,7 @@ function renderOfficialWritingSuggestions() {
             <p class="official-writing-suggestion-text">${escapeAppsHtml(suggestion.replacement || suggestion.detail || '')}</p>
             ${actions}
         </article>`;
-    }).join('') || '<div class="official-writing-empty-note">暂无修改建议，可从顶部全文 AI 或选区工具生成。</div>');
+    }).join('') || '<div class="official-writing-empty-note">暂无 AI 审校建议，可先全文起草、选中文字处理，或点击“开始审校”生成修改意见。</div>');
 }
 
 function renderOfficialWritingReferences() {
@@ -1076,22 +1313,70 @@ function renderOfficialWritingReferences() {
     `).join('') || '<div class="official-writing-empty-note">暂未识别到正文与原文材料的直接引用</div>');
 }
 
-function renderOfficialWritingMaterials() {
-    const preview = document.getElementById('official-writing-material-preview');
-    if (preview) preview.textContent = compactTextPreview(officialWritingState.source, 120) || '暂无材料';
-    const outline = document.getElementById('official-writing-outline-list');
-    if (outline) {
-        const paragraphs = splitOfficialWritingParagraphs(officialWritingState.draft);
-        PivotSafeHtml.setHtml(outline, paragraphs.map((item, index) => `
-            <button type="button" class="official-writing-outline-item" data-official-writing-jump="${item.start}" data-official-writing-target="draft" title="${escapeAppsHtml(item.text)}" data-full-text="${escapeAppsHtml(item.text)}">
-                <span>${index + 1}</span>
-                <strong>${escapeAppsHtml(compactTextPreview(item.text, 52))}</strong>
-            </button>
-        `).join('') || '<div class="official-writing-empty-note">正文生成后自动形成大纲</div>');
+function setOfficialWritingMaterialEditorOpenState(isOpen) {
+    document.getElementById('official-writing-left-rail')?.classList.toggle('is-material-editor-open', Boolean(isOpen));
+}
+
+function syncOfficialWritingMaterialEditorStats(value = '') {
+    setText('official-writing-material-editor-count', `${getTextCount(value)} 字`);
+}
+
+function syncOfficialWritingMaterialEditor(sourceText = officialWritingState.source, { force = false } = {}) {
+    const editor = document.getElementById('official-writing-material-editor');
+    if (!editor) return;
+    const nextValue = String(sourceText || '');
+    if (force || document.activeElement !== editor) {
+        editor.value = nextValue;
     }
+    syncOfficialWritingMaterialEditorStats(editor.value);
+}
+
+function openOfficialWritingMaterialEditor() {
+    setOfficialWritingMaterialTab('materials');
+    const card = document.getElementById('official-writing-material-editor-card');
+    const currentSource = getOfficialWritingText('official-writing-source') || officialWritingState.source || '';
+    if (card) card.classList.remove('hidden');
+    setOfficialWritingMaterialEditorOpenState(true);
+    syncOfficialWritingMaterialEditor(currentSource, { force: true });
+    window.setTimeout(() => document.getElementById('official-writing-material-editor')?.focus(), 0);
+}
+
+function closeOfficialWritingMaterialEditor() {
+    document.getElementById('official-writing-material-editor-card')?.classList.add('hidden');
+    setOfficialWritingMaterialEditorOpenState(false);
+}
+
+function clearOfficialWritingMaterialEditor() {
+    const editor = document.getElementById('official-writing-material-editor');
+    if (!editor) return;
+    editor.value = '';
+    syncOfficialWritingMaterialEditorStats('');
+    editor.focus();
+}
+
+function saveOfficialWritingMaterialEditor() {
+    const editor = document.getElementById('official-writing-material-editor');
+    if (!editor) return;
+    const next = String(editor.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    pushOfficialWritingUndoSnapshot();
+    setOfficialWritingTextareaValue('source', next);
+    officialWritingState.source = next;
+    syncOfficialWritingStateFromInputs();
+    renderOfficialWritingWorkspace();
+    syncOfficialWritingMaterialEditor(next, { force: true });
+    showToast(next ? '本篇材料已保存' : '本篇材料已清空');
+}
+
+function renderOfficialWritingMaterials() {
+    const sourceText = String(officialWritingState.source || '');
+    const segments = getOfficialWritingMaterialSegments();
+    setText('official-writing-material-char-count', String(getTextCount(sourceText)));
+    setText('official-writing-material-segment-count', String(segments.length));
+    const preview = document.getElementById('official-writing-material-preview');
+    if (preview) preview.textContent = compactTextPreview(sourceText, 120) || '暂无材料';
+    syncOfficialWritingMaterialEditor(sourceText);
     const materialCards = document.getElementById('official-writing-material-card-list');
     if (materialCards) {
-        const segments = getOfficialWritingMaterialSegments();
         PivotSafeHtml.setHtml(materialCards, segments.map(segment => `
             <article class="official-writing-material-card" data-material-id="${escapeAppsHtml(segment.id)}">
                 <p>${escapeAppsHtml(compactTextPreview(segment.text, 82))}</p>
@@ -1101,18 +1386,7 @@ function renderOfficialWritingMaterials() {
                     <button type="button" data-material-action="view">查看来源</button>
                 </div>
             </article>
-        `).join('') || '<div class="official-writing-empty-note">粘贴原文材料后可建立引用链</div>');
-    }
-    const history = document.getElementById('official-writing-history-list');
-    if (history) {
-        const saved = officialWritingState.versions.map(version => ({ ...version, kind: version.stage || '保存版本' }));
-        const auto = (officialWritingState.autoSaves || []).map(version => ({ ...version, kind: '自动草稿' }));
-        PivotSafeHtml.setHtml(history, [...saved, ...auto].map(version => `
-            <button type="button" class="official-writing-history-item" data-version-load="${escapeAppsHtml(version.id)}">
-                <strong>${escapeAppsHtml(version.name || '未命名版本')}</strong>
-                <span>${escapeAppsHtml(version.kind)} · ${escapeAppsHtml(formatVersionTime(version.createdAt))}</span>
-            </button>
-        `).join('') || '<div class="official-writing-empty-note">暂无历史稿件</div>');
+        `).join('') || '<div class="official-writing-empty-note">本篇材料为空。可粘贴材料或上传文件，AI 全文起草会优先参考这里的内容</div>');
     }
 }
 

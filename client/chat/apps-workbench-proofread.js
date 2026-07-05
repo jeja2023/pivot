@@ -145,10 +145,41 @@ function getOfficialWritingProofreadIssues() {
 
 function renderOfficialWritingProofread() {
     const list = document.getElementById('official-writing-proofread-list');
-    const issues = getOfficialWritingProofreadIssues();
+    const status = document.getElementById('official-writing-proofread-status');
+    const draft = String(officialWritingState.draft || '');
+    const draftText = draft.trim();
+    const hasChecked = Boolean(officialWritingUiState.proofreadCheckedAt)
+        && officialWritingUiState.proofreadDraftSnapshot === draft;
+    const issues = hasChecked ? getOfficialWritingProofreadIssues() : [];
     setText('official-writing-proofread-count', `${issues.length} 项`);
-    setText('official-writing-proofread-badge', String(issues.length));
-    if (!list) return;
+    if (status) {
+        let statusText = '点击开始审校后自动检查正文';
+        let statusClass = '';
+        if (!draftText) {
+            statusText = '请先输入正文后再审校';
+            statusClass = 'is-empty';
+        } else if (!hasChecked) {
+            statusText = '正文有更新，点击开始审校';
+            statusClass = 'is-pending';
+        } else if (issues.length) {
+            statusText = `基础校对完成，发现 ${issues.length} 项需核对`;
+            statusClass = 'is-warning';
+        } else {
+            statusText = '基础校对完成，未发现明显问题';
+            statusClass = 'is-clean';
+        }
+        status.textContent = statusText;
+        status.className = ['official-writing-proofread-status', statusClass].filter(Boolean).join(' ');
+    }
+    if (!list) return issues;
+    if (!draftText) {
+        PivotSafeHtml.setHtml(list, '<div class="official-writing-empty-note">正文为空，请先起草或粘贴正文后再审校。</div>');
+        return issues;
+    }
+    if (!hasChecked) {
+        PivotSafeHtml.setHtml(list, '<div class="official-writing-empty-note">点击“开始审校”后，将先检查易错词、敏感表述、标点和标题文种一致性。</div>');
+        return issues;
+    }
     PivotSafeHtml.setHtml(list, issues.map(issue => `
         <article class="official-writing-check-item" ${issue.end > issue.start ? `data-official-writing-proof-start="${issue.start}" data-official-writing-proof-end="${issue.end}"` : ''}>
             <strong>${escapeAppsHtml(issue.kind)}<span>${escapeAppsHtml(issue.level)}</span></strong>
@@ -156,8 +187,46 @@ function renderOfficialWritingProofread() {
             <em>${escapeAppsHtml(issue.suggestion)}</em>
         </article>
     `).join('') || '<div class="official-writing-empty-note">未发现敏感词、易错字、标点或文种一致性问题</div>');
+    return issues;
 }
 
+function markOfficialWritingProofreadChecked() {
+    syncOfficialWritingStateFromInputs();
+    officialWritingUiState.proofreadCheckedAt = new Date().toISOString();
+    officialWritingUiState.proofreadDraftSnapshot = String(officialWritingState.draft || '');
+    return renderOfficialWritingProofread();
+}
+
+function runOfficialWritingProofread() {
+    const issues = markOfficialWritingProofreadChecked();
+    const draftText = String(officialWritingState.draft || '').trim();
+    if (!draftText) {
+        showToast('请先输入正文后再审校', 'warning');
+    } else if (issues.length) {
+        showToast(`基础校对完成，发现 ${issues.length} 项需核对`, 'warning');
+    } else {
+        showToast('基础校对完成，未发现明显问题');
+    }
+}
+
+async function runOfficialWritingReview() {
+    const button = document.getElementById('official-writing-generate-suggestions-btn');
+    const issues = markOfficialWritingProofreadChecked();
+    const draftText = String(officialWritingState.draft || '').trim();
+    if (!draftText) {
+        showToast('请先输入正文后再审校', 'warning');
+        return;
+    }
+    if (button) button.textContent = '审校中…';
+    if (issues.length) {
+        showToast(`基础校对发现 ${issues.length} 项问题，AI 审校继续进行中…`, 'warning');
+    }
+    try {
+        await generateOfficialWritingSuggestion('review');
+    } finally {
+        if (button) button.textContent = '重新审校';
+    }
+}
 function applyOfficialWritingViewMode(mode = 'document') {
     const nextMode = ['document', 'compare'].includes(mode) ? mode : 'document';
     officialWritingUiState.viewMode = nextMode;
@@ -193,6 +262,7 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     drawer.classList.remove('hidden');
     shell?.classList.remove('is-drawer-hidden');
     drawer.setAttribute('aria-hidden', 'false');
+    drawer.dataset.officialWritingDrawerView = tab;
     Object.keys(OFFICIAL_WRITING_DRAWER_META).forEach(key => {
         document.getElementById(`official-writing-${key}-drawer`)?.classList.toggle('hidden', key !== tab);
     });
@@ -213,6 +283,7 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     if (tab === 'elements') hydrateOfficialWritingMetaForm();
     resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
+    if (typeof syncOfficialWritingAiIndicators === 'function') syncOfficialWritingAiIndicators();
 }
 
 function closeOfficialWritingDrawer() {
@@ -222,6 +293,7 @@ function closeOfficialWritingDrawer() {
     drawer.classList.add('hidden');
     shell?.classList.add('is-drawer-hidden');
     drawer.setAttribute('aria-hidden', 'true');
+    delete drawer.dataset.officialWritingDrawerView;
     officialWritingUiState.rightCollapsed = true;
     document.querySelectorAll('[data-official-writing-drawer-tab]').forEach(button => {
         button.classList.remove('active');
@@ -229,6 +301,7 @@ function closeOfficialWritingDrawer() {
     });
     resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
+    if (typeof syncOfficialWritingAiIndicators === 'function') syncOfficialWritingAiIndicators();
 }
 
 function toggleOfficialWritingDrawer() {
@@ -246,29 +319,44 @@ function updateOfficialWritingDrawerToggleLabel() {
     const button = document.getElementById('official-writing-toggle-right-btn');
     if (!button) return;
     const visible = !officialWritingUiState.rightCollapsed;
-    button.textContent = '审改栏';
+    button.textContent = '建议栏';
     button.classList.toggle('active', visible);
     button.setAttribute('aria-pressed', visible ? 'true' : 'false');
-    button.title = visible ? '隐藏审改栏' : '显示审改栏';
+    button.title = visible ? '隐藏建议栏' : '显示建议栏';
 }
 
 function applyOfficialWritingLeftRailState() {
     const workbench = document.querySelector('.official-writing-workbench');
     const button = document.getElementById('official-writing-toggle-left-btn');
+    const rail = document.getElementById('official-writing-left-rail');
     const collapsed = Boolean(officialWritingUiState.leftCollapsed);
     workbench?.classList.toggle('is-left-rail-hidden', collapsed);
+    rail?.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
     if (button) {
-        button.textContent = '资料栏';
+        button.textContent = '写作资源';
         button.classList.toggle('active', !collapsed);
         button.setAttribute('aria-pressed', collapsed ? 'false' : 'true');
-        button.title = collapsed ? '显示资料栏' : '隐藏资料栏';
+        button.title = collapsed ? '打开写作资源' : '关闭写作资源';
     }
     resizeOfficialWritingDraftPage();
 }
 
-function toggleOfficialWritingLeftRail() {
-    officialWritingUiState.leftCollapsed = !officialWritingUiState.leftCollapsed;
+function openOfficialWritingMaterialModal() {
+    officialWritingUiState.leftCollapsed = false;
+    setOfficialWritingMaterialTab(officialWritingUiState.materialTab || 'materials');
+    renderOfficialWritingMaterials();
     applyOfficialWritingLeftRailState();
+}
+
+function closeOfficialWritingMaterialModal() {
+    if (typeof closeOfficialWritingMaterialEditor === 'function') closeOfficialWritingMaterialEditor();
+    officialWritingUiState.leftCollapsed = true;
+    applyOfficialWritingLeftRailState();
+}
+
+function toggleOfficialWritingLeftRail() {
+    if (officialWritingUiState.leftCollapsed) openOfficialWritingMaterialModal();
+    else closeOfficialWritingMaterialModal();
 }
 
 function closeOfficialWritingCommandMenu() {
@@ -282,18 +370,23 @@ function setOfficialWritingMaterialTab(tab) {
     document.querySelectorAll('[data-official-writing-material-tab]').forEach(button => {
         button.classList.toggle('active', button.dataset.officialWritingMaterialTab === nextTab);
     });
-    ['outline', 'materials', 'history', 'standards', 'templates'].forEach(key => {
+    ['materials', 'history', 'templates'].forEach(key => {
         document.getElementById(`official-writing-${key}-panel`)?.classList.toggle('hidden', key !== nextTab);
     });
     const select = document.getElementById('official-writing-material-source');
     if (select) select.value = OFFICIAL_WRITING_MATERIAL_TAB_TO_SOURCE[nextTab];
-    // 进入历史/规范检索 tab 时按需加载知识库专题库列表。
-    if (nextTab === 'history' || nextTab === 'standards') {
+    if (nextTab !== 'materials' && typeof closeOfficialWritingMaterialEditor === 'function') closeOfficialWritingMaterialEditor();
+    // 进入知识库 tab 时按需加载专题库列表。
+    if (nextTab === 'history') {
         ensureOfficialWritingRagCollections();
     }
 }
 
 function setOfficialWritingMaterialSource(source) {
+    if (source === '规范条文') {
+        setOfficialWritingMaterialTab('history');
+        return;
+    }
     const entry = Object.entries(OFFICIAL_WRITING_MATERIAL_TAB_TO_SOURCE).find(([, value]) => value === source);
     setOfficialWritingMaterialTab(entry?.[0] || 'materials');
 }

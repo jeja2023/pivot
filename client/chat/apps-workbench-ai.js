@@ -1,20 +1,44 @@
-
+function formatOfficialWritingAiErrorMessage(data, status) {
+    const raw = data?.error?.message || data?.error || '';
+    const message = String(raw || '').trim();
+    if (data?.error?.code === 'api_key_decrypt_failed' || message.includes('密钥解密失败')) {
+        return '当前模型密钥无法解密，请在模型管理中重新保存该模型的 API Key，或恢复原 DATA_ENCRYPTION_KEY/JWT_SECRET 后重启服务。';
+    }
+    return message || `AI 请求失败（${status}）`;
+}
 function getOfficialWritingSelectedModelId() {
     return document.getElementById('model-selector')?.value || '';
+}
+function isOfficialWritingDrawerOpen() {
+    const drawer = document.getElementById('official-writing-drawer');
+    return !!drawer && !drawer.classList.contains('hidden') && drawer.getAttribute('aria-hidden') !== 'true';
+}
+
+function syncOfficialWritingAiIndicators() {
+    const message = officialWritingAiBusy ? (officialWritingAiBusyLabel || 'AI 处理中…') : '';
+    const drawerOpen = isOfficialWritingDrawerOpen();
+    const toolbarIndicator = document.getElementById('official-writing-ai-indicator');
+    if (toolbarIndicator) {
+        toolbarIndicator.textContent = drawerOpen ? '' : message;
+        toolbarIndicator.classList.toggle('hidden', !message || drawerOpen);
+    }
+    const drawerIndicator = document.getElementById('official-writing-drawer-ai-indicator');
+    if (drawerIndicator) {
+        drawerIndicator.textContent = drawerOpen ? message : '';
+        drawerIndicator.classList.toggle('hidden', !message || !drawerOpen);
+    }
 }
 
 function setOfficialWritingAiBusy(busy, label) {
     officialWritingAiBusy = !!busy;
-    const buttons = document.querySelectorAll('[data-official-writing-run-mode], #official-writing-generate-suggestions-btn, [data-official-writing-selection-action]');
+    officialWritingAiBusyLabel = busy ? (label || 'AI 处理中…') : '';
+    const buttons = document.querySelectorAll('[data-official-writing-run-mode], #official-writing-open-draft-modal-btn, #official-writing-draft-confirm-btn, #official-writing-review-suggestions-btn, #official-writing-generate-suggestions-btn, [data-official-writing-selection-action]');
     buttons.forEach(button => {
         button.disabled = !!busy;
         button.setAttribute('aria-busy', busy ? 'true' : 'false');
     });
-    const indicator = document.getElementById('official-writing-ai-indicator');
-    if (indicator) {
-        indicator.textContent = busy ? (label || 'AI 处理中…') : '';
-        indicator.classList.toggle('hidden', !busy);
-    }
+    syncOfficialWritingAiIndicators();
+    if (typeof renderOfficialWritingSuggestions === 'function') renderOfficialWritingSuggestions();
 }
 
 // 统一调用后端公文写作 AI 接口：提示词组装、模型权限/配额/上下文预算与审计均在后端完成，
@@ -42,7 +66,7 @@ async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}
         });
         if (!res.ok || (useStream && !res.body)) {
             const data = await res.clone().json().catch(() => ({}));
-            showToast(data?.error?.message || `AI 请求失败（${res.status}）`, 'error');
+            showToast(formatOfficialWritingAiErrorMessage(data, res.status), 'error');
             return null;
         }
         if (!useStream) {
@@ -190,35 +214,35 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
             return;
         }
 
-        // 文本类模式（起草/润色/全文改写）：先插入占位卡片，再流式增量填充。
-        // 索引按当前正文长度捕获；流式期间不改动文本框，故索引保持有效。
-        let cardMeta;
-        let successToast;
         if (mode === 'draft') {
-            const insertionPoint = selection?.text ? selection.start : officialWritingState.draft.length;
-            cardMeta = {
-                type: '起草',
-                title: `${docType} AI 初稿`,
-                target: 'draft',
-                start: insertionPoint,
-                end: selection?.text ? selection.end : insertionPoint,
-                original: selection?.text || '',
-                detail: 'AI 基于材料和文种生成的规范初稿。'
-            };
-            successToast = 'AI 初稿已生成，可在审改栏接受或调整';
-        } else {
-            cardMeta = {
-                type: modeLabel,
-                title: selection?.text ? `选区${modeLabel}建议` : `全文${modeLabel}建议`,
-                target: selection?.target || 'draft',
-                start: selection?.text ? selection.start : 0,
-                end: selection?.text ? selection.end : officialWritingState.draft.length,
-                original: baseText,
-                detail: 'AI 生成，可替换、插入、转为批注或保存为新版本。'
-            };
-            successToast = `AI ${modeLabel}建议已生成`;
+            const result = await requestOfficialWritingAi(params, { stream: true });
+            const text = result ? String(result.content || '').trim() : '';
+            if (!text) {
+                if (result != null) showToast(officialWritingNoContentMessage(result), 'warning');
+                return;
+            }
+            pushOfficialWritingUndoSnapshot();
+            setOfficialWritingTextareaValue('draft', text);
+            syncOfficialWritingStateFromInputs();
+            renderOfficialWritingWorkspace();
+            showToast('AI 初稿已写入正文');
+            getOfficialWritingSurface('draft')?.focus();
+            return;
         }
 
+        // 文本类模式（润色/扩写/压缩/改写）：先插入占位卡片，再流式增量填充。
+        // 索引按当前正文长度捕获；流式期间不改动文本框，故索引保持有效。
+        const cardMeta = {
+            type: modeLabel,
+            title: selection?.text ? `选区${modeLabel}建议` : `全文${modeLabel}建议`,
+            target: selection?.target || 'draft',
+            start: selection?.text ? selection.start : 0,
+            end: selection?.text ? selection.end : officialWritingState.draft.length,
+            original: baseText,
+            detail: 'AI 生成，可替换、插入或忽略。'
+        };
+
+        const successToast = `AI ${modeLabel}建议已生成`;
         const placeholder = addOfficialWritingSuggestion({ ...cardMeta, replacement: '', streaming: true });
         const result = await requestOfficialWritingAi(params, {
             stream: true,

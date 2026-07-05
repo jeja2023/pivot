@@ -68,6 +68,7 @@ function buildOfficialWritingMessages(params = {}) {
         userLines.push('只输出 JSON，不要输出其它内容。');
         if (requirements) userLines.push(`额外关注：${requirements}`);
         userLines.push('', '正文稿：', draft || '【暂无正文稿】');
+        if (source) userLines.push('', '本篇材料/知识库引用（用于核对事实、数据、依据与正文是否一致）：', source);
     } else if (mode === 'selection') {
         const action = String(params.action || '').trim();
         let instruction;
@@ -98,6 +99,7 @@ function buildOfficialWritingMessages(params = {}) {
         userLines.push(`请将以下「${docType}」文本${verb}，保持事实信息不变，使其更规范、准确、克制。`);
         userLines.push('只输出处理后的文本，不要输出任何说明。');
         if (requirements) userLines.push(`补充要求：${requirements}`);
+        if (source) userLines.push('', '参考材料（用于保持事实一致，不要直接照搬无关内容）：', source);
         userLines.push('', '待处理文本：', baseText);
     }
 

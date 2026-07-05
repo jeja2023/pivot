@@ -235,7 +235,7 @@ function resetOfficialWritingForm() {
     setOfficialWritingMaterialTab('materials');
     hydrateOfficialWritingMetaForm();
     applyOfficialWritingViewMode('document');
-    openOfficialWritingDrawer('suggestions');
+    closeOfficialWritingDrawer();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
 }
@@ -245,11 +245,21 @@ function runOfficialWritingMode(mode) {
     officialWritingState.mode = nextMode;
     syncOfficialWritingStateFromInputs();
     if (nextMode === 'review') {
-        // 规范检查（本地、规范库驱动）始终刷新展示，同时调用 AI 生成审校建议。
+        // 审校统一从“基础校对 + AI 审校建议”流程进入，避免重复入口。
         renderOfficialWritingWorkspace();
+        openOfficialWritingDrawer('suggestions');
         const risks = getOfficialWritingComplianceRisks();
         if (risks.length) showToast(`本地规范检查发现 ${risks.length} 项风险，AI 审校进行中…`);
+        void runOfficialWritingReview();
+        return;
     }
     generateOfficialWritingSuggestion(nextMode);
+}
+
+function handleOfficialWritingReviewSuggestions() {
+    syncOfficialWritingStateFromInputs();
+    officialWritingState.mode = 'review';
+    renderOfficialWritingWorkspace();
+    openOfficialWritingDrawer('suggestions');
 }
 

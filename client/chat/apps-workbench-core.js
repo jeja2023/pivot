@@ -36,19 +36,16 @@ const OFFICIAL_WRITING_MODES = {
     review: '格式与表达审校'
 };
 const OFFICIAL_WRITING_DRAWER_META = {
-    suggestions: ['修改建议', '生成可接受、拒绝、替换、插入或转批注的审改建议。'],
+    suggestions: ['审校建议', '汇总基础校对和 AI 审校产生的可应用建议。'],
     elements: ['发文要素', '填写版头（密级、紧急程度、发文字号、签发人）和版记（抄送、印发机关、印发日期），导出时自动排版。'],
     comments: ['批注', '对原文或正文稿添加局部意见。'],
     versions: ['版本对比', '保存正文稿并查看原文、正文稿或历史版本差异。'],
     compliance: ['规范检查', '检查标题、日期、待补充项和事实依据风险。'],
-    proofread: ['校对检查', '检查敏感词、易错字、标点规范和标题与文种一致性。'],
     references: ['材料引用', '查看正文稿与原文材料之间的引用关系。']
 };
 const OFFICIAL_WRITING_MATERIAL_TAB_TO_SOURCE = {
-    outline: '粘贴材料',
     materials: '粘贴材料',
-    history: '历史公文',
-    standards: '规范条文',
+    history: '知识库',
     templates: '常用模板'
 };
 const OFFICIAL_WRITING_TEMPLATES = {
@@ -265,14 +262,20 @@ function deriveOfficialWritingDocTitle(state) {
 
 let officialWritingState = createOfficialWritingState();
 let officialWritingUiState = {
+    screen: 'library',
+    libraryPage: 1,
+    libraryPageSize: 10,
     viewMode: 'document',
     drawerTab: 'suggestions',
-    materialTab: 'outline',
-    leftCollapsed: false,
-    rightCollapsed: false,
-    lastSelection: null
+    materialTab: 'materials',
+    leftCollapsed: true,
+    rightCollapsed: true,
+    lastSelection: null,
+    proofreadCheckedAt: '',
+    proofreadDraftSnapshot: ''
 };
 let officialWritingAiBusy = false;
+let officialWritingAiBusyLabel = '';
 let officialWritingProgrammaticTextUpdate = false;
 const OFFICIAL_WRITING_HISTORY_LIMIT = 50;
 // 批注 / 修改建议为只增不减的 unshift 列表，配额裁剪不会触及它们，
@@ -423,8 +426,9 @@ function showOfficialWritingApp() {
     document.getElementById('data-analysis-view')?.classList.add('hidden');
     document.getElementById('regulations-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
-    setAppsTitle('公文写作', '正文模式用于正式写作，对照模式用于原文和正文稿并排审改；批注、版本、规范检查和材料引用集中在右侧审改栏。');
+    setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
     loadOfficialWritingState();
+    if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
     hydrateOfficialWritingForm();
     setOfficialWritingMaterialSource(officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource);
     applyOfficialWritingViewMode(officialWritingUiState.viewMode);
@@ -437,8 +441,8 @@ function showOfficialWritingApp() {
     updateOfficialWritingUndoRedoButtons();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
+    if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
 }
-
 async function showDataAnalysisAppFromRegistry() {
     if (typeof window.showDataAnalysisApp === 'function') {
         await window.showDataAnalysisApp();
@@ -487,6 +491,7 @@ function loadOfficialWritingLibrary() {
                 docs: docs.map(doc => ({
                     id: String(doc?.id || generateOfficialWritingDocId()),
                     title: String(doc?.title || '未命名公文'),
+                    manualTitle: Boolean(doc?.manualTitle),
                     updatedAt: String(doc?.updatedAt || new Date().toISOString()),
                     state: sanitizeOfficialWritingState(doc?.state)
                 }))
@@ -499,6 +504,7 @@ function loadOfficialWritingLibrary() {
                 officialWritingLibrary.docs.push({
                     id: generateOfficialWritingDocId(),
                     title: deriveOfficialWritingDocTitle(migrated),
+                    manualTitle: false,
                     updatedAt: new Date().toISOString(),
                     state: migrated
                 });
@@ -511,6 +517,7 @@ function loadOfficialWritingLibrary() {
         officialWritingLibrary.docs.push({
             id: generateOfficialWritingDocId(),
             title: '新公文',
+            manualTitle: false,
             updatedAt: new Date().toISOString(),
             state: createOfficialWritingState()
         });
@@ -555,7 +562,7 @@ function syncActiveOfficialWritingDoc() {
     const activeDoc = getActiveOfficialWritingDoc();
     if (!activeDoc) return;
     activeDoc.state = officialWritingState;
-    activeDoc.title = deriveOfficialWritingDocTitle(officialWritingState);
+    if (!activeDoc.manualTitle) activeDoc.title = deriveOfficialWritingDocTitle(officialWritingState);
     activeDoc.updatedAt = new Date().toISOString();
 }
 

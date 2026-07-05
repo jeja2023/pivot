@@ -1,7 +1,7 @@
-// ===== 知识库 / 历史公文检索接入 =====
+// ===== 知识库检索接入 =====
 
-// 缓存两个检索面板（历史 / 规范）的最近一次结果，供插入和引用操作复用。
-const officialWritingRagResults = { history: [], standards: [] };
+// 缓存知识库最近一次检索结果，供插入和引用操作复用。
+const officialWritingRagResults = { history: [] };
 let officialWritingRagCollectionsLoaded = false;
 
 async function ensureOfficialWritingRagCollections() {
@@ -17,7 +17,7 @@ async function ensureOfficialWritingRagCollections() {
     if (!Array.isArray(collections)) return;
     // 仅在 fetch 成功后标记已加载，失败后仍可重试。
     officialWritingRagCollectionsLoaded = true;
-    ['official-writing-kb-history-collection', 'official-writing-kb-standards-collection'].forEach(id => {
+    ['official-writing-kb-history-collection'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
         const current = select.value;
@@ -41,7 +41,7 @@ function renderOfficialWritingRagResults(scopeKey) {
             <p>${escapeAppsHtml(compactTextPreview(match.text, 140))}</p>
             <div class="official-writing-kb-result-actions">
                 <button type="button" data-official-writing-rag-insert="${index}" data-official-writing-rag-scope="${escapeAppsHtml(scopeKey)}">引用到正文</button>
-                <button type="button" data-official-writing-rag-ref="${index}" data-official-writing-rag-scope="${escapeAppsHtml(scopeKey)}">作为依据</button>
+                <button type="button" data-official-writing-rag-ref="${index}" data-official-writing-rag-scope="${escapeAppsHtml(scopeKey)}">加入AI依据</button>
             </div>
         </article>
     `).join('') || '<div class="official-writing-empty-note">输入关键词后点击“检索”，从知识库查找参考资料。</div>');
@@ -92,10 +92,8 @@ async function runOfficialWritingRagSearch(scopeKey) {
 }
 
 function findOfficialWritingRagMatch(index, scopeKey) {
-    const key = scopeKey || (officialWritingUiState.materialTab === 'standards' ? 'standards' : 'history');
-    const fromScope = (officialWritingRagResults[key] || [])[index];
-    if (fromScope) return fromScope;
-    return (officialWritingRagResults.history[index] || officialWritingRagResults.standards[index]);
+    const key = scopeKey || 'history';
+    return (officialWritingRagResults[key] || officialWritingRagResults.history || [])[index];
 }
 
 function insertOfficialWritingRagMatch(index, scopeKey) {
@@ -111,19 +109,45 @@ function insertOfficialWritingRagMatch(index, scopeKey) {
     showToast('已引用到正文');
 }
 
+function appendOfficialWritingReferenceToMaterials(match) {
+    const text = String(match?.text || '').trim();
+    if (!text) return 'empty';
+    const sourceLabel = String(match?.source || '知识库').trim() || '知识库';
+    const block = `【知识库引用：${sourceLabel}】\n${text}`;
+    const materialEditorCard = document.getElementById('official-writing-material-editor-card');
+    const materialEditor = document.getElementById('official-writing-material-editor');
+    const editorOpen = Boolean(materialEditorCard && !materialEditorCard.classList.contains('hidden'));
+    const current = String((editorOpen ? materialEditor?.value : '') || getOfficialWritingTextarea('source')?.value || officialWritingState.source || '').trim();
+    if (current.includes(text)) return 'exists';
+    const next = [current, block].filter(Boolean).join('\n\n');
+    pushOfficialWritingUndoSnapshot();
+    setOfficialWritingTextareaValue('source', next);
+    officialWritingState.source = next;
+    setOfficialWritingMaterialTab('materials');
+    syncOfficialWritingStateFromInputs();
+    saveOfficialWritingState();
+    renderOfficialWritingWorkspace();
+    syncOfficialWritingMaterialEditor(next, { force: true });
+    return 'added';
+}
+
 function referenceOfficialWritingRagMatch(index, scopeKey) {
     const match = findOfficialWritingRagMatch(index, scopeKey);
     if (!match) return;
-    appendOfficialWritingRequirement(`参考资料「${compactTextPreview(match.text, 30)}」（来源：${match.source || '知识库'}）作为事实依据`);
+    const status = appendOfficialWritingReferenceToMaterials(match);
+    if (status === 'empty') return;
+    const sourceLabel = String(match.source || '知识库').trim() || '知识库';
+    appendOfficialWritingRequirement(`优先参考本篇材料中的“知识库引用：${sourceLabel}”`, { silent: true });
+    showToast(status === 'exists' ? '该知识库内容已在本篇材料中，AI 会自动参考' : '已加入本篇材料，AI 会自动参考');
 }
 
-function appendOfficialWritingRequirement(text) {
+function appendOfficialWritingRequirement(text, options = {}) {
     const input = document.getElementById('official-writing-requirements');
     if (!input) return;
     const value = input.value.trim();
     input.value = value ? `${value}；${text}` : text;
     renderOfficialWritingWorkspace();
-    showToast('已加入 AI 指令');
+    if (!options.silent) showToast('已加入 AI 指令');
 }
 
 function applyOfficialWritingTemplate(templateId) {
@@ -141,9 +165,42 @@ function applyOfficialWritingTemplate(templateId) {
     showToast('模板已加入正文稿');
 }
 
+async function importOfficialWritingMaterialFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const chunks = [];
+    for (const file of files) {
+        try {
+            const text = await file.text();
+            const clean = String(text || '').trim();
+            if (clean) chunks.push(`【${file.name || '素材'}】\n${clean}`);
+        } catch (e) {
+            // 单个文件读取失败不阻断其他素材导入。
+        }
+    }
+    if (!chunks.length) {
+        showToast('未读取到可用文本，请上传 TXT、Markdown、CSV 或 JSON 等文本文件', 'warning');
+        return;
+    }
+    pushOfficialWritingUndoSnapshot();
+    const materialEditorCard = document.getElementById('official-writing-material-editor-card');
+    const materialEditor = document.getElementById('official-writing-material-editor');
+    const editorOpen = Boolean(materialEditorCard && !materialEditorCard.classList.contains('hidden'));
+    const current = String((editorOpen ? materialEditor?.value : '') || getOfficialWritingTextarea('source')?.value || officialWritingState.source || '').trim();
+    const next = [current, ...chunks].filter(Boolean).join('\n\n');
+    setOfficialWritingTextareaValue('source', next);
+    officialWritingState.source = next;
+    setOfficialWritingMaterialTab('materials');
+    syncOfficialWritingStateFromInputs();
+    saveOfficialWritingState();
+    renderOfficialWritingWorkspace();
+    syncOfficialWritingMaterialEditor(next, { force: true });
+    showToast(`已导入 ${chunks.length} 个本篇材料`);
+}
 function focusOfficialWritingSource() {
+    closeOfficialWritingMaterialModal();
     applyOfficialWritingViewMode('compare');
-    getOfficialWritingSurface('source')?.focus();
+    window.setTimeout(() => getOfficialWritingSurface('source')?.focus(), 0);
 }
 
 function handleOfficialWritingMaterialAction(materialId, action) {
@@ -157,12 +214,13 @@ function handleOfficialWritingMaterialAction(materialId, action) {
         showToast('已引用到正文');
     } else if (action === 'basis') {
         appendOfficialWritingRequirement(`将材料“${compactTextPreview(segment.text, 30)}”作为事实依据`);
-        openOfficialWritingDrawer('suggestions');
     } else if (action === 'view') {
+        closeOfficialWritingMaterialModal();
         applyOfficialWritingViewMode('compare');
         const source = getOfficialWritingTextarea('source');
         const index = source?.value.indexOf(segment.text) ?? -1;
         if (index >= 0) setTextareaSelection(source, index, index + segment.text.length);
+        window.setTimeout(() => getOfficialWritingSurface('source')?.focus(), 0);
     }
     renderOfficialWritingWorkspace();
 }
@@ -196,18 +254,63 @@ function bindAppsWorkbenchEvents() {
         toggleOfficialWritingDrawer();
         closeOfficialWritingCommandMenu();
     });
+    document.getElementById('official-writing-open-draft-modal-btn')?.addEventListener('click', () => {
+        openOfficialWritingDraftDialog();
+        closeOfficialWritingCommandMenu();
+    });
+    document.getElementById('official-writing-draft-form')?.addEventListener('submit', submitOfficialWritingDraftDialog);
+    document.getElementById('official-writing-draft-cancel-btn')?.addEventListener('click', closeOfficialWritingDraftDialog);
+    document.getElementById('official-writing-draft-modal')?.addEventListener('click', event => {
+        if (event.target?.id === 'official-writing-draft-modal') closeOfficialWritingDraftDialog();
+    });
+    const draftInstruction = document.getElementById('official-writing-draft-instruction');
+    draftInstruction?.addEventListener('input', () => setOfficialWritingDraftDialogError(''));
+    draftInstruction?.addEventListener('focus', () => {
+        const initialHint = draftInstruction.dataset.officialWritingInitialHint || '';
+        const shouldClear = draftInstruction.dataset.officialWritingClearOnFocus === 'true';
+        if (shouldClear && initialHint && draftInstruction.value.trim() === initialHint.trim()) {
+            draftInstruction.value = '';
+            draftInstruction.dataset.officialWritingClearOnFocus = 'false';
+        }
+        draftInstruction.dataset.officialWritingFocusPlaceholder = draftInstruction.placeholder || draftInstruction.dataset.officialWritingDefaultPlaceholder || '';
+        draftInstruction.placeholder = '';
+        setOfficialWritingDraftDialogError('');
+    });
+    draftInstruction?.addEventListener('blur', () => {
+        if (!draftInstruction.value.trim()) {
+            draftInstruction.placeholder = draftInstruction.dataset.officialWritingInitialHint
+                || draftInstruction.dataset.officialWritingFocusPlaceholder
+                || draftInstruction.dataset.officialWritingDefaultPlaceholder
+                || '';
+        }
+    });
+    document.getElementById('official-writing-review-suggestions-btn')?.addEventListener('click', () => {
+        handleOfficialWritingReviewSuggestions();
+        closeOfficialWritingCommandMenu();
+    });
+    document.getElementById('official-writing-drawer-close-btn')?.addEventListener('click', closeOfficialWritingDrawer);
+    document.getElementById('official-writing-material-close-btn')?.addEventListener('click', closeOfficialWritingMaterialModal);
     document.getElementById('official-writing-sync-btn')?.addEventListener('click', syncOfficialWritingSourceToDraft);
     document.getElementById('official-writing-reset-btn')?.addEventListener('click', () => {
         resetOfficialWritingForm();
         closeOfficialWritingCommandMenu();
     });
-    document.getElementById('official-writing-undo-btn')?.addEventListener('click', undoOfficialWriting);
-    document.getElementById('official-writing-redo-btn')?.addEventListener('click', redoOfficialWriting);
     document.getElementById('official-writing-backup-btn')?.addEventListener('click', () => {
         exportOfficialWritingBackup();
         closeOfficialWritingCommandMenu();
     });
-    document.getElementById('official-writing-edit-source-btn')?.addEventListener('click', focusOfficialWritingSource);
+    document.getElementById('official-writing-edit-source-btn')?.addEventListener('click', openOfficialWritingMaterialEditor);
+    document.getElementById('official-writing-upload-material-btn')?.addEventListener('click', () => document.getElementById('official-writing-material-upload-input')?.click());
+    document.getElementById('official-writing-material-save-btn')?.addEventListener('click', saveOfficialWritingMaterialEditor);
+    document.getElementById('official-writing-material-clear-btn')?.addEventListener('click', clearOfficialWritingMaterialEditor);
+    document.getElementById('official-writing-material-editor-close-btn')?.addEventListener('click', closeOfficialWritingMaterialEditor);
+    document.getElementById('official-writing-material-editor')?.addEventListener('input', event => {
+        syncOfficialWritingMaterialEditorStats(event.target.value);
+    });
+    document.getElementById('official-writing-material-upload-input')?.addEventListener('change', event => {
+        void importOfficialWritingMaterialFiles(event.target.files);
+        event.target.value = '';
+    });
     document.getElementById('official-writing-source-selection-btn')?.addEventListener('click', () => {
         captureSelection('official-writing-source', 'official-writing-comment-anchor');
         const target = document.getElementById('official-writing-comment-target');
@@ -222,7 +325,7 @@ function bindAppsWorkbenchEvents() {
         exportOfficialWritingText();
         closeOfficialWritingCommandMenu();
     });
-    document.getElementById('official-writing-generate-suggestions-btn')?.addEventListener('click', () => generateOfficialWritingSuggestion(getOfficialWritingMode()));
+    document.getElementById('official-writing-generate-suggestions-btn')?.addEventListener('click', runOfficialWritingReview);
     document.getElementById('official-writing-add-comment-btn')?.addEventListener('click', addOfficialWritingComment);
     document.getElementById('official-writing-clear-comments-btn')?.addEventListener('click', () => {
         officialWritingState.comments = [];
@@ -246,18 +349,19 @@ function bindAppsWorkbenchEvents() {
     document.getElementById('official-writing-standard')?.addEventListener('change', renderOfficialWritingWorkspace);
     document.getElementById('official-writing-type')?.addEventListener('change', renderOfficialWritingWorkspace);
     document.getElementById('official-writing-requirements')?.addEventListener('input', renderOfficialWritingWorkspace);
-    document.getElementById('official-writing-new-doc-btn')?.addEventListener('click', createOfficialWritingDoc);
+    document.getElementById('official-writing-new-doc-btn')?.addEventListener('click', openOfficialWritingCreateDialog);
+    document.getElementById('official-writing-create-doc-btn')?.addEventListener('click', openOfficialWritingCreateDialog);
+    document.getElementById('official-writing-create-form')?.addEventListener('submit', submitOfficialWritingCreateDialog);
+    document.getElementById('official-writing-create-cancel-btn')?.addEventListener('click', closeOfficialWritingCreateDialog);
+    document.getElementById('official-writing-create-modal')?.addEventListener('click', event => {
+        if (event.target?.id === 'official-writing-create-modal') closeOfficialWritingCreateDialog();
+    });
+    document.getElementById('official-writing-create-title')?.addEventListener('input', () => setOfficialWritingCreateDialogError(''));
+    document.getElementById('official-writing-refresh-docs-btn')?.addEventListener('click', renderOfficialWritingDocList);
+    document.getElementById('official-writing-back-to-library-btn')?.addEventListener('click', showOfficialWritingLibrary);
     document.getElementById('official-writing-kb-history-search-btn')?.addEventListener('click', () => runOfficialWritingRagSearch('history'));
-    document.getElementById('official-writing-kb-standards-search-btn')?.addEventListener('click', () => runOfficialWritingRagSearch('standards'));
     document.getElementById('official-writing-kb-history-query')?.addEventListener('keydown', event => {
         if (event.key === 'Enter') { event.preventDefault(); runOfficialWritingRagSearch('history'); }
-    });
-    document.getElementById('official-writing-kb-standards-query')?.addEventListener('keydown', event => {
-        if (event.key === 'Enter') { event.preventDefault(); runOfficialWritingRagSearch('standards'); }
-    });
-    document.getElementById('official-writing-proofread-btn')?.addEventListener('click', () => {
-        syncOfficialWritingStateFromInputs();
-        renderOfficialWritingProofread();
     });
     document.getElementById('official-writing-diff-close')?.addEventListener('click', closeOfficialWritingDiffModal);
     document.getElementById('official-writing-diff-cancel')?.addEventListener('click', closeOfficialWritingDiffModal);
@@ -436,40 +540,10 @@ function bindAppsWorkbenchEvents() {
         }
     });
 
-    // 审改栏分页 tab 的方向键导航（WAI-ARIA tablist 模式）。
-    const drawerTabs = document.querySelector('.official-writing-drawer-tabs');
-    drawerTabs?.addEventListener('keydown', event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        const tabs = Array.from(drawerTabs.querySelectorAll('[data-official-writing-drawer-tab]'));
-        if (!tabs.length) return;
-        const currentIndex = tabs.findIndex(tab => tab === document.activeElement);
-        let nextIndex = currentIndex;
-        if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-        else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
-        else if (event.key === 'Home') nextIndex = 0;
-        else if (event.key === 'End') nextIndex = tabs.length - 1;
-        event.preventDefault();
-        const nextTab = tabs[nextIndex];
-        if (nextTab) {
-            openOfficialWritingDrawer(nextTab.dataset.officialWritingDrawerTab);
-            nextTab.focus();
-        }
-    });
 
-    // 键盘快捷键：撤销/重做，以及 Esc 收起审改栏。
+    // 键盘快捷键：Esc 收起弹窗或辅助面板。
     panel.addEventListener('keydown', event => {
         if (document.getElementById('official-writing-view')?.classList.contains('hidden')) return;
-        const isMod = event.ctrlKey || event.metaKey;
-        if (isMod && !event.shiftKey && (event.key === 'z' || event.key === 'Z')) {
-            event.preventDefault();
-            undoOfficialWriting();
-            return;
-        }
-        if (isMod && ((event.key === 'y' || event.key === 'Y') || (event.shiftKey && (event.key === 'z' || event.key === 'Z')))) {
-            event.preventDefault();
-            redoOfficialWriting();
-            return;
-        }
         if (event.key === 'Escape') {
             const diffModal = document.getElementById('official-writing-diff-modal');
             if (diffModal && !diffModal.classList.contains('hidden')) {
@@ -477,12 +551,25 @@ function bindAppsWorkbenchEvents() {
                 closeOfficialWritingDiffModal();
                 return;
             }
+            const draftModal = document.getElementById('official-writing-draft-modal');
+            if (draftModal && !draftModal.classList.contains('hidden')) {
+                event.preventDefault();
+                closeOfficialWritingDraftDialog();
+                document.getElementById('official-writing-open-draft-modal-btn')?.focus();
+                return;
+            }
+            const workbench = document.querySelector('.official-writing-workbench');
+            if (workbench && !workbench.classList.contains('is-left-rail-hidden')) {
+                event.preventDefault();
+                closeOfficialWritingMaterialModal();
+                document.getElementById('official-writing-toggle-left-btn')?.focus();
+                return;
+            }
             const drawer = document.getElementById('official-writing-drawer');
             if (drawer && !drawer.classList.contains('hidden')) {
                 event.preventDefault();
                 closeOfficialWritingDrawer();
-                // 收起后将焦点交还给打开按钮，保持键盘焦点不丢失。
-                document.getElementById('official-writing-toggle-right-btn')?.focus();
+                document.getElementById('official-writing-review-suggestions-btn')?.focus();
             }
         }
     });

@@ -434,3 +434,686 @@
     padding: 12px 16px;
     border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
+/* ===== 简化编辑详情：正文优先，辅助能力弹窗化 ===== */
+.official-writing-panel[data-official-writing-screen="editor"] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-hidden-config {
+    display: none !important;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 48px;
+    padding: 8px 12px;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 0;
+    border: 0;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-action,
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-more-trigger {
+    height: 32px;
+    min-width: 64px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-workbench {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-shell,
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-shell.is-drawer-hidden {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-editor-area {
+    min-height: 0;
+}
+
+.official-writing-panel[data-writing-view-mode="document"] .official-writing-draft-pane {
+    width: min(100%, 1040px);
+}
+
+.official-writing-left-rail {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 1800;
+    width: min(640px, calc(100vw - 48px));
+    height: min(720px, calc(100vh - 80px));
+    min-height: 0;
+    transform: translate(-50%, -50%);
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24), 0 0 0 9999px rgba(15, 23, 42, 0.28);
+}
+
+.official-writing-workbench.is-left-rail-hidden .official-writing-left-rail,
+.official-writing-left-rail[aria-hidden="true"] {
+    display: none !important;
+}
+
+.official-writing-left-rail .official-writing-rail-body {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.official-writing-modal-close {
+    height: 28px;
+    min-width: 54px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.official-writing-drawer {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 1800;
+    width: min(640px, calc(100vw - 48px));
+    height: min(700px, calc(100vh - 80px));
+    min-width: 0;
+    min-height: 0;
+    transform: translate(-50%, -50%);
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24), 0 0 0 9999px rgba(15, 23, 42, 0.28);
+}
+
+.official-writing-drawer.hidden {
+    display: none !important;
+}
+
+.official-writing-drawer-head {
+    min-height: 52px;
+    padding: 10px 12px;
+}
+
+.official-writing-drawer-tabs {
+    padding: 8px 10px;
+}
+
+.official-writing-drawer-section {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.official-writing-drawer-section .official-writing-subpanel {
+    min-height: 0;
+}
+
+.official-writing-draft-modal {
+    z-index: 1800;
+}
+
+.official-writing-draft-dialog {
+    width: min(560px, 100%);
+    padding: 0;
+    text-align: left;
+    overflow: hidden;
+}
+
+.official-writing-draft-dialog-head {
+    padding: 18px 20px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.official-writing-draft-dialog-head h3 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 1rem;
+}
+
+.official-writing-draft-dialog-head p {
+    margin: 5px 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.official-writing-draft-form {
+    display: grid;
+    gap: 8px;
+    padding: 16px 20px 18px;
+}
+
+.official-writing-draft-form label {
+    color: #475569;
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.official-writing-draft-form textarea.form-input {
+    min-height: 140px;
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    resize: vertical;
+    font-size: 0.84rem;
+    line-height: 1.55;
+}
+
+.official-writing-draft-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.official-writing-draft-dialog-actions .btn-primary,
+.official-writing-draft-dialog-actions .btn-secondary {
+    height: 34px;
+    min-width: 86px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+@media (max-width: 720px) {
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-toolbar,
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-row {
+        align-items: stretch;
+        justify-content: flex-start;
+    }
+
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-action,
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-menu,
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-more-trigger {
+        flex: 1 1 120px;
+    }
+
+    .official-writing-left-rail,
+    .official-writing-drawer {
+        width: calc(100vw - 24px);
+        height: calc(100vh - 48px);
+    }
+}
+/* ===== 编辑页单行顶部栏 ===== */
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 56px;
+    padding: 8px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-title {
+    flex: 1 1 220px;
+    min-width: 150px;
+    gap: 0;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-status-metrics {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-command-row {
+    width: auto;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: nowrap;
+    padding: 0;
+    border: 0;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-command-action,
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-command-more-trigger {
+    height: 32px;
+    min-width: 64px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-ai-indicator {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-workbench {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.official-writing-panel[data-official-writing-screen="editor"] .official-writing-editor-grid {
+    padding-top: 8px;
+}
+
+@media (max-width: 1280px) {
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header {
+        flex-wrap: wrap;
+    }
+
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-command-row {
+        flex: 1 1 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 760px) {
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-title,
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-status-metrics,
+    .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-command-row {
+        width: 100%;
+        flex: 0 1 auto;
+        justify-content: flex-start;
+    }
+}
+.official-writing-drawer-ai-indicator {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    max-width: 220px;
+    margin-top: 0;
+    padding: 0 10px;
+    border: 1px solid rgba(37, 99, 235, 0.16);
+    border-radius: 8px;
+    background: rgba(37, 99, 235, 0.06);
+    color: #2563eb;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.official-writing-drawer-ai-indicator.hidden {
+    display: none;
+}
+
+.official-writing-ai-empty-state {
+    min-height: 160px;
+    gap: 10px;
+}
+
+.official-writing-ai-empty-state .official-writing-ai-indicator {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(37, 99, 235, 0.16);
+    border-radius: 8px;
+    background: rgba(37, 99, 235, 0.06);
+    color: #2563eb;
+    font-size: 0.8rem;
+}
+
+.official-writing-ai-empty-state em {
+    color: #64748b;
+    font-size: 0.72rem;
+    font-style: normal;
+    font-weight: 700;
+}
+/* ===== 公文写作弹窗统一为全局 modal 风格 ===== */
+.official-writing-draft-modal {
+    z-index: 1800;
+    padding: clamp(12px, 2.5vh, 24px) clamp(12px, 2.5vw, 24px);
+    background: rgba(15, 23, 42, 0.42);
+    backdrop-filter: blur(8px);
+}
+
+.official-writing-draft-dialog,
+.official-writing-drawer,
+.official-writing-left-rail {
+    width: min(960px, calc(100vw - 48px));
+    height: min(760px, calc(100vh - 48px));
+    max-height: calc(100vh - 48px);
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+    text-align: left;
+    overflow: hidden;
+}
+
+.official-writing-draft-dialog {
+    height: auto;
+    min-height: min(520px, calc(100vh - 48px));
+}
+
+.official-writing-drawer,
+.official-writing-left-rail {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 1800;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 0 0 100vmax rgba(15, 23, 42, 0.42);
+}
+
+.official-writing-draft-dialog-head,
+.official-writing-drawer-head,
+.official-writing-rail-head {
+    min-height: 64px;
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+}
+
+.official-writing-draft-dialog-head h3,
+.official-writing-drawer-head h4,
+.official-writing-rail-head strong {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 1.02rem;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.official-writing-draft-dialog-head p,
+.official-writing-drawer-head span {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.42;
+}
+
+.official-writing-modal-close {
+    flex: 0 0 auto;
+    min-width: 72px;
+    height: 34px;
+    padding: 0 14px;
+    border-color: rgba(239, 68, 68, 0.35);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--danger);
+    font-size: 0.82rem;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.official-writing-modal-close:hover {
+    border-color: var(--danger);
+    background: rgba(254, 226, 226, 0.7);
+    color: var(--danger);
+}
+
+.official-writing-draft-form,
+.official-writing-left-rail .official-writing-rail-body,
+.official-writing-drawer-section {
+    background: #f8fafc;
+}
+
+.official-writing-draft-form {
+    padding: 18px;
+}
+
+.official-writing-draft-form textarea.form-input {
+    min-height: 260px;
+}
+
+.official-writing-drawer-tabs,
+.official-writing-material-tabs {
+    padding: 10px 14px;
+    background: #fff;
+}
+
+.official-writing-drawer-section,
+.official-writing-left-rail .official-writing-rail-body {
+    padding: 12px 14px 14px;
+}
+
+.official-writing-drawer-section .official-writing-subpanel {
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+}
+
+.official-writing-suggestion-list,
+.official-writing-proofread-list,
+.official-writing-left-rail .official-writing-rail-body {
+    scrollbar-width: thin;
+}
+
+@media (max-width: 720px) {
+    .official-writing-draft-modal {
+        padding: 12px;
+    }
+
+    .official-writing-draft-dialog,
+    .official-writing-drawer,
+    .official-writing-left-rail {
+        width: calc(100vw - 24px);
+        height: calc(100vh - 48px);
+        max-height: calc(100vh - 48px);
+    }
+
+    .official-writing-draft-dialog {
+        min-height: min(520px, calc(100vh - 48px));
+    }
+
+    .official-writing-draft-form textarea.form-input {
+        min-height: 220px;
+    }
+}
+/* 公文写作弹窗细节修正：标题纵向排布，并与全局弹窗盒模型一致。 */
+.official-writing-draft-dialog,
+.official-writing-drawer,
+.official-writing-left-rail {
+    box-sizing: border-box;
+}
+
+.official-writing-draft-dialog-head {
+    display: block;
+}
+/* 写作资源弹窗头部使用全局弹窗的左右布局：标题在左，关闭在右。 */
+.official-writing-left-rail > .official-writing-rail-head {
+    justify-content: space-between;
+}
+
+.official-writing-left-rail > .official-writing-rail-head strong {
+    flex: 1 1 auto;
+}
+
+.official-writing-left-rail > .official-writing-rail-head .official-writing-modal-close {
+    margin-left: auto;
+}
+
+/* 审校建议弹窗：基础校对与 AI 建议采用左右两栏，避免 AI 建议区域被压缩。 */
+.official-writing-drawer[data-official-writing-drawer-view="suggestions"] {
+    width: min(1360px, calc(100vw - 32px));
+    height: min(820px, calc(100vh - 32px));
+}
+
+.official-writing-drawer[data-official-writing-drawer-view="suggestions"] .official-writing-drawer-section {
+    overflow: hidden;
+}
+
+.official-writing-review-stack {
+    flex: 1 1 auto;
+    display: grid;
+    min-height: 0;
+    grid-template-columns: minmax(320px, 0.42fr) minmax(520px, 0.58fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+    overflow: hidden;
+}
+
+.official-writing-review-toolbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.official-writing-review-toolbar h4 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.92rem;
+    font-weight: 800;
+}
+
+.official-writing-review-toolbar > div:first-child > span {
+    display: block;
+    margin-top: 2px;
+    color: #64748b;
+    font-size: 0.74rem;
+    line-height: 1.4;
+}
+
+.official-writing-review-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.official-writing-review-actions .btn-secondary {
+    height: 34px;
+    min-width: 88px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.official-writing-drawer-section .official-writing-review-stack .official-writing-subpanel {
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.official-writing-review-stack .official-writing-proofread-panel,
+.official-writing-review-stack .official-writing-suggestions-panel {
+    min-height: 0;
+}
+
+.official-writing-review-stack .official-writing-subpanel-head {
+    min-height: 68px;
+    padding: 10px 12px;
+}
+
+.official-writing-review-stack .official-writing-suggestion-list,
+.official-writing-review-stack .official-writing-proofread-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+}
+
+.official-writing-review-stack .official-writing-proofread-list {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+}
+
+.official-writing-review-stack .official-writing-proofread-list .official-writing-check-item {
+    margin: 0 0 10px;
+}
+
+.official-writing-review-stack .official-writing-proofread-list .official-writing-check-item:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 980px) {
+    .official-writing-drawer[data-official-writing-drawer-view="suggestions"] {
+        width: calc(100vw - 24px);
+        height: calc(100vh - 48px);
+    }
+
+    .official-writing-review-stack {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(180px, 0.45fr) minmax(260px, 0.55fr);
+        overflow: auto;
+    }
+
+    .official-writing-review-toolbar {
+        grid-column: 1;
+    }
+}
+
+@media (max-width: 720px) {
+    .official-writing-review-toolbar,
+    .official-writing-review-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .official-writing-review-actions .btn-secondary {
+        width: 100%;
+    }
+}
+
+/* 本篇材料编辑状态：外层弹窗不滚动，滚动仅留给材料输入框。 */
+.official-writing-left-rail.is-material-editor-open .official-writing-rail-body {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.official-writing-left-rail.is-material-editor-open #official-writing-materials-panel {
+    flex: 1 1 auto;
+    display: grid;
+    min-height: 0;
+    height: 100%;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 10px;
+    overflow: hidden;
+}
+
+.official-writing-left-rail.is-material-editor-open .official-writing-material-editor-card {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+}
+
+.official-writing-left-rail.is-material-editor-open .official-writing-material-editor-card textarea.form-input {
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    resize: none;
+    overflow: auto;
+}
+
+.official-writing-left-rail.is-material-editor-open .official-writing-material-snapshot,
+.official-writing-left-rail.is-material-editor-open .official-writing-material-card-list {
+    display: none;
+}
