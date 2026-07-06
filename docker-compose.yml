@@ -7,11 +7,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PIVOT_INSTALL_PADDLEOCR: ${PIVOT_INSTALL_PADDLEOCR:-true}
     container_name: pivot
 
     # 端口映射：宿主机端口 -> 容器端口
     ports:
-      - "3000:3000"
+      - "9006:3000"
 
     # 环境变量：运行时自动读取同目录下的 .env 文件
     env_file:
@@ -22,6 +24,9 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # Docker 容器内默认使用 PATH 中的 paddleocr，避免复用本地 Windows .env 的 .venv-paddleocr/Scripts/paddleocr.exe
+      # 如需挂载容器内虚拟环境，可在 .env 中设置 PADDLEOCR_DOCKER_CMD=/app/.venv-paddleocr/bin/paddleocr
+      PADDLEOCR_CMD: ${PADDLEOCR_DOCKER_CMD:-paddleocr}
 
     # 数据持久化：保证数据库和上传文件在容器重建后仍然保留
     volumes:

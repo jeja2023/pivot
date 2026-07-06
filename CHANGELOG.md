@@ -24,6 +24,8 @@
 
 #### Docker 离线部署与配置
 
+- **PaddleOCR 运行时入镜像**：Dockerfile 默认安装 PaddleOCR/PaddlePaddle 运行时并提供 `paddleocr` 命令，模型文件仍通过外部挂载提供；可用 `PIVOT_INSTALL_PADDLEOCR=false` 关闭运行时安装。
+- **Compose 构建入口保留**：`docker-compose.yml` 保留 `build` 配置，方便有网环境一键构建并拉起容器；离线生产环境要求先导入镜像，并使用 `docker-compose up -d --no-build` 只运行已导入的 `pivot` 镜像。
 - **模型外部挂载路径调整**：生产 Docker 部署通过 ./models/paddleocr:/app/models/paddleocr 挂载模型目录，统一落在容器 /app 业务目录下，避免使用 /root/.paddleocr。
 - **镜像瘦身策略明确**：PaddleOCR 模型文件通过宿主机目录提供，不写入 Docker 镜像，便于离线生产环境更新模型而不重构镜像。
 - **环境变量对齐**：.env 与 .env.example 中 PaddleOCR 相关配置保持一致，补齐模型目录、CLI 版本、OCR 版本和下载开关等配置项。

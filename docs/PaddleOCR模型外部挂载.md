@@ -34,6 +34,7 @@ models/
 ```env
 DOCUMENT_PROCESSING_OCR_ENGINE=paddle
 PADDLEOCR_CMD=paddleocr
+PADDLEOCR_DOCKER_CMD=paddleocr
 PADDLEOCR_LANG=ch
 PADDLEOCR_CLI_VERSION=3
 PADDLE_PDX_CACHE_HOME=data/paddlex-cache
@@ -79,13 +80,17 @@ python -m venv .venv-paddleocr
 
 ```env
 PADDLEOCR_CMD=.venv-paddleocr/Scripts/paddleocr.exe
+PADDLEOCR_DOCKER_CMD=paddleocr
 ```
+
+`PADDLEOCR_CMD` 只用于本机直接启动服务；Docker 生产部署会用 `PADDLEOCR_DOCKER_CMD` 覆盖容器内命令，避免 Windows 路径进入 Linux 容器。
+
 ## 关于 paddleocr 命令
 
-当前基础 Docker 镜像不内置 `paddleocr` 命令。启用容器内 OCR 时，需要满足其一：
+默认 Dockerfile 会在构建阶段安装 PaddleOCR/PaddlePaddle 运行时，并把 `paddleocr` 命令放进镜像 PATH；模型文件仍通过 `models/paddleocr` 外部挂载。启用容器内 OCR 时需要满足其一：
 
-1. 使用包含 PaddleOCR/PaddlePaddle 运行时的自定义镜像。
-2. 将可执行命令或虚拟环境挂载进容器，并把 `PADDLEOCR_CMD` 指向对应路径。
+1. 使用默认 `PIVOT_INSTALL_PADDLEOCR=true` 重新构建镜像。
+2. 设置 `PIVOT_INSTALL_PADDLEOCR=false`，但将 Linux 版可执行命令或虚拟环境挂载进容器，并把 `PADDLEOCR_DOCKER_CMD` 指向对应的容器内路径。
 3. 暂时改用已安装的其他 OCR 命令，并设置 `DOCUMENT_PROCESSING_OCR_ENGINE`。
 
 验证方式：
