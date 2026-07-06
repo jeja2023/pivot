@@ -40,6 +40,39 @@ function openList(type, state, chunks) {
     state.listType = type;
 }
 
+const VERSION_UPDATE_HEADING_RE = /^##\s+(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))\s*$/i;
+const SECOND_LEVEL_HEADING_RE = /^##\s+/;
+
+function stripVersionUpdateSections(markdown) {
+    const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+    const kept = [];
+    let skipping = false;
+    let inFence = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('```')) {
+            if (!skipping) kept.push(line);
+            inFence = !inFence;
+            continue;
+        }
+
+        if (!inFence && VERSION_UPDATE_HEADING_RE.test(trimmed)) {
+            skipping = true;
+            continue;
+        }
+
+        if (!inFence && skipping && SECOND_LEVEL_HEADING_RE.test(trimmed)) {
+            skipping = false;
+        }
+
+        if (!skipping) kept.push(line);
+    }
+
+    return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
 function renderMarkdown(markdown) {
     const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
     const chunks = [];
@@ -111,7 +144,7 @@ function renderMarkdown(markdown) {
 }
 
 function renderManualHtml(markdown, { appVersion = '', nonce = '', embedded = false } = {}) {
-    const body = renderMarkdown(markdown);
+    const body = renderMarkdown(stripVersionUpdateSections(markdown));
     const safeVersion = escapeHtml(appVersion || '');
     const safeNonce = escapeHtml(nonce || '');
     const topbarHtml = embedded ? '' : `        <header class="manual-topbar">
@@ -177,5 +210,6 @@ ${topbarHtml}
 module.exports = {
     MANUAL_PATH,
     renderManualHtml,
-    renderMarkdown
+    renderMarkdown,
+    stripVersionUpdateSections
 };

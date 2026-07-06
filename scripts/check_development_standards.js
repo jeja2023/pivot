@@ -22,9 +22,6 @@ function readUtf8(filePath) {
     return fs.readFileSync(filePath, 'utf8');
 }
 
-function fileExists(relativePath) {
-    return fs.existsSync(path.join(rootDir, relativePath));
-}
 
 function walk(dir, files = []) {
     if (!fs.existsSync(dir)) return files;

@@ -321,7 +321,9 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/apps-workbench-rewrite.js',
         '/chat/apps-workbench-export.js',
         '/chat/apps-workbench-rag.js',
-        '/chat/apps-workbench-regulations.js'
+        '/chat/apps-workbench-regulations.js',
+        '/chat/apps-workbench-ocr.js',
+        '/chat/apps-workbench-pdf-tools.js'
     ],
     agent: [
         '/chat/dag-core.js',

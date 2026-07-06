@@ -8,6 +8,7 @@ const { getBeijingTimestamp } = require('../time');
 const { parsePositiveInt, parseNonNegativeInt } = require('../number');
 const { cleanupSoftDeletedStorage } = require('./storage-gc');
 const { cleanupAnalysisWorkspace } = require('./data-analysis');
+const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing/cleanup');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -334,6 +335,14 @@ function runAnalysisWorkspaceCleanup() {
     }
 }
 
+function runDocumentProcessingCleanup() {
+    try {
+        cleanupExpiredDocumentProcessingFiles();
+    } catch (err) {
+        logger.warn({ err: err.message }, '文档处理输出清理失败');
+    }
+}
+
 function startMaintenanceTasks() {
     const retentionDays = getAuditLogRetentionDays();
     const apiCallLogRetentionDays = getApiCallLogRetentionDays();
@@ -354,6 +363,7 @@ function startMaintenanceTasks() {
     cleanupExpiredRefreshTokens().catch(() => {});
     cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
     runAnalysisWorkspaceCleanup();
+    runDocumentProcessingCleanup();
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
 
@@ -363,6 +373,7 @@ function startMaintenanceTasks() {
         cleanupExpiredRefreshTokens().catch(() => {});
         cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
         runAnalysisWorkspaceCleanup();
+    runDocumentProcessingCleanup();
         backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
         optimizeDatabase().catch(() => {});
     }, DAY_MS).unref();

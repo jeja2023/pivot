@@ -1,3 +1,4 @@
+/* global showOcrAppFromRegistry, showPdfToolsAppFromRegistry */
 // ===== 知识库检索接入 =====
 
 // 缓存知识库最近一次检索结果，供插入和引用操作复用。
@@ -585,6 +586,18 @@ window.openAppsWorkbench = function() {
     } else if (getStoredAppsActiveApp() === 'regulations') {
         if (typeof window.showRegulationsAppFromRegistry === 'function') {
             window.showRegulationsAppFromRegistry().catch(() => showAppsHome());
+        } else {
+            showAppsHome();
+        }
+    } else if (getStoredAppsActiveApp() === 'ocr') {
+        if (typeof showOcrAppFromRegistry === 'function') {
+            showOcrAppFromRegistry().catch(() => showAppsHome());
+        } else {
+            showAppsHome();
+        }
+    } else if (getStoredAppsActiveApp() === 'pdf-tools') {
+        if (typeof showPdfToolsAppFromRegistry === 'function') {
+            showPdfToolsAppFromRegistry().catch(() => showAppsHome());
         } else {
             showAppsHome();
         }

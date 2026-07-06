@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { db } = require('../../db');
-const { extractDocumentText, truncateExtractedText } = require('../../document-text');
+const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('../document-processing/text-extraction');
 const { getKnowledgeLimits } = require('../resource-limits');
 const { getBeijingTimestamp } = require('../../time');
 const { normalizeUploadedOriginalName } = require('../../upload');
@@ -185,7 +185,7 @@ function saveRegulationUploadedFile(file, documentId) {
 }
 
 async function readRegulationTextFromPath(filePath, originalName = '') {
-    const text = await extractDocumentText(filePath, '', originalName || filePath);
+    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10 });
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 
@@ -229,7 +229,7 @@ module.exports = {
     fs,
     path,
     db,
-    extractDocumentText,
+    extractDocumentText: extractDocumentTextWithOcrFallback,
     truncateExtractedText,
     getKnowledgeLimits,
     getBeijingTimestamp,

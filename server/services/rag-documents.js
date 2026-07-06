@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { extractDocumentText, truncateExtractedText } = require('../document-text');
+const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('./document-processing/text-extraction');
 const { getKnowledgeLimits } = require('./resource-limits');
 const { db } = require('../db');
 const { logger } = require('../logger');
@@ -311,7 +311,7 @@ function persistUploadedKnowledgeFile(file, userId, docId) {
 }
 
 async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
-    const text = await extractDocumentText(filePath, '', originalName || filePath);
+    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10 });
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { loadChatHtmlTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
+const { renderManualHtml, stripVersionUpdateSections } = require('../server/manual-page');
 
 const rootDir = path.resolve(__dirname, '..');
 const chatDir = path.join(rootDir, 'client', 'chat');
@@ -59,6 +60,16 @@ if (!renderChartsJs.includes("loadScriptOnce('/common/vendor/echarts.min.js')"))
 
 const manualPath = path.join(rootDir, '使用帮助.md');
 if (!fs.existsSync(manualPath)) fail('使用帮助.md is required for the /manual page and Docker deployment');
+const manualMarkdown = fs.readFileSync(manualPath, 'utf8');
+const renderedManualHtml = renderManualHtml(manualMarkdown, { appVersion: 'v0.0.0', embedded: true });
+if (/<h2>(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))<\/h2>/i.test(renderedManualHtml)) {
+    fail('/manual page must not render version update records from 使用帮助.md');
+}
+const syntheticManual = '# 标题\n\n适用版本：`v0.0.1`\n\n## 版本更新记录\n\n- 不应显示\n\n## v0.0.2 更新提示\n\n- 也不应显示\n\n## 1. 登录\n\n正文';
+const strippedSyntheticManual = stripVersionUpdateSections(syntheticManual);
+if (strippedSyntheticManual.includes('更新提示') || strippedSyntheticManual.includes('版本更新记录') || strippedSyntheticManual.includes('不应显示') || !strippedSyntheticManual.includes('适用版本') || !strippedSyntheticManual.includes('## 1. 登录')) {
+    fail('manual version update stripping must keep help content and remove release notes');
+}
 const dockerignorePath = path.join(rootDir, '.dockerignore');
 if (fs.existsSync(dockerignorePath)) {
     const ignoredEntries = fs.readFileSync(dockerignorePath, 'utf8')

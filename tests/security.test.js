@@ -12,3 +12,5 @@ require('./db-migration-snapshots.test');
 require('./security-rag-debug-history.test');
 require('./security-desktop-update.test');
 require('./enterprise-deployment.test');
+
+require('./document-processing.test');

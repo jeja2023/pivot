@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
-const { extractDocumentText, truncateExtractedText } = require('../../../document-text');
+const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('../../../services/document-processing/text-extraction');
 const { isAdmin, isSuperAdmin } = require('../../../permissions');
 const { getKnowledgeLimits } = require('../../../services/resource-limits');
 const {
@@ -165,7 +165,7 @@ function deriveUploadTitleFromText(extractedText, fallbackName = '') {
 async function extractUploadText(file) {
     if (!file?.path) return '';
     try {
-        const text = await extractDocumentText(file.path, '', file.originalname);
+        const text = await extractDocumentTextWithOcrFallback(file.path, '', file.originalname, { maxOcrPages: 10 });
         return truncateExtractedText(normalizeUploadText(text), getKnowledgeLimits().extractMaxChars);
     } catch (_err) {
         return '';

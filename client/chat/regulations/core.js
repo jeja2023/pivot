@@ -3,7 +3,7 @@
     if (ns.coreReady) return;
     window.PivotRegulationsInternal = ns;
     const API = '/api/apps/regulations';
-        const FILE_ACCEPT = '.txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm';
+        const FILE_ACCEPT = '.txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp';
         const SUPPORTED_FORMATS = 'TXT、Markdown、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV、JSON、HTML/HTM';
         const REGULATIONS_PAGE_SIZE = 20;
         const html = window.PivotSafeHtml || {

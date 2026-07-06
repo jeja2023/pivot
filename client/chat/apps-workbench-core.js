@@ -26,6 +26,24 @@ const PIVOT_APP_REGISTRY = [
         icon: 'book-open',
         status: 'available',
         openMode: 'inline'
+    },
+    {
+        id: 'ocr',
+        name: '\u6587\u5b57\u8bc6\u522b',
+        category: '\u6587\u6863\u5904\u7406',
+        description: '\u4e0a\u4f20\u56fe\u7247\u6216 PDF\uff0c\u8bc6\u522b\u6b63\u6587\u3001\u590d\u6838\u4f4e\u7f6e\u4fe1\u5ea6\u9875\u9762\u5e76\u5bfc\u51fa\u7ed3\u6784\u5316\u7ed3\u679c\u3002',
+        icon: 'scan-text',
+        status: 'available',
+        openMode: 'inline'
+    },
+    {
+        id: 'pdf-tools',
+        name: 'PDF \u5de5\u5177',
+        category: '\u6587\u6863\u5904\u7406',
+        description: '\u5408\u5e76\u3001\u62c6\u5206\u3001\u65cb\u8f6c\u3001\u5220\u9664\u3001\u91cd\u6392 PDF \u9875\u9762\uff0c\u5e76\u5bfc\u51fa\u56fe\u7247\u6216\u6587\u672c\u3002',
+        icon: 'file-cog',
+        status: 'available',
+        openMode: 'inline'
     }
 ];
 
@@ -350,6 +368,34 @@ function getAppIconSvg(icon) {
             </svg>
         `;
     }
+    if (icon === 'scan-text') {
+        return `
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path d="M4 7V5a1 1 0 0 1 1-1h2"></path>
+                <path d="M17 4h2a1 1 0 0 1 1 1v2"></path>
+                <path d="M20 17v2a1 1 0 0 1-1 1h-2"></path>
+                <path d="M7 20H5a1 1 0 0 1-1-1v-2"></path>
+                <path d="M7 9h10"></path>
+                <path d="M7 13h7"></path>
+                <path d="M7 17h5"></path>
+            </svg>
+        `;
+    }
+    if (icon === 'file-cog') {
+        return `
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <path d="M14 2v6h6"></path>
+                <circle cx="12" cy="15" r="2"></circle>
+                <path d="M12 11.5v1"></path>
+                <path d="M12 17.5v1"></path>
+                <path d="M8.97 13.25l.86.5"></path>
+                <path d="M14.17 16.25l.86.5"></path>
+                <path d="M15.03 13.25l-.86.5"></path>
+                <path d="M9.83 16.25l-.86.5"></path>
+            </svg>
+        `;
+    }
     return `
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
@@ -414,6 +460,8 @@ function showAppsHome() {
     document.getElementById('official-writing-view')?.classList.add('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
     document.getElementById('regulations-view')?.classList.add('hidden');
+    document.getElementById('ocr-view')?.classList.add('hidden');
+    document.getElementById('pdf-tools-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
     renderAppsGrid();
@@ -425,6 +473,8 @@ function showOfficialWritingApp() {
     document.getElementById('official-writing-view')?.classList.remove('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
     document.getElementById('regulations-view')?.classList.add('hidden');
+    document.getElementById('ocr-view')?.classList.add('hidden');
+    document.getElementById('pdf-tools-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
     loadOfficialWritingState();
@@ -461,6 +511,24 @@ async function showRegulationsAppFromRegistry() {
     await window.showRegulationsApp?.();
 }
 
+async function showOcrAppFromRegistry() {
+    if (typeof window.showOcrApp === 'function') {
+        await window.showOcrApp();
+        return;
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-ocr.js');
+    await window.showOcrApp?.();
+}
+
+async function showPdfToolsAppFromRegistry() {
+    if (typeof window.showPdfToolsApp === 'function') {
+        await window.showPdfToolsApp();
+        return;
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-pdf-tools.js');
+    await window.showPdfToolsApp?.();
+}
+
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
@@ -475,6 +543,18 @@ function openRegisteredApp(appId) {
         showRegulationsAppFromRegistry()
             .catch(() => {
                 if (typeof showToast === 'function') showToast('\u6cd5\u89c4\u67e5\u8be2\u52a0\u8f7d\u5931\u8d25', 'error');
+            });
+    }
+    if (app.id === 'ocr') {
+        showOcrAppFromRegistry()
+            .catch(() => {
+                if (typeof showToast === 'function') showToast('\u6587\u5b57\u8bc6\u522b\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
+            });
+    }
+    if (app.id === 'pdf-tools') {
+        showPdfToolsAppFromRegistry()
+            .catch(() => {
+                if (typeof showToast === 'function') showToast('PDF \u5de5\u5177\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
 }

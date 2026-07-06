@@ -3,6 +3,9 @@
 // 由后端负责提示词组装、模型权限/配额/上下文预算、上游转发、用量统计与审计标签。
 const express = require('express');
 const { createRegulationsRouter } = require('./regulations');
+const { createDocumentProcessingRouter } = require('./document-processing');
+const { createOcrRouter } = require('./ocr');
+const { createPdfToolsRouter } = require('./pdf-tools');
 const { asyncHandler } = require('../../http');
 const { logger } = require('../../logger');
 const { estimateTokens } = require('../../llm');
@@ -383,6 +386,27 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         uploadLimiter,
         upload,
         runAppsAiCompletion
+    }));
+
+    router.use('/apps/document-processing', createDocumentProcessingRouter({
+        authMiddleware,
+        logAction,
+        uploadLimiter,
+        upload
+    }));
+
+    router.use('/apps/ocr', createOcrRouter({
+        authMiddleware,
+        logAction,
+        uploadLimiter,
+        upload
+    }));
+
+    router.use('/apps/pdf-tools', createPdfToolsRouter({
+        authMiddleware,
+        logAction,
+        uploadLimiter,
+        upload
     }));
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {

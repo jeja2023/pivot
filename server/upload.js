@@ -12,7 +12,7 @@ const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     : path.join(projectRoot, 'uploads');
 const knowledgeUploadRoot = path.join(uploadRoot, 'docs');
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm', '.doc', '.docx', '.xls', '.xlsx']);
-const knowledgeExtensions = new Set(['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm']);
+const knowledgeExtensions = new Set(['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm', '.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
 const DEFAULT_MULTIPART_LIMITS = Object.freeze({
     fieldNameSize: 80,

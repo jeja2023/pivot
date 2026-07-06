@@ -432,6 +432,127 @@ function initSchema() {
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         );
 
+        CREATE TABLE IF NOT EXISTS document_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_name TEXT DEFAULT '',
+            file_path TEXT DEFAULT '',
+            file_type TEXT DEFAULT '',
+            file_ext TEXT DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            page_count INTEGER DEFAULT 0,
+            source_module TEXT DEFAULT 'document_processing',
+            source_ref TEXT DEFAULT '',
+            sha256 TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            deleted_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS document_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            job_type TEXT NOT NULL,
+            status TEXT DEFAULT 'queued',
+            progress INTEGER DEFAULT 0,
+            error_message TEXT DEFAULT '',
+            config_json TEXT DEFAULT '{}',
+            result_json TEXT DEFAULT '{}',
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            locked_at DATETIME,
+            cancelled_at DATETIME,
+            completed_at DATETIME,
+            source_module TEXT DEFAULT 'document_processing',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (file_id) REFERENCES document_files(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS document_pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            page_number INTEGER DEFAULT 1,
+            width INTEGER DEFAULT 0,
+            height INTEGER DEFAULT 0,
+            image_path TEXT DEFAULT '',
+            text TEXT DEFAULT '',
+            text_length INTEGER DEFAULT 0,
+            ocr_status TEXT DEFAULT 'pending',
+            confidence REAL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (file_id) REFERENCES document_files(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES document_jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS document_ocr_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            page_id INTEGER NOT NULL,
+            page_number INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            block_type TEXT DEFAULT 'line',
+            text TEXT NOT NULL,
+            bbox_json TEXT DEFAULT '[]',
+            confidence REAL DEFAULT 0,
+            language TEXT DEFAULT '',
+            engine TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (file_id) REFERENCES document_files(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES document_jobs(id) ON DELETE CASCADE,
+            FOREIGN KEY (page_id) REFERENCES document_pages(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS document_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            output_type TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_name TEXT DEFAULT '',
+            mime_type TEXT DEFAULT 'application/octet-stream',
+            file_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'ready',
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (file_id) REFERENCES document_files(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES document_jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS document_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            page_id INTEGER NOT NULL,
+            review_status TEXT DEFAULT 'draft',
+            original_text TEXT DEFAULT '',
+            revised_text TEXT DEFAULT '',
+            low_confidence_confirmed INTEGER DEFAULT 0,
+            reviewed_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (file_id) REFERENCES document_files(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES document_jobs(id) ON DELETE CASCADE,
+            FOREIGN KEY (page_id) REFERENCES document_pages(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS prompts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -939,6 +1060,14 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_prompts_type ON prompts(type, category);
         CREATE INDEX IF NOT EXISTS idx_attachments_user_session ON attachments(user_id, session_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_token ON attachments(access_token);
+        CREATE INDEX IF NOT EXISTS idx_document_files_user_created ON document_files(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_document_files_source ON document_files(source_module, source_ref);
+        CREATE INDEX IF NOT EXISTS idx_document_jobs_user_status ON document_jobs(user_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_document_jobs_file ON document_jobs(file_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_document_pages_job_number ON document_pages(job_id, page_number);
+        CREATE INDEX IF NOT EXISTS idx_document_blocks_page_order ON document_ocr_blocks(page_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_document_outputs_user_job ON document_outputs(user_id, job_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_document_reviews_page ON document_reviews(page_id, updated_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
