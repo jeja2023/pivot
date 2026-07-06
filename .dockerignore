@@ -5,6 +5,7 @@ node_modules/
 data/
 uploads/
 logs/
+models/
 
 # Git 与版本控制
 .git/
@@ -69,3 +70,5 @@ scripts/check_chat_assets.js
 # *.md
 # !README.md
 
+.venv-paddleocr/
+.paddlex/

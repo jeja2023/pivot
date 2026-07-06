@@ -170,49 +170,129 @@
                 </aside>
 
                 <main class="workspace-panel doc-tool-main ocr-main">
-                    <div class="doc-tool-main-head">
-                        <div>
+                    <div class="workspace-toolbar doc-tool-toolbar">
+                        <div class="doc-tool-toolbar-title">
                             <h4>文字识别任务</h4>
                             <span id="ocr-list-summary">0 个任务</span>
                         </div>
-                        <div class="doc-tool-head-actions">
-                            <button id="ocr-prev-page" class="btn-secondary" type="button">上一页</button>
-                            <button id="ocr-next-page" class="btn-secondary" type="button">下一页</button>
-                        </div>
                     </div>
                     <div class="table-container workspace-table-wrap doc-tool-table-wrap">
-                        <table class="data-table compact-table doc-tool-table">
+                        <table class="data-table compact-table doc-tool-table ocr-job-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 58px;" class="text-center">序号</th>
-                                    <th>文件</th>
-                                    <th style="width: 100px;" class="text-center">状态</th>
-                                    <th style="width: 96px;" class="text-center">进度</th>
-                                    <th style="width: 150px;">更新时间</th>
+                                    <th style="width: 54px;" class="text-center">序号</th>
+                                    <th style="width: 310px;">文件</th>
+                                    <th style="width: 110px;">识别引擎</th>
+                                    <th style="width: 86px;" class="text-center">状态</th>
+                                    <th style="width: 76px;" class="text-center">进度</th>
+                                    <th style="width: 140px;">更新时间</th>
+                                    <th style="width: 196px;" class="text-center">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="ocr-job-table-body"></tbody>
                         </table>
                     </div>
-                    <div id="ocr-detail" class="ocr-detail"></div>
+                    <div id="ocr-job-pagination" class="pagination workspace-pagination"></div>
                 </main>
             </div>
+            <section id="ocr-detail-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="ocr-detail-title">
+                <div class="workspace-modal doc-tool-dialog ocr-detail-dialog">
+                    <div class="workspace-modal-header">
+                        <div>
+                            <h3 id="ocr-detail-title">识别结果</h3>
+                            <p id="ocr-detail-subtitle">查看页面预览、复核文本并导出结果。</p>
+                        </div>
+                        <button class="btn-secondary workspace-modal-close" type="button" data-ocr-close-detail>关闭</button>
+                    </div>
+                    <div id="ocr-detail" class="workspace-modal-body doc-tool-modal-body ocr-detail"></div>
+                </div>
+            </section>
         `);
         view.dataset.ready = '1';
         bindEvents(view);
         return view;
     }
 
+    function compactEngineError(info, current) {
+        const message = String(info?.error || '不可用');
+        if (!current && message.includes('OCR 引擎命令不存在')) return '未安装（可选）';
+        return message;
+    }
+
     function renderEngines() {
         const box = document.getElementById('ocr-engine-status');
         if (!box) return;
         const entries = Object.entries(state.engines || {});
-        html.setHtml(box, entries.map(([name, info]) => `
-            <div class="doc-tool-engine ${info?.available ? 'is-success' : 'is-warning'}">
-                <strong>${esc(name)}</strong>
-                <span>${info?.available ? '可用' : esc(info?.error || '不可用')}</span>
-            </div>
-        `).join('') || '<div class="doc-tool-empty-small">引擎状态未加载</div>');
+        const selectedEngine = document.getElementById('ocr-engine-select')?.value || entries.find(([, info]) => info?.default)?.[0] || 'paddle';
+        html.setHtml(box, entries.map(([name, info]) => {
+            const current = String(selectedEngine) === String(name);
+            const tone = info?.available
+                ? 'is-success'
+                : (current ? 'is-warning' : 'is-muted');
+            const label = info?.label || name;
+            const status = info?.available
+                ? (current ? '当前可用' : '可用')
+                : (info?.auxiliary ? (current ? '仅辅助，不能批量识别' : '辅助能力') : compactEngineError(info, current));
+            const title = info?.description || info?.error || status;
+            return `
+                <div class="doc-tool-engine ${tone}" title="${esc(title)}">
+                    <strong>${esc(label)}</strong>
+                    <span>${esc(status)}</span>
+                </div>
+            `;
+        }).join('') || '<div class="doc-tool-empty-small">引擎状态未加载</div>');
+    }
+
+    function resultOutputs(job) {
+        return Array.isArray(job?.result?.outputs) ? job.result.outputs.filter(Boolean) : [];
+    }
+
+    function selectOutput(outputs = [], preferredType = '') {
+        const list = Array.isArray(outputs) ? outputs.filter(output => output?.id) : [];
+        if (!list.length) return null;
+        if (preferredType) {
+            const preferred = list.find(output => String(output.outputType || '').toLowerCase() === preferredType);
+            if (preferred) return preferred;
+        }
+        return list[0];
+    }
+
+    function renderOcrRowActions(item) {
+        const outputs = resultOutputs(item);
+        const canDownload = item.status === 'succeeded' || outputs.length > 0;
+        const canCancel = item.status === 'pending' || item.status === 'processing';
+        const canRetry = ['failed', 'cancelled', 'needs_review', 'succeeded'].includes(item.status);
+        return [
+            '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-open="' + esc(item.id) + '">查看</button>',
+            '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-download="' + esc(item.id) + '"' + (canDownload ? '' : ' disabled') + '>下载</button>',
+            canCancel ? '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-cancel="' + esc(item.id) + '">取消</button>' : '',
+            canRetry ? '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-retry="' + esc(item.id) + '">重试</button>' : ''
+        ].filter(Boolean).join('');
+    }
+
+    function isDetailPanelOpen() {
+        return !document.getElementById('ocr-detail-panel')?.classList.contains('hidden');
+    }
+
+    function openDetailPanel() {
+        document.getElementById('ocr-detail-panel')?.classList.remove('hidden');
+    }
+
+    function closeDetailPanel() {
+        document.getElementById('ocr-detail-panel')?.classList.add('hidden');
+    }
+
+    function setDetailHeader(detail) {
+        const title = document.getElementById('ocr-detail-title');
+        const subtitle = document.getElementById('ocr-detail-subtitle');
+        if (!title || !subtitle) return;
+        if (!detail?.job) {
+            title.textContent = '识别结果';
+            subtitle.textContent = '查看页面预览、复核文本并导出结果。';
+            return;
+        }
+        title.textContent = detail.file?.originalName || `任务 ${detail.job.id}`;
+        subtitle.textContent = `${statusLabel(detail.job.status)} · ${Number(detail.job.progress || 0)}% · ${formatTime(detail.job.updatedAt || detail.job.createdAt)}`;
     }
 
     function renderJobs() {
@@ -221,20 +301,45 @@
         if (summary) summary.textContent = `${state.total || 0} 个任务`;
         if (!tbody) return;
         const offset = (state.page - 1) * state.limit;
-        html.setHtml(tbody, state.jobs.map((item, index) => `
-            <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}" data-ocr-job-id="${esc(item.id)}">
-                <td class="text-center">${offset + index + 1}</td>
-                <td>
-                    <button class="doc-tool-link" type="button" data-ocr-job-open="${esc(item.id)}">${esc(item.file?.originalName || `任务 ${item.id}`)}</button>
-                    <small>${esc(item.file?.fileExt || '')} ${formatBytes(item.file?.fileSize)}</small>
-                </td>
-                <td class="text-center"><span class="doc-tool-badge ${statusTone(item.status)}">${statusLabel(item.status)}</span></td>
-                <td class="text-center">${Number(item.progress || 0)}%</td>
-                <td>${esc(formatTime(item.updatedAt || item.createdAt))}</td>
-            </tr>
-        `).join('') || '<tr><td colspan="5" class="doc-tool-empty-cell">暂无任务</td></tr>');
-        document.getElementById('ocr-prev-page')?.toggleAttribute('disabled', state.page <= 1);
-        document.getElementById('ocr-next-page')?.toggleAttribute('disabled', state.page * state.limit >= state.total);
+        html.setHtml(tbody, state.jobs.map((item, index) => {
+            const engine = item.config?.engine || item.config?.ocrEngine || '-';
+            const language = item.config?.language || item.config?.lang || '';
+            return `
+                <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}" data-ocr-job-id="${esc(item.id)}">
+                    <td class="text-center">${offset + index + 1}</td>
+                    <td title="${esc(item.file?.originalName || '')}">
+                        <strong class="doc-tool-file-title">${esc(item.file?.originalName || `任务 ${item.id}`)}</strong>
+                        <span class="doc-tool-file-meta">${esc(item.file?.fileExt || '')} · ${formatBytes(item.file?.fileSize)}</span>
+                    </td>
+                    <td title="${esc([engine, language].filter(Boolean).join(' / '))}">${esc(engine)}${language ? '<span class="doc-tool-file-meta">' + esc(language) + '</span>' : ''}</td>
+                    <td class="text-center"><span class="doc-tool-badge ${statusTone(item.status)}">${statusLabel(item.status)}</span></td>
+                    <td class="text-center">${Number(item.progress || 0)}%</td>
+                    <td title="${esc(formatTime(item.updatedAt || item.createdAt))}">${esc(formatTime(item.updatedAt || item.createdAt))}</td>
+                    <td class="text-center"><div class="doc-tool-row-actions">${renderOcrRowActions(item)}</div></td>
+                </tr>
+            `;
+        }).join('') || '<tr><td colspan="7" class="doc-tool-empty-cell">暂无任务</td></tr>');
+        renderJobPagination();
+    }
+
+    function renderJobPagination() {
+        const pager = document.getElementById('ocr-job-pagination');
+        if (!pager) return;
+        if (typeof window.renderWorkspacePagination !== 'function') {
+            pager.replaceChildren();
+            return;
+        }
+        window.renderWorkspacePagination(pager, {
+            total: state.total,
+            page: state.page,
+            limit: state.limit,
+            onPageChange: targetPage => {
+                const nextPage = Math.max(Number(targetPage) || 1, 1);
+                if (nextPage === state.page) return;
+                state.page = nextPage;
+                loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
+            }
+        });
     }
 
     function renderOutputs(outputs = []) {
@@ -349,10 +454,12 @@
         if (!box) return;
         const detail = state.detail;
         if (!detail?.job) {
+            setDetailHeader(null);
             html.setHtml(box, '<div class="doc-tool-empty-detail">选择任务查看页面、文本和输出</div>');
             return;
         }
         const job = detail.job;
+        setDetailHeader(detail);
         const page = activePage();
         const review = page ? reviewForPage(page.id) : null;
         const text = review?.revisedText ?? page?.text ?? '';
@@ -428,18 +535,17 @@
         state.total = Number(data.total || 0);
         state.queue = data.queue || null;
         if (!keepActive || !state.jobs.some(item => String(item.id) === String(state.activeJobId))) {
-            state.activeJobId = state.jobs[0]?.id ? String(state.jobs[0].id) : '';
+            state.activeJobId = '';
+            state.activePageId = '';
+            state.detail = null;
         }
         renderJobs();
-        if (state.activeJobId) await loadDetail(state.activeJobId, { silent: true });
-        else {
-            state.detail = null;
-            renderDetail();
-        }
+        if (state.activeJobId && isDetailPanelOpen()) await loadDetail(state.activeJobId, { silent: true, openPanel: false });
+        else renderDetail();
     }
 
-    async function loadDetail(jobId, { silent = false } = {}) {
-        if (!jobId) return;
+    async function loadDetail(jobId, { silent = false, openPanel = true } = {}) {
+        if (!jobId) return null;
         const data = await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`);
         state.detail = data;
         state.activeJobId = String(data.job?.id || jobId);
@@ -447,7 +553,9 @@
             state.activePageId = data.pages?.[0]?.id ? String(data.pages[0].id) : '';
         }
         render();
+        if (openPanel) openDetailPanel();
         if (!silent) toast('任务详情已更新');
+        return data;
     }
 
     async function submitUpload(form) {
@@ -602,6 +710,21 @@
         await loadDetail(state.activeJobId, { silent: true });
     }
 
+    async function downloadJobOutput(jobId) {
+        const row = state.jobs.find(item => String(item.id) === String(jobId));
+        const rowOutput = selectOutput(resultOutputs(row), 'text');
+        if (rowOutput?.id) {
+            await downloadOutput(rowOutput.id, rowOutput.fileName);
+            return;
+        }
+        const detail = await loadDetail(jobId, { silent: true, openPanel: false });
+        const output = selectOutput(detail?.outputs, 'text');
+        if (!output?.id) {
+            toast('该任务暂无可下载输出', 'warning');
+            return;
+        }
+        await downloadOutput(output.id, output.fileName);
+    }
     async function retryJob(jobId) {
         await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
         toast('任务已重新排队', 'success');
@@ -628,11 +751,18 @@
                 state.page = 1;
                 loadJobs({ keepActive: false }).catch(e => toast(e.message || '任务加载失败', 'error'));
             }
+            if (event.target?.id === 'ocr-engine-select') {
+                renderEngines();
+            }
         });
         view.addEventListener('click', event => {
             const open = event.target.closest('[data-ocr-job-open]');
             if (open) {
                 loadDetail(open.dataset.ocrJobOpen).catch(e => toast(e.message || '任务详情加载失败', 'error'));
+                return;
+            }
+            if (event.target.closest('[data-ocr-close-detail]')) {
+                closeDetailPanel();
                 return;
             }
             const page = event.target.closest('[data-ocr-page-id]');
@@ -644,20 +774,6 @@
             if (event.target.closest('#ocr-refresh-btn')) {
                 loadJobs({ keepActive: true }).catch(e => toast(e.message || '刷新失败', 'error'));
                 loadEngines();
-                return;
-            }
-            if (event.target.closest('#ocr-prev-page')) {
-                if (state.page > 1) {
-                    state.page -= 1;
-                    loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
-                }
-                return;
-            }
-            if (event.target.closest('#ocr-next-page')) {
-                if (state.page * state.limit < state.total) {
-                    state.page += 1;
-                    loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
-                }
                 return;
             }
             const shareBtn = event.target.closest('[data-ocr-share]');
@@ -679,6 +795,11 @@
             const output = event.target.closest('[data-ocr-output-download]');
             if (output) {
                 downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
+                return;
+            }
+            const rowDownload = event.target.closest('[data-ocr-job-download]');
+            if (rowDownload) {
+                downloadJobOutput(rowDownload.dataset.ocrJobDownload).catch(e => toast(e.message || '下载失败', 'error'));
                 return;
             }
             const save = event.target.closest('[data-ocr-page-save]');

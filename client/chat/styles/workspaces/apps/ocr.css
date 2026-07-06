@@ -180,18 +180,29 @@
 .doc-tool-table-wrap {
     flex: 0 0 auto;
     max-height: 220px;
-    border-width: 0 0 1px;
-    border-radius: 0;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #fff;
     overflow: auto;
 }
 
 .doc-tool-table {
     min-width: 760px;
+    border-collapse: collapse;
 }
 
 .doc-tool-table th,
 .doc-tool-table td {
+    height: 38px;
+    min-height: 38px;
+    padding: 6px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.13);
+    line-height: 1.25;
     vertical-align: middle;
+}
+
+.doc-tool-table th {
+    background: #f8fafc;
 }
 
 .doc-tool-row {
@@ -205,6 +216,7 @@
 .doc-tool-link {
     display: block;
     max-width: 100%;
+    line-height: 1.25;
     border: 0;
     background: transparent;
     color: var(--text-main);
@@ -228,7 +240,7 @@
     display: block;
     color: var(--text-muted);
     font-size: 0.7rem;
-    line-height: 1.3;
+    line-height: 1.25;
     margin-top: 2px;
 }
 
@@ -257,6 +269,11 @@
 .doc-tool-engine.is-warning {
     background: rgba(245, 158, 11, 0.12);
     color: #92400e;
+}
+
+.doc-tool-engine.is-muted {
+    background: rgba(100, 116, 139, 0.08);
+    color: #64748b;
 }
 
 .doc-tool-badge.is-danger {
@@ -582,6 +599,174 @@
     box-shadow: inset 3px 0 0 rgba(37, 99, 235, 0.85);
 }
 
+
+/* Regulations-style task table and modal layout for OCR / PDF tools. */
+.doc-tool-main {
+    padding: 12px 14px 10px;
+    gap: 0;
+}
+
+.doc-tool-toolbar {
+    flex: 0 0 auto;
+    min-height: 0;
+    justify-content: space-between;
+    padding: 0 0 8px;
+    margin: 0 0 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.doc-tool-toolbar-title {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.doc-tool-toolbar-title h4 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+.doc-tool-toolbar-title span {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+}
+
+.doc-tool-table-wrap {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    margin: 0;
+    scrollbar-gutter: stable;
+}
+
+.ocr-job-table,
+.pdf-job-table {
+    min-width: 1080px;
+}
+
+.doc-tool-table tbody td {
+    height: 40px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    vertical-align: middle;
+}
+
+.doc-tool-file-title {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doc-tool-file-meta {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doc-tool-table .doc-tool-file-meta {
+    display: none;
+}
+
+.doc-tool-row-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 24px;
+}
+
+.doc-tool-row-actions .doc-tool-row-action {
+    display: inline-flex;
+    min-width: 0;
+    height: 22px;
+    min-height: 22px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 0.66rem;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.doc-tool-row-actions .doc-tool-row-action:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
+.doc-tool-detail-panel:not(.hidden) {
+    position: fixed;
+    inset: 0;
+    z-index: 6200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 20px;
+    border: 0;
+    background: rgba(15, 23, 42, 0.42);
+}
+
+.workspace-modal.doc-tool-dialog {
+    width: min(1120px, calc(100vw - 32px));
+    height: min(760px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.workspace-modal.ocr-detail-dialog {
+    width: min(1500px, calc(100vw - 28px));
+    height: min(860px, calc(100vh - 28px));
+}
+
+.workspace-modal.pdf-detail-dialog {
+    width: min(1040px, calc(100vw - 32px));
+    height: min(620px, calc(100vh - 32px));
+}
+
+.doc-tool-modal-body.ocr-detail,
+.doc-tool-modal-body.pdf-detail {
+    flex: 1;
+    min-height: 0;
+    padding: 12px 14px 14px;
+    overflow: hidden;
+    background: #f8fafc;
+}
+
+.pdf-output-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    align-content: start;
+    gap: 8px;
+    overflow: auto;
+}
+
+.pdf-output-list .doc-tool-output-btn,
+.ocr-output-strip .doc-tool-output-btn {
+    justify-content: flex-start;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 @media (max-width: 1180px) {
     .doc-tool-layout {
         grid-template-columns: 1fr;

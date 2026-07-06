@@ -174,34 +174,43 @@
                 </aside>
 
                 <main class="workspace-panel doc-tool-main pdf-tools-main">
-                    <div class="doc-tool-main-head">
-                        <div>
+                    <div class="workspace-toolbar doc-tool-toolbar">
+                        <div class="doc-tool-toolbar-title">
                             <h4>PDF 工具任务</h4>
                             <span id="pdf-list-summary">0 个任务</span>
                         </div>
-                        <div class="doc-tool-head-actions">
-                            <button id="pdf-prev-page" class="btn-secondary" type="button">上一页</button>
-                            <button id="pdf-next-page" class="btn-secondary" type="button">下一页</button>
-                        </div>
                     </div>
                     <div class="table-container workspace-table-wrap doc-tool-table-wrap">
-                        <table class="data-table compact-table doc-tool-table">
+                        <table class="data-table compact-table doc-tool-table pdf-job-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 58px;" class="text-center">序号</th>
-                                    <th>文件</th>
-                                    <th style="width: 118px;">操作</th>
-                                    <th style="width: 100px;" class="text-center">状态</th>
-                                    <th style="width: 96px;" class="text-center">进度</th>
-                                    <th style="width: 150px;">更新时间</th>
+                                    <th style="width: 54px;" class="text-center">序号</th>
+                                    <th style="width: 330px;">文件</th>
+                                    <th style="width: 118px;">处理方式</th>
+                                    <th style="width: 86px;" class="text-center">状态</th>
+                                    <th style="width: 76px;" class="text-center">进度</th>
+                                    <th style="width: 140px;">更新时间</th>
+                                    <th style="width: 196px;" class="text-center">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="pdf-job-table-body"></tbody>
                         </table>
                     </div>
-                    <div id="pdf-detail" class="pdf-detail"></div>
+                    <div id="pdf-job-pagination" class="pagination workspace-pagination"></div>
                 </main>
             </div>
+            <section id="pdf-detail-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-detail-title">
+                <div class="workspace-modal doc-tool-dialog pdf-detail-dialog">
+                    <div class="workspace-modal-header">
+                        <div>
+                            <h3 id="pdf-detail-title">PDF 处理结果</h3>
+                            <p id="pdf-detail-subtitle">查看任务摘要并下载输出文件。</p>
+                        </div>
+                        <button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-detail>关闭</button>
+                    </div>
+                    <div id="pdf-detail" class="workspace-modal-body doc-tool-modal-body pdf-detail"></div>
+                </div>
+            </section>
         `);
         view.dataset.ready = '1';
         bindEvents(view);
@@ -209,6 +218,53 @@
         return view;
     }
 
+    function resultOutputs(job) {
+        return Array.isArray(job?.result?.outputs) ? job.result.outputs.filter(Boolean) : [];
+    }
+
+    function selectOutput(outputs = []) {
+        const list = Array.isArray(outputs) ? outputs.filter(output => output?.id) : [];
+        return list[0] || null;
+    }
+
+    function renderPdfRowActions(item) {
+        const outputs = resultOutputs(item);
+        const canDownload = item.status === 'succeeded' || outputs.length > 0;
+        const canCancel = item.status === 'pending' || item.status === 'processing';
+        const canRetry = ['failed', 'cancelled', 'needs_review', 'succeeded'].includes(item.status);
+        return [
+            '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-open="' + esc(item.id) + '">查看</button>',
+            '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-download="' + esc(item.id) + '"' + (canDownload ? '' : ' disabled') + '>下载</button>',
+            canCancel ? '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-cancel="' + esc(item.id) + '">取消</button>' : '',
+            canRetry ? '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-retry="' + esc(item.id) + '">重试</button>' : ''
+        ].filter(Boolean).join('');
+    }
+
+    function isDetailPanelOpen() {
+        return !document.getElementById('pdf-detail-panel')?.classList.contains('hidden');
+    }
+
+    function openDetailPanel() {
+        document.getElementById('pdf-detail-panel')?.classList.remove('hidden');
+    }
+
+    function closeDetailPanel() {
+        document.getElementById('pdf-detail-panel')?.classList.add('hidden');
+    }
+
+    function setDetailHeader(detail) {
+        const title = document.getElementById('pdf-detail-title');
+        const subtitle = document.getElementById('pdf-detail-subtitle');
+        if (!title || !subtitle) return;
+        if (!detail?.job) {
+            title.textContent = 'PDF 处理结果';
+            subtitle.textContent = '查看任务摘要并下载输出文件。';
+            return;
+        }
+        const operation = detail.job?.config?.operation || detail.job?.result?.operation || '';
+        title.textContent = detail.file?.originalName || `任务 ${detail.job.id}`;
+        subtitle.textContent = `${operationLabel(operation)} · ${statusLabel(detail.job.status)} · ${Number(detail.job.progress || 0)}%`;
+    }
     function renderJobs() {
         const tbody = document.getElementById('pdf-job-table-body');
         const summary = document.getElementById('pdf-list-summary');
@@ -218,21 +274,41 @@
         html.setHtml(tbody, state.jobs.map((item, index) => {
             const operation = item.config?.operation || item.config?.pdfOperation || '';
             return `
-                <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}">
+                <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}" data-pdf-job-id="${esc(item.id)}">
                     <td class="text-center">${offset + index + 1}</td>
-                    <td>
-                        <button class="doc-tool-link" type="button" data-pdf-job-open="${esc(item.id)}">${esc(item.file?.originalName || `任务 ${item.id}`)}</button>
-                        <small>${esc(item.file?.fileExt || '')} ${formatBytes(item.file?.fileSize)}</small>
+                    <td title="${esc(item.file?.originalName || '')}">
+                        <strong class="doc-tool-file-title">${esc(item.file?.originalName || `任务 ${item.id}`)}</strong>
+                        <span class="doc-tool-file-meta">${esc(item.file?.fileExt || '')} · ${formatBytes(item.file?.fileSize)}</span>
                     </td>
-                    <td>${esc(operationLabel(operation))}</td>
+                    <td title="${esc(operationLabel(operation))}">${esc(operationLabel(operation))}</td>
                     <td class="text-center"><span class="doc-tool-badge ${statusTone(item.status)}">${statusLabel(item.status)}</span></td>
                     <td class="text-center">${Number(item.progress || 0)}%</td>
-                    <td>${esc(formatTime(item.updatedAt || item.createdAt))}</td>
+                    <td title="${esc(formatTime(item.updatedAt || item.createdAt))}">${esc(formatTime(item.updatedAt || item.createdAt))}</td>
+                    <td class="text-center"><div class="doc-tool-row-actions">${renderPdfRowActions(item)}</div></td>
                 </tr>
             `;
-        }).join('') || '<tr><td colspan="6" class="doc-tool-empty-cell">暂无任务</td></tr>');
-        document.getElementById('pdf-prev-page')?.toggleAttribute('disabled', state.page <= 1);
-        document.getElementById('pdf-next-page')?.toggleAttribute('disabled', state.page * state.limit >= state.total);
+        }).join('') || '<tr><td colspan="7" class="doc-tool-empty-cell">暂无任务</td></tr>');
+        renderJobPagination();
+    }
+
+    function renderJobPagination() {
+        const pager = document.getElementById('pdf-job-pagination');
+        if (!pager) return;
+        if (typeof window.renderWorkspacePagination !== 'function') {
+            pager.replaceChildren();
+            return;
+        }
+        window.renderWorkspacePagination(pager, {
+            total: state.total,
+            page: state.page,
+            limit: state.limit,
+            onPageChange: targetPage => {
+                const nextPage = Math.max(Number(targetPage) || 1, 1);
+                if (nextPage === state.page) return;
+                state.page = nextPage;
+                loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
+            }
+        });
     }
 
     function renderOutputs(outputs = []) {
@@ -260,10 +336,12 @@
         if (!box) return;
         const detail = state.detail;
         if (!detail?.job) {
+            setDetailHeader(null);
             html.setHtml(box, '<div class="doc-tool-empty-detail">选择任务查看输出</div>');
             return;
         }
         const job = detail.job;
+        setDetailHeader(detail);
         html.setHtml(box, `
             <section class="pdf-detail-head">
                 <div>
@@ -303,23 +381,23 @@
         state.jobs = Array.isArray(data.data) ? data.data : [];
         state.total = Number(data.total || 0);
         if (!keepActive || !state.jobs.some(item => String(item.id) === String(state.activeJobId))) {
-            state.activeJobId = state.jobs[0]?.id ? String(state.jobs[0].id) : '';
+            state.activeJobId = '';
+            state.detail = null;
         }
         renderJobs();
-        if (state.activeJobId) await loadDetail(state.activeJobId, { silent: true });
-        else {
-            state.detail = null;
-            renderDetail();
-        }
+        if (state.activeJobId && isDetailPanelOpen()) await loadDetail(state.activeJobId, { silent: true, openPanel: false });
+        else renderDetail();
     }
 
-    async function loadDetail(jobId, { silent = false } = {}) {
-        if (!jobId) return;
+    async function loadDetail(jobId, { silent = false, openPanel = true } = {}) {
+        if (!jobId) return null;
         const data = await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`);
         state.detail = data;
         state.activeJobId = String(data.job?.id || jobId);
         render();
+        if (openPanel) openDetailPanel();
         if (!silent) toast('任务详情已更新');
+        return data;
     }
 
     async function submitJob(form) {
@@ -377,6 +455,26 @@
         URL.revokeObjectURL(url);
     }
 
+    async function downloadJobOutputs(jobId) {
+        const row = state.jobs.find(item => String(item.id) === String(jobId));
+        const rowOutput = selectOutput(resultOutputs(row));
+        if (rowOutput?.id && resultOutputs(row).length === 1) {
+            await downloadOutput(rowOutput.id, rowOutput.fileName);
+            return;
+        }
+        const detail = await loadDetail(jobId, { silent: true, openPanel: false });
+        const outputs = Array.isArray(detail?.outputs) ? detail.outputs.filter(output => output?.id) : [];
+        if (!outputs.length) {
+            toast('该任务暂无可下载输出', 'warning');
+            return;
+        }
+        if (outputs.length === 1) {
+            await downloadOutput(outputs[0].id, outputs[0].fileName);
+            return;
+        }
+        openDetailPanel();
+        toast('该任务有多个输出，请在详情中选择下载文件', 'warning');
+    }
     async function retryJob(jobId) {
         await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
         toast('任务已重新排队', 'success');
@@ -414,27 +512,22 @@
                 loadDetail(open.dataset.pdfJobOpen).catch(e => toast(e.message || '任务详情加载失败', 'error'));
                 return;
             }
+            if (event.target.closest('[data-pdf-close-detail]')) {
+                closeDetailPanel();
+                return;
+            }
             if (event.target.closest('#pdf-refresh-btn')) {
                 loadJobs({ keepActive: true }).catch(e => toast(e.message || '刷新失败', 'error'));
-                return;
-            }
-            if (event.target.closest('#pdf-prev-page')) {
-                if (state.page > 1) {
-                    state.page -= 1;
-                    loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
-                }
-                return;
-            }
-            if (event.target.closest('#pdf-next-page')) {
-                if (state.page * state.limit < state.total) {
-                    state.page += 1;
-                    loadJobs({ keepActive: false }).catch(e => toast(e.message || '翻页失败', 'error'));
-                }
                 return;
             }
             const output = event.target.closest('[data-pdf-output-download]');
             if (output) {
                 downloadOutput(output.dataset.pdfOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
+                return;
+            }
+            const rowDownload = event.target.closest('[data-pdf-job-download]');
+            if (rowDownload) {
+                downloadJobOutputs(rowDownload.dataset.pdfJobDownload).catch(e => toast(e.message || '下载失败', 'error'));
                 return;
             }
             const retry = event.target.closest('[data-pdf-job-retry]');

@@ -707,8 +707,14 @@ async function processJob(jobId) {
 function retryJob({ userId, jobId }) {
     const job = getJobRow(jobId, userId);
     if (!job) return null;
-    if (![JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
-        const error = new Error('只有失败、待复核或已取消任务可以重试。');
+    const retryableStatuses = [
+        JOB_STATUSES.FAILED,
+        JOB_STATUSES.NEEDS_REVIEW,
+        JOB_STATUSES.CANCELLED,
+        JOB_STATUSES.SUCCEEDED
+    ];
+    if (!retryableStatuses.includes(job.status)) {
+        const error = new Error('只有失败、待复核、已取消或已完成任务可以重试。');
         error.status = 409;
         throw error;
     }

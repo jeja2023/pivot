@@ -1,4 +1,4 @@
-﻿const {
+const {
     assert,
     db,
     fs,
@@ -18,7 +18,7 @@ const {
 } = require('../server/services/document-processing');
 const { documentRoot, resolveStoredDocumentPath } = require('../server/services/document-processing/paths');
 const { PDFDocument } = require('pdf-lib');
-const { parsePaddleOutput } = require('../server/services/document-processing/ocr/adapters/paddle');
+const { normalizePaddleDiagnostic, parsePaddleOutput } = require('../server/services/document-processing/ocr/adapters/paddle');
 
 async function waitForDocumentJob(userId, jobId, timeoutMs = 5000) {
     const startedAt = Date.now();
@@ -130,6 +130,23 @@ test('PaddleOCR 输出解析会保留文本、坐标和置信度', () => {
     assert.equal(blocks[1].confidence, 0.88);
 });
 
+test('PaddleOCR 3.x 输出解析会保留识别文本和置信度', () => {
+    const output = "{'rec_texts': ['测试文字', '第二行'], 'rec_scores': [0.93, 88.0], 'rec_polys': [array([[1, 2], [3, 2]], dtype=int16), array([[5, 6], [7, 6]], dtype=int16)]}";
+    const blocks = parsePaddleOutput(output);
+    assert.equal(blocks.length, 2);
+    assert.equal(blocks[0].text, '测试文字');
+    assert.equal(blocks[0].confidence, 0.93);
+    assert.equal(blocks[1].text, '第二行');
+    assert.equal(blocks[1].confidence, 0.88);
+});
+test('PaddleOCR diagnostics ignore ANSI font notices', () => {
+    const warning = '\u001b[33mUsing the local font file(models/paddleocr/fonts/simfang.ttf) specified by LOCAL_FONT_FILE_PATH\u001b[0m';
+    assert.equal(normalizePaddleDiagnostic(warning), '');
+    const blocks = parsePaddleOutput(warning + "\n{'rec_texts': ['hello'], 'rec_scores': [0.91]}");
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].text, 'hello');
+    assert.equal(blocks[0].confidence, 0.91);
+});
 test('PDF tools merge multiple PDFs into one output', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

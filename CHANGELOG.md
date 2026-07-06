@@ -1,3 +1,41 @@
+## [v0.0.196] - 2026-07-06
+
+### 文档处理离线部署、PaddleOCR 3.x 升级与 OCR/PDF 工具界面收口
+
+本版本围绕文字识别和 PDF 工具从功能可用继续收口到可部署、可维护、可反复使用：升级 PaddleOCR 3.x 与 PP-OCRv6，本地开发环境可直接使用项目目录模型，生产 Docker 部署支持外部挂载模型目录；同时把文字识别和 PDF 工具的任务列表对齐法规查询的数据表格布局，处理结果改为通过查看弹窗或下载入口进入，不再直接铺在主页面上。
+
+#### OCR 引擎与识别质量
+
+- **PaddleOCR 3.x 升级**：默认启用 PaddleOCR 3.x CLI，使用 PP-OCRv6 作为当前轻量 OCR 模型，并保留 legacy 模式兼容旧版命令参数。
+- **本地 PP-OCRv6 模型准备**：本地开发环境使用 models/paddleocr/det、models/paddleocr/rec、models/paddleocr/cls 和字体目录，模型文件不进入 Git 与 Docker 镜像层。
+- **Windows 中文识别乱码修复**：OCR 子进程显式设置 UTF-8 环境变量，修复 Windows 下 PaddleOCR 输出中文被解析成乱码的问题。
+- **PaddleOCR 3.x 输出解析**：适配新版输出结构中的 rec_texts 与 rec_scores，识别结果能正确还原为页面文本块和置信度。
+- **识别结果可重新生成**：已完成的 OCR 任务允许重试，便于模型、DPI、语言或编码配置调整后重新识别。
+- **Tesseract 定位收口**：PaddleOCR 作为默认 OCR 引擎，Tesseract 仅作为可选备用能力；未安装时页面显示可选状态，不阻断默认识别流程。
+
+#### 文字识别与 PDF 工具界面
+
+- **任务表格统一**：文字识别和 PDF 工具的任务列表对齐法规查询的数据表格布局，统一表头、边框、行高、状态徽章和操作列。
+- **全局分页控件复用**：两个应用的任务分页改用全局统一分页控件，避免局部私有分页样式继续扩散。
+- **主页面结果收口**：OCR 识别结果、页面预览、置信度明细和 PDF 输出列表不再直接堆叠在主页面，改为点击查看后在弹窗中查看。
+- **下载入口补齐**：OCR 导出文件和 PDF 处理输出都在任务表格操作列提供下载入口；PDF 多输出任务会在查看弹窗中列出每个结果文件。
+- **表格单元格更克制**：任务表格文件列、识别引擎列等只显示主信息，不再显示第二行文件类型、大小或语言等辅助文字，行高保持一致。
+- **操作语义统一**：任务表格统一提供查看 / 下载 / 重试 / 取消等操作，减少页面顶部和详情区按钮堆叠造成的混乱。
+
+#### Docker 离线部署与配置
+
+- **模型外部挂载路径调整**：生产 Docker 部署通过 ./models/paddleocr:/app/models/paddleocr 挂载模型目录，统一落在容器 /app 业务目录下，避免使用 /root/.paddleocr。
+- **镜像瘦身策略明确**：PaddleOCR 模型文件通过宿主机目录提供，不写入 Docker 镜像，便于离线生产环境更新模型而不重构镜像。
+- **环境变量对齐**：.env 与 .env.example 中 PaddleOCR 相关配置保持一致，补齐模型目录、CLI 版本、OCR 版本和下载开关等配置项。
+- **离线部署文档补齐**：新增 PaddleOCR 模型外部挂载说明和生产离线部署说明，补充模型准备、目录结构、Compose 挂载和环境变量配置。
+- **单一 Compose 文件维护**：离线部署继续使用 docker-compose.yml，不再额外维护 docker-compose.offline.yml。
+
+#### 文档与验证
+
+- **版本文档同步**：更新 CHANGELOG.md、README、使用帮助、项目汇报、package.json 和 package-lock.json，启用 v0.0.196。
+- **配置一致性检查**：确认 .env 与 .env.example 的配置项结构一致，避免生产部署遗漏 PaddleOCR 配置。
+- **回归验证通过**：已通过 npm run check、node --test tests/document-processing.test.js 和 git diff --check；并通过 Playwright 验证 OCR/PDF 工具主页面不再直接展示处理结果，查看弹窗与下载入口可用。
+
 ## [v0.0.195] - 2026-07-06
 
 ### 文档处理底座落地、文字识别/PDF 工具应用与全局样式统一

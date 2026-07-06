@@ -1,4 +1,4 @@
-﻿const paddle = require('./adapters/paddle');
+const paddle = require('./adapters/paddle');
 const tesseract = require('./adapters/tesseract');
 const vision = require('./adapters/vision');
 
@@ -6,6 +6,24 @@ const ADAPTERS = Object.freeze({
     paddle,
     tesseract,
     vision
+});
+
+const ENGINE_META = Object.freeze({
+    paddle: {
+        label: 'PaddleOCR',
+        description: '默认批量 OCR 引擎'
+    },
+    tesseract: {
+        label: 'Tesseract',
+        optional: true,
+        description: '可选 OCR 引擎，未安装时不影响 PaddleOCR'
+    },
+    vision: {
+        label: '视觉模型',
+        optional: true,
+        auxiliary: true,
+        description: '复杂版面复核辅助能力，当前不作为批量 OCR 引擎'
+    }
 });
 
 function normalizeEngine(value) {
@@ -32,11 +50,24 @@ async function recognizePage(imagePath, options = {}) {
 }
 
 async function getOcrEngineStatus() {
+    const defaultEngine = normalizeEngine();
     const entries = await Promise.all(Object.entries(ADAPTERS).map(async ([engine, adapter]) => {
+        const meta = ENGINE_META[engine] || {};
         try {
-            return [engine, await adapter.checkAvailability()];
+            return [engine, {
+                engine,
+                default: engine === defaultEngine,
+                ...meta,
+                ...await adapter.checkAvailability()
+            }];
         } catch (error) {
-            return [engine, { available: false, error: error.message }];
+            return [engine, {
+                engine,
+                default: engine === defaultEngine,
+                ...meta,
+                available: false,
+                error: error.message
+            }];
         }
     }));
     return Object.fromEntries(entries);

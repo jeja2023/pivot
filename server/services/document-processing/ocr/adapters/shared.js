@@ -1,11 +1,12 @@
-﻿const { execFile } = require('child_process');
+const { execFile } = require('child_process');
 
 function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
         execFile(command, args, {
             timeout: options.timeoutMs || 120000,
             windowsHide: true,
-            maxBuffer: options.maxBuffer || 10 * 1024 * 1024
+            maxBuffer: options.maxBuffer || 10 * 1024 * 1024,
+            env: { ...process.env, ...(options.env || {}) }
         }, (error, stdout, stderr) => {
             if (error) {
                 const message = error.code === 'ENOENT'
@@ -13,6 +14,8 @@ function runCommand(command, args, options = {}) {
                     : String(stderr || error.message || 'OCR 引擎执行失败').split('\n')[0].slice(0, 500);
                 const err = new Error(message);
                 err.code = error.code || 'OCR_COMMAND_FAILED';
+                err.stdout = String(stdout || '');
+                err.stderr = String(stderr || '');
                 reject(err);
                 return;
             }
