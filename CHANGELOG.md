@@ -1,17 +1,234 @@
+## [v0.0.205] - 2026-07-07
+
+### 本轮修改优化归档与版本号启用
+
+本版本把当前工作区自 `v0.0.197` 至 `v0.0.204` 的功能、体验、部署和安全边界变更统一归档为新的发布口径，便于后续以 `v0.0.205` 作为当前版本进行打包、部署、验收和问题追踪。下方各小版本继续保留完整明细，本节用于汇总“当前所有修改和优化”的发布说明。
+
+#### 重点变更归档
+
+- **工具箱与数据分析收口**：工具箱首页完成数据来源重组、服务器可访问数据库/报表目录命名落地、SQLite 数据集导入、已导入数据集摘要入口、轻量统计接口、数据管理单入口、admin 多用户工具折叠摘要和宽扁卡片可读性修复。
+- **文档处理、OCR 与 PDF 工具**：OCR 能力彻底外置为独立 HTTP 服务，Pivot 主项目只保留 HTTP OCR 客户端和对接协议；文字识别与 PDF 工具补齐任务删除、受控产物清理、多输出 ZIP 下载、统一表格/弹窗化结果查看和外部 OCR 服务配置口径。
+- **本机能力与 MCP 治理**：桌面端/本地助手授权中心启用，工具箱“我的电脑”入口可查看、选择和撤销本机 SQLite 文件或报表目录授权；完整本机路径保留在桌面端本机配置中，页面和服务器仅展示安全摘要。
+- **桌面客户端更新链路**：Windows 桌面端自动更新接入服务器 `/downloads/` 发布目录，打包产物可自动归档；生产 HTTPS 更新源继续保持默认安全边界，同时支持无互联网局域网在显式开关和来源白名单下使用 HTTP 更新。
+- **部署与文档体系**：新增 OCR 服务对接协议、独立 OCR 项目搭建指南，删除 Pivot 仓库内 PaddleOCR 外部挂载旧文档口径；同步更新远程部署、Docker 客户端下载、生产离线部署、downloads 发布目录、使用帮助、项目汇报和开发规范。
+
+#### 版本与文档同步
+
+- **版本号启用**：应用版本升级至 `v0.0.205`，以 `CHANGELOG.md` 顶部版本作为运行时和发布文档的当前版本锚点。
+- **文档同步**：README、使用帮助、项目汇报和更新日志新增 `v0.0.205` 汇总说明，并继续保留下方 `v0.0.197` 至 `v0.0.204` 的逐版本详情。
+- **包版本同步**：`package.json` 与 `package-lock.json` 已通过版本同步脚本更新为 `0.0.205`，确保桌面打包、服务端版本读取和文档展示一致。
+- **验证口径**：本轮文档与版本同步后已通过 `git diff --check`、`npm run check:text` 和 `npm run check`；各能力的具体测试覆盖和打包验证继续见对应小版本条目。
+
+## [v0.0.204] - 2026-07-07
+
+### 离线局域网 HTTP 客户端自动更新放行
+
+本版本针对生产环境无互联网、无 HTTPS 证书、仅内网 HTTP 的部署约束，补齐桌面客户端自动更新的受控 HTTP 模式：管理员可以在 `config.json` 中显式设置 `autoUpdate.allowInsecureHttp=true`，并通过 `autoUpdate.allowedOrigins` 绑定固定内网服务地址，让客户端从局域网 `http://.../downloads/` 读取 `latest.yml` 并下载安装新版本。
+
+#### 局域网 HTTP 更新策略
+
+- **显式开关**：新增 `autoUpdate.allowInsecureHttp` 配置，默认 `false`；只有显式开启时才允许非 HTTPS 更新源。
+- **来源白名单必填**：非 loopback 的 HTTP 更新源必须配置 `autoUpdate.allowedOrigins`，并且更新 URL 的 origin 必须命中白名单，避免客户端被改到任意 HTTP 地址。
+- **同站推导继续可用**：当 `autoUpdate.url` 为空时，仍基于 `remoteUrl + autoUpdate.path` 推导更新源；内网 HTTP 场景会得到类似 `http://pivot.example.local:3000/downloads/` 的 feed。
+- **运行时二次校验**：`desktop/updater.js` 在调用 `electron-updater` 前继续复核 `allowInsecureHttp`、`allowedOrigins` 和最终 feed URL。
+
+#### 配置与文档
+
+- **内网模板更新**：`config.example.json` 改为 `Production LAN` 示例，展示 `remoteUrl=http://pivot.example.local:3000/`、`allowInsecureHttp=true` 和 `allowedOrigins` 的组合。
+- **部署说明同步**：更新远程模式部署说明、downloads 目录说明、Docker 客户端下载说明、README、使用帮助和项目汇报，明确离线局域网 HTTP 可以启用自动更新，但应固定 IP/域名并限制来源。
+- **版本号启用**：应用版本升级至 `v0.0.204`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证与打包**：新增局域网 HTTP 自动更新策略测试，覆盖允许白名单 HTTP、拒绝无白名单 HTTP、拒绝白名单不匹配 HTTP，并验证 `normalizeConfig` 可推导内网 HTTP `/downloads/` feed；已通过 `node tests\\security-desktop-update.test.js`、`npm run check` 和 `npm run dist:win`，最终安装包、`.blockmap` 与 `latest.yml` 已写入 `downloads/`。
+
+## [v0.0.203] - 2026-07-07
+
+### 桌面客户端自动更新接入 downloads 发布目录
+
+本版本把 Windows 桌面客户端的自动更新链路接到服务器同站 `/downloads/` 目录：生产环境只需要在 HTTPS 站点开启 `autoUpdate.enabled`，打包产物放入或挂载到 `downloads/`，已安装客户端即可通过 `latest.yml` 检测新版本、下载并提示重启安装；手工下载入口继续使用 `downloads/Pivot-Setup.exe`。
+
+#### 桌面端自动更新
+
+- **同站更新源推导**：`desktop/config.js` 新增 `autoUpdate.path`，默认 `/downloads/`；当 `autoUpdate.enabled=true` 且未显式填写 `autoUpdate.url` 时，会基于 `remoteUrl` 自动推导更新源。
+- **更新源安全边界**：继续要求生产更新源使用 HTTPS；HTTP 仅允许在显式环境变量放开的 loopback 开发场景中使用，避免普通内网明文更新源被误启用。
+- **中文更新提示**：`desktop/updater.js` 的打包环境限制、下载完成、重启安装等提示改为中文，并在状态中暴露当前更新路径，便于排查配置。
+
+#### 打包与发布
+
+- **打包产物自动归档**：`npm run dist:win` 成功生成 NSIS 安装包后，会自动把 `Pivot Setup <version>.exe`、对应 `.blockmap` 和 `latest.yml` 复制到 `downloads/`，并同步生成 `downloads/Pivot-Setup.exe` 作为网页下载入口。
+- **调试构建不发布**：`npm run pack:win` / `--dir` 只生成未打包目录，不写入自动更新目录，避免把调试产物误当正式客户端发布。
+- **下载目录忽略规则**：`.gitignore` 补充忽略 `downloads/*.blockmap` 和 `downloads/latest.yml`，安装包与更新元数据由部署目录或 Docker volume 管理，不提交到仓库。
+
+#### 文档与验证
+
+- **部署文档同步**：更新 `downloads/README.md`、远程模式部署说明、README、使用帮助和项目汇报，明确自动更新所需文件、配置方式和 HTTPS 要求。
+- **版本号启用**：应用版本升级至 `v0.0.203`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证通过**：已通过 `node -c desktop\config.js`、`node -c desktop\updater.js`、`node -c scripts\package_desktop.js`、`node tests\security-desktop-update.test.js`、`npm run check` 和 `npm run dist:win`；最终安装包、`.blockmap` 与 `latest.yml` 已写入 `downloads/`。`node --test tests\security-desktop-update.test.js` 在当前沙箱触发 Node 子进程 `spawn EPERM`，改用直接执行测试文件完成同等断言验证。
+
+## [v0.0.202] - 2026-07-07
+
+### 桌面端/本地助手授权中心与工具箱本机入口启用
+
+本版本把工具箱中的“连接本机数据库”和“授权本机报表目录”从禁用预留入口推进为可点击的本机授权中心：桌面客户端提供只读授权状态桥，用户可以在授权中心选择本机 SQLite 文件或本机报表目录、查看当前设备授权状态并撤销授权；Web 页面仍不会直接读取用户电脑的 localhost、本机数据库或本机文件夹。
+
+#### 工具箱本机授权中心
+
+- **本机入口可点击**：工具箱“我的电脑”动作区的连接本机数据库、授权本机报表目录改为进入“本机授权中心”，并按桌面端/本地助手状态显示待授权、已授权或需客户端。
+- **授权中心弹窗**：新增本机授权中心弹窗，展示当前设备、本机桥状态、授权类型、安全边界和授权摘要，支持数据库与报表目录两类授权切换。
+- **首页状态联动**：授权或撤销后自动刷新工具箱首页，入口文案展示当前设备和授权摘要，不再只停留在静态“等待桌面端”说明。
+
+#### 桌面端安全桥
+
+- **桌面端授权桥**：Electron 主进程新增本机授权状态、授权选择和撤销 IPC；preload 只暴露受控方法给页面，不开放 Node.js 文件系统能力。
+- **本机路径不上传服务器**：授权明细保存在桌面客户端本机 `local-authorizations.json`，渲染层只拿到资源名称、设备名、授权时间和路径摘要，不返回完整本机绝对路径。
+- **安全边界保持只读预备态**：本版本只完成授权中心和状态记录，不执行本机数据库查询或目录扫描；后续查询/扫描仍需通过桌面端或本地助手只读执行器接入。
+
+#### 文档与验证
+
+- **帮助与项目文档同步**：更新 README、使用帮助、项目汇报、设计方案和 CHANGELOG，明确本机授权中心已经可进入，但本机执行器仍是后续阶段能力。
+- **版本号启用**：应用版本升级至 `v0.0.202`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证通过**：已通过 `node -c desktop\main.js`、`node -c desktop\preload.js`、`node -c client\chat\mcp-workbench-local-auth.js`、`node -c client\chat\mcp-workbench-common.js`、`node -c client\chat\mcp-workbench-main.js` 和 `npm run check`。
+
+## [v0.0.201] - 2026-07-07
+
+### 工具箱数据管理入口统一、布局紧凑化与卡片可读性修复
+
+本版本继续收口工具箱首页信息架构：导入数据文件、导入报表文件和已导入数据集摘要不再拆成三个同跳按钮，而是统一为一个“数据管理”主入口，并直接跳转数据分析应用的数据总览；本机授权能力独立为“我的电脑”动作区，长期在线服务继续使用工具卡片，admin 看到的其它用户个人工具默认折叠为治理摘要，避免多用户工具把首页撑爆。
+
+#### 工具箱布局与样式
+
+- **数据管理单入口**：导入我的数据文件、导入我的报表文件和已导入数据集摘要合并为一个“打开数据总览”主入口，避免三个按钮指向同一页面。
+- **本机能力边界独立呈现**：连接本机数据库、授权本机报表目录改为“我的电脑”授权动作区，继续保持禁用态并说明需要桌面端或本地助手授权。
+- **连接器卡片只保留长期服务**：数据来源卡片网格只展示服务器可访问数据库、服务器可访问报表目录和已配置数据库实例等长期入口，避免把数据集管理误当作可配置工具服务。
+- **宽扁卡片与可读性修复**：卡片网格保持 360px 起步的宽扁规格，数据管理说明移入主入口并完整换行，普通卡片的元信息和标签允许两行或换行展示。
+- **admin 多用户工具收口**：admin 首页只铺开全局和本人连接，其它用户个人工具折叠为数量、用户数和类型分布摘要，可按需展开紧凑明细。
+
+#### 文档与验证
+
+- **帮助与项目文档同步**：更新 README、使用帮助、项目汇报和 CHANGELOG，明确数据管理是单一主入口，长期服务才按工具卡片呈现。
+- **版本号启用**：应用版本升级至 `v0.0.201`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证通过**：已通过 `node -c client\chat\mcp-workbench-common.js`、`node -c client\chat\mcp-workbench-main.js`、`npm run check` 和 `git diff --check`。
+
+## [v0.0.200] - 2026-07-07
+
+### 文字识别/PDF 工具任务删除与 PDF 多输出打包下载补齐
+
+本版本补齐应用中心中“文字识别”和“PDF 工具”的数据列表删除能力，并优化 PDF 拆分、PDF 转图片等多输出任务的下载体验：用户可以直接删除不再需要的识别/处理记录，也可以一键打包下载 PDF 工具的全部输出文件。
+
+#### 任务删除能力
+
+- **列表删除按钮**：文字识别和 PDF 工具的数据列表操作区新增“删除”按钮，窄屏下任务行操作允许换行，避免按钮挤出表格。
+- **详情删除入口**：文字识别结果详情和 PDF 工具结果详情同步新增删除按钮，减少必须回到列表才能处理记录的往返。
+- **PDF 多输出打包下载**：PDF 工具新增任务全部输出下载接口，拆分 PDF、PDF 转图片等多产物任务会自动下载 ZIP 包；详情中多个输出时显示“全部下载”。
+- **后端删除接口**：新增 OCR 与 PDF 工具任务删除接口，统一复用文档处理底座的任务删除服务，并按来源模块校验任务归属。
+- **受控文件清理**：删除任务时会移出待处理队列、清理输出文件、页面预览、OCR 文本块、复核记录，并将对应上传源文件标记删除。已完成、失败、待复核、取消和排队任务都可以删除。
+
+#### 文档与验证
+
+- **版本号启用**：应用版本升级至 `v0.0.200`，同步更新 `package.json`、`package-lock.json`、README、使用帮助、项目汇报和 CHANGELOG。
+- **回归覆盖**：新增文档处理任务删除测试和 PDF 拆分多输出 ZIP 下载测试，覆盖任务记录、输出记录、源文件状态、磁盘受控文件清理和打包下载；本轮已通过相关 JS 语法检查，完整项目检查见本次提交验证记录。
+
+## [v0.0.199] - 2026-07-07
+
+### 工具箱数据集展示收口、轻量摘要接口与文档口径修正
+
+本版本针对工具箱首页的数据来源区做体验收口：工具箱不再承担用户文件管理器职责，已导入数据集只展示摘要入口；完整数据集列表、搜索、删除、导出和分析继续放在数据分析工作台，避免用户文件很多时首页膨胀。
+
+#### 工具箱数据来源收口
+
+- **已导入数据集摘要卡**：工具箱“数据来源”区固定展示“已导入数据集”摘要卡，显示数据集数量和总行数，不再逐个铺开用户文件。
+- **数据分析工作台承接列表管理**：查看列表、搜索、删除、导出、字段画像、查询、透视、图表和智能分析都通过数据分析工作台完成。
+- **轻量摘要接口**：新增 `/apps/data-analysis/datasets/summary`，仅返回当前用户数据集数量和总行数，避免工具箱首页拉取完整数据集、字段画像和预览行。
+- **大数据量稳定布局**：无论用户导入多少文件，工具箱首页都保持固定入口数量，继续表达数据来源和执行边界。
+
+#### 文档与验证
+
+- **帮助与项目文档同步**：更新 README、使用帮助、项目汇报和 CHANGELOG，明确工具箱不逐个展示用户文件。
+- **版本号启用**：应用版本升级至 `v0.0.199`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证通过**：已通过 `node -c client\chat\mcp-workbench-main.js`、`node -c server\services\data-analysis\datasets.js`、`node -c server\routes\apps\index.js`、`node tests\data-analysis.test.js` 和 `npm run check`。
+
+## [v0.0.198] - 2026-07-07
+
+### OCR 项目彻底外置、HTTP 对接协议固化与独立 OCR 项目文档补齐
+
+本版本把 OCR 从 Pivot 主项目中彻底解耦：Pivot 不再保存 OCR 服务实现、OCR Dockerfile、OCR compose 或本地 PaddleOCR/Tesseract 命令适配器，只保留 HTTP OCR 客户端和统一协议。后续 OCR 将作为独立项目单独构建、部署和升级，Pivot 通过 `OCR_SERVICE_URL` 调用外部 OCR 服务。
+
+#### OCR 解耦与对接边界
+
+- **主项目只保留 HTTP OCR 适配器**：文档处理 OCR 底座只注册 `http` 引擎，旧的 `paddle`、`tesseract` 等配置会自动归一到 `http`，避免升级后继续寻找本地 OCR 命令。
+- **仓库内 OCR 实现移除**：删除 `docker/ocr` 服务目录，删除 PaddleOCR、Tesseract、视觉占位等本地命令适配器，Pivot 仓库不再维护 OCR 镜像、模型、字体和缓存目录。
+- **前端引擎选择收口**：文字识别页面的识别引擎只展示“外部 OCR 服务”，用户侧不再暴露本地 OCR 命令模式。
+- **错误提示统一**：外部 OCR 服务不可达、超时或返回错误时，统一提示检查独立 OCR 服务部署和 `OCR_SERVICE_URL`。
+
+#### Docker 与生产配置
+
+- **主 compose 只编排 Pivot**：根目录 `docker-compose.yml` 只包含主应用 `pivot`，不再包含 OCR 服务、OCR profile 或 OCR 镜像构建入口。
+- **主镜像继续保持轻量边界**：主 Dockerfile 不包含 PaddleOCR/PaddlePaddle/PaddleOCR-VL 安装入口，`.dockerignore` 不再承担仓库内 OCR 目录排除职责。
+- **环境变量收敛**：`.env.example` 和本地 `.env` 只保留 Pivot 侧 OCR HTTP 客户端配置，包括 `DOCUMENT_PROCESSING_OCR_ENGINE=http`、默认 `OCR_SERVICE_URL=http://ocr-service:9100`、超时和请求大小限制。`OCR_SERVICE_URL` 同时支持管理员在文字识别页面前端保存更新，避免后续切换 OCR 服务时改代码或重构镜像。
+- **离线部署说明更新**：生产离线部署文档改为“Pivot 主镜像 + 外部 OCR 服务”模式，OCR 镜像、模型和升级流程归独立 OCR 项目维护。
+
+#### 独立 OCR 项目文档
+
+- **HTTP 对接协议固化**：新增 `docs/OCR服务对接协议.md`，明确外部 OCR 服务需要提供 `GET /health` 和 `POST /ocr`，并定义请求体、响应体、错误响应和 Docker 网络约定。
+- **独立 OCR 项目搭建指南**：新增 `docs/独立OCR项目搭建指南.md`，说明独立项目目录、Docker compose、镜像构建、服务实现职责和验收清单。
+- **PaddleOCR-VL 选型说明**：文档明确 PaddleOCR-VL 可以用于独立 OCR 项目，但不进入 Pivot 主项目；普通批量识别建议使用 PP-OCR 系列，复杂版面、表格、公式和结构化文档解析可使用 PaddleOCR-VL。
+- **快速部署入口同步**：Docker 部署快速指南增加 OCR 服务对接协议和独立 OCR 项目搭建指南链接，方便运维按新边界部署。
+
+#### 公文写作体验优化
+
+- **审改列统计收口**：公文写作首页数据表的"审改"列暂时取消批注数量统计，仅保留待处理建议数，避免批注功能暂停期间继续在列表中展示无效统计。
+
+#### 文档与验证
+
+- **版本号启用**：应用版本升级至 `v0.0.198`，同步更新 `package.json`、`package-lock.json`、README、使用帮助、项目汇报和 CHANGELOG。
+- **回归验证通过**：已通过 `npm run check`、`node tests\document-processing.test.js`、`docker-compose config --services` 和 `git diff --check`；Docker build 验证在本机 Docker daemon 发送上下文阶段连续超时，已清理挂起的 docker CLI 进程。
+
+## [v0.0.197] - 2026-07-06
+
+### 工具箱数据接入边界清晰化、SQLite 数据集导入与数据来源工作台落地
+
+本版本按《工具箱数据接入与本机能力设计方案.md》和《开发规范.md》推进工具箱数据来源改造：工具箱从服务平铺调整为“数据来源、处理与分析、展示交付、消息通知、扩展治理”的工作台心智，统一区分服务器可访问资源、上传导入数据集和后续本机授权能力；数据分析工作台新增 SQLite 上传导入，普通用户无需配置数据库也能分析本机导出的 SQLite 文件。
+
+#### 工具箱数据来源与执行位置
+
+- **服务器可访问数据库命名落地**：数据库入口、表单、诊断、数据分析导入和帮助文档统一使用“服务器可访问数据库”，明确由 Pivot 服务器发起连接。
+- **服务器可访问报表目录命名落地**：报表目录入口和配置表单统一说明路径必须能被 Pivot 服务器进程读取，避免把浏览器所在电脑路径误当服务器路径。
+- **执行位置标签**：工具箱卡片新增执行位置、归属范围、风险等级和自动化状态标签，用户可直接判断数据访问发生在服务器、外部服务还是后续本机能力。
+- **数据来源区重组**：工具箱首页按数据来源组织服务器可访问数据库、服务器可访问报表目录、导入我的数据文件、导入我的报表文件、本机数据库和本机报表目录入口。
+- **本机能力边界提示**：连接本机数据库和授权本机报表目录以禁用卡片呈现，明确需要桌面客户端或本地助手授权后执行，Web 页面不会直接访问用户电脑的 localhost 或本机文件夹。
+
+#### 数据分析与导入数据集
+
+- **SQLite 上传导入**：数据分析上传支持 `.sqlite`、`.sqlite3`、`.db` 文件，服务端使用只读 SQLite 连接读取第一个可用表或视图，并统一生成 Parquet 数据集、字段画像和预览数据。
+- **Excel/CSV/SQLite 统一入口**：上传按钮、文件选择范围、错误提示和帮助文档统一为“Excel / CSV / SQLite”，导入后继续使用数据分析工作台的查询、透视、图表和智能分析能力。
+- **已导入数据集摘要入口**：工具箱“数据来源”区展示已导入数据集摘要入口，显示数量并引导打开数据分析工作台；不逐个铺开用户文件，避免文件很多时首页膨胀。
+- **服务器数据库导入文案修正**：数据分析中的数据库导入入口改为“从服务器可访问数据库导入”，连接失败和空连接提示都说明这是服务器侧连接。
+
+#### 诊断、表单与帮助
+
+- **数据库诊断失败结构化**：数据库配置诊断捕获连接失败并返回服务器网络相关的错误、代码、排障建议和脱敏诊断信息，明确 `localhost / 127.0.0.1` 指 Pivot 服务器。
+- **报表目录诊断提示增强**：报表目录诊断失败时返回服务器路径和读取权限提示，帮助管理员确认目录、共享盘和服务进程权限。
+- **配置表单提示增强**：数据库类型提示、SQLite 路径占位、报表目录根路径提示和表单内说明都强调服务器路径与只读账号建议。
+- **应用中心模块入口规范化**：应用中心和数据分析入口补充 `Pivot.exposeModule` 模块暴露，工具箱通过模块 API 打开数据分析，避免新增直接 window 全局读取。
+
+#### 文档与验证
+
+- **帮助与项目文档同步**：更新 README、使用帮助、项目汇报和 CHANGELOG，补齐服务器可访问资源、导入数据文件、本机能力边界和 SQLite 导入说明。
+- **版本号启用**：应用版本升级至 `v0.0.197`，同步更新 `package.json` 与 `package-lock.json`。
+- **回归验证通过**：已通过 `npm run check` 和 `node tests\data-analysis.test.js`；新增 SQLite 上传导入测试覆盖真实 SQLite 文件到数据集的导入路径。
+
 ## [v0.0.196] - 2026-07-06
 
-### 文档处理离线部署、PaddleOCR 3.x 升级与 OCR/PDF 工具界面收口
+### 文档处理离线部署、OCR 外部服务对接与 OCR/PDF 工具界面收口
 
-本版本围绕文字识别和 PDF 工具从功能可用继续收口到可部署、可维护、可反复使用：升级 PaddleOCR 3.x 与 PP-OCRv6，本地开发环境可直接使用项目目录模型，生产 Docker 部署支持外部挂载模型目录；同时把文字识别和 PDF 工具的任务列表对齐法规查询的数据表格布局，处理结果改为通过查看弹窗或下载入口进入，不再直接铺在主页面上。
+本版本围绕文字识别和 PDF 工具从功能可用继续收口到可部署、可维护、可反复使用：OCR 引擎实现从 Pivot 主项目拆出，主应用通过 HTTP 对接独立 OCR 项目；同时把文字识别和 PDF 工具的任务列表对齐法规查询的数据表格布局，处理结果改为通过查看弹窗或下载入口进入，不再直接铺在主页面上。
 
 #### OCR 引擎与识别质量
 
-- **PaddleOCR 3.x 升级**：默认启用 PaddleOCR 3.x CLI，使用 PP-OCRv6 作为当前轻量 OCR 模型，并保留 legacy 模式兼容旧版命令参数。
-- **本地 PP-OCRv6 模型准备**：本地开发环境使用 models/paddleocr/det、models/paddleocr/rec、models/paddleocr/cls 和字体目录，模型文件不进入 Git 与 Docker 镜像层。
-- **Windows 中文识别乱码修复**：OCR 子进程显式设置 UTF-8 环境变量，修复 Windows 下 PaddleOCR 输出中文被解析成乱码的问题。
-- **PaddleOCR 3.x 输出解析**：适配新版输出结构中的 rec_texts 与 rec_scores，识别结果能正确还原为页面文本块和置信度。
+- **OCR HTTP 对接**：默认使用 `http` 引擎，通过 `OCR_SERVICE_URL` 调用独立 OCR 项目的识别服务。
+- **OCR 实现外移**：OCR 镜像、模型、缓存和具体引擎运行时不再属于 Pivot 主仓库，由独立 OCR 项目维护。
+- **外部响应归一**：HTTP OCR 适配器统一接收外部服务返回的文本、文本块、置信度和坐标信息。
+- **错误提示收口**：外部 OCR 服务不可达或返回错误时，统一提示检查服务部署和 `OCR_SERVICE_URL`。
 - **识别结果可重新生成**：已完成的 OCR 任务允许重试，便于模型、DPI、语言或编码配置调整后重新识别。
-- **Tesseract 定位收口**：PaddleOCR 作为默认 OCR 引擎，Tesseract 仅作为可选备用能力；未安装时页面显示可选状态，不阻断默认识别流程。
+- **本地命令引擎下线**：Pivot 不再暴露本地 OCR 命令引擎选项，避免主项目继续承担 OCR 运行时配置。
 
 #### 文字识别与 PDF 工具界面
 
@@ -24,18 +241,18 @@
 
 #### Docker 离线部署与配置
 
-- **PaddleOCR 运行时入镜像**：Dockerfile 默认安装 PaddleOCR/PaddlePaddle 运行时并提供 `paddleocr` 命令，模型文件仍通过外部挂载提供；可用 `PIVOT_INSTALL_PADDLEOCR=false` 关闭运行时安装。
+- **OCR 项目彻底解耦**：主 Dockerfile 和主 compose 不包含 OCR 服务实现；Pivot 仅保留 HTTP OCR 适配器，OCR 镜像与运行时由独立项目交付。
 - **Compose 构建入口保留**：`docker-compose.yml` 保留 `build` 配置，方便有网环境一键构建并拉起容器；离线生产环境要求先导入镜像，并使用 `docker-compose up -d --no-build` 只运行已导入的 `pivot` 镜像。
-- **模型外部挂载路径调整**：生产 Docker 部署通过 ./models/paddleocr:/app/models/paddleocr 挂载模型目录，统一落在容器 /app 业务目录下，避免使用 /root/.paddleocr。
-- **镜像瘦身策略明确**：PaddleOCR 模型文件通过宿主机目录提供，不写入 Docker 镜像，便于离线生产环境更新模型而不重构镜像。
-- **环境变量对齐**：.env 与 .env.example 中 PaddleOCR 相关配置保持一致，补齐模型目录、CLI 版本、OCR 版本和下载开关等配置项。
-- **离线部署文档补齐**：新增 PaddleOCR 模型外部挂载说明和生产离线部署说明，补充模型准备、目录结构、Compose 挂载和环境变量配置。
+- **外部服务地址配置**：生产 Docker 部署只需要配置 `DOCUMENT_PROCESSING_OCR_ENGINE=http` 和 `OCR_SERVICE_URL`，具体模型挂载由 OCR 项目负责。
+- **镜像瘦身策略明确**：OCR 模型和运行时不写入主业务镜像，便于独立更新 OCR 能力而不重构 Pivot 镜像。
+- **环境变量对齐**：.env 与 .env.example 只保留 Pivot 侧 OCR HTTP 客户端配置。
+- **离线部署文档补齐**：新增 OCR 服务对接协议和生产离线部署说明，明确 OCR 项目独立交付。
 - **单一 Compose 文件维护**：离线部署继续使用 docker-compose.yml，不再额外维护 docker-compose.offline.yml。
 
 #### 文档与验证
 
 - **版本文档同步**：更新 CHANGELOG.md、README、使用帮助、项目汇报、package.json 和 package-lock.json，启用 v0.0.196。
-- **配置一致性检查**：确认 .env 与 .env.example 的配置项结构一致，避免生产部署遗漏 PaddleOCR 配置。
+- **配置一致性检查**：确认 .env 与 .env.example 的配置项结构一致，避免生产部署遗漏外部 OCR 服务地址。
 - **回归验证通过**：已通过 npm run check、node --test tests/document-processing.test.js 和 git diff --check；并通过 Playwright 验证 OCR/PDF 工具主页面不再直接展示处理结果，查看弹窗与下载入口可用。
 
 ## [v0.0.195] - 2026-07-06
@@ -120,7 +337,7 @@
 
 - **新增完整方案文档**：新增 `文档处理底座与OCR_PDF工具应用分阶段开发方案.md`，覆盖当前项目现状、产品边界、OCR 引擎策略、版式还原边界、总体架构、数据表建议、分阶段计划和验收标准。
 - **明确底座优先**：方案要求先建设共享文档处理底座，再复用到底层 OCR 应用、PDF 工具应用、知识库、法规查询和聊天附件处理，避免重复实现。
-- **OCR 引擎策略**：中文场景优先 PaddleOCR，Tesseract 作为轻量备用或可搜索 PDF 辅助方案，视觉大模型只作为复杂版面和低置信度补救。
+- **OCR 引擎策略**：Pivot 只保留外部 OCR 服务对接，具体识别引擎由独立 OCR 项目选择。
 - **版式还原边界清晰**：区分原样预览、可搜索 PDF 和可编辑文档，避免把可搜索 PDF 的视觉一致误承诺为 DOCX 像素级还原。
 
 #### DESIGN.md 定位说明

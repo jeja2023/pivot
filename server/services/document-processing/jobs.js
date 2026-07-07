@@ -6,12 +6,14 @@ const { db } = require('../../db');
 const { extractDocumentText, isPasswordError, truncateExtractedText } = require('../../document-text');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
-const { getAppSettingValue, setAppSetting } = require('../app-settings');
+const { deleteAppSetting, getAppSettingValue, setAppSetting } = require('../app-settings');
 const { createKnowledgeDocumentFromUpload, scheduleKnowledgeDocumentIndexing } = require('../rag-documents');
 const { createRegulationDocumentFromUpload } = require('../regulations');
 const { getKnowledgeLimits } = require('../resource-limits');
 const {
     DEFAULT_DOCUMENT_PROCESSING_CONFIG,
+    DEFAULT_OCR_SERVICE_URL,
+    DOCUMENT_PROCESSING_SETTING_KEYS,
     JOB_STATUSES,
     JOB_TYPES,
     OUTPUT_TYPES,
@@ -19,7 +21,8 @@ const {
     isPdfExtension,
     isTextExtractableExtension,
     normalizeJobStatus,
-    normalizeJobType
+    normalizeJobType,
+    normalizeOcrServiceUrl
 } = require('./constants');
 const {
     getDocumentFileForUser,
@@ -29,25 +32,15 @@ const {
     serializeFile,
     updateDocumentFileMetadata
 } = require('./files');
-const { createTextOutputs, pagesToText, serializeOutput } = require('./exporters');
+const { createTextOutputs, createZip, pagesToText, serializeOutput } = require('./exporters');
 const { imageFileToPage, renderPdfPagesToFiles } = require('./renderers');
-const { recognizePage } = require('./ocr');
+const { normalizeEngine, recognizePage } = require('./ocr');
 const { PDF_TOOL_OPERATIONS, createSearchablePdfOutput, normalizePdfOperation, processPdfToolOperation } = require('./pdf');
 const { buildManagedPath, resolveStoredDocumentPath, safeUnlinkManaged, tempRoot } = require('./paths');
 
 const queue = [];
 const runningJobs = new Set();
 let runningCount = 0;
-
-const DOCUMENT_PROCESSING_SETTING_KEYS = Object.freeze({
-    engine: 'document_processing_ocr_engine',
-    maxRenderPages: 'document_processing_max_render_pages',
-    maxOcrPages: 'document_processing_max_ocr_pages',
-    confidenceThreshold: 'document_processing_confidence_threshold',
-    ocrTimeoutMs: 'document_processing_ocr_timeout_ms',
-    maxConcurrentJobs: 'document_processing_max_concurrent_jobs',
-    outputRetentionDays: 'document_processing_output_retention_days'
-});
 
 function settingInt(key, fallback, min, max) {
     const value = Number.parseInt(getAppSettingValue(key), 10);
@@ -63,7 +56,8 @@ function settingFloat(key, fallback, min, max) {
 
 function getDocumentProcessingSettings() {
     return {
-        engine: String(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.engine) || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'paddle').slice(0, 32),
+        engine: normalizeEngine(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.engine) || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'http'),
+        serviceUrl: normalizeOcrServiceUrl(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl) || process.env.OCR_SERVICE_URL || DEFAULT_OCR_SERVICE_URL),
         maxRenderPages: settingInt(DOCUMENT_PROCESSING_SETTING_KEYS.maxRenderPages, DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxRenderPages, 1, 100),
         maxOcrPages: settingInt(DOCUMENT_PROCESSING_SETTING_KEYS.maxOcrPages, DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxOcrPages, 1, 100),
         confidenceThreshold: settingFloat(DOCUMENT_PROCESSING_SETTING_KEYS.confidenceThreshold, DEFAULT_DOCUMENT_PROCESSING_CONFIG.confidenceThreshold, 0, 1),
@@ -75,7 +69,8 @@ function getDocumentProcessingSettings() {
 
 function updateDocumentProcessingSettings({ patch = {}, userId = null } = {}) {
     const allowed = {
-        engine: value => String(value || 'paddle').slice(0, 32),
+        engine: value => normalizeEngine(value),
+        serviceUrl: value => normalizeOcrServiceUrl(value),
         maxRenderPages: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxRenderPages, 1), 100),
         maxOcrPages: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxOcrPages, 1), 100),
         confidenceThreshold: value => Math.min(Math.max(Number.parseFloat(value) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.confidenceThreshold, 0), 1),
@@ -85,7 +80,12 @@ function updateDocumentProcessingSettings({ patch = {}, userId = null } = {}) {
     };
     Object.entries(allowed).forEach(([name, normalize]) => {
         if (!Object.prototype.hasOwnProperty.call(patch, name)) return;
-        setAppSetting(DOCUMENT_PROCESSING_SETTING_KEYS[name], normalize(patch[name]), { updatedBy: userId });
+        const key = DOCUMENT_PROCESSING_SETTING_KEYS[name];
+        if (name === 'serviceUrl' && String(patch[name] ?? '').trim() === '') {
+            deleteAppSetting(key);
+            return;
+        }
+        setAppSetting(key, normalize(patch[name]), { updatedBy: userId });
     });
     return getDocumentProcessingSettings();
 }
@@ -114,14 +114,18 @@ function sanitizeErrorMessage(error) {
 function normalizeConfig(config = {}) {
     const safe = config && typeof config === 'object' ? config : {};
     const defaults = getDocumentProcessingSettings();
+    const requestedRenderPages = Number.parseInt(safe.maxRenderPages, 10);
+    const requestedOcrPages = Number.parseInt(safe.maxOcrPages, 10);
+    const requestedConfidence = Number.parseFloat(safe.confidenceThreshold);
+    const requestedTimeoutMs = Number.parseInt(safe.timeoutMs, 10);
     return {
         language: String(safe.language || safe.lang || 'ch').slice(0, 24),
-        engine: String(safe.engine || defaults.engine || 'paddle').slice(0, 32),
+        engine: normalizeEngine(safe.engine || defaults.engine || 'http'),
         dpi: Math.min(Math.max(Number.parseInt(safe.dpi, 10) || 220, 72), 600),
-        maxRenderPages: Math.min(Math.max(Number.parseInt(safe.maxRenderPages, 10) || defaults.maxRenderPages, 1), 100),
-        maxOcrPages: Math.min(Math.max(Number.parseInt(safe.maxOcrPages, 10) || defaults.maxOcrPages, 1), 100),
-        confidenceThreshold: Math.min(Math.max(Number.parseFloat(safe.confidenceThreshold) || defaults.confidenceThreshold, 0), 1),
-        timeoutMs: Math.max(5000, Number.parseInt(safe.timeoutMs, 10) || defaults.ocrTimeoutMs),
+        maxRenderPages: Math.min(Math.max(Number.isFinite(requestedRenderPages) ? requestedRenderPages : defaults.maxRenderPages, 1), defaults.maxRenderPages),
+        maxOcrPages: Math.min(Math.max(Number.isFinite(requestedOcrPages) ? requestedOcrPages : defaults.maxOcrPages, 1), defaults.maxOcrPages),
+        confidenceThreshold: Math.min(Math.max(Number.isFinite(requestedConfidence) ? requestedConfidence : defaults.confidenceThreshold, 0), 1),
+        timeoutMs: Math.min(Math.max(Number.isFinite(requestedTimeoutMs) ? requestedTimeoutMs : defaults.ocrTimeoutMs, 5000), 600000),
         password: String(safe.password || '').slice(0, 200),
         operation: String(safe.operation || safe.pdfOperation || '').slice(0, 40),
         pages: String(safe.pages || safe.pageRanges || '').slice(0, 500),
@@ -314,6 +318,42 @@ function cleanupJobArtifacts(jobId) {
     db.prepare('DELETE FROM document_ocr_blocks WHERE job_id = ?').run(jobId);
     db.prepare('DELETE FROM document_reviews WHERE job_id = ?').run(jobId);
     db.prepare('DELETE FROM document_pages WHERE job_id = ?').run(jobId);
+}
+
+function removeQueuedJob(jobId) {
+    const id = Number.parseInt(jobId, 10);
+    let index = queue.indexOf(id);
+    while (index >= 0) {
+        queue.splice(index, 1);
+        index = queue.indexOf(id);
+    }
+}
+
+function getJobSourceFileIds(job) {
+    const ids = new Set();
+    const primaryId = Number.parseInt(job?.file_id, 10);
+    if (Number.isSafeInteger(primaryId) && primaryId > 0) ids.add(primaryId);
+    const config = parseJson(job?.config_json, {});
+    const sourceIds = Array.isArray(config.sourceFileIds) ? config.sourceFileIds : [];
+    sourceIds.forEach(value => {
+        const id = Number.parseInt(value, 10);
+        if (Number.isSafeInteger(id) && id > 0) ids.add(id);
+    });
+    return Array.from(ids);
+}
+
+function cleanupJobSourceFiles(job, userId) {
+    const now = getBeijingTimestamp();
+    getJobSourceFileIds(job).forEach(fileId => {
+        const row = db.prepare('SELECT id, file_path FROM document_files WHERE id = ? AND user_id = ?').get(fileId, userId);
+        if (!row) return;
+        safeUnlinkManaged(row.file_path);
+        db.prepare(`
+            UPDATE document_files
+            SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
+            WHERE id = ? AND user_id = ?
+        `).run(now, now, fileId, userId);
+    });
 }
 
 function enqueueJob(jobId) {
@@ -734,12 +774,75 @@ function cancelJob({ userId, jobId }) {
     if ([JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
         return getJobDetail({ userId, jobId: job.id });
     }
-    const index = queue.indexOf(job.id);
-    if (index >= 0) queue.splice(index, 1);
+    removeQueuedJob(job.id);
     setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '用户已取消任务。' } });
     return getJobDetail({ userId, jobId: job.id });
 }
 
+function deleteJob({ userId, jobId, sourceModule = '' }) {
+    const job = getJobRow(jobId, userId);
+    if (!job) return null;
+    if (sourceModule && job.source_module !== sourceModule) return null;
+    const deleted = serializeJob(job);
+    removeQueuedJob(job.id);
+    if (![JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
+        setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '任务已删除。' } });
+    }
+    cleanupJobArtifacts(job.id);
+    cleanupJobSourceFiles(job, userId);
+    db.prepare('DELETE FROM document_jobs WHERE id = ? AND user_id = ?').run(job.id, userId);
+    return deleted;
+}
+
+function sanitizeArchiveFileName(value, fallback = 'output') {
+    const clean = path.basename(String(value || fallback))
+        .replace(/[\\/:*?"<>|\0\r\n\t]/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/-+/g, '-')
+        .trim()
+        .slice(0, 120);
+    return clean || fallback;
+}
+
+function uniqueArchiveFileName(value, seen, fallback) {
+    const clean = sanitizeArchiveFileName(value, fallback);
+    const ext = path.extname(clean);
+    const base = path.basename(clean, ext) || fallback;
+    let name = clean;
+    let index = 2;
+    while (seen.has(name.toLowerCase())) {
+        name = `${base}-${index}${ext}`;
+        index += 1;
+    }
+    seen.add(name.toLowerCase());
+    return name;
+}
+
+function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
+    const job = getJobRow(jobId, userId);
+    if (!job) return null;
+    if (sourceModule && job.source_module !== sourceModule) return null;
+    const outputs = getOutputs(job.id);
+    if (!outputs.length) return null;
+    const seen = new Set();
+    const entries = outputs.map(output => {
+        const filePath = resolveStoredDocumentPath(output.file_path);
+        if (!filePath || !fs.existsSync(filePath)) return null;
+        return {
+            name: uniqueArchiveFileName(output.file_name || `output-${output.id}`, seen, `output-${output.id}`),
+            data: fs.readFileSync(filePath)
+        };
+    }).filter(Boolean);
+    if (!entries.length) return null;
+    const file = db.prepare('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?').get(job.file_id, userId);
+    const base = sanitizeArchiveFileName(path.basename(String(file?.original_name || `pdf-job-${job.id}`), path.extname(String(file?.original_name || ''))), `pdf-job-${job.id}`);
+    return {
+        buffer: createZip(entries),
+        fileName: `${base || `pdf-job-${job.id}`}-全部输出.zip`,
+        mimeType: 'application/zip',
+        count: entries.length
+    };
+}
 function getOutputDownload({ userId, outputId }) {
     const output = getOutputRow(outputId, userId);
     if (!output) return null;
@@ -965,10 +1068,12 @@ module.exports = {
     shareJobResult,
     createJobFromUpload,
     createPdfToolJobFromUploads,
+    deleteJob,
     enqueueJob,
     getDocumentProcessingSettings,
     getDocumentProcessingStats,
     getJobDetail,
+    getJobOutputsArchive,
     getOutputDownload,
     getPageImage,
     getQueueStatus,

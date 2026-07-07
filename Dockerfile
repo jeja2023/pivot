@@ -19,21 +19,14 @@ RUN apt-get update && apt-get install -y \
     libgif-dev \
     librsvg2-dev \
     python3 \
-    python3-venv \
-    python3-pip \
-    libgomp1 \
-    libgl1 \
     make \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置容器时区与国内加速环境变量
 ARG PIVOT_BUILD_REVISION=
-ARG PIVOT_INSTALL_PADDLEOCR=true
 ENV TZ=Asia/Shanghai
 ENV PIVOT_BUILD_REVISION=$PIVOT_BUILD_REVISION
-ENV PADDLEOCR_VENV=/opt/paddleocr
-ENV PATH="${PADDLEOCR_VENV}/bin:${PATH}"
 ENV npm_config_registry=https://registry.npmmirror.com
 ENV PYTHON=python3
 ENV SHARP_LIBVIPS_BINARY_HOST=https://npmmirror.com/mirrors/sharp-libvips
@@ -41,19 +34,6 @@ ENV npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-lib
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
 ENV SHARP_USE_GLOBAL_LIBVIPS=false
 
-# 安装 PaddleOCR/PaddlePaddle 运行时；模型文件仍通过 /app/models/paddleocr 外部挂载，不进入镜像层。
-# 如部署环境不需要 OCR，可构建时传入 --build-arg PIVOT_INSTALL_PADDLEOCR=false 缩小镜像体积。
-RUN if [ "$PIVOT_INSTALL_PADDLEOCR" = "true" ]; then \
-      python3 -m venv "$PADDLEOCR_VENV" && \
-      "$PADDLEOCR_VENV/bin/python" -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-      "$PADDLEOCR_VENV/bin/python" -m pip install --upgrade paddlepaddle -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ && \
-      "$PADDLEOCR_VENV/bin/python" -m pip install --upgrade paddleocr -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-      ln -sf "$PADDLEOCR_VENV/bin/paddleocr" /usr/local/bin/paddleocr && \
-      paddleocr --help >/dev/null && \
-      echo "[build] PaddleOCR runtime installed"; \
-    else \
-      echo "[build] PaddleOCR runtime skipped"; \
-    fi
 
 # 安装生产环境依赖，并确保 DuckDB Linux 原生绑定就位
 # 背景：@duckdb/node-bindings-linux-x64 是 optional 依赖，弱网/TLS 抖动时 npm ci 会“静默跳过”

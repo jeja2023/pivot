@@ -69,6 +69,3 @@ scripts/check_chat_assets.js
 # docs/
 # *.md
 # !README.md
-
-.venv-paddleocr/
-.paddlex/

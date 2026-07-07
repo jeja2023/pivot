@@ -2,8 +2,8 @@ const { db } = require('../../db');
 const { isSuperAdmin } = require('../../permissions');
 const SYSTEM_MCP_SERVICES = {
     reports: {
-        name: '报表文件',
-        description: '系统集成的报表和数据文件访问能力。',
+        name: '服务器可访问报表目录',
+        description: '由 Pivot 服务器读取授权目录内的报表和数据文件。',
         requiresConfig: true
     },
     visualization: {

@@ -1,40 +1,29 @@
-const paddle = require('./adapters/paddle');
-const tesseract = require('./adapters/tesseract');
-const vision = require('./adapters/vision');
+const http = require('./adapters/http');
 
 const ADAPTERS = Object.freeze({
-    paddle,
-    tesseract,
-    vision
+    http
 });
 
 const ENGINE_META = Object.freeze({
-    paddle: {
-        label: 'PaddleOCR',
-        description: '默认批量 OCR 引擎'
-    },
-    tesseract: {
-        label: 'Tesseract',
-        optional: true,
-        description: '可选 OCR 引擎，未安装时不影响 PaddleOCR'
-    },
-    vision: {
-        label: '视觉模型',
-        optional: true,
-        auxiliary: true,
-        description: '复杂版面复核辅助能力，当前不作为批量 OCR 引擎'
+    http: {
+        label: '外部 OCR 服务',
+        description: '通过 HTTP 调用独立 OCR 项目提供的识别服务'
     }
 });
 
 function normalizeEngine(value) {
-    const engine = String(value || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'paddle').trim().toLowerCase();
+    const engine = String(value || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'http').trim().toLowerCase();
     if (ADAPTERS[engine]) return engine;
-    return 'paddle';
+    return 'http';
+}
+
+function engineLabel(engine) {
+    return ENGINE_META[engine]?.label || '外部 OCR 服务';
 }
 
 function sanitizeOcrError(error, engine) {
     const message = String(error?.message || 'OCR 识别失败').split('\n')[0].slice(0, 500);
-    const safe = new Error(`${engine === 'paddle' ? 'PaddleOCR' : engine} 识别失败：${message}。请检查 OCR 引擎是否已安装并配置命令。`);
+    const safe = new Error(`${engineLabel(engine)}识别失败：${message}。请检查外部 OCR 服务是否已部署，并确认 OCR_SERVICE_URL 配置正确。`);
     safe.code = error?.code || 'OCR_FAILED';
     return safe;
 }
@@ -43,7 +32,7 @@ async function recognizePage(imagePath, options = {}) {
     const engine = normalizeEngine(options.engine);
     const adapter = ADAPTERS[engine];
     try {
-        return await adapter.recognizePage(imagePath, options);
+        return await adapter.recognizePage(imagePath, { ...options, engine });
     } catch (error) {
         throw sanitizeOcrError(error, engine);
     }

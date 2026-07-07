@@ -13,6 +13,7 @@
         total: 0,
         queue: null,
         engines: {},
+        settings: null,
         timer: null
     };
 
@@ -115,12 +116,10 @@
                             <input id="ocr-file-input" class="form-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp" required>
                         </label>
                         <div class="doc-tool-field-row">
-                            <label class="doc-tool-field">
+                            <label class="doc-tool-field ocr-engine-admin-only hidden">
                                 <span>识别引擎</span>
                                 <select id="ocr-engine-select" class="form-input">
-                                    <option value="paddle">PaddleOCR</option>
-                                    <option value="tesseract">Tesseract</option>
-                                    <option value="vision">视觉模型</option>
+                                    <option value="http">外部 OCR 服务</option>
                                 </select>
                             </label>
                             <label class="doc-tool-field">
@@ -166,7 +165,17 @@
                         </label>
                     </div>
 
-                    <div id="ocr-engine-status" class="doc-tool-engine-list"></div>
+                    <div id="ocr-engine-status" class="doc-tool-engine-list ocr-engine-admin-only hidden"></div>
+                    <form id="ocr-settings-form" class="doc-tool-settings hidden" autocomplete="off">
+                        <label class="doc-tool-field doc-tool-field-wide">
+                            <span>服务地址</span>
+                            <input id="ocr-service-url-input" class="form-input" type="url" inputmode="url" placeholder="http://ocr-service:9100">
+                        </label>
+                        <div class="doc-tool-actions">
+                            <button id="ocr-settings-save-btn" class="btn-secondary" type="submit">保存地址</button>
+                            <button id="ocr-settings-refresh-btn" class="btn-secondary" type="button">检测</button>
+                        </div>
+                    </form>
                 </aside>
 
                 <main class="workspace-panel doc-tool-main ocr-main">
@@ -182,7 +191,7 @@
                                 <tr>
                                     <th style="width: 54px;" class="text-center">序号</th>
                                     <th style="width: 310px;">文件</th>
-                                    <th style="width: 110px;">识别引擎</th>
+                                    <th class="ocr-engine-admin-only hidden" style="width: 110px;">识别引擎</th>
                                     <th style="width: 86px;" class="text-center">状态</th>
                                     <th style="width: 76px;" class="text-center">进度</th>
                                     <th style="width: 140px;">更新时间</th>
@@ -213,17 +222,48 @@
         return view;
     }
 
-    function compactEngineError(info, current) {
+    function canViewOcrEngineConfig() {
+        return typeof isSuperAdminUser === 'function' && isSuperAdminUser();
+    }
+
+    function canManageOcrSettings() {
+        return canViewOcrEngineConfig();
+    }
+
+    function renderEngineConfigVisibility() {
+        const canView = canViewOcrEngineConfig();
+        document.querySelectorAll('#ocr-view .ocr-engine-admin-only').forEach(el => {
+            el.classList.toggle('hidden', !canView);
+        });
+    }
+
+    function renderSettings() {
+        const form = document.getElementById('ocr-settings-form');
+        if (!form) return;
+        const canManage = canManageOcrSettings();
+        form.classList.toggle('hidden', !canManage);
+        if (!canManage) return;
+        const input = document.getElementById('ocr-service-url-input');
+        if (input && document.activeElement !== input) {
+            input.value = state.settings?.serviceUrl || '';
+        }
+    }
+
+    function compactEngineError(info, _current) {
         const message = String(info?.error || '不可用');
-        if (!current && message.includes('OCR 引擎命令不存在')) return '未安装（可选）';
         return message;
     }
 
     function renderEngines() {
+        renderEngineConfigVisibility();
         const box = document.getElementById('ocr-engine-status');
         if (!box) return;
+        if (!canViewOcrEngineConfig()) {
+            html.setHtml(box, '');
+            return;
+        }
         const entries = Object.entries(state.engines || {});
-        const selectedEngine = document.getElementById('ocr-engine-select')?.value || entries.find(([, info]) => info?.default)?.[0] || 'paddle';
+        const selectedEngine = document.getElementById('ocr-engine-select')?.value || entries.find(([, info]) => info?.default)?.[0] || 'http';
         html.setHtml(box, entries.map(([name, info]) => {
             const current = String(selectedEngine) === String(name);
             const tone = info?.available
@@ -243,30 +283,12 @@
         }).join('') || '<div class="doc-tool-empty-small">引擎状态未加载</div>');
     }
 
-    function resultOutputs(job) {
-        return Array.isArray(job?.result?.outputs) ? job.result.outputs.filter(Boolean) : [];
-    }
-
-    function selectOutput(outputs = [], preferredType = '') {
-        const list = Array.isArray(outputs) ? outputs.filter(output => output?.id) : [];
-        if (!list.length) return null;
-        if (preferredType) {
-            const preferred = list.find(output => String(output.outputType || '').toLowerCase() === preferredType);
-            if (preferred) return preferred;
-        }
-        return list[0];
-    }
-
     function renderOcrRowActions(item) {
-        const outputs = resultOutputs(item);
-        const canDownload = item.status === 'succeeded' || outputs.length > 0;
         const canCancel = item.status === 'pending' || item.status === 'processing';
-        const canRetry = ['failed', 'cancelled', 'needs_review', 'succeeded'].includes(item.status);
         return [
             '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-open="' + esc(item.id) + '">查看</button>',
-            '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-download="' + esc(item.id) + '"' + (canDownload ? '' : ' disabled') + '>下载</button>',
             canCancel ? '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-cancel="' + esc(item.id) + '">取消</button>' : '',
-            canRetry ? '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-retry="' + esc(item.id) + '">重试</button>' : ''
+            '<button class="btn-danger-outline doc-tool-row-action" type="button" data-ocr-job-delete="' + esc(item.id) + '">删除</button>'
         ].filter(Boolean).join('');
     }
 
@@ -301,9 +323,13 @@
         if (summary) summary.textContent = `${state.total || 0} 个任务`;
         if (!tbody) return;
         const offset = (state.page - 1) * state.limit;
+        const showEngineConfig = canViewOcrEngineConfig();
         html.setHtml(tbody, state.jobs.map((item, index) => {
             const engine = item.config?.engine || item.config?.ocrEngine || '-';
             const language = item.config?.language || item.config?.lang || '';
+            const engineCell = showEngineConfig
+                ? `<td title="${esc([engine, language].filter(Boolean).join(' / '))}">${esc(engine)}${language ? '<span class="doc-tool-file-meta">' + esc(language) + '</span>' : ''}</td>`
+                : '';
             return `
                 <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}" data-ocr-job-id="${esc(item.id)}">
                     <td class="text-center">${offset + index + 1}</td>
@@ -311,14 +337,14 @@
                         <strong class="doc-tool-file-title">${esc(item.file?.originalName || `任务 ${item.id}`)}</strong>
                         <span class="doc-tool-file-meta">${esc(item.file?.fileExt || '')} · ${formatBytes(item.file?.fileSize)}</span>
                     </td>
-                    <td title="${esc([engine, language].filter(Boolean).join(' / '))}">${esc(engine)}${language ? '<span class="doc-tool-file-meta">' + esc(language) + '</span>' : ''}</td>
+                    ${engineCell}
                     <td class="text-center"><span class="doc-tool-badge ${statusTone(item.status)}">${statusLabel(item.status)}</span></td>
                     <td class="text-center">${Number(item.progress || 0)}%</td>
                     <td title="${esc(formatTime(item.updatedAt || item.createdAt))}">${esc(formatTime(item.updatedAt || item.createdAt))}</td>
                     <td class="text-center"><div class="doc-tool-row-actions">${renderOcrRowActions(item)}</div></td>
                 </tr>
             `;
-        }).join('') || '<tr><td colspan="7" class="doc-tool-empty-cell">暂无任务</td></tr>');
+        }).join('') || `<tr><td colspan="${showEngineConfig ? 7 : 6}" class="doc-tool-empty-cell">暂无任务</td></tr>`);
         renderJobPagination();
     }
 
@@ -474,6 +500,7 @@
                 <div class="ocr-detail-actions">
                     <button class="btn-secondary" type="button" data-ocr-job-retry="${esc(job.id)}">重试</button>
                     <button class="btn-secondary" type="button" data-ocr-job-cancel="${esc(job.id)}">取消</button>
+                    <button class="btn-danger-outline" type="button" data-ocr-job-delete="${esc(job.id)}">删除</button>
                     <button class="btn-secondary" type="button" data-ocr-export="text">TXT</button>
                     <button class="btn-secondary" type="button" data-ocr-export="markdown">Markdown</button>
                     <button class="btn-secondary" type="button" data-ocr-export="json">JSON</button>
@@ -515,9 +542,32 @@
         renderEngines();
         renderJobs();
         renderDetail();
+        renderSettings();
+    }
+
+    async function loadSettings() {
+        if (!canManageOcrSettings()) {
+            state.settings = null;
+            renderSettings();
+            return null;
+        }
+        try {
+            const data = await requestJson(`${API}/settings`);
+            state.settings = data.settings || {};
+            renderSettings();
+            return state.settings;
+        } catch (e) {
+            toast(e.message || 'OCR 服务配置加载失败', 'warning');
+            return null;
+        }
     }
 
     async function loadEngines() {
+        if (!canViewOcrEngineConfig()) {
+            state.engines = {};
+            renderEngines();
+            return null;
+        }
         try {
             const data = await requestJson(`${API}/engines`);
             state.engines = data.engines || {};
@@ -558,6 +608,34 @@
         return data;
     }
 
+    async function saveSettings(form) {
+        if (!canManageOcrSettings()) return;
+        const input = document.getElementById('ocr-service-url-input');
+        const serviceUrl = String(input?.value || '').trim();
+        const btn = document.getElementById('ocr-settings-save-btn');
+        const text = btn?.textContent || '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '保存中';
+        }
+        try {
+            const data = await requestJson(`${API}/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serviceUrl })
+            });
+            state.settings = data.settings || {};
+            renderSettings();
+            toast('OCR 服务地址已保存', 'success');
+            await loadEngines();
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = text;
+            }
+            if (form) form.dataset.dirty = '0';
+        }
+    }
     async function submitUpload(form) {
         const file = document.getElementById('ocr-file-input')?.files?.[0];
         if (!file) {
@@ -566,7 +644,8 @@
         }
         const data = new FormData(form);
         data.set('file', file);
-        data.set('engine', document.getElementById('ocr-engine-select')?.value || 'paddle');
+        if (canViewOcrEngineConfig()) data.set('engine', document.getElementById('ocr-engine-select')?.value || 'http');
+        else data.delete('engine');
         data.set('language', document.getElementById('ocr-language-select')?.value || 'ch');
         data.set('dpi', document.getElementById('ocr-dpi-input')?.value || '220');
         data.set('maxRenderPages', document.getElementById('ocr-pages-input')?.value || '10');
@@ -710,21 +789,7 @@
         await loadDetail(state.activeJobId, { silent: true });
     }
 
-    async function downloadJobOutput(jobId) {
-        const row = state.jobs.find(item => String(item.id) === String(jobId));
-        const rowOutput = selectOutput(resultOutputs(row), 'text');
-        if (rowOutput?.id) {
-            await downloadOutput(rowOutput.id, rowOutput.fileName);
-            return;
-        }
-        const detail = await loadDetail(jobId, { silent: true, openPanel: false });
-        const output = selectOutput(detail?.outputs, 'text');
-        if (!output?.id) {
-            toast('该任务暂无可下载输出', 'warning');
-            return;
-        }
-        await downloadOutput(output.id, output.fileName);
-    }
+
     async function retryJob(jobId) {
         await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
         toast('任务已重新排队', 'success');
@@ -737,10 +802,30 @@
         await loadJobs({ keepActive: true });
     }
 
+    async function deleteJob(jobId) {
+        if (!jobId) return;
+        const confirmed = typeof window.confirm !== 'function' || window.confirm('确定删除该任务及相关文件吗？删除后不可恢复。');
+        if (!confirmed) return;
+        await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+        if (String(state.activeJobId) === String(jobId)) {
+            state.activeJobId = '';
+            state.activePageId = '';
+            state.detail = null;
+            closeDetailPanel();
+        }
+        toast('任务已删除', 'success');
+        await loadJobs({ keepActive: false });
+    }
+
     function bindEvents(view) {
         if (view.dataset.bound === '1') return;
         view.dataset.bound = '1';
         view.addEventListener('submit', event => {
+            if (event.target?.id === 'ocr-settings-form') {
+                event.preventDefault();
+                saveSettings(event.target).catch(e => toast(e.message || 'OCR 服务地址保存失败', 'error'));
+                return;
+            }
             if (event.target?.id !== 'ocr-upload-form') return;
             event.preventDefault();
             submitUpload(event.target).catch(e => toast(e.message || '创建任务失败', 'error'));
@@ -753,6 +838,9 @@
             }
             if (event.target?.id === 'ocr-engine-select') {
                 renderEngines();
+            }
+            if (event.target?.id === 'ocr-service-url-input') {
+                document.getElementById('ocr-settings-form')?.setAttribute('data-dirty', '1');
             }
         });
         view.addEventListener('click', event => {
@@ -773,6 +861,11 @@
             }
             if (event.target.closest('#ocr-refresh-btn')) {
                 loadJobs({ keepActive: true }).catch(e => toast(e.message || '刷新失败', 'error'));
+                if (canViewOcrEngineConfig()) loadEngines();
+                if (canManageOcrSettings()) loadSettings();
+                return;
+            }
+            if (event.target.closest('#ocr-settings-refresh-btn')) {
                 loadEngines();
                 return;
             }
@@ -797,14 +890,15 @@
                 downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
                 return;
             }
-            const rowDownload = event.target.closest('[data-ocr-job-download]');
-            if (rowDownload) {
-                downloadJobOutput(rowDownload.dataset.ocrJobDownload).catch(e => toast(e.message || '下载失败', 'error'));
-                return;
-            }
+
             const save = event.target.closest('[data-ocr-page-save]');
             if (save) {
                 saveReview(save.dataset.ocrPageSave).catch(e => toast(e.message || '保存复核失败', 'error'));
+                return;
+            }
+            const remove = event.target.closest('[data-ocr-job-delete]');
+            if (remove) {
+                deleteJob(remove.dataset.ocrJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
                 return;
             }
             const retry = event.target.closest('[data-ocr-job-retry]');
@@ -841,7 +935,10 @@
         if (typeof setAppsTitle === 'function') setAppsTitle('文字识别', '上传图片或 PDF，复核识别结果并导出文本、Markdown、JSON 或可检索 PDF。');
         render();
         startPolling();
-        await Promise.all([loadEngines(), loadJobs({ keepActive: true })]);
+        const loaders = [loadJobs({ keepActive: true })];
+        if (canViewOcrEngineConfig()) loaders.push(loadEngines());
+        if (canManageOcrSettings()) loaders.push(loadSettings());
+        await Promise.all(loaders);
     }
 
     window.PivotOcr = {

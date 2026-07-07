@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.196",
+  "version": "0.0.205",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -78,7 +78,7 @@
       "package.json",
       "package-lock.json",
       "README.md",
-      "浣跨敤甯姪.md",
+      "使用帮助.md",
       "node_modules/**",
       "!data/**",
       "!uploads/**",
@@ -116,8 +116,8 @@
         "to": "config.example.json"
       },
       {
-        "from": "docs/杩滅▼妯″紡閮ㄧ讲璇存槑.md",
-        "to": "docs/杩滅▼妯″紡閮ㄧ讲璇存槑.md"
+        "from": "docs/远程模式部署说明.md",
+        "to": "docs/远程模式部署说明.md"
       }
     ],
     "nodeGypRebuild": false,

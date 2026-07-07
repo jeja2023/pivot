@@ -1,4 +1,4 @@
-﻿const cp = require('child_process');
+const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,6 +6,8 @@ const root = path.resolve(__dirname, '..');
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
 const electronBuilderInstallDeps = path.join(root, 'node_modules', 'electron-builder', 'install-app-deps.js');
 const projectVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const electronOutputDir = path.join(root, 'dist-electron-remote');
+const downloadsDir = path.join(root, 'downloads');
 
 function run(command, args, options = {}) {
     console.log(`> ${[command, ...args].join(' ')}`);
@@ -53,6 +55,36 @@ function normalizeBuilderArgs(rawArgs) {
     return ['--win', ...rawArgs, ...extraArgs];
 }
 
+function copyReleaseArtifactsToDownloads(rawArgs) {
+    if (rawArgs.includes('--dir')) {
+        console.log('> skip downloads release artifacts for unpacked build');
+        return;
+    }
+
+    const installerName = `Pivot Setup ${projectVersion}.exe`;
+    const requiredArtifacts = [installerName, `${installerName}.blockmap`, 'latest.yml'];
+    fs.mkdirSync(downloadsDir, { recursive: true });
+
+    const copied = [];
+    for (const fileName of requiredArtifacts) {
+        const source = path.join(electronOutputDir, fileName);
+        if (!fs.existsSync(source)) {
+            throw new Error(`Expected desktop release artifact was not generated: ${source}`);
+        }
+        const target = path.join(downloadsDir, fileName);
+        fs.copyFileSync(source, target);
+        copied.push(path.relative(root, target));
+    }
+
+    const installerSource = path.join(electronOutputDir, installerName);
+    const latestInstallerTarget = path.join(downloadsDir, 'Pivot-Setup.exe');
+    fs.copyFileSync(installerSource, latestInstallerTarget);
+    copied.push(path.relative(root, latestInstallerTarget));
+
+    console.log(`> copied desktop update artifacts to downloads: ${copied.join(', ')}`);
+}
+
+const rawBuilderArgs = process.argv.slice(2);
 let runError = null;
 
 try {
@@ -60,7 +92,8 @@ try {
     cleanBuildOutputs();
     run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
     run(process.execPath, [electronBuilderInstallDeps]);
-    run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(process.argv.slice(2))]);
+    run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(rawBuilderArgs)]);
+    copyReleaseArtifactsToDownloads(rawBuilderArgs);
 } catch (err) {
     runError = err;
 }

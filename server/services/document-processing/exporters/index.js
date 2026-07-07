@@ -468,6 +468,7 @@ module.exports = {
     buildJson,
     buildMarkdown,
     createTextOutputs,
+    createZip,
     escapeHtml,
     outputTypeMeta,
     pagesToText,

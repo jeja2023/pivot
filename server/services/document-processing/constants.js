@@ -1,4 +1,4 @@
-﻿const JOB_STATUSES = Object.freeze({
+const JOB_STATUSES = Object.freeze({
     QUEUED: 'queued',
     PROCESSING: 'processing',
     SUCCEEDED: 'succeeded',
@@ -28,11 +28,51 @@ const PDF_EXTENSIONS = new Set(['.pdf']);
 const TEXT_LIKE_EXTENSIONS = new Set(['.txt', '.md', '.csv', '.json', '.html', '.htm']);
 const OFFICE_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx']);
 
+const DEFAULT_OCR_SERVICE_URL = 'http://ocr-service:9100';
+
+const DOCUMENT_PROCESSING_SETTING_KEYS = Object.freeze({
+    engine: 'document_processing_ocr_engine',
+    serviceUrl: 'document_processing_ocr_service_url',
+    maxRenderPages: 'document_processing_max_render_pages',
+    maxOcrPages: 'document_processing_max_ocr_pages',
+    confidenceThreshold: 'document_processing_confidence_threshold',
+    ocrTimeoutMs: 'document_processing_ocr_timeout_ms',
+    maxConcurrentJobs: 'document_processing_max_concurrent_jobs',
+    outputRetentionDays: 'document_processing_output_retention_days'
+});
+
+function normalizeOcrServiceUrl(value, fallback = DEFAULT_OCR_SERVICE_URL) {
+    const raw = String(value || fallback || DEFAULT_OCR_SERVICE_URL).trim();
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch (_err) {
+        const error = new Error('OCR 服务地址格式不正确');
+        error.status = 400;
+        throw error;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        const error = new Error('OCR 服务地址仅支持 HTTP 或 HTTPS');
+        error.status = 400;
+        throw error;
+    }
+    if (parsed.username || parsed.password) {
+        const error = new Error('OCR 服务地址不能包含用户名或密码');
+        error.status = 400;
+        throw error;
+    }
+    if (parsed.search || parsed.hash) {
+        const error = new Error('OCR 服务地址不能包含查询参数或锚点');
+        error.status = 400;
+        throw error;
+    }
+    return parsed.href.replace(/\/+$/, '');
+}
 const DEFAULT_DOCUMENT_PROCESSING_CONFIG = Object.freeze({
     maxRenderPages: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_RENDER_PAGES || '5', 10) || 5),
     maxOcrPages: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_OCR_PAGES || '5', 10) || 5),
     confidenceThreshold: Math.min(Math.max(Number.parseFloat(process.env.DOCUMENT_PROCESSING_CONFIDENCE_THRESHOLD || '0.75') || 0.75, 0), 1),
-    ocrTimeoutMs: Math.max(5000, Number.parseInt(process.env.DOCUMENT_PROCESSING_OCR_TIMEOUT_MS || '120000', 10) || 120000),
+    ocrTimeoutMs: Math.max(5000, Number.parseInt(process.env.DOCUMENT_PROCESSING_OCR_TIMEOUT_MS || process.env.OCR_SERVICE_TIMEOUT_MS || '120000', 10) || 120000),
     maxConcurrentJobs: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_CONCURRENT || '2', 10) || 2),
     outputRetentionDays: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_OUTPUT_RETENTION_DAYS || '30', 10) || 30)
 });
@@ -64,6 +104,8 @@ function isTextExtractableExtension(ext) {
 
 module.exports = {
     DEFAULT_DOCUMENT_PROCESSING_CONFIG,
+    DEFAULT_OCR_SERVICE_URL,
+    DOCUMENT_PROCESSING_SETTING_KEYS,
     IMAGE_EXTENSIONS,
     JOB_STATUSES,
     JOB_TYPES,
@@ -75,5 +117,6 @@ module.exports = {
     isPdfExtension,
     isTextExtractableExtension,
     normalizeJobStatus,
-    normalizeJobType
+    normalizeJobType,
+    normalizeOcrServiceUrl
 };

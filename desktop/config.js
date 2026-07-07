@@ -5,9 +5,11 @@ const { normalizeOriginList, normalizeUpdateFeedUrl } = require('./update-policy
 const DEFAULT_AUTO_UPDATE = {
     enabled: false,
     url: '',
+    path: '/downloads/',
     checkOnStart: true,
     autoDownload: true,
     allowPrerelease: false,
+    allowInsecureHttp: false,
     installOnQuit: true,
     allowedOrigins: []
 };
@@ -74,6 +76,7 @@ function normalizeStringList(value) {
     const items = Array.isArray(value) ? value : String(value || '').split(',');
     return items.map(item => String(item || '').trim()).filter(Boolean);
 }
+
 function normalizeMode(value) {
     const mode = String(value || '').trim().toLowerCase();
     if (mode === 'remote' || mode === 'local') return mode;
@@ -109,25 +112,48 @@ function normalizeRemoteUrl(value) {
     return normalizeHttpUrl(value, 'config.remoteUrl', true);
 }
 
-function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env) {
+function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env, allowInsecureHttp = false) {
     return normalizeUpdateFeedUrl(value, {
         required,
         allowedOrigins,
+        allowInsecureHttp,
         env
     });
 }
 
-function normalizeAutoUpdate(value, env = process.env) {
+function normalizeUpdatePath(value) {
+    const raw = String(value || DEFAULT_AUTO_UPDATE.path).trim() || DEFAULT_AUTO_UPDATE.path;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+        throw new Error('config.autoUpdate.path must be a URL path, not a full URL.');
+    }
+    return raw.startsWith('/') ? raw : '/' + raw;
+}
+
+function resolveUpdateUrlFromRemote(remoteUrl, updatePath) {
+    if (!remoteUrl) return '';
+    const url = new URL(updatePath || DEFAULT_AUTO_UPDATE.path, remoteUrl);
+    url.hash = '';
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url.toString();
+}
+
+function normalizeAutoUpdate(value, env = process.env, options = {}) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const merged = { ...DEFAULT_AUTO_UPDATE, ...source };
     const enabled = merged.enabled === true;
     const allowedOrigins = normalizeOriginList(merged.allowedOrigins);
+    const updatePath = normalizeUpdatePath(merged.path);
+    const allowInsecureHttp = merged.allowInsecureHttp === true;
+    const explicitUrl = String(merged.url || '').trim();
+    const derivedUrl = explicitUrl || (enabled ? resolveUpdateUrlFromRemote(options.remoteUrl, updatePath) : '');
     return {
         enabled,
-        url: normalizeUpdateUrl(merged.url, enabled, allowedOrigins, env),
+        url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env, allowInsecureHttp),
+        path: updatePath,
         checkOnStart: merged.checkOnStart !== false,
         autoDownload: merged.autoDownload !== false,
         allowPrerelease: merged.allowPrerelease === true,
+        allowInsecureHttp,
         installOnQuit: merged.installOnQuit !== false,
         allowedOrigins
     };
@@ -138,21 +164,20 @@ function normalizeConfig(raw, meta = {}, env = process.env) {
     const merged = { ...DEFAULT_CONFIG, ...input };
     const mode = normalizeMode(merged.mode);
     const environmentName = typeof input.environmentName === 'string' ? input.environmentName.trim() : (mode === 'remote' ? 'Remote' : 'Local');
-    const config = {
+    const remoteUrl = mode === 'remote' ? normalizeRemoteUrl(merged.remoteUrl) : '';
+    return {
         mode,
         environmentName,
-        remoteUrl: '',
+        remoteUrl,
         partition: normalizePartition(merged.partition, mode, environmentName),
         windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : '智枢 Pivot',
         allowExternalOpen: merged.allowExternalOpen !== false,
         allowedExternalOrigins: normalizeStringList(merged.allowedExternalOrigins),
         sandbox: merged.sandbox !== false,
-        autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env),
+        autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl }),
         source: meta.source || 'default',
         path: meta.path || ''
     };
-    if (mode === 'remote') config.remoteUrl = normalizeRemoteUrl(merged.remoteUrl);
-    return config;
 }
 
 function loadDesktopConfig(app, argv = process.argv, env = process.env) {
@@ -170,5 +195,7 @@ module.exports = {
     loadDesktopConfig,
     normalizeAutoUpdate,
     normalizeConfig,
-    normalizeRemoteUrl
+    normalizeRemoteUrl,
+    normalizeUpdatePath,
+    resolveUpdateUrlFromRemote
 };

@@ -13,14 +13,14 @@ const MCP_CONFIG_HELPERS = {
         note: '外部工具服务建议开启健康检查和工具 Schema 校验，便于上线前发现不可用工具。'
     },
     database: {
-        title: '数据库连接',
-        steps: ['选择数据库类型', '填写只读账号', '配置表/字段白名单和脱敏字段'],
-        note: '默认只读查询并限制返回行数；生产库建议配置表白名单、字段白名单和敏感字段脱敏。'
+        title: '服务器可访问数据库',
+        steps: ['选择数据库类型', '填写服务器可访问地址', '配置表/字段白名单和脱敏字段'],
+        note: '由 Pivot 服务器发起连接；localhost / 127.0.0.1 指 Pivot 服务器，不是你的电脑。默认只读查询并限制返回行数。'
     },
     reports: {
-        title: '报表文件',
-        steps: ['填写报表目录', '确认允许格式', '保存后做目录诊断'],
-        note: '诊断会检查目录读取权限并预览可读文件，适合共享目录接入前验收。'
+        title: '服务器可访问报表目录',
+        steps: ['填写服务器可访问目录', '确认允许格式', '保存后做目录诊断'],
+        note: '填写的路径必须能被 Pivot 服务器进程读取；D:\\reports 是服务器目录，不是浏览器所在电脑目录。'
     },
     im: {
         title: '消息通知',
@@ -55,16 +55,16 @@ const MCP_CONFIG_HELPERS = {
 };
 
 const MCP_DATABASE_TYPE_TIPS = {
-    postgres: 'PostgreSQL 常用端口 5432；数据分组/Schema 不确定时可以先留空。',
-    mysql: 'MySQL/MariaDB 常用端口 3306；数据库名通常是业务库名称。',
-    sqlserver: 'SQL Server 常用端口 1433；数据分组/Schema 常见为 dbo，不确定可留空。',
-    sqlite: 'SQLite 只需要填写数据库文件路径，主机、端口、用户名和密码会自动隐藏。',
-    mongodb: 'MongoDB 常用端口 27017；数据库名填写要查询的 database。'
+    postgres: 'PostgreSQL 常用端口 5432；localhost 指 Pivot 服务器。数据分组/Schema 不确定时可以先留空。',
+    mysql: 'MySQL/MariaDB 常用端口 3306；localhost 指 Pivot 服务器。数据库名通常是业务库名称。',
+    sqlserver: 'SQL Server 常用端口 1433；localhost 指 Pivot 服务器。数据分组/Schema 常见为 dbo，不确定可留空。',
+    sqlite: 'SQLite 只需要填写数据库文件路径（服务器文件系统内），主机、端口、用户名和密码会自动隐藏。',
+    mongodb: 'MongoDB 常用端口 27017；localhost 指 Pivot 服务器。数据库名填写要查询的 database。'
 };
 
 const MCP_DATABASE_PLACEHOLDERS = {
     postgres: {
-        host: '主机地址，例如 10.0.0.8',
+        host: '服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器',
         port: '端口，默认 5432',
         name: '数据库名，例如 analytics',
         user: '只读账号用户名',
@@ -72,7 +72,7 @@ const MCP_DATABASE_PLACEHOLDERS = {
         schema: '数据分组/Schema，可选，例如 public；不确定留空'
     },
     mysql: {
-        host: '主机地址，例如 10.0.0.8',
+        host: '服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器',
         port: '端口，默认 3306',
         name: '数据库名，例如 biz',
         user: '只读账号用户名',
@@ -80,7 +80,7 @@ const MCP_DATABASE_PLACEHOLDERS = {
         schema: '可留空'
     },
     sqlserver: {
-        host: '主机地址，例如 10.0.0.8',
+        host: '服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器',
         port: '端口，默认 1433',
         name: '数据库名，例如 BI',
         user: '只读账号用户名',
@@ -90,13 +90,13 @@ const MCP_DATABASE_PLACEHOLDERS = {
     sqlite: {
         host: 'SQLite 不需要主机',
         port: 'SQLite 不需要端口',
-        name: 'SQLite 文件路径，例如 D:\\data\\report.db',
+        name: '服务器 SQLite 文件路径，例如 D:\\data\\report.db',
         user: 'SQLite 不需要用户名',
         password: 'SQLite 不需要密码',
         schema: '可留空'
     },
     mongodb: {
-        host: '主机地址，例如 10.0.0.8',
+        host: '服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器',
         port: '端口，默认 27017',
         name: '数据库名，例如 admin 或 reporting',
         user: '只读账号用户名，可选',
@@ -335,7 +335,7 @@ window.resetMcpForm = function() {
 };
 
 window.openMcpCreateModal = function(type = 'external') {
-    const service = mcpServiceCatalog.find(item => item.type === type) || mcpPersonalBuiltinServices.find(item => item.type === type);
+    const service = mcpServiceCatalog.find(item => item.type === type) || mcpPersonalBuiltinServices.find(item => item.type === type) || (type === 'external' ? mcpExternalServiceCatalog : null);
     const modal = document.getElementById('mcp-edit-modal');
     if (!modal || !service) return;
     bindMcpFormControls('edit');

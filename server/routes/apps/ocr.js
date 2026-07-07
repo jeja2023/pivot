@@ -1,9 +1,12 @@
 const express = require('express');
 const { asyncHandler } = require('../../http');
+const { isSuperAdmin } = require('../../permissions');
 const {
     cancelJob,
     createJobExport,
     createJobFromUpload,
+    deleteJob,
+    getDocumentProcessingSettings,
     getJobDetail,
     getOcrEngineStatus,
     getOutputDownload,
@@ -11,13 +14,19 @@ const {
     listJobs,
     retryJob,
     savePageReview,
-    shareJobResult
+    shareJobResult,
+    updateDocumentProcessingSettings
 } = require('../../services/document-processing');
 
-function readOcrConfig(body = {}) {
+function requireOcrAdmin(req, res) {
+    if (isSuperAdmin(req.user)) return true;
+    res.status(403).json({ error: '\u4ec5 admin \u8d26\u53f7\u53ef\u67e5\u770b\u548c\u914d\u7f6e OCR \u5f15\u64ce\u3002' });
+    return false;
+}
+function readOcrConfig(body = {}, user = null) {
     return {
         language: body.language,
-        engine: body.engine,
+        engine: isSuperAdmin(user) ? body.engine : undefined,
         dpi: body.dpi,
         maxRenderPages: body.maxRenderPages,
         maxOcrPages: body.maxOcrPages,
@@ -30,7 +39,26 @@ function readOcrConfig(body = {}) {
 function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     const router = express.Router();
 
-    router.get('/engines', authMiddleware, asyncHandler(async (_req, res) => {
+    router.get('/settings', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireOcrAdmin(req, res)) return;
+        return res.json({ settings: getDocumentProcessingSettings() });
+    }));
+
+    router.put('/settings', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireOcrAdmin(req, res)) return;
+        try {
+            const settings = updateDocumentProcessingSettings({
+                patch: { serviceUrl: req.body?.serviceUrl },
+                userId: req.user.id
+            });
+            logAction?.(req, 'OCR 服务地址更新', `服务地址: ${settings.serviceUrl}`);
+            return res.json({ success: true, settings });
+        } catch (error) {
+            return res.status(error.status || 400).json({ error: error.message || 'OCR 服务地址保存失败' });
+        }
+    }));
+    router.get('/engines', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireOcrAdmin(req, res)) return;
         res.json({ engines: await getOcrEngineStatus() });
     }));
 
@@ -53,7 +81,7 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
             jobType: 'ocr',
             sourceModule: 'ocr_app',
             sourceRef: req.body?.sourceRef,
-            config: readOcrConfig(req.body || {})
+            config: readOcrConfig(req.body || {}, req.user)
         });
         logAction?.(req, '文字识别任务创建', `任务: ${detail.job.id}，文件: ${detail.file.originalName}`);
         return res.json({ success: true, ...detail });
@@ -75,6 +103,13 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
         const detail = cancelJob({ userId: req.user.id, jobId: req.params.id });
         if (!detail || detail.job.sourceModule !== 'ocr_app') return res.status(404).json({ error: '文字识别任务不存在' });
         return res.json({ success: true, ...detail });
+    }));
+
+    router.delete('/jobs/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const job = deleteJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'ocr_app' });
+        if (!job) return res.status(404).json({ error: '文字识别任务不存在' });
+        logAction?.(req, '文字识别任务删除', `任务: ${job.id}`);
+        return res.json({ success: true, job });
     }));
 
     router.post('/jobs/:id/outputs', authMiddleware, asyncHandler(async (req, res) => {

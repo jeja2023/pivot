@@ -1,16 +1,21 @@
 {
   "mode": "remote",
-  "environmentName": "Production",
-  "remoteUrl": "https://pivot.example.com/",
+  "environmentName": "Production LAN",
+  "remoteUrl": "http://pivot.example.local:3000/",
   "partition": "persist:pivot-production",
   "windowTitle": "智枢 Pivot",
   "allowExternalOpen": true,
   "autoUpdate": {
     "enabled": false,
-    "url": "https://updates.example.com/pivot/",
+    "path": "/downloads/",
+    "url": "",
     "checkOnStart": true,
     "autoDownload": true,
     "allowPrerelease": false,
+    "allowInsecureHttp": true,
+    "allowedOrigins": [
+      "http://pivot.example.local:3000"
+    ],
     "installOnQuit": true
   }
 }

@@ -1,6 +1,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const Sqlite = require('better-sqlite3');
 const XLSX = require('@e965/xlsx');
 const {
     db,
@@ -124,6 +125,125 @@ async function importCsvToParquet(sourcePath, parquetPath) {
     }
 }
 
+function sqliteIdent(value) {
+    return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function readSqliteTableColumns(sqliteDb, tableName) {
+    try {
+        return sqliteDb.prepare(`PRAGMA table_info(${sqliteIdent(tableName)})`).all()
+            .map(item => String(item.name || '').trim())
+            .filter(Boolean);
+    } catch (_err) {
+        return [];
+    }
+}
+
+function selectSqliteImportTable(sqliteDb) {
+    const candidates = sqliteDb.prepare(`
+        SELECT name, type
+        FROM sqlite_schema
+        WHERE type IN ('table', 'view')
+          AND name NOT LIKE 'sqlite_%'
+        ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name COLLATE NOCASE
+    `).all();
+    let firstReadable = null;
+    for (const item of candidates) {
+        const tableName = String(item.name || '').trim();
+        if (!tableName) continue;
+        const rawColumns = readSqliteTableColumns(sqliteDb, tableName);
+        if (!rawColumns.length) continue;
+        const selectedColumns = rawColumns.slice(0, MAX_UPLOAD_COLUMNS);
+        const readable = { tableName, rawColumns, selectedColumns, objectType: item.type || 'table' };
+        if (!firstReadable) firstReadable = readable;
+        try {
+            const hasRow = sqliteDb.prepare(`SELECT 1 AS ok FROM ${sqliteIdent(tableName)} LIMIT 1`).get();
+            if (hasRow) return readable;
+        } catch (_err) {
+            // 单个视图或表不可读时跳过，继续尝试其它候选对象。
+        }
+    }
+    return firstReadable;
+}
+
+async function importSqliteToParquet(sourcePath, parquetPath) {
+    let sqliteDb;
+    try {
+        sqliteDb = new Sqlite(sourcePath, { readonly: true, fileMustExist: true });
+        sqliteDb.pragma('query_only = ON');
+    } catch (_err) {
+        const err = new Error('SQLite 文件无法打开，请确认文件未损坏且不是加密数据库。');
+        err.status = 400;
+        throw err;
+    }
+
+    let selected;
+    try {
+        selected = selectSqliteImportTable(sqliteDb);
+    } catch (_err) {
+        sqliteDb.close();
+        const err = new Error('SQLite 文件无法读取表结构，请确认文件未损坏且不是加密数据库。');
+        err.status = 400;
+        throw err;
+    }
+    if (!selected) {
+        sqliteDb.close();
+        const err = new Error('SQLite 文件中没有可导入的数据表或视图。');
+        err.status = 400;
+        throw err;
+    }
+
+    const seen = new Set();
+    const columns = selected.selectedColumns.map((name, index) => ({
+        key: `c_${index + 1}`,
+        name: normalizeHeader(name, index, seen),
+        index,
+        sourceKey: name
+    }));
+    const selectList = selected.selectedColumns.map(sqliteIdent).join(', ');
+    const rowsStatement = sqliteDb.prepare(`SELECT ${selectList} FROM ${sqliteIdent(selected.tableName)} LIMIT ?`).raw(true);
+    const { instance, connection } = await createDuckConnection();
+    let appender = null;
+    let rowCount = 0;
+    let truncated = false;
+    try {
+        const schema = columns.map(column => `${sqlIdent(column.key)} VARCHAR`).join(', ');
+        await connection.run(`CREATE TABLE imported (${schema})`);
+        appender = await connection.createAppender('imported');
+        for (const row of rowsStatement.iterate(MAX_UPLOAD_ROWS + 1)) {
+            if (rowCount >= MAX_UPLOAD_ROWS) {
+                truncated = true;
+                break;
+            }
+            columns.forEach(column => {
+                const value = normalizeCell(row[column.index]);
+                appender.appendVarchar(String(value ?? ''));
+            });
+            appender.endRow();
+            rowCount += 1;
+        }
+        if (!rowCount) {
+            const err = new Error('SQLite 数据表中没有可分析的数据行。');
+            err.status = 400;
+            throw err;
+        }
+        appender.closeSync();
+        appender = null;
+        await connection.run(`COPY imported TO ${sqlLiteral(parquetPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`);
+        return {
+            columns,
+            rowCount,
+            tableName: selected.tableName,
+            tableCount: 1,
+            truncated
+        };
+    } finally {
+        if (appender) appender.closeSync();
+        connection.closeSync();
+        instance.closeSync();
+        sqliteDb.close();
+    }
+}
 // Store one uploaded file as the dataset source and generate Parquet, profile, and preview data.
 // Caller wraps this with withAnalysisSlot because DuckDB work is heavy.
 async function ingestUpload({ datasetDir, file, ext }) {
@@ -140,6 +260,12 @@ async function ingestUpload({ datasetDir, file, ext }) {
         columns = meta.columns;
         rowCount = meta.rowCount;
         sourceType = 'csv';
+    } else if (['.sqlite', '.sqlite3', '.db'].includes(ext)) {
+        const meta = await importSqliteToParquet(sourcePath, parquetPath);
+        columns = meta.columns;
+        rowCount = meta.rowCount;
+        sheetName = meta.tableName || '';
+        sourceType = 'sqlite';
     } else {
         const parsed = readSpreadsheet(sourcePath, sourceName);
         await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
@@ -163,8 +289,8 @@ async function importDataset({ user, file, name }) {
         throw err;
     }
     const ext = path.extname(file.originalname || file.filename || '').toLowerCase();
-    if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
-        const err = new Error('数据分析仅支持 CSV、XLSX、XLS 文件。');
+    if (!['.csv', '.xlsx', '.xls', '.sqlite', '.sqlite3', '.db'].includes(ext)) {
+        const err = new Error('数据分析支持 CSV、XLSX、XLS、SQLite 文件。');
         err.status = 400;
         throw err;
     }
@@ -219,6 +345,18 @@ function listDatasets(userId) {
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
     `).all(userId).map(serializeDataset);
+}
+
+function getDatasetSummary(userId) {
+    const row = db.prepare(`
+        SELECT COUNT(*) AS count, COALESCE(SUM(row_count), 0) AS row_count
+        FROM analysis_datasets
+        WHERE user_id = ? AND deleted_at IS NULL
+    `).get(userId);
+    return {
+        count: Number(row?.count) || 0,
+        rowCount: Number(row?.row_count) || 0
+    };
 }
 
 async function getDatasetDetail(userId, datasetId) {
@@ -436,8 +574,10 @@ module.exports = {
     sanitizeRows,
     readSpreadsheet,
     importCsvToParquet,
+    importSqliteToParquet,
     importDataset,
     listDatasets,
+    getDatasetSummary,
     getDatasetDetail,
     purgeDatasetArtifacts,
     softDeleteDataset,

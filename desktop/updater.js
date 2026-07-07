@@ -44,6 +44,8 @@ function createInitialState(app, updateConfig) {
         status: updateConfig.enabled === true ? 'idle' : 'disabled',
         currentVersion: app.getVersion(),
         updateUrl: updateConfig.url || '',
+        updatePath: updateConfig.path || '',
+        allowInsecureHttp: updateConfig.allowInsecureHttp === true,
         error: '',
         updateInfo: null,
         progress: null,
@@ -95,7 +97,7 @@ function setupAutoUpdater({ app, mainWindow, config }) {
             return emitState({
                 enabled: false,
                 status: 'disabled',
-                error: 'Auto update only runs in the packaged Windows app.'
+                error: '自动更新只在已打包的 Windows 客户端中运行。'
             });
         }
         try {
@@ -134,13 +136,14 @@ function setupAutoUpdater({ app, mainWindow, config }) {
         emitState({
             enabled: false,
             status: 'disabled',
-            error: 'Auto update only runs in the packaged Windows app.'
+            error: '自动更新只在已打包的 Windows 客户端中运行。'
         });
         return activeController;
     }
 
     const feedUrl = assertAllowedUpdateFeedUrl(updateConfig.url, {
         allowedOrigins: updateConfig.allowedOrigins || [],
+        allowInsecureHttp: updateConfig.allowInsecureHttp === true,
         env: process.env
     });
 
@@ -163,13 +166,13 @@ function setupAutoUpdater({ app, mainWindow, config }) {
     });
     autoUpdater.on('update-downloaded', async (info) => {
         emitState({ status: 'downloaded', updateInfo: serializeUpdateInfo(info), progress: null, error: '' });
-        const version = info && info.version ? info.version : 'new version';
+        const version = info && info.version ? info.version : '新版本';
         const result = await showUpdateDialog(mainWindow, {
             type: 'info',
-            title: 'Pivot update ready',
-            message: 'Pivot ' + version + ' has been downloaded.',
-            detail: 'Restart Pivot to install the update. Unsaved work should be saved before continuing.',
-            buttons: ['Restart and install', 'Later'],
+            title: 'Pivot 更新已就绪',
+            message: 'Pivot ' + version + ' 已下载完成。',
+            detail: '重启 Pivot 后会安装更新。继续前请先保存未完成的工作。',
+            buttons: ['重启并安装', '稍后'],
             defaultId: 0,
             cancelId: 1
         });

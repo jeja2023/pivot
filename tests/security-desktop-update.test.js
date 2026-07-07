@@ -6,7 +6,7 @@ const {
     normalizeOriginList,
     normalizeUpdateFeedUrl
 } = require('../desktop/update-policy');
-const { normalizeAutoUpdate } = require('../desktop/config');
+const { normalizeAutoUpdate, normalizeConfig, normalizeUpdatePath, resolveUpdateUrlFromRemote } = require('../desktop/config');
 
 test('desktop update policy requires https for remote feeds', () => {
     assert.equal(
@@ -50,4 +50,72 @@ test('desktop update policy enforces allowed origins', () => {
         }),
         /not in config\.autoUpdate\.allowedOrigins/
     );
+});
+
+test('desktop config can derive same-origin downloads update feed', () => {
+    const config = normalizeConfig({
+        mode: 'remote',
+        remoteUrl: 'https://pivot.example.com/app/',
+        autoUpdate: {
+            enabled: true,
+            url: '',
+            path: 'downloads',
+            allowedOrigins: ['https://pivot.example.com']
+        }
+    }, {}, {});
+
+    assert.equal(config.autoUpdate.path, '/downloads');
+    assert.equal(config.autoUpdate.url, 'https://pivot.example.com/downloads/');
+});
+
+test('desktop update path rejects full URLs', () => {
+    assert.equal(normalizeUpdatePath('/downloads/'), '/downloads/');
+    assert.equal(
+        resolveUpdateUrlFromRemote('https://pivot.example.com/', '/downloads/'),
+        'https://pivot.example.com/downloads/'
+    );
+    assert.throws(
+        () => normalizeUpdatePath('https://updates.example.com/pivot/'),
+        /must be a URL path/
+    );
+});
+
+test('desktop update policy allows explicit LAN HTTP feeds with origin whitelist', () => {
+    assert.equal(
+        assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
+            allowInsecureHttp: true,
+            allowedOrigins: ['http://pivot.lan:3000']
+        }),
+        'http://pivot.lan:3000/downloads/'
+    );
+    assert.throws(
+        () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
+            allowInsecureHttp: true
+        }),
+        /allowedOrigins is required/
+    );
+    assert.throws(
+        () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
+            allowInsecureHttp: true,
+            allowedOrigins: ['http://other.lan:3000']
+        }),
+        /not in config\.autoUpdate\.allowedOrigins/
+    );
+});
+
+test('desktop config can derive LAN HTTP downloads feed when explicitly allowed', () => {
+    const config = normalizeConfig({
+        mode: 'remote',
+        remoteUrl: 'http://192.168.10.20:3000/',
+        autoUpdate: {
+            enabled: true,
+            path: '/downloads/',
+            url: '',
+            allowInsecureHttp: true,
+            allowedOrigins: ['http://192.168.10.20:3000']
+        }
+    }, {}, {});
+
+    assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');
+    assert.equal(config.autoUpdate.allowInsecureHttp, true);
 });

@@ -3,7 +3,9 @@ const {
     db,
     fs,
     path,
+    readZipEntries,
     removeTestPath,
+    runExpressHandlers,
     test,
     uploadRoot
 } = require('./security-helpers');
@@ -12,13 +14,21 @@ const {
     createJobExport,
     createJobFromUpload,
     createPdfToolJobFromUploads,
+    deleteJob,
+    getDocumentProcessingSettings,
     getJobDetail,
+    getJobOutputsArchive,
     getOutputDownload,
-    savePageReview
+    savePageReview,
+    updateDocumentProcessingSettings
 } = require('../server/services/document-processing');
 const { documentRoot, resolveStoredDocumentPath } = require('../server/services/document-processing/paths');
 const { PDFDocument } = require('pdf-lib');
-const { normalizePaddleDiagnostic, parsePaddleOutput } = require('../server/services/document-processing/ocr/adapters/paddle');
+const nodeHttp = require('http');
+const httpOcr = require('../server/services/document-processing/ocr/adapters/http');
+const { normalizeEngine } = require('../server/services/document-processing/ocr');
+const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/document-processing/constants');
+const { createOcrRouter } = require('../server/routes/apps/ocr');
 
 async function waitForDocumentJob(userId, jobId, timeoutMs = 5000) {
     const startedAt = Date.now();
@@ -38,6 +48,54 @@ async function createSamplePdf(filePath, labels = ['Sample PDF']) {
         page.drawText(label, { x: 40, y: 180, size: 18 });
     });
     fs.writeFileSync(filePath, await pdf.save());
+}
+
+function preserveAppSetting(key, callback) {
+    const rows = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').all(key);
+    db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+    const restore = () => {
+        db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        rows.forEach(row => {
+            db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
+                .run(row.key, row.value, row.updated_at, row.updated_by);
+        });
+    };
+    try {
+        const result = callback();
+        if (result && typeof result.then === 'function') {
+            return result.finally(restore);
+        }
+        restore();
+        return result;
+    } catch (error) {
+        restore();
+        throw error;
+    }
+}
+
+
+function createJsonResponse() {
+    return {
+        statusCode: 200,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+}
+
+function createOcrRouteForTest(pathName, method = 'get') {
+    const router = createOcrRouter({
+        authMiddleware: (_req, _res, next) => next(),
+        uploadLimiter: (_req, _res, next) => next(),
+        upload: { single: () => (_req, _res, next) => next() },
+        logAction: () => {}
+    });
+    return router.stack.find(layer => layer.route?.path === pathName && layer.route?.methods?.[method]);
 }
 
 function cleanupDocumentProcessingRows(userId) {
@@ -120,33 +178,297 @@ test('文档处理底座会登记文件、生成任务和受控输出', async ()
     }
 });
 
-test('PaddleOCR 输出解析会保留文本、坐标和置信度', () => {
-    const output = "[[[1,2],[3,2],[3,4],[1,4]], ('测试文字', 0.93)]\n[[[5,6],[7,6],[7,8],[5,8]], ('第二行', 88.0)]";
-    const blocks = parsePaddleOutput(output);
-    assert.equal(blocks.length, 2);
-    assert.equal(blocks[0].text, '测试文字');
-    assert.equal(blocks[0].confidence, 0.93);
-    assert.equal(blocks[1].text, '第二行');
-    assert.equal(blocks[1].confidence, 0.88);
+test('文档处理任务删除会清理任务记录和受控文件', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`doc_delete_${suffix}`, 'hash', 'Document Delete Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'document-delete-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const tempPath = path.join(tempDir, `${suffix}.txt`);
+    fs.writeFileSync(tempPath, '用于验证删除任务的文本内容', 'utf8');
+
+    try {
+        const initial = await createJobFromUpload({
+            user: { id: userId, username: `doc_delete_${suffix}` },
+            file: {
+                path: tempPath,
+                originalname: '待删除任务.txt',
+                mimetype: 'text/plain',
+                size: fs.statSync(tempPath).size
+            },
+            jobType: 'extract_text',
+            sourceModule: 'document_processing',
+            config: {}
+        });
+        const detail = await waitForDocumentJob(userId, initial.job.id);
+        assert.equal(detail.job.status, 'succeeded');
+
+        const fileRow = db.prepare('SELECT id, file_path FROM document_files WHERE id = ? AND user_id = ?').get(detail.file.id, userId);
+        const outputRow = db.prepare('SELECT id, file_path FROM document_outputs WHERE job_id = ? AND user_id = ? LIMIT 1').get(detail.job.id, userId);
+        const storedPath = resolveStoredDocumentPath(fileRow.file_path);
+        const outputPath = resolveStoredDocumentPath(outputRow.file_path);
+        assert.equal(fs.existsSync(storedPath), true);
+        assert.equal(fs.existsSync(outputPath), true);
+
+        const deleted = deleteJob({ userId, jobId: detail.job.id, sourceModule: 'document_processing' });
+        assert.equal(deleted.id, detail.job.id);
+        assert.equal(getJobDetail({ userId, jobId: detail.job.id }), null);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM document_jobs WHERE id = ?').get(detail.job.id).count, 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM document_outputs WHERE job_id = ?').get(detail.job.id).count, 0);
+        assert.ok(db.prepare('SELECT deleted_at FROM document_files WHERE id = ?').get(detail.file.id).deleted_at);
+        assert.equal(fs.existsSync(storedPath), false);
+        assert.equal(fs.existsSync(outputPath), false);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
 });
 
-test('PaddleOCR 3.x 输出解析会保留识别文本和置信度', () => {
-    const output = "{'rec_texts': ['测试文字', '第二行'], 'rec_scores': [0.93, 88.0], 'rec_polys': [array([[1, 2], [3, 2]], dtype=int16), array([[5, 6], [7, 6]], dtype=int16)]}";
-    const blocks = parsePaddleOutput(output);
-    assert.equal(blocks.length, 2);
-    assert.equal(blocks[0].text, '测试文字');
-    assert.equal(blocks[0].confidence, 0.93);
-    assert.equal(blocks[1].text, '第二行');
-    assert.equal(blocks[1].confidence, 0.88);
+
+test('OCR engine status is visible only to built-in admin account', async () => {
+    const route = createOcrRouteForTest('/engines', 'get');
+    assert.ok(route);
+
+    const managerRes = createJsonResponse();
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), {
+        user: { id: 2, username: 'manager', role: 'admin', unit: 'QA' },
+        headers: {}
+    }, managerRes);
+    assert.equal(managerRes.statusCode, 403);
+    assert.match(managerRes.body.error, /admin/);
+
+    const normalRes = createJsonResponse();
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), {
+        user: { id: 3, username: 'user', role: 'user', unit: 'QA' },
+        headers: {}
+    }, normalRes);
+    assert.equal(normalRes.statusCode, 403);
+
+    const previousUrl = process.env.OCR_SERVICE_URL;
+    const previousHealthTimeout = process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
+    try {
+        process.env.OCR_SERVICE_URL = 'http://127.0.0.1:1';
+        process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = '1000';
+        const adminRes = createJsonResponse();
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), {
+            user: { id: 1, username: 'admin', role: 'admin', unit: 'QA' },
+            headers: {}
+        }, adminRes);
+        assert.equal(adminRes.statusCode, 200);
+        assert.ok(adminRes.body.engines?.http);
+    } finally {
+        if (previousUrl === undefined) delete process.env.OCR_SERVICE_URL;
+        else process.env.OCR_SERVICE_URL = previousUrl;
+        if (previousHealthTimeout === undefined) delete process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
+        else process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = previousHealthTimeout;
+    }
 });
-test('PaddleOCR diagnostics ignore ANSI font notices', () => {
-    const warning = '\u001b[33mUsing the local font file(models/paddleocr/fonts/simfang.ttf) specified by LOCAL_FONT_FILE_PATH\u001b[0m';
-    assert.equal(normalizePaddleDiagnostic(warning), '');
-    const blocks = parsePaddleOutput(warning + "\n{'rec_texts': ['hello'], 'rec_scores': [0.91]}");
-    assert.equal(blocks.length, 1);
-    assert.equal(blocks[0].text, 'hello');
-    assert.equal(blocks[0].confidence, 0.91);
+
+test('OCR engine normalization falls back to external HTTP service', () => {
+    assert.equal(normalizeEngine('http'), 'http');
+    assert.equal(normalizeEngine('paddle'), 'http');
+    assert.equal(normalizeEngine('tesseract'), 'http');
+    assert.equal(normalizeEngine(''), 'http');
 });
+
+test('OCR service URL setting is saved, normalized, cleared, and validated', () => {
+    const key = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    const previousUrl = process.env.OCR_SERVICE_URL;
+    preserveAppSetting(key, () => {
+        try {
+            process.env.OCR_SERVICE_URL = 'http://env-ocr:9100';
+            const settings = updateDocumentProcessingSettings({
+                patch: { serviceUrl: 'http://ocr-service:9100/' },
+                userId: 1
+            });
+            assert.equal(settings.serviceUrl, 'http://ocr-service:9100');
+            assert.equal(getDocumentProcessingSettings().serviceUrl, 'http://ocr-service:9100');
+            const cleared = updateDocumentProcessingSettings({ patch: { serviceUrl: '' }, userId: 1 });
+            assert.equal(cleared.serviceUrl, 'http://env-ocr:9100');
+            assert.throws(
+                () => updateDocumentProcessingSettings({ patch: { serviceUrl: 'file:///tmp/ocr' }, userId: 1 }),
+                /OCR 服务地址仅支持 HTTP 或 HTTPS/
+            );
+        } finally {
+            if (previousUrl === undefined) delete process.env.OCR_SERVICE_URL;
+            else process.env.OCR_SERVICE_URL = previousUrl;
+        }
+    });
+});
+
+test('OCR engine setting normalizes legacy values to external HTTP service', () => {
+    const key = DOCUMENT_PROCESSING_SETTING_KEYS.engine;
+    preserveAppSetting(key, () => {
+        const settings = updateDocumentProcessingSettings({
+            patch: { engine: 'paddle' },
+            userId: 1
+        });
+        assert.equal(settings.engine, 'http');
+        assert.equal(getDocumentProcessingSettings().engine, 'http');
+    });
+});
+
+test('HTTP OCR adapter calls external service and normalizes result blocks', async () => {
+    const previousUrl = process.env.OCR_SERVICE_URL;
+    const key = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    const rows = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').all(key);
+    db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+    const previousHealthTimeout = process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
+    const imagePath = path.join(uploadRoot, `http-ocr-${Date.now()}.png`);
+    fs.writeFileSync(imagePath, Buffer.from('fake-image'));
+    let receivedBody = null;
+    const server = nodeHttp.createServer((req, res) => {
+        if (req.method === 'GET' && req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'ok', engine: 'external' }));
+            return;
+        }
+        if (req.method !== 'POST' || req.url !== '/ocr') {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+        const chunks = [];
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', () => {
+            receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                language: receivedBody.language,
+                blocks: [{ text: 'external text', confidence: 0.92, bbox: [] }]
+            }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    try {
+        process.env.OCR_SERVICE_URL = `http://127.0.0.1:${address.port}`;
+        process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = '1000';
+        const status = await httpOcr.checkAvailability();
+        assert.equal(status.available, true);
+        const result = await httpOcr.recognizePage(imagePath, { language: 'ch', timeoutMs: 5000 });
+        assert.equal(receivedBody.language, 'ch');
+        assert.equal(Buffer.from(receivedBody.imageBase64, 'base64').toString('utf8'), 'fake-image');
+        assert.equal(result.text, 'external text');
+        assert.equal(result.engine, 'http');
+        assert.equal(result.blocks[0].engine, 'http');
+        assert.equal(result.confidence, 0.92);
+    } finally {
+        if (previousUrl === undefined) delete process.env.OCR_SERVICE_URL;
+        else process.env.OCR_SERVICE_URL = previousUrl;
+        if (previousHealthTimeout === undefined) delete process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
+        else process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = previousHealthTimeout;
+        db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        rows.forEach(row => {
+            db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
+                .run(row.key, row.value, row.updated_at, row.updated_by);
+        });
+        await new Promise(resolve => server.close(resolve));
+        removeTestPath(imagePath);
+    }
+});
+
+test('HTTP OCR adapter enforces configured image byte limit before request', async () => {
+    const previousMax = process.env.OCR_SERVICE_MAX_IMAGE_BYTES;
+    const imagePath = path.join(uploadRoot, `http-ocr-too-large-${Date.now()}.png`);
+    fs.writeFileSync(imagePath, Buffer.from('too-large'));
+    try {
+        process.env.OCR_SERVICE_MAX_IMAGE_BYTES = '4';
+        await assert.rejects(
+            () => httpOcr.recognizePage(imagePath, { language: 'ch', timeoutMs: 5000 }),
+            /OCR 页面图片超过外部服务请求上限/
+        );
+    } finally {
+        if (previousMax === undefined) delete process.env.OCR_SERVICE_MAX_IMAGE_BYTES;
+        else process.env.OCR_SERVICE_MAX_IMAGE_BYTES = previousMax;
+        removeTestPath(imagePath);
+    }
+});
+
+test('HTTP OCR adapter prefers saved service URL over environment default', async () => {
+    const key = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    const previousUrl = process.env.OCR_SERVICE_URL;
+    const imagePath = path.join(uploadRoot, `http-ocr-setting-${Date.now()}.png`);
+    fs.writeFileSync(imagePath, Buffer.from('setting-image'));
+    let received = false;
+    const server = nodeHttp.createServer((req, res) => {
+        if (req.method !== 'POST' || req.url !== '/ocr') {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+        req.resume();
+        req.on('end', () => {
+            received = true;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ text: 'setting url text', confidence: 0.88 }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    await preserveAppSetting(key, async () => {
+        try {
+            process.env.OCR_SERVICE_URL = 'http://127.0.0.1:1';
+            updateDocumentProcessingSettings({
+                patch: { serviceUrl: `http://127.0.0.1:${address.port}` },
+                userId: 1
+            });
+            const result = await httpOcr.recognizePage(imagePath, { language: 'ch', timeoutMs: 5000 });
+            assert.equal(received, true);
+            assert.equal(result.text, 'setting url text');
+        } finally {
+            if (previousUrl === undefined) delete process.env.OCR_SERVICE_URL;
+            else process.env.OCR_SERVICE_URL = previousUrl;
+            await new Promise(resolve => server.close(resolve));
+            removeTestPath(imagePath);
+        }
+    });
+});
+
+
+test('PDF tools split outputs can be downloaded as one archive', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_archive_${suffix}`, 'hash', 'PDF Archive Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-archive-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    await createSamplePdf(sourcePath, ['Archive Page 1', 'Archive Page 2']);
+
+    try {
+        const initial = await createPdfToolJobFromUploads({
+            user: { id: userId, username: `pdf_archive_${suffix}` },
+            files: [
+                { path: sourcePath, originalname: 'archive-source.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }
+            ],
+            operation: 'split',
+            config: { operation: 'split', pages: '1-2' }
+        });
+        const detail = await waitForDocumentJob(userId, initial.job.id);
+        assert.equal(detail.job.status, 'succeeded');
+        assert.equal(detail.outputs.filter(output => output.outputType === 'split_pdf').length, 2);
+
+        const archive = getJobOutputsArchive({ userId, jobId: detail.job.id, sourceModule: 'pdf_tools' });
+        assert.ok(Buffer.isBuffer(archive.buffer));
+        assert.equal(archive.mimeType, 'application/zip');
+        assert.match(archive.fileName, /全部输出\.zip$/);
+        const entries = readZipEntries(archive.buffer);
+        assert.equal(entries.size, 2);
+        assert.ok(Array.from(entries.keys()).every(name => name.endsWith('.pdf')));
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
 test('PDF tools merge multiple PDFs into one output', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

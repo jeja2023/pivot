@@ -51,11 +51,16 @@
         return loadingPromise;
     }
 
-    window.showDataAnalysisApp = async function () {
+    async function showDataAnalysisApp(options = {}) {
         await loadDataAnalysisModules();
         if (typeof window.PivotDataAnalysis?.showDataAnalysisApp !== 'function') {
             throw new Error('数据分析应用加载失败');
         }
-        return window.PivotDataAnalysis.showDataAnalysisApp();
-    };
+        return window.PivotDataAnalysis.showDataAnalysisApp(options);
+    }
+
+    window.showDataAnalysisApp = showDataAnalysisApp;
+    window.Pivot?.exposeModule?.('apps.dataAnalysis', {
+        showDataAnalysisApp
+    });
 })();

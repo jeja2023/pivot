@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 
 const { extractDocumentText, renderPdfPages, truncateExtractedText } = require('../../document-text');
-const { recognizePage } = require('./ocr');
+const { normalizeEngine, recognizePage } = require('./ocr');
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
@@ -13,9 +13,9 @@ function isImageDocument(filename = '') {
 
 function normalizeOcrOptions(options = {}) {
     return {
-        engine: options.engine || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'paddle',
+        engine: normalizeEngine(options.engine || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'http'),
         language: options.language || options.lang || 'ch',
-        timeoutMs: Math.max(5000, Number.parseInt(options.timeoutMs, 10) || 120000),
+        timeoutMs: Math.min(Math.max(Number.parseInt(options.timeoutMs || process.env.DOCUMENT_PROCESSING_OCR_TIMEOUT_MS || process.env.OCR_SERVICE_TIMEOUT_MS || '120000', 10) || 120000, 5000), 600000),
         password: options.password || '',
         maxOcrPages: Math.min(Math.max(Number.parseInt(options.maxOcrPages, 10) || 10, 1), 100),
         desiredWidth: Math.min(Math.max(Number.parseInt(options.desiredWidth, 10) || 1600, 800), 3200)

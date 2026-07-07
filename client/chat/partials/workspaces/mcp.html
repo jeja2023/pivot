@@ -4,7 +4,7 @@
             <div class="workspace-modal-header">
                 <div>
                     <h3>工具箱</h3>
-                    <p>把图表、报表、数据库、通知等工具交给聊天和智能体（自由任务、工作流）使用；先启用，再按场景授权调用。</p>
+                    <p>按数据来源、处理工具、输出动作和治理扩展组织工具；每张卡片都会说明执行位置、归属范围、风险和自动化状态。</p>
                 </div>
                 <button id="mcp-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
             </div>
@@ -31,8 +31,8 @@
                 <input type="hidden" id="mcp-edit-id">
                 <select id="mcp-edit-source-type" class="form-input" disabled>
                     <option value="external">外部工具服务（技术同事提供）</option>
-                    <option value="database">数据库连接</option>
-                    <option value="reports">报表文件</option>
+                    <option value="database">服务器可访问数据库</option>
+                    <option value="reports">服务器可访问报表目录</option>
                     <option value="visualization">图表生成</option>
                     <option value="report">报告编排</option>
                     <option value="im">IM 通知</option>
@@ -70,8 +70,9 @@
                         </select>
                         <input id="mcp-edit-db-port" class="form-input" type="number" placeholder="端口">
                     </div>
-                    <input id="mcp-edit-db-host" class="form-input" placeholder="主机地址，例如 10.0.0.8">
-                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填文件路径">
+                    <input id="mcp-edit-db-host" class="form-input" placeholder="服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器">
+                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填服务器文件路径">
+                    <div class="mcp-form-tip">localhost / 127.0.0.1 指 Pivot 服务器，不是你的电脑；生产库建议使用只读账号。</div>
                     <div class="mcp-form-row">
                         <input id="mcp-edit-db-user" class="form-input" placeholder="用户名">
                         <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码">
@@ -103,7 +104,8 @@
                     </details>
                 </div>
                 <div id="mcp-edit-reports-fields" class="mcp-field-group hidden">
-                    <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="报表/数据文件目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>
+                    <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="服务器可访问报表目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>
+                    <div class="mcp-form-tip">这里填写的是服务器路径或服务器能访问的共享目录；不支持跳出授权根目录。</div>
                     <div class="mcp-form-row">
                         <input id="mcp-edit-reports-extensions" class="form-input" placeholder="允许扩展名：csv,xlsx,xls,json,txt,md">
                         <input id="mcp-edit-reports-max-file-mb" class="form-input" type="number" min="1" max="200" placeholder="单文件 MB，默认 20">
@@ -155,5 +157,18 @@
                 </div>
             </div>
             <div id="mcp-tools-list" class="mcp-tools-list"></div>
+        </div>
+    </div>
+
+    <div id="mcp-local-auth-modal" class="modal-overlay hidden mcp-local-auth-overlay">
+        <div class="modal mcp-local-auth-modal">
+            <div class="mcp-edit-header">
+                <div>
+                    <h3>本机授权中心</h3>
+                    <p>授权本机数据库或报表目录后，后续工具调用仍由桌面端或本地助手只读执行。</p>
+                </div>
+                <button id="mcp-local-auth-close-btn" class="btn-secondary workspace-modal-close" type="button">关闭</button>
+            </div>
+            <div id="mcp-local-auth-body" class="mcp-local-auth-body"></div>
         </div>
     </div>

@@ -1,69 +1,35 @@
 // 聊天工具箱工作台数据加载与操作 Chat MCP workbench data loading and actions
-async function loadMcpServers() {
-    const list = document.getElementById('mcp-server-list');
-    if (!list) return;
-    const res = await apiFetch(`${API_BASE}/mcp/servers`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '工具服务加载失败');
-    mcpServersCache = data.data || [];
-    const systemTypes = new Set(mcpSystemServices.map(item => item.type));
-    const personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
-    const userManagedServers = mcpServersCache.filter(server => !systemTypes.has(server.server_type));
-    const personalConnectionServers = userManagedServers.filter(server => !personalBuiltinTypes.has(server.server_type));
-    const logsByServer = new Map();
-    mcpCallLogsCache.forEach(log => {
-        const key = String(log.server_id || '');
-        if (!key) return;
-        if (!logsByServer.has(key)) logsByServer.set(key, []);
-        logsByServer.get(key).push(log);
-    });
-    renderMcpSystemServices();
-    const personalByType = new Map(mcpServersCache
-        .filter(server => mcpPersonalBuiltinServices.some(item => item.type === server.server_type))
-        .map(server => [server.server_type, server]));
-    const databaseCount = userManagedServers.filter(server => server.server_type === 'database').length;
-    PivotSafeHtml.setHtml(list, `
-        <div class="mcp-system-head">
-            <div>
-                <strong>个人连接</strong>
-                <span>需要个人连接或个人配置的工具，保存后供当前用户调用。</span>
+function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
+    const badge = count ? `${count} 个` : service.badge;
+    const cardMeta = metaText || (count ? '可继续添加连接' : '配置后可查看工具');
+    return `
+        <div class="mcp-system-card mcp-connector-card">
+            <div class="mcp-system-card-head">
+                <strong>${mcpEscape(service.title)}</strong>
+                <em>${mcpEscape(badge || '入口')}</em>
+            </div>
+            <p>${mcpEscape(service.description)}</p>
+            ${renderMcpCardTags(mcpMetadataForType(service.type))}
+            <div class="mcp-card-meta">${mcpEscape(cardMeta)}</div>
+            <div class="mcp-system-actions">
+                <button class="btn-secondary" type="button" data-mcp-create="${mcpEscape(service.type)}">${mcpEscape(service.actionLabel || '配置')}</button>
             </div>
         </div>
-        <div class="mcp-system-grid">
-            ${mcpServiceCatalog.map(service => `
-                <div class="mcp-system-card mcp-connector-card">
-                    <div class="mcp-system-card-head">
-                        <strong>${mcpEscape(service.title)}</strong>
-                        <em>${mcpEscape(databaseCount ? `${databaseCount} 个` : service.badge)}</em>
-                    </div>
-                    <p>${mcpEscape(service.description)}</p>
-                    <div class="mcp-card-meta">${mcpEscape(databaseCount ? '可继续添加连接' : '配置后可查看工具')}</div>
-                    <div class="mcp-system-actions">
-                        <button class="btn-secondary" type="button" data-mcp-create="${mcpEscape(service.type)}">${mcpEscape(service.actionLabel)}</button>
-                    </div>
-                </div>
-            `).join('')}
-            ${mcpPersonalBuiltinServices.map(service => {
-                const server = personalByType.get(service.type);
-                return renderMcpServiceCard({
-                    service,
-                    server,
-                    connector: true,
-                    enabledEmptyText: '已配置，刷新后可查看工具',
-                    configMetaText: '配置后可查看工具'
-                });
-            }).join('')}
-            ${personalConnectionServers.map(server => {
-        const database = server.database_connection || {};
-        const typeLabel = server.server_type === 'database'
-            ? (mcpDbToolLabels[database.database_type] || '数据库')
-            : (mcpBuiltinToolLabels[server.server_type] || '外部服务');
-        const ownerLabel = mcpOwnerLabel(server);
-        const showOwner = mcpShouldShowOwner(server);
-        const serverTools = mcpToolsForServer(server.id, mcpFallbackToolsForServer(server));
-        const isPaused = server.status === 'paused';
-        const toolCount = serverTools.length;
-        return `
+    `;
+}
+
+function renderMcpInstanceCard(server) {
+    const database = server.database_connection || {};
+    const typeLabel = server.server_type === 'database'
+        ? (mcpDbToolLabels[database.database_type] || '数据库')
+        : (mcpBuiltinToolLabels[server.server_type] || '外部服务');
+    const metadataType = server.server_type === 'database' ? 'database' : (server.server_type || 'external');
+    const ownerLabel = mcpOwnerLabel(server);
+    const showOwner = mcpShouldShowOwner(server);
+    const serverTools = mcpToolsForServer(server.id, mcpFallbackToolsForServer(server));
+    const isPaused = server.status === 'paused';
+    const toolCount = serverTools.length;
+    return `
         <div class="mcp-system-card mcp-connector-card mcp-instance-card${isPaused ? ' is-paused' : ''}">
             <div class="mcp-system-card-head mcp-instance-head">
                 <div class="mcp-instance-title">
@@ -77,6 +43,7 @@ async function loadMcpServers() {
                     <span></span>
                 </button>
             </div>
+            ${renderMcpCardTags(mcpMetadataForType(metadataType, server))}
             <div class="mcp-card-meta${server.last_error ? ' error-text' : ''}">
                 ${mcpEscape(server.last_error || mcpToolPreviewText(server.id, mcpFallbackToolsForServer(server), toolCount ? `已接入 ${toolCount} 个工具` : '刷新后显示该服务工具'))}
             </div>
@@ -87,15 +54,229 @@ async function loadMcpServers() {
             </div>
         </div>
     `;
-    }).join('')}
-        </div>
-        ${personalConnectionServers.length ? '' : `
-            <div class="mcp-empty-panel">
-                <strong>还没有个人连接</strong>
-                <span>可以先配置一个数据库连接。</span>
+}
+
+function mcpFormatCount(value) {
+    if (window.Pivot?.formatNumber) return window.Pivot.formatNumber(value);
+    const num = Number(value) || 0;
+    return String(num);
+}
+
+async function loadMcpDatasetSummary() {
+    try {
+        const res = await apiFetch(`${API_BASE}/apps/data-analysis/datasets/summary`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return { count: 0, rowCount: 0, available: false };
+        const summary = data.summary || {};
+        return {
+            count: Number(summary.count) || 0,
+            rowCount: Number(summary.rowCount) || 0,
+            available: true
+        };
+    } catch (_err) {
+        return { count: 0, rowCount: 0, available: false };
+    }
+}
+function mcpServerOwnerId(server = {}) {
+    const owner = server.owner || {};
+    if (owner.scope === 'global' || owner.id === null || server.user_id === null) return null;
+    return owner.id || server.user_id || null;
+}
+
+function mcpServerBelongsToCurrentUser(server = {}) {
+    const user = typeof currentUser !== 'undefined' ? currentUser : null;
+    const ownerId = mcpServerOwnerId(server);
+    return Boolean(ownerId && user?.id && String(ownerId) === String(user.id));
+}
+
+function mcpShouldShowAsWorkbenchServer(server = {}) {
+    if (mcpServerOwnerId(server) === null) return true;
+    if (mcpServerBelongsToCurrentUser(server)) return true;
+    return false;
+}
+
+function mcpIsOtherUserServer(server = {}) {
+    if (!(typeof isAdminUser === 'function' && isAdminUser())) return false;
+    if (mcpServerOwnerId(server) === null) return false;
+    return !mcpServerBelongsToCurrentUser(server);
+}
+
+function mcpServerTypeLabel(server = {}) {
+    const database = server.database_connection || {};
+    if (server.server_type === 'database') return mcpDbToolLabels[database.database_type] || '数据库';
+    return mcpBuiltinToolLabels[server.server_type] || '外部服务';
+}
+
+function renderMcpOtherUserToolsPanel(servers = []) {
+    if (!servers.length) return '';
+    const owners = new Set();
+    const typeCounts = new Map();
+    servers.forEach(server => {
+        const ownerLabel = mcpOwnerLabel(server) || '未知用户';
+        owners.add(ownerLabel);
+        const typeLabel = mcpServerTypeLabel(server);
+        typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
+    });
+    const typeText = Array.from(typeCounts.entries())
+        .map(([label, count]) => `${label} ${count}`)
+        .join(' / ');
+    const previewRows = servers.slice(0, 8).map(server => {
+        const ownerLabel = mcpOwnerLabel(server) || '未知用户';
+        return `
+            <div class="mcp-other-tool-row">
+                <strong>${mcpEscape(mcpCleanServiceName(server.name))}</strong>
+                <span>${mcpEscape(mcpServerTypeLabel(server))}</span>
+                <em>${mcpEscape(ownerLabel)}</em>
             </div>
-        `}
+        `;
+    }).join('');
+    return `
+        <details class="mcp-other-tools-panel">
+            <summary>
+                <span>
+                    <strong>其它用户个人工具</strong>
+                    <small>admin 可见但不默认铺开，避免用户个人工具过多时挤占当前工作入口。</small>
+                </span>
+                <em>${mcpEscape(`${servers.length} 个 / ${owners.size} 人`)}</em>
+            </summary>
+            <div class="mcp-other-tools-body">
+                <p>${mcpEscape(typeText || '暂无类型统计')}</p>
+                <div class="mcp-other-tools-list">${previewRows}</div>
+                ${servers.length > 8 ? `<small>另有 ${mcpEscape(servers.length - 8)} 个个人工具未展开显示，可到工具策略或对应用户配置中治理。</small>` : ''}
+                <button class="btn-secondary" type="button" data-mcp-open-tool-policy>查看工具策略</button>
+            </div>
+        </details>
+    `;
+}
+
+function renderMcpDataManagementPanel(summary = {}) {
+    const count = Number(summary.count) || 0;
+    const rowCount = Number(summary.rowCount) || 0;
+    const countText = summary.available === false ? '摘要不可用' : `${mcpFormatCount(count)} 个数据集`;
+    const rowText = rowCount > 0 ? `，约 ${mcpFormatCount(rowCount)} 行` : '';
+    const summaryText = summary.available === false
+        ? '打开数据分析的数据总览，上传 Excel、CSV、SQLite 或一次性报表，并查看导入状态。'
+        : count > 0
+            ? `当前已有 ${mcpFormatCount(count)} 个数据集${rowText}；上传、列表、搜索、删除和导出都在数据总览完成。`
+            : '还没有导入数据集，可上传 Excel、CSV、SQLite 或临时报表开始分析。';
+    return `
+        <div class="mcp-data-management-panel">
+            <div class="mcp-data-management-head">
+                <strong>数据管理</strong>
+                <span>${mcpEscape(countText)}</span>
+            </div>
+            <button class="mcp-data-management-action is-primary" type="button" data-mcp-open-data-analysis data-mcp-open-data-analysis-tab="overview" aria-label="打开数据分析数据总览">
+                <span>
+                    <strong>打开数据总览</strong>
+                    <small>${mcpEscape(summaryText)}</small>
+                </span>
+                <em>进入管理</em>
+            </button>
+        </div>
+    `;
+}
+async function openMcpDataAnalysisImport(options = {}) {
+    try {
+        const payload = typeof options === 'string'
+            ? { datasetId: options, tab: 'overview' }
+            : { tab: 'overview', ...(options || {}) };
+        const workspaces = window.Pivot?.moduleApi?.('workspaces.apps', {}) || {};
+        if (typeof workspaces.openAppsWorkbench === 'function') await workspaces.openAppsWorkbench();
+        let dataAnalysis = window.Pivot?.moduleApi?.('apps.dataAnalysis', {}) || {};
+        if (typeof dataAnalysis.showDataAnalysisApp !== 'function') {
+            await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-data-analysis.js');
+            dataAnalysis = window.Pivot?.moduleApi?.('apps.dataAnalysis', {}) || {};
+        }
+        if (typeof dataAnalysis.showDataAnalysisApp === 'function') {
+            await dataAnalysis.showDataAnalysisApp(payload);
+            return;
+        }
+        showToast('数据分析应用入口未就绪，请从应用中心打开数据分析。', 'error');
+    } catch (e) {
+        showToast(e.message || '数据分析应用打开失败', 'error');
+    }
+}
+
+async function loadMcpServers() {
+    const list = document.getElementById('mcp-server-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/mcp/servers`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '工具服务加载失败');
+    mcpServersCache = data.data || [];
+    const datasetSummary = await loadMcpDatasetSummary();
+    const localAuthorizationStatus = await (window.getMcpLocalAuthorizationStatus?.({ silent: true }) || Promise.resolve(null));
+    const systemTypes = new Set(mcpSystemServices.map(item => item.type));
+    const personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
+    const userManagedServers = mcpServersCache.filter(server => !systemTypes.has(server.server_type));
+    const workbenchServers = userManagedServers.filter(mcpShouldShowAsWorkbenchServer);
+    const otherUserServers = userManagedServers.filter(mcpIsOtherUserServer);
+    const personalByType = new Map(workbenchServers
+        .filter(server => mcpPersonalBuiltinServices.some(item => item.type === server.server_type))
+        .map(server => [server.server_type, server]));
+    const databaseServers = workbenchServers.filter(server => server.server_type === 'database');
+    const externalServers = workbenchServers.filter(server => !personalBuiltinTypes.has(server.server_type) && server.server_type !== 'database');
+    renderMcpSystemServices();
+
+    const databaseEntry = mcpServiceCatalog.map(service => renderMcpCatalogCard(service, {
+        count: databaseServers.length,
+        metaText: databaseServers.length ? '可继续添加服务器可访问数据库' : '配置后可查看数据库工具'
+    })).join('');
+    const reportsService = mcpPersonalBuiltinServices.find(item => item.type === 'reports');
+    const imService = mcpPersonalBuiltinServices.find(item => item.type === 'im');
+    const localActionCards = (window.decorateMcpLocalActionCards || (cards => cards))(
+        mcpSourceActionCards.filter(card => card.action === 'local-auth'),
+        localAuthorizationStatus
+    );
+    const dataSourceActionPanels = [
+        renderMcpDataManagementPanel(datasetSummary),
+        renderMcpSourceActionPanel(localActionCards, {
+            title: '我的电脑',
+            description: window.mcpLocalAuthorizationDescription?.(localAuthorizationStatus) || '需桌面端或本地助手授权。'
+        })
+    ].join('');
+    const dataSourceActions = dataSourceActionPanels ? `<div class="mcp-source-action-zone">${dataSourceActionPanels}</div>` : '';
+    const dataSourceCards = [
+        databaseEntry,
+        reportsService ? renderMcpServiceCard({
+            service: reportsService,
+            server: personalByType.get('reports'),
+            connector: true,
+            enabledEmptyText: '已配置，刷新后可查看工具',
+            configMetaText: '配置后可诊断服务器目录'
+        }) : '',
+        ...databaseServers.map(renderMcpInstanceCard)
+    ].join('');
+    const notificationCards = imService ? renderMcpServiceCard({
+        service: imService,
+        server: personalByType.get('im'),
+        connector: true,
+        enabledEmptyText: '已配置，刷新后可查看工具',
+        configMetaText: '配置后可测试发送'
+    }) : '';
+    const extensionCards = [
+        renderMcpCatalogCard(mcpExternalServiceCatalog, {
+            count: externalServers.length,
+            metaText: externalServers.length ? '可继续添加外部工具服务' : '添加后可进行健康检查和工具 Schema 校验'
+        }),
+        ...externalServers.map(renderMcpInstanceCard)
+    ].join('');
+
+    const otherUserToolsPanel = renderMcpOtherUserToolsPanel(otherUserServers);
+    const governanceCards = [notificationCards, extensionCards, otherUserToolsPanel].filter(Boolean).join('');
+    PivotSafeHtml.setHtml(list, `
+        ${renderMcpSection('数据来源', '先判断数据由服务器、上传文件还是我的电脑提供，再交给下游工具处理。', dataSourceCards, { beforeGridHtml: dataSourceActions })}
+        ${renderMcpSection('通知与扩展', '把结果发到授权目标，或接入技术同事提供的外部工具服务。', governanceCards, { emptyText: '配置消息通知或外部工具服务后可在任务和工作流中复用。' })}
     `);
+    list.querySelectorAll('[data-mcp-open-data-analysis]').forEach(btn => {
+        btn.addEventListener('click', () => openMcpDataAnalysisImport({
+            datasetId: btn.dataset.mcpOpenDataAnalysisDataset || '',
+            tab: btn.dataset.mcpOpenDataAnalysisTab || btn.dataset.mcpOpenDataAnalysis || 'overview'
+        }));
+    });
+    list.querySelectorAll('[data-mcp-open-local-auth]').forEach(btn => {
+        btn.addEventListener('click', () => window.openMcpLocalAuthorizationCenter?.(btn.dataset.mcpOpenLocalAuth || 'local_database'));
+    });
     list.querySelectorAll('[data-mcp-create]').forEach(btn => {
         btn.addEventListener('click', () => window.openMcpCreateModal(btn.dataset.mcpCreate));
     });
@@ -108,8 +289,13 @@ async function loadMcpServers() {
     list.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools)));
     list.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus)));
     list.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete)));
+    list.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            await window.openAdminPanel?.({ restore: false });
+            await window.switchTab?.('tool-policy');
+        });
+    });
 }
-
 function mcpToolRiskLabel(level) {
     if (level === 'low') return '低风险';
     if (level === 'high') return '高风险';
@@ -120,21 +306,13 @@ function renderMcpSystemServices() {
     const box = document.getElementById('mcp-system-services');
     if (!box) return;
     const byType = new Map(mcpServersCache
-        .filter(server => mcpSystemServices.some(item => item.type === server.server_type))
+        .filter(server => mcpSystemServices.some(item => item.type === server.server_type) && mcpShouldShowAsWorkbenchServer(server))
         .map(server => [server.server_type, server]));
+    const systemCards = mcpSystemServices
+        .map(service => renderMcpServiceCard({ service, server: byType.get(service.type) }))
+        .join('');
     PivotSafeHtml.setHtml(box, `
-        <div class="mcp-system-head">
-            <div>
-                <strong>系统工具</strong>
-                <span>系统工具由系统集成，可直接启用或在卡片里完成必要配置。</span>
-            </div>
-        </div>
-        <div class="mcp-system-grid">
-            ${mcpSystemServices.map(service => {
-                const server = byType.get(service.type);
-                return renderMcpServiceCard({ service, server });
-            }).join('')}
-        </div>
+        ${renderMcpSection('处理与交付', '文档、数据、格式转换、图表和报告只处理上传文件、数据集或上游结果。', systemCards)}
     `);
     box.querySelectorAll('[data-mcp-system-enable]').forEach(btn => {
         btn.addEventListener('click', () => window.ensureMcpSystemService(btn.dataset.mcpSystemEnable, btn));
@@ -149,7 +327,6 @@ function renderMcpSystemServices() {
         btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus));
     });
 }
-
 window.openMcpSystemConfig = function(type) {
     const service = mcpBuiltinServices.find(item => item.type === type);
     if (!service?.requiresConfig) return showToast('该系统工具不需要额外配置', 'error');
@@ -386,7 +563,7 @@ function validateMcpBuiltinPayload(type, payload) {
     return '';
 }
 
-function formatMcpDatabaseError(data, fallback = '数据库连接失败') {
+function formatMcpDatabaseError(data, fallback = '服务器可访问数据库连接失败') {
     const parts = [data?.error || fallback];
     if (data?.hint) parts.push(data.hint);
     if (data?.diagnostics?.host) {
@@ -397,7 +574,7 @@ function formatMcpDatabaseError(data, fallback = '数据库连接失败') {
 
 window.testMcpDatabaseConnection = async function(mode = 'create') {
     if ((mcpFormEl('source-type', mode)?.value || 'external') !== 'database') {
-        return showToast('请先选择数据库连接', 'error');
+        return showToast('请先选择服务器可访问数据库', 'error');
     }
     const payload = collectMcpDatabasePayload(mode);
     const error = validateMcpDatabasePayload(payload, { requireName: false });
@@ -416,8 +593,8 @@ window.testMcpDatabaseConnection = async function(mode = 'create') {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!res.ok) return showToast(formatMcpDatabaseError(data, '连接测试失败'), 'error');
-        return showToast('数据库连接测试通过', 'success');
+        if (!res.ok) return showToast(formatMcpDatabaseError(data, '服务器可访问数据库测试失败'), 'error');
+        return showToast('服务器可访问数据库测试通过', 'success');
     } finally {
         if (button) {
             button.disabled = false;
@@ -461,7 +638,7 @@ function renderMcpDiagnostics(data = {}) {
     }
     if (data.type === 'database') {
         return [
-            '数据库连接测试通过',
+            '服务器可访问数据库测试通过',
             `表白名单：${(data.governance?.tableAllowlist || []).length || 0}`,
             `敏感字段：${(data.governance?.sensitiveFields || []).length || 0}`,
             `查询超时：${data.governance?.queryTimeoutMs || 20000}ms`

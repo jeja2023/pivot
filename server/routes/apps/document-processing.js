@@ -1,6 +1,6 @@
 ﻿const express = require('express');
 const { asyncHandler } = require('../../http');
-const { isAdmin } = require('../../permissions');
+const { isAdmin, isSuperAdmin } = require('../../permissions');
 const {
     cancelJob,
     createJobExport,
@@ -24,10 +24,16 @@ function requireDocumentProcessingAdmin(req, res) {
     return false;
 }
 
-function readJobConfig(body = {}) {
+function requireDocumentProcessingSuperAdmin(req, res) {
+    if (isSuperAdmin(req.user)) return true;
+    res.status(403).json({ error: '\u4ec5 admin \u8d26\u53f7\u53ef\u67e5\u770b\u548c\u914d\u7f6e OCR \u5f15\u64ce\u3002' });
+    return false;
+}
+
+function readJobConfig(body = {}, user = null) {
     return {
         language: body.language,
-        engine: body.engine,
+        engine: isSuperAdmin(user) ? body.engine : undefined,
         dpi: body.dpi,
         maxRenderPages: body.maxRenderPages,
         maxOcrPages: body.maxOcrPages,
@@ -41,12 +47,12 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
     const router = express.Router();
 
     router.get('/admin/settings', authMiddleware, asyncHandler(async (req, res) => {
-        if (!requireDocumentProcessingAdmin(req, res)) return;
+        if (!requireDocumentProcessingSuperAdmin(req, res)) return;
         return res.json({ settings: getDocumentProcessingSettings() });
     }));
 
     router.put('/admin/settings', authMiddleware, asyncHandler(async (req, res) => {
-        if (!requireDocumentProcessingAdmin(req, res)) return;
+        if (!requireDocumentProcessingSuperAdmin(req, res)) return;
         const settings = updateDocumentProcessingSettings({ patch: req.body || {}, userId: req.user.id });
         logAction?.(req, '\u6587\u6863\u5904\u7406\u914d\u7f6e\u66f4\u65b0', '\u66f4\u65b0 OCR/PDF \u5904\u7406\u9650\u5236');
         return res.json({ success: true, settings });
@@ -57,7 +63,8 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
         return res.json(getDocumentProcessingStats());
     }));
 
-    router.get('/engines', authMiddleware, asyncHandler(async (_req, res) => {
+    router.get('/engines', authMiddleware, asyncHandler(async (req, res) => {
+        if (!requireDocumentProcessingSuperAdmin(req, res)) return;
         res.json({ engines: await getOcrEngineStatus() });
     }));
 
@@ -80,7 +87,7 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
             jobType: req.body?.jobType,
             sourceModule: req.body?.sourceModule || 'document_processing',
             sourceRef: req.body?.sourceRef,
-            config: readJobConfig(req.body || {})
+            config: readJobConfig(req.body || {}, req.user)
         });
         logAction?.(req, '文档处理任务创建', `任务: ${detail.job.id}，文件: ${detail.file.originalName}`);
         return res.json({ success: true, ...detail });

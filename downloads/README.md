@@ -1,135 +1,89 @@
-# 客户端下载目录
+# 客户端下载与自动更新目录
 
-本目录用于存放 Pivot 客户端安装包，供用户通过 Web 页面下载。
+本目录用于存放 Pivot Windows 桌面客户端发布文件。它同时服务两个入口：
 
-## 🚀 快速开始
+- Web 登录页手工下载：`/downloads/Pivot-Setup.exe`
+- 桌面客户端自动更新：`/downloads/latest.yml` 以及 `latest.yml` 指向的安装包和 `.blockmap`
 
-### Docker 部署（推荐）
+## 推荐发布流程
 
 ```bash
-# 1. 复制客户端到此目录
-cp client/Pivot-Setup.exe downloads/
+# 1. 更新版本号和变更日志后打包 Windows 客户端
+npm run dist:win
 
-# 2. 启动 Docker 服务（docker-compose.yml 已配置挂载）
-docker-compose up -d
+# 2. 脚本会自动复制自动更新所需文件到 downloads/
+#    downloads/Pivot Setup <version>.exe
+#    downloads/Pivot Setup <version>.exe.blockmap
+#    downloads/latest.yml
+#    downloads/Pivot-Setup.exe
 
-# 3. 用户可通过登录页下载客户端
-# 访问地址：http://your-server:3000/downloads/Pivot-Setup.exe
+# 3. Docker/生产环境挂载 downloads 目录后即可通过 Web 服务访问
+curl -I http://your-pivot-server:3000/downloads/latest.yml
+curl -I http://your-pivot-server:3000/downloads/Pivot-Setup.exe
 ```
 
-### 直接运行
+`npm run pack:win` / `--dir` 只生成未打包调试目录，不会写入 `downloads/`。
 
-```bash
-# 1. 复制客户端到此目录
-cp client/Pivot-Setup.exe downloads/
+## 文件说明
 
-# 2. 启动服务
-npm start
+- `latest.yml`：Electron 自动更新清单。客户端会先读取它判断是否有新版本。
+- `Pivot Setup <version>.exe`：自动更新实际下载的版本化安装包，文件名必须与 `latest.yml` 中的 `path` 保持一致。
+- `Pivot Setup <version>.exe.blockmap`：差分更新元数据，由 `electron-builder` 生成。
+- `Pivot-Setup.exe`：网页登录页使用的“最新版客户端”下载入口，由打包脚本从版本化安装包复制而来。
 
-# 3. 用户可通过登录页下载
+安装包、`.blockmap` 和 `latest.yml` 都是发布产物，已通过 `.gitignore` 排除，不应提交到仓库。
+
+## 桌面端配置
+
+无 HTTPS 的离线局域网生产环境，可以在桌面端 `config.json` 中使用：
+
+```json
+{
+  "mode": "remote",
+  "remoteUrl": "http://pivot.example.local:3000/",
+  "autoUpdate": {
+    "enabled": true,
+    "path": "/downloads/",
+    "url": "",
+    "checkOnStart": true,
+    "autoDownload": true,
+    "allowPrerelease": false,
+    "allowInsecureHttp": true,
+    "allowedOrigins": ["http://pivot.example.local:3000"],
+    "installOnQuit": true
+  }
+}
 ```
 
-## 📁 文件说明
+当 `autoUpdate.enabled=true` 且 `autoUpdate.url` 为空时，桌面客户端会基于 `remoteUrl + autoUpdate.path` 推导更新源，例如 `http://pivot.example.local:3000/downloads/`。
 
-- **Pivot-Setup.exe** - Windows 客户端安装包（约 100-150MB）
-- 此目录中的 `.exe` 文件不会被提交到 Git（已在 .gitignore 中排除）
-- Docker 镜像默认不包含客户端文件，需要通过挂载提供
+## 更新源协议要求
 
-## 🔧 部署方案对比
+有 HTTPS 时优先使用 HTTPS。无互联网、无 HTTPS 证书的离线局域网生产环境可以使用 HTTP，但必须在桌面端配置中同时设置：
 
-| 方案 | 镜像大小 | 更新便利性 | 适用场景 |
-|------|---------|-----------|---------|
-| **外部挂载** ✅ | ~500MB | ⭐⭐⭐⭐⭐ 热更新 | 生产环境、内网部署 |
-| 打包进镜像 | ~650MB | ⭐⭐ 需重新构建 | 离线环境 |
-| 外部托管 | ~500MB | ⭐⭐⭐⭐ 独立管理 | 公网部署、CDN |
+- `autoUpdate.allowInsecureHttp=true`
+- `autoUpdate.allowedOrigins=["http://固定内网地址:端口"]`
 
-## 📦 多版本管理
+`allowedOrigins` 必须与客户端实际访问的协议、主机和端口一致。未显式开启或白名单不匹配时，普通 HTTP 更新源会被拒绝。
 
-如果需要提供多个版本供用户选择：
+## Docker 部署
 
-```bash
-downloads/
-├── Pivot-Setup.exe              # 最新版本（或软链接）
-├── Pivot-Setup-0.0.160.exe      # v0.0.160
-├── Pivot-Setup-0.0.159.exe      # v0.0.159
-└── README.txt                   # 版本说明
+推荐通过 volume 挂载主机目录，替换文件即可发布新客户端，无需重建镜像：
 
-# 创建软链接指向最新版本
-ln -s Pivot-Setup-0.0.160.exe downloads/Pivot-Setup.exe
+```yaml
+services:
+  pivot:
+    volumes:
+      - ./downloads:/app/downloads
 ```
 
-用户访问方式：
-- `/downloads/Pivot-Setup.exe` - 自动下载最新版本
-- `/downloads/Pivot-Setup-0.0.160.exe` - 下载指定版本
-
-## 🔍 验证部署
+发布新版本后确认容器内能看到文件：
 
 ```bash
-# 检查文件是否存在
-ls -lh downloads/
-
-# Docker 环境检查容器内文件
 docker exec pivot ls -lh /app/downloads/
-
-# 测试下载链接
-curl -I http://localhost:3000/downloads/Pivot-Setup.exe
-
-# 应返回 200 OK 和文件大小信息
+curl -I http://your-pivot-server:3000/downloads/latest.yml
 ```
 
-## ⚠️ 注意事项
+## 多版本保留
 
-1. **文件大小**：客户端安装包较大（100MB+），下载需要一定时间
-2. **磁盘空间**：确保主机/容器有足够空间存储
-3. **权限**：确保 Docker 容器有读取权限（通常挂载会自动处理）
-4. **更新策略**：建议保留最近 2-3 个版本，定期清理旧版本
-
-## 🌐 外部托管方案
-
-如果不想在 Docker 中存放大文件，可以使用外部托管：
-
-### GitHub Releases（推荐）
-
-1. 创建 GitHub Release
-2. 上传 `Pivot-Setup.exe`
-3. 修改 `client/chat/partials/pre-app-modals.html` 中的链接：
-   ```html
-   <a href="https://github.com/your-org/pivot/releases/latest/download/Pivot-Setup.exe" ...>
-   ```
-
-### 对象存储
-
-1. 上传到阿里云 OSS / 腾讯云 COS / AWS S3
-2. 配置公开读取权限或签名 URL
-3. 更新登录页链接
-
-## 📚 相关文档
-
-- [Docker客户端下载配置.md](../docs/Docker客户端下载配置.md) - 详细配置说明
-- [Docker部署快速指南.md](../docs/Docker部署快速指南.md) - 部署步骤
-- [SOLUTION.md](../SOLUTION.md) - 完整解决方案
-
-## 🆘 常见问题
-
-**Q: 用户点击下载显示 404？**
-```bash
-# 检查文件是否存在
-ls downloads/Pivot-Setup.exe
-
-# Docker 环境检查挂载
-docker inspect pivot | grep -A 10 Mounts
-```
-
-**Q: 下载速度慢？**
-- 使用 Nginx 反向代理并配置缓存
-- 考虑使用 CDN 加速
-- 或使用对象存储（OSS/COS/S3）
-
-**Q: 如何不提供下载？**
-- 保持此目录为空即可
-- 登录页链接会返回 404（可选择隐藏链接）
-
-**Q: 可以放置其他平台的客户端吗？**
-- 可以！macOS (.dmg)、Linux (.AppImage) 都可以
-- 需要自行修改前端添加对应的下载链接
-
+建议保留最近 2-3 个版本，便于回滚和排查。不要手动改写 `latest.yml` 中的文件名，除非同时保证对应安装包和 `.blockmap` 已存在。

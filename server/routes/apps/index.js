@@ -42,6 +42,7 @@ const {
     compareDatasets,
     exportDataset,
     getDatasetDetail,
+    getDatasetSummary,
     importDataset,
     importFromDatabase,
     listDatasetArtifacts,
@@ -411,6 +412,10 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ datasets: listDatasets(req.user.id) });
+    }));
+
+    router.get('/apps/data-analysis/datasets/summary', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ summary: getDatasetSummary(req.user.id) });
     }));
 
     router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {

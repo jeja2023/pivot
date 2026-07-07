@@ -20,6 +20,8 @@ client/*.exe
 
 # 下载目录中的大文件（不提交到 Git）
 downloads/*.exe
+downloads/*.blockmap
+downloads/latest.yml
 downloads/*.msi
 downloads/*.dmg
 downloads/*.AppImage

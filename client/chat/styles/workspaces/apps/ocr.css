@@ -325,6 +325,18 @@
     overflow: auto;
 }
 
+.doc-tool-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.doc-tool-settings.hidden {
+    display: none;
+}
+
 .doc-tool-engine {
     display: grid;
     grid-template-columns: minmax(76px, 0.7fr) minmax(0, 1fr);
@@ -683,6 +695,7 @@
 
 .doc-tool-row-actions {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     gap: 4px;

@@ -372,6 +372,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
     mcp: [
         '/chat/tool-policy.js',
         '/chat/mcp-workbench-common.js',
+        '/chat/mcp-workbench-local-auth.js',
         '/chat/mcp-workbench-form.js',
         '/chat/mcp-workbench-main.js'
     ]
@@ -559,11 +560,15 @@ function createLazyWorkspaceEntrypoint(group, functionName) {
     return lazyEntrypoint;
 }
 
-window.openAppsWorkbench = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
+const openAppsWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
+window.openAppsWorkbench = openAppsWorkbenchEntrypoint;
 window.openAgentWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
 window.openAgentDagWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
 window.openKnowledgeWorkbench = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
 window.openMcpWorkbench = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
+window.Pivot?.exposeModule?.('workspaces.apps', {
+    openAppsWorkbench: openAppsWorkbenchEntrypoint
+});
 
 window.closeAgentWorkbench = () => {
     if (document.body?.dataset.activeWorkspace === 'agent') window.showMainWorkspace?.('chat');

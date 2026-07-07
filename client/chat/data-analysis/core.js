@@ -140,9 +140,12 @@
         renderPivotControls();
     }
 
-    app.showDataAnalysisApp = async function () {
+    app.showDataAnalysisApp = async function (options = {}) {
         const view = app.ensureView();
         if (!view) return;
+        const requestedDatasetId = String(options?.datasetId || '').trim();
+        const requestedTab = String(options?.tab || options?.view || 'overview').trim() || 'overview';
+        if (requestedDatasetId) state.activeId = requestedDatasetId;
         sessionStorage.setItem('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
@@ -152,7 +155,9 @@
         if (typeof setAppsTitle === 'function') {
             setAppsTitle('数据分析', '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和智能分析洞察。');
         }
+        if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
+        if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
     };
 
     Object.assign(app, {

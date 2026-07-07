@@ -146,6 +146,16 @@ fetch('/downloads/Pivot-Setup.exe', { method: 'HEAD' })
     });
 ```
 
+## 自动更新文件
+
+如果桌面客户端启用了自动更新，`downloads/` 目录除了 `Pivot-Setup.exe` 外，还需要保留 `npm run dist:win` 生成并自动复制的三类文件：
+
+- `latest.yml`
+- `Pivot Setup <version>.exe`
+- `Pivot Setup <version>.exe.blockmap`
+
+无 HTTPS 的离线局域网生产环境，可以在桌面端 `config.json` 中使用 HTTP 的 `remoteUrl`，并设置 `autoUpdate.enabled=true`、`autoUpdate.path=/downloads/`、`autoUpdate.url=""`、`autoUpdate.allowInsecureHttp=true`，同时把固定内网地址写入 `autoUpdate.allowedOrigins`。这样客户端会从同一个 Pivot 服务的 `/downloads/` 目录检查更新。
+
 ## 多版本支持（可选）
 
 如果需要提供多个版本供用户选择，可以：

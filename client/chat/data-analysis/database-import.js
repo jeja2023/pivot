@@ -15,7 +15,7 @@
             connections = (Array.isArray(data.data) ? data.data : []).filter(item => item.server_type === 'database');
         } catch (_e) { /* 空处理 */ }
         if (!connections.length) {
-            toast('没有可用的数据库连接，请先在「工具服务」中配置数据库连接', 'warning');
+            toast('没有可用的服务器可访问数据库，请先在「工具箱」中配置服务器可访问数据库', 'warning');
             return;
         }
 
@@ -50,7 +50,7 @@
         const name = datasetNameInput?.value || '';
 
         if (!mcpServerId) {
-            toast('请选择数据库连接', 'warning');
+            toast('请选择服务器可访问数据库', 'warning');
             return;
         }
         if (!sql.trim() && !table.trim()) {
@@ -64,7 +64,7 @@
 
         // 关闭导入弹窗并进入忙碌状态
         document.getElementById('data-analysis-db-import-modal')?.classList.add('hidden');
-        setBusy(true, '正在从数据库导入...');
+        setBusy(true, '正在从服务器可访问数据库导入...');
         try {
             const data = await fetchJson(`${API}/import-database`, {
                 method: 'POST',
@@ -77,10 +77,10 @@
                 })
             });
             state.activeId = data.dataset?.id || '';
-            toast('数据库数据已导入');
+            toast('服务器数据库数据已导入');
             await loadDatasets({ keepActive: true });
         } catch (e) {
-            toast(e && e.message ? e.message : '数据库导入失败', 'error');
+            toast(e && e.message ? e.message : '服务器数据库导入失败', 'error');
         } finally {
             setBusy(false);
         }

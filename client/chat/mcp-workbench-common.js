@@ -21,7 +21,7 @@ const mcpDbToolLabels = {
 };
 
 const mcpBuiltinToolLabels = {
-    reports: '报表文件',
+    reports: '服务器可访问报表目录',
     visualization: '图表生成',
     report: '报告编排',
     documents: '文档解析',
@@ -76,14 +76,14 @@ const mcpSystemServices = [
 const mcpPersonalBuiltinServices = [
     {
         type: 'reports',
-        title: '报表文件',
-        badge: '需配置',
-        description: '连接报表和数据文件目录后，提供查找文件、摘要读取和表格查询工具。',
-        usage: '适合“从共享目录读取 Excel/CSV 报表”。',
+        title: '服务器可访问报表目录',
+        badge: '服务器执行',
+        description: '由 Pivot 服务器读取服务器目录、NAS 或共享目录，提供查找文件、摘要读取和表格查询工具。',
+        usage: '适合“从服务器或共享目录读取 Excel/CSV 报表”。',
         tools: ['reports.list_files', 'reports.read_file_summary', 'reports.query_table', 'reports.compare_files'],
         requiresConfig: true,
-        defaultName: '报表文件',
-        defaultDescription: '系统集成的报表和数据文件访问能力。'
+        defaultName: '服务器可访问报表目录',
+        defaultDescription: '由 Pivot 服务器读取授权目录内的报表和数据文件。'
     },
     {
         type: 'im',
@@ -103,16 +103,152 @@ const mcpBuiltinServices = [...mcpSystemServices, ...mcpPersonalBuiltinServices]
 const mcpServiceCatalog = [
     {
         type: 'database',
-        title: '数据库连接',
-        badge: '手动连接',
-        description: '连接业务数据库后，提供表结构查看、只读查询和集合分析等工具。',
-        usage: '适合“查询业务表、统计数量、生成图表”。默认只读，避免误写数据。',
+        title: '服务器可访问数据库',
+        badge: '服务器执行',
+        description: '由 Pivot 服务器发起连接，适合连接服务器本机、内网或云上数据库。',
+        usage: '适合“查询服务器能访问的业务表、统计数量、生成图表”。默认只读，避免误写数据。',
         actionLabel: '配置',
-        defaultName: '数据库连接',
-        defaultDescription: '手动连接数据库后启用查询工具。'
+        defaultName: '服务器可访问数据库',
+        defaultDescription: '由 Pivot 服务器发起连接并启用只读数据库查询工具。'
     }
 ];
 
+const mcpExternalServiceCatalog = {
+    type: 'external',
+    title: '外部工具服务',
+    badge: '技术接入',
+    description: '接入技术同事提供的工具服务，需配置服务地址、鉴权、健康检查和工具 Schema 校验。',
+    usage: '适合连接已经部署好的内部工具服务。',
+    actionLabel: '添加',
+    defaultName: '外部工具服务',
+    defaultDescription: '技术同事提供的外部工具服务。'
+};
+
+const mcpSourceActionCards = [
+    {
+        type: 'imported_dataset',
+        title: '导入我的数据文件',
+        badge: '推荐',
+        description: 'Excel、CSV、SQLite 上传后进入数据分析。',
+        statusText: '服务器受控目录内生成个人数据集',
+        actionLabel: '导入数据',
+        action: 'data-analysis'
+    },
+    {
+        type: 'imported_report',
+        title: '导入我的报表文件',
+        badge: '推荐',
+        description: '上传单个 Excel/CSV 报表做一次性分析。',
+        statusText: '作为临时分析材料，不配置服务器路径',
+        actionLabel: '导入报表',
+        action: 'data-analysis'
+    },
+    {
+        type: 'local_database',
+        title: '连接本机数据库',
+        badge: '待授权',
+        description: '由桌面端或本地助手在本机执行只读查询。',
+        statusText: 'Web 不直连本机 localhost',
+        actionLabel: '授权',
+        action: 'local-auth'
+    },
+    {
+        type: 'local_report_dir',
+        title: '授权本机报表目录',
+        badge: '待授权',
+        description: '只读扫描授权目录，不把本机路径当服务器路径。',
+        statusText: '默认不用于定时工作流',
+        actionLabel: '授权',
+        action: 'local-auth'
+    }
+];
+
+const MCP_CARD_METADATA = {
+    database: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '可用于工作流' },
+    reports: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '可用于工作流' },
+    imported_dataset: { executionLocation: '服务器导入后处理', ownerScope: '个人', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    imported_report: { executionLocation: '服务器导入后处理', ownerScope: '个人', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    local_database: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
+    local_report_dir: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
+    external: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '按服务策略' },
+    im: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '可用于工作流' },
+    visualization: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    report: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    documents: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    data: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
+    format: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' }
+};
+
+function mcpOwnerScopeForServer(server, fallback = '个人/全局') {
+    if (!server) return fallback;
+    return server.user_id === null || server.owner?.scope === 'global' ? '全局' : '个人';
+}
+
+function mcpMetadataForType(type, server = null) {
+    const metadata = { ...(MCP_CARD_METADATA[type] || MCP_CARD_METADATA.external) };
+    metadata.ownerScope = mcpOwnerScopeForServer(server, metadata.ownerScope);
+    return metadata;
+}
+
+function renderMcpCardTags(metadata = {}) {
+    const tags = [
+        ['执行', metadata.executionLocation || '服务器'],
+        ['归属', metadata.ownerScope || '个人'],
+        ['风险', metadata.riskLevel || '中风险'],
+        ['自动化', metadata.workflowAvailability || '按策略']
+    ];
+    return `<div class="mcp-card-tags">${tags.map(([label, value]) => `<span><b>${mcpEscape(label)}</b>${mcpEscape(value)}</span>`).join('')}</div>`;
+}
+
+function renderMcpSourceActionPanel(cards = [], { title = '', description = '' } = {}) {
+    const availableCards = cards.filter(Boolean);
+    if (!availableCards.length) return '';
+    const actions = availableCards.map(card => {
+        const isDataAnalysis = card.action === 'data-analysis';
+        const isLocalAuth = card.action === 'local-auth';
+        const enabled = (isDataAnalysis || isLocalAuth) && !card.disabled;
+        const stateText = card.disabled ? (card.badge || '需授权') : (card.actionLabel || '打开');
+        const actionAttr = isDataAnalysis && enabled
+            ? 'data-mcp-open-data-analysis'
+            : (isLocalAuth && enabled ? `data-mcp-open-local-auth="${mcpEscape(card.type)}"` : 'disabled aria-disabled="true"');
+        return `
+            <button class="mcp-source-action${card.disabled ? ' is-disabled' : ''}" type="button" ${actionAttr}>
+                <span class="mcp-source-action-copy">
+                    <strong>${mcpEscape(card.title)}</strong>
+                    <span>${mcpEscape(card.description)}</span>
+                    <small>${mcpEscape(card.statusText || '')}</small>
+                </span>
+                <em>${mcpEscape(stateText)}</em>
+            </button>
+        `;
+    }).join('');
+    return `
+        <div class="mcp-source-action-panel">
+            <div class="mcp-source-action-head">
+                <strong>${mcpEscape(title)}</strong>
+                <span>${mcpEscape(description)}</span>
+            </div>
+            <div class="mcp-source-action-list">${actions}</div>
+        </div>
+    `;
+}
+
+function renderMcpSection(title, description, cardsHtml, { emptyText = '', beforeGridHtml = '' } = {}) {
+    const content = String(cardsHtml || '').trim();
+    const beforeGrid = String(beforeGridHtml || '').trim();
+    return `
+        <section class="mcp-home-section">
+            <div class="mcp-system-head">
+                <div>
+                    <strong>${mcpEscape(title)}</strong>
+                    <span>${mcpEscape(description)}</span>
+                </div>
+            </div>
+            ${beforeGrid}
+            ${content ? `<div class="mcp-system-grid">${content}</div>` : `<div class="mcp-empty-panel compact"><strong>暂无可用入口</strong><span>${mcpEscape(emptyText || '请稍后刷新或联系管理员。')}</span></div>`}
+        </section>
+    `;
+}
 function renderMcpServiceCard({
     service,
     server = null,
@@ -144,6 +280,7 @@ function renderMcpServiceCard({
                 ${headAction}
             </div>
             <p>${mcpEscape(service.description)}</p>
+            ${renderMcpCardTags(mcpMetadataForType(service.type, server))}
             <div class="mcp-card-meta">${mcpEscape(metaText)}</div>
             <div class="mcp-system-actions">
                 ${enabled ? `<button class="btn-secondary" type="button" data-mcp-tools="${mcpEscape(server.id)}">工具</button>` : ''}

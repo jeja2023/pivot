@@ -8,6 +8,15 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getStatus() {
         return ipcRenderer.invoke('pivot-desktop:status');
     },
+    getLocalAuthorizationStatus() {
+        return ipcRenderer.invoke('pivot-local-auth:status');
+    },
+    requestLocalAuthorization(type) {
+        return ipcRenderer.invoke('pivot-local-auth:grant', type);
+    },
+    revokeLocalAuthorization(type) {
+        return ipcRenderer.invoke('pivot-local-auth:revoke', type);
+    },
     checkForUpdates() {
         return ipcRenderer.invoke('pivot-updater:check');
     },

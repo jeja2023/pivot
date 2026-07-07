@@ -82,6 +82,16 @@ function ensureAppSetting(key, value, options = {}) {
     return { inserted: true, row: getAppSettingRow(key) };
 }
 
+function deleteAppSetting(key) {
+    try {
+        db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        return true;
+    } catch (e) {
+        if (isMissingAppSettingsTable(e)) return false;
+        throw e;
+    }
+}
+
 function setAppSetting(key, value, options = {}) {
     const updatedAt = options.updatedAt || getBeijingTimestamp();
     const updatedBy = options.updatedBy || null;
@@ -122,6 +132,7 @@ function setAppSetting(key, value, options = {}) {
 }
 
 module.exports = {
+    deleteAppSetting,
     ensureAppSetting,
     getAppSettingRow,
     getAppSettingRows,

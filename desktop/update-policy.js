@@ -31,6 +31,22 @@ function isOriginAllowed(url, allowedOrigins = []) {
     return allowed.some(item => item === origin || item === host);
 }
 
+function assertHttpUpdatePolicy(url, options = {}) {
+    if (url.protocol !== 'http:') return;
+
+    const allowedOrigins = normalizeOriginList(options.allowedOrigins);
+    const allowConfiguredHttp = options.allowInsecureHttp === true;
+    const allowLoopbackDevHttp = normalizeBoolean(options.env?.PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED)
+        && isLoopbackUpdateUrl(url);
+
+    if (!allowConfiguredHttp && !allowLoopbackDevHttp) {
+        throw new Error('config.autoUpdate.url must use https unless config.autoUpdate.allowInsecureHttp=true or explicit loopback dev feeds are enabled.');
+    }
+    if (allowConfiguredHttp && !isLoopbackUpdateUrl(url) && allowedOrigins.length === 0) {
+        throw new Error('config.autoUpdate.allowedOrigins is required when config.autoUpdate.allowInsecureHttp=true for non-loopback http feeds.');
+    }
+}
+
 function normalizeUpdateFeedUrl(value, options = {}) {
     const raw = String(value || '').trim();
     if (!raw) {
@@ -39,14 +55,12 @@ function normalizeUpdateFeedUrl(value, options = {}) {
     }
 
     const url = new URL(raw);
-    const allowInsecureHttp = options.allowInsecureHttp === true
-        || normalizeBoolean(options.env?.PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED);
-
-    if (url.protocol !== 'https:') {
-        if (!(url.protocol === 'http:' && allowInsecureHttp && isLoopbackUpdateUrl(url))) {
-            throw new Error('config.autoUpdate.url must use https, except explicit loopback dev feeds.');
-        }
+    if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new Error('config.autoUpdate.url must use http or https.');
     }
+
+    assertHttpUpdatePolicy(url, options);
+
     if (!isOriginAllowed(url, options.allowedOrigins)) {
         throw new Error('config.autoUpdate.url origin is not in config.autoUpdate.allowedOrigins.');
     }

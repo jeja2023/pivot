@@ -26,5 +26,6 @@
 @import url("./workspaces/mcp/mcp-system-cards.css");
 @import url("./workspaces/mcp/mcp-call-logs.css");
 @import url("./workspaces/mcp/mcp-governance.css");
+@import url("./workspaces/mcp/mcp-local-auth.css");
 @import url("./workspaces/mcp/mcp-responsive.css");
 @import url("./workspaces/responsive.css");

@@ -228,15 +228,11 @@
     }
 
     function renderPdfRowActions(item) {
-        const outputs = resultOutputs(item);
-        const canDownload = item.status === 'succeeded' || outputs.length > 0;
         const canCancel = item.status === 'pending' || item.status === 'processing';
-        const canRetry = ['failed', 'cancelled', 'needs_review', 'succeeded'].includes(item.status);
         return [
             '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-open="' + esc(item.id) + '">查看</button>',
-            '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-download="' + esc(item.id) + '"' + (canDownload ? '' : ' disabled') + '>下载</button>',
             canCancel ? '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-cancel="' + esc(item.id) + '">取消</button>' : '',
-            canRetry ? '<button class="btn-secondary doc-tool-row-action" type="button" data-pdf-job-retry="' + esc(item.id) + '">重试</button>' : ''
+            '<button class="btn-danger-outline doc-tool-row-action" type="button" data-pdf-job-delete="' + esc(item.id) + '">删除</button>'
         ].filter(Boolean).join('');
     }
 
@@ -351,8 +347,10 @@
                     ${job.errorMessage ? `<em>${esc(job.errorMessage)}</em>` : ''}
                 </div>
                 <div class="pdf-detail-actions">
+                    ${(detail.outputs || []).filter(output => output?.id).length > 1 ? `<button class="btn-secondary" type="button" data-pdf-job-download="${esc(job.id)}">全部下载</button>` : ''}
                     <button class="btn-secondary" type="button" data-pdf-job-retry="${esc(job.id)}">重试</button>
                     <button class="btn-secondary" type="button" data-pdf-job-cancel="${esc(job.id)}">取消</button>
+                    <button class="btn-danger-outline" type="button" data-pdf-job-delete="${esc(job.id)}">删除</button>
                 </div>
             </section>
             ${renderResultMeta(job)}
@@ -455,11 +453,33 @@
         URL.revokeObjectURL(url);
     }
 
+    async function downloadJobOutputArchive(jobId, filename = '') {
+        const res = await apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/outputs/download`);
+        if (!res.ok) {
+            const data = await res.clone().json().catch(() => ({}));
+            throw new Error(data?.error?.message || data?.error || `下载失败（${res.status}）`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename || `pdf-job-${jobId}-全部输出.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
     async function downloadJobOutputs(jobId) {
         const row = state.jobs.find(item => String(item.id) === String(jobId));
-        const rowOutput = selectOutput(resultOutputs(row));
-        if (rowOutput?.id && resultOutputs(row).length === 1) {
+        const rowOutputs = resultOutputs(row);
+        const rowOutput = selectOutput(rowOutputs);
+        if (rowOutput?.id && rowOutputs.length === 1) {
             await downloadOutput(rowOutput.id, rowOutput.fileName);
+            return;
+        }
+        if (rowOutputs.length > 1) {
+            await downloadJobOutputArchive(jobId);
+            toast('已开始下载全部输出', 'success');
             return;
         }
         const detail = await loadDetail(jobId, { silent: true, openPanel: false });
@@ -472,8 +492,8 @@
             await downloadOutput(outputs[0].id, outputs[0].fileName);
             return;
         }
-        openDetailPanel();
-        toast('该任务有多个输出，请在详情中选择下载文件', 'warning');
+        await downloadJobOutputArchive(jobId);
+        toast('已开始下载全部输出', 'success');
     }
     async function retryJob(jobId) {
         await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
@@ -485,6 +505,20 @@
         await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
         toast('任务已取消');
         await loadJobs({ keepActive: true });
+    }
+
+    async function deleteJob(jobId) {
+        if (!jobId) return;
+        const confirmed = typeof window.confirm !== 'function' || window.confirm('确定删除该任务及相关文件吗？删除后不可恢复。');
+        if (!confirmed) return;
+        await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+        if (String(state.activeJobId) === String(jobId)) {
+            state.activeJobId = '';
+            state.detail = null;
+            closeDetailPanel();
+        }
+        toast('任务已删除', 'success');
+        await loadJobs({ keepActive: false });
     }
 
     function bindEvents(view) {
@@ -528,6 +562,11 @@
             const rowDownload = event.target.closest('[data-pdf-job-download]');
             if (rowDownload) {
                 downloadJobOutputs(rowDownload.dataset.pdfJobDownload).catch(e => toast(e.message || '下载失败', 'error'));
+                return;
+            }
+            const remove = event.target.closest('[data-pdf-job-delete]');
+            if (remove) {
+                deleteJob(remove.dataset.pdfJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
                 return;
             }
             const retry = event.target.closest('[data-pdf-job-retry]');

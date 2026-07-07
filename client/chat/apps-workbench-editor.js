@@ -7,7 +7,6 @@ function getOfficialWritingDocSummary(doc) {
     const pendingSuggestions = Array.isArray(state.suggestions)
         ? state.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected').length
         : 0;
-    const commentCount = Array.isArray(state.comments) ? state.comments.length : 0;
     let status = '待起草';
     if (draftCount > 0) status = pendingSuggestions > 0 ? '可审阅' : '可导出';
     else if (sourceCount > 0) status = '可起草';
@@ -16,7 +15,6 @@ function getOfficialWritingDocSummary(doc) {
         sourceCount,
         draftCount,
         pendingSuggestions,
-        commentCount,
         status
     };
 }
@@ -101,7 +99,7 @@ function renderOfficialWritingDocTableRows(docs, startIndex = 0) {
                 <td class="text-center"><span class="official-writing-status-pill ${statusClass}">${escapeAppsHtml(summary.status)}</span></td>
                 <td class="text-center">${summary.draftCount} 字</td>
                 <td class="text-center">${summary.sourceCount} 字</td>
-                <td class="text-center">${summary.pendingSuggestions} 建议 / ${summary.commentCount} 批注</td>
+                <td class="text-center">${summary.pendingSuggestions} 建议</td>
                 <td>${escapeAppsHtml(formatVersionTime(doc.updatedAt))}</td>
                 <td class="text-center">
                     <span class="official-writing-row-actions">

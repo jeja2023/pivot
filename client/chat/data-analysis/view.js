@@ -272,11 +272,11 @@
             <div id="data-analysis-db-import-modal" class="modal-overlay hidden" style="z-index: 8000;">
                 <div class="modal" style="width: min(500px, 92vw); max-height: 85vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
                     <div style="display: flex; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
-                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">从数据库导入数据集</h3>
+                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">从服务器可访问数据库导入数据集</h3>
                     </div>
                     <form id="data-analysis-db-import-form" style="display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 4px; text-align: left;">
                         <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据库连接</label>
+                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">服务器可访问数据库</label>
                             <select id="data-analysis-db-conn" class="form-input" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 10px; margin-bottom: 0;" required></select>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 6px;">
@@ -359,10 +359,10 @@
         if (actionsEl) {
             PivotSafeHtml.setHtml(actionsEl, tab === 'overview' ? `
                 <label class="btn-secondary data-analysis-upload-action">
-                    <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls">
-                    <span>\u4e0a\u4f20 Excel / CSV</span>
+                    <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls,.sqlite,.sqlite3,.db">
+                    <span>上传 Excel / CSV / SQLite</span>
                 </label>
-                <button id="data-analysis-import-db" class="btn-secondary" type="button">\u4ece\u6570\u636e\u5e93\u5bfc\u5165</button>
+                <button id="data-analysis-import-db" class="btn-secondary" type="button">从服务器可访问数据库导入</button>
                 <button id="data-analysis-overview-refresh" class="btn-secondary" type="button">\u5237\u65b0\u5217\u8868</button>
             ` : '');
         }

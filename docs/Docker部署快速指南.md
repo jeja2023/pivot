@@ -245,8 +245,9 @@ server {
 ## 八、参考文档
 
 - [Docker客户端下载配置.md](./Docker客户端下载配置.md) - 详细配置说明
-- [生产环境离线部署.md](./生产环境离线部署.md) - 离线生产环境镜像导入、模型挂载和升级回滚流程
-- [PaddleOCR模型外部挂载.md](./PaddleOCR模型外部挂载.md) - OCR 模型目录挂载与运行时配置
+- [生产环境离线部署.md](./生产环境离线部署.md) - 离线生产环境镜像导入、OCR 外部服务对接和升级回滚流程
+- [OCR服务对接协议.md](./OCR%E6%9C%8D%E5%8A%A1%E5%AF%B9%E6%8E%A5%E5%8D%8F%E8%AE%AE.md) - 外部 OCR 服务 HTTP 接口约定
+- [独立OCR项目搭建指南.md](./独立OCR项目搭建指南.md) - 独立 OCR 项目目录、镜像和 PaddleOCR-VL 选型建议
 - [Dockerfile](../Dockerfile) - 镜像构建配置
 - [docker-compose.yml](../docker-compose.yml) - 编排配置
 - [使用帮助.md](../使用帮助.md) - 用户使用手册

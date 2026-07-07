@@ -14,13 +14,13 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
 
     const serverId = Number(mcpServerId);
     if (!serverId) {
-        const err = new Error('请选择一个数据库连接。');
+        const err = new Error('请选择一个服务器可访问数据库。');
         err.status = 400;
         throw err;
     }
     const server = getAccessibleMcpServer(serverId, user);
     if (!server || String(server.base_url || '').indexOf('pivot-db://') !== 0) {
-        const err = new Error('数据库连接不存在或无权访问。');
+        const err = new Error('服务器可访问数据库不存在或无权访问。');
         err.status = 404;
         throw err;
     }

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { loadDesktopConfig } = require('./config');
@@ -212,6 +213,124 @@ async function loadTarget() {
     }
 }
 
+const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir']);
+
+function localAuthorizationFilePath() {
+    return path.join(app.getPath('userData'), 'local-authorizations.json');
+}
+
+function normalizeLocalAuthorizationStore(value) {
+    const grants = value && typeof value.grants === 'object' && value.grants ? value.grants : {};
+    return { version: 1, grants };
+}
+
+function readLocalAuthorizations() {
+    return normalizeLocalAuthorizationStore(readJson(localAuthorizationFilePath()));
+}
+
+function writeLocalAuthorizations(value) {
+    writeJson(localAuthorizationFilePath(), normalizeLocalAuthorizationStore(value));
+}
+
+function localPathHint(resourcePath) {
+    const base = path.basename(resourcePath || '');
+    const parent = path.basename(path.dirname(resourcePath || ''));
+    if (!base) return '';
+    return parent ? path.join(parent, base) : base;
+}
+
+function sanitizeLocalGrant(type, grant) {
+    if (!grant || typeof grant !== 'object') return { type, authorized: false };
+    return {
+        type,
+        authorized: true,
+        resourceKind: grant.resourceKind || 'local_resource',
+        label: grant.label || localPathHint(grant.path) || '已授权资源',
+        pathHint: localPathHint(grant.path),
+        provider: grant.provider || 'desktop',
+        deviceName: grant.deviceName || os.hostname(),
+        grantedAt: grant.grantedAt || '',
+        updatedAt: grant.updatedAt || grant.grantedAt || ''
+    };
+}
+
+function buildLocalAuthorizationStatus() {
+    const store = readLocalAuthorizations();
+    return {
+        available: true,
+        provider: 'desktop',
+        mode: runtimeConfig && runtimeConfig.mode ? runtimeConfig.mode : 'unknown',
+        deviceName: os.hostname(),
+        supportedTypes: Array.from(LOCAL_AUTH_TYPES),
+        grants: {
+            local_database: sanitizeLocalGrant('local_database', store.grants.local_database),
+            local_report_dir: sanitizeLocalGrant('local_report_dir', store.grants.local_report_dir)
+        },
+        message: '桌面客户端已就绪，本机授权信息仅保存在当前设备。'
+    };
+}
+
+function assertLocalAuthorizationType(type) {
+    if (!LOCAL_AUTH_TYPES.has(type)) throw new Error('不支持的本机授权类型。');
+}
+
+function showLocalAuthorizationDialog(options) {
+    return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options);
+}
+async function chooseLocalAuthorizationTarget(type) {
+    assertLocalAuthorizationType(type);
+    const now = new Date().toISOString();
+    if (type === 'local_database') {
+        const result = await showLocalAuthorizationDialog({
+            title: '选择本机 SQLite 数据库文件',
+            properties: ['openFile'],
+            filters: [{ name: 'SQLite 数据库', extensions: ['sqlite', 'sqlite3', 'db'] }]
+        });
+        if (result.canceled || !result.filePaths || !result.filePaths[0]) return null;
+        const selectedPath = result.filePaths[0];
+        return {
+            resourceKind: 'sqlite_file',
+            label: path.basename(selectedPath) || '本机 SQLite 数据库',
+            path: selectedPath,
+            provider: 'desktop',
+            deviceName: os.hostname(),
+            grantedAt: now,
+            updatedAt: now
+        };
+    }
+    const result = await showLocalAuthorizationDialog({
+        title: '选择本机报表目录',
+        properties: ['openDirectory']
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) return null;
+    const selectedPath = result.filePaths[0];
+    return {
+        resourceKind: 'report_directory',
+        label: path.basename(selectedPath) || '本机报表目录',
+        path: selectedPath,
+        provider: 'desktop',
+        deviceName: os.hostname(),
+        grantedAt: now,
+        updatedAt: now
+    };
+}
+
+async function grantLocalAuthorization(type) {
+    const grant = await chooseLocalAuthorizationTarget(type);
+    if (!grant) return { canceled: true, status: buildLocalAuthorizationStatus() };
+    const store = readLocalAuthorizations();
+    store.grants[type] = grant;
+    writeLocalAuthorizations(store);
+    return { canceled: false, status: buildLocalAuthorizationStatus() };
+}
+
+function revokeLocalAuthorization(type) {
+    assertLocalAuthorizationType(type);
+    const store = readLocalAuthorizations();
+    delete store.grants[type];
+    writeLocalAuthorizations(store);
+    return buildLocalAuthorizationStatus();
+}
 async function shutdownServer() {
     if (!pivotServer) return;
     await new Promise((resolve) => {
@@ -221,6 +340,11 @@ async function shutdownServer() {
     pivotServer = null;
 }
 
+ipcMain.handle('pivot-local-auth:status', async () => buildLocalAuthorizationStatus());
+
+ipcMain.handle('pivot-local-auth:grant', async (_event, type) => grantLocalAuthorization(String(type || '')));
+
+ipcMain.handle('pivot-local-auth:revoke', async (_event, type) => revokeLocalAuthorization(String(type || '')));
 ipcMain.handle('pivot-desktop:retry', async () => {
     lastLoadError = null;
     await loadTarget();

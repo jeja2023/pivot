@@ -80,7 +80,7 @@ function databaseConnectionDiagnostics(connection = {}) {
         port: connection.port || '',
         database_name: connection.database_name || connection.databaseName || '',
         ssl: Boolean(connection.ssl || connection.options?.ssl),
-        source: 'Pivot server runtime'
+        source: 'Pivot 服务器运行环境'
     };
 }
 
@@ -91,7 +91,7 @@ function normalizeDatabaseConnectionError(err, connection = {}) {
     const base = {
         status: Number(err?.status || err?.statusCode || 0) || 502,
         code: rawCode || 'DB_CONNECTION_FAILED',
-        message: rawMessage || 'Database connection failed.',
+        message: rawMessage || '数据库连接失败。',
         detail: rawMessage || '',
         hint: '',
         diagnostics

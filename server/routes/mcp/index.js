@@ -291,10 +291,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             const existing = getAccessibleMcpServer(serverId, req.user);
             if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
             if (!String(existing.base_url || '').startsWith('pivot-db://')) {
-                return res.status(400).json({ error: '该工具服务不是数据库连接。' });
+                return res.status(400).json({ error: '该工具服务不是服务器可访问数据库。' });
             }
             const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
-            if (!dbConnectionRow) return res.status(404).json({ error: '数据库连接配置不存在。' });
+            if (!dbConnectionRow) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
             if (password === undefined || password === '********') {
                 password = decryptExistingDatabasePassword(dbConnectionRow);
             }
@@ -315,10 +315,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 message: failure.detail || failure.message || err?.message,
                 hint: failure.hint,
                 connection: sanitizeDatabaseConnectionForLog(connection, req.body)
-            }, 'MCP 数据库连接测试失败');
+            }, 'MCP 服务器可访问数据库测试失败');
             res.status(status).json({
                 success: false,
-                error: failure.message || err?.message || '数据库连接测试失败。',
+                error: failure.message || err?.message || '服务器可访问数据库测试失败。',
                 code: failure.code || err?.code || 'MCP_DATABASE_CONNECTION_TEST_FAILED',
                 detail: failure.detail || '',
                 hint: failure.hint || '',
@@ -495,12 +495,12 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.put('/mcp/database-connections/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
-        if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该工具服务不是数据库连接。' });
+        if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该工具服务不是服务器可访问数据库。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
         const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
-        if (!dbConnectionRow) return res.status(404).json({ error: '数据库连接配置不存在。' });
+        if (!dbConnectionRow) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
 
         const name = String(req.body?.name || existing.name).trim();
         const description = String(req.body?.description ?? existing.description ?? '').trim();
@@ -542,7 +542,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
-        if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '数据库预设请使用数据库连接表单编辑。' });
+        if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '服务器可访问数据库请使用对应表单编辑。' });
         if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统工具预设请使用对应的系统服务表单编辑。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
@@ -619,45 +619,84 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const builtinType = getBuiltinServiceTypeFromUrl(baseUrl);
         if (baseUrl.startsWith('pivot-db://')) {
             const row = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(server.id);
-            if (!row) return res.status(404).json({ error: '数据库连接配置不存在。' });
-            const connection = validateDatabaseConnectionPayload({
-                database_type: row.database_type,
-                host: row.host,
-                port: row.port,
-                database_name: row.database_name,
-                username: row.username,
-                password: decryptExistingDatabasePassword(row),
-                ...(parseServerConfig(row.options))
-            }, req.user);
-            const result = await testDatabaseConnection(connection);
-            return res.json({
-                success: true,
-                type: 'database',
-                result,
-                governance: {
-                    tableAllowlist: connection.options.tableAllowlist || [],
-                    fieldAllowlist: connection.options.fieldAllowlist || {},
-                    sensitiveFields: connection.options.sensitiveFields || [],
-                    rowPolicyHint: connection.options.rowPolicyHint || '',
-                    queryTimeoutMs: connection.options.queryTimeoutMs || 20000,
-                    sqlCostEstimate: connection.options.sqlCostEstimate !== false
-                }
-            });
+            if (!row) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
+            let connection = null;
+            try {
+                connection = validateDatabaseConnectionPayload({
+                    database_type: row.database_type,
+                    host: row.host,
+                    port: row.port,
+                    database_name: row.database_name,
+                    username: row.username,
+                    password: decryptExistingDatabasePassword(row),
+                    ...(parseServerConfig(row.options))
+                }, req.user);
+                const result = await testDatabaseConnection(connection);
+                return res.json({
+                    success: true,
+                    type: 'database',
+                    result,
+                    governance: {
+                        tableAllowlist: connection.options.tableAllowlist || [],
+                        fieldAllowlist: connection.options.fieldAllowlist || {},
+                        sensitiveFields: connection.options.sensitiveFields || [],
+                        rowPolicyHint: connection.options.rowPolicyHint || '',
+                        queryTimeoutMs: connection.options.queryTimeoutMs || 20000,
+                        sqlCostEstimate: connection.options.sqlCostEstimate !== false
+                    }
+                });
+            } catch (err) {
+                const fallbackConnection = connection || {
+                    database_type: row.database_type,
+                    host: row.host,
+                    port: row.port,
+                    database_name: row.database_name,
+                    ...(parseServerConfig(row.options))
+                };
+                const failure = normalizeDatabaseConnectionError(err, fallbackConnection);
+                const status = failure.status || getDatabaseTestErrorStatus(err);
+                return res.status(status).json({
+                    success: false,
+                    type: 'database',
+                    error: failure.message || 'Pivot 服务器无法访问该数据库地址。',
+                    code: failure.code || err?.code || 'MCP_DATABASE_DIAGNOSE_FAILED',
+                    detail: failure.detail || '',
+                    hint: failure.hint || '请确认这是由 Pivot 服务器发起连接；localhost / 127.0.0.1 指 Pivot 服务器。',
+                    diagnostics: failure.diagnostics || sanitizeDatabaseConnectionForLog(fallbackConnection)
+                });
+            }
         }
         if (builtinType === 'reports') {
-            const result = await executeBuiltinMcpTool(server, 'reports.list_files', {
-                limit: Math.min(Math.max(Number(req.body?.limit || 8), 1), 20)
-            }, req.user);
-            return res.json({
-                success: true,
-                type: 'reports',
-                readableFiles: Array.isArray(result.files) ? result.files.length : Number(result.count || 0),
-                previewFiles: result.files || result.rows || [],
-                diagnostics: {
-                    roots: getBuiltinConfigForServer(server.id)?.config?.roots || [],
-                    hint: '如果预览为空，请确认 Pivot 服务进程对目录有读取权限。'
-                }
-            });
+            try {
+                const result = await executeBuiltinMcpTool(server, 'reports.list_files', {
+                    limit: Math.min(Math.max(Number(req.body?.limit || 8), 1), 20)
+                }, req.user);
+                return res.json({
+                    success: true,
+                    type: 'reports',
+                    readableFiles: Array.isArray(result.files) ? result.files.length : Number(result.count || 0),
+                    previewFiles: result.files || result.rows || [],
+                    diagnostics: {
+                        roots: getBuiltinConfigForServer(server.id)?.config?.roots || [],
+                        hint: '如果预览为空，请确认 Pivot 服务进程对目录有读取权限。'
+                    }
+                });
+            } catch (err) {
+                const config = getBuiltinConfigForServer(server.id)?.config || {};
+                const roots = Array.isArray(config.roots) ? config.roots : [];
+                const status = Number(err?.status || err?.statusCode || 0) || 400;
+                return res.status(status).json({
+                    success: false,
+                    type: 'reports',
+                    error: 'Pivot 服务器无法读取该报表目录。',
+                    code: err?.code || 'MCP_REPORTS_DIAGNOSE_FAILED',
+                    detail: String(err?.message || '').slice(0, 500),
+                    diagnostics: {
+                        roots,
+                        hint: '这里填写的是服务器路径或服务器可访问的共享目录；请确认 Pivot 服务进程有读取权限。'
+                    }
+                });
+            }
         }
         if (builtinType === 'im') {
             const action = String(req.body?.action || '').trim();
