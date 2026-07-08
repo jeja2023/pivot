@@ -54,8 +54,11 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
     node -e "require('@duckdb/node-api'); console.log('[build] DuckDB 原生绑定校验通过')" && \
     rm .npmrc
 
-# 将项目源代码及模型下载脚本复制进镜像
-COPY . .
+# 只复制生产运行需要的文件，避免安装包、本机配置和开发辅助目录误进镜像
+COPY server ./server
+COPY client ./client
+COPY scripts/download_model.js ./scripts/download_model.js
+COPY CHANGELOG.md 使用帮助.md ./
 
 # 关键环节：在 Docker 构建阶段执行预下载模型脚本
 # [RAG 功能] 如果需要离线使用本地 Embedding，请取消下面一行的注释。

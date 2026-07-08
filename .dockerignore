@@ -1,30 +1,59 @@
 # Node.js
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # 数据与上传文件（运行时挂载）
 data/
 uploads/
 logs/
 models/
+downloads/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-*
 
 # Git 与版本控制
 .git/
 .github/
 .gitignore
 
-# 环境变量
-.env
-.env.example
-
-# 临时与缓存目录
-scratch/
+# 本机/智能体辅助目录
+.agents/
+.githooks/
+.codex/
 .gemini/
 .claude/
 .codex-tmp/
 .codex-sidebar-data/
-artifacts/
+.vscode/
+.idea/
 
-# Docker 相关
+# 环境变量与本机配置
+.env
+.env.*
+.env.example
+.npmrc
+.yarnrc
+config.json
+config.example.json
+*.pem
+*.key
+*.crt
+*.p12
+
+# 临时、缓存与报告
+scratch/
+artifacts/
+coverage/
+.nyc_output/
+.cache/
+.DS_Store
+Thumbs.db
+
+# Docker 相关（构建时使用，不复制进镜像）
 Dockerfile
 docker-compose.yml
 .dockerignore
@@ -34,28 +63,44 @@ desktop/
 dist-electron-remote/
 dist-electron-*/
 dist/
-# 客户端安装包（默认排除，如需在 Docker 中提供下载请移动到 downloads/ 目录）
+updater-state.json
+*.exe
+**/*.exe
 client/*.exe
 *.msi
+**/*.msi
 *.dmg
+**/*.dmg
 *.AppImage
-updater-state.json
+**/*.AppImage
+*.bat
+**/*.bat
 
 # 开发与测试
 tests/
 *.test.js
 *.spec.js
+eslint.config.js
 
-# 桌面端构建脚本（Docker 不需要）
-scripts/run_desktop.js
-scripts/package_desktop.js
+# 开发、检查、桌面与发布脚本（Docker 运行时不需要）
+scripts/backup_db.js
 scripts/build_desktop_icon.js
-
-# 语法检查脚本（构建时不需要）
+scripts/build_installer.js
+scripts/check_audit_policy.js
+scripts/check_chat_assets.js
+scripts/check_development_standards.js
+scripts/check_e2e_smoke.js
+scripts/check_external_links.js
+scripts/check_safe_html_usage.js
 scripts/check_syntax.js
 scripts/check_text_integrity.js
-scripts/check_external_links.js
-scripts/check_chat_assets.js
+scripts/check_window_globals_usage.js
+scripts/git_push.js
+scripts/install_git_hooks.js
+scripts/package_desktop.js
+scripts/run_desktop.js
+scripts/sync_version.js
+scripts/window_globals_baseline.json
 
 # 日志与压缩文件
 *.log
@@ -65,7 +110,8 @@ scripts/check_chat_assets.js
 *.bak
 *.tmp
 
-# 文档（可选，如果想保留可以删除这行）
-# docs/
-# *.md
-# !README.md
+# 非运行文档；服务运行需要 CHANGELOG.md 和 使用帮助.md
+docs/
+*.md
+!CHANGELOG.md
+!使用帮助.md
