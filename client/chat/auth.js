@@ -350,7 +350,7 @@ window.loadAvailableModels = async function() {
             <div class="api-model-chip-list">
                 ${models.map(renderModelChip).join('')}
             </div>
-            <p class="api-model-note">* 以上为外部调用时 model 参数需填写的具体值；聊天模型用于 /v1/chat/completions，向量模型用于 /v1/embeddings。</p>
+            <p class="api-model-note">* 以上为外部调用时 model 参数需填写的具体值；聊天对话使用 /v1/chat/completions，代码补全使用 /v1/completions（支持 prompt / input / prefix / suffix），向量生成使用 /v1/embeddings。</p>
         `);
     } catch (e) {
         PivotSafeHtml.setHtml(listEl, `<span style="color: var(--danger);">加载失败: ${escapeHtml(e.message)}</span>`);
