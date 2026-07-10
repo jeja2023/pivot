@@ -6,6 +6,7 @@ const {
     shouldUseResponsesApi
 } = require('./model-adapter');
 const { executeMcpTool } = require('./mcp-client');
+const { getLocalBridgeStatus } = require('./local-device-bridge');
 const {
     cleanCapabilityDisplayName,
     extractModelText,
@@ -110,6 +111,36 @@ function detectTableCountIntent(userPrompt = '') {
     return detectTableInventoryIntent(prompt) && /数量|个数|多少|几张|几个|count/.test(prompt);
 }
 
+function detectReportFileInventoryIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '').toLowerCase();
+    const asksInventory = /查询|查找|列出|读取|扫描|看看|查看|有哪些|所有|全部|清单|列表|list|show/.test(prompt);
+    const mentionsFiles = /文件|目录|文件夹|报表|表格|台账|清单|资料|材料|csv|xlsx?|xls|json|txt|md|folder|directory|files?/.test(prompt);
+    const mentionsLocal = /本机|我的电脑|本地|授权目录|报表目录|当前目录|目录下|文件夹下|local/.test(prompt);
+    return asksInventory && mentionsFiles && (mentionsLocal || /报表|表格|台账|csv|xlsx?|xls/.test(prompt));
+}
+
+function detectLocalReportFileInventoryIntent(userPrompt = '') {
+    return detectReportFileInventoryIntent(userPrompt)
+        && /本机|我的电脑|本地|授权目录|当前目录|local/.test(String(userPrompt || '').toLowerCase());
+}
+
+function extractReportListQuery(userPrompt = '') {
+    const prompt = String(userPrompt || '').trim();
+    const patterns = [
+        /(?:查询|查找|列出|看看|查看|扫描)\s*(?:本机|本地|我的电脑|授权目录|报表目录)?\s*([^\s，。；、,.!?]+?)\s*(?:目录|文件夹)\s*(?:下|里|中)?/,
+        /(?:本机|本地|我的电脑|授权目录|报表目录)?\s*([^\s，。；、,.!?]+?)\s*(?:目录|文件夹)\s*(?:下|里|中)?/,
+        /(?:查询|查找|列出|看看|查看|扫描)\s*([^\s，。；、,.!?]+?)\s*(?:文件|报表)/,
+        /名称?为\s*[“"']?([^\s，。；、,.!?"'”]+)[”"']?/
+    ];
+    for (const pattern of patterns) {
+        const match = prompt.match(pattern);
+        let value = match?.[1] ? String(match[1]).trim() : '';
+        value = value.replace(/^(?:查询|查找|列出|看看|查看|扫描)?(?:本机|本地|我的电脑|授权目录|报表目录|授权)?/u, '').trim();
+        if (value && !/本机|本地|我的电脑|授权|报表|文件|目录|文件夹|哪些|所有|全部/.test(value)) return value;
+    }
+    return '';
+}
+
 // 检测用户是否明确要求查询数据库（即使规划器返回 none 也应强行走数据工具）
 function detectStrongDataQueryIntent(userPrompt = '') {
     const prompt = String(userPrompt || '').toLowerCase();
@@ -130,6 +161,7 @@ function detectExplicitMcpCapabilityIntent(userPrompt = '') {
     const wantsDataOperation = /查询|查找|统计|计数|列出|读取|筛选|分析|汇总|调用|请求|select\s|show\s|describe\s|count\s/i.test(prompt)
         && /数据库|数据表|数据库表|sql\b|集合|collections?|api|接口|webhook/.test(prompt);
     return detectStrongDataQueryIntent(userPrompt)
+        || detectReportFileInventoryIntent(userPrompt)
         || wantsChartOutput
         || wantsReportOutput
         || wantsDataOperation
@@ -228,6 +260,51 @@ function resolvePlannerTool(toolName, tools, userPrompt = '') {
     return matches.find(tool => toolMatchesPromptSource(tool, userPrompt)) || null;
 }
 
+function preferLocalDeviceTool(tools = [], matcher = () => false) {
+    const candidates = tools.filter(tool => matcher(String(tool.name || tool.fullName || '')));
+    return candidates.find(tool => String(tool.fullName || '').startsWith('mcp.0.')) || candidates[0] || null;
+}
+
+function normalizeReportQueryToken(value = '') {
+    return String(value || '')
+        .trim()
+        .replace(/[\/]+$/g, '')
+        .replace(/^[\/]+/g, '')
+        .toLowerCase();
+}
+
+function localReportGrantLabels(tool = {}) {
+    const grant = tool?.localDevice?.grants?.local_report_dir || null;
+    if (!grant || grant.authorized !== true) return [];
+    const labels = [grant.label, grant.pathHint]
+        .map(value => String(value || '').trim())
+        .filter(Boolean);
+    const baseLabels = labels
+        .map(value => value.split(/[\/]+/).filter(Boolean).pop() || '')
+        .filter(Boolean);
+    return Array.from(new Set([...labels, ...baseLabels].map(normalizeReportQueryToken).filter(Boolean)));
+}
+
+function shouldListAuthorizedReportRoot(tool, query = '') {
+    const normalizedQuery = normalizeReportQueryToken(query);
+    if (!normalizedQuery) return false;
+    return localReportGrantLabels(tool).includes(normalizedQuery);
+}
+
+function buildDeterministicReportFallback(userPrompt = '', tools = []) {
+    if (!detectReportFileInventoryIntent(userPrompt)) return null;
+    const listTool = preferLocalDeviceTool(tools, name => /reports\.list_files/i.test(name));
+    if (!listTool) return null;
+    const query = extractReportListQuery(userPrompt);
+    const listRoot = query && shouldListAuthorizedReportRoot(listTool, query);
+    const input = query && !listRoot ? { query, limit: 80 } : { limit: 80 };
+    return {
+        tool: listTool,
+        input,
+        reason: query ? `用户要求查询本机目录或报表文件：${query}` : '用户要求查询本机目录或报表文件清单'
+    };
+}
+
 function buildDeterministicDataFallback(userPrompt = '', tools = []) {
     const table = extractTableName(userPrompt);
     if (!table && detectTableInventoryIntent(userPrompt)) {
@@ -255,7 +332,69 @@ function buildDeterministicDataFallback(userPrompt = '', tools = []) {
     return input ? { tool: dataTool, input, reason: '用户明确要求查询数据库数据' } : null;
 }
 
+function toolNameMatches(tool, pattern) {
+    return pattern.test(String(tool?.name || '')) || pattern.test(String(tool?.fullName || ''));
+}
+
+function filterReportFileInventoryTools(tools = [], userPrompt = '') {
+    return tools.filter(tool => {
+        if (!toolNameMatches(tool, /(?:^|\.)reports\.list_files$/i)) return false;
+        return !detectLocalReportFileInventoryIntent(userPrompt) || String(tool.fullName || '').startsWith('mcp.0.');
+    });
+}
+
+function localBridgeReportMissingReason(tools = [], user = null, userPrompt = '', localMcpBridgeDebug = null) {
+    if (!detectLocalReportFileInventoryIntent(userPrompt)) {
+        return '当前没有可用于列出报表目录文件的 reports.list_files 工具。';
+    }
+    const reportNames = tools
+        .filter(tool => toolNameMatches(tool, /(?:^|\.)reports\./i))
+        .map(tool => tool.fullName || tool.name)
+        .filter(Boolean);
+    if (reportNames.length) {
+        return '本机报表目录工具存在，但 reports.list_files 没有进入本轮候选，请检查工具治理或工具名称。';
+    }
+    let status = null;
+    try {
+        status = getLocalBridgeStatus(user);
+    } catch (_err) {
+        status = null;
+    }
+    const devices = Array.isArray(status?.devices) ? status.devices : [];
+    if (!devices.length) {
+        const debug = localMcpBridgeDebug && typeof localMcpBridgeDebug === 'object' ? localMcpBridgeDebug : null;
+        const reason = String(debug?.reason || '').trim();
+        if (debug?.hasDesktopBridge === false) {
+            return reason || '聊天页没有检测到桌面端桥；请确认当前页面是在 Pivot 桌面客户端中打开，而不是普通浏览器。';
+        }
+        if (debug?.hasStatusBridge === false) {
+            return reason || '当前桌面客户端缺少本机授权状态接口；请重新打包或安装包含本机授权中心的新版本。';
+        }
+        if (debug?.hasExecuteBridge === false) {
+            return reason || '当前桌面客户端缺少本机只读执行接口；请重新打包或安装包含本机执行器的新版本。';
+        }
+        if (debug?.status === 'authorization_unavailable') {
+            return reason || '聊天页已检测到桌面端，但没有读到可用的本机授权；请重新授权本机报表目录后再发送。';
+        }
+        if (debug?.status === 'heartbeat_failed') {
+            return `聊天页已检测到桌面端本机执行器，但心跳注册失败：${reason || '请检查登录状态和服务端接口。'}`;
+        }
+        if (debug?.statusAvailable === true && debug?.grants?.local_report_dir !== true) {
+            return '聊天页已读取桌面端本机授权状态，但没有报表目录授权；请在“我的电脑/管理本机资源授权”里授权报表目录。';
+        }
+        return '没有收到桌面端本机执行器心跳；请确认使用桌面客户端打开、工具箱已开启，并重新发送消息。';
+    }
+    const hasReportGrant = devices.some(device => device?.grants?.local_report_dir?.authorized === true);
+    if (!hasReportGrant) {
+        return '桌面端本机执行器在线，但本轮没有收到本机报表目录授权；请在“我的电脑/管理本机资源授权”里授权报表目录。';
+    }
+    return '已收到本机报表目录授权，但 mcp.0.reports.list_files 没有进入治理后的工具列表，请检查该工具是否被禁用。';
+}
+
 function filterMcpToolsForChatIntent(tools, userPrompt = '') {
+    if (detectReportFileInventoryIntent(userPrompt)) {
+        return filterReportFileInventoryTools(tools, userPrompt);
+    }
     const intent = getMcpToolIntent(userPrompt);
     return tools.filter(tool => {
         const name = String(tool.name || tool.fullName || '');
@@ -489,6 +628,44 @@ function buildMcpFailureMessage(error, stage = 'planning') {
     return '工具箱工具调用失败，请稍后重试或检查工具箱配置。';
 }
 
+async function executeDeterministicMcpFallback({ fallback, intentTools, userPrompt, user, writeSse, log, logLabel = '回退工具调用失败', requireResult = false }) {
+    if (!fallback?.tool) return null;
+    const selectedTool = fallback.tool;
+    const fallbackInput = fallback.input || {};
+    const trace = buildMcpTracePayload(selectedTool);
+    writeSse(JSON.stringify({
+        type: 'mcp',
+        status: 'running',
+        ...trace,
+        message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具箱工具')
+    }));
+    try {
+        const result = await executeMcpTool(selectedTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
+        let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
+        const chartText = await maybeBuildChartAfterDataTool({ selected: selectedTool, result, intentTools, userPrompt, user, writeSse });
+        if (chartText) {
+            resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
+        }
+        writeSse(JSON.stringify({
+            type: 'mcp',
+            status: 'done',
+            ...trace,
+            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
+        }));
+        return [
+            '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+            `工具: ${selectedTool.fullName}`,
+            `调用原因: ${fallback.reason || ''}`,
+            `输入: ${JSON.stringify(fallbackInput)}`,
+            '结果:',
+            resultText
+        ].join('\n');
+    } catch (fallbackErr) {
+        log?.warn?.({ err: fallbackErr.message }, logLabel);
+        if (requireResult) throw fallbackErr;
+        return null;
+    }
+}
 function buildMcpFailureHint(error, stage = 'planning') {
     const statusCode = getAxiosStatusCode(error);
     const statusText = statusCode ? `HTTP ${statusCode}` : '未知状态';
@@ -506,25 +683,35 @@ function buildMcpFailureHint(error, stage = 'planning') {
     ].join('\n');
 }
 
-async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log }) {
+async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null }) {
     const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
+        const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
+            ? localBridgeReportMissingReason(tools, user, userPrompt, localMcpBridgeDebug)
+            : '';
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'empty',
-            message: explicitToolIntent ? '没有可用的工具箱工具，无法完成本轮工具调用' : '没有可用的工具箱工具缓存'
+            message: explicitToolIntent ? (reason || '没有可用的工具箱工具，无法完成本轮工具调用') : '没有可用的工具箱工具缓存',
+            reason
         }));
-        return explicitToolIntent ? buildMcpMissingToolHint([], '没有可用的工具箱工具缓存') : '';
+        return explicitToolIntent ? buildMcpMissingToolHint([], reason || '没有可用的工具箱工具缓存') : '';
     }
     const intentTools = filterMcpToolsForChatIntent(tools, userPrompt);
     if (!intentTools.length) {
+        const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
+            ? localBridgeReportMissingReason(tools, user, userPrompt, localMcpBridgeDebug)
+            : '';
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'skipped',
-            message: explicitToolIntent ? '没有匹配用户请求的工具箱工具' : '本轮没有匹配用户意图的工具箱工具'
+            message: explicitToolIntent
+                ? (reason || '没有匹配用户请求的工具箱工具')
+                : '本轮没有匹配用户意图的工具箱工具',
+            reason
         }));
         if (explicitToolIntent) {
-            return buildMcpMissingToolHint(tools, '没有匹配用户请求的工具箱工具');
+            return buildMcpMissingToolHint(tools, reason || '没有匹配用户请求的工具箱工具');
         }
         // 注入可用工具提示，防止主模型自行生成代码
         const dataTools = tools.filter(isDataResultMcpTool);
@@ -538,58 +725,71 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用工具箱工具' }));
         const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
         if (!plannerTools.length) {
+            const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
+                ? localBridgeReportMissingReason(tools, user, userPrompt, localMcpBridgeDebug)
+                : '';
             writeSse(JSON.stringify({
                 type: 'mcp',
                 status: 'skipped',
-                message: explicitToolIntent ? '没有适合本轮请求的工具箱工具' : '本轮没有适合优先调用的工具箱工具'
+                message: explicitToolIntent
+                    ? (reason || '没有适合本轮请求的工具箱工具')
+                    : '本轮没有适合优先调用的工具箱工具',
+                reason
             }));
             return explicitToolIntent
-                ? buildMcpMissingToolHint(intentTools, '工具过滤后没有适合本轮请求的工具')
+                ? buildMcpMissingToolHint(intentTools, reason || '工具过滤后没有适合本轮请求的工具')
                 : buildMcpToolsHint(intentTools, '工具过滤后无匹配');
         }
         mcpStage = 'planning';
+        const earlyReportFallback = buildDeterministicReportFallback(userPrompt, plannerTools);
+        if (earlyReportFallback) {
+            mcpStage = 'execution';
+            const context = await executeDeterministicMcpFallback({
+                fallback: earlyReportFallback,
+                intentTools,
+                userPrompt,
+                user,
+                writeSse,
+                log,
+                logLabel: '回退报表目录查询失败',
+                requireResult: true
+            });
+            if (context) return context;
+            mcpStage = 'planning';
+        }
         const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user);
         const plan = parsePlannerJson(plannerText);
         const plannedTool = plan?.action === 'tool' ? resolvePlannerTool(plan.tool, plannerTools, userPrompt) : null;
         if (!plan || plan.action !== 'tool' || !plannedTool) {
-            // 规划器返回 none 或解析失败——尝试确定性回退：用户明显要查数据时直接执行
+            // 规划器返回 none 或解析失败时，先尝试确定性回退，避免模型把可查询数据误判成普通问答。
+            const reportFallback = buildDeterministicReportFallback(userPrompt, plannerTools);
+            if (reportFallback) {
+                mcpStage = 'execution';
+                const context = await executeDeterministicMcpFallback({
+                    fallback: reportFallback,
+                    intentTools,
+                    userPrompt,
+                    user,
+                    writeSse,
+                    log,
+                    logLabel: '回退报表目录查询失败'
+                });
+                if (context) return context;
+            }
             if (detectStrongDataQueryIntent(userPrompt)) {
-                const fallback = buildDeterministicDataFallback(userPrompt, plannerTools);
-                if (fallback) {
-                    const dataTool = fallback.tool;
-                    const fallbackInput = fallback.input;
-                    const trace = buildMcpTracePayload(dataTool);
-                    writeSse(JSON.stringify({
-                        type: 'mcp',
-                        status: 'running',
-                        ...trace,
-                        message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具箱工具')
-                    }));
-                    try {
-                        mcpStage = 'execution';
-                        const result = await executeMcpTool(dataTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
-                        let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
-                        const chartText = await maybeBuildChartAfterDataTool({ selected: dataTool, result, intentTools, userPrompt, user, writeSse });
-                        if (chartText) {
-                            resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
-                        }
-                        writeSse(JSON.stringify({
-                            type: 'mcp',
-                            status: 'done',
-                            ...trace,
-                            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
-                        }));
-                        return [
-                            '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
-                            `工具: ${dataTool.fullName}`,
-                            `输入: ${JSON.stringify(fallbackInput)}`,
-                            '结果:',
-                            resultText
-                        ].join('\n');
-                    } catch (fallbackErr) {
-                        // 回退执行也失败，降级到提示
-                        log?.warn?.({ err: fallbackErr.message }, '回退数据查询也失败');
-                    }
+                const dataFallback = buildDeterministicDataFallback(userPrompt, plannerTools);
+                if (dataFallback) {
+                    mcpStage = 'execution';
+                    const context = await executeDeterministicMcpFallback({
+                        fallback: dataFallback,
+                        intentTools,
+                        userPrompt,
+                        user,
+                        writeSse,
+                        log,
+                        logLabel: '回退数据查询也失败'
+                    });
+                    if (context) return context;
                 }
             }
             if (explicitToolIntent) {
@@ -600,7 +800,6 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             // 注入可用工具提示，防止主模型自行生成代码
             return buildMcpToolsHint(plannerTools, plan?.reason || '规划器判断不需要调用');
         }
-
         const selected = plannedTool;
         const trace = buildMcpTracePayload(selected);
         writeSse(JSON.stringify({
@@ -644,8 +843,10 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
 
 module.exports = {
     buildFallbackDataQueryInput,
+    detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
+    localBridgeReportMissingReason,
     filterMcpToolsForPlanner,
     maybeBuildMcpChatContext
 };

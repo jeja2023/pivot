@@ -9,7 +9,7 @@ const PACKAGE_STATUSES = new Set(['enabled', 'disabled']);
 const TOOL_RISK_LEVELS = new Set(['low', 'medium', 'high']);
 
 function sourceKey(type, ref) {
-    return `${type}:${String(ref || '').trim()}`;
+    return `${type}:${String(ref ?? '').trim()}`;
 }
 
 function normalizeStatus(value) {
@@ -67,8 +67,9 @@ function normalizePackageConfig(config = {}, existing = {}) {
 }
 
 function upsertCapabilityPackage({ type, sourceRef, name, description = '', scope = 'user', userId = null, status = 'enabled', config = {} }) {
-    if (!PACKAGE_TYPES.has(type) || !sourceRef || !name) return null;
-    const key = sourceKey(type, sourceRef);
+    const sourceRefText = String(sourceRef ?? '').trim();
+    if (!PACKAGE_TYPES.has(type) || !sourceRefText || !name) return null;
+    const key = sourceKey(type, sourceRefText);
     const now = getBeijingTimestamp();
     const existing = db.prepare('SELECT config FROM capability_packages WHERE package_key = ?').get(key);
     const nextConfig = normalizePackageConfig(config, existing?.config);
@@ -89,7 +90,7 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
     `).run(
         key,
         type,
-        String(sourceRef),
+        sourceRefText,
         userId,
         scope,
         cleanCapabilityName(name).slice(0, 120),
@@ -323,7 +324,7 @@ function filterMcpToolsByCapability(tools, user) {
         const type = tool.serverType === 'database'
             ? 'database_connection'
             : 'mcp_server';
-        const sourceRef = String(tool.serverId || '');
+        const sourceRef = String(tool.serverId ?? '');
         const governance = getCapabilityToolGovernance(type, sourceRef, tool.name, user);
         return { ...tool, governance };
     }).filter(tool => tool.governance.enabled);

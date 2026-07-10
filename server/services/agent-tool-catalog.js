@@ -105,8 +105,8 @@ function buildGenericDatabaseTools(tools = []) {
     return [...grouped.entries()].map(([name, items]) => {
         const first = items[0] || {};
         const connections = items.map(tool => ({
-            serverId: String(tool.serverId || ''),
-            connectionId: String(tool.serverId || ''),
+            serverId: String(tool.serverId ?? ''),
+            connectionId: String(tool.serverId ?? ''),
             serverName: tool.serverName || `Database ${tool.serverId}`,
             databaseType: tool.databaseType || '',
             fullName: tool.fullName,

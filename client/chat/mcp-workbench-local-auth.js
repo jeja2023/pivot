@@ -1,4 +1,4 @@
-// 工具箱本机授权中心。当前只负责授权状态与本机资源选择，不执行查询或扫描。
+// 工具箱本机授权中心。负责授权状态与本机资源选择；只读查询/扫描由桌面端或本地助手执行器完成。
 const MCP_LOCAL_AUTH_TYPES = [
     {
         type: 'local_database',
@@ -20,6 +20,144 @@ const MCP_LOCAL_AUTH_TYPES = [
 
 let mcpLocalAuthorizationStatusCache = null;
 let mcpLocalAuthorizationActiveType = 'local_database';
+const MCP_LOCAL_EXECUTION_HEARTBEAT_MS = 15000;
+const MCP_LOCAL_EXECUTION_RETRY_MS = 5000;
+let mcpLocalExecutionLoopStarted = false;
+let mcpLocalExecutionLoopRunning = false;
+let mcpLocalExecutionLastHeartbeatAt = 0;
+
+
+function mcpLocalExecutionBridge() {
+    const desktop = window.pivotDesktop;
+    if (desktop
+        && typeof desktop.getLocalAuthorizationStatus === 'function'
+        && typeof desktop.executeLocalMcpTool === 'function') {
+        return desktop;
+    }
+    return null;
+}
+
+function mcpLocalExecutionDeviceId() {
+    const key = 'pivot_local_execution_device_id';
+    try {
+        const existing = localStorage.getItem(key);
+        if (existing) return existing;
+        const next = globalThis.crypto?.randomUUID?.() || `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem(key, next);
+        return next;
+    } catch (_err) {
+        return `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+}
+
+function mcpLocalExecutionSleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function mcpLocalExecutionHasGrant(status) {
+    return MCP_LOCAL_AUTH_TYPES.some(item => mcpLocalGrant(status, item.type).authorized);
+}
+
+async function registerMcpLocalExecutionBridge(options = {}) {
+    const bridge = mcpLocalExecutionBridge();
+    if (!bridge) return null;
+    const now = Date.now();
+    if (!options.force && now - mcpLocalExecutionLastHeartbeatAt < MCP_LOCAL_EXECUTION_HEARTBEAT_MS) {
+        return { skipped: true };
+    }
+    const status = options.status || await getMcpLocalAuthorizationStatus({ refresh: true, silent: true });
+    if (!status?.available) return null;
+    const payload = {
+        deviceId: mcpLocalExecutionDeviceId(),
+        deviceName: status.deviceName || '我的电脑',
+        provider: status.provider || 'desktop',
+        mode: status.mode || 'remote',
+        grants: status.grants || {}
+    };
+    const response = await apiFetch(`${API_BASE}/mcp/local-device/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(await response.text() || '本机执行器心跳失败。');
+    mcpLocalExecutionLastHeartbeatAt = now;
+    const data = await response.json();
+    return { ...data, status, active: mcpLocalExecutionHasGrant(status) };
+}
+
+async function syncMcpLocalExecutionBridge(options = {}) {
+    return registerMcpLocalExecutionBridge({ force: true, ...(options || {}) });
+}
+
+async function completeMcpLocalExecutionTask(task, outcome) {
+    const response = await apiFetch(`${API_BASE}/mcp/local-device/tasks/${encodeURIComponent(task.id)}/result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            deviceId: mcpLocalExecutionDeviceId(),
+            ...outcome
+        })
+    });
+    if (!response.ok) throw new Error(await response.text() || '本机执行结果回传失败。');
+}
+
+async function handleMcpLocalExecutionTask(task) {
+    const bridge = mcpLocalExecutionBridge();
+    if (!bridge || !task?.id) return;
+    try {
+        const result = await bridge.executeLocalMcpTool({
+            taskId: task.id,
+            toolName: task.toolName,
+            input: task.input || {}
+        });
+        await completeMcpLocalExecutionTask(task, { success: true, result });
+    } catch (error) {
+        await completeMcpLocalExecutionTask(task, {
+            success: false,
+            error: {
+                message: error?.message || '本机执行失败。',
+                status: Number(error?.status || error?.statusCode || 0) || 500,
+                code: String(error?.code || '').slice(0, 80),
+                detail: String(error?.detail || '').slice(0, 1000)
+            }
+        });
+    }
+}
+
+async function runMcpLocalExecutionLoop() {
+    if (mcpLocalExecutionLoopRunning) return;
+    mcpLocalExecutionLoopRunning = true;
+    while (mcpLocalExecutionLoopStarted) {
+        try {
+            const registration = await registerMcpLocalExecutionBridge({ force: true });
+            if (!registration?.active) {
+                await mcpLocalExecutionSleep(MCP_LOCAL_EXECUTION_RETRY_MS);
+                continue;
+            }
+            const deviceId = encodeURIComponent(mcpLocalExecutionDeviceId());
+            const response = await apiFetch(`${API_BASE}/mcp/local-device/tasks/next?deviceId=${deviceId}&waitMs=25000`);
+            if (!response.ok) throw new Error(await response.text() || '本机执行任务拉取失败。');
+            const data = await response.json();
+            if (data.task) {
+                await handleMcpLocalExecutionTask(data.task);
+            }
+        } catch (error) {
+            console.debug?.('[pivot] 本机执行通道等待中:', error?.message || error);
+            await mcpLocalExecutionSleep(MCP_LOCAL_EXECUTION_RETRY_MS);
+        }
+    }
+    mcpLocalExecutionLoopRunning = false;
+}
+
+function startMcpLocalExecutionBridge() {
+    if (mcpLocalExecutionLoopStarted) return;
+    if (!mcpLocalExecutionBridge()) return;
+    mcpLocalExecutionLoopStarted = true;
+    runMcpLocalExecutionLoop();
+}
+
+setTimeout(startMcpLocalExecutionBridge, 1500);
+setInterval(startMcpLocalExecutionBridge, 10000);
 
 function mcpLocalAuthConfig(type) {
     return MCP_LOCAL_AUTH_TYPES.find(item => item.type === type) || MCP_LOCAL_AUTH_TYPES[0];
@@ -215,6 +353,7 @@ function bindMcpLocalAuthorizationCenter(status) {
 async function refreshMcpLocalAuthorizationCenter(options = {}) {
     const status = await getMcpLocalAuthorizationStatus({ refresh: true, silent: options.silent !== false });
     renderMcpLocalAuthorizationCenter(status);
+    await registerMcpLocalExecutionBridge({ status, force: true }).catch(() => null);
     await window.loadMcpWorkbench?.();
 }
 
@@ -226,6 +365,7 @@ async function requestMcpLocalAuthorization(type) {
         if (result?.canceled) return showToast('已取消本机授权选择。', 'warning');
         mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(result?.status);
         renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);
+        await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true }).catch(() => null);
         await window.loadMcpWorkbench?.();
         showToast('本机授权已更新。', 'success');
     } catch (e) {
@@ -242,6 +382,7 @@ function confirmRevokeMcpLocalAuthorization(type) {
             const status = await bridge.revokeLocalAuthorization(type);
             mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(status);
             renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);
+            await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true }).catch(() => null);
             await window.loadMcpWorkbench?.();
             showToast('本机授权已撤销。', 'success');
         } catch (e) {
@@ -275,12 +416,14 @@ window.Pivot?.exposeModule?.('mcp.localAuth', {
     mcpLocalAuthorizationDescription,
     openMcpLocalAuthorizationCenter,
     closeMcpLocalAuthorizationCenter,
-    refreshMcpLocalAuthorizationCenter
+    refreshMcpLocalAuthorizationCenter,
+    syncMcpLocalExecutionBridge
 }, [
     ['getMcpLocalAuthorizationStatus', 'getMcpLocalAuthorizationStatus'],
     ['decorateMcpLocalActionCards', 'decorateMcpLocalActionCards'],
     ['mcpLocalAuthorizationDescription', 'mcpLocalAuthorizationDescription'],
     ['openMcpLocalAuthorizationCenter', 'openMcpLocalAuthorizationCenter'],
     ['closeMcpLocalAuthorizationCenter', 'closeMcpLocalAuthorizationCenter'],
-    ['refreshMcpLocalAuthorizationCenter', 'refreshMcpLocalAuthorizationCenter']
+    ['refreshMcpLocalAuthorizationCenter', 'refreshMcpLocalAuthorizationCenter'],
+    ['syncMcpLocalExecutionBridge', 'syncMcpLocalExecutionBridge']
 ]);

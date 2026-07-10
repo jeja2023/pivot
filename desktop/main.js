@@ -94,6 +94,8 @@ async function configureLocalEnvironment() {
     if (changed) writeJson(secretsPath, secrets);
 
     process.env.PIVOT_DESKTOP = 'true';
+    process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE
+        || path.join(userData, 'local-authorizations.json');
     process.env.NODE_ENV = process.env.NODE_ENV || 'production';
     process.env.PORT = process.env.PORT || process.env.PIVOT_DESKTOP_PORT || String(await findAvailablePort());
     process.env.JWT_SECRET = process.env.JWT_SECRET || secrets.jwtSecret;
@@ -219,6 +221,32 @@ function localAuthorizationFilePath() {
     return path.join(app.getPath('userData'), 'local-authorizations.json');
 }
 
+function configureLocalAuthorizationEnvironment() {
+    const userData = app.getPath('userData');
+    const secretsPath = path.join(userData, 'desktop-secrets.json');
+    const secrets = readJson(secretsPath);
+    let changed = false;
+    if (!secrets.jwtSecret) {
+        secrets.jwtSecret = randomSecret();
+        changed = true;
+    }
+    if (!secrets.dataEncryptionKey) {
+        secrets.dataEncryptionKey = randomSecret();
+        changed = true;
+    }
+    if (changed) writeJson(secretsPath, secrets);
+
+    process.env.PIVOT_DESKTOP = 'true';
+    process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = localAuthorizationFilePath();
+    process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+    process.env.JWT_SECRET = process.env.JWT_SECRET || secrets.jwtSecret;
+    process.env.DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY || secrets.dataEncryptionKey;
+    process.env.DATA_DIR = process.env.DATA_DIR || path.join(userData, 'data');
+    process.env.PIVOT_UPLOAD_DIR = process.env.PIVOT_UPLOAD_DIR || path.join(userData, 'uploads');
+    process.env.PIVOT_ANALYSIS_DIR = process.env.PIVOT_ANALYSIS_DIR || path.join(userData, 'data', 'analysis');
+    process.env.LOG_DIR = process.env.LOG_DIR || path.join(userData, 'logs');
+}
+
 function normalizeLocalAuthorizationStore(value) {
     const grants = value && typeof value.grants === 'object' && value.grants ? value.grants : {};
     return { version: 1, grants };
@@ -255,6 +283,7 @@ function sanitizeLocalGrant(type, grant) {
 }
 
 function buildLocalAuthorizationStatus() {
+    configureLocalAuthorizationEnvironment();
     const store = readLocalAuthorizations();
     return {
         available: true,
@@ -331,6 +360,45 @@ function revokeLocalAuthorization(type) {
     writeLocalAuthorizations(store);
     return buildLocalAuthorizationStatus();
 }
+
+function normalizeLocalMcpExecutionError(error) {
+    const message = String(error?.message || error || '本机执行失败。');
+    let friendlyMessage = message;
+    let status = Number(error?.status || error?.statusCode || 0) || 500;
+    const code = String(error?.code || '').trim();
+    if ((code === 'ENOTDIR' || /ENOTDIR/i.test(message)) && /app\.asar/i.test(message)) {
+        friendlyMessage = '桌面端本机执行环境目录初始化失败，请重新打包或重启客户端后再试。';
+        status = 500;
+    } else if (code === 'ENOTDIR' || /ENOTDIR/i.test(message)) {
+        friendlyMessage = '本机报表目录中存在无法按目录读取的路径，或当前授权目标不是有效目录；请重新授权一个真实文件夹后再试。';
+        status = 400;
+    } else if (code === 'ENOENT' || /ENOENT/i.test(message)) {
+        friendlyMessage = '本机授权资源不存在或已移动；请重新授权后再试。';
+        status = 404;
+    } else if (code === 'EACCES' || code === 'EPERM') {
+        friendlyMessage = '当前系统权限不足，无法读取本机授权资源。';
+        status = 403;
+    }
+    return {
+        message: friendlyMessage,
+        status,
+        code,
+        detail: friendlyMessage === message ? '' : message.slice(0, 1000)
+    };
+}
+
+async function executeLocalMcpTool(payload = {}) {
+    configureLocalAuthorizationEnvironment();
+    const toolName = String(payload.toolName || payload.name || '').trim();
+    if (!/^(db|reports)\./.test(toolName)) {
+        const err = new Error('不支持的本机 MCP 工具。');
+        err.status = 400;
+        throw err;
+    }
+    const input = payload.input && typeof payload.input === 'object' ? payload.input : {};
+    const { executeLocalDeviceMcpTool } = require('../server/services/local-device-mcp');
+    return executeLocalDeviceMcpTool(toolName, input, null);
+}
 async function shutdownServer() {
     if (!pivotServer) return;
     await new Promise((resolve) => {
@@ -345,6 +413,14 @@ ipcMain.handle('pivot-local-auth:status', async () => buildLocalAuthorizationSta
 ipcMain.handle('pivot-local-auth:grant', async (_event, type) => grantLocalAuthorization(String(type || '')));
 
 ipcMain.handle('pivot-local-auth:revoke', async (_event, type) => revokeLocalAuthorization(String(type || '')));
+
+ipcMain.handle('pivot-local-auth:execute-tool', async (_event, payload) => {
+    try {
+        return { success: true, result: await executeLocalMcpTool(payload || {}) };
+    } catch (error) {
+        return { success: false, error: normalizeLocalMcpExecutionError(error) };
+    }
+});
 ipcMain.handle('pivot-desktop:retry', async () => {
     lastLoadError = null;
     await loadTarget();

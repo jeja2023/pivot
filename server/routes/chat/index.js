@@ -51,9 +51,48 @@ const { createObservabilityTrace, withObservabilitySpan } = require('../../servi
 const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
 const { assembleChatContext } = require('../../services/chat-context-assembler');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
+const { registerLocalBridgeDevice } = require('../../services/local-device-bridge');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
+
+function hasAuthorizedLocalBridgeGrant(payload) {
+    const grants = payload && typeof payload.grants === 'object' && payload.grants ? payload.grants : {};
+    return Object.values(grants).some(grant => grant && grant.authorized === true);
+}
+
+function normalizeChatLocalBridgeDebug(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const grants = payload.grants && typeof payload.grants === 'object' ? payload.grants : {};
+    return {
+        page: String(payload.page || '').slice(0, 40),
+        status: String(payload.status || '').slice(0, 80),
+        reason: String(payload.reason || '').slice(0, 300),
+        hasDesktopBridge: payload.hasDesktopBridge === true,
+        hasStatusBridge: payload.hasStatusBridge === true,
+        hasExecuteBridge: payload.hasExecuteBridge === true,
+        statusAvailable: payload.statusAvailable === true,
+        mode: String(payload.mode || '').slice(0, 40),
+        deviceName: String(payload.deviceName || '').slice(0, 120),
+        toolCount: Number.isFinite(Number(payload.toolCount)) ? Number(payload.toolCount) : null,
+        grants: {
+            local_database: grants.local_database === true,
+            local_report_dir: grants.local_report_dir === true
+        }
+    };
+}
+
+function registerChatRequestLocalBridge(req) {
+    req.localMcpBridgeDebug = normalizeChatLocalBridgeDebug(req.body?.localMcpBridgeDebug);
+    const payload = req.body?.localMcpBridge;
+    if (!payload || typeof payload !== 'object' || !hasAuthorizedLocalBridgeGrant(payload)) return null;
+    try {
+        return registerLocalBridgeDevice(req.user, payload);
+    } catch (error) {
+        req.log?.warn?.({ err: error.message }, '聊天请求携带的本机执行器快照注册失败');
+        return null;
+    }
+}
 
 
 const {
@@ -172,6 +211,12 @@ function createChatRouter({
             return res.end();
         }
         const { modelCfg } = preflight;
+        if (mcpEnabled) {
+            const localBridgeDevice = registerChatRequestLocalBridge(req);
+            if (localBridgeDevice) {
+                req.log.info({ deviceId: localBridgeDevice.deviceId, grants: localBridgeDevice.grants }, '聊天请求已同步桌面端本机执行器');
+            }
+        }
 
         let userMessageId = null;
         if (!regenerate) {

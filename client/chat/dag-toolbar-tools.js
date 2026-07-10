@@ -180,8 +180,8 @@ function findGenericDatabaseToolForFullName(tools, value) {
             tool?.databaseTool
             && toolShortName(tool) === shortName
             && databaseConnectionsFromTool(tool).some(connection => (
-                String(connection.connectionId || connection.serverId || '') === serverId
-                || String(connection.serverId || '') === serverId
+                String(connection.connectionId ?? connection.serverId ?? '') === serverId
+                || String(connection.serverId ?? '') === serverId
             ))
         )) || null;
     }

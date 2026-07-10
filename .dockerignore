@@ -112,6 +112,10 @@ scripts/window_globals_baseline.json
 
 # 非运行文档；服务运行需要 CHANGELOG.md 和 使用帮助.md
 docs/
-*.md
-!CHANGELOG.md
-!使用帮助.md
+README.md
+DESIGN.md
+开发规范.md
+项目汇报.md
+打包与推送说明.md
+工具箱数据接入与本机能力设计方案.md
+文档处理底座与OCR_PDF工具应用分阶段开发方案.md

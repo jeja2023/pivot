@@ -35,7 +35,7 @@ function getAssistantTraceMcpActionName(event = {}) {
                 serverName: event?.serverName || ''
             });
             if (title && title !== '工具') return title;
-        } catch (_) {}
+        } catch (_) { }
     }
     return toolName.split('.').pop().replace(/[_-]+/g, ' ').trim();
 }

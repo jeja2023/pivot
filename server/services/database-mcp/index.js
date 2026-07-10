@@ -1,6 +1,10 @@
 const Database = require('better-sqlite3');
-const { db } = require('../../db');
+const path = require('path');
 const { isPrivateHost } = require('../../security');
+
+function appDb() {
+    return require('../../db').db;
+}
 const { isAdmin } = require('../../permissions');
 
 const {
@@ -43,7 +47,7 @@ const {
 
 
 function getDatabaseConnectionForServer(serverId, { includeSecret = false } = {}) {
-    const row = db.prepare(`
+    const row = appDb().prepare(`
         SELECT * FROM mcp_database_connections
         WHERE mcp_server_id = ? AND status != 'deleted'
     `).get(serverId);
@@ -53,6 +57,10 @@ function getDatabaseConnectionForServer(serverId, { includeSecret = false } = {}
 function listDatabaseMcpTools(server) {
     const connection = getDatabaseConnectionForServer(server.id);
     if (!connection) throw new Error('Database MCP connection not found.');
+    return listDatabaseConnectionMcpTools(connection);
+}
+
+function listDatabaseConnectionMcpTools(connection) {
     return connection.database_type === 'mongodb' ? MONGO_TOOL_DEFINITIONS : SQL_TOOL_DEFINITIONS;
 }
 
@@ -182,7 +190,9 @@ async function withSqlServer(connection, handler) {
 }
 
 async function withSqlite(connection, handler) {
-    const sqlitePath = resolveSafeSqlitePath(connection.database_name);
+    const sqlitePath = connection.trusted_local_authorization === true
+        ? path.resolve(String(connection.database_name || ''))
+        : resolveSafeSqlitePath(connection.database_name);
     const client = new Database(sqlitePath, { readonly: true, fileMustExist: true });
     try {
         // better-sqlite3 为同步驱动，但统一 await 句柄以便共享分发器（runRelationalTool）
@@ -488,6 +498,10 @@ async function testDatabaseConnection(connection) {
 async function executeDatabaseMcpTool(server, name, input = {}) {
     const connection = getDatabaseConnectionForServer(server.id, { includeSecret: true });
     if (!connection) throw new Error('Database MCP connection not found.');
+    return executeDatabaseConnectionTool(connection, name, input);
+}
+
+async function executeDatabaseConnectionTool(connection, name, input = {}) {
     if (connection.database_type === 'mongodb') {
         return executeMongoTool(connection, name, input);
     }
@@ -560,8 +574,10 @@ function validateDatabaseConnectionPayload(payload, user) {
 module.exports = {
     DEFAULT_PORTS,
     executeDatabaseMcpTool,
+    executeDatabaseConnectionTool,
     buildDatabaseTestConnectionConfig,
     getDatabaseConnectionForServer,
+    listDatabaseConnectionMcpTools,
     listDatabaseMcpTools,
     normalizeDatabaseConnection,
     normalizeDatabaseType,

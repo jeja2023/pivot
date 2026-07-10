@@ -54,7 +54,13 @@ const {
     buildCapabilityHealth,
     findAccessibleBuiltinService
 } = require('./helpers');
-
+const {
+    completeLocalBridgeTask,
+    getLocalBridgeStatus,
+    listBridgeLocalDeviceMcpTools,
+    pollLocalBridgeTask,
+    registerLocalBridgeDevice
+} = require('../../services/local-device-bridge');
 
 function createSystemBuiltinService(serviceType, user) {
     const definition = SYSTEM_MCP_SERVICES[serviceType];
@@ -109,6 +115,25 @@ function sendJsonRpc(res, id, result, error = null) {
 
 function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
+    router.post('/mcp/local-device/heartbeat', authMiddleware, asyncHandler(async (req, res) => {
+        const device = registerLocalBridgeDevice(req.user, req.body || {});
+        const tools = filterMcpToolsByCapability(listBridgeLocalDeviceMcpTools(req.user), req.user);
+        res.json({ success: true, device, tools });
+    }));
+
+    router.get('/mcp/local-device/status', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, status: getLocalBridgeStatus(req.user) });
+    }));
+
+    router.get('/mcp/local-device/tasks/next', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await pollLocalBridgeTask(req.user, req.query.deviceId || req.query.device_id, req.query.waitMs || req.query.wait_ms);
+        res.json({ success: true, ...result });
+    }));
+
+    router.post('/mcp/local-device/tasks/:id/result', authMiddleware, asyncHandler(async (req, res) => {
+        const result = completeLocalBridgeTask(req.user, req.params.id, req.body || {});
+        res.json({ success: true, result });
+    }));
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listMcpServers(req.user) });
@@ -135,7 +160,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const recentWindow = "datetime('now', '+8 hours', '-7 days')";
         const callScope = superAdmin
             ? `l.created_at >= ${recentWindow}`
-            : `(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?) AND l.created_at >= ${recentWindow}`;
+            : `(l.user_id = ? OR (l.server_id IS NOT NULL AND (s.user_id IS NULL OR s.user_id = ?))) AND l.created_at >= ${recentWindow}`;
         const callParams = superAdmin ? [] : [req.user.id, req.user.id];
         const callSummary = db.prepare(`
             SELECT
@@ -147,7 +172,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             WHERE ${callScope}
         `).get(...callParams);
         const topTools = db.prepare(`
-            SELECT l.tool_name, s.name AS server_name, COUNT(*) AS count,
+            SELECT l.tool_name, COALESCE(s.name, '我的电脑') AS server_name, COUNT(*) AS count,
                    SUM(CASE WHEN l.status = 'error' THEN 1 ELSE 0 END) AS errors,
                    ROUND(AVG(l.duration_ms), 0) AS avgDurationMs
             FROM mcp_call_logs l
@@ -185,10 +210,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.get('/mcp/call-logs', authMiddleware, asyncHandler(async (req, res) => {
         const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 30, 1), 100);
         const superAdmin = isSuperAdmin(req.user);
-        const where = superAdmin ? "s.status != 'deleted'" : "(l.user_id = ? OR s.user_id IS NULL OR s.user_id = ?)";
+        const where = superAdmin ? "(l.server_id IS NULL OR s.status != 'deleted')" : "(l.user_id = ? OR (l.server_id IS NOT NULL AND (s.user_id IS NULL OR s.user_id = ?)))";
         const params = superAdmin ? [limit] : [req.user.id, req.user.id, limit];
         const rows = db.prepare(`
-            SELECT l.id, l.user_id, u.username, u.nickname, l.server_id, s.name AS server_name,
+            SELECT l.id, l.user_id, u.username, u.nickname, l.server_id, COALESCE(s.name, '我的电脑') AS server_name,
                    l.tool_name, l.source, l.status, l.duration_ms, l.input_preview,
                    l.output_preview, l.error_message, l.created_at
             FROM mcp_call_logs l
@@ -605,6 +630,11 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.post('/mcp/servers/:id/refresh', authMiddleware, asyncHandler(async (req, res) => {
+        if (String(req.params.id) === '0') {
+            const tools = filterMcpToolsByCapability(listCachedMcpTools(0, req.user), req.user);
+            logAction(req, '刷新本机虚拟工具', `mcp.0: ${tools.length}`);
+            return res.json({ success: true, tools });
+        }
         const server = getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const tools = await refreshMcpTools(server, req.user);
@@ -757,6 +787,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.get('/mcp/servers/:id/tools', authMiddleware, asyncHandler(async (req, res) => {
+        if (String(req.params.id) === '0') {
+            return res.json({ tools: filterMcpToolsByCapability(listCachedMcpTools(0, req.user), req.user) });
+        }
         const server = getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const allTools = listCachedMcpTools(server.id, req.user);
@@ -772,7 +805,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!name) return res.status(400).json({ error: 'Tool name is required.' });
         if (name.startsWith('mcp.')) {
             const cached = listCachedMcpTools(null, req.user).find(tool => tool.fullName === name);
-            const sourceRef = cached?.serverId || cached?.server_id || cached?.serverName || '';
+            const sourceRef = cached
+                ? String(cached.serverId ?? cached.server_id ?? cached.serverName ?? '')
+                : '';
             const type = cached?.serverType === 'database'
                 ? 'database_connection'
                 : 'mcp_server';

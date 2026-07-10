@@ -288,6 +288,7 @@ const {
 } = require('../server/services/mcp-client');
 
 const {
+    detectReportFileInventoryIntent,
     maybeBuildMcpChatContext
 } = require('../server/services/chat-mcp-context');
 
@@ -785,6 +786,7 @@ module.exports = {
     debugRetrieveContext,
     deleteKnowledgeDocument,
     deleteRelation,
+    detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,
     encodeAttachmentUrl,
     encryptSecret,

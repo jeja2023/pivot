@@ -1,7 +1,7 @@
 /* Agent DAG 数据库工具栏辅助函数（拆自 dag-toolbar.js） */
 
 function mcpServerIdFromTool(tool) {
-        if (tool?.serverId !== undefined && tool?.serverId !== null) return String(tool.serverId || '').trim();
+        if (tool?.serverId !== undefined && tool?.serverId !== null) return String(tool.serverId ?? '').trim();
         const match = String(toolValue(tool) || '').match(/^mcp\.(\d+)\./);
         return match ? match[1] : '';
     }
@@ -10,9 +10,9 @@ function databaseConnectionsFromTool(tool) {
         const connections = Array.isArray(tool?.databaseConnections) ? tool.databaseConnections : [];
         if (connections.length) {
             return connections.map(item => ({
-                serverId: String(item.serverId || '').trim(),
-                connectionId: String(item.connectionId || item.serverId || '').trim(),
-                serverName: item.serverName || `数据库 ${item.serverId || ''}`,
+                serverId: String(item.serverId ?? '').trim(),
+                connectionId: String(item.connectionId ?? item.serverId ?? '').trim(),
+                serverName: item.serverName || `数据库 ${item.serverId ?? ''}`,
                 databaseType: item.databaseType || '',
                 fullName: item.fullName || ''
             })).filter(item => item.serverId || item.connectionId);

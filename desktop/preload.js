@@ -17,6 +17,18 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     revokeLocalAuthorization(type) {
         return ipcRenderer.invoke('pivot-local-auth:revoke', type);
     },
+    async executeLocalMcpTool(task) {
+        const response = await ipcRenderer.invoke('pivot-local-auth:execute-tool', task || {});
+        if (response && response.success === false) {
+            const error = new Error(response.error?.message || '本机执行失败。');
+            error.status = Number(response.error?.status || 0) || 500;
+            error.statusCode = error.status;
+            error.code = response.error?.code || '';
+            error.detail = response.error?.detail || '';
+            throw error;
+        }
+        return response && response.success === true ? response.result : response;
+    },
     checkForUpdates() {
         return ipcRenderer.invoke('pivot-updater:check');
     },

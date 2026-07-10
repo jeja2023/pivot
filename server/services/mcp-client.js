@@ -20,6 +20,17 @@ const {
     isInternalMcpUrl,
     listBuiltinMcpTools
 } = require('./builtin-mcp');
+const {
+    LOCAL_MCP_SERVER_ID,
+    executeLocalDeviceMcpTool,
+    getLocalDeviceMcpServerTypeForTool,
+    isLocalDeviceMcpServerId,
+    listLocalDeviceMcpTools
+} = require('./local-device-mcp');
+const {
+    executeBridgeLocalDeviceMcpTool,
+    listBridgeLocalDeviceMcpTools
+} = require('./local-device-bridge');
 const { isSuperAdmin } = require('../permissions');
 const { enqueueMcpCallLog } = require('./sqlite-write-queue');
 
@@ -42,7 +53,7 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
     try {
         enqueueMcpCallLog({
             userId: user?.id || null,
-            serverId: serverId || null,
+            serverId: isLocalDeviceMcpServerId(serverId) ? null : (serverId ?? null),
             toolName: String(toolName || '').slice(0, 240),
             source: String(source || 'manual').slice(0, 40),
             status: status === 'error' ? 'error' : 'success',
@@ -281,6 +292,10 @@ async function refreshMcpTools(server, user = null) {
 }
 
 function listCachedMcpTools(serverId = null, user = null) {
+    if (isLocalDeviceMcpServerId(serverId)) {
+        const directLocalTools = listLocalDeviceMcpTools(user);
+        return directLocalTools.length ? directLocalTools : listBridgeLocalDeviceMcpTools(user);
+    }
     if (serverId) {
         return db.prepare(`
             SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
@@ -306,7 +321,13 @@ function listCachedMcpTools(serverId = null, user = null) {
           AND (? IS NULL OR s.user_id IS NULL OR s.user_id = ? OR ? = 1)
         ORDER BY s.name ASC, t.name ASC
     `).all(user?.id || null, user?.id || null, isSuperAdmin(user) ? 1 : 0);
-    return rows.map(formatMcpTool);
+    const directLocalTools = listLocalDeviceMcpTools(user);
+    const bridgeLocalTools = directLocalTools.length ? [] : listBridgeLocalDeviceMcpTools(user);
+    return [
+        ...directLocalTools,
+        ...bridgeLocalTools,
+        ...rows.map(formatMcpTool)
+    ];
 }
 
 function formatMcpTool(row) {
@@ -320,7 +341,7 @@ function formatMcpTool(row) {
         : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
     const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
     const { getCapabilityToolGovernance } = require('./capability-market');
-    const governance = getCapabilityToolGovernance(packageType, String(row.server_id || ''), row.name);
+    const governance = getCapabilityToolGovernance(packageType, String(row.server_id ?? ''), row.name);
     return {
         serverId: row.server_id,
         serverName: row.server_name,
@@ -339,6 +360,55 @@ function formatMcpTool(row) {
 async function executeMcpTool(fullName, input, user, options = {}) {
     const match = String(fullName || '').match(/^mcp\.(\d+)\.(.+)$/);
     if (!match) throw new Error('Invalid MCP tool name.');
+    if (isLocalDeviceMcpServerId(match[1])) {
+        const toolName = match[2];
+        const serverType = getLocalDeviceMcpServerTypeForTool(toolName);
+        if (!serverType) throw new Error('本机工具不可用。');
+        const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
+        const { isToolCapabilityEnabled } = require('./capability-market');
+        if (!isToolCapabilityEnabled(packageType, match[1], toolName, user)) {
+            const err = new Error('该工具已在工具治理中停用。');
+            err.status = 403;
+            throw err;
+        }
+        const startedAt = Date.now();
+        try {
+            const directLocalTools = listLocalDeviceMcpTools(user);
+            const hasDirectLocalTool = directLocalTools.some(tool => tool.name === toolName);
+            const result = hasDirectLocalTool
+                ? await executeLocalDeviceMcpTool(toolName, input || {}, user)
+                : await executeBridgeLocalDeviceMcpTool(toolName, input || {}, user);
+            recordMcpCallLog({
+                user,
+                serverId: LOCAL_MCP_SERVER_ID,
+                toolName,
+                source: options.source || 'manual',
+                status: 'success',
+                durationMs: Date.now() - startedAt,
+                input,
+                output: result
+            });
+            return {
+                content: [{
+                    type: 'text',
+                    text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+                }],
+                structuredContent: result
+            };
+        } catch (e) {
+            recordMcpCallLog({
+                user,
+                serverId: LOCAL_MCP_SERVER_ID,
+                toolName,
+                source: options.source || 'manual',
+                status: 'error',
+                durationMs: Date.now() - startedAt,
+                input,
+                error: e
+            });
+            throw e;
+        }
+    }
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
     const serverType = String(server.base_url || '').startsWith('pivot-db://')

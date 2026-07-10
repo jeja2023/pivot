@@ -134,7 +134,8 @@ async function assembleChatContext({
             tools: mcpTools,
             user: req.user,
             writeSse,
-            log: req.log
+            log: req.log,
+            localMcpBridgeDebug: req.localMcpBridgeDebug || req.body?.localMcpBridgeDebug || null
         });
         if (mcpContext) {
             visionHistory.push({ role: 'system', content: mcpContext });

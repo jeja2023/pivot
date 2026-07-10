@@ -1,5 +1,4 @@
 const path = require('path');
-const { dataDir } = require('../../db');
 const {
     DATABASE_CONNECT_TIMEOUT_MS,
     DATABASE_TEST_CONNECT_TIMEOUT_MS,
@@ -8,13 +7,18 @@ const {
     clampTimeoutMs
 } = require('./connection-policy');
 
+function defaultDataDir() {
+    return require('../../db').dataDir;
+}
+
 function allowedSqliteRoots() {
-    const roots = (process.env.MCP_SQLITE_ROOTS || dataDir)
+    const fallbackDataDir = defaultDataDir();
+    const roots = (process.env.MCP_SQLITE_ROOTS || fallbackDataDir)
         .split(',')
         .map(item => item.trim())
         .filter(Boolean)
         .map(item => path.resolve(item));
-    return roots.length ? roots : [dataDir];
+    return roots.length ? roots : [fallbackDataDir];
 }
 
 function resolveSafeSqlitePath(databaseName) {

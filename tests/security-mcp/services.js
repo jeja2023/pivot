@@ -130,6 +130,54 @@ test('admin tool policy routes manage only global tool packages', async () => {
     }
 });
 
+test('本机桥接执行错误会按路径错误归一化状态码', async () => {
+    const {
+        completeLocalBridgeTask,
+        executeBridgeLocalDeviceMcpTool,
+        registerLocalBridgeDevice,
+        resetLocalBridgeForTests
+    } = require('../../server/services/local-device-bridge');
+    const user = { id: 1, username: 'admin', role: 'admin', unit: 'HQ' };
+    const deviceId = `bridge-error-${Date.now()}`;
+    resetLocalBridgeForTests();
+    try {
+        registerLocalBridgeDevice(user, {
+            deviceId,
+            deviceName: '测试电脑',
+            provider: 'desktop',
+            mode: 'remote',
+            grants: {
+                local_report_dir: {
+                    authorized: true,
+                    resourceKind: 'report_directory',
+                    label: '法律',
+                    pathHint: '法律'
+                }
+            }
+        });
+        const pending = executeBridgeLocalDeviceMcpTool('reports.list_files', { limit: 80 }, user);
+        const task = await require('../../server/services/local-device-bridge').pollLocalBridgeTask(user, deviceId, 1000);
+        assert.equal(task.status, 'claimed');
+        assert.equal(task.task.toolName, 'reports.list_files');
+        completeLocalBridgeTask(user, task.task.id, {
+            deviceId,
+            success: false,
+            error: {
+                message: '本机报表目录中存在无法按目录读取的路径，或当前授权目标不是有效目录；请重新授权一个真实文件夹后再试。',
+                code: 'ENOTDIR'
+            }
+        });
+        await assert.rejects(pending, err => {
+            assert.equal(err.status, 400);
+            assert.equal(err.code, 'ENOTDIR');
+            assert.match(err.message, /有效目录|目录读取/);
+            return true;
+        });
+    } finally {
+        resetLocalBridgeForTests();
+    }
+});
+
 test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
     const generic = buildGenericDatabaseTools([
         {
@@ -881,5 +929,267 @@ test('系统即时消息 MCP 使用默认服务身份和用户配置', async () 
         }
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
         await new Promise(resolve => webhook.close(resolve));
+    }
+});
+
+test('desktop local read-only executor exposes authorized SQLite and report directory only', async () => {
+    const suffix = Date.now().toString(36);
+    const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-local-executor-${suffix}-`));
+    const reportDir = path.join(localRoot, 'reports');
+    fs.mkdirSync(reportDir, { recursive: true });
+    fs.writeFileSync(path.join(reportDir, 'sales.csv'), 'dept,amount\nops,10\nrnd,25\nops,30\n', 'utf8');
+
+    const sqlitePath = path.join(localRoot, 'local.db');
+    const sqlite = new Sqlite(sqlitePath);
+    sqlite.exec(`
+        CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+        INSERT INTO widgets (name) VALUES ('local-alpha'), ('local-beta');
+    `);
+    sqlite.close();
+
+    const authFile = path.join(localRoot, 'local-authorizations.json');
+    fs.writeFileSync(authFile, JSON.stringify({
+        version: 1,
+        grants: {
+            local_database: {
+                resourceKind: 'sqlite_file',
+                path: sqlitePath,
+                label: 'Local SQLite'
+            },
+            local_report_dir: {
+                resourceKind: 'report_directory',
+                path: reportDir,
+                label: 'Local Reports',
+                extensions: ['csv'],
+                maxRows: 20
+            }
+        }
+    }), 'utf8');
+
+    const previousDesktop = process.env.PIVOT_DESKTOP;
+    const previousHelper = process.env.PIVOT_LOCAL_HELPER;
+    const previousAuthFile = process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+    process.env.PIVOT_DESKTOP = 'true';
+    delete process.env.PIVOT_LOCAL_HELPER;
+    process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = authFile;
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`local_executor_${suffix}`, 'hash', 'Local Executor Test', 'QA', 'admin', 'active');
+    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `local_executor_${suffix}`, role: 'admin', unit: 'QA' };
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = adminUser; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    const toolsRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools' && layer.route?.methods?.get);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+
+    try {
+        const toolsRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), { user: adminUser }, toolsRes);
+        assert.equal(toolsRes.statusCode, 200);
+        const fullNames = toolsRes.body.tools.map(tool => tool.fullName);
+        assert.equal(fullNames.includes('mcp.0.reports.list_files'), true);
+        assert.equal(fullNames.includes('mcp.0.db.run_readonly_query'), true);
+        assert.equal(toolsRes.body.tools.find(tool => tool.fullName === 'mcp.0.db.run_readonly_query').serverId, 0);
+
+        const agentTools = formatToolList(adminUser);
+        const genericQuery = agentTools.find(tool => tool.name === 'db.run_readonly_query');
+        assert.equal(genericQuery?.databaseConnections.some(connection => connection.serverId === '0'), true);
+        assert.equal(genericQuery?.input_schema.properties.connectionId.enum.includes('0'), true);
+
+        const listRes = makeRes();
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: { name: 'mcp.0.reports.list_files', input: { query: 'sales' } },
+            user: adminUser
+        }, listRes);
+        assert.equal(listRes.statusCode, 200);
+        const listedFile = listRes.body.result.structuredContent.files[0];
+        assert.equal(listedFile.path, '0:sales.csv');
+        assert.equal(listedFile.relativePath, 'sales.csv');
+        const listedText = JSON.stringify(listedFile).replace(/\\\\/g, '\\');
+        assert.equal(listedText.includes(sqlitePath), false);
+        assert.equal(listedText.includes(reportDir), false);
+
+        const queryTableRes = makeRes();
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: 'mcp.0.reports.query_table',
+                input: { path: listedFile.path, filters: { dept: 'ops' }, columns: ['amount'], limit: 5 }
+            },
+            user: adminUser
+        }, queryTableRes);
+        assert.deepEqual(queryTableRes.body.result.structuredContent.rows.map(row => row.amount), ['10', '30']);
+        assert.equal(queryTableRes.body.result.structuredContent.file.relativePath, 'sales.csv');
+
+        await assert.rejects(
+            runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+                body: { name: 'mcp.0.reports.read_file_summary', input: { path: '0:../local.db' } },
+                user: adminUser
+            }, makeRes()),
+            err => err?.status === 404
+        );
+
+        const dbRes = makeRes();
+        await runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            body: {
+                name: 'mcp.0.db.run_readonly_query',
+                input: { sql: 'SELECT name FROM widgets ORDER BY id', limit: 1 }
+            },
+            user: adminUser
+        }, dbRes);
+        assert.equal(dbRes.statusCode, 200);
+        assert.deepEqual(dbRes.body.result.structuredContent.rows.map(row => row.name), ['local-alpha']);
+
+        await assert.rejects(
+            runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+                body: {
+                    name: 'mcp.0.db.run_readonly_query',
+                    input: { sql: "INSERT INTO widgets (name) VALUES ('blocked')" }
+                },
+                user: adminUser
+            }, makeRes()),
+            /Only readonly SQL is allowed/
+        );
+
+        const callLog = db.prepare(`
+            SELECT server_id, tool_name, source, input_preview, output_preview
+            FROM mcp_call_logs
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(adminUser.id);
+        assert.equal(callLog.server_id, null);
+        assert.equal(callLog.tool_name, 'db.run_readonly_query');
+        assert.match(callLog.input_preview, /INSERT INTO widgets/);
+    } finally {
+        if (previousDesktop === undefined) delete process.env.PIVOT_DESKTOP;
+        else process.env.PIVOT_DESKTOP = previousDesktop;
+        if (previousHelper === undefined) delete process.env.PIVOT_LOCAL_HELPER;
+        else process.env.PIVOT_LOCAL_HELPER = previousHelper;
+        if (previousAuthFile === undefined) delete process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+        else process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = previousAuthFile;
+        db.prepare('DELETE FROM mcp_call_logs WHERE user_id = ?').run(adminUser.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
+        fs.rmSync(localRoot, { recursive: true, force: true });
+    }
+});
+test('remote desktop bridge exposes authorized local MCP tools', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`remote_local_bridge_${suffix}`, 'hash', 'Remote Local Bridge', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `remote_local_bridge_${suffix}`, role: 'admin', unit: 'QA' };
+    const { resetLocalBridgeForTests } = require('../../server/services/local-device-bridge');
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = req.user || user; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    const heartbeatRoute = router.stack.find(layer => layer.route?.path === '/mcp/local-device/heartbeat' && layer.route?.methods?.post);
+    const nextRoute = router.stack.find(layer => layer.route?.path === '/mcp/local-device/tasks/next' && layer.route?.methods?.get);
+    const completeRoute = router.stack.find(layer => layer.route?.path === '/mcp/local-device/tasks/:id/result' && layer.route?.methods?.post);
+    const toolsRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools' && layer.route?.methods?.get);
+    const serverToolsRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/tools' && layer.route?.methods?.get);
+    const callRoute = router.stack.find(layer => layer.route?.path === '/mcp/tools/call' && layer.route?.methods?.post);
+    const deviceId = `desktop-${suffix}`;
+    try {
+        const heartbeatRes = makeRes();
+        await runExpressHandlers(heartbeatRoute.route.stack.map(layer => layer.handle), {
+            user,
+            body: {
+                deviceId,
+                deviceName: 'QA Desktop',
+                provider: 'desktop',
+                mode: 'remote',
+                grants: {
+                    local_database: { type: 'local_database', authorized: true, label: 'Local DB', pathHint: 'local.db' },
+                    local_report_dir: { type: 'local_report_dir', authorized: true, label: 'Reports', pathHint: 'Reports' }
+                }
+            }
+        }, heartbeatRes);
+        assert.equal(heartbeatRes.statusCode, 200);
+        assert.equal(heartbeatRes.body.tools.some(tool => tool.fullName === 'mcp.0.reports.list_files'), true);
+        assert.equal(heartbeatRes.body.tools.some(tool => tool.fullName === 'mcp.0.db.run_readonly_query'), true);
+
+        const toolsRes = makeRes();
+        await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), { user }, toolsRes);
+        assert.equal(toolsRes.body.tools.some(tool => tool.fullName === 'mcp.0.reports.list_files'), true);
+
+        const localServerToolsRes = makeRes();
+        await runExpressHandlers(serverToolsRoute.route.stack.map(layer => layer.handle), {
+            user,
+            params: { id: '0' }
+        }, localServerToolsRes);
+        assert.equal(localServerToolsRes.statusCode, 200);
+        assert.equal(localServerToolsRes.body.tools.some(tool => tool.fullName === 'mcp.0.reports.list_files'), true);
+        assert.equal(localServerToolsRes.body.tools.some(tool => tool.fullName === 'mcp.0.db.run_readonly_query'), true);
+
+        const agentTools = formatToolList(user);
+        const genericQuery = agentTools.find(tool => tool.name === 'db.run_readonly_query');
+        assert.equal(genericQuery?.databaseConnections.some(connection => connection.serverId === '0'), true);
+
+        const callRes = makeRes();
+        const callPromise = runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), {
+            user,
+            body: { name: 'mcp.0.reports.list_files', input: { query: 'sales' } }
+        }, callRes);
+        await new Promise(resolve => setImmediate(resolve));
+
+        const nextRes = makeRes();
+        await runExpressHandlers(nextRoute.route.stack.map(layer => layer.handle), {
+            user,
+            query: { deviceId, waitMs: '1000' }
+        }, nextRes);
+        assert.equal(nextRes.statusCode, 200);
+        assert.equal(nextRes.body.task.toolName, 'reports.list_files');
+        assert.deepEqual(nextRes.body.task.input, { query: 'sales' });
+
+        const completeRes = makeRes();
+        await runExpressHandlers(completeRoute.route.stack.map(layer => layer.handle), {
+            user,
+            params: { id: nextRes.body.task.id },
+            body: {
+                deviceId,
+                success: true,
+                result: {
+                    files: [{ path: '0:sales.csv', relativePath: 'sales.csv' }],
+                    count: 1
+                }
+            }
+        }, completeRes);
+        assert.equal(completeRes.statusCode, 200);
+
+        await callPromise;
+        assert.equal(callRes.statusCode, 200);
+        assert.equal(callRes.body.result.structuredContent.files[0].path, '0:sales.csv');
+
+        const callLog = db.prepare(`
+            SELECT server_id, tool_name, source, output_preview
+            FROM mcp_call_logs
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(user.id);
+        assert.equal(callLog.server_id, null);
+        assert.equal(callLog.tool_name, 'reports.list_files');
+        assert.match(callLog.output_preview, /sales\.csv/);
+    } finally {
+        resetLocalBridgeForTests();
+        db.prepare('DELETE FROM mcp_call_logs WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
     }
 });

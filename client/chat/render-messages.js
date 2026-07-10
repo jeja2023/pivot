@@ -123,7 +123,7 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
         (!messageTimeHtml && !statsHtml) ? 'hidden' : '',
         (messageTimeHtml && !statsHtml) ? 'hover-time-only' : ''
     ].filter(Boolean).join(' ');
-    
+
     PivotSafeHtml.setHtml(div, `
         <div class="avatar">${role === 'user' ? ICONS.user : ICONS.ai}</div>
         <div class="message-content"${id ? ` data-message-id="${id}"` : ''}>
@@ -353,7 +353,7 @@ function restoreThoughtStateAfterRender(root, state) {
 document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.code-copy-btn');
     if (!btn) return;
-    
+
     const codeBlock = btn.closest('.code-block');
     const code = codeBlock ? codeBlock.querySelector('code')?.innerText : '';
     if (!code) return;
@@ -377,7 +377,7 @@ document.addEventListener('click', async (e) => {
         }
 
         if (window.showToast) showToast('代码已复制到剪贴板');
-        
+
         // 按钮文字反馈
         const span = btn.querySelector('span');
         if (span) {

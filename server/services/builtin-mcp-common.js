@@ -8,8 +8,11 @@
  * 本文件由 builtin-mcp.js 拆分而来，逻辑保持不变，仅做结构归并以便维护。
  */
 const path = require('path');
-const { db } = require('../db');
 const { decryptSecret, validateMcpEndpointUrl } = require('../security');
+
+function appDb() {
+    return require('../db').db;
+}
 
 const BUILTIN_MCP_PREFIXES = {
     reports: 'pivot-reports://',
@@ -142,7 +145,7 @@ function isInternalMcpUrl(baseUrl = '') {
 }
 
 function getBuiltinConfigRow(serverId) {
-    return db.prepare(`
+    return appDb().prepare(`
         SELECT * FROM mcp_builtin_configs
         WHERE mcp_server_id = ? AND status != 'deleted'
     `).get(serverId) || null;

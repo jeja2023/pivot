@@ -5,7 +5,11 @@
  */
 const fs = require('fs');
 const path = require('path');
-const XLSX = require('@e965/xlsx');
+let XLSX = null;
+function getXlsx() {
+    if (!XLSX) XLSX = require('@e965/xlsx');
+    return XLSX;
+}
 const {
     getRequiredBuiltinConfig,
     isPathInside,
@@ -164,10 +168,11 @@ async function listReportFiles(config, query = '', limit = 50) {
 }
 async function readWorkbookRows(file, sheetName, maxRows) {
     const buffer = await fs.promises.readFile(file.target);
-    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
+    const xlsx = getXlsx();
+    const workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
     const selectedSheet = sheetName && workbook.Sheets[sheetName] ? sheetName : workbook.SheetNames[0];
     const sheet = workbook.Sheets[selectedSheet];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
     const headers = (rows[0] || []).map((cell, index) => String(cell || `column_${index + 1}`).trim() || `column_${index + 1}`);
     const objects = rows.slice(1).map(row => {
         const item = {};
@@ -222,8 +227,7 @@ async function queryReportTable(config, input = {}) {
     };
 }
 
-async function executeReportTool(server, name, input = {}) {
-    const { config } = getRequiredBuiltinConfig(server, 'reports');
+async function executeReportConfigTool(config, name, input = {}) {
     if (name === 'reports.list_files') {
         return await listReportFiles(config, input.query, input.limit);
     }
@@ -262,12 +266,12 @@ async function executeReportTool(server, name, input = {}) {
     }
     if (name === 'reports.compare_files') {
         const [left, right] = await Promise.all([
-            executeReportTool(server, 'reports.read_file_summary', {
+            executeReportConfigTool(config, 'reports.read_file_summary', {
                 path: input.leftPath,
                 sheet: input.sheet,
                 sampleRows: input.sampleRows || 20
             }),
-            executeReportTool(server, 'reports.read_file_summary', {
+            executeReportConfigTool(config, 'reports.read_file_summary', {
                 path: input.rightPath,
                 sheet: input.sheet,
                 sampleRows: input.sampleRows || 20
@@ -284,7 +288,13 @@ async function executeReportTool(server, name, input = {}) {
     throw new Error(`Unsupported reports MCP tool: ${name}`);
 }
 
+async function executeReportTool(server, name, input = {}) {
+    const { config } = getRequiredBuiltinConfig(server, 'reports');
+    return executeReportConfigTool(config, name, input);
+}
+
 module.exports = {
+    executeReportConfigTool,
     listReportTools,
     resolveReportFile,
     listReportFiles,

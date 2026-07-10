@@ -1,10 +1,13 @@
-const { db } = require('../../db');
 const {
     decryptSecret,
     assertSafeOutboundHost,
     createSafeLookup,
     getSafeOutboundOptionsForUser
 } = require('../../security');
+
+function appDb() {
+    return require('../../db').db;
+}
 
 // 数据库出站 SSRF 守卫：解析 DNS 后校验真实 IP，拦截 loopback / link-local / 云元数据等敏感目标，
 // 默认仅管理员可连接内网（RFC1918）数据库（受 MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN 控制）。
@@ -44,7 +47,7 @@ function getConnectionOwner(connection = {}) {
     if (connection._owner) return connection._owner;
     if (!connection.user_id) return null;
     try {
-        return db.prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
+        return appDb().prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
     } catch (e) {
         return null;
     }

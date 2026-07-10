@@ -14,7 +14,7 @@
                 const shortName = toolShortName(tool);
                 if (!shortName.startsWith('db.')) return;
                 databaseConnectionsFromTool(tool).forEach(connection => {
-                    const serverId = String(connection.connectionId || connection.serverId || '').trim();
+                    const serverId = String(connection.connectionId ?? connection.serverId ?? '').trim();
                     if (!serverId) return;
                     const entry = entries.get(serverId) || {
                         serverId,
@@ -66,13 +66,13 @@
         const selectedDatabaseConnectionId = (tool, input = {}, toolsOrResolver = []) => {
             const options = databaseToolConnectionOptions(tool, toolsOrResolver);
             const explicit = databaseConnectionInputValue(input);
-            if (explicit && options.some(item => String(item.connectionId || item.serverId || '') === explicit)) return explicit;
-            return options[0]?.connectionId || options[0]?.serverId || explicit || '';
+            if (explicit && options.some(item => String(item.connectionId ?? item.serverId ?? '') === explicit)) return explicit;
+            return String(options[0]?.connectionId ?? options[0]?.serverId ?? explicit ?? '');
         };
 
         const databaseConnectionLabel = (tool, serverId, toolsOrResolver = []) => {
-            const option = databaseToolConnectionOptions(tool, toolsOrResolver).find(item => String(item.connectionId || item.serverId || '') === String(serverId || ''));
-            if (!option) return String(serverId || '') || '未选择';
+            const option = databaseToolConnectionOptions(tool, toolsOrResolver).find(item => String(item.connectionId ?? item.serverId ?? '') === String(serverId ?? ''));
+            if (!option) return String(serverId ?? '') || '未选择';
             return [option.serverName || `数据库 ${option.serverId}`, option.databaseType].filter(Boolean).join(' · ');
         };
 

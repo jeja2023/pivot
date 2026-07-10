@@ -4,6 +4,7 @@ const {
     assert,
     buildFallbackDataQueryInput,
     db,
+    detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
@@ -12,6 +13,7 @@ const {
     http,
     listCachedMcpTools,
     maybeBuildMcpChatContext,
+    os,
     path,
     refreshMcpTools,
     test
@@ -93,6 +95,229 @@ test('聊天 MCP 上下文会为明确能力请求报告缺少匹配工具', asy
     assert.doesNotMatch(context, /本轮不需要调用工具箱工具/);
 });
 
+test('聊天 MCP 本机目录请求不会误用数据库工具', async () => {
+    const { resetLocalBridgeForTests } = require('../../server/services/local-device-bridge');
+    resetLocalBridgeForTests();
+    const prompt = '查询本机法律目录下有哪些文件';
+    const dbOnlyTools = [{
+        fullName: 'mcp.0.db.run_readonly_query',
+        name: 'db.run_readonly_query',
+        serverName: 'DESKTOP-SNH56CH：本机 SQLite',
+        description: '执行只读 SQL',
+        input_schema: { type: 'object' }
+    }];
+    const filtered = filterMcpToolsForChatIntent(dbOnlyTools, prompt);
+    assert.deepEqual(filtered, []);
+
+    const events = [];
+    const context = await maybeBuildMcpChatContext({
+        modelCfg: {
+            id: 1,
+            name: 'Unused Planner',
+            model_name: 'planner-test',
+            url: 'http://127.0.0.1:9/v1',
+            api_key: '',
+            user_id: null
+        },
+        history: [{ role: 'user', content: prompt }],
+        userPrompt: prompt,
+        tools: dbOnlyTools,
+        user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+        writeSse(payload) {
+            events.push(JSON.parse(payload));
+        },
+        log: { warn() {} }
+    });
+
+    assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['skipped']);
+    assert.match(context, /本机报表目录|桌面端本机执行器/);
+    assert.doesNotMatch(context, /db\.run_readonly_query.*无法调用的原因：规划器未选择工具/s);
+});
+
+test('聊天 MCP 本机目录请求会报告桌面端桥接诊断', async () => {
+    const { resetLocalBridgeForTests } = require('../../server/services/local-device-bridge');
+    resetLocalBridgeForTests();
+    const events = [];
+    const context = await maybeBuildMcpChatContext({
+        modelCfg: {
+            id: 1,
+            name: 'Unused Planner',
+            model_name: 'planner-test',
+            url: 'http://127.0.0.1:9/v1',
+            api_key: '',
+            user_id: null
+        },
+        history: [{ role: 'user', content: '查询本机法律目录下有哪些文件' }],
+        userPrompt: '查询本机法律目录下有哪些文件',
+        tools: [],
+        user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+        localMcpBridgeDebug: {
+            page: 'chat',
+            status: 'bridge_unavailable',
+            hasDesktopBridge: false,
+            hasStatusBridge: false,
+            hasExecuteBridge: false,
+            reason: '聊天页没有检测到桌面端桥 window.pivotDesktop；请确认当前页面在桌面客户端中打开，而不是普通浏览器。'
+        },
+        writeSse(payload) {
+            events.push(JSON.parse(payload));
+        },
+        log: { warn() {} }
+    });
+
+    assert.match(events[0].message, /window\.pivotDesktop|普通浏览器/);
+    assert.match(context, /window\.pivotDesktop|普通浏览器/);
+});
+
+test('聊天 MCP 会将本机目录文件清单请求确定性路由到报表工具', async () => {
+    assert.equal(detectReportFileInventoryIntent('查询本机法律目录下有哪些文件'), true);
+
+    const suffix = Date.now().toString(36);
+    const reportParent = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-chat-local-reports-${suffix}-`));
+    const legalDir = path.join(reportParent, '法律');
+    fs.mkdirSync(legalDir, { recursive: true });
+    fs.writeFileSync(path.join(legalDir, '法规.md'), '# 法规\n', 'utf8');
+    fs.writeFileSync(path.join(legalDir, '合同.csv'), 'name,type\n合同,法律\n', 'utf8');
+
+    const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-chat-local-auth-${suffix}-`));
+    const authFile = path.join(localRoot, 'local-authorizations.json');
+    fs.writeFileSync(authFile, JSON.stringify({
+        version: 1,
+        grants: {
+            local_report_dir: {
+                resourceKind: 'report_directory',
+                path: legalDir,
+                label: '法律',
+                extensions: ['md', 'csv'],
+                maxRows: 20
+            }
+        }
+    }), 'utf8');
+
+    const previousDesktop = process.env.PIVOT_DESKTOP;
+    const previousHelper = process.env.PIVOT_LOCAL_HELPER;
+    const previousAuthFile = process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+    process.env.PIVOT_DESKTOP = 'true';
+    delete process.env.PIVOT_LOCAL_HELPER;
+    process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = authFile;
+
+    const plannerServer = http.createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ action: 'none', reason: '不需要工具箱' }) } }]
+        }));
+    });
+
+    try {
+        await new Promise(resolve => plannerServer.listen(0, '127.0.0.1', resolve));
+        const events = [];
+        const context = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Fake Planner',
+                model_name: 'planner-test',
+                url: `http://127.0.0.1:${plannerServer.address().port}/v1`,
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '查询本机法律目录下有哪些文件' }],
+            userPrompt: '查询本机法律目录下有哪些文件',
+            tools: [{
+                fullName: 'mcp.0.reports.list_files',
+                name: 'reports.list_files',
+                serverName: 'DESKTOP-SNH56CH：我的电脑',
+                description: '列出配置目录下可访问的报表/数据文件。',
+                input_schema: { type: 'object' },
+                localDevice: {
+                    online: true,
+                    grants: {
+                        local_report_dir: {
+                            authorized: true,
+                            label: '法律',
+                            pathHint: '法律'
+                        }
+                    }
+                }
+            }],
+            user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+            writeSse(payload) {
+                events.push(JSON.parse(payload));
+            },
+            log: { warn() {} }
+        });
+
+        assert.match(context, /工具: mcp\.0\.reports\.list_files/);
+        assert.match(context, /法规\.md/);
+        assert.match(context, /"limit":80|"limit": 80/);
+        assert.doesNotMatch(context, /"query":"法律"|"query": "法律"/);
+        assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'done']);
+        const running = events.find(event => event.type === 'mcp' && event.status === 'running');
+        assert.equal(running.toolName, 'reports.list_files');
+        assert.match(running.message, /查找报表文件/);
+    } finally {
+        await new Promise(resolve => plannerServer.close(resolve));
+        if (previousDesktop === undefined) delete process.env.PIVOT_DESKTOP;
+        else process.env.PIVOT_DESKTOP = previousDesktop;
+        if (previousHelper === undefined) delete process.env.PIVOT_LOCAL_HELPER;
+        else process.env.PIVOT_LOCAL_HELPER = previousHelper;
+        if (previousAuthFile === undefined) delete process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+        else process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = previousAuthFile;
+        db.prepare("DELETE FROM mcp_call_logs WHERE server_id IS NULL AND tool_name = 'reports.list_files' AND source = 'chat_fallback'").run();
+        fs.rmSync(reportParent, { recursive: true, force: true });
+        fs.rmSync(localRoot, { recursive: true, force: true });
+    }
+});
+
+test('聊天 MCP 本机目录确定性工具失败时不会继续等待规划模型', async () => {
+    const { resetLocalBridgeForTests } = require('../../server/services/local-device-bridge');
+    resetLocalBridgeForTests();
+    const previousDesktop = process.env.PIVOT_DESKTOP;
+    const previousHelper = process.env.PIVOT_LOCAL_HELPER;
+    const previousAuthFile = process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+    delete process.env.PIVOT_DESKTOP;
+    delete process.env.PIVOT_LOCAL_HELPER;
+    delete process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+
+    try {
+        const events = [];
+        const context = await maybeBuildMcpChatContext({
+            modelCfg: {
+                id: 1,
+                name: 'Planner Must Not Be Called',
+                model_name: 'planner-test',
+                url: 'http://127.0.0.1:9/v1',
+                api_key: '',
+                user_id: null
+            },
+            history: [{ role: 'user', content: '查询本机法律目录下有哪些文件' }],
+            userPrompt: '查询本机法律目录下有哪些文件',
+            tools: [{
+                fullName: 'mcp.0.reports.list_files',
+                name: 'reports.list_files',
+                serverName: 'DESKTOP-SNH56CH：我的电脑',
+                description: '列出配置目录下可访问的报表/数据文件。',
+                input_schema: { type: 'object' }
+            }],
+            user: { id: 1, username: 'admin', role: 'admin', unit: '' },
+            writeSse(payload) {
+                events.push(JSON.parse(payload));
+            },
+            log: { warn() {} }
+        });
+
+        assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'error']);
+        assert.match(context, /工具执行阶段|工具调用暂时不可用|HTTP 404/);
+        assert.doesNotMatch(context, /工具规划暂时不可用/);
+    } finally {
+        if (previousDesktop === undefined) delete process.env.PIVOT_DESKTOP;
+        else process.env.PIVOT_DESKTOP = previousDesktop;
+        if (previousHelper === undefined) delete process.env.PIVOT_LOCAL_HELPER;
+        else process.env.PIVOT_LOCAL_HELPER = previousHelper;
+        if (previousAuthFile === undefined) delete process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE;
+        else process.env.PIVOT_LOCAL_AUTHORIZATIONS_FILE = previousAuthFile;
+        resetLocalBridgeForTests();
+    }
+});
 test('聊天 MCP 规划模型限流时不会误报为工具执行失败', async () => {
     const plannerServer = http.createServer((_req, res) => {
         res.writeHead(429, { 'Content-Type': 'application/json' });

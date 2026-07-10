@@ -10,7 +10,7 @@ function findDatabaseCompatTool(fullName, toolList = []) {
         if (!tool?.databaseTool || tool.name !== shortName) return false;
         const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
         return connections.some(connection => (
-            String(connection.serverId || '') === serverId
+            String(connection.serverId ?? '') === serverId
             && String(connection.fullName || '') === String(fullName || '')
         ));
     }) || null;
@@ -35,10 +35,11 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
     if (tool.databaseTool && safeName.startsWith('db.')) {
         const rawConnectionId = input?.connectionId ?? input?.connection_id ?? input?.databaseConnectionId ?? input?.database_connection_id ?? input?.mcpServerId ?? input?.mcp_server_id;
         const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
-        const selectedConnectionId = String(rawConnectionId || '').trim() || (connections.length === 1 ? String(connections[0].connectionId || connections[0].serverId || '') : '');
+        const selectedConnectionId = String(rawConnectionId ?? '').trim()
+            || (connections.length === 1 ? String(connections[0].connectionId ?? connections[0].serverId ?? '') : '');
         const connection = connections.find(item => (
-            String(item.connectionId || item.serverId || '') === selectedConnectionId
-            || String(item.serverId || '') === selectedConnectionId
+            String(item.connectionId ?? item.serverId ?? '') === selectedConnectionId
+            || String(item.serverId ?? '') === selectedConnectionId
         ));
         if (!connection?.fullName) {
             const err = new Error('请为这个数据库工具选择一个可用的数据连接。');

@@ -190,6 +190,32 @@ function mcpMetadataForType(type, server = null) {
     return metadata;
 }
 
+function mcpGetTagClass(label, value) {
+    const val = String(value || '');
+    if (label === '执行') {
+        if (val.includes('导入')) return 'exe-server-import';
+        if (val.includes('服务器')) return 'exe-server';
+        if (val.includes('电脑')) return 'exe-local';
+        if (val.includes('外部')) return 'exe-external';
+    }
+    if (label === '归属') {
+        if (val.includes('个人') && val.includes('全局')) return 'owner-both';
+        if (val.includes('个人')) return 'owner-personal';
+        if (val.includes('全局')) return 'owner-global';
+    }
+    if (label === '风险') {
+        if (val.includes('低')) return 'risk-low';
+        if (val.includes('中')) return 'risk-medium';
+        if (val.includes('高')) return 'risk-high';
+    }
+    if (label === '自动化') {
+        if (val.includes('工作流')) return 'auto-workflow';
+        if (val.includes('设备')) return 'auto-local';
+        return 'auto-policy';
+    }
+    return 'default';
+}
+
 function renderMcpCardTags(metadata = {}) {
     const tags = [
         ['执行', metadata.executionLocation || '服务器'],
@@ -197,7 +223,7 @@ function renderMcpCardTags(metadata = {}) {
         ['风险', metadata.riskLevel || '中风险'],
         ['自动化', metadata.workflowAvailability || '按策略']
     ];
-    return `<div class="mcp-card-tags">${tags.map(([label, value]) => `<span><b>${mcpEscape(label)}</b>${mcpEscape(value)}</span>`).join('')}</div>`;
+    return `<div class="mcp-card-tags">${tags.map(([label, value]) => `<span class="mcp-tag mcp-tag-${mcpGetTagClass(label, value)}"><b>${mcpEscape(label)}</b>${mcpEscape(value)}</span>`).join('')}</div>`;
 }
 
 function renderMcpSourceActionPanel(cards = [], { title = '', description = '' } = {}) {
@@ -512,22 +538,71 @@ function mcpShouldShowOwner(item = {}) {
     return Boolean(owner.id && String(owner.id) !== String(currentUser?.id || ''));
 }
 
+function mcpIsLocalDeviceServerId(serverId) {
+    return String(serverId ?? '') === '0';
+}
+
+function mcpLocalDeviceServer(status = null) {
+    return {
+        id: 0,
+        name: status?.deviceName ? `${status.deviceName}：我的电脑` : '我的电脑',
+        server_type: 'local_device',
+        status: 'active',
+        localAuthorizationStatus: status,
+        grants: status?.grants || {},
+        owner: {
+            id: currentUser?.id || null,
+            username: currentUser?.username || '',
+            nickname: currentUser?.nickname || '',
+            displayName: currentUser?.nickname || currentUser?.username || '当前用户',
+            scope: 'user'
+        },
+        user_id: currentUser?.id || null
+    };
+}
+
+function mcpLocalAuthorizedFallbackTools(status = null) {
+    const grants = status && typeof status.grants === 'object' && status.grants ? status.grants : {};
+    const tools = [];
+    if (grants.local_database?.authorized) tools.push(...mcpSqlDatabaseFallbackTools);
+    if (grants.local_report_dir?.authorized) {
+        tools.push(
+            'reports.list_files',
+            'reports.read_file_summary',
+            'reports.query_table',
+            'reports.compare_files'
+        );
+    }
+    return tools;
+}
 function mcpToolsForServer(serverId, fallbackToolNames = []) {
-    const tools = mcpToolsCache.filter(tool => String(tool.serverId || tool.server_id || '') === String(serverId || ''));
+    const tools = mcpToolsCache.filter(tool => String(tool.serverId ?? tool.server_id ?? '') === String(serverId ?? ''));
     if (tools.length || !fallbackToolNames.length) return tools;
-    const server = mcpServersCache.find(item => String(item.id) === String(serverId || ''));
+    const server = mcpServersCache.find(item => String(item.id) === String(serverId ?? ''));
+    const isLocalDevice = mcpIsLocalDeviceServerId(serverId);
     return fallbackToolNames.map(name => ({
         name,
-        fullName: name,
+        fullName: isLocalDevice ? `mcp.0.${name}` : name,
         description: mcpToolDisplayMap[name]?.description || '',
         serverId,
-        serverName: server?.name || '',
+        serverName: server?.name || (isLocalDevice ? '我的电脑' : ''),
         owner: server?.owner || null,
         user_id: server?.user_id ?? null
     }));
 }
 
 function mcpFallbackToolsForServer(server) {
+    if (mcpIsLocalDeviceServerId(server?.id)) {
+        const authorizedTools = mcpLocalAuthorizedFallbackTools(server?.localAuthorizationStatus || server);
+        if (authorizedTools.length) return authorizedTools;
+        return [
+            ...mcpSqlDatabaseFallbackTools,
+            'reports.list_files',
+            'reports.read_file_summary',
+            'reports.query_table',
+            'reports.compare_files'
+        ];
+    }
     const builtinService = mcpBuiltinServices.find(item => item.type === server?.server_type);
     if (builtinService?.tools) return builtinService.tools;
     if (server?.server_type === 'database') {
@@ -546,4 +621,3 @@ function mcpToolPreviewText(serverId, fallbackToolNames = [], emptyText = '启�
     const count = mcpToolCount(serverId, fallbackToolNames);
     return count ? `已接入 ${count} 个工具` : emptyText;
 }
-

@@ -1,6 +1,161 @@
 // --- 数据引擎模块 Engine ---
 let currentAbortController = null;
+let chatLocalMcpBridgeDebug = null;
+let chatLocalMcpHeartbeatStarted = false;
 
+function getChatLocalMcpDeviceId() {
+    const key = 'pivot_local_execution_device_id';
+    try {
+        const existing = localStorage.getItem(key);
+        if (existing) return existing;
+        const next = globalThis.crypto?.randomUUID?.() || `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem(key, next);
+        return next;
+    } catch (_err) {
+        return `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+}
+
+function normalizeChatLocalMcpBridgePayload(status, deviceId = '') {
+    if (!status?.available) return null;
+    const grants = status.grants && typeof status.grants === 'object' ? status.grants : {};
+    return {
+        deviceId: deviceId || status.deviceId || getChatLocalMcpDeviceId(),
+        deviceName: status.deviceName || '我的电脑',
+        provider: status.provider || 'desktop',
+        mode: status.mode || 'remote',
+        grants
+    };
+}
+
+function summarizeChatLocalMcpGrants(grants = {}) {
+    return {
+        local_database: grants.local_database?.authorized === true,
+        local_report_dir: grants.local_report_dir?.authorized === true
+    };
+}
+
+function updateChatLocalMcpBridgeDebug(state = {}) {
+    const next = {
+        page: 'chat',
+        checkedAt: new Date().toISOString(),
+        ...state
+    };
+    chatLocalMcpBridgeDebug = next;
+    return next;
+}
+
+function getChatLocalMcpBridgeDebugSnapshot() {
+    return chatLocalMcpBridgeDebug || updateChatLocalMcpBridgeDebug({
+        status: 'not_checked',
+        reason: '聊天页尚未检查桌面端本机执行器。'
+    });
+}
+
+function inspectChatLocalMcpDesktopBridge() {
+    const desktop = window.pivotDesktop;
+    const hasDesktopBridge = Boolean(desktop);
+    const hasStatusBridge = typeof desktop?.getLocalAuthorizationStatus === 'function';
+    const hasExecuteBridge = typeof desktop?.executeLocalMcpTool === 'function';
+    let reason = '';
+    if (!hasDesktopBridge) {
+        reason = '聊天页没有检测到桌面端桥 window.pivotDesktop；请确认当前页面在桌面客户端中打开，而不是普通浏览器。';
+    } else if (!hasStatusBridge) {
+        reason = '当前桌面客户端缺少本机授权状态接口；请重新打包或安装包含本机授权中心的新版本。';
+    } else if (!hasExecuteBridge) {
+        reason = '当前桌面客户端缺少本机只读执行接口；请重新打包或安装包含本机执行器的新版本。';
+    }
+    return {
+        hasDesktopBridge,
+        hasStatusBridge,
+        hasExecuteBridge,
+        ready: hasDesktopBridge && hasStatusBridge && hasExecuteBridge,
+        reason
+    };
+}
+
+async function registerChatLocalMcpBridgeDirectly() {
+    const bridgeState = inspectChatLocalMcpDesktopBridge();
+    if (!bridgeState.ready) {
+        updateChatLocalMcpBridgeDebug({ status: 'bridge_unavailable', ...bridgeState });
+        return null;
+    }
+    const desktop = window.pivotDesktop;
+    const status = await desktop.getLocalAuthorizationStatus();
+    const grants = summarizeChatLocalMcpGrants(status?.grants || {});
+    const payload = normalizeChatLocalMcpBridgePayload(status, getChatLocalMcpDeviceId());
+    if (!payload) {
+        updateChatLocalMcpBridgeDebug({
+            status: 'authorization_unavailable',
+            ...bridgeState,
+            statusAvailable: status?.available === true,
+            mode: status?.mode || '',
+            grants,
+            reason: status?.available
+                ? '聊天页已检测到桌面端，但没有可同步的本机授权。'
+                : '桌面端本机授权状态不可用。'
+        });
+        return null;
+    }
+    const response = await apiFetch(`${API_BASE}/mcp/local-device/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const message = await response.text() || '本机工具箱同步失败。';
+        updateChatLocalMcpBridgeDebug({ status: 'heartbeat_failed', ...bridgeState, grants, reason: message.slice(0, 300) });
+        throw new Error(message);
+    }
+    const data = await response.json().catch(() => ({}));
+    updateChatLocalMcpBridgeDebug({
+        status: 'heartbeat_ok',
+        ...bridgeState,
+        statusAvailable: true,
+        mode: payload.mode,
+        deviceName: payload.deviceName,
+        grants,
+        toolCount: Array.isArray(data.tools) ? data.tools.length : 0,
+        reason: '桌面端本机执行器已同步。'
+    });
+    return payload;
+}
+
+async function syncChatLocalMcpBridgeBeforeSend() {
+    try {
+        if (!window.syncMcpLocalExecutionBridge && window.Pivot?.loadScriptOnce) {
+            await window.Pivot.loadScriptOnce('/chat/mcp-workbench-local-auth.js');
+        }
+        const result = await window.syncMcpLocalExecutionBridge?.({ force: true });
+        const payload = normalizeChatLocalMcpBridgePayload(result?.status, result?.device?.deviceId);
+        if (payload) return payload;
+        return await registerChatLocalMcpBridgeDirectly();
+    } catch (error) {
+        console.debug?.('[pivot] 本机工具箱同步失败，继续发送消息', error?.message || error);
+        try {
+            return await registerChatLocalMcpBridgeDirectly();
+        } catch (fallbackError) {
+            console.debug?.('[pivot] 本机工具箱直接同步失败', fallbackError?.message || fallbackError);
+        }
+    }
+    return null;
+}
+
+function startChatLocalMcpBridgeHeartbeat() {
+    if (chatLocalMcpHeartbeatStarted) return;
+    chatLocalMcpHeartbeatStarted = true;
+    const tick = () => registerChatLocalMcpBridgeDirectly().catch(error => {
+        console.debug?.('[pivot] 聊天页本机执行器心跳等待中', error?.message || error);
+    });
+    setTimeout(tick, 2000);
+    setInterval(tick, 15000);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startChatLocalMcpBridgeHeartbeat, { once: true });
+} else {
+    startChatLocalMcpBridgeHeartbeat();
+}
 window.sendMessage = async function(isRegenerate = false) {
     const shouldRegenerate = isRegenerate === true;
     if (currentAbortController) {
@@ -66,9 +221,13 @@ window.sendMessage = async function(isRegenerate = false) {
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     let mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
+    let localMcpBridge = null;
+    let localMcpBridgeDebug = null;
     if (mcpEnabled) {
         mcpConfirmed = mcpConfirmed || await ensureChatMcpConsent();
         if (!mcpConfirmed) return;
+        localMcpBridge = await syncChatLocalMcpBridgeBeforeSend();
+        localMcpBridgeDebug = getChatLocalMcpBridgeDebugSnapshot();
     }
 
     document.getElementById('user-input').value = '';
@@ -127,7 +286,9 @@ window.sendMessage = async function(isRegenerate = false) {
                 ragEnabled,
                 ragScope: window.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
-                mcpConfirmed
+                mcpConfirmed,
+                localMcpBridge,
+                localMcpBridgeDebug
             }),
             signal: currentAbortController.signal
         });
