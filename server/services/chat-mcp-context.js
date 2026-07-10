@@ -628,6 +628,17 @@ function buildMcpFailureMessage(error, stage = 'planning') {
     return '工具箱工具调用失败，请稍后重试或检查工具箱配置。';
 }
 
+function buildMcpToolResultContext(lines = []) {
+    const body = Array.isArray(lines) ? lines : [String(lines || '')];
+    return [
+        'PIVOT_MCP_TOOL_RESULT_BEGIN',
+        '【工具箱结果：本轮最新事实】',
+        '本轮已经通过 Pivot 工具箱完成了授权工具调用。下面的“结果”是刚刚实时返回的内容，不是长期记忆、历史猜测或模型常识。',
+        '回答用户时必须优先使用下面的工具结果；不得与工具结果相反地声称无法访问本机目录、数据库或工具资源。若结果不足，只说明结果不足。',
+        ...body,
+        'PIVOT_MCP_TOOL_RESULT_END'
+    ].join('\n');
+}
 async function executeDeterministicMcpFallback({ fallback, intentTools, userPrompt, user, writeSse, log, logLabel = '回退工具调用失败', requireResult = false }) {
     if (!fallback?.tool) return null;
     const selectedTool = fallback.tool;
@@ -652,14 +663,14 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
             ...trace,
             message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
         }));
-        return [
+        return buildMcpToolResultContext([
             '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
             `工具: ${selectedTool.fullName}`,
             `调用原因: ${fallback.reason || ''}`,
             `输入: ${JSON.stringify(fallbackInput)}`,
             '结果:',
             resultText
-        ].join('\n');
+        ]);
     } catch (fallbackErr) {
         log?.warn?.({ err: fallbackErr.message }, logLabel);
         if (requireResult) throw fallbackErr;
@@ -821,14 +832,14 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             ...trace,
             message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
         }));
-        return [
+        return buildMcpToolResultContext([
             '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
             '如果工具结果包含 ```pivot-echart 代码块，且用户需要图表，请在最终回答中原样保留该代码块，前端会自动渲染为可视化图表。',
             `工具: ${selected.fullName}`,
             `调用原因: ${plan.reason || ''}`,
             '结果:',
             resultText
-        ].join('\n');
+        ]);
     } catch (e) {
         log?.warn?.({ err: e.message, statusCode: getAxiosStatusCode(e), stage: mcpStage }, '普通对话工具箱调用失败');
         const message = buildMcpFailureMessage(e, mcpStage);

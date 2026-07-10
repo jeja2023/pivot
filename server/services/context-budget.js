@@ -145,8 +145,14 @@ function isRagMessage(message) {
 }
 
 function isMcpMessage(message) {
-    if (message?.role !== 'system') return false;
     const text = contentText(message.content);
+    if (text.includes('PIVOT_MCP_CONTEXT_BEGIN')
+        || text.includes('PIVOT_MCP_CONTEXT_END')
+        || text.includes('PIVOT_MCP_TOOL_RESULT_BEGIN')
+        || text.includes('PIVOT_MCP_TOOL_RESULT_END')) {
+        return true;
+    }
+    if (message?.role !== 'system') return false;
     return text.includes('MCP') || text.includes('工具:');
 }
 

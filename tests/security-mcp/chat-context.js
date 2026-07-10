@@ -18,6 +18,7 @@ const {
     refreshMcpTools,
     test
 } = require('../security-helpers');
+const { appendMcpContextForFinalAnswer } = require('../../server/services/chat-context-assembler');
 
 test('聊天 MCP 意图过滤不会为普通数据查询暴露可视化工具', () => {
     const tools = [
@@ -246,6 +247,8 @@ test('聊天 MCP 会将本机目录文件清单请求确定性路由到报表工
             log: { warn() {} }
         });
 
+        assert.match(context, /PIVOT_MCP_TOOL_RESULT_BEGIN/);
+        assert.match(context, /PIVOT_MCP_TOOL_RESULT_END/);
         assert.match(context, /工具: mcp\.0\.reports\.list_files/);
         assert.match(context, /法规\.md/);
         assert.match(context, /"limit":80|"limit": 80/);
@@ -268,6 +271,25 @@ test('聊天 MCP 会将本机目录文件清单请求确定性路由到报表工
     }
 });
 
+
+test('chat MCP result context is appended as final answer turn for reasoning models', () => {
+    const messages = appendMcpContextForFinalAnswer([
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'count files in my local report directory' }
+    ], [
+        'PIVOT_MCP_TOOL_RESULT_BEGIN',
+        '工具: mcp.0.reports.list_files',
+        '结果:',
+        'total: 2',
+        'PIVOT_MCP_TOOL_RESULT_END'
+    ].join('\n'));
+
+    assert.deepEqual(messages.map(message => message.role), ['system', 'user', 'assistant', 'user']);
+    assert.match(messages[2].content, /PIVOT_MCP_CONTEXT_BEGIN/);
+    assert.match(messages[2].content, /mcp\.0\.reports\.list_files/);
+    assert.match(messages[3].content, /PIVOT_MCP_TOOL_RESULT_BEGIN/);
+    assert.match(messages[3].content, /不得声称无法访问本机文件系统/);
+});
 test('聊天 MCP 本机目录确定性工具失败时不会继续等待规划模型', async () => {
     const { resetLocalBridgeForTests } = require('../../server/services/local-device-bridge');
     resetLocalBridgeForTests();
