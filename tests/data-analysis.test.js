@@ -18,8 +18,7 @@ const Sqlite = require('better-sqlite3');
 const {
     importDataset,
     getDatasetDetail,
-    getDatasetSummary,
-    softDeleteDataset
+    getDatasetSummary
 } = require('../server/services/data-analysis/datasets');
 
 function cleanupAnalysisRows(userId) {
