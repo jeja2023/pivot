@@ -77,7 +77,7 @@ async function clearDesktopCaches() {
     if (typeof webSession.clearStorageData === 'function') {
         await webSession.clearStorageData({
             storages: ['appcache', 'shadercache', 'serviceworkers', 'cachestorage']
-        }).catch(() => {});
+        }).catch(() => { });
     }
     return true;
 }
@@ -100,7 +100,7 @@ async function resetRendererPivotCaches() {
     await mainWindow.webContents.executeJavaScript(
         "window.PivotPwa && window.PivotPwa.reset ? window.PivotPwa.reset() : null",
         true
-    ).catch(() => {});
+    ).catch(() => { });
 }
 
 async function clearCacheAndReloadDesktop() {
@@ -162,8 +162,7 @@ function showAboutDialog() {
             message: 'Pivot 智枢',
             detail: [
                 '当前版本：v' + app.getVersion(),
-                '运行模式：' + mode,
-                '环境：' + env
+                '运行模式：' + mode
             ].filter(Boolean).join('\n'),
             buttons: ['确定']
         });
@@ -315,7 +314,7 @@ function createMainWindow(config) {
         minWidth: 1100,
         minHeight: 720,
         show: false,
-        title: '',
+        title: 'Pivot 智枢',
         titleBarStyle: 'hidden',
         titleBarOverlay: {
             color: '#ffffff',
@@ -345,9 +344,9 @@ function createMainWindow(config) {
         lastLoadError = { errorCode, errorDescription, validatedUrl };
         loadErrorPage(errorDescription + ' (' + errorCode + ')');
     });
-    mainWindow.webContents.on('page-title-updated', (event) => {
+    mainWindow.webContents.on('page-title-updated', (event, title) => {
         event.preventDefault();
-        if (mainWindow) mainWindow.setTitle('');
+        if (mainWindow) mainWindow.setTitle(title || 'Pivot');
     });
     mainWindow.on('closed', () => {
         mainWindow = null;

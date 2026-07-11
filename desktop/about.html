@@ -33,6 +33,7 @@
             display: flex;
             flex-direction: column;
             background: #ffffff;
+            border: 1px solid #cbd5e1;
         }
 
         .titlebar {
@@ -190,10 +191,6 @@
                     <strong class="meta-value" id="version">-</strong>
                 </div>
                 <div class="meta-card">
-                    <span class="meta-label">环境</span>
-                    <strong class="meta-value" id="env">-</strong>
-                </div>
-                <div class="meta-card wide">
                     <span class="meta-label">运行模式</span>
                     <strong class="meta-value" id="mode">-</strong>
                 </div>
@@ -206,12 +203,12 @@
         const params = new URLSearchParams(window.location.search);
         function setText(id, value) {
             const element = document.getElementById(id);
+            if (!element) return;
             element.textContent = value || "-";
             element.title = value || "-";
         }
         setText("version", "v" + (params.get("version") || "-"));
         setText("mode", params.get("mode") || "-");
-        setText("env", params.get("env") || "-");
         function closeWindow() {
             if (window.pivotAbout && typeof window.pivotAbout.close === "function") window.pivotAbout.close();
             else window.close();
