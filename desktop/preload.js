@@ -8,6 +8,17 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getStatus() {
         return ipcRenderer.invoke('pivot-desktop:status');
     },
+    reload(options = {}) {
+        return ipcRenderer.invoke('pivot-desktop:reload', {
+            clearCache: options && options.clearCache === true
+        });
+    },
+    quit() {
+        return ipcRenderer.invoke('pivot-desktop:quit');
+    },
+    windowAction(action) {
+        return ipcRenderer.invoke('pivot-desktop:window-action', action);
+    },
     getLocalAuthorizationStatus() {
         return ipcRenderer.invoke('pivot-local-auth:status');
     },

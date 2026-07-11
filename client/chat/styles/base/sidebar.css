@@ -63,6 +63,85 @@
     color: #08a45b;
     font-weight: 800;
 }
+
+.desktop-app-menu {
+    display: none;
+    align-items: center;
+    gap: 0;
+    min-width: 0;
+    height: 100%;
+    padding: 0 8px;
+    background: transparent;
+}
+body.pivot-desktop-runtime .desktop-app-menu {
+    display: inline-flex;
+}
+.desktop-app-menu-trigger {
+    height: 28px;
+    min-width: 46px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #334155;
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease;
+}
+.desktop-app-menu-trigger:hover,
+.desktop-app-menu-trigger.is-open {
+    color: var(--primary);
+    background: rgba(15, 23, 42, 0.06);
+}
+.desktop-app-menu-popover {
+    position: fixed;
+    z-index: 2500;
+    min-width: 198px;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+}
+.desktop-app-menu-item {
+    width: 100%;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #1f2937;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+.desktop-app-menu-item:hover {
+    color: var(--primary);
+    background: rgba(15, 23, 42, 0.06);
+}
+.desktop-app-menu-item[disabled] {
+    color: #94a3b8;
+    cursor: default;
+    background: transparent;
+}
+.desktop-app-menu-shortcut {
+    flex: 0 0 auto;
+    color: #94a3b8;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+.desktop-app-menu-separator {
+    height: 1px;
+    margin: 5px 4px;
+    background: rgba(148, 163, 184, 0.18);
+}
 .new-chat-circle-btn {
     width: 32px; height: 32px; background: var(--primary); color: white;
     border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;

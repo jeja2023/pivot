@@ -139,6 +139,111 @@ test('getCookie ignores malformed percent-encoded cookie pairs', () => {
     assert.equal(getCookie(req, 'bad'), undefined);
 });
 
+function createMemoryStorage(initial = {}) {
+    const data = new Map(Object.entries(initial));
+    return {
+        getItem(key) {
+            return data.has(key) ? data.get(key) : null;
+        },
+        setItem(key, value) {
+            data.set(key, String(value));
+        },
+        removeItem(key) {
+            data.delete(key);
+        },
+        clear() {
+            data.clear();
+        }
+    };
+}
+
+function createJsonResponse(status, body) {
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        async json() {
+            return body;
+        },
+        clone() {
+            return createJsonResponse(status, body);
+        }
+    };
+}
+
+function createConfigSandbox(fetchImpl) {
+    const vm = require('node:vm');
+    const sandbox = {
+        console,
+        URL,
+        document: { documentElement: { dataset: {} } },
+        localStorage: createMemoryStorage({ pivot_token: 'legacy-token' }),
+        sessionStorage: createMemoryStorage(),
+        fetch: fetchImpl,
+        window: {
+            APP_VERSION_TAG: '',
+            location: { origin: 'http://localhost' },
+            Pivot: {}
+        }
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'config.js'), 'utf8'), sandbox, {
+        filename: 'client/chat/config.js'
+    });
+    return sandbox;
+}
+
+test('apiFetch refreshes expired cookie state and retries the original request', async () => {
+    const calls = [];
+    const sandbox = createConfigSandbox(async (url, options = {}) => {
+        calls.push({ url, headers: { ...(options.headers || {}) }, method: options.method || 'GET' });
+        if (url === '/api/chat' && calls.length === 1) {
+            return createJsonResponse(403, { error: 'csrf invalid', code: 'CSRF_INVALID' });
+        }
+        if (url === '/api/auth/refresh') {
+            return createJsonResponse(200, { success: true, csrfToken: 'fresh-csrf' });
+        }
+        if (url === '/api/chat') {
+            return createJsonResponse(200, { ok: true });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const res = await sandbox.apiFetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+    });
+
+    assert.equal(res.ok, true);
+    assert.deepEqual(calls.map(call => call.url), ['/api/chat', '/api/auth/refresh', '/api/chat']);
+    assert.equal(calls[2].headers['X-CSRF-Token'], 'fresh-csrf');
+    assert.equal(sandbox.sessionStorage.getItem('pivot_csrf_token'), 'fresh-csrf');
+});
+
+test('apiFetch returns to login when refresh token is no longer valid', async () => {
+    const calls = [];
+    const sandbox = createConfigSandbox(async (url, options = {}) => {
+        calls.push({ url, headers: { ...(options.headers || {}) } });
+        if (url === '/api/sessions') {
+            return createJsonResponse(401, { error: 'missing auth', code: 'AUTH_MISSING' });
+        }
+        if (url === '/api/auth/refresh') {
+            return createJsonResponse(401, { error: 'refresh expired', code: 'REFRESH_TOKEN_INVALID' });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    let showAuthCount = 0;
+    let closedRealtimeCount = 0;
+    sandbox.window.showAuth = () => { showAuthCount += 1; };
+    sandbox.window.closeAgentRealtime = () => { closedRealtimeCount += 1; };
+
+    await assert.rejects(() => sandbox.apiFetch('/api/sessions'), /Refresh failed/);
+
+    assert.deepEqual(calls.map(call => call.url), ['/api/sessions', '/api/auth/refresh']);
+    assert.equal(showAuthCount, 1);
+    assert.equal(closedRealtimeCount, 1);
+    assert.equal(sandbox.sessionStorage.getItem('pivot_csrf_token'), null);
+});
+
 test('outbound URL guard blocks sensitive SSRF targets', async () => {
     assert.equal(isSensitiveOutboundHost('127.0.0.1'), true);
     assert.equal(isSensitiveOutboundHost('169.254.169.254'), true);
@@ -356,6 +461,7 @@ test('csrfMiddleware requires matching cookie and header for cookie writes', () 
     });
     assert.equal(statusCode, 403);
     assert.equal(body.error, 'CSRF 校验失败');
+    assert.equal(body.code, 'CSRF_INVALID');
 
     let passed = false;
     csrfMiddleware({

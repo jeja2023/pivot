@@ -1037,6 +1037,41 @@ input::-webkit-contacts-auto-fill-button {
 }
 
 #app { display: flex; height: 100vh; }
+body.pivot-desktop-runtime #app {
+    height: calc(100vh - 30px);
+    height: calc(100dvh - 30px);
+    margin-top: 30px;
+}
+body.pivot-desktop-runtime.auth-active #app {
+    margin-top: 0;
+}
+.desktop-window-drag-region {
+    display: none;
+}
+body.pivot-desktop-runtime .desktop-window-drag-region {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    background: #ffffff;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    -webkit-app-region: drag;
+    z-index: 2600;
+}
+body.pivot-desktop-runtime.auth-active .desktop-window-drag-region {
+    display: none;
+}
+body.pivot-desktop-runtime .desktop-app-menu-trigger,
+body.pivot-desktop-runtime button,
+body.pivot-desktop-runtime input,
+body.pivot-desktop-runtime textarea,
+body.pivot-desktop-runtime select,
+body.pivot-desktop-runtime a {
+    -webkit-app-region: no-drag;
+}
 /* Auth login final wide layout */
 #auth-container {
     --auth-ink: #071936;

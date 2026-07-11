@@ -232,7 +232,7 @@ function authMiddleware(req, res, next) {
     const auth = resolveAuthenticatedUser(req);
 
     if (!auth.token) {
-        return res.status(401).json({ error: '未授权访问' });
+        return res.status(401).json({ error: '未授权访问', code: 'AUTH_MISSING' });
     }
 
     if (auth.code === 'TOKEN_EXPIRED') {
@@ -262,7 +262,7 @@ function csrfMiddleware(req, res, next) {
     const cookieToken = getCookie(req, CSRF_COOKIE_NAME);
     const headerToken = req.headers['x-csrf-token'];
     if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-        return res.status(403).json({ error: 'CSRF 校验失败' });
+        return res.status(403).json({ error: 'CSRF 校验失败', code: 'CSRF_INVALID' });
     }
     next();
 }

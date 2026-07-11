@@ -37,8 +37,11 @@ function getPermissionLabel(user = currentUser) {
 }
 
 // 刷新状态管理
+const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_EXPIRED', 'AUTH_MISSING', 'TOKEN_INVALID']);
+const CSRF_INVALID_CODE = 'CSRF_INVALID';
 let isRefreshing = false;
 let refreshQueue = [];
+let authFailureHandled = false;
 
 async function refreshAccessToken() {
     if (!isRefreshing) {
@@ -51,18 +54,26 @@ async function refreshAccessToken() {
                 setCsrfToken(refreshData.csrfToken);
             }
             isRefreshing = false;
-            refreshQueue.forEach(cb => cb(true));
-            refreshQueue = [];
+            flushRefreshQueue();
             return true;
         } catch (e) {
             isRefreshing = false;
-            refreshQueue = [];
+            flushRefreshQueue(e);
             throw e;
         }
     }
 
-    return new Promise((resolve) => {
-        refreshQueue.push(resolve);
+    return new Promise((resolve, reject) => {
+        refreshQueue.push({ resolve, reject });
+    });
+}
+
+function flushRefreshQueue(error) {
+    const queue = refreshQueue;
+    refreshQueue = [];
+    queue.forEach(({ resolve, reject }) => {
+        if (error) reject(error);
+        else resolve(true);
     });
 }
 
@@ -76,6 +87,39 @@ async function authFetch(url, options = {}) {
     return apiFetch(url, options);
 }
 
+function resolveApiPath(url) {
+    try {
+        return new URL(url, window.location?.origin || 'http://localhost').pathname;
+    } catch (e) {
+        return String(url || '').split('?')[0];
+    }
+}
+
+function isAuthLifecycleRequest(url) {
+    const path = resolveApiPath(url);
+    return path === `${API_BASE}/auth/login`
+        || path === `${API_BASE}/auth/register`
+        || path === `${API_BASE}/auth/config`
+        || path === `${API_BASE}/auth/refresh`;
+}
+
+function isRefreshableAuthCode(code) {
+    return REFRESHABLE_AUTH_CODES.has(code);
+}
+
+function shouldRefreshAfterAuthFailure(res, data, url) {
+    if (isAuthLifecycleRequest(url)) return false;
+    if (res.status === 401) return isRefreshableAuthCode(data.code);
+    if (res.status === 403) return data.code === CSRF_INVALID_CODE;
+    return false;
+}
+
+function shouldEndSessionAfterRetry(res, data, url) {
+    if (isAuthLifecycleRequest(url)) return false;
+    return (res.status === 401 && isRefreshableAuthCode(data.code))
+        || (res.status === 403 && data.code === CSRF_INVALID_CODE);
+}
+
 // 通用请求包装器 (支持自动刷新)
 async function apiFetch(url, options = {}) {
     const originalRequest = async () => {
@@ -84,25 +128,26 @@ async function apiFetch(url, options = {}) {
     };
 
     const res = await originalRequest();
+    const data = (res.status === 401 || res.status === 403) ? await res.clone().json().catch(() => ({})) : {};
 
-    // 只有 401 且错误码为 TOKEN_EXPIRED 时才尝试刷新
-    if (res.status === 401) {
-        const data = await res.clone().json().catch(() => ({}));
-        if (data.code === 'TOKEN_EXPIRED') {
-            try {
-                await refreshAccessToken();
-                return originalRequest();
-            } catch (e) {
+    if (shouldRefreshAfterAuthFailure(res, data, url)) {
+        try {
+            await refreshAccessToken();
+            const retryRes = await originalRequest();
+            const retryData = (retryRes.status === 401 || retryRes.status === 403) ? await retryRes.clone().json().catch(() => ({})) : {};
+            if (shouldEndSessionAfterRetry(retryRes, retryData, url)) {
                 handleUnauthorized();
-                throw e;
             }
+            return retryRes;
+        } catch (e) {
+            handleUnauthorized();
+            throw e;
         }
     }
 
     return res;
 }
 
-// 初始化时检查登录状态
 window.Pivot = window.Pivot || {};
 window.Pivot.api = {
     fetch: apiFetch,
@@ -117,16 +162,16 @@ window.Pivot.permissions = {
     getPermissionLabel
 };
 
-async function checkLogin() {
+async function checkLogin(hasRetried = false) {
     try {
         const res = await apiFetch(`${API_BASE}/auth/me`);
         if (res.ok) {
             const data = await res.json();
             if (data.authenticated === false) {
-                if (data.code === 'TOKEN_EXPIRED') {
+                if (!hasRetried && isRefreshableAuthCode(data.code)) {
                     try {
                         await refreshAccessToken();
-                        return checkLogin();
+                        return checkLogin(true);
                     } catch (e) {
                         handleUnauthorized();
                         return;
@@ -137,6 +182,7 @@ async function checkLogin() {
             }
             if (data.csrfToken) setCsrfToken(data.csrfToken);
             currentUser = data.user;
+            authFailureHandled = false;
             if (window.showApp) window.showApp();
         } else {
             handleUnauthorized();
@@ -148,14 +194,21 @@ async function checkLogin() {
 }
 
 function handleUnauthorized() {
+    currentUser = null;
+    currentSessionId = null;
     localStorage.removeItem('pivot_token');
     setCsrfToken('');
+    if (authFailureHandled) return;
+    authFailureHandled = true;
+    if (window.closeAgentRealtime) window.closeAgentRealtime();
+    if (window.stopAnnouncements) window.stopAnnouncements();
     if (window.showAuth) window.showAuth();
 }
 
 function setCsrfToken(value) {
     csrfToken = value || '';
     if (csrfToken) {
+        authFailureHandled = false;
         sessionStorage.setItem('pivot_csrf_token', csrfToken);
     } else {
         sessionStorage.removeItem('pivot_csrf_token');

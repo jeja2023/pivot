@@ -13,6 +13,7 @@ let runtimeConfig = null;
 let currentTargetUrl = '';
 let lastLoadError = null;
 let updaterController = null;
+let aboutWindow = null;
 
 function randomSecret() {
     return crypto.randomBytes(48).toString('hex');
@@ -50,15 +51,6 @@ function findAvailablePort() {
     });
 }
 
-function windowTitle(config) {
-    const env = config && config.environmentName ? config.environmentName : '';
-    let base = config && typeof config.windowTitle === 'string' ? config.windowTitle.trim() : '智枢 Pivot';
-    if (!base) {
-        base = '智枢 Pivot';
-    }
-    return env && base ? base + ' - ' + env : (base || env);
-}
-
 
 
 
@@ -75,6 +67,164 @@ async function loadErrorPage(message) {
     } catch (err) {
         console.error('加载错误页面失败:', err);
     }
+}
+
+
+async function clearDesktopCaches() {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    const webSession = mainWindow.webContents.session;
+    await webSession.clearCache();
+    if (typeof webSession.clearStorageData === 'function') {
+        await webSession.clearStorageData({
+            storages: ['appcache', 'shadercache', 'serviceworkers', 'cachestorage']
+        }).catch(() => {});
+    }
+    return true;
+}
+
+async function reloadDesktop(options = {}) {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (options.clearCache === true) await clearDesktopCaches();
+    lastLoadError = null;
+    const currentUrl = mainWindow.webContents.getURL();
+    if (!currentUrl || currentUrl.startsWith('file://')) {
+        await loadTarget();
+        return true;
+    }
+    mainWindow.webContents.reloadIgnoringCache();
+    return true;
+}
+
+async function resetRendererPivotCaches() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    await mainWindow.webContents.executeJavaScript(
+        "window.PivotPwa && window.PivotPwa.reset ? window.PivotPwa.reset() : null",
+        true
+    ).catch(() => {});
+}
+
+async function clearCacheAndReloadDesktop() {
+    await resetRendererPivotCaches();
+    return reloadDesktop({ clearCache: true });
+}
+
+
+function desktopModeLabel(mode) {
+    if (mode === 'remote') return '远程模式 (remote)';
+    if (mode === 'local') return '本地模式 (local)';
+    return mode || '未配置';
+}
+
+function showAboutDialog() {
+    if (aboutWindow && !aboutWindow.isDestroyed()) {
+        aboutWindow.focus();
+        return;
+    }
+    const env = runtimeConfig && runtimeConfig.environmentName ? runtimeConfig.environmentName : '默认环境';
+    const mode = desktopModeLabel(runtimeConfig && runtimeConfig.mode ? runtimeConfig.mode : '');
+    aboutWindow = new BrowserWindow({
+        width: 500,
+        height: 360,
+        resizable: false,
+        maximizable: false,
+        minimizable: false,
+        fullscreenable: false,
+        show: false,
+        frame: false,
+        modal: Boolean(mainWindow),
+        parent: mainWindow || undefined,
+        title: '关于 Pivot',
+        backgroundColor: '#ffffff',
+        autoHideMenuBar: true,
+        webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            preload: path.join(__dirname, 'about-preload.js')
+        }
+    });
+    aboutWindow.once('ready-to-show', () => aboutWindow && aboutWindow.show());
+    aboutWindow.on('closed', () => {
+        aboutWindow = null;
+    });
+    aboutWindow.loadFile(path.join(__dirname, 'about.html'), {
+        query: {
+            version: app.getVersion(),
+            env,
+            mode
+        }
+    }).catch((error) => {
+        console.error('加载关于窗口失败:', error);
+        if (aboutWindow && !aboutWindow.isDestroyed()) aboutWindow.close();
+        dialog.showMessageBox(mainWindow || undefined, {
+            type: 'info',
+            title: '关于 Pivot',
+            message: 'Pivot 智枢',
+            detail: [
+                '当前版本：v' + app.getVersion(),
+                '运行模式：' + mode,
+                '环境：' + env
+            ].filter(Boolean).join('\n'),
+            buttons: ['确定']
+        });
+    });
+}
+
+function runWindowAction(action) {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    const webContents = mainWindow.webContents;
+    switch (action) {
+        case 'zoom-reset':
+            webContents.setZoomLevel(0);
+            return true;
+        case 'zoom-in':
+            webContents.setZoomLevel(Math.min(webContents.getZoomLevel() + 0.5, 6));
+            return true;
+        case 'zoom-out':
+            webContents.setZoomLevel(Math.max(webContents.getZoomLevel() - 0.5, -6));
+            return true;
+        case 'toggle-fullscreen':
+            mainWindow.setFullScreen(!mainWindow.isFullScreen());
+            return true;
+        case 'about':
+            showAboutDialog();
+            return true;
+        default:
+            return false;
+    }
+}
+
+function buildApplicationMenu() {
+    const template = [
+        {
+            label: '页面',
+            submenu: [
+                { label: '刷新页面', accelerator: 'CmdOrCtrl+R', click: () => reloadDesktop() },
+                { label: '清理缓存并刷新', accelerator: 'CmdOrCtrl+Shift+R', click: () => clearCacheAndReloadDesktop() }
+            ]
+        },
+        {
+            label: '显示',
+            submenu: [
+                { label: '实际大小', role: 'resetZoom' },
+                { label: '放大', role: 'zoomIn' },
+                { label: '缩小', role: 'zoomOut' },
+                { type: 'separator' },
+                { label: '切换全屏', accelerator: 'F11', role: 'togglefullscreen' }
+            ]
+        },
+        {
+            label: '客户端',
+            submenu: [
+                { label: '检查客户端更新', click: () => updaterController?.checkForUpdates?.(true) },
+                { type: 'separator' },
+                { label: '关于 Pivot', click: () => showAboutDialog() },
+                { type: 'separator' },
+                { label: '退出客户端', click: () => app.quit() }
+            ]
+        }
+    ];
+    return Menu.buildFromTemplate(template);
 }
 
 async function configureLocalEnvironment() {
@@ -165,7 +315,13 @@ function createMainWindow(config) {
         minWidth: 1100,
         minHeight: 720,
         show: false,
-        title: windowTitle(config),
+        title: '',
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+            color: '#ffffff',
+            symbolColor: '#334155',
+            height: 30
+        },
         backgroundColor: '#0f172a',
         icon: path.join(__dirname, 'icon.ico'),
         webPreferences: {
@@ -191,7 +347,7 @@ function createMainWindow(config) {
     });
     mainWindow.webContents.on('page-title-updated', (event) => {
         event.preventDefault();
-        if (mainWindow) mainWindow.setTitle(windowTitle(config));
+        if (mainWindow) mainWindow.setTitle('');
     });
     mainWindow.on('closed', () => {
         mainWindow = null;
@@ -427,6 +583,22 @@ ipcMain.handle('pivot-desktop:retry', async () => {
     return true;
 });
 
+ipcMain.handle('pivot-desktop:reload', async (_event, options = {}) => reloadDesktop({
+    clearCache: options && options.clearCache === true
+}));
+
+ipcMain.handle('pivot-desktop:window-action', async (_event, action) => runWindowAction(String(action || '')));
+
+ipcMain.handle('pivot-desktop:quit', async () => {
+    app.quit();
+    return true;
+});
+
+ipcMain.handle('pivot-about:close', async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window && !window.isDestroyed()) window.close();
+    return true;
+});
 ipcMain.handle('pivot-desktop:status', async () => ({
     config: runtimeConfig,
     targetUrl: currentTargetUrl,
@@ -446,7 +618,7 @@ if (!gotLock) {
 
     app.whenReady().then(async () => {
         app.setAppUserModelId('com.pivot.desktop');
-        Menu.setApplicationMenu(null);
+        Menu.setApplicationMenu(buildApplicationMenu());
         try {
             runtimeConfig = loadDesktopConfig(app);
             createMainWindow(runtimeConfig);
