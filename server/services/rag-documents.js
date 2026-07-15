@@ -356,7 +356,7 @@ function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive 
         SELECT
             d.id,
             d.user_id,
-            u.username,
+            COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username,
             u.nickname,
             d.name,
             d.status,

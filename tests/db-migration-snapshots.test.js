@@ -9,6 +9,7 @@ const migrations = require('../server/db/migrations');
 const { runVersionedMigrations } = require('../server/db/migrations/runner');
 
 const migrationId = '202606260001_rag_search_content_backfill';
+const deletedUsernameMigrationId = '202607150001_release_deleted_usernames';
 const sampleText = 'alpha \u4e2d\u6587 \u68c0\u7d22';
 const legacyText = 'legacy \u4e2d\u6587 \u5206\u5757';
 
@@ -56,6 +57,51 @@ test('versioned migrations upgrade legacy RAG chunk snapshots idempotently', () 
         const secondRun = runVersionedMigrations(db, migrations);
         assert.deepEqual(secondRun, []);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, 1);
+    } finally {
+        db.close();
+    }
+});
+
+test('deleted username migration preserves history and releases the unique username', () => {
+    const db = new Sqlite(':memory:');
+    try {
+        db.exec(`
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                deleted_at DATETIME
+            );
+        `);
+        const deleted = db.prepare(`
+            INSERT INTO users (username, password_hash, status, deleted_at)
+            VALUES (?, 'hash', 'disabled', '2026-07-15 10:00:00')
+        `).run('reusable_name');
+        db.prepare(`
+            INSERT INTO users (username, password_hash, status)
+            VALUES (?, 'hash', 'active')
+        `).run('active_name');
+
+        const migration = migrations.find(item => item.id === deletedUsernameMigrationId);
+        assert.ok(migration);
+        assert.deepEqual(runVersionedMigrations(db, [migration]), [deletedUsernameMigrationId]);
+
+        const columns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
+        assert.ok(columns.includes('deleted_username'));
+        const archived = db.prepare('SELECT username, deleted_username FROM users WHERE id = ?')
+            .get(deleted.lastInsertRowid);
+        assert.match(archived.username, /^@deleted:/);
+        assert.equal(archived.deleted_username, 'reusable_name');
+        assert.equal(db.prepare('SELECT username FROM users WHERE username = ?').get('active_name').username, 'active_name');
+
+        assert.doesNotThrow(() => {
+            db.prepare(`
+                INSERT INTO users (username, password_hash, status)
+                VALUES (?, 'new-hash', 'active')
+            `).run('reusable_name');
+        });
+        assert.deepEqual(runVersionedMigrations(db, [migration]), []);
     } finally {
         db.close();
     }

@@ -144,7 +144,7 @@ function getAccessibleMcpServer(serverId, user) {
 
 function listMcpServers(user) {
     const rows = db.prepare(`
-        SELECT s.*, u.username AS owner_username, u.nickname AS owner_nickname,
+        SELECT s.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                u.unit AS owner_unit, u.role AS owner_role
         FROM mcp_servers s
         LEFT JOIN users u ON u.id = s.user_id
@@ -299,7 +299,7 @@ function listCachedMcpTools(serverId = null, user = null) {
     if (serverId) {
         return db.prepare(`
             SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
-                   u.username AS owner_username, u.nickname AS owner_nickname,
+                   COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                    u.unit AS owner_unit, u.role AS owner_role, c.database_type
             FROM mcp_tool_cache t
             JOIN mcp_servers s ON s.id = t.server_id
@@ -311,7 +311,7 @@ function listCachedMcpTools(serverId = null, user = null) {
     }
     const rows = db.prepare(`
         SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
-               u.username AS owner_username, u.nickname AS owner_nickname,
+               COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                u.unit AS owner_unit, u.role AS owner_role, c.database_type
         FROM mcp_tool_cache t
         JOIN mcp_servers s ON s.id = t.server_id

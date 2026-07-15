@@ -140,7 +140,7 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
     const usageWhere = usageDate.conditions;
 
     const sessions = db.prepare(`
-        SELECT s.id, u.username, u.nickname, s.title, s.tags, s.is_pinned, s.is_archived,
+        SELECT s.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, s.title, s.tags, s.is_pinned, s.is_archived,
                s.deleted_at, s.created_at, s.updated_at,
                (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count,
                (SELECT COUNT(*) FROM attachments a WHERE a.session_id = s.id) AS attachment_count
@@ -152,7 +152,7 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
     `).all(...sessionDate.params);
 
     const audits = db.prepare(`
-        SELECT al.id, al.timestamp, u.username, al.ip_address, al.action, al.details
+        SELECT al.id, al.timestamp, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, al.ip_address, al.action, al.details
         FROM audit_logs al
         LEFT JOIN users u ON u.id = al.user_id
         ${auditWhere.length ? `WHERE ${auditWhere.join(' AND ')}` : ''}
@@ -161,7 +161,7 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
     `).all(...auditDate.params);
 
     const usage = db.prepare(`
-        SELECT usage.created_at, u.username, u.nickname, md.name AS model_name,
+        SELECT usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name AS model_name,
                usage.role, usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
         FROM (
             SELECT user_id, model_id, role, token_count,

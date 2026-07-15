@@ -415,7 +415,7 @@ function createAdminStatsRouter({
         const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
         if (!canViewAll) filterParams.userId = req.user.id;
         const groupedQuery = `
-            SELECT u.username, u.nickname, m.name as model_name,
+            SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
                    COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
@@ -445,7 +445,7 @@ function createAdminStatsRouter({
         const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
         if (!canViewAll) params.userId = req.user.id;
         const usageExportStmt = db.prepare(`
-            SELECT u.username, u.nickname, m.name as model_name,
+            SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
                    COALESCE(SUM(${balancedOutputSql('usage')}), 0) as output_tokens,
@@ -531,7 +531,7 @@ function createAdminStatsRouter({
             params.unit = unit;
         }
         if (username) {
-            outerConditions.push('u.username LIKE @username');
+            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE @username");
             params.username = `%${username}%`;
         }
 
@@ -546,7 +546,7 @@ function createAdminStatsRouter({
         `).all(params);
 
         const byUser = db.prepare(`
-            SELECT u.username, u.nickname, SUM(usage.token_count) as tokens
+            SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, SUM(usage.token_count) as tokens
             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
             ${outerWhere}
             GROUP BY u.id ORDER BY tokens DESC LIMIT 10
@@ -631,7 +631,7 @@ function createAdminStatsRouter({
         // 个人维度过滤下推到 UNION 内部（user_id 命中索引）；分页参数同用命名参数（better-sqlite3 不允许命名与匿名混用）。
         const innerWhere = canViewAll ? '' : 'user_id = @userId';
         const query = `
-            SELECT usage.id, usage.created_at, u.username, u.nickname, md.name as model_name,
+            SELECT usage.id, usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name,
                    usage.role, usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
@@ -655,7 +655,7 @@ function createAdminStatsRouter({
     router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         const query = `
-            SELECT usage.created_at, u.username, u.nickname, md.name as model_name, usage.role,
+            SELECT usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name, usage.role,
                    usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
                    ${balancedOutputSql('usage')} AS output_tokens,
@@ -792,7 +792,7 @@ function createAdminStatsRouter({
         const conditions = [];
         const params = [];
         if (keyword) {
-            conditions.push('(u.username LIKE ? OR u.nickname LIKE ? OR l.model_name LIKE ? OR l.request_messages LIKE ? OR l.response_text LIKE ?)');
+            conditions.push("(COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ? OR u.nickname LIKE ? OR l.model_name LIKE ? OR l.request_messages LIKE ? OR l.response_text LIKE ?)");
             const like = `%${keyword}%`;
             params.push(like, like, like, like, like);
         }
@@ -803,7 +803,7 @@ function createAdminStatsRouter({
                    MAX(COALESCE(l.output_tokens, 0), COALESCE(l.total_tokens, 0) - COALESCE(l.input_tokens, 0)) AS output_tokens,
                    l.total_tokens, l.stream, l.ip_address,
                    l.request_messages, l.response_text,
-                   u.username, u.nickname, k.name AS api_key_name, k.key_preview
+                   COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, k.name AS api_key_name, k.key_preview
             FROM api_call_logs l
             JOIN users u ON u.id = l.user_id
             LEFT JOIN api_keys k ON k.id = l.api_key_id

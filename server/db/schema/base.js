@@ -38,6 +38,7 @@ function initSchema() {
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            deleted_username TEXT,
             password_hash TEXT NOT NULL,
             nickname TEXT,
             unit TEXT,

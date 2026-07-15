@@ -213,7 +213,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const where = superAdmin ? "(l.server_id IS NULL OR s.status != 'deleted')" : "(l.user_id = ? OR (l.server_id IS NOT NULL AND (s.user_id IS NULL OR s.user_id = ?)))";
         const params = superAdmin ? [limit] : [req.user.id, req.user.id, limit];
         const rows = db.prepare(`
-            SELECT l.id, l.user_id, u.username, u.nickname, l.server_id, COALESCE(s.name, '我的电脑') AS server_name,
+            SELECT l.id, l.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, l.server_id, COALESCE(s.name, '我的电脑') AS server_name,
                    l.tool_name, l.source, l.status, l.duration_ms, l.input_preview,
                    l.output_preview, l.error_message, l.created_at
             FROM mcp_call_logs l

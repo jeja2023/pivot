@@ -117,7 +117,7 @@ function listDeletedRunsForAdmin(user, limit = 100) {
     }
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
     return db.prepare(`
-        SELECT r.id, r.user_id, u.username, u.nickname, u.unit, r.session_id, r.model_id,
+        SELECT r.id, r.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, r.session_id, r.model_id,
                m.name AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
                r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.approval_policy,
                r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.max_token_budget, r.export_count,
@@ -125,7 +125,7 @@ function listDeletedRunsForAdmin(user, limit = 100) {
                r.input_tokens, r.output_tokens, r.total_tokens,
                r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
                r.deleted_at, r.deleted_by_user, r.delete_reason,
-               du.username AS deleted_by_username, du.nickname AS deleted_by_nickname,
+               COALESCE(NULLIF(du.deleted_username, ''), du.username) AS deleted_by_username, du.nickname AS deleted_by_nickname,
                (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id) AS step_count,
                (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.type = 'tool') AS tool_count,
                (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.status = 'error') AS error_count

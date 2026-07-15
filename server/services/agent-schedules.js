@@ -195,7 +195,7 @@ function runAgentScheduleNow(scheduleId, user) {
 
 function runDueAgentSchedules(limit = 20) {
     const due = db.prepare(`
-        SELECT s.*, u.username, u.nickname, u.unit, u.role
+        SELECT s.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role
         FROM agent_schedules s
         JOIN users u ON u.id = s.user_id
         WHERE s.status = 'active'

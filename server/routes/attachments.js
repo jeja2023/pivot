@@ -243,7 +243,7 @@ function createAttachmentsRouter({
             params.push(`%${keyword}%`);
         }
         const data = db.prepare(`
-            SELECT a.*, s.title AS session_title, u.username, u.nickname
+            SELECT a.*, s.title AS session_title, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname
             FROM attachments a
             LEFT JOIN sessions s ON s.id = a.session_id
             LEFT JOIN users u ON u.id = a.user_id

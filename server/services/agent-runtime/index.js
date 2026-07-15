@@ -183,7 +183,7 @@ function getRunStatus(runId) {
 }
 
 function getRunUser(runId) {
-    return db.prepare('SELECT u.id, u.username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?').get(runId);
+    return db.prepare("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?").get(runId);
 }
 
 function markRunError(runId, message) {

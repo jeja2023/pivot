@@ -1,6 +1,7 @@
 const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
+const { archiveDeletedUsername } = require('../../services/user-identity');
 
 const migrations = [
     {
@@ -36,6 +37,28 @@ const migrations = [
         description: 'Create RAG debug history and enterprise deployment contract tables.',
         up(db) {
             db.exec(enterpriseSchemaSql());
+        }
+    },
+    {
+        id: '202607150001_release_deleted_usernames',
+        description: 'Preserve deleted usernames while releasing them for new registrations.',
+        up(db) {
+            const usersTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+            if (!usersTable) return;
+
+            const columns = db.prepare('PRAGMA table_info(users)').all();
+            if (!columns.some(column => column.name === 'deleted_username')) {
+                db.exec('ALTER TABLE users ADD COLUMN deleted_username TEXT');
+            }
+            if (!columns.some(column => column.name === 'deleted_at')) return;
+
+            const deletedUsers = db.prepare(`
+                SELECT id
+                FROM users
+                WHERE deleted_at IS NOT NULL AND username != 'admin'
+                ORDER BY id ASC
+            `).all();
+            deletedUsers.forEach(user => archiveDeletedUsername(db, user.id));
         }
     },
     ...regulationsMigrations

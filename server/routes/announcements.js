@@ -247,7 +247,7 @@ function createAnnouncementsRouter({
         }
         const where = `WHERE ${conditions.join(' AND ')}`;
         const data = db.prepare(`
-            SELECT a.*, u.username AS created_by_name,
+            SELECT a.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS created_by_name,
                    (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.read_at IS NOT NULL) AS read_count,
                    (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.acknowledged_at IS NOT NULL) AS ack_count
             FROM announcements a

@@ -847,6 +847,76 @@ test('model deletion soft deletes referenced models without breaking history', a
     }
 });
 
+test('deleting a user releases the username without reviving the old identity', async () => {
+    const suffix = Date.now().toString(36);
+    const username = `reuse_${suffix}`;
+    const oldUserInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'old-hash', 'Old Identity', 'QA', 'user', 'active', datetime('now', '+8 hours'))
+    `).run(username);
+    const oldUserId = Number(oldUserInfo.lastInsertRowid);
+    db.prepare('INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+        .run(oldUserId, 'identity_marker', 'old');
+
+    const superAdmin = { id: 1, username: 'admin', role: 'admin', unit: '' };
+    const router = createAdminUsersRouter({
+        authMiddleware: (req, _res, next) => { req.user = superAdmin; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        upload: { single: () => (_req, _res, next) => next() },
+        logAction: () => {}
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/admin/users' && layer.route?.methods?.post);
+    const listRoute = router.stack.find(layer => layer.route?.path === '/admin/users' && layer.route?.methods?.get);
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/admin/users/:id' && layer.route?.methods?.delete);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+
+    let newUserId;
+    try {
+        const deleteRes = makeRes();
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(oldUserId) }
+        }, deleteRes);
+        assert.equal(deleteRes.statusCode, 200);
+        assert.equal(deleteRes.body.success, true);
+
+        const archived = db.prepare('SELECT username, deleted_username, deleted_at FROM users WHERE id = ?').get(oldUserId);
+        assert.match(archived.username, /^@deleted:/);
+        assert.equal(archived.deleted_username, username);
+        assert.ok(archived.deleted_at);
+
+        const createRes = makeRes();
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body: { username, password: 'Password123', nickname: 'New Identity', unit: 'QA', role: 'user' }
+        }, createRes);
+        assert.equal(createRes.statusCode, 200);
+        assert.equal(createRes.body.success, true);
+        newUserId = Number(createRes.body.user.id);
+        assert.notEqual(newUserId, oldUserId);
+
+        const active = db.prepare('SELECT id, username, deleted_at FROM users WHERE username = ?').get(username);
+        assert.equal(active.id, newUserId);
+        assert.equal(active.deleted_at, null);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM user_settings WHERE user_id = ?').get(newUserId).count, 0);
+
+        const listRes = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { includeDeleted: 'true', limit: '10000' }
+        }, listRes);
+        const matchingUsers = listRes.body.data.filter(user => user.username === username);
+        assert.equal(matchingUsers.length, 2);
+        assert.deepEqual(new Set(matchingUsers.map(user => Number(user.id))), new Set([oldUserId, newUserId]));
+    } finally {
+        if (newUserId) db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(newUserId);
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(oldUserId);
+        if (newUserId) db.prepare('DELETE FROM users WHERE id = ?').run(newUserId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(oldUserId);
+    }
+});
+
 test('non-root admin cannot manage administrator accounts', async () => {
     const suffix = Date.now().toString(36);
     const adminInfo = db.prepare(`

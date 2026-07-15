@@ -296,7 +296,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 m.temperature, m.max_input_tokens, m.max_tokens, m.context_window_tokens, m.monitor_url, m.max_concurrent, m.supports_vision, m.supports_reasoning, m.chat_thinking_enabled,
                 m.input_price_per_million, m.output_price_per_million, m.price_currency,
                 (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
-                u.username as owner_name, u.nickname as owner_nickname, u.role as owner_role
+                COALESCE(NULLIF(u.deleted_username, ''), u.username) as owner_name, u.nickname as owner_nickname, u.role as owner_role
             FROM models m
             LEFT JOIN users u ON m.user_id = u.id
             ${where} 

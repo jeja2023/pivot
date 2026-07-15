@@ -14,6 +14,7 @@ const {
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
+const { archiveDeletedUsername } = require('../services/user-identity');
 const {
     getPublicRegistrationSetting,
     setPublicRegistrationSetting
@@ -47,7 +48,8 @@ function createAdminUsersRouter({
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
         const where = includeDeleted ? '' : 'WHERE deleted_at IS NULL';
         const users = db.prepare(`
-            SELECT id, username, nickname, unit, role, status, deleted_at, created_at, last_login_at
+            SELECT id, COALESCE(NULLIF(deleted_username, ''), username) AS username,
+                   nickname, unit, role, status, deleted_at, created_at, last_login_at
             FROM users
             ${where}
             ORDER BY id ASC LIMIT ? OFFSET ?
@@ -144,7 +146,7 @@ function createAdminUsersRouter({
         const { username, action, details, ip, start, end } = req.query;
         let conditions = [];
         let params = [];
-        if (username) { conditions.push("u.username LIKE ?"); params.push(`%${username}%`); }
+        if (username) { conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?"); params.push(`%${username}%`); }
         if (action) {
             const actionValues = getAuditActionFilterValues(action);
             conditions.push(`al.action IN (${actionValues.map(() => '?').join(', ')})`);
@@ -157,7 +159,7 @@ function createAdminUsersRouter({
         
         const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
         const logs = db.prepare(`
-            SELECT al.*, u.username, u.nickname 
+            SELECT al.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname
             FROM audit_logs al 
             LEFT JOIN users u ON al.user_id = u.id 
             ${whereClause}
@@ -193,7 +195,13 @@ function createAdminUsersRouter({
 
     router.get('/admin/users/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
-        const users = db.prepare(`SELECT * FROM users ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'} LIMIT 10000`).all();
+        const users = db.prepare(`
+            SELECT id, COALESCE(NULLIF(deleted_username, ''), username) AS username,
+                   nickname, unit, role, status, deleted_at, created_at
+            FROM users
+            ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'}
+            LIMIT 10000
+        `).all();
         let csv = '\uFEFFID,用户名,显示名,单位,角色,状态,删除时间,创建时间\n';
         users.forEach(u => {
             csv += [u.id, u.username, u.nickname || '', u.unit || '', u.role, u.status || 'active', u.deleted_at || '', u.created_at].map(escapeCsvCell).join(',') + '\n';
@@ -385,7 +393,7 @@ function createAdminUsersRouter({
         let params = [];
         
         if (username) {
-            conditions.push("u.username LIKE ?");
+            conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
             params.push(`%${username}%`);
         }
         if (action) {
@@ -413,7 +421,7 @@ function createAdminUsersRouter({
         const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
         
         const logs = db.prepare(`
-            SELECT l.*, u.username, u.nickname
+            SELECT l.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname
             FROM audit_logs l
             LEFT JOIN users u ON l.user_id = u.id
             ${whereClause}
@@ -456,6 +464,7 @@ function createAdminUsersRouter({
                 .run(now, now, targetUserId);
             const info = db.prepare("UPDATE users SET status = 'disabled', deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL")
                 .run(now, req.user.id, targetUserId);
+            if (info.changes > 0) archiveDeletedUsername(db, targetUserId);
             return info;
         });
         deleteUserTx();

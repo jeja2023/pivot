@@ -7,6 +7,7 @@ const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
 const { normalizeRole, withPermissionFlags } = require('./permissions');
 const { getApiAccessSetting } = require('./services/api-access-settings');
+const { archiveDeletedUsername } = require('./services/user-identity');
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -164,8 +165,17 @@ function register(username, password, nickname, unit, role = 'user') {
     const hash = bcrypt.hashSync(password, 10);
     const safeRole = normalizeRole(role);
     const stmt = db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    const createUser = db.transaction(() => {
+        const deletedUser = db.prepare(`
+            SELECT id
+            FROM users
+            WHERE username = ? AND deleted_at IS NOT NULL
+        `).get(cleanUsername);
+        if (deletedUser) archiveDeletedUsername(db, deletedUser.id);
+        return stmt.run(cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp());
+    });
     try {
-        const info = stmt.run(cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp());
+        const info = createUser();
         return withPermissionFlags({ id: info.lastInsertRowid, username: cleanUsername, nickname, role: safeRole, status: 'active' });
     } catch (e) {
         if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
