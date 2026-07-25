@@ -1,13 +1,27 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.226-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.0.228-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是一款面向私有化、离线化和企业内网场景的全栈 AI 对话、自由任务与工作流编排平台。系统集成多模型接入、知识库检索、工具箱调用（兼容 MCP）、自由任务、工作流编排、第三方 OpenAI-compatible API、审计日志、系统监控、数据维护、数据分析工作台、法规查询和企业级权限治理能力，目标是在可控环境中提供稳定、安全、可审计的 AI 工作入口。
 
 > 普通用户使用说明请阅读 [Pivot 使用帮助](使用帮助.md)。部署后也可在前端左下角点击”帮助”，在应用内打开同一份帮助内容；直接访问 `/manual` 仍可独立查看。
 
-## 最新版本：0.0.226
+## 最新版本：0.0.228
+
+### v0.0.228 更新摘要
+
+- **Qwen3.6 thinking 硬关闭**：代码补全除 `/no_think` 外，会向 llama.cpp 发送 `chat_template_kwargs.enable_thinking=false`，解决 `peg-native` chat template 仍生成大量 thinking token、正文为空的问题。
+- **普通模型隔离**：模板硬开关只应用于 Qwen3 系列，Qwen2.5 等普通模型请求体和补全行为保持不变。
+- **诊断与验证**：空正文日志增加 `hardThinkingDisabled`，生产等价的非流式、流式和批量回归均要求硬开关生效；完整安全测试 `316/316` 通过。
+
+### v0.0.227 更新摘要
+
+- **Qwen3 代码补全修复**：代码补全会自动为 Qwen3.6 等推理模型关闭 thinking，避免输出预算耗在思考阶段后返回空补全。
+- **双入口兼容**：`/v1/completions` 和使用 `prompt` / `input` / `prefix` / `suffix` 的 `/v1/chat/completions` 均应用同一处理，Qwen2.5 等普通模型行为不变。
+- **Completions 兼容补齐**：文本 prompt 数组、`n`、`best_of`、`echo`、`logprobs`、`seed`、`stream_options`、`logit_bias` 和 `user` 均已支持，非流式与流式都能处理多个 choices 并正确汇总 usage。
+- **错误与空正文可诊断**：上游流中断返回 SSE error 且不再伪造 `[DONE]`；两个补全入口都会记录 reasoning 状态、结束原因、token 用量和输出上限，不向客户端泄露思考内容。
+- **验证与版本启用**：完整安全测试 `315/315` 已通过，应用版本升级至 `0.0.227`。
 
 ### v0.0.226 更新摘要
 
@@ -1641,4 +1655,4 @@ npm run check:external -- --live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.0.226（删除用户后支持同名重新注册，新旧账号身份与数据严格隔离，并自动迁移历史软删除记录；详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。）
+**当前版本**：v0.0.228（为 Qwen3.6 代码补全增加 llama.cpp 模板级 thinking 硬开关，解决 `/no_think` 被 `peg-native` 模板忽略后仍返回空正文的问题；详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。）

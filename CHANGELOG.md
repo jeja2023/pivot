@@ -1,3 +1,36 @@
+## [v0.0.228] - 2026-07-25
+
+### Qwen3.6 代码补全增加 llama.cpp thinking 硬开关
+
+生产环境复测表明，`v0.0.227` 追加的 `/no_think` 软指令没有被 Qwen3.6 使用的 llama.cpp `peg-native` chat template 严格执行：模型日志显示每次请求实际生成了 77、89、318 个输出 token，但这些 token 仍被 thinking 占用，客户端最终没有收到可插入代码。本版本根据 Qwen 与 llama.cpp 的请求规范增加模板级硬开关。
+
+- **模板级 thinking 硬关闭**：Qwen3 系列的 `/v1/completions` 及 prompt 风格 `/v1/chat/completions` 请求会强制携带 `chat_template_kwargs: { "enable_thinking": false }`，由 llama.cpp 在套用 chat template 时直接关闭思考。
+- **软硬开关双保险**：保留最后一条用户消息中的 `/no_think`，同时增加模板硬开关；前者兼容仅识别 Qwen 软指令的服务，后者解决 `peg-native` 模板忽略软指令的问题。
+- **客户端参数安全合并**：调用方已有 `chat_template_kwargs` 会被保留，但代码补全场景下的 `enable_thinking` 最终固定为 `false`，避免客户端配置重新开启思考。
+- **Qwen2.5 保持不变**：硬开关只匹配 Qwen3 系列，Qwen2.5 和其他普通模型不会新增模板参数，也不会改变现有补全行为。
+- **生产诊断增强**：空正文警告新增 `hardThinkingDisabled` 字段，可直接确认 Pivot 是否向上游启用了模板硬开关，并继续记录 reasoning、结束原因、token 用量和输出上限。
+- **生产等价回归**：非流式、流式和批量 Qwen3 模拟上游改为只有同时收到软、硬开关才返回正文，并新增 Qwen2.5 请求体不受影响测试；完整安全测试 `316/316` 通过。
+- **版本号启用**：应用版本升级至 `v0.0.228`，生产环境需部署该版本后再复测 Qwen3.6 代码补全。
+
+## [v0.0.227] - 2026-07-24
+
+### 推理模型代码补全与 Completions 兼容层完整修复
+
+本版本修复离线生产环境中 Qwen3.6 等推理模型通过 OpenAI-compatible API 执行代码补全时，请求成功但客户端收不到补全文本的问题，并完整收口 `/v1/completions` 的请求参数、批量 prompt、多候选响应、流式错误与诊断行为。
+
+- **代码补全自动关闭思考**：`/v1/completions` 以及 `prompt` / `input` / `prefix` / `suffix` 风格的 `/v1/chat/completions` 请求，会对后台标记为推理模型或名称匹配 Qwen3、QwQ、DeepSeek-R1 的模型，在最后一条用户消息追加 `/no_think`。
+- **上下文裁剪保持软开关**：no-think 指令会先进入上下文预算与裁剪流程，确保裁剪后的实际上游请求仍携带该指令，不会被原始消息覆盖。
+- **普通模型行为保持不变**：Qwen2.5 等非推理模型不会追加 no-think 指令，现有代码补全请求参数、流式响应和正文转换逻辑保持兼容。
+- **Completions 参数补齐**：支持并正确处理 `n`、`best_of`、`echo`、`logprobs`、`seed`、`stream_options`、`logit_bias`、`user`，保留 `temperature`、`max_tokens`、`stop`、`top_p`、presence/frequency penalty 与 `suffix` 兼容；`best_of` 会按候选平均 logprob 选优。
+- **批量 prompt 与多 choice 补齐**：文本 `prompt[]` 会逐项调用聊天模型并合并为连续 choice 索引，非流式聚合 usage，流式转换全部 choices、聚合最终 usage，且整个批次只发送一个 `[DONE]`。
+- **legacy 响应语义补齐**：`echo` 会回显对应 prompt，Chat Completions 的 token logprobs 会转换为 legacy `tokens`、`token_logprobs`、`top_logprobs` 和累计 `text_offset`。
+- **流式异常不再伪装成功**：上游 socket 中断、SSE error 数据帧或非法 SSE 数据会返回结构化 SSE `error` 并立即结束，错误路径不再追加 `[DONE]`；失败调用同步写入模型失败状态和 API 调用审计。
+- **双入口空正文诊断**：`/v1/completions` 和 prompt 风格 `/v1/chat/completions` 的非流式、流式响应若最终没有可见正文，都会记录模型、入口、是否存在 `reasoning_content`、`finish_reason`、token 用量及请求输出上限。
+- **思考内容继续隔离**：诊断只记录状态与用量，不会把 reasoning 内容作为代码返回，也不会暴露给 Continue 等补全客户端。
+- **输入错误显式返回**：文本 prompt 数组完整支持；token ID 数组因聊天适配层无法获知上游分词器而明确返回 `400 token_prompt_not_supported`，不再静默丢弃或错误拼接。
+- **回归验证补齐**：新增 Qwen3/Qwen2.5、双入口空正文、文本 prompt 批量、`n/best_of/echo/logprobs`、多 choice 流、usage 聚合、SSE error 与 socket 中断测试；完整安全测试 `315/315` 已通过。
+- **版本号启用**：应用版本升级至 `v0.0.227`，用于离线生产部署和桌面客户端重新打包。
+
 ## [v0.0.226] - 2026-07-15
 
 ### 删除用户后支持同名重新注册

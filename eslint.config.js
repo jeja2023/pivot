@@ -508,6 +508,7 @@ module.exports = [
     {
         ignores: [
             'node_modules/**',
+            '.codex-tmp/**',
             'data/**',
             'logs/**',
             'uploads/**',

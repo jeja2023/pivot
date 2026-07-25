@@ -32,6 +32,162 @@ const {
     setApiAccessSetting,
     test
 } = require('../security-helpers');
+const {
+    applyCompletionNoThinkSoftSwitch,
+    applyCompletionThinkingControls,
+    createCompletionResponseProxy,
+    normalizeCompletionRequest
+} = require('../../server/routes/openai/helpers');
+const { logger: appLogger } = require('../../server/logger');
+
+test('代码补全仅对推理模型追加 no-think 软开关', () => {
+    const messages = [{ role: 'user', content: 'Complete this code' }];
+    const configuredReasoning = applyCompletionNoThinkSoftSwitch(messages, {
+        model_name: 'custom-model',
+        supports_reasoning: 1
+    });
+    const qwen3Fallback = applyCompletionNoThinkSoftSwitch(messages, {
+        model_name: 'Qwen3.6-35B'
+    });
+    const qwen25 = applyCompletionNoThinkSoftSwitch(messages, {
+        model_name: 'Qwen2.5-14B'
+    });
+
+    assert.equal(configuredReasoning[0].content, 'Complete this code\n/no_think');
+    assert.equal(qwen3Fallback[0].content, 'Complete this code\n/no_think');
+    assert.equal(qwen25[0].content, 'Complete this code');
+    assert.equal(messages[0].content, 'Complete this code');
+
+    const repeated = applyCompletionNoThinkSoftSwitch(configuredReasoning, {
+        supports_reasoning: 1
+    });
+    assert.equal(repeated[0].content, 'Complete this code\n/no_think');
+});
+
+test('Qwen3 代码补全强制关闭 chat template thinking 且不影响 Qwen2.5', () => {
+    const payload = {
+        model: 'upstream-model',
+        chat_template_kwargs: {
+            enable_thinking: true,
+            custom_flag: 'preserved'
+        }
+    };
+    const qwen3 = applyCompletionThinkingControls(payload, {
+        model_name: 'Qwen3.6-35B'
+    });
+    const qwen25 = applyCompletionThinkingControls(payload, {
+        model_name: 'Qwen2.5-14B'
+    });
+
+    assert.notStrictEqual(qwen3, payload);
+    assert.equal(qwen3.chat_template_kwargs.enable_thinking, false);
+    assert.equal(qwen3.chat_template_kwargs.custom_flag, 'preserved');
+    assert.equal(payload.chat_template_kwargs.enable_thinking, true);
+    assert.strictEqual(qwen25, payload);
+});
+
+test('代码补全空正文诊断保留 reasoning、结束原因与用量', () => {
+    let diagnostic = null;
+    const res = {
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+    const proxy = createCompletionResponseProxy(res, {
+        model: 'Qwen3.6-35B',
+        stream: false,
+        onEmptyCompletion(value) {
+            diagnostic = value;
+        }
+    });
+
+    proxy.json({
+        id: 'chatcmpl-reasoning-only',
+        model: 'Qwen3.6-35B',
+        choices: [{
+            index: 0,
+            message: { content: '', reasoning_content: 'thinking only' },
+            finish_reason: 'length'
+        }],
+        usage: { prompt_tokens: 128, completion_tokens: 16, total_tokens: 144 }
+    });
+
+    assert.equal(res.body.choices[0].text, '');
+    assert.equal(diagnostic.hasReasoningContent, true);
+    assert.equal(diagnostic.finishReason, 'length');
+    assert.equal(diagnostic.usage.completion_tokens, 16);
+});
+
+test('代码补全请求完整校验文本批量、候选数与 legacy 参数', () => {
+    const normalized = normalizeCompletionRequest({
+        prompt: ['const a = ', 'const b = '],
+        n: 2,
+        best_of: 3,
+        echo: true,
+        logprobs: 5
+    });
+    assert.deepEqual(normalized.prompts, ['const a = ', 'const b = ']);
+    assert.equal(normalized.n, 2);
+    assert.equal(normalized.generationCount, 3);
+    assert.equal(normalized.echo, true);
+    assert.equal(normalized.logprobs, 5);
+
+    assert.throws(
+        () => normalizeCompletionRequest({ prompt: [101, 102] }),
+        error => error.code === 'token_prompt_not_supported' && error.param === 'prompt'
+    );
+    assert.throws(
+        () => normalizeCompletionRequest({ prompt: 'x', stream: true, best_of: 2 }),
+        error => error.code === 'invalid_best_of'
+    );
+    assert.throws(
+        () => normalizeCompletionRequest({ prompt: 'x', n: 2, best_of: 1 }),
+        error => error.code === 'invalid_best_of'
+    );
+});
+
+test('代码补全代理转换全部流式 choices 并在错误帧后禁止 DONE', () => {
+    const res = {
+        chunks: [],
+        writableEnded: false,
+        write(chunk) {
+            this.chunks.push(String(chunk));
+            return true;
+        },
+        end() {
+            this.writableEnded = true;
+            return this;
+        }
+    };
+    let streamError = null;
+    const proxy = createCompletionResponseProxy(res, {
+        model: 'Qwen3.6-35B',
+        stream: true,
+        echoText: 'p=',
+        choiceIndexOffset: 4,
+        includeLogprobs: true,
+        onStreamError(error) {
+            streamError = error;
+        }
+    });
+
+    proxy.write('data: {"id":"chatcmpl-multi","choices":[{"index":0,"delta":{"content":"1"},"logprobs":{"content":[{"token":"1","logprob":-0.1,"top_logprobs":[]}]}},{"index":1,"delta":{"content":"2"},"logprobs":{"content":[{"token":"2","logprob":-0.2,"top_logprobs":[]}]}}]}\n\n');
+    proxy.write('data: {"error":{"message":"runtime disconnected","type":"api_error","code":"upstream_stream_error"}}\n\n');
+    proxy.write('data: [DONE]\n\n');
+    proxy.end();
+
+    const output = res.chunks.join('');
+    assert.match(output, /"index":4/);
+    assert.match(output, /"index":5/);
+    assert.match(output, /"text":"p=1"/);
+    assert.match(output, /"text":"p=2"/);
+    assert.match(output, /"text_offset":\[2\]/);
+    assert.match(output, /event: error/);
+    assert.match(output, /runtime disconnected/);
+    assert.doesNotMatch(output, /data: \[DONE\]/);
+    assert.equal(streamError.error.code, 'upstream_stream_error');
+});
 
 test('ConcurrencySemaphore 会报告等待请求的队列位置', async () => {
     const semaphore = new ConcurrencySemaphore({
@@ -394,9 +550,17 @@ test('OpenAI 聊天补全兼容 prompt 风格的代码补全请求', async () =>
         req.on('data', chunk => { body += chunk; });
         req.on('end', () => {
             capturedPayload = JSON.parse(body);
+            const shouldReturnEmpty = capturedPayload.messages?.[0]?.content?.includes('EMPTY_COMPLETION');
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.end(JSON.stringify({
-                choices: [{ message: { role: 'assistant', content: 'return a + b' }, finish_reason: 'stop' }],
+                choices: [{
+                    message: {
+                        role: 'assistant',
+                        content: shouldReturnEmpty ? '' : 'return a + b',
+                        reasoning_content: shouldReturnEmpty ? 'output budget consumed by reasoning' : ''
+                    },
+                    finish_reason: shouldReturnEmpty ? 'length' : 'stop'
+                }],
                 usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 }
             }));
         });
@@ -465,6 +629,44 @@ test('OpenAI 聊天补全兼容 prompt 风格的代码补全请求', async () =>
         assert.match(capturedPayload.messages[0].content, /File path: src\/math\.js/);
         assert.match(capturedPayload.messages[0].content, /function add/);
         assert.match(capturedPayload.messages[0].content, /Code after cursor/);
+        assert.doesNotMatch(capturedPayload.messages[0].content, /\/no_think/);
+
+        let emptyDiagnostic = null;
+        const originalWarn = appLogger.warn;
+        appLogger.warn = (details, message) => {
+            if (message === 'OpenAI code completion returned no visible content') emptyDiagnostic = details;
+        };
+        try {
+            const emptyReq = {
+                body: {
+                    model: modelName,
+                    messages: [],
+                    prompt: 'EMPTY_COMPLETION',
+                    max_tokens: 8,
+                    stream: false
+                },
+                headers: {},
+                ip: '127.0.0.1'
+            };
+            const emptyRes = {
+                statusCode: 200,
+                status(code) {
+                    this.statusCode = code;
+                    return this;
+                },
+                json(body) {
+                    this.body = body;
+                    return this;
+                }
+            };
+            await runExpressHandlers(route.route.stack.map(layer => layer.handle), emptyReq, emptyRes);
+            assert.equal(emptyRes.body.choices[0].message.content, '');
+            assert.equal(emptyDiagnostic.endpoint, '/v1/chat/completions');
+            assert.equal(emptyDiagnostic.hasReasoningContent, true);
+            assert.equal(emptyDiagnostic.finishReason, 'length');
+        } finally {
+            appLogger.warn = originalWarn;
+        }
     } finally {
         await new Promise(resolve => upstream.close(resolve));
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
@@ -482,6 +684,9 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
         req.on('data', chunk => { body += chunk; });
         req.on('end', () => {
             capturedPayload = JSON.parse(body);
+            const noThinkEnabled = /\/no_think\s*$/.test(capturedPayload.messages?.[0]?.content || '');
+            const hardThinkingDisabled = capturedPayload.chat_template_kwargs?.enable_thinking === false;
+            const completionEnabled = noThinkEnabled && hardThinkingDisabled;
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.end(JSON.stringify({
                 id: 'chatcmpl-test',
@@ -492,10 +697,10 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
                     index: 0,
                     message: {
                         role: 'assistant',
-                        content: 'return a + b<think>hidden reasoning</think>',
-                        reasoning_content: 'hidden reasoning'
+                        content: completionEnabled ? 'return a + b' : '',
+                        reasoning_content: completionEnabled ? '' : 'reasoning consumed the output budget'
                     },
-                    finish_reason: 'stop'
+                    finish_reason: completionEnabled ? 'stop' : 'length'
                 }],
                 usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 }
             }));
@@ -508,11 +713,11 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`openai_completion_${suffix}`, 'hash', 'OpenAI Completion User', 'QA', 'admin', 'active');
     const user = { id: Number(userInfo.lastInsertRowid), username: `openai_completion_${suffix}`, role: 'admin', unit: 'QA' };
-    const modelName = `completion-model-${suffix}`;
+    const modelName = `qwen3.6-completion-${suffix}`;
     const modelInfo = db.prepare(`
-        INSERT INTO models (user_id, name, url, model_name, status, created_at)
-        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
-    `).run(user.id, 'Completion Model', `http://127.0.0.1:${upstream.address().port}/v1`, modelName);
+        INSERT INTO models (user_id, name, url, model_name, supports_reasoning, status, created_at)
+        VALUES (?, ?, ?, ?, 1, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Reasoning Completion Model', `http://127.0.0.1:${upstream.address().port}/v1`, modelName);
     const router = createOpenAIRouter({
         authMiddleware: (req, res, next) => {
             req.user = user;
@@ -566,6 +771,129 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
         assert.match(capturedPayload.messages[0].content, /File path: src\/math\.js/);
         assert.match(capturedPayload.messages[0].content, /function add/);
         assert.match(capturedPayload.messages[0].content, /Code after cursor/);
+        assert.match(capturedPayload.messages[0].content, /\/no_think\s*$/);
+        assert.equal(capturedPayload.chat_template_kwargs.enable_thinking, false);
+    } finally {
+        await new Promise(resolve => upstream.close(resolve));
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('OpenAI completions 完整支持文本 prompt 数组与 legacy 候选参数', async () => {
+    const suffix = Date.now().toString(36);
+    const capturedPayloads = [];
+    const upstream = http.createServer((req, res) => {
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const payload = JSON.parse(body);
+            capturedPayloads.push(payload);
+            const promptLabel = payload.messages?.[0]?.content?.includes('FIRST:') ? 'first' : 'second';
+            const makeChoice = (index, text, score) => ({
+                index,
+                message: { role: 'assistant', content: text },
+                finish_reason: 'stop',
+                logprobs: {
+                    content: [{
+                        token: text,
+                        logprob: score,
+                        top_logprobs: [{ token: text, logprob: score }]
+                    }]
+                }
+            });
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({
+                id: `chatcmpl-${promptLabel}`,
+                object: 'chat.completion',
+                created: 1710000002,
+                model: 'qwen3.6-batch',
+                choices: [
+                    makeChoice(0, `${promptLabel}-low`, -2),
+                    makeChoice(1, `${promptLabel}-best`, -0.1),
+                    makeChoice(2, `${promptLabel}-second`, -1)
+                ],
+                usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 }
+            }));
+        });
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`openai_completion_batch_${suffix}`, 'hash', 'OpenAI Completion Batch User', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `openai_completion_batch_${suffix}`, role: 'admin', unit: 'QA' };
+    const modelName = `qwen3.6-completion-batch-${suffix}`;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Completion Batch Model', `http://127.0.0.1:${upstream.address().port}/v1`, modelName);
+    const router = createOpenAIRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = user;
+            next();
+        },
+        embeddingLimiter: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/completions');
+
+    try {
+        const req = {
+            body: {
+                model: modelName,
+                prompt: ['FIRST:', 'SECOND:'],
+                n: 2,
+                best_of: 3,
+                echo: true,
+                logprobs: 2,
+                seed: 7,
+                logit_bias: { 42: 1 },
+                user: 'continue-editor',
+                max_tokens: 24,
+                stream: false
+            },
+            headers: {},
+            ip: '127.0.0.1'
+        };
+        const res = {
+            statusCode: 200,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body) {
+                this.body = body;
+                return this;
+            }
+        };
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(capturedPayloads.length, 2);
+        capturedPayloads.forEach(payload => {
+            assert.equal(payload.n, 3);
+            assert.equal(payload.logprobs, true);
+            assert.equal(payload.top_logprobs, 2);
+            assert.equal(payload.seed, 7);
+            assert.deepEqual(payload.logit_bias, { 42: 1 });
+            assert.equal(payload.user, 'continue-editor');
+            assert.match(payload.messages[0].content, /\/no_think\s*$/);
+            assert.equal(payload.chat_template_kwargs.enable_thinking, false);
+        });
+        assert.deepEqual(res.body.choices.map(choice => choice.index), [0, 1, 2, 3]);
+        assert.deepEqual(res.body.choices.map(choice => choice.text), [
+            'FIRST:first-best',
+            'FIRST:first-second',
+            'SECOND:second-best',
+            'SECOND:second-second'
+        ]);
+        assert.equal(res.body.choices[0].logprobs.tokens[0], 'first-best');
+        assert.equal(res.body.choices[0].logprobs.text_offset[0], 'FIRST:'.length);
+        assert.deepEqual(res.body.usage, { prompt_tokens: 20, completion_tokens: 6, total_tokens: 26 });
     } finally {
         await new Promise(resolve => upstream.close(resolve));
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
@@ -576,14 +904,25 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
 
 test('OpenAI completions 流式响应会转换为 text completion SSE', async () => {
     const suffix = Date.now().toString(36);
+    const capturedPayloads = [];
     const upstream = http.createServer((req, res) => {
-        req.resume();
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', chunk => { body += chunk; });
         req.on('end', () => {
+            const capturedPayload = JSON.parse(body);
+            capturedPayloads.push(capturedPayload);
+            const noThinkEnabled = /\/no_think\s*$/.test(capturedPayload.messages?.[0]?.content || '');
+            const hardThinkingDisabled = capturedPayload.chat_template_kwargs?.enable_thinking === false;
             res.setHeader('Content-Type', 'text/event-stream');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"reasoning_content":"hidden reasoning"},"finish_reason":null}]}\n\n');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"ret"},"finish_reason":null}]}\n\n');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"urn"},"finish_reason":null}]}\n\n');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n\n');
+            if (noThinkEnabled && hardThinkingDisabled) {
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"ret"},"finish_reason":null},{"index":1,"delta":{"content":"sum"},"finish_reason":null}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"content":"urn"},"finish_reason":null},{"index":1,"delta":{"content":" = a + b"},"finish_reason":null}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":4,"total_tokens":9}}\n\n');
+            } else {
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{"reasoning_content":"hidden reasoning"},"finish_reason":null}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1710000001,"model":"autocomplete-model","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":5,"completion_tokens":16,"total_tokens":21}}\n\n');
+            }
             res.write('data: [DONE]\n\n');
             res.end();
         });
@@ -595,7 +934,7 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`openai_completion_stream_${suffix}`, 'hash', 'OpenAI Completion Stream User', 'QA', 'admin', 'active');
     const user = { id: Number(userInfo.lastInsertRowid), username: `openai_completion_stream_${suffix}`, role: 'admin', unit: 'QA' };
-    const modelName = `completion-stream-model-${suffix}`;
+    const modelName = `qwen3.6-completion-stream-${suffix}`;
     const modelInfo = db.prepare(`
         INSERT INTO models (user_id, name, url, model_name, status, created_at)
         VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
@@ -616,9 +955,12 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         Object.assign(req, {
             body: {
                 model: modelName,
-                prompt: 'function add(a, b) {\n  ',
+                prompt: ['function add(a, b) {\n  ', 'function subtract(a, b) {\n  '],
                 suffix: ';\n}',
                 max_tokens: 16,
+                n: 2,
+                seed: 11,
+                stream_options: { include_usage: true },
                 stream: true
             },
             headers: {},
@@ -653,12 +995,127 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         const output = res.chunks.join('');
         assert.equal(res.statusCode, 200);
         assert.equal(res.headers['content-type'], 'text/event-stream');
+        assert.equal(capturedPayloads.length, 2);
+        capturedPayloads.forEach(capturedPayload => {
+            assert.match(capturedPayload.messages[0].content, /\/no_think\s*$/);
+            assert.equal(capturedPayload.n, 2);
+            assert.equal(capturedPayload.seed, 11);
+            assert.deepEqual(capturedPayload.stream_options, { include_usage: true });
+            assert.equal(capturedPayload.chat_template_kwargs.enable_thinking, false);
+        });
         assert.doesNotMatch(output, /hidden reasoning/);
         assert.match(output, /"object":"text_completion"/);
         assert.match(output, /"text":"ret"/);
         assert.match(output, /"text":"urn"/);
+        assert.match(output, /"index":1/);
+        assert.match(output, /"index":2/);
+        assert.match(output, /"index":3/);
+        assert.match(output, /"text":"sum"/);
+        assert.match(output, /"text":" = a \+ b"/);
         assert.match(output, /"finish_reason":"stop"/);
+        assert.equal((output.match(/"usage":/g) || []).length, 1);
+        assert.match(output, /"prompt_tokens":10/);
+        assert.match(output, /"completion_tokens":8/);
+        assert.match(output, /"total_tokens":18/);
         assert.match(output, /data: \[DONE\]/);
+        assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
+    } finally {
+        await new Promise(resolve => upstream.close(resolve));
+        db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('OpenAI completions 上游流中断会返回 SSE error 且不伪造 DONE', async () => {
+    const suffix = Date.now().toString(36);
+    const upstream = http.createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+            res.write('data: {"id":"chatcmpl-broken","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n');
+            setTimeout(() => res.destroy(new Error('simulated upstream disconnect')), 20);
+        });
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`openai_completion_error_${suffix}`, 'hash', 'OpenAI Completion Error User', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `openai_completion_error_${suffix}`, role: 'admin', unit: 'QA' };
+    const modelName = `qwen3.6-completion-error-${suffix}`;
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Completion Error Model', `http://127.0.0.1:${upstream.address().port}/v1`, modelName);
+    const router = createOpenAIRouter({
+        authMiddleware: (req, res, next) => {
+            req.user = user;
+            next();
+        },
+        embeddingLimiter: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/completions');
+
+    try {
+        const req = new (require('node:events').EventEmitter)();
+        Object.assign(req, {
+            body: {
+                model: modelName,
+                prompt: 'const value = ',
+                max_tokens: 8,
+                stream: true
+            },
+            headers: {},
+            ip: '127.0.0.1'
+        });
+        const res = {
+            statusCode: 200,
+            headers: {},
+            chunks: [],
+            writableEnded: false,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            setHeader(name, value) {
+                this.headers[name.toLowerCase()] = value;
+            },
+            write(chunk) {
+                this.chunks.push(String(chunk));
+                return true;
+            },
+            json(body) {
+                this.body = body;
+                this.writableEnded = true;
+                if (typeof this.onEnd === 'function') this.onEnd();
+                return this;
+            },
+            end() {
+                this.writableEnded = true;
+                if (typeof this.onEnd === 'function') this.onEnd();
+                return this;
+            }
+        };
+        const done = new Promise(resolve => { res.onEnd = resolve; });
+        const timeout = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('stream error test timed out')), 3000);
+            done.finally(() => clearTimeout(timer));
+        });
+        await Promise.race([
+            runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res),
+            done,
+            timeout
+        ]);
+
+        const output = res.chunks.join('');
+        assert.match(output, /"text":"partial"/);
+        assert.match(output, /event: error/);
+        assert.match(output, /upstream_stream_error|ECONNRESET|aborted/i);
+        assert.doesNotMatch(output, /data: \[DONE\]/);
+        assert.equal(res.writableEnded, true);
     } finally {
         await new Promise(resolve => upstream.close(resolve));
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);

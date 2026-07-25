@@ -48,10 +48,101 @@ const {
     buildEmbeddingResponse,
     buildEmbeddingModelItem,
     normalizeChatCompletionMessages,
+    normalizeCompletionRequest,
+    applyCompletionNoThinkSoftSwitch,
+    applyCompletionThinkingControls,
     updateApiKeyUsage,
     runRouteHandlers,
-    createCompletionResponseProxy
+    createCompletionResponseProxy,
+    createCompletionVisibilityTracker
 } = require('./helpers');
+
+const CODE_COMPLETION_REQUEST = Symbol('codeCompletionRequest');
+const COMPLETION_HARD_THINKING_DISABLED = Symbol('completionHardThinkingDisabled');
+
+function createBufferedResponse() {
+    return {
+        statusCode: 200,
+        headers: {},
+        body: undefined,
+        writableEnded: false,
+        get headersSent() {
+            return this.body !== undefined || this.writableEnded;
+        },
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        setHeader(name, value) {
+            this.headers[String(name).toLowerCase()] = value;
+            return this;
+        },
+        getHeader(name) {
+            return this.headers[String(name).toLowerCase()];
+        },
+        json(body) {
+            this.body = body;
+            this.writableEnded = true;
+            return this;
+        },
+        send(body) {
+            this.body = body;
+            this.writableEnded = true;
+            return this;
+        },
+        end(body) {
+            if (body !== undefined) this.body = body;
+            this.writableEnded = true;
+            return this;
+        }
+    };
+}
+
+function addCompletionUsage(total, usage) {
+    if (!usage) return total;
+    const normalized = normalizeTokenUsage({
+        inputTokens: usage.prompt_tokens,
+        outputTokens: usage.completion_tokens,
+        totalTokens: usage.total_tokens
+    });
+    return {
+        prompt_tokens: total.prompt_tokens + normalized.inputTokens,
+        completion_tokens: total.completion_tokens + normalized.outputTokens,
+        total_tokens: total.total_tokens + normalized.totalTokens
+    };
+}
+
+function buildOpenAIError(error, fallbackMessage = 'Upstream completion stream failed.') {
+    return {
+        error: {
+            message: error?.response?.data?.error?.message || error?.message || fallbackMessage,
+            type: 'api_error',
+            code: error?.code || 'upstream_stream_error'
+        }
+    };
+}
+
+function endStreamWithError(res, error) {
+    const payload = buildOpenAIError(error);
+    if (typeof res.writeSseError === 'function') {
+        res.writeSseError(payload);
+    } else if (!res.writableEnded) {
+        res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+    if (!res.writableEnded) res.end();
+}
+
+function createEmptyCompletionLogger(req, endpoint, promptIndex = null) {
+    return (diagnostic) => {
+        logger.warn({
+            ...diagnostic,
+            endpoint,
+            promptIndex,
+            hardThinkingDisabled: req[COMPLETION_HARD_THINKING_DISABLED] === true,
+            requestedMaxTokens: req.body?.max_tokens ?? req.body?.max_completion_tokens ?? null
+        }, 'OpenAI code completion returned no visible content');
+    };
+}
 
 function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_req, _res, next) => next() }) {
     const router = express.Router();
@@ -209,15 +300,122 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         if (!chatRoute) {
             return res.status(500).json({ error: { message: 'Chat completions route is not available.', type: 'api_error' } });
         }
-        req.body = {
-            ...req.body,
-            stream: !!req.body?.stream
+        const originalBody = req.body || {};
+        let completionRequest;
+        try {
+            completionRequest = normalizeCompletionRequest(originalBody);
+        } catch (e) {
+            return res.status(e.status || 400).json({
+                error: {
+                    message: e.message,
+                    type: e.type || 'invalid_request_error',
+                    param: e.param || null,
+                    code: e.code || 'invalid_completion_request'
+                }
+            });
+        }
+
+        const stream = !!originalBody.stream;
+        const chatHandlers = chatRoute.route.stack.map(layer => layer.handle);
+        req[CODE_COMPLETION_REQUEST] = true;
+        const buildPromptBody = (prompt) => {
+            const body = {
+                ...originalBody,
+                stream,
+                n: completionRequest.generationCount
+            };
+            if (prompt !== null) body.prompt = prompt;
+            return body;
         };
-        const proxyRes = createCompletionResponseProxy(res, {
-            model: req.body?.model,
-            stream: !!req.body?.stream
+        const buildProxyOptions = (prompt, promptIndex, overrides = {}) => ({
+            model: originalBody.model,
+            stream,
+            echoText: completionRequest.echo && typeof prompt === 'string' ? prompt : '',
+            choiceIndexOffset: promptIndex * completionRequest.n,
+            choiceCount: completionRequest.n,
+            includeLogprobs: completionRequest.logprobs !== null,
+            onEmptyCompletion: createEmptyCompletionLogger(req, '/v1/completions', promptIndex),
+            ...overrides
         });
-        return runRouteHandlers(chatRoute.route.stack.map(layer => layer.handle), req, proxyRes);
+
+        try {
+            if (completionRequest.prompts.length === 1) {
+                const prompt = completionRequest.prompts[0];
+                req.body = buildPromptBody(prompt);
+                const proxyRes = createCompletionResponseProxy(res, buildProxyOptions(prompt, 0));
+                await runRouteHandlers(chatHandlers, req, proxyRes);
+                return;
+            }
+
+            if (stream) {
+                let streamErrored = false;
+                const streamUsageByPrompt = new Map();
+                for (let index = 0; index < completionRequest.prompts.length; index += 1) {
+                    const prompt = completionRequest.prompts[index];
+                    req.body = buildPromptBody(prompt);
+                    const proxyRes = createCompletionResponseProxy(res, buildProxyOptions(prompt, index, {
+                        writeDone: false,
+                        endResponse: false,
+                        emitUsage: false,
+                        onUsage(usage) {
+                            streamUsageByPrompt.set(index, usage);
+                        },
+                        onStreamError() {
+                            streamErrored = true;
+                        }
+                    }));
+                    await runRouteHandlers(chatHandlers, req, proxyRes);
+                    if (streamErrored || res.writableEnded) break;
+                }
+                if (!streamErrored && !res.writableEnded) {
+                    if (originalBody.stream_options?.include_usage === true && streamUsageByPrompt.size > 0) {
+                        const usage = Array.from(streamUsageByPrompt.values()).reduce(
+                            addCompletionUsage,
+                            { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+                        );
+                        res.write(`data: ${JSON.stringify({
+                            id: `cmpl-${Date.now().toString(36)}`,
+                            object: 'text_completion',
+                            created: Math.floor(Date.now() / 1000),
+                            model: String(originalBody.model || ''),
+                            choices: [],
+                            usage
+                        })}\n\n`);
+                    }
+                    res.write('data: [DONE]\n\n');
+                }
+                if (!res.writableEnded) res.end();
+                return;
+            }
+
+            const aggregate = {
+                id: '',
+                object: 'text_completion',
+                created: 0,
+                model: String(originalBody.model || ''),
+                choices: [],
+                usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+            };
+            for (let index = 0; index < completionRequest.prompts.length; index += 1) {
+                const prompt = completionRequest.prompts[index];
+                req.body = buildPromptBody(prompt);
+                const bufferedRes = createBufferedResponse();
+                const proxyRes = createCompletionResponseProxy(bufferedRes, buildProxyOptions(prompt, index));
+                await runRouteHandlers(chatHandlers, req, proxyRes);
+                if (bufferedRes.statusCode >= 400 || bufferedRes.body?.error) {
+                    return res.status(bufferedRes.statusCode || 500).json(bufferedRes.body || buildOpenAIError());
+                }
+                const result = bufferedRes.body || {};
+                if (!aggregate.id) aggregate.id = result.id || `cmpl-${Date.now().toString(36)}`;
+                if (!aggregate.created) aggregate.created = result.created || Math.floor(Date.now() / 1000);
+                if (result.model) aggregate.model = result.model;
+                if (Array.isArray(result.choices)) aggregate.choices.push(...result.choices);
+                aggregate.usage = addCompletionUsage(aggregate.usage, result.usage);
+            }
+            return res.json(aggregate);
+        } finally {
+            req.body = originalBody;
+        }
     }));
 
     router.post('/chat/completions', authMiddleware, asyncHandler(async (req, res) => {
@@ -231,7 +429,15 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             stop,
             top_p,
             presence_penalty,
-            frequency_penalty
+            frequency_penalty,
+            n,
+            logprobs,
+            top_logprobs,
+            seed,
+            stream_options,
+            logit_bias,
+            user,
+            chat_template_kwargs
         } = req.body;
         const messages = normalizeChatCompletionMessages(req.body);
         const userId = req.user.id;
@@ -325,9 +531,23 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             });
         }
 
-        let upstreamMessages = messages;
+        const hasPromptStyleInput = ['prompt', 'input', 'prefix', 'suffix']
+            .some(field => req.body?.[field] !== undefined);
+        const hasChatMessages = Array.isArray(req.body?.messages) && req.body.messages.length > 0;
+        const isPromptStyleCompletion = req[CODE_COMPLETION_REQUEST] === true
+            || (hasPromptStyleInput && !hasChatMessages);
+        const directCompletionTracker = isPromptStyleCompletion && req[CODE_COMPLETION_REQUEST] !== true
+            ? createCompletionVisibilityTracker({
+                model,
+                stream: !!stream,
+                onEmptyCompletion: createEmptyCompletionLogger(req, '/v1/chat/completions')
+            })
+            : null;
+        let upstreamMessages = isPromptStyleCompletion
+            ? applyCompletionNoThinkSoftSwitch(messages, modelCfg)
+            : messages;
         try {
-            const budgetResult = fitMessagesToContextBudget(messages, modelCfg, {
+            const budgetResult = fitMessagesToContextBudget(upstreamMessages, modelCfg, {
                 maxOutputTokens: requestedMaxTokens ?? modelCfg.max_tokens ?? 2000
             });
             upstreamMessages = budgetResult.messages;
@@ -411,7 +631,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         // 3. 构建下游请求
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
 
-        const payload = {
+        let payload = {
             model: modelCfg.model_name,
             messages: upstreamMessages,
             stream: !!stream,
@@ -422,6 +642,26 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         payload.top_p = top_p ?? runtimeSampling.topP;
         payload.presence_penalty = presence_penalty ?? runtimeSampling.presencePenalty;
         payload.frequency_penalty = frequency_penalty ?? runtimeSampling.frequencyPenalty;
+        if (n !== undefined) payload.n = n;
+        if (req[CODE_COMPLETION_REQUEST] === true && logprobs !== undefined && logprobs !== null) {
+            payload.logprobs = true;
+            payload.top_logprobs = Number(logprobs);
+        } else {
+            if (logprobs !== undefined) payload.logprobs = logprobs;
+            if (top_logprobs !== undefined) payload.top_logprobs = top_logprobs;
+        }
+        if (req[CODE_COMPLETION_REQUEST] === true && req.body?.best_of !== undefined && logprobs == null) {
+            payload.logprobs = true;
+        }
+        if (seed !== undefined) payload.seed = seed;
+        if (stream_options !== undefined) payload.stream_options = stream_options;
+        if (logit_bias !== undefined) payload.logit_bias = logit_bias;
+        if (user !== undefined) payload.user = user;
+        if (chat_template_kwargs !== undefined) payload.chat_template_kwargs = chat_template_kwargs;
+        if (isPromptStyleCompletion) {
+            payload = applyCompletionThinkingControls(payload, modelCfg);
+            req[COMPLETION_HARD_THINKING_DISABLED] = payload.chat_template_kwargs?.enable_thinking === false;
+        }
         if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
             payload.max_input_tokens = modelCfg.max_input_tokens;
         }
@@ -444,9 +684,16 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 res.setHeader('Connection', 'keep-alive');
                 
                 const accumulator = createStreamAccumulator();
+                let streamFailed = false;
+                let streamPayloadError = null;
                 const parser = createSseEventParser({
                     onData(payload) {
+                        try {
+                            const json = JSON.parse(payload);
+                            if (json?.error) streamPayloadError = json;
+                        } catch (e) {}
                         accumulator.pushPayload(payload);
+                        if (directCompletionTracker) directCompletionTracker.observeStreamPayload(payload);
                     }
                 });
                 response.data.on('data', chunk => {
@@ -455,8 +702,26 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 });
 
                 response.data.on('end', () => {
+                    if (streamFailed) return;
                     parser.end();
+                    const completionProxyError = res.streamErrored ? res.streamErrorPayload : null;
+                    const payloadError = completionProxyError || streamPayloadError;
+                    if (payloadError) {
+                        streamFailed = true;
+                        const error = new Error(payloadError.error?.message || 'Upstream completion stream failed.');
+                        error.code = payloadError.error?.code || 'upstream_stream_error';
+                        recordModelFailure(modelCfg, error);
+                        recordApiCallLog(req, modelCfg, upstreamMessages, {
+                            status: 'error',
+                            errorMessage: error.message,
+                            stream: true
+                        });
+                        if (!res.writableEnded) res.end();
+                        releaseSemaphore();
+                        return;
+                    }
                     accumulator.finish();
+                    if (directCompletionTracker) directCompletionTracker.finish();
                     const totalContent = accumulator.getContent();
                     const apiUsage = accumulator.getUsage();
                     const usage = normalizeTokenUsage({
@@ -479,9 +744,16 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     releaseSemaphore();
                 });
                 response.data.on('error', err => {
+                    if (streamFailed) return;
+                    streamFailed = true;
                     logger.error({ err: err.message, model: modelCfg.name }, 'OpenAI 流式转发中断');
                     recordModelFailure(modelCfg, err);
-                    if (!res.writableEnded) res.end();
+                    recordApiCallLog(req, modelCfg, upstreamMessages, {
+                        status: 'error',
+                        errorMessage: err.message,
+                        stream: true
+                    });
+                    endStreamWithError(res, err);
                     releaseSemaphore();
                 });
                 req.on('close', () => {
@@ -489,6 +761,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     releaseSemaphore();
                 });
             } else {
+                if (directCompletionTracker) directCompletionTracker.observeResponse(response.data);
                 res.json(response.data);
                 const usage = normalizeTokenUsage({
                     inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
