@@ -167,9 +167,19 @@ async function listReportFiles(config, query = '', limit = 50) {
     return { files: results, scanned };
 }
 async function readWorkbookRows(file, sheetName, maxRows) {
-    const buffer = await fs.promises.readFile(file.target);
     const xlsx = getXlsx();
-    const workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
+    let workbook;
+    if (file.ext === 'csv') {
+        // CSV 是纯文本格式，必须先按 UTF-8 解码再解析。
+        // 直接把 Buffer 交给 xlsx 会被当作单字节编码处理，导致不带 BOM 的 UTF-8 中文表头
+        // 和内容全部乱码，并把乱码带入模型上下文。
+        const raw = await fs.promises.readFile(file.target, 'utf8');
+        const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+        workbook = xlsx.read(text, { type: 'string', cellDates: true, sheetRows: maxRows + 1 });
+    } else {
+        const buffer = await fs.promises.readFile(file.target);
+        workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
+    }
     const selectedSheet = sheetName && workbook.Sheets[sheetName] ? sheetName : workbook.SheetNames[0];
     const sheet = workbook.Sheets[selectedSheet];
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });

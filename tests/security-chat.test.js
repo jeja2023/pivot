@@ -11,3 +11,4 @@ require('./security-chat/model-forwarder');
 require('./security-chat/context-settings');
 require('./security-chat/context-thought');
 require('./security-chat/chat-no-think');
+require('./security-chat/route-orchestration');

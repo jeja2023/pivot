@@ -25,17 +25,13 @@ jobs:
       - name: Security audit policy
         run: npm run audit:policy
 
-      - name: Text integrity check
-        run: npm run check:text
-
-      - name: Syntax check
-        run: node scripts/check_syntax.js
-
-      - name: Chat asset check
-        run: node scripts/check_chat_assets.js
+      # 覆盖文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局与 E2E 脚手架检查
+      - name: Project checks
+        run: npm run check
 
       - name: Lint
         run: npm run lint
 
-      - name: Security tests
-        run: node tests/security.test.js
+      # 顺序运行全部测试套件，与本地 npm test 口径保持一致
+      - name: All test suites
+        run: npm run test:all

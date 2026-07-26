@@ -1,0 +1,297 @@
+// 聊天路由编排回归测试
+// 覆盖优化路线图「Chat orchestration tests」列出的路由级场景：额度拦截、知识库命中、
+// 长期记忆命中、流式中断和上下文裁剪，确保对话路由继续只做 SSE 传输层。
+const {
+    assert,
+    db,
+    longTermMemory,
+    test
+} = require('../security-helpers');
+const {
+    createChatFixture,
+    postChat,
+    readSessionMessages,
+    startChatRouteServer,
+    startFakeUpstream
+} = require('./chat-route-harness');
+
+// 上下文窗口取 4000 时输入预算为 4000 - 2048（保留输出）- 256（安全边界）= 1696 tokens。
+const NARROW_CONTEXT_WINDOW_TOKENS = 4000;
+// 中文按 2 tokens/字估算，200 字约 400 tokens，多条历史即可超出上述输入预算。
+const LONG_HISTORY_TEXT = '这是一段用于占满模型上下文窗口的历史会话内容'.repeat(9);
+
+test('聊天路由在模型今日额度用尽时拦截请求且不落库用户消息', async () => {
+    const fixture = createChatFixture({
+        prefix: 'chat_quota',
+        modelColumns: { daily_token_limit: 50 }
+    });
+    // 预置一条今日已计费消息，使 getModelDailyUsage 汇总值超过额度上限。
+    db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
+        VALUES (?, ?, 'assistant', ?, 120, ?, datetime('now', '+8 hours'))
+    `).run(fixture.sessionId, fixture.userId, '历史回答', fixture.modelId);
+
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '今天的额度还够用吗',
+            modelId: fixture.modelId
+        });
+
+        assert.equal(result.errorEvent?.code, 'QUOTA_EXCEEDED');
+        assert.match(result.errorEvent.error, /额度已用完/);
+        assert.ok(routeServer.auditRecords.some(item => item.action === '模型额度拦截'));
+
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 0, '额度拦截发生在用户消息入库之前');
+        assert.equal(messages.length, 1);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由拒绝不属于当前用户的会话', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_forbidden', createSession: false });
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '你好',
+            modelId: fixture.modelId
+        });
+
+        assert.equal(result.errorEvent?.code, 'FORBIDDEN');
+        assert.equal(readSessionMessages(fixture).length, 0);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在模型不可用时返回模型缺失错误', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_model_missing' });
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '你好',
+            modelId: fixture.modelId + 9_000_000
+        });
+
+        assert.equal(result.errorEvent?.code, 'MODEL_NOT_FOUND');
+        assert.equal(readSessionMessages(fixture).length, 0);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在知识库命中时下发引用来源摘要', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['已依据知识库回答'] });
+    const fixture = createChatFixture({ prefix: 'chat_rag_hit', upstreamUrl: upstream.url });
+    const ragContext = [
+        '[引用 1 | 来源: 差旅报销制度.pdf] 出差住宿标准按城市分级执行。',
+        '[引用 2 | 来源: 差旅报销制度.pdf] 报销单据需在返岗后十个工作日内提交。',
+        '[引用 3 | 来源: 财务流程手册.docx] 超标住宿需部门负责人审批。'
+    ].join('\n');
+    const routeServer = await startChatRouteServer({
+        fixture,
+        retrieveContext: async () => ragContext,
+        isRagEnabled: () => true
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '出差住宿怎么报销',
+            modelId: fixture.modelId
+        });
+
+        const ragEvent = result.findByType('rag');
+        assert.ok(ragEvent, '应下发知识库检索事件');
+        assert.equal(ragEvent.status, 'hit');
+        assert.equal(ragEvent.citationCount, 3);
+        assert.equal(ragEvent.sourceCount, 2);
+        assert.deepEqual(ragEvent.sources, ['差旅报销制度.pdf', '财务流程手册.docx']);
+        assert.equal(ragEvent.scoped, false);
+        assert.match(ragEvent.message, /2 份可引用文档/);
+
+        const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant');
+        assert.ok(assistant, '命中知识库后仍应正常生成并落库助手消息');
+        assert.match(assistant.content, /已依据知识库回答/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在知识库未命中时提示按普通对话继续', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['按普通对话回答'] });
+    const fixture = createChatFixture({ prefix: 'chat_rag_empty', upstreamUrl: upstream.url });
+    const routeServer = await startChatRouteServer({
+        fixture,
+        retrieveContext: async () => null,
+        isRagEnabled: () => true
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '公司团建预算是多少',
+            modelId: fixture.modelId
+        });
+
+        const ragEvent = result.findByType('rag');
+        assert.ok(ragEvent);
+        assert.equal(ragEvent.status, 'empty');
+        assert.match(ragEvent.message, /未检索到足够相关内容/);
+
+        const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant');
+        assert.ok(assistant, '未命中知识库时应按普通对话完成生成');
+        assert.match(assistant.content, /按普通对话回答/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在长期记忆命中时下发记忆检索事件', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['已结合长期记忆回答'] });
+    const fixture = createChatFixture({ prefix: 'chat_memory_hit', upstreamUrl: upstream.url });
+    // 跳过向量生成，命中路径回退为关键词打分，避免测试依赖外部 Embedding 服务。
+    const saved = await longTermMemory.upsertMemory(fixture.userId, {
+        type: longTermMemory.MEMORY_TYPES.fact,
+        content: '蓝鲸项目的发布节奏是每两周一次，由质量组确认后发布',
+        salience: 0.9,
+        confidence: 0.9
+    }, { skipEmbedding: true });
+    assert.equal(saved.inserted, true, '记忆需成功写入才能验证命中路径');
+
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '蓝鲸项目的发布节奏是怎么安排的',
+            modelId: fixture.modelId
+        });
+
+        const memoryEvent = result.findByType('memory');
+        assert.ok(memoryEvent, '应下发长期记忆检索事件');
+        assert.equal(memoryEvent.status, 'hit');
+        assert.ok(memoryEvent.memoryCount >= 1);
+        assert.match(memoryEvent.message, /相关长期记忆/);
+
+        const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant');
+        assert.ok(assistant, '命中长期记忆后仍应正常完成生成');
+        assert.match(assistant.content, /已结合长期记忆回答/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在历史超出模型窗口时自动裁剪并提示', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['裁剪后仍可回答'] });
+    const fixture = createChatFixture({
+        prefix: 'chat_trim',
+        upstreamUrl: upstream.url,
+        modelColumns: { context_window_tokens: NARROW_CONTEXT_WINDOW_TOKENS }
+    });
+    const insertHistory = db.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `);
+    for (let round = 0; round < 4; round += 1) {
+        insertHistory.run(fixture.sessionId, fixture.userId, 'user', `${LONG_HISTORY_TEXT}${round}`, 400, fixture.modelId);
+        insertHistory.run(fixture.sessionId, fixture.userId, 'assistant', `${LONG_HISTORY_TEXT}${round}`, 400, fixture.modelId);
+    }
+
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '请总结上面的讨论',
+            modelId: fixture.modelId
+        });
+
+        const budgetEvent = result.findByType('context_budget');
+        assert.ok(budgetEvent, '超出窗口时应下发上下文裁剪事件');
+        assert.equal(budgetEvent.status, 'trimmed');
+        assert.equal(budgetEvent.contextBudget.adjusted, true);
+        assert.ok(budgetEvent.contextBudget.droppedMessages > 0, '应丢弃较早历史消息');
+        assert.ok(
+            budgetEvent.contextBudget.inputTokensAfter <= budgetEvent.contextBudget.budget.inputBudget,
+            '裁剪后输入 token 必须落回预算内'
+        );
+        const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant' && row.content.includes('裁剪后仍可回答'));
+        assert.ok(assistant, '裁剪后请求仍应完成生成');
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在当前输入超出窗口时于预检阶段拦截', async () => {
+    const fixture = createChatFixture({
+        prefix: 'chat_too_long',
+        modelColumns: { context_window_tokens: NARROW_CONTEXT_WINDOW_TOKENS }
+    });
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '这是一条远超模型上下文窗口的超长提问内容'.repeat(45),
+            modelId: fixture.modelId
+        });
+
+        assert.equal(result.errorEvent?.code, 'CONTEXT_LENGTH_EXCEEDED');
+        assert.match(result.errorEvent.error, /超过当前模型/);
+        assert.equal(readSessionMessages(fixture).length, 0, '预检拦截不应写入任何消息');
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在上游流式中断时持久化助手错误消息', async () => {
+    // 上游先下发部分 SSE 再断开底层连接，触发流传输错误分支。
+    const upstream = await startFakeUpstream({
+        handler: (_req, res) => {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '回答开头' } }] })}\n\n`);
+            setTimeout(() => res.socket?.destroy(), 30);
+        }
+    });
+    const fixture = createChatFixture({ prefix: 'chat_stream_break', upstreamUrl: upstream.url });
+    const routeServer = await startChatRouteServer({ fixture });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '讲一段较长的说明',
+            modelId: fixture.modelId
+        });
+
+        const errorEvent = result.findByType('assistant_error');
+        assert.ok(errorEvent, '流中断应下发可持久化的助手错误事件');
+        assert.match(errorEvent.error, /流传输中断/);
+
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1, '用户消息应保留');
+        const assistant = messages.find(row => row.role === 'assistant');
+        assert.ok(assistant);
+        assert.match(assistant.content, /生成失败/);
+        assert.match(assistant.content, /流传输中断/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
