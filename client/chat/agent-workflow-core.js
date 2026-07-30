@@ -119,7 +119,9 @@ function updateAgentDagNodeDrawer(node) {
     drawer.classList.toggle('hidden', !isOpen);
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     if (title) title.textContent = node?.title || node?.id || '节点配置';
-    if (subtitle) subtitle.textContent = node ? `${node.id}${node.tool ? ` · ${node.tool}` : ''}` : '';
+    if (subtitle) subtitle.textContent = node
+        ? `${node.id}${node.tool ? ` · ${node.tool}` : ''}${node.isPrimaryLlm ? ' · 主大模型' : ''}`
+        : '';
 }
 
 function closeAgentDagNodeDrawer() {

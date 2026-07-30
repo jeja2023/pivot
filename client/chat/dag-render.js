@@ -40,8 +40,10 @@ const renderEdges = () => {
             ctx.nodesLayer.replaceChildren();
             const tools = ctx.currentTools();
             ctx.spec.nodes.forEach(node => {
+                const llmNode = isLlmNode(node);
+                const primaryLlmNode = llmNode && ctx.spec.primaryLlmNodeId === node.id;
                 const group = makeSvgEl('g', {
-                    class: `pivot-dag-node ${ctx.selectedId === node.id ? 'is-selected' : ''} ${node.tool ? '' : 'has-warning'}`,
+                    class: `pivot-dag-node ${ctx.selectedId === node.id ? 'is-selected' : ''} ${node.tool ? '' : 'has-warning'} ${llmNode ? 'is-llm' : ''} ${primaryLlmNode ? 'is-primary-llm' : ''}`,
                     transform: `translate(${node._x}, ${node._y})`,
                     'data-pivot-dag-id': node.id
                 });
@@ -52,6 +54,16 @@ const renderEdges = () => {
                     rx: 8,
                     ry: 8
                 }));
+                if (primaryLlmNode) {
+                    const primaryMark = makeSvgEl('g', { class: 'pivot-dag-primary-mark' });
+                    const markTitle = makeSvgEl('title');
+                    markTitle.textContent = '主大模型节点';
+                    primaryMark.appendChild(markTitle);
+                    const star = makeSvgEl('text', { x: NODE_WIDTH - 17, y: 18 });
+                    star.textContent = '★';
+                    primaryMark.appendChild(star);
+                    group.appendChild(primaryMark);
+                }
                 const title = makeSvgEl('text', { class: 'pivot-dag-node-title', x: 10, y: 18 });
                 title.textContent = node.title || node.id;
                 group.appendChild(title);

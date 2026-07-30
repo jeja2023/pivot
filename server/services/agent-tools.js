@@ -52,6 +52,37 @@ function getBuiltInToolDefinitions(user) {
             }, ['prompt', 'model'])
         },
         {
+            name: 'agent.delegate',
+            title: '委派智能体',
+            description: '以隔离上下文调用一个具名专家智能体，并将结果封装为可追踪的 Handoff 交给下游 Supervisor。',
+            input_schema: asJsonSchema({
+                task: { type: 'string', description: '委派给专家智能体的明确任务，支持工作流模板变量。' },
+                context: { type: 'string', description: '上游事实、证据或其他智能体的交接内容。' },
+                agentName: { type: 'string', description: '专家智能体名称。' },
+                role: { type: 'string', enum: ['researcher', 'analyst', 'reviewer', 'writer', 'custom'], default: 'analyst' },
+                instructions: { type: 'string', description: '角色边界、判断标准和禁止事项。' },
+                model: { type: 'string', description: '模型 ID 或 model_name。' },
+                temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.2 },
+                maxTokens: { type: 'integer', minimum: 1, maximum: 8000, default: 1200 },
+                responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' }
+            }, ['task', 'agentName', 'role', 'model'])
+        },
+        {
+            name: 'agent.handoff',
+            title: '智能体交接',
+            description: '把上游结论、证据、风险和待决问题整理为结构化 Handoff，供另一个智能体或 Supervisor 接收。',
+            input_schema: asJsonSchema({
+                fromAgent: { type: 'string' },
+                toAgent: { type: 'string', default: 'Supervisor' },
+                summary: { type: 'string' },
+                findings: { type: 'array', items: { type: 'string' } },
+                evidence: { type: 'array', items: { type: 'string' } },
+                risks: { type: 'array', items: { type: 'string' } },
+                openQuestions: { type: 'array', items: { type: 'string' } },
+                confidence: { type: 'number', minimum: 0, maximum: 1, default: 0.7 }
+            }, ['fromAgent', 'summary'])
+        },
+        {
             name: 'rag.search',
             title: '知识库检索',
             description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。',
@@ -207,9 +238,104 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
     };
 }
 
+const DELEGATE_ROLE_LABELS = {
+    researcher: '研究员',
+    analyst: '分析员',
+    reviewer: '审阅员',
+    writer: '撰写员',
+    custom: '领域专家'
+};
+
+async function executeAgentDelegate(input = {}, user, context = {}) {
+    const task = String(input.task || '').trim();
+    const agentName = String(input.agentName || input.agent_name || '').trim().slice(0, 80);
+    const role = Object.hasOwn(DELEGATE_ROLE_LABELS, input.role) ? input.role : 'custom';
+    if (!task) throw new Error('委派智能体需要填写明确任务。');
+    if (!agentName) throw new Error('委派智能体需要填写名称。');
+    const modelCfg = chooseAgentLlmModel(input, user, context);
+    if (!modelCfg) throw new Error('没有可用于委派智能体的模型，或当前用户无权访问指定模型。');
+    const responseFormat = ['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
+        ? String(input.responseFormat || input.response_format || 'markdown')
+        : 'markdown';
+    const roleLabel = DELEGATE_ROLE_LABELS[role];
+    const instructions = String(input.instructions || '').trim();
+    const contextText = clampText(input.context || '', 20000);
+    const formatGuide = responseFormat === 'json'
+        ? '只输出合法 JSON，不要使用 Markdown 代码块。'
+        : responseFormat === 'text'
+            ? '输出简洁纯文本。'
+            : '输出结构清晰的 Markdown。';
+    const messages = [
+        {
+            role: 'system',
+            content: [
+                `你是 Pivot 多智能体团队中的“${agentName}”，职责是${roleLabel}。`,
+                '你只处理当前委派任务，不擅自扩展目标；明确区分事实、推断和未知信息。',
+                instructions,
+                formatGuide
+            ].filter(Boolean).join('\n')
+        },
+        {
+            role: 'user',
+            content: [
+                `委派任务：\n${task}`,
+                contextText ? `可用上下文：\n${contextText}` : '',
+                '请给出可直接交给 Supervisor 审核的结果，并指出关键依据、风险和仍待确认的问题。'
+            ].filter(Boolean).join('\n\n')
+        }
+    ];
+    const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
+    const maxTokens = parsePositiveInt(input.maxTokens ?? input.max_tokens, 1200, 8000);
+    const content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
+    recordAgentModelUsage(user, modelCfg, messages, content, 'agent_delegate', context.run?.id || context.runId || '');
+    return {
+        content,
+        text: content,
+        agent: { name: agentName, role, roleLabel, modelId: modelCfg.id, modelName: modelCfg.name },
+        handoff: {
+            fromAgent: agentName,
+            toAgent: 'Supervisor',
+            summary: content,
+            status: 'ready',
+            createdAt: new Date().toISOString()
+        },
+        responseFormat
+    };
+}
+
+function normalizeHandoffList(value, limit = 30) {
+    const source = Array.isArray(value) ? value : (value ? [value] : []);
+    return source.map(item => clampText(item, 1200).trim()).filter(Boolean).slice(0, limit);
+}
+
+function executeAgentHandoff(input = {}) {
+    const fromAgent = String(input.fromAgent || input.from_agent || '').trim().slice(0, 80);
+    const summary = clampText(input.summary || '', 20000).trim();
+    if (!fromAgent || !summary) throw new Error('智能体交接需要来源智能体和交接摘要。');
+    return {
+        type: 'agent_handoff',
+        fromAgent,
+        toAgent: String(input.toAgent || input.to_agent || 'Supervisor').trim().slice(0, 80) || 'Supervisor',
+        summary,
+        findings: normalizeHandoffList(input.findings),
+        evidence: normalizeHandoffList(input.evidence),
+        risks: normalizeHandoffList(input.risks),
+        openQuestions: normalizeHandoffList(input.openQuestions || input.open_questions),
+        confidence: Math.max(0, Math.min(Number(input.confidence ?? 0.7), 1)),
+        status: 'ready',
+        createdAt: new Date().toISOString()
+    };
+}
+
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
+    }
+    if (name === 'agent.delegate') {
+        return executeAgentDelegate(input, user, context);
+    }
+    if (name === 'agent.handoff') {
+        return executeAgentHandoff(input);
     }
 
     if (name === 'rag.search') {
@@ -308,6 +434,8 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
 
 module.exports = {
     clampText,
+    executeAgentDelegate,
+    executeAgentHandoff,
     executeBuiltInTool,
     getBuiltInToolDefinitions
 };

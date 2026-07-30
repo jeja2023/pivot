@@ -19,7 +19,10 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
         return { valid: false, error: e };
     }
     const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
-    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm') || null;
+    const primaryLlmNodeId = String(spec?.primaryLlmNodeId || spec?.primary_llm_node_id || '').trim();
+    const llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
+        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm')
+        || null;
     const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
     const maxSteps = Number.parseInt(input.maxSteps ?? input.max_steps ?? 20, 10);
     return {

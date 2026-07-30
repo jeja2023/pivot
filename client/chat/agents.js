@@ -58,6 +58,8 @@ const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr
     ? window.PivotSafeHtml.escapeAttr(value)
     : agentEscape(value).replace(/"/g, '&quot;');
 
+const agentEvaluationsApi = () => window.Pivot.moduleApi('agent.evaluations');
+
 function agentLooksLikeCorruptTitle(value) {
     const text = String(value || '').trim();
     if (!text) return true;
@@ -93,7 +95,8 @@ window.loadAgentWorkbench = async function() {
             loadAgentTemplates(),
             loadAgentSchedules(),
             loadAgentNotifications(),
-            loadAgentArtifacts()
+            loadAgentArtifacts(),
+            agentEvaluationsApi().loadSuites?.()
         ]);
     } catch (e) {
         showToast(e.message, 'error');
@@ -174,7 +177,8 @@ window.bindAgentEnterpriseControls = function() {
 
 const agentConfigSectionTitles = {
     templates: '模板与计划',
-    results: '能力与结果'
+    results: '能力与结果',
+    evaluations: '质量评测'
 };
 
 function closeAgentConfigModal() {
@@ -205,6 +209,11 @@ function openAgentConfigSection(sectionKey) {
     section.open = true;
     body.appendChild(section);
     modal.classList.remove('hidden');
+    if (sectionKey === 'evaluations') {
+        const evaluations = agentEvaluationsApi();
+        evaluations.bind?.();
+        evaluations.loadSuites?.().catch(error => showToast(error.message || '评测中心加载失败', 'error'));
+    }
     if (sectionKey === 'advanced') {
         mountAgentDagEditor();
         setTimeout(() => window.refreshAgentDagEditor?.(), 50);

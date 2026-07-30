@@ -6,6 +6,7 @@
 @import url("./agent/agent-run-detail.css");
 @import url("./agent/agent-run-steps.css");
 @import url("./agent/agent-run-capabilities.css");
+@import url("./agent/agent-evaluations.css");
 @import url("./agent/agent-run-dag-artifacts.css");
 @import url("./agent/agent-dag-toolbar.css");
 @import url("./agent/agent-dag-workspace-shell.css");

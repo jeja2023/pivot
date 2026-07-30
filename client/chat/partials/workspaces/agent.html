@@ -116,6 +116,7 @@
                         <button id="agent-open-dag-btn" class="btn-secondary" type="button">工作流</button>
                         <button class="btn-secondary" type="button" data-agent-config-open="templates">模板与计划</button>
                         <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
+                        <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
                     </div>
                     <div id="agent-config-section-store" class="agent-config-section-store">
                     <details class="agent-collapse-section" data-agent-config-section="templates">
@@ -201,6 +202,29 @@
                                     <span>已保存的自由任务输出</span>
                                 </div>
                                 <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
+                            </div>
+                        </div>
+                    </details>
+                    <details class="agent-collapse-section agent-collapse-evaluations" data-agent-config-section="evaluations">
+                        <summary>
+                            <span>质量评测</span>
+                            <small>评测集、回归结果、基线变化</small>
+                        </summary>
+                        <div class="agent-collapse-body agent-eval-center">
+                            <div class="agent-eval-toolbar">
+                                <div>
+                                    <strong>智能体质量中心</strong>
+                                    <span id="agent-eval-center-status">尚未运行评测</span>
+                                </div>
+                                <div class="agent-eval-toolbar-actions">
+                                    <button id="agent-eval-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                                    <button id="agent-eval-create-btn" class="btn-primary" type="button">新建评测集</button>
+                                </div>
+                            </div>
+                            <div id="agent-eval-overview" class="agent-eval-overview"></div>
+                            <div class="agent-eval-layout">
+                                <div id="agent-eval-suite-list" class="agent-eval-suite-list"></div>
+                                <div id="agent-eval-suite-detail" class="agent-eval-suite-detail"></div>
                             </div>
                         </div>
                     </details>

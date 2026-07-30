@@ -172,7 +172,11 @@ function agentSummarizeInput(input) {
 
 function agentReadableCell(value) {
     if (value === undefined || value === null || value === '') return '-';
-    if (typeof value === 'object') return agentShortText(JSON.stringify(value), 80);
+    if (typeof value === 'object') {
+        if (typeof agentResultObjectSummary === 'function') return agentResultObjectSummary(value, 2);
+        if (Array.isArray(value)) return agentShortText(value.map(item => String(item ?? '')).join('、'), 80);
+        return Object.entries(value).slice(0, 2).map(([key, item]) => `${key}：${String(item ?? '-')}`).join(' · ') || '-';
+    }
     return agentShortText(value, 80);
 }
 

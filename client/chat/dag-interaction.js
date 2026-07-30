@@ -104,13 +104,6 @@ function createDagInteractionController(ctx) {
                 if (targetId && targetId !== connecting.fromId) {
                     const targetNode = ctx.spec.nodes.find(n => n.id === targetId);
                     if (targetNode && !targetNode.dependsOn.includes(connecting.fromId)) {
-                        if (!ctx.isForwardDependency(connecting.fromId, targetId)) {
-                            window.showToast?.('只能从左侧上游节点连接到右侧下游节点', 'error');
-                            connecting.ghost.remove();
-                            connecting = null;
-                            ctx.render();
-                            return;
-                        }
                         if (ctx.wouldCreateCycle(connecting.fromId, targetId)) {
                             window.showToast?.('不能添加循环依赖', 'error');
                             connecting.ghost.remove();
@@ -130,6 +123,7 @@ function createDagInteractionController(ctx) {
             }
             if (dragging) {
                 dragging = null;
+                ctx.render();
                 ctx.flushOut();
             }
             if (panning) {

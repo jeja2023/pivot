@@ -21,7 +21,9 @@ function inferDagRunGoal({ goal, title, workflowId, runMetadata = {}, dagSpec = 
 
 function inferDagLlmRuntimeSettings(dagSpec = {}) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    const primaryLlmNodeId = String(dagSpec?.primaryLlmNodeId || dagSpec?.primary_llm_node_id || '').trim();
+    const llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
+        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
     const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
     const maxSteps = Number.parseInt(input.maxSteps ?? input.max_steps, 10);
     return {

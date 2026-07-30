@@ -360,7 +360,8 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/agent-workflows.js',
         '/chat/agent-templates.js',
         '/chat/agent-schedules.js',
-        '/chat/agent-artifacts.js'
+        '/chat/agent-artifacts.js',
+        '/chat/agent-evaluations.js'
     ],
     knowledge: [
         '/chat/rag-graph-layout.js',

@@ -60,6 +60,97 @@ function ensureAgentRunDetailModalVisible() {
     return modal;
 }
 
+function agentTraceTypeLabel(type = '') {
+    return ({
+        model: '模型', tool: '工具', plan: '规划', dag: '工作流', dag_node: '节点',
+        agent: '智能体', handoff: '交接', routing: '路由', control: '控制', note: '记录'
+    })[String(type || '').toLowerCase()] || '步骤';
+}
+
+function agentTraceDuration(value) {
+    const ms = Math.max(Number(value) || 0, 0);
+    if (ms >= 60000) return `${(ms / 60000).toFixed(ms >= 600000 ? 0 : 1)} 分钟`;
+    if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} 秒`;
+    return `${Math.round(ms)} 毫秒`;
+}
+
+function agentTraceTimestamp(value) {
+    const text = String(value || '').trim();
+    if (!text) return 0;
+    const normalized = /[zZ]|[+-]\d\d:\d\d$/.test(text) ? text : `${text.replace(' ', 'T')}+08:00`;
+    const parsed = Date.parse(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function agentTraceReadableDetail(span = {}) {
+    const items = [];
+    if (span.details) items.push(['运行信息', span.details]);
+    if (span.input) items.push(['输入摘要', span.input]);
+    if (span.output) items.push(['输出摘要', span.output]);
+    if (!items.length && !span.error_message) return '';
+    return `
+        <details class="agent-trace-detail">
+            <summary>查看上下文</summary>
+            <div class="agent-trace-detail-body">
+                ${span.error_message ? `<div class="error-detail">${agentEscape(span.error_message)}</div>` : ''}
+                ${items.map(([label, value]) => `
+                    <section>
+                        <h5>${agentEscape(label)}</h5>
+                        ${typeof agentResultReadableMarkup === 'function'
+                            ? agentResultReadableMarkup(value, { maxRows: 4, maxItems: 5 })
+                            : `<p>${agentEscape(agentShortText(JSON.stringify(value), 600))}</p>`}
+                    </section>
+                `).join('')}
+            </div>
+        </details>
+    `;
+}
+
+function renderAgentTrace(traceData = {}, runStatus = '') {
+    const spans = Array.isArray(traceData?.spans) ? traceData.spans : [];
+    if (!spans.length) return '';
+    const summary = traceData.summary || {};
+    const starts = spans.map(span => agentTraceTimestamp(span.started_at)).filter(Boolean);
+    const traceStart = agentTraceTimestamp(traceData.trace?.started_at) || (starts.length ? Math.min(...starts) : Date.now());
+    const spanEnd = Math.max(traceStart, ...spans.map(span => agentTraceTimestamp(span.completed_at) || (agentTraceTimestamp(span.started_at) + Number(span.duration_ms || 0))));
+    const longestSpanMs = Math.max(0, ...spans.map(span => Number(span.duration_ms || 0)));
+    const totalMs = Math.max(Number(summary.totalDurationMs || 0), spanEnd - traceStart, longestSpanMs, 1);
+    const expanded = ['error', 'approval_required'].includes(String(runStatus || '')) ? ' open' : '';
+    return `
+        <details class="agent-trace-panel"${expanded}>
+            <summary class="agent-trace-head">
+                <span><strong>运行追踪</strong><em>${spans.length} 个环节</em></span>
+                <span>
+                    <em>总耗时 ${agentEscape(agentTraceDuration(totalMs))}</em>
+                    ${Number(summary.errorCount || 0) ? `<em class="is-error">${Number(summary.errorCount)} 个异常</em>` : '<em class="is-success">链路正常</em>'}
+                </span>
+            </summary>
+            <div class="agent-trace-list">
+                ${spans.map(span => {
+                    const start = agentTraceTimestamp(span.started_at) || traceStart;
+                    const duration = Math.max(Number(span.duration_ms || 0), 12);
+                    const left = Math.max(0, Math.min(((start - traceStart) / totalMs) * 100, 96));
+                    const width = Math.max(2, Math.min((duration / totalMs) * 100, 100 - left));
+                    const status = span.status === 'error' ? 'error' : (span.status === 'running' ? 'running' : 'completed');
+                    return `
+                        <article class="agent-trace-item ${status}">
+                            <div class="agent-trace-item-meta">
+                                <span class="agent-trace-type">${agentEscape(agentTraceTypeLabel(span.span_type))}</span>
+                                <strong>${agentEscape(span.name || '运行步骤')}</strong>
+                                <em>${agentEscape(agentTraceDuration(span.duration_ms))}</em>
+                            </div>
+                            <div class="agent-trace-track" aria-label="${agentEscape(span.name || '运行步骤')}，耗时 ${agentEscape(agentTraceDuration(span.duration_ms))}">
+                                <span style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></span>
+                            </div>
+                            ${agentTraceReadableDetail(span)}
+                        </article>
+                    `;
+                }).join('')}
+            </div>
+        </details>
+    `;
+}
+
 function closeAgentRunDetailModal() {
     const modal = document.getElementById('agent-run-detail-modal');
     const detail = document.getElementById('agent-run-detail');
@@ -98,6 +189,8 @@ window.openAgentRun = async function(runId, options = {}) {
     const steps = data.steps || [];
     const dagNodes = agentSortDagNodesForDisplay(data.dagNodes || []);
     const progress = data.progress || {};
+    const trace = data.trace || {};
+    const checkpoints = data.checkpoints || {};
     const canCancel = isAgentRunActive(run.status);
     const canRerun = !isPreview && !isAgentRunActive(run.status);
     const canApprove = !isPreview && run.status === 'approval_required';
@@ -120,6 +213,7 @@ window.openAgentRun = async function(runId, options = {}) {
                 <span>${agentEscape(progressLabel)}</span>
                 <span>工具 ${Number(progress.toolCount || 0)}</span>
                 <span>错误 ${Number(progress.errorCount || 0)}</span>
+                <span>检查点 ${Number(checkpoints.total || 0)}</span>
                 <span>耗时 ${Number(progress.totalDurationMs || 0)} 毫秒</span>
                 <span>${agentEscape(agentRunModeLabel(run.run_mode))}</span>
                 <span>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</span>
@@ -127,14 +221,16 @@ window.openAgentRun = async function(runId, options = {}) {
                 ${canCancel ? `<button class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止</button>` : ''}
                 ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
-                ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">断点续跑</button>` : ''}
+                ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}" title="${Number(checkpoints.total || 0) ? `从最近的 ${Number(checkpoints.total)} 个持久化检查点恢复上下文` : '当前任务没有可用检查点，将按历史错误上下文续跑'}">${Number(checkpoints.total || 0) ? '从检查点续跑' : '断点续跑'}</button>` : ''}
                 ${canCreateWorkflowDraft ? `<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">生成工作流草稿</button>` : ''}
                 ${!isPreview && (run.final_answer || run.error_message) ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
+                ${!isPreview && !isAgentRunActive(run.status) ? `<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>` : ''}
                 ${!isPreview ? `<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>` : ''}
             </div>
         </div>
-        ${run.final_answer ? `<div class="agent-final">${renderMarkdown(normalizeAgentMarkdown(run.final_answer))}</div>` : ''}
+        ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
+        ${renderAgentTrace(trace, run.status)}
         ${visualOutputs}
         ${showDagNodeDetails ? `
             <div class="agent-dag-list">
@@ -164,6 +260,9 @@ window.openAgentRun = async function(runId, options = {}) {
         btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });
     detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.saveAgentArtifact(run.id));
+    detail.querySelector('[data-agent-add-evaluation]')?.addEventListener('click', () => {
+        window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
+    });
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
     window.renderPivotCharts?.(detail);
     return run;

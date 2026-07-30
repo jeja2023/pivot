@@ -207,6 +207,81 @@ test('agent step details render structured tool output as readable summaries', (
     assert.match(llmHtml, /responseFormat/);
 });
 
+test('agent result renderer turns JSON payloads into readable UI', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const payload = JSON.stringify({
+        summary: '本次检查已完成，发现两个需要跟进的事项。',
+        status: 'completed',
+        metrics: { checked: 12, warnings: 2 },
+        recommendations: ['复核异常记录', '补齐负责人'],
+        followUp: '{"owner":"数据组","due":"本周五"}'
+    });
+    const html = sandbox.renderAgentFinalAnswer(payload);
+    const readableHtml = html.slice(0, html.indexOf('agent-result-raw'));
+
+    assert.match(readableHtml, /任务结果/);
+    assert.match(readableHtml, /本次检查已完成/);
+    assert.match(readableHtml, /关键指标/);
+    assert.match(readableHtml, /建议/);
+    assert.match(readableHtml, /复核异常记录/);
+    assert.match(readableHtml, /状态/);
+    assert.match(readableHtml, /已完成/);
+    assert.match(readableHtml, /Follow Up/);
+    assert.match(readableHtml, /数据组/);
+    assert.doesNotMatch(readableHtml, /&quot;summary&quot;|\{"summary"/);
+    assert.match(html, /<summary>查看原始数据<\/summary>/);
+});
+
+test('generic agent tool and workflow outputs do not expose JSON as primary content', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const genericOutput = {
+        status: 'completed',
+        files: [
+            { name: '月报.xlsx', path: 'reports/monthly.xlsx', size: 2048 },
+            { name: '摘要.md', path: 'reports/summary.md', size: 512 }
+        ]
+    };
+    const stepHtml = sandbox.agentStepMarkup({
+        step_index: 1,
+        status: 'completed',
+        type: 'tool',
+        tool_name: 'reports.list',
+        duration_ms: 8,
+        output: genericOutput
+    });
+    const stepReadableHtml = stepHtml.slice(0, stepHtml.indexOf('agent-step-raw'));
+    assert.match(stepReadableHtml, /agent-result-table/);
+    assert.match(stepReadableHtml, /月报\.xlsx/);
+    assert.match(stepReadableHtml, /文件/);
+    assert.doesNotMatch(stepReadableHtml, /&quot;files&quot;|\{"status"/);
+
+    const nodeHtml = sandbox.agentDagNodeMarkup({
+        node_key: 'summary',
+        title: '结构化总结',
+        tool_name: 'agent.llm',
+        status: 'completed',
+        depends_on: [],
+        condition: 'success',
+        attempt_count: 1,
+        duration_ms: 20,
+        output: {
+            content: '{"summary":"流程执行完成","findings":["数据已同步","校验已通过"]}',
+            responseFormat: 'json'
+        }
+    });
+    const nodeReadableHtml = nodeHtml.slice(0, nodeHtml.indexOf('<summary>节点输出</summary>'));
+    assert.match(nodeReadableHtml, /流程执行完成/);
+    assert.match(nodeReadableHtml, /发现/);
+    assert.match(nodeReadableHtml, /数据已同步/);
+    assert.doesNotMatch(nodeReadableHtml, /is-json|&quot;summary&quot;|\{"summary"/);
+});
+
+test('agent workflow node metadata remains readable on mobile', () => {
+    const css = readAgentCssBundle();
+    assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.agent-dag-node-meta\s*\{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+    assert.match(css, /\.agent-dag-node-meta span:first-child,[\s\S]*\.agent-dag-node-meta span:nth-child\(4\)[\s\S]*grid-column: 1 \/ -1;/);
+});
+
 test('agent DAG node details render LLM output as readable content', () => {
     const sandbox = createAgentWorkbenchSandbox();
     const tableHtml = sandbox.agentDagNodeMarkup({
@@ -308,7 +383,8 @@ test('agent DAG inspector uses modal entry points for parameter editing', () => 
     assert.match(source, />上游节点</);
     assert.match(source, />上游成功后执行</);
     assert.match(source, /这是起始节点，没有可选上游节点/);
-    assert.match(source, /只能从左侧上游节点连接到右侧下游节点/);
+    assert.doesNotMatch(source, /只能从左侧上游节点连接到右侧下游节点/);
+    assert.match(source, /不能添加循环依赖/);
     assert.doesNotMatch(source, />依赖节点</);
     assert.ok(
         source.indexOf('<div class="pivot-dag-inspector-depends">') < source.indexOf('<div class="pivot-dag-input-overview">'),
@@ -450,7 +526,8 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(dagPartial, /id="agent-dag-console-preview-run-btn"/);
     assert.doesNotMatch(dagPartial, /id="agent-dag-console-run-published-btn"/);
     assert.doesNotMatch(dagPartial, /id="agent-dag-console-publish-run-btn"/);
-    assert.match(editor, /makeToolbarDropdown\('节点'/);
+    assert.match(editor, /makeToolbarGroup\(\[/);
+    assert.match(editor, /makeButton\('大模型'[\s\S]*?variant: 'primary'/);
     assert.match(editor, /makeToolbarDropdown\('发布'/);
     assert.match(editor, /makeToolbarDropdown\('运行'/);
     assert.match(editor, /const DEFAULT_VIEW_SCALE = 0\.72/);
@@ -482,7 +559,8 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(agentPartial, /<option value="dag">工作流<\/option>/);
     assert.match(source, /function buildAgentWorkflowWorkbenchRunPayload/);
     assert.match(source, /function getAgentWorkflowRunSettings/);
-    assert.match(source, /const llmNode = nodes\.find\(node => String\(node\?\.tool/);
+    assert.match(source, /const primaryLlmNodeId = String\(spec\?\.primaryLlmNodeId/);
+    assert.match(source, /node\.id === primaryLlmNodeId[\s\S]*?agent\.llm/);
     assert.match(source, /modelId: runSettings\.modelId/);
     assert.match(source, /maxSteps: runSettings\.maxSteps/);
     assert.match(source, /async function ensureAgentWorkflowNameForSave/);
@@ -594,7 +672,9 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     assert.match(editor, /patterns: \['agent\.llm'\]/);
     assert.match(editor, /prompt: selectedNode/);
     assert.match(editor, /id: 'llm_summary'[\s\S]*?dependsOn: \['group_count'\]/);
-    assert.match(editor, /id: 'group_chart'[\s\S]*?dependsOn: \['llm_summary'\]/);
+    assert.match(editor, /id: 'group_chart'[\s\S]*?dependsOn: \['group_count'\]/);
+    assert.match(editor, /primaryLlmNodeId: 'llm_summary'/);
+    assert.match(editor, /class: `pivot-dag-node[\s\S]*?is-primary-llm/);
     assert.match(tools, /name: 'agent\.llm'/);
     assert.match(tools, /maxSteps: \{ type: 'integer'/);
     assert.match(tools, /\['prompt', 'model'\]/);
@@ -1059,6 +1139,7 @@ test('DAG final answer falls back to successful node output when summary is empt
                             prompt: '请总结测试数据：{{goal}}',
                             responseFormat: 'markdown'
                         },
+                        outputSchema: { type: 'string' },
                         dependsOn: [],
                         condition: 'success',
                         retryLimit: 0,
@@ -1076,6 +1157,8 @@ test('DAG final answer falls back to successful node output when summary is empt
         assert.equal(detail.run.status, 'completed');
         assert.equal(detail.run.final_answer, '这是大模型节点输出');
         assert.equal(detail.dagNodes[0].tool_name, 'agent.llm');
+        assert.equal(detail.dagNodes[0].contract_status, 'valid');
+        assert.equal(detail.trace.spans.some(span => span.span_type === 'dag_node'), true);
         assert.equal(callCount, 2);
     } finally {
         axios.post = originalPost;

@@ -78,46 +78,99 @@ function autoLayout(nodes) {
         });
     }
 
+function findAvailableNodePosition(nodes, anchorId = '') {
+        const anchor = nodes.find(node => node.id === anchorId);
+        const baseX = anchor
+            ? Number(anchor._x || 0) + NODE_WIDTH + NODE_GAP_X
+            : PADDING;
+        const baseY = anchor ? Number(anchor._y || 0) : PADDING;
+        const occupied = nodes.filter(node => Number.isFinite(node._x) && Number.isFinite(node._y));
+        const overlaps = (x, y) => occupied.some(node => (
+            Math.abs(node._x - x) < NODE_WIDTH + 16
+            && Math.abs(node._y - y) < NODE_HEIGHT + 12
+        ));
+        const rowStep = NODE_HEIGHT + NODE_GAP_Y;
+        const maxAttempts = Math.max(12, nodes.length * 2 + 4);
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            const y = baseY + attempt * rowStep;
+            if (!overlaps(baseX, y)) return { x: baseX, y };
+        }
+        return { x: baseX + NODE_WIDTH + NODE_GAP_X, y: baseY };
+    }
+
+function placeNewNode(nodes, node, anchorId = '') {
+        const position = findAvailableNodePosition(nodes.filter(item => item !== node), anchorId);
+        node._x = position.x;
+        node._y = position.y;
+        return node;
+    }
+
+function resolvePrimaryLlmNodeId(nodes = [], requestedId = '') {
+        const llmIds = nodes.filter(isLlmNode).map(node => node.id);
+        const requested = String(requestedId || '').trim();
+        return llmIds.includes(requested) ? requested : (llmIds[0] || '');
+    }
+
 function ensureDefaults(spec) {
+        const savedLayout = spec?.layout && typeof spec.layout === 'object' && !Array.isArray(spec.layout)
+            ? spec.layout
+            : {};
         const nodes = Array.isArray(spec?.nodes) ? spec.nodes.map(n => ({
             id: String(n.id || '').trim() || 'node',
             title: String(n.title || n.id || '').trim() || '未命名',
             tool: String(n.tool || '').trim(),
             input: n.input && typeof n.input === 'object' ? n.input : {},
+            inputSchema: n.inputSchema && typeof n.inputSchema === 'object'
+                ? n.inputSchema
+                : (n.input_schema && typeof n.input_schema === 'object' ? n.input_schema : {}),
+            outputSchema: n.outputSchema && typeof n.outputSchema === 'object'
+                ? n.outputSchema
+                : (n.output_schema && typeof n.output_schema === 'object' ? n.output_schema : {}),
             dependsOn: Array.isArray(n.dependsOn) ? n.dependsOn.slice() : [],
             condition: ['always', 'success'].includes(n.condition) ? n.condition : 'success',
             retryLimit: Math.max(0, Math.min(Number.parseInt(n.retryLimit ?? n.retry_limit ?? 0, 10) || 0, 5)),
             timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
             onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
-            // 保留已有坐标，避免 autoLayout 丢失用户手动调整的位置
-            _x: Number.isFinite(Number(n._x)) ? Number(n._x) : undefined,
-            _y: Number.isFinite(Number(n._y)) ? Number(n._y) : undefined
+            // 优先读取独立布局元数据，同时兼容旧版节点内坐标。
+            _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? Number(savedLayout[n.id]?.x ?? n._x) : undefined,
+            _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? Number(savedLayout[n.id]?.y ?? n._y) : undefined
         })) : [];
         if (!nodes.length) nodes.push(createDefaultLlmNode([]));
         nodes.forEach(ensureLlmNodeInput);
         clampDependsOn(nodes);
-        // 只有在新节点缺少坐标时才自动布局
-        const hasMissingCoords = nodes.some(n => n._x === undefined || n._y === undefined);
-        if (hasMissingCoords) autoLayout(nodes);
-        return { nodes };
+        const missingPositionNodes = nodes.filter(n => n._x === undefined || n._y === undefined);
+        if (missingPositionNodes.length === nodes.length) {
+            autoLayout(nodes);
+        } else {
+            missingPositionNodes.forEach(node => placeNewNode(nodes, node, node.dependsOn?.[0] || ''));
+        }
+        return {
+            nodes,
+            primaryLlmNodeId: resolvePrimaryLlmNodeId(nodes, spec?.primaryLlmNodeId ?? spec?.primary_llm_node_id)
+        };
     }
 
 function serialize(spec) {
+        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, retryLimit, timeoutMs, onError }) => ({
+            id,
+            title,
+            tool,
+            input,
+            inputSchema: inputSchema && typeof inputSchema === 'object' ? inputSchema : {},
+            outputSchema: outputSchema && typeof outputSchema === 'object' ? outputSchema : {},
+            dependsOn: [...(dependsOn || [])],
+            condition,
+            retryLimit: Number(retryLimit || 0),
+            timeoutMs: Number(timeoutMs || 0),
+            onError: onError || 'skip_dependents'
+        }));
+        const layout = Object.fromEntries(spec.nodes
+            .filter(node => Number.isFinite(node._x) && Number.isFinite(node._y))
+            .map(node => [node.id, { x: Math.max(0, node._x), y: Math.max(0, node._y) }]));
         return {
-            nodes: spec.nodes.map(({ id, title, tool, input, dependsOn, condition, retryLimit, timeoutMs, onError, _x, _y }) => ({
-                id,
-                title,
-                tool,
-                input,
-                dependsOn: [...(dependsOn || [])],
-                condition,
-                retryLimit: Number(retryLimit || 0),
-                timeoutMs: Number(timeoutMs || 0),
-                onError: onError || 'skip_dependents',
-                // 保留坐标以便再次加载时恢复用户手动调整的布局
-                _x: Number.isFinite(_x) ? _x : undefined,
-                _y: Number.isFinite(_y) ? _y : undefined
-            }))
+            nodes,
+            primaryLlmNodeId: resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId),
+            layout
         };
     }
 
@@ -219,6 +272,8 @@ function createDefaultLlmNode(existingIds = []) {
             title: '大模型处理',
             tool: 'agent.llm',
             input: defaultLlmInput(),
+            inputSchema: {},
+            outputSchema: { type: 'string' },
             dependsOn: [],
             condition: 'success',
             retryLimit: 0,

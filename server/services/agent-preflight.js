@@ -3,6 +3,7 @@ const { getRunnableModelForUser } = require('./models');
 const { formatToolList } = require('./agent-tool-catalog');
 const { assertWorkflowHasConfiguredLlm, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { isSuperAdmin } = require('../permissions');
+const { inspectDagContracts } = require('./agent-dag-contracts');
 const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
@@ -39,7 +40,9 @@ function getMcpHealthForPreflight(user) {
 
 function inferDagLlmModelId(dag = {}) {
     const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
-    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    const primaryLlmNodeId = String(dag?.primaryLlmNodeId || dag?.primary_llm_node_id || '').trim();
+    const llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
+        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
     const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
     return String(input.model || input.modelId || input.model_id || '').trim();
 }
@@ -69,6 +72,7 @@ function preflightAgentRun(user, body = {}) {
     const warnings = [];
     const blockers = [];
     let dag = null;
+    let contractReport = null;
     if (mcpTools.length > 0 && Number(mcpHealth.error || 0) > 0) warnings.push('工具箱存在异常服务，本次任务可能遇到工具调用失败。');
     if (mcpTools.length > 0 && Number(mcpHealth.unchecked || 0) > 0) warnings.push('工具箱存在未刷新工具列表的服务，建议先刷新工具缓存。');
     if (runMode === 'dag') {
@@ -100,6 +104,9 @@ function preflightAgentRun(user, body = {}) {
             } catch (e) {
                 blockers.push(e.message || '工作流大模型节点配置不完整。');
             }
+            contractReport = inspectDagContracts(dag, toolList);
+            blockers.push(...contractReport.blockers);
+            warnings.push(...contractReport.warnings);
         }
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
@@ -137,6 +144,7 @@ function preflightAgentRun(user, body = {}) {
             knowledgeChunks: Number(knowledge.chunks || 0),
             knowledgeErrors: Number(knowledge.error || 0)
         },
+        contracts: contractReport,
         recommendations: blockers.length
             ? ['修复阻断项后再创建任务。']
             : warnings.length

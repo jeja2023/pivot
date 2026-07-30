@@ -196,13 +196,14 @@ function createDagWizardStatsController(ctx) {
                             sortOrder: 'desc',
                             limit
                         },
-                        dependsOn: ['llm_summary'],
+                        dependsOn: ['group_count'],
                         condition: 'success',
                         retryLimit: 0,
                         timeoutMs: 0,
                         onError: 'skip_dependents'
                     }
-                ]
+                ],
+                primaryLlmNodeId: 'llm_summary'
             };
             const apply = () => {
                 ctx.spec = ensureDefaults(nextSpec);

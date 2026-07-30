@@ -1,4 +1,5 @@
 /* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
+/* global resolvePrimaryLlmNodeId */
 
 
 
@@ -7,16 +8,30 @@ function createDagInspectorController(ctx) {
     const onNodeSelectionChange = ctx.onNodeSelectionChange;
     const currentTools = () => typeof ctx.currentTools === 'function' ? (ctx.currentTools() || []) : [];
     const getDependencyCandidateNodes = (...args) => ctx.getDependencyCandidateNodes?.(...args) || [];
-    const isForwardDependency = (...args) => Boolean(ctx.isForwardDependency?.(...args));
     const wouldCreateCycle = (...args) => Boolean(ctx.wouldCreateCycle?.(...args));
     const openNodeInputWizard = (...args) => ctx.openNodeInputWizard?.(...args);
     const renderInputSummary = (...args) => ctx.renderInputSummary?.(...args) || '';
+    const schemaSummary = (schema = {}) => {
+        const value = schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
+        const typeLabels = { object: '对象', array: '列表', string: '文本', number: '数值', integer: '整数', boolean: '布尔值' };
+        const types = Array.isArray(value.type) ? value.type : (value.type ? [value.type] : []);
+        const fieldCount = value.properties && typeof value.properties === 'object' ? Object.keys(value.properties).length : 0;
+        const requiredCount = Array.isArray(value.required) ? value.required.length : 0;
+        if (!Object.keys(value).length) return { configured: false, text: '未配置' };
+        const label = types.map(type => typeLabels[type] || type).join(' / ') || '任意类型';
+        return { configured: true, text: `${label}${fieldCount ? ` · ${fieldCount} 个字段` : ''}${requiredCount ? ` · ${requiredCount} 项必填` : ''}` };
+    };
+    const effectiveInputSchema = (node, tool) => {
+        const explicit = node?.inputSchema && typeof node.inputSchema === 'object' ? node.inputSchema : {};
+        return Object.keys(explicit).length ? explicit : getToolSchema(tool);
+    };
     const notifySelectionChange = (node) => {
         if (typeof onNodeSelectionChange !== 'function') return;
         onNodeSelectionChange(node ? {
             id: node.id,
             title: node.title,
-            tool: node.tool
+            tool: node.tool,
+            isPrimaryLlm: isLlmNode(node) && ctx.spec.primaryLlmNodeId === node.id
         } : null);
     };
 
@@ -131,6 +146,88 @@ function createDagInspectorController(ctx) {
         requestAnimationFrame(() => textareaEl?.focus?.({ preventScroll: true }));
     };
 
+    const openNodeContractEditor = (nodeId) => {
+        const node = ctx.spec.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+        const tool = resolveToolForNode(currentTools(), node.tool);
+        let modal = document.getElementById('pivot-dag-contract-editor');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'pivot-dag-contract-editor';
+            modal.className = 'modal-overlay hidden pivot-dag-json-input-overlay';
+            document.body.appendChild(modal);
+        }
+        PivotSafeHtml.setHtml(modal, `
+            <div class="modal rag-detail-modal pivot-dag-contract-editor">
+                <div class="rag-detail-header pivot-dag-input-head">
+                    <div>
+                        <h3>节点数据契约</h3>
+                        <p class="model-modal-desc">${dagEscapeHtml(node.title || node.id)} · ${dagEscapeHtml(friendlyToolTitle(tool) || node.tool)}</p>
+                    </div>
+                    <button type="button" class="btn-danger-outline" data-pivot-contract-close="1">关闭</button>
+                </div>
+                <div class="pivot-dag-contract-editor-body">
+                    <label>
+                        <span><strong>输入契约</strong><em>留空时自动使用工具参数契约</em></span>
+                        <textarea class="form-input" data-pivot-contract-input spellcheck="false">${dagEscapeHtml(JSON.stringify(node.inputSchema || {}, null, 2))}</textarea>
+                    </label>
+                    <label>
+                        <span><strong>输出契约</strong><em>用于校验节点业务输出并向下游提供字段约束</em></span>
+                        <textarea class="form-input" data-pivot-contract-output spellcheck="false">${dagEscapeHtml(JSON.stringify(node.outputSchema || {}, null, 2))}</textarea>
+                    </label>
+                </div>
+                <div class="pivot-dag-json-error" data-pivot-contract-error></div>
+                <div class="agent-workflow-create-actions pivot-dag-json-actions">
+                    <button type="button" class="btn-secondary" data-pivot-contract-sync="1">同步工具输入契约</button>
+                    <button type="button" class="btn-secondary" data-pivot-contract-format="1">格式化</button>
+                    <button type="button" class="btn-primary" data-pivot-contract-apply="1">应用契约</button>
+                </div>
+            </div>
+        `);
+        const inputEl = modal.querySelector('[data-pivot-contract-input]');
+        const outputEl = modal.querySelector('[data-pivot-contract-output]');
+        const errorEl = modal.querySelector('[data-pivot-contract-error]');
+        const parseSchemas = () => {
+            try {
+                const inputSchema = JSON.parse(inputEl.value || '{}');
+                const outputSchema = JSON.parse(outputEl.value || '{}');
+                if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) throw new Error('输入契约必须是 JSON 对象。');
+                if (!outputSchema || typeof outputSchema !== 'object' || Array.isArray(outputSchema)) throw new Error('输出契约必须是 JSON 对象。');
+                inputEl.classList.remove('is-invalid');
+                outputEl.classList.remove('is-invalid');
+                errorEl.textContent = '';
+                return { inputSchema, outputSchema };
+            } catch (e) {
+                errorEl.textContent = e.message || '契约格式不正确。';
+                return null;
+            }
+        };
+        const close = () => modal.classList.add('hidden');
+        modal.querySelector('[data-pivot-contract-close]')?.addEventListener('click', close);
+        modal.querySelector('[data-pivot-contract-sync]')?.addEventListener('click', () => {
+            inputEl.value = JSON.stringify(getToolSchema(tool), null, 2);
+        });
+        modal.querySelector('[data-pivot-contract-format]')?.addEventListener('click', () => {
+            const schemas = parseSchemas();
+            if (!schemas) return;
+            inputEl.value = JSON.stringify(schemas.inputSchema, null, 2);
+            outputEl.value = JSON.stringify(schemas.outputSchema, null, 2);
+        });
+        modal.querySelector('[data-pivot-contract-apply]')?.addEventListener('click', () => {
+            const schemas = parseSchemas();
+            if (!schemas) return;
+            node.inputSchema = schemas.inputSchema;
+            node.outputSchema = schemas.outputSchema;
+            ctx.render?.();
+            ctx.flushOut?.();
+            close();
+            window.showToast?.('节点契约已更新', 'success');
+        });
+        modal.addEventListener('click', event => { if (event.target === modal) close(); }, { once: true });
+        modal.classList.remove('hidden');
+        requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
+    };
+
     const renderInspector = () => {
         if (!inspector) return;
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
@@ -157,6 +254,9 @@ function createDagInspectorController(ctx) {
         notifySelectionChange(node);
         const tools = currentTools();
         const selectedTool = resolveToolForNode(tools, node.tool);
+        const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
+        const outputContract = schemaSummary(node.outputSchema || {});
+        const isPrimaryLlm = isLlmNode(node) && ctx.spec.primaryLlmNodeId === node.id;
         const upstreamNodes = getDependencyCandidateNodes(node);
         const dependsChecks = upstreamNodes.map(upstreamNode => `
             <label class="pivot-dag-depends-item">
@@ -189,6 +289,15 @@ function createDagInspectorController(ctx) {
                 </label>
             </div>
             ${renderSelectedToolMeta(selectedTool)}
+            ${isLlmNode(node) ? `
+                <label class="pivot-dag-primary-llm ${isPrimaryLlm ? 'is-active' : ''}">
+                    <input type="radio" name="pivot-dag-primary-llm" data-pivot-dag-primary-llm="1" ${isPrimaryLlm ? 'checked' : ''}>
+                    <span>
+                        <strong>主大模型节点</strong>
+                        <em>${isPrimaryLlm ? '当前主节点' : '设为主节点'}</em>
+                    </span>
+                </label>
+            ` : ''}
             <div class="pivot-dag-inspector-row pivot-dag-inspector-row-runtime">
                 <label><span>失败策略</span>
                     <select data-pivot-dag-field="onError">
@@ -199,6 +308,31 @@ function createDagInspectorController(ctx) {
                 </label>
                 <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
                 <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
+            </div>
+            <div class="pivot-dag-contract-panel">
+                <div class="pivot-dag-contract-panel-head">
+                    <strong>数据契约</strong>
+                    <button type="button" class="btn-secondary" data-pivot-dag-edit-contract="1">编辑契约</button>
+                </div>
+                <div class="pivot-dag-contract-grid">
+                    <div class="pivot-dag-contract-card ${inputContract.configured ? 'is-ready' : 'is-warning'}">
+                        <span>输入</span>
+                        <strong>${dagEscapeHtml(inputContract.text)}</strong>
+                        <em>${Object.keys(node.inputSchema || {}).length ? '节点覆盖' : '继承工具'}</em>
+                    </div>
+                    <div class="pivot-dag-contract-card ${outputContract.configured ? 'is-ready' : 'is-warning'}">
+                        <span>输出</span>
+                        <strong>${dagEscapeHtml(outputContract.text)}</strong>
+                        <em>${outputContract.configured ? '运行时校验' : '待补充'}</em>
+                    </div>
+                </div>
+                <div class="pivot-dag-contract-presets">
+                    <span>输出类型</span>
+                    <button type="button" data-pivot-contract-preset="string">文本</button>
+                    <button type="button" data-pivot-contract-preset="object">对象</button>
+                    <button type="button" data-pivot-contract-preset="array">列表</button>
+                    <button type="button" data-pivot-contract-preset="clear">清除</button>
+                </div>
             </div>
             <div class="pivot-dag-inspector-depends">
                 <div class="pivot-dag-inspector-depends-head">
@@ -224,6 +358,17 @@ function createDagInspectorController(ctx) {
         `);
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
         inspector.querySelector('[data-pivot-dag-open-json]')?.addEventListener('click', () => openNodeJsonEditor(node.id));
+        inspector.querySelector('[data-pivot-dag-edit-contract]')?.addEventListener('click', () => openNodeContractEditor(node.id));
+        inspector.querySelectorAll('[data-pivot-contract-preset]').forEach(button => {
+            button.addEventListener('click', () => {
+                const preset = button.dataset.pivotContractPreset;
+                node.outputSchema = preset === 'clear' ? {} : preset === 'array'
+                    ? { type: 'array', items: {} }
+                    : { type: preset };
+                ctx.render?.();
+                ctx.flushOut?.();
+            });
+        });
 
         inspector.querySelectorAll('[data-pivot-dag-field]').forEach(input => {
             input.addEventListener('input', (e) => handleInspectorEdit(e.target));
@@ -231,6 +376,12 @@ function createDagInspectorController(ctx) {
         });
         inspector.querySelectorAll('[data-pivot-dag-depend]').forEach(checkbox => {
             checkbox.addEventListener('change', (e) => handleDependsToggle(e.target));
+        });
+        inspector.querySelector('[data-pivot-dag-primary-llm]')?.addEventListener('change', () => {
+            ctx.spec.primaryLlmNodeId = node.id;
+            ctx.render?.();
+            ctx.flushOut?.();
+            window.showToast?.(`已将「${node.title || node.id}」设为主大模型节点`, 'success');
         });
         inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
         if (focusSnapshot?.field) {
@@ -273,10 +424,13 @@ function createDagInspectorController(ctx) {
                 return;
             }
             node.tool = nextTool;
+            node.inputSchema = {};
+            node.outputSchema = nextTool === 'agent.llm' ? { type: 'string' } : {};
             if (node.tool === 'agent.llm') {
                 node.input = { ...defaultLlmInput(), ...(node.input || {}) };
                 ensureLlmNodeInput(node);
             }
+            ctx.spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(ctx.spec.nodes, ctx.spec.primaryLlmNodeId);
         } else if (field === 'condition') {
             node.condition = ['always', 'success'].includes(input.value) ? input.value : 'success';
         } else if (field === 'onError') {
@@ -305,11 +459,6 @@ function createDagInspectorController(ctx) {
         const dep = checkbox.dataset.pivotDagDepend;
         const deps = new Set(node.dependsOn || []);
         if (checkbox.checked) {
-            if (!isForwardDependency(dep, node.id)) {
-                checkbox.checked = false;
-                window.showToast?.('只能选择当前节点左侧的上游节点', 'error');
-                return;
-            }
             if (wouldCreateCycle(dep, node.id)) {
                 checkbox.checked = false;
                 window.showToast?.('不能添加循环依赖', 'error');

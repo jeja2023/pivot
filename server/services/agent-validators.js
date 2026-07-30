@@ -15,6 +15,7 @@ const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly']);
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
 const RUN_MODES = new Set(['standard', 'deep', 'audit', 'dag']);
 const APPROVAL_POLICIES = new Set(['safe_mcp_auto', 'approve_all_mcp']);
+const { normalizeJsonSchema } = require('./agent-dag-contracts');
 
 // 解码 U+FFFD 替换字符；不能直接出现在源文件中，否则会被 check:text 误报为乱码
 const REPLACEMENT_CHAR = String.fromCharCode(0xFFFD);
@@ -71,6 +72,12 @@ function normalizePositiveInt(value, fallback, min = 0, max = Number.MAX_SAFE_IN
     return Math.min(parsed, max);
 }
 
+function normalizeDagCoordinate(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.round(Math.max(0, Math.min(parsed, 100000)) * 100) / 100;
+}
+
 function normalizeScheduleFrequency(value) {
     const frequency = String(value || 'manual').trim();
     return SCHEDULE_FREQUENCIES.has(frequency) ? frequency : 'manual';
@@ -109,6 +116,9 @@ function normalizeDagSpec(value) {
         }
     }
     const rawNodes = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.nodes) ? parsed.nodes : []);
+    const rawLayout = !Array.isArray(parsed) && parsed?.layout && typeof parsed.layout === 'object' && !Array.isArray(parsed.layout)
+        ? parsed.layout
+        : {};
     const seen = new Set();
     const nodes = rawNodes.slice(0, 24).map((node, index) => {
         const key = String(node.id || node.key || `node_${index + 1}`).trim().replace(/[^\w.-]/g, '_').slice(0, 60) || `node_${index + 1}`;
@@ -117,26 +127,44 @@ function normalizeDagSpec(value) {
         const dependsOn = Array.isArray(node.dependsOn || node.depends_on)
             ? (node.dependsOn || node.depends_on).map(item => String(item || '').trim()).filter(Boolean).slice(0, 12)
             : String(node.dependsOn || node.depends_on || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 12);
+        const savedPosition = rawLayout[key] || rawLayout[uniqueKey] || node.position || {};
+        const x = normalizeDagCoordinate(savedPosition.x ?? node._x);
+        const y = normalizeDagCoordinate(savedPosition.y ?? node._y);
         return {
             id: uniqueKey,
             title: String(node.title || uniqueKey).trim().slice(0, 120),
             tool: String(node.tool || node.toolName || node.tool_name || '').trim(),
             input: node.input && typeof node.input === 'object' ? node.input : {},
+            inputSchema: normalizeJsonSchema(node.inputSchema || node.input_schema || {}),
+            outputSchema: normalizeJsonSchema(node.outputSchema || node.output_schema || {}),
             dependsOn,
             condition: ['always', 'success'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success',
             retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
             timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000),
             onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
                 ? String(node.onError || node.on_error || 'skip_dependents')
-                : 'skip_dependents'
+                : 'skip_dependents',
+            _layout: x === null || y === null ? null : { x, y }
         };
     }).filter(node => node.tool);
     const validKeys = new Set(nodes.map(node => node.id));
+    const layout = Object.fromEntries(nodes
+        .filter(node => node._layout)
+        .map(node => [node.id, node._layout]));
+    const cleanNodes = nodes.map(({ _layout, ...node }) => ({
+        ...node,
+        dependsOn: node.dependsOn.filter(dep => validKeys.has(dep) && dep !== node.id)
+    }));
+    const requestedPrimaryId = String(
+        (!Array.isArray(parsed) && (parsed?.primaryLlmNodeId ?? parsed?.primary_llm_node_id)) || ''
+    ).trim().replace(/[^\w.-]/g, '_').slice(0, 60);
+    const llmIds = cleanNodes
+        .filter(node => node.tool === 'agent.llm')
+        .map(node => node.id);
     return {
-        nodes: nodes.map(node => ({
-            ...node,
-            dependsOn: node.dependsOn.filter(dep => validKeys.has(dep) && dep !== node.id)
-        }))
+        nodes: cleanNodes,
+        primaryLlmNodeId: llmIds.includes(requestedPrimaryId) ? requestedPrimaryId : (llmIds[0] || ''),
+        layout
     };
 }
 

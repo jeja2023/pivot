@@ -105,6 +105,187 @@
     margin-left: auto;
 }
 
+.agent-trace-panel {
+    margin-bottom: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.agent-trace-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 42px;
+    padding: 8px 12px;
+    cursor: pointer;
+    list-style: none;
+    background: #f8fafc;
+}
+
+.agent-trace-head::-webkit-details-marker {
+    display: none;
+}
+
+.agent-trace-head > span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.agent-trace-head strong {
+    color: #0f172a;
+    font-size: 0.78rem;
+}
+
+.agent-trace-head em {
+    color: #64748b;
+    font-size: 0.68rem;
+    font-style: normal;
+    white-space: nowrap;
+}
+
+.agent-trace-head em.is-success {
+    color: #047857;
+    font-weight: 800;
+}
+
+.agent-trace-head em.is-error {
+    color: #b91c1c;
+    font-weight: 800;
+}
+
+.agent-trace-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 4px 12px 10px;
+}
+
+.agent-trace-item {
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.agent-trace-item:last-child {
+    border-bottom: 0;
+}
+
+.agent-trace-item-meta {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-trace-item-meta strong {
+    min-width: 0;
+    color: #1e293b;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-trace-item-meta em {
+    color: #64748b;
+    font-size: 0.66rem;
+    font-style: normal;
+}
+
+.agent-trace-type {
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-align: center;
+}
+
+.agent-trace-track {
+    position: relative;
+    height: 6px;
+    margin: 7px 0 0 62px;
+    border-radius: 999px;
+    background: #eef2f7;
+    overflow: hidden;
+}
+
+.agent-trace-track > span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: inherit;
+    background: #0f766e;
+}
+
+.agent-trace-item.error .agent-trace-track > span {
+    background: #dc2626;
+}
+
+.agent-trace-item.running .agent-trace-track > span {
+    background: #2563eb;
+}
+
+.agent-trace-detail {
+    margin: 7px 0 0 62px;
+}
+
+.agent-trace-detail > summary {
+    width: fit-content;
+    color: #64748b;
+    font-size: 0.66rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.agent-trace-detail-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+    margin-top: 7px;
+}
+
+.agent-trace-detail-body section {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    background: #f8fafc;
+    font-size: 0.7rem;
+    overflow: auto;
+}
+
+.agent-trace-detail-body h5 {
+    margin: 0 0 6px;
+    color: #475569;
+    font-size: 0.66rem;
+}
+
+@media (max-width: 640px) {
+    .agent-trace-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .agent-trace-item-meta {
+        grid-template-columns: 48px minmax(0, 1fr);
+    }
+
+    .agent-trace-item-meta em {
+        grid-column: 2;
+    }
+
+    .agent-trace-track,
+    .agent-trace-detail {
+        margin-left: 56px;
+    }
+}
+
 .agent-final {
     position: relative;
     border: 1px solid rgba(148, 163, 184, 0.24);
@@ -127,6 +308,13 @@
     width: 4px;
     border-radius: 8px 0 0 8px;
     background: linear-gradient(180deg, #10a37f, #3b82f6);
+}
+
+.agent-final-label {
+    margin: 0 0 12px;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
 }
 
 .agent-final > :first-child {
@@ -209,6 +397,34 @@
 .agent-final td {
     padding: 8px 10px;
     line-height: 1.5;
+}
+
+.agent-result-raw {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.agent-result-raw summary {
+    width: fit-content;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.agent-result-raw pre {
+    max-height: 260px;
+    margin: 9px 0 0;
+    padding: 10px 12px;
+    overflow: auto;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.68rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .agent-visual-results {

@@ -15,8 +15,8 @@
  * 数据格式与 server/services/agent-validators.js 中的 normalizeDagSpec 完全一致：
  *   { nodes: [{ id, title, tool, input, dependsOn: [], condition: 'always'|'success' }] }
  *
- * 节点坐标 (x, y) 仅在编辑器内部维护，写入 textarea 时不会保留（normalizeDagSpec 会丢弃），
- * 加载已有 JSON 时编辑器会用拓扑层次自动布局重新生成坐标。
+ * 节点坐标通过根级 layout 元数据持久化；执行节点与视图状态保持分离。
+ * 旧版节点内 _x/_y 坐标仍可读取，并会在下次同步时迁移到 layout。
  *
  * 设计原则：
  *   - 零依赖，纯原生 JS + SVG
@@ -24,6 +24,7 @@
  *   - CSP 兼容：所有事件都用 addEventListener，无内联 onclick
  *   - 多次 mount 同一容器幂等：先 destroy 旧实例
  */
+/* global placeNewNode, resolvePrimaryLlmNodeId */
 (function () {
 if (window.PivotDagEditor) return;
 
@@ -94,7 +95,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                     height: NODE_HEIGHT,
                     rx: 4,
                     ry: 4,
-                    fill: selectedId === node.id ? '#3b82f6' : '#cbd5e1',
+                    fill: selectedId === node.id
+                        ? '#3b82f6'
+                        : spec.primaryLlmNodeId === node.id
+                            ? '#10a37f'
+                            : isLlmNode(node) ? '#5eead4' : '#cbd5e1',
                     opacity: '0.7'
                 });
                 minimap.nodesLayer.appendChild(rect);
@@ -190,35 +195,9 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             return visit(dependencyId);
         };
 
-        const nodePositionRank = (node) => {
-            const x = Number(node?._x);
-            const y = Number(node?._y);
-            const index = spec.nodes.findIndex(item => item.id === node?.id);
-            return {
-                x: Number.isFinite(x) ? x : index * (NODE_WIDTH + NODE_GAP_X),
-                y: Number.isFinite(y) ? y : 0,
-                index
-            };
-        };
-
-        const isForwardDependency = (dependencyId, targetId) => {
-            if (!dependencyId || !targetId || dependencyId === targetId) return false;
-            const dependency = spec.nodes.find(item => item.id === dependencyId);
-            const target = spec.nodes.find(item => item.id === targetId);
-            if (!dependency || !target) return false;
-            const depRank = nodePositionRank(dependency);
-            const targetRank = nodePositionRank(target);
-            if (depRank.x !== targetRank.x) return depRank.x < targetRank.x;
-            return depRank.index >= 0 && targetRank.index >= 0 && depRank.index < targetRank.index;
-        };
-
         const getDependencyCandidateNodes = (node) => spec.nodes
-            .filter(candidate => isForwardDependency(candidate.id, node?.id))
-            .sort((a, b) => {
-                const rankA = nodePositionRank(a);
-                const rankB = nodePositionRank(b);
-                return rankA.x - rankB.x || rankA.y - rankB.y || rankA.index - rankB.index;
-            });
+            .filter(candidate => candidate.id !== node?.id && !wouldCreateCycle(candidate.id, node?.id))
+            .sort((a, b) => Number(a._x || 0) - Number(b._x || 0) || Number(a._y || 0) - Number(b._y || 0));
 
         const validateWorkflow = () => {
             const tools = currentTools();
@@ -239,7 +218,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 if (node.tool && toolNames.size && !isKnownToolValue(tools, node.tool)) warnings.push(`${node.title || node.id} 使用的工具当前不可用`);
                 (node.dependsOn || []).forEach(dep => {
                     if (!byId.has(dep)) errors.push(`${node.title || node.id} 依赖了不存在的节点 ${dep}`);
-                    else if (!isForwardDependency(dep, node.id)) errors.push(`${node.title || node.id} 只能连接左侧的上游节点 ${dep}`);
                 });
             });
             const visiting = new Set();
@@ -295,7 +273,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             openNodeInputWizard,
             renderInputSummary,
             getDependencyCandidateNodes,
-            isForwardDependency,
             wouldCreateCycle,
             render: () => render(),
             flushOut: () => flushOut()
@@ -309,8 +286,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             }
             spec.nodes = spec.nodes.filter(n => n.id !== id);
             clampDependsOn(spec.nodes);
+            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             if (selectedId === id) selectedId = null;
-            autoLayout(spec.nodes);
             render();
             flushOut();
             return true;
@@ -337,11 +314,15 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 timeoutMs: 0,
                 onError: 'skip_dependents'
             };
+            const anchorId = selectedId;
+            const anchorNode = spec.nodes.find(n => n.id === anchorId);
             spec.nodes.push(node);
-            autoLayout(spec.nodes);
+            placeNewNode(spec.nodes, node, anchorId);
+            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             selectedId = node.id;
             render();
             flushOut();
+            window.showToast?.(anchorNode ? `已在「${anchorNode.title || anchorNode.id}」后添加新节点` : '已添加新的起始节点', 'success');
         };
 
         const addPresetNode = (preset) => {
@@ -355,8 +336,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const node = {
                 id: baseId,
                 title: preset.title,
-                tool: toolValue(preferred),
+                tool: toolValue(preferred) || ((preset.patterns || []).includes('agent.llm') ? 'agent.llm' : ''),
                 input: { ...inputTemplate },
+                inputSchema: preset.inputSchema && typeof preset.inputSchema === 'object' ? preset.inputSchema : {},
+                outputSchema: preset.outputSchema && typeof preset.outputSchema === 'object'
+                    ? preset.outputSchema
+                    : ((preset.patterns || []).includes('agent.llm') ? { type: 'string' } : {}),
                 dependsOn: selectedId ? [selectedId] : [],
                 condition: 'success',
                 retryLimit: 0,
@@ -364,15 +349,98 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 onError: 'skip_dependents'
             };
             spec.nodes.push(node);
-            autoLayout(spec.nodes);
+            placeNewNode(spec.nodes, node, selectedId);
+            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             selectedId = node.id;
             render();
             flushOut();
+            window.showToast?.(
+                selectedNode
+                    ? `已在「${selectedNode.title || selectedNode.id}」后添加${node.title}`
+                    : `已添加${node.title}起始节点`,
+                'success'
+            );
+        };
+
+        const addAgentTeamTemplate = () => {
+            const replacePlaceholder = spec.nodes.length === 1
+                && isLlmNode(spec.nodes[0])
+                && ['大模型处理', '大模型节点'].includes(String(spec.nodes[0].title || ''));
+            if (replacePlaceholder) {
+                spec.nodes = [];
+                selectedId = '';
+            }
+            const existingIds = spec.nodes.map(node => node.id);
+            const anchorId = selectedId || '';
+            const model = defaultWorkflowModelId();
+            const researcherId = uniqueId(existingIds, 'researcher');
+            existingIds.push(researcherId);
+            const reviewerId = uniqueId(existingIds, 'reviewer');
+            existingIds.push(reviewerId);
+            const supervisorId = uniqueId(existingIds, 'supervisor');
+            const baseContext = anchorId ? `{{nodes.${anchorId}.output}}` : '{{goal}}';
+            const delegateOutputSchema = {
+                type: 'object',
+                required: ['content', 'agent', 'handoff'],
+                properties: {
+                    content: { type: 'string' },
+                    agent: { type: 'object' },
+                    handoff: { type: 'object' }
+                }
+            };
+            const delegates = [
+                {
+                    id: researcherId,
+                    title: '研究智能体',
+                    tool: 'agent.delegate',
+                    input: {
+                        agentName: '研究员', role: 'researcher', model,
+                        task: '围绕工作流目标收集事实、依据与未知信息，形成可核验的研究结论。',
+                        context: baseContext, responseFormat: 'markdown', temperature: 0.1, maxTokens: 1200
+                    },
+                    inputSchema: {}, outputSchema: delegateOutputSchema,
+                    dependsOn: anchorId ? [anchorId] : [], condition: 'success', retryLimit: 1, timeoutMs: 0, onError: 'continue'
+                },
+                {
+                    id: reviewerId,
+                    title: '审阅智能体',
+                    tool: 'agent.delegate',
+                    input: {
+                        agentName: '审阅员', role: 'reviewer', model,
+                        task: '独立检查目标、约束、证据充分性与潜在风险，指出遗漏和反例。',
+                        context: baseContext, responseFormat: 'markdown', temperature: 0.1, maxTokens: 1200
+                    },
+                    inputSchema: {}, outputSchema: delegateOutputSchema,
+                    dependsOn: anchorId ? [anchorId] : [], condition: 'success', retryLimit: 1, timeoutMs: 0, onError: 'continue'
+                }
+            ];
+            const supervisor = {
+                id: supervisorId,
+                title: 'Supervisor 裁决',
+                tool: 'agent.llm',
+                input: {
+                    model,
+                    maxSteps: 20,
+                    systemPrompt: '你是多智能体团队的 Supervisor。请核对各专家的事实依据与分歧，拒绝未经支持的结论，并形成最终可交付结果。',
+                    prompt: `工作流目标：\n{{goal}}\n\n研究员 Handoff：\n{{nodes.${researcherId}.output.handoff.summary}}\n\n审阅员 Handoff：\n{{nodes.${reviewerId}.output.handoff.summary}}\n\n请先解决分歧，再给出结论、依据、风险和下一步。`,
+                    responseFormat: 'markdown', temperature: 0.1, maxTokens: 1600
+                },
+                inputSchema: {}, outputSchema: { type: 'string' },
+                dependsOn: [researcherId, reviewerId], condition: 'success', retryLimit: 0, timeoutMs: 0, onError: 'stop'
+            };
+            spec.nodes.push(...delegates, supervisor);
+            spec.primaryLlmNodeId = supervisorId;
+            autoLayout(spec.nodes);
+            selectedId = supervisorId;
+            render();
+            flushOut();
+            window.showToast?.('已添加并行专家与 Supervisor，可继续调整角色、模型和交接契约', 'success');
         };
 
         const resetLayout = () => {
             autoLayout(spec.nodes);
             render();
+            flushOut();
         };
 
                 const { renderEdges, renderNodes } = createDagRenderController({
@@ -417,7 +485,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             renderEdges: () => renderEdges(),
             flushOut: () => flushOut(),
             deleteNode: (id) => deleteNode(id),
-            isForwardDependency: (fromId, targetId) => isForwardDependency(fromId, targetId),
             wouldCreateCycle: (fromId, targetId) => wouldCreateCycle(fromId, targetId)
         });
         document.addEventListener('keydown', onKeyDown);
@@ -438,6 +505,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             toolbar,
             addNode,
             addPresetNode,
+            addAgentTeamTemplate,
             fitToContent,
             openStatsChartWizard,
             resetLayout,

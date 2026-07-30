@@ -175,6 +175,19 @@
     box-shadow: 0 3px 8px rgba(16, 163, 127, 0.22);
 }
 
+.pivot-dag-toolbar-btn.is-llm {
+    border-color: #0f8f72;
+    background: #10a37f;
+    color: #fff;
+    font-weight: 800;
+}
+
+.pivot-dag-toolbar-btn.is-llm:hover,
+.pivot-dag-toolbar-btn.is-llm:focus-visible {
+    border-color: #047857;
+    background: #07866a;
+}
+
 .pivot-dag-toolbar-btn-icon {
     display: inline-flex;
     align-items: center;

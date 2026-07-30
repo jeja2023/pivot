@@ -96,6 +96,14 @@ const {
 } = require('./runtime-env');
 const { getAgentRunTitle, getRunMetadata } = require('./metadata');
 const { assertAgentRunStatusTransition } = require('./state-machine');
+const {
+    ensureAgentTrace,
+    finishAgentTraceSpan,
+    recordAgentTraceSpan,
+    startAgentTraceSpan,
+    syncAgentTraceFromRun
+} = require('../agent-traces');
+const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { inferDagRunGoal, inferDagLlmRuntimeSettings } = require('./dag-run-config');
@@ -347,7 +355,13 @@ function buildDagResumeSpec(originalRun, startNodeId = '') {
         ...node,
         dependsOn: (node.dependsOn || []).filter(dep => include.has(dep))
     }));
-    return { dagSpec: { nodes }, reusable };
+    const primaryLlmNodeId = nodes.some(node => node.id === dagSpec.primaryLlmNodeId && node.tool === 'agent.llm')
+        ? dagSpec.primaryLlmNodeId
+        : nodes.find(node => node.tool === 'agent.llm')?.id || '';
+    const layout = Object.fromEntries(nodes
+        .filter(node => dagSpec.layout?.[node.id])
+        .map(node => [node.id, dagSpec.layout[node.id]]));
+    return { dagSpec: { nodes, primaryLlmNodeId, layout }, reusable };
 }
 
 function rerunAgentDagFromNode(runId, user, nodeId = '') {
@@ -410,22 +424,18 @@ function resumeAgentRun(runId, user) {
         err.status = 400;
         throw err;
     }
+    if (run.run_mode === 'dag') {
+        const dagResume = buildDagResumeSpec(run);
+        if (dagResume?.dagSpec?.nodes?.length) return rerunAgentDagFromNode(runId, user, '');
+    }
     const steps = listSteps(run.id);
     const lastStep = steps.length ? Math.max(...steps.map(step => Number(step.step_index || 0))) : 0;
     const failed = steps.filter(step => step.status === 'error').slice(-3);
-    const resumeGoal = [
-        run.goal,
-        '',
-        'Continue this task from the previous run context.',
-        `Previous status: ${run.status}`,
-        run.final_answer ? `Previous answer: ${clampText(run.final_answer, 1200)}` : '',
-        run.error_message ? `Previous error: ${run.error_message}` : '',
-        failed.length ? `Recent failed steps: ${JSON.stringify(failed.map(step => ({ step: step.step_index, tool: step.tool_name, error: step.error_message })))}` : ''
-    ].filter(Boolean).join('\n');
+    const resumeContext = buildAgentResumeContext(run.id);
     const previousMetadata = getRunMetadata(run);
     return createAgentRun({
         user,
-        goal: resumeGoal,
+        goal: run.goal,
         modelId: run.model_id,
         sessionId: run.session_id,
         title: `断点续跑：${getAgentRunTitle(run)}`.slice(0, 80),
@@ -448,7 +458,13 @@ function resumeAgentRun(runId, user) {
             ...previousMetadata,
             pendingApproval: null,
             resumedFromRunId: run.id,
-            failedSteps: failed.map(step => step.id)
+            failedSteps: failed.map(step => step.id),
+            resumeContext: {
+                ...resumeContext,
+                previousStatus: run.status,
+                previousAnswer: clampText(run.final_answer || '', 1200),
+                previousError: run.error_message || ''
+            }
         }
     });
 }
@@ -504,6 +520,33 @@ function insertStep(runId, stepIndex, data = {}) {
         now
     );
     if (info.changes > 0) {
+        recordAgentCheckpoint(runId, {
+            stepIndex,
+            type: data.type || 'control',
+            status: data.status || 'completed',
+            state: {
+                title: data.title || '',
+                toolName: data.toolName || '',
+                nodeId: data.nodeId || '',
+                input: data.input,
+                output: data.output,
+                errorMessage: data.errorMessage || '',
+                durationMs: Number(data.durationMs) || 0
+            },
+            createdAt: data.completedAt
+        });
+        recordAgentTraceSpan(runId, {
+            type: data.type || 'note',
+            name: data.title || `执行步骤 ${stepIndex}`,
+            input: data.input,
+            output: data.output,
+            details: { stepIndex, toolName: data.toolName || '' },
+            status: data.status === 'error' ? 'error' : (data.status || 'completed'),
+            errorMessage: data.errorMessage || '',
+            durationMs: Number(data.durationMs) || 0,
+            startedAt: data.startedAt,
+            completedAt: data.completedAt
+        });
         publishAgentRunEvent(runId, 'step', {
             step: {
                 index: stepIndex,
@@ -532,6 +575,8 @@ function getAgentRuntimeDeps() {
         parseJsonObject,
         publishUserEvent,
         synthesizeFinalAnswer,
+        finishAgentTraceSpan,
+        startAgentTraceSpan,
         updateRun,
         withTimeout
     };
@@ -542,6 +587,11 @@ async function runAgent(runId, user) {
         const run = getRunForUser(runId, user, { includeDeleted: true });
         if (!run) throw new Error('Agent run not found.');
         if (run.deleted_at) return;
+        ensureAgentTrace(run, {
+            runMode: run.run_mode,
+            modelRouter: run.model_router,
+            approvalPolicy: run.approval_policy
+        });
         assertRunNotCancelled(runId);
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
         const assertRunWithinBudget = () => {
@@ -576,12 +626,44 @@ async function runAgent(runId, user) {
                     });
                     logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
                 }
+                recordAgentTraceSpan(runId, {
+                    type: 'routing',
+                    name: '模型路由',
+                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
+                    output: { chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '' },
+                    details: { strategy: routerStrategy }
+                });
             } catch (routerErr) {
+                recordAgentTraceSpan(runId, {
+                    type: 'routing',
+                    name: '模型路由',
+                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
+                    status: 'error',
+                    errorMessage: routerErr.message
+                });
                 logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，已使用原始模型');
             }
         }
 
-        const observations = [];
+        const runtimeMetadata = getRunMetadata(run);
+        const resumeContext = runtimeMetadata.resumeContext && typeof runtimeMetadata.resumeContext === 'object'
+            ? runtimeMetadata.resumeContext
+            : {};
+        const observations = [
+            ...(Array.isArray(resumeContext.observations) ? resumeContext.observations : []),
+            ...(Array.isArray(resumeContext.recentFailures) ? resumeContext.recentFailures : [])
+        ].slice(-25);
+        if (resumeContext.latestCheckpointId) {
+            insertStep(runId, listSteps(runId).length + 1, {
+                type: 'control',
+                title: '已从持久化检查点恢复上下文',
+                output: {
+                    sourceRunId: resumeContext.sourceRunId || '',
+                    checkpointId: resumeContext.latestCheckpointId,
+                    restoredObservations: observations.length
+                }
+            });
+        }
         const toolList = formatToolList(user, {
             toolPolicy: run.tool_policy,
             toolAllowlist: run.tool_allowlist
@@ -618,7 +700,28 @@ async function runAgent(runId, user) {
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {});
-            const plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划');
+            const plannerStartedAt = Date.now();
+            const plannerSpanId = startAgentTraceSpan(runId, {
+                type: 'model',
+                name: `规划模型调用 #${step}`,
+                input: { messageCount: plannerMessages.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
+                details: { purpose: 'agent_planner', step }
+            });
+            let plannedText;
+            try {
+                plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划');
+                finishAgentTraceSpan(plannerSpanId, {
+                    output: { responseLength: String(plannedText || '').length },
+                    durationMs: Date.now() - plannerStartedAt
+                });
+            } catch (plannerError) {
+                finishAgentTraceSpan(plannerSpanId, {
+                    status: 'error',
+                    errorMessage: plannerError.message,
+                    durationMs: Date.now() - plannerStartedAt
+                });
+                throw plannerError;
+            }
             recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
@@ -627,7 +730,8 @@ async function runAgent(runId, user) {
                 type: 'plan',
                 title: plan.thought || 'Agent plan',
                 input: { goal: run.goal },
-                output: plan
+                output: plan,
+                durationMs: Date.now() - plannerStartedAt
             });
 
             if (plan.action === 'final' || !plan.tool) {
@@ -694,7 +798,28 @@ async function runAgent(runId, user) {
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
-        let answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
+        const summaryStartedAt = Date.now();
+        const summarySpanId = startAgentTraceSpan(runId, {
+            type: 'model',
+            name: '生成最终总结',
+            input: { observationCount: observations.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
+            details: { purpose: 'agent_final_summary' }
+        });
+        let answer;
+        try {
+            answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
+            finishAgentTraceSpan(summarySpanId, {
+                output: { responseLength: String(answer || '').length },
+                durationMs: Date.now() - summaryStartedAt
+            });
+        } catch (summaryError) {
+            finishAgentTraceSpan(summarySpanId, {
+                status: 'error',
+                errorMessage: summaryError.message,
+                durationMs: Date.now() - summaryStartedAt
+            });
+            throw summaryError;
+        }
         // v0.0.50 自动升级逻辑会在置信度较低时用更强模型重试最终总结。
         if (routerStrategy === 'auto-escalate') {
             const confidence = assessConfidence({ output: answer });
@@ -774,6 +899,8 @@ async function runAgent(runId, user) {
             updated_at: getBeijingTimestamp()
         });
         createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
+    } finally {
+        syncAgentTraceFromRun(runId);
     }
 }
 

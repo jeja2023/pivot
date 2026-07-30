@@ -9,6 +9,17 @@ const {
     listSteps
 } = require('../services/agent-runs');
 const { preflightAgentRun } = require('../services/agent-preflight');
+const { getAgentTraceForUser } = require('../services/agent-traces');
+const { listAgentCheckpointsForUser } = require('../services/agent-checkpoints');
+const {
+    createAgentEvalSuite,
+    deleteAgentEvalSuite,
+    getAgentEvalRun,
+    getAgentEvalSuite,
+    listAgentEvalSuites,
+    startAgentEvaluation,
+    updateAgentEvalSuite
+} = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const {
     cancelAgentRun,
@@ -68,6 +79,49 @@ function createAgentsRouter({ authMiddleware, logAction }) {
 
     router.get('/agents/metrics', authMiddleware, asyncHandler(async (req, res) => {
         res.json(getAgentMetrics(req.user, req.query.days));
+    }));
+
+    router.get('/agents/evaluations/suites', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listAgentEvalSuites(req.user) });
+    }));
+
+    router.post('/agents/evaluations/suites', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluation = createAgentEvalSuite(req.user, req.body || {});
+        logAction(req, '创建智能体评测集', `评测集ID: ${evaluation.suite.id}，名称: ${evaluation.suite.name}`);
+        res.status(201).json({ success: true, ...evaluation });
+    }));
+
+    router.get('/agents/evaluations/runs/:evalRunId', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluation = getAgentEvalRun(req.params.evalRunId, req.user);
+        if (!evaluation) return res.status(404).json({ error: '智能体评测批次不存在。' });
+        res.json(evaluation);
+    }));
+
+    router.get('/agents/evaluations/suites/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluation = getAgentEvalSuite(req.params.id, req.user);
+        if (!evaluation) return res.status(404).json({ error: '智能体评测集不存在。' });
+        res.json(evaluation);
+    }));
+
+    router.put('/agents/evaluations/suites/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluation = updateAgentEvalSuite(req.params.id, req.user, req.body || {});
+        if (!evaluation) return res.status(404).json({ error: '智能体评测集不存在。' });
+        logAction(req, '更新智能体评测集', `评测集ID: ${evaluation.suite.id}，名称: ${evaluation.suite.name}`);
+        res.json({ success: true, ...evaluation });
+    }));
+
+    router.post('/agents/evaluations/suites/:id/runs', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluation = startAgentEvaluation(req.params.id, req.user, req.body || {}, createAgentRun);
+        if (!evaluation) return res.status(404).json({ error: '智能体评测集不存在。' });
+        logAction(req, '运行智能体评测集', `评测集ID: ${req.params.id}，批次ID: ${evaluation.run.id}`);
+        res.status(202).json({ success: true, ...evaluation });
+    }));
+
+    router.delete('/agents/evaluations/suites/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const suite = deleteAgentEvalSuite(req.params.id, req.user);
+        if (!suite) return res.status(404).json({ error: '智能体评测集不存在。' });
+        logAction(req, '归档智能体评测集', `评测集ID: ${suite.id}，名称: ${suite.name}`);
+        res.json({ success: true, suite });
     }));
 
     router.post('/agents/preflight', authMiddleware, asyncHandler(async (req, res) => {
@@ -278,6 +332,18 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         const detail = getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
+    }));
+
+    router.get('/agents/runs/:id/trace', authMiddleware, asyncHandler(async (req, res) => {
+        const trace = getAgentTraceForUser(req.params.id, req.user);
+        if (!trace) return res.status(404).json({ error: '智能体任务不存在。' });
+        res.json(trace);
+    }));
+
+    router.get('/agents/runs/:id/checkpoints', authMiddleware, asyncHandler(async (req, res) => {
+        const checkpoints = listAgentCheckpointsForUser(req.params.id, req.user, { limit: req.query.limit });
+        if (!checkpoints) return res.status(404).json({ error: '智能体任务不存在。' });
+        res.json({ data: checkpoints });
     }));
 
     router.post('/agents/runs/:id/workflow-draft', authMiddleware, asyncHandler(async (req, res) => {

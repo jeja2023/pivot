@@ -115,7 +115,12 @@ function agentProgressLabel(run = {}, progress = {}) {
 }
 
 function agentDagNodeReadableText(node) {
-    if (String(node?.tool_name || '').trim() !== 'agent.llm') return '';
+    const tool = String(node?.tool_name || '').trim();
+    if (tool === 'agent.delegate') {
+        return agentLlmOutputText(node.output) || String(node.output?.handoff?.summary || '').trim();
+    }
+    if (tool === 'agent.handoff') return String(node.output?.summary || '').trim();
+    if (tool !== 'agent.llm') return '';
     return agentLlmOutputText(node.output);
 }
 
@@ -128,13 +133,11 @@ function agentDagNodeReadableOutputMarkup(node) {
         if (renderedOutput) return `<div class="agent-dag-node-readable-output">${renderedOutput}</div>`;
     }
     const text = agentDagNodeReadableText(node);
-    if (!text) return '';
-    const cleanText = stripAgentWorkflowReportHeading(text);
-    const parsed = agentParsePayload(cleanText);
-    if (parsed && typeof parsed === 'object') {
-        return `<div class="agent-dag-node-readable-output is-json"><pre>${agentEscape(JSON.stringify(parsed, null, 2))}</pre></div>`;
-    }
-    return `<div class="agent-dag-node-readable-output is-markdown">${renderMarkdown(normalizeAgentMarkdown(cleanText))}</div>`;
+    const value = text ? stripAgentWorkflowReportHeading(text) : node.output;
+    if (value === undefined || value === null || value === '') return '';
+    const parsed = agentParsePayload(value);
+    const modeClass = typeof parsed === 'string' ? ' is-markdown' : ' is-structured';
+    return `<div class="agent-dag-node-readable-output${modeClass}">${agentResultReadableMarkup(parsed, { maxRows: 8, maxItems: 10 })}</div>`;
 }
 
 function agentDagNodeMarkup(node) {
@@ -151,8 +154,20 @@ function agentDagNodeMarkup(node) {
         skipped: '跳过',
         pending: '待执行'
     }[status] || agentStatusLabel(status);
+    const contractStatus = String(node.contract_status || '');
+    const contractLabel = contractStatus === 'valid'
+        ? '契约通过'
+        : contractStatus === 'invalid'
+            ? '契约未通过'
+            : contractStatus === 'validating'
+                ? '契约校验中'
+                : '';
+    const contractIssues = Array.isArray(node.contract_issues) ? node.contract_issues : [];
     const depText = deps.length ? deps.join(', ') : '无依赖';
     const toolName = agentToolTitle(node.tool_name || '-');
+    const delegateName = node.tool_name === 'agent.delegate'
+        ? String(node.input?.agentName || node.input?.agent_name || '').trim()
+        : '';
     return `
         <div class="agent-dag-node ${agentEscape(node.status)}">
             <div class="agent-dag-node-head">
@@ -162,6 +177,8 @@ function agentDagNodeMarkup(node) {
                 </div>
                 <div class="agent-dag-node-badges">
                     <span class="agent-dag-node-status ${agentEscape(status)}">${agentEscape(statusLabel)}</span>
+                    ${contractLabel ? `<span class="agent-dag-node-contract ${agentEscape(contractStatus)}">${agentEscape(contractLabel)}</span>` : ''}
+                    ${delegateName ? `<span class="agent-dag-node-agent">${agentEscape(delegateName)}</span>` : ''}
                     <span class="agent-dag-node-tool">${agentEscape(toolName)}</span>
                 </div>
             </div>
@@ -172,6 +189,7 @@ function agentDagNodeMarkup(node) {
                 <span><em>条件</em><strong>${agentEscape(node.condition || '-')}</strong></span>
             </div>
             ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
+            ${contractIssues.length ? `<div class="agent-dag-contract-issues"><strong>契约问题</strong><span>${agentEscape(contractIssues.join('；'))}</span></div>` : ''}
             ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">重跑此节点</button>` : ''}
             ${readableOutput}
             ${(input || output) ? `

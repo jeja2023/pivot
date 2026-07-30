@@ -32,6 +32,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             assertRunNotCancelled(runId);
             deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
+            const modelSpanId = deps.startAgentTraceSpan?.(runId, {
+                type: 'model',
+                name: `流式规划模型调用 #${step}`,
+                input: { messageCount: conversation.length, toolCount: tools.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
+                details: { purpose: 'agent_planner_streaming', step }
+            });
             // 限制流式更新频率：除非内容增长明显，否则最多每 100ms 推送一次。
             let lastEmittedAt = 0;
             let lastEmittedLen = 0;
@@ -51,11 +57,25 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     finishReason: snapshot.finishReason || null
                 });
             };
-            const result = await deps.withTimeout(
-                callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, onDelta: emitDelta, user }),
-                Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-                '流式工具规划'
-            );
+            let result;
+            try {
+                result = await deps.withTimeout(
+                    callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, onDelta: emitDelta, user }),
+                    Math.min(180000, Math.max(deadline - Date.now(), 1000)),
+                    '流式工具规划'
+                );
+                deps.finishAgentTraceSpan?.(modelSpanId, {
+                    output: { responseLength: String(result?.content || '').length, toolCallCount: result?.toolCalls?.length || 0, finishReason: result?.finishReason || '' },
+                    durationMs: Date.now() - stepStart
+                });
+            } catch (modelError) {
+                deps.finishAgentTraceSpan?.(modelSpanId, {
+                    status: 'error',
+                    errorMessage: modelError.message,
+                    durationMs: Date.now() - stepStart
+                });
+                throw modelError;
+            }
             // 推送最后一次流式快照，便于界面标记当前步骤已完成。
             deps.publishUserEvent(user.id, 'agent.streaming', {
                 runId,
@@ -118,6 +138,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     return { completed: true };
                 }
                 const callStart = Date.now();
+                const toolSpanId = deps.startAgentTraceSpan?.(runId, {
+                    type: 'tool',
+                    name: `工具调用：${call.name}`,
+                    input: call.arguments || {},
+                    details: { step, toolName: call.name, source: 'streaming_tool_call' }
+                });
                 try {
                     const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
                     const output = await deps.withTimeout(
@@ -136,6 +162,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                     conversation.push(buildToolResultMessage(call.id, compactOutput));
+                    deps.finishAgentTraceSpan?.(toolSpanId, {
+                        output: compactOutput,
+                        durationMs: Date.now() - callStart
+                    });
                 } catch (toolErr) {
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
                     deps.insertStep(runId, deps.listSteps(runId).length + 1, {
@@ -149,6 +179,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                     conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
+                    deps.finishAgentTraceSpan?.(toolSpanId, {
+                        status: 'error',
+                        errorMessage: toolErr.message,
+                        durationMs: Date.now() - callStart
+                    });
                 }
             }
         }

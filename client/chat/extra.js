@@ -193,11 +193,14 @@ async function applyPromptToWorkflow(prompt) {
     }
     const normalized = Array.isArray(spec) ? { nodes: spec } : (spec && typeof spec === 'object' ? spec : { nodes: [] });
     const nodes = Array.isArray(normalized.nodes) ? normalized.nodes : [];
-    let llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
+    const primaryLlmNodeId = String(normalized.primaryLlmNodeId || normalized.primary_llm_node_id || '').trim();
+    let llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
+        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
     if (!llmNode) {
         llmNode = createPromptLlmNode(nodes, prompt);
         nodes.push(llmNode);
     }
+    normalized.primaryLlmNodeId = llmNode.id;
     llmNode.input = llmNode.input && typeof llmNode.input === 'object' ? llmNode.input : {};
     if (prompt.type === 'role') {
         llmNode.input.systemPrompt = appendTextBlock(llmNode.input.systemPrompt, promptBlock(prompt));

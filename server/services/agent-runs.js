@@ -5,6 +5,8 @@ const {
     normalizeMaxSteps
 } = require('./agent-validators');
 const { isSuperAdmin } = require('../permissions');
+const { getAgentTraceForUser } = require('./agent-traces');
+const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
 
 function getRunForUser(runId, user, options = {}) {
     const includeDeleted = Boolean(options.includeDeleted);
@@ -21,7 +23,7 @@ function normalizeBooleanOption(value) {
 }
 
 function previewRunFilterSql(alias = 'r') {
-    return `(CASE
+    return `((CASE
         WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND json_valid(${alias}.metadata)
         THEN lower(COALESCE(
             json_extract(${alias}.metadata, '$.workflowRunSource'),
@@ -30,7 +32,12 @@ function previewRunFilterSql(alias = 'r') {
             ''
         ))
         ELSE ''
-    END) != 'preview'`;
+    END) != 'preview'
+    AND (CASE
+        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND json_valid(${alias}.metadata)
+        THEN json_extract(${alias}.metadata, '$.evaluation.evalRunId')
+        ELSE NULL
+    END) IS NULL)`;
 }
 
 function normalizeRunTypeFilter(value) {
@@ -243,7 +250,7 @@ function buildWorkflowDraftFromRun(run, steps = []) {
     return {
         name: `由自由任务生成：${sourceTitle || run.id}`.slice(0, 100),
         description: `从自由任务 ${run.id} 生成的工作流草稿。请在编排页检查节点、参数和发布策略后再用于生产任务。`.slice(0, 300),
-        dagSpec: { nodes: [...toolNodes, llmNode] },
+        dagSpec: { nodes: [...toolNodes, llmNode], primaryLlmNodeId: llmId },
         sourceRun: {
             id: run.id,
             title: run.title || '',
@@ -308,15 +315,18 @@ function sortDagNodesByDependencies(nodes = []) {
 
 function listDagNodes(runId) {
     const nodes = db.prepare(`
-        SELECT id, run_id, node_key, title, tool_name, input, depends_on, condition, status,
-               output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
+        SELECT id, run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, condition, status,
+               output, error_message, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
         FROM agent_dag_nodes
         WHERE run_id = ?
         ORDER BY id ASC
     `).all(runId).map(node => ({
         ...node,
         input: parseJsonObject(node.input) || {},
+        input_schema: parseJsonObject(node.input_schema) || {},
+        output_schema: parseJsonObject(node.output_schema) || {},
         depends_on: parseJsonObject(node.depends_on) || [],
+        contract_issues: parseJsonObject(node.contract_issues) || [],
         output: parseJsonObject(node.output) || node.output
     }));
     return sortDagNodesByDependencies(nodes);
@@ -345,7 +355,14 @@ function getRunDetailForUser(runId, user) {
     const run = getRunForUser(runId, user);
     if (!run) return null;
     const steps = listSteps(run.id);
-    return { run, steps, dagNodes: listDagNodes(run.id), progress: getRunProgress(run, steps) };
+    return {
+        run,
+        steps,
+        dagNodes: listDagNodes(run.id),
+        progress: getRunProgress(run, steps),
+        trace: getAgentTraceForUser(run.id, user),
+        checkpoints: summarizeAgentCheckpoints(run.id)
+    };
 }
 
 module.exports = {

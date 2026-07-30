@@ -75,43 +75,68 @@ function makeToolbarDropdown(label, buttons, className = '') {
         return dropdown;
     }
 
+function makeToolbarGroup(items, className = '') {
+        const group = document.createElement('div');
+        group.className = `pivot-dag-toolbar-group${className ? ` ${className}` : ''}`;
+        items.forEach(item => group.appendChild(item));
+        return group;
+    }
+
 function renderDagToolbar(ctx) {
         if (!ctx.toolbar) return null;
             ctx.toolbar.replaceChildren();
-            ctx.toolbar.appendChild(makeToolbarDropdown('节点', [
-                makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' }),
-                makeButton('大模型', '添加大模型处理节点，可总结、抽取或生成内容', () => ctx.addPresetNode({
+            const addLlmNode = () => ctx.addPresetNode({
                     base: 'llm',
                     title: '大模型处理',
                     patterns: ['agent.llm'],
                     input: ({ selectedNode }) => defaultLlmInput(selectedNode)
+                });
+            ctx.toolbar.appendChild(makeToolbarGroup([
+                makeButton('大模型', '添加大模型处理节点', addLlmNode, { icon: '+', variant: 'primary', tone: 'llm' }),
+                makeToolbarDropdown('其他节点', [
+                    makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' }),
+                    makeButton('委派智能体', '添加隔离上下文的专家智能体节点', () => ctx.addPresetNode({
+                    base: 'delegate',
+                    title: '委派智能体',
+                    patterns: ['agent.delegate'],
+                    input: { agentName: '领域专家', role: 'analyst', model: defaultWorkflowModelId(), task: '{{goal}}', context: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 },
+                    outputSchema: { type: 'object', required: ['content', 'agent', 'handoff'], properties: { content: { type: 'string' }, agent: { type: 'object' }, handoff: { type: 'object' } } }
                 }), { icon: '+' }),
-                makeButton('检索', '添加知识检索节点', () => ctx.addPresetNode({
+                    makeButton('智能体交接', '添加结构化 Handoff 节点', () => ctx.addPresetNode({
+                    base: 'handoff',
+                    title: '智能体交接',
+                    patterns: ['agent.handoff'],
+                    input: { fromAgent: '上游智能体', toAgent: 'Supervisor', summary: '', findings: [], evidence: [], risks: [], openQuestions: [], confidence: 0.7 },
+                    outputSchema: { type: 'object', required: ['fromAgent', 'toAgent', 'summary', 'status'], properties: { fromAgent: { type: 'string' }, toAgent: { type: 'string' }, summary: { type: 'string' }, status: { type: 'string' } } }
+                }), { icon: '+' }),
+                    makeButton('检索', '添加知识检索节点', () => ctx.addPresetNode({
                     base: 'search',
                     title: '知识检索',
                     patterns: ['rag.search', 'knowledge', 'search'],
                     input: { query: '' }
                 }), { icon: '+' }),
-                makeButton('数据', '添加数据查询节点', () => ctx.addPresetNode({
+                    makeButton('数据', '添加数据查询节点', () => ctx.addPresetNode({
                     base: 'data',
                     title: '数据查询',
                     patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
                     input: {}
                 }), { icon: '+' }),
-                makeButton('图表', '添加图表生成节点', () => ctx.addPresetNode({
+                    makeButton('图表', '添加图表生成节点', () => ctx.addPresetNode({
                     base: 'chart',
                     title: '图表生成',
                     patterns: ['viz.build_chart', 'chart'],
                     input: {}
                 }), { icon: '+' }),
-                makeButton('报告', '添加报告编排节点', () => ctx.addPresetNode({
+                    makeButton('报告', '添加报告编排节点', () => ctx.addPresetNode({
                     base: 'report',
                     title: '报告编排',
                     patterns: ['report.compose', 'report'],
                     input: {}
                 }), { icon: '+' })
+                ])
             ], 'is-node-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
+                makeButton('多智能体审阅', '添加并行研究员、审阅员与 Supervisor 裁决节点', ctx.addAgentTeamTemplate),
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
             ], 'is-template-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('操作', [

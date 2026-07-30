@@ -6,7 +6,11 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
-- 待发布（当前工作区）依赖安全与流水线收口：生产依赖高危项清零（`axios` 1.16.1→1.18.1、`js-yaml` 4.2.0→4.3.0、`sharp` 0.34.5→0.35.3、`body-parser` 补丁），`engines.node` 收紧为 `>=20.9.0` 以匹配 sharp 要求；审计门禁改为"豁免必须带理由与复查日期、到期自动失效"，并补 7 项门禁回归；CI 由只跑单一套件改为 `npm run check` + `lint` + `npm run test:all` 全量 673 项；修复内置工具箱读取不带 BOM 的 UTF-8 CSV 时中文乱码。
+- v0.0.233 (2026-07-30) 正式汇总发布智能体产品化升级：结构化可读结果、稳定 DAG 布局、显式主大模型节点、Agent Trace、节点数据契约、发布治理、持久化检查点、质量评测中心、确定性回归基线、`agent.delegate`、结构化 `agent.handoff` 和 Supervisor 模板完整贯通；完成 1440px/390px 视觉验收与全仓 691 项回归。模型裁判、自动 CI 发布门禁、原生工具调用能力探测和角色级独立预算仍作为二期治理项。
+- v0.0.232 (2026-07-30) 完成智能体质量评测与多智能体协作第一阶段：评测集、真实任务批量回归、确定性规则评分、历史基线对比、任务追踪回链、`agent.delegate`、结构化 `agent.handoff` 和 Supervisor 工作流模板落地；模型裁判、自动发布门禁与原生工具调用能力探测继续作为后续治理项。
+- v0.0.231 (2026-07-30) 完成智能体可追踪、节点契约和检查点恢复：Agent Trace/Span 独立存储、敏感字段脱敏、运行详情时间瀑布、DAG 输入输出契约、运行时严格校验、预检覆盖率、发布门禁及持久化恢复状态落地；评测中心和多智能体交接仍按后续里程碑推进。
+- v0.0.230 (2026-07-30) 完成工作流 DAG 布局持久化、主大模型节点显式化，以及自由任务/工作流结果的结构化可读展示。
+- v0.0.229 (2026-07-26) 完成生产依赖高危清零、审计门禁、CI 全量校验与内置报表 CSV 中文乱码修复。
 - v0.0.191–v0.0.228 (2026-07-05 ~ 2026-07-25) 按主题归并（逐版本明细见 CHANGELOG）：
   - **公文写作与文档处理**：公文写作分步化与审校体验重构；文档处理底座落地，文字识别/PDF 工具接入应用中心；OCR 彻底外置为独立服务并固化 HTTP 对接协议。
   - **工具箱数据接入**：数据接入边界清晰化、SQLite 数据集导入、数据来源工作台、数据管理入口统一与卡片可读性修复。
@@ -27,6 +31,11 @@ This document records optimization work that is intentionally staged instead of 
 - Server-side JSON HTTP calls are routed through `safe-http-client` or `model-forwarder`, which enforce SSRF checks, restricted agents, timeouts, `proxy: false`, and JSON-only payloads.
 - Runtime settings use a short-lived in-memory snapshot and invalidate after admin saves.
 - Agent queue workers renew running locks, validate run status transitions, record retry reasons, and expose active-run and oldest-queue-age metrics.
+- Agent Trace stores user-scoped run spans for routing, model, tool, DAG and control operations; sensitive keys are redacted before persistence and run details render a responsive waterfall view.
+- DAG nodes support persisted input/output contracts, runtime value validation, contract status in node history, preflight coverage metrics and publish-time blocking for invalid contracts or inaccessible tools.
+- Agent runs persist bounded checkpoints after planning, tool, DAG and control steps; free-task resume restores successful observations and recent failures, while DAG resume reuses completed nodes.
+- Agent evaluation suites execute real user-scoped runs, grade deterministic content/structure/performance rules, preserve historical cases, compare completed batches and link every result back to its trace.
+- Multi-agent workflows can delegate isolated role-specific sub-tasks and emit structured Handoff payloads; the built-in Supervisor template creates parallel research/review branches with an explicit primary adjudication model.
 - Chat generation is split into preflight, context assembly, model stream, and persistence services while emitting observability traces for slow or failed requests.
 - RAG debug query responses expose chunk ids, dense/fused/FTS/MMR score components, selected chunks, hybrid weights, applied scope, and index queue state; debug queries are now stored in `rag_debug_queries` and surfaced in the debug modal history.
 - 智能体“能力与结果”弹窗内容已使用受限面板，长工具列表和结果沉淀列表会在弹窗内滚动，不再向外撑开视口。
@@ -75,6 +84,16 @@ This document records optimization work that is intentionally staged instead of 
    - ✅ 生产更新源要求 HTTPS；离线局域网 HTTP 需显式开关加来源白名单（v0.0.203/204）。
    - ⏸ **Electron 主版本升级仍未评估**：v0.0.191 因「避免未经桌面启动、打包和原生模块验证的破坏性升级混入生产依赖修复」而暂缓，当时约定「后续按桌面运行时升级单独评估」，至今未执行。当前 electron 38 已落后 5 个大版本（最新 43），属于桌面端最大的一笔技术债，需要单独排期并完整验证启动、打包、原生模块（better-sqlite3 / sharp / duckdb）与自动更新。
    - ⬜ 为受信任的文档/更新域配置 `allowedExternalOrigins`。
+
+7. Agent quality platform — 🔄 进行中
+   - ✅ 运行追踪第一阶段已完成：Trace/Span、敏感字段脱敏、标准/流式/DAG 三路径采集和运行详情时间瀑布。
+   - ✅ DAG 契约第一阶段已完成：输入/输出契约、运行时校验、预检覆盖率和发布阻断。
+   - ✅ 评测中心第一阶段已完成：任务集、期望输出、确定性规则评分、真实任务批量运行、历史基线对比和 Trace 回链。
+   - ⬜ 增加模型裁判、人工标注校准和可选的发布/CI 回归门禁，避免仅靠字符串与结构规则判断语义质量。
+   - ✅ 持久化检查点第一阶段已完成：规划、工具、DAG 和控制步骤保存有上限的恢复状态，自由任务恢复观察，DAG 复用完成节点并从失败点继续。
+   - ⬜ 将支持工具调用的模型默认迁移到原生 `tool_calls`，并记录能力探测与 JSON 规划器回退原因。
+   - ✅ 多智能体 Supervisor/Handoff 第一阶段已完成：角色化委派、隔离上下文、结构化交接、并行研究/审阅模板、主裁决节点和 Trace 类型均已落地。
+   - ⬜ 为多智能体节点补充独立预算分摊、角色级工具白名单和跨分支冲突检测；当前仍继承工作流总体权限、审批和预算边界。
 
 ## 已知技术债与判断
 

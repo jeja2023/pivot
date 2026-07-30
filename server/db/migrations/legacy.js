@@ -683,6 +683,131 @@ function runMigrations() {
     ensureColumn('agent_steps', 'started_at', 'DATETIME');
     ensureColumn('agent_steps', 'completed_at', 'DATETIME');
     db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_traces (
+            run_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            status TEXT DEFAULT 'queued',
+            metadata TEXT,
+            started_at DATETIME,
+            completed_at DATETIME,
+            duration_ms INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_trace_spans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            span_id TEXT NOT NULL UNIQUE,
+            run_id TEXT NOT NULL,
+            parent_span_id TEXT,
+            span_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT DEFAULT 'running',
+            input_summary TEXT,
+            output_summary TEXT,
+            details TEXT,
+            error_message TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            started_at DATETIME,
+            completed_at DATETIME,
+            duration_ms INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_traces_user_created ON agent_traces(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_run_started ON agent_trace_spans(run_id, started_at, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_parent ON agent_trace_spans(parent_span_id);
+        CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checkpoint_id TEXT NOT NULL UNIQUE,
+            run_id TEXT NOT NULL,
+            step_index INTEGER DEFAULT 0,
+            checkpoint_type TEXT DEFAULT 'step',
+            status TEXT DEFAULT 'completed',
+            state TEXT NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_run_step ON agent_run_checkpoints(run_id, step_index, id);
+
+        CREATE TABLE IF NOT EXISTS agent_eval_suites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            target_type TEXT DEFAULT 'free',
+            workflow_id INTEGER,
+            workflow_version TEXT,
+            model_id INTEGER,
+            run_config TEXT,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE SET NULL,
+            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_eval_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            suite_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            input TEXT NOT NULL,
+            input_variables TEXT,
+            expected_output TEXT,
+            assertions TEXT,
+            sort_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (suite_id) REFERENCES agent_eval_suites(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_eval_runs (
+            id TEXT PRIMARY KEY,
+            suite_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            status TEXT DEFAULT 'running',
+            target_snapshot TEXT,
+            summary TEXT,
+            started_at DATETIME,
+            completed_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (suite_id) REFERENCES agent_eval_suites(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_eval_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            eval_run_id TEXT NOT NULL,
+            case_id INTEGER NOT NULL,
+            agent_run_id TEXT,
+            status TEXT DEFAULT 'queued',
+            score REAL DEFAULT 0,
+            passed INTEGER DEFAULT 0,
+            grader_results TEXT,
+            actual_output TEXT,
+            error_message TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            UNIQUE(eval_run_id, case_id),
+            FOREIGN KEY (eval_run_id) REFERENCES agent_eval_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES agent_eval_cases(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_eval_suites_user_updated ON agent_eval_suites(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_eval_cases_suite_order ON agent_eval_cases(suite_id, sort_order, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_eval_runs_suite_created ON agent_eval_runs(suite_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_eval_results_run_status ON agent_eval_results(eval_run_id, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_eval_results_agent_run ON agent_eval_results(agent_run_id);
+    `);
+    db.exec(`
         CREATE TABLE IF NOT EXISTS agent_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -817,6 +942,7 @@ function runMigrations() {
         );
     `);
     ensureColumn('agent_templates', 'scope', "TEXT DEFAULT 'personal'");
+    ensureColumn('agent_eval_cases', 'deleted_at', 'DATETIME');
     ensureColumn('agent_templates', 'description', 'TEXT');
     ensureColumn('agent_templates', 'tool_allowlist', 'TEXT');
     ensureColumn('agent_templates', 'max_token_budget', 'INTEGER DEFAULT 0');
@@ -848,6 +974,10 @@ function runMigrations() {
     ensureColumn('agent_workflow_versions', 'note', 'TEXT');
     ensureColumn('agent_workflow_versions', 'created_by', 'INTEGER');
     ensureColumn('agent_dag_nodes', 'attempt_count', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_dag_nodes', 'input_schema', 'TEXT');
+    ensureColumn('agent_dag_nodes', 'output_schema', 'TEXT');
+    ensureColumn('agent_dag_nodes', 'contract_status', "TEXT DEFAULT 'unchecked'");
+    ensureColumn('agent_dag_nodes', 'contract_issues', 'TEXT');
     ensureColumn('agent_artifacts', 'current_version_id', 'INTEGER');
     ensureColumn('agent_artifacts', 'note', 'TEXT');
     ensureColumn('agent_artifacts', 'updated_at', 'DATETIME');

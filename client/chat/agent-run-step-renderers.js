@@ -59,6 +59,266 @@ function agentStepRowsMarkup(structured) {
     `;
 }
 
+const AGENT_RESULT_FIELD_LABELS = {
+    answer: '结果',
+    content: '内容',
+    text: '内容',
+    markdown: '内容',
+    summary: '摘要',
+    description: '说明',
+    message: '消息',
+    title: '标题',
+    name: '名称',
+    status: '状态',
+    type: '类型',
+    error: '错误',
+    warning: '提示',
+    warnings: '提示',
+    query: '查询条件',
+    sql: 'SQL',
+    total: '总数',
+    count: '数量',
+    limit: '返回上限',
+    score: '相关度',
+    confidence: '置信度',
+    rows: '数据明细',
+    data: '数据明细',
+    items: '结果列表',
+    result: '结果',
+    results: '结果列表',
+    matches: '匹配结果',
+    documents: '文档',
+    sessions: '会话',
+    models: '模型',
+    files: '文件',
+    recommendations: '建议',
+    findings: '发现',
+    insights: '洞察',
+    metrics: '关键指标',
+    details: '详细信息',
+    path: '路径',
+    url: '链接',
+    createdAt: '创建时间',
+    created_at: '创建时间',
+    updatedAt: '更新时间',
+    updated_at: '更新时间',
+    duration: '耗时',
+    durationMs: '耗时（毫秒）',
+    duration_ms: '耗时（毫秒）',
+    checked: '已检查',
+    size: '大小',
+    table: '数据表',
+    schema: '数据库模式',
+    groupBy: '分组字段',
+    group_by: '分组字段',
+    value: '值',
+    ok: '执行状态'
+};
+
+const AGENT_RESULT_ENVELOPE_FIELDS = new Set([
+    'content', 'text', 'markdown', 'answer', 'message', 'summary', 'structuredContent',
+    'responseFormat', 'temperature', 'maxTokens', 'model', 'usage', 'finishReason',
+    'toolCalls', 'renderer', 'version'
+]);
+
+function agentResultFieldLabel(key) {
+    const value = String(key || '').trim();
+    if (!value) return '信息';
+    if (AGENT_RESULT_FIELD_LABELS[value]) return AGENT_RESULT_FIELD_LABELS[value];
+    return value
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function agentResultIsScalar(value) {
+    return value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value);
+}
+
+function agentResultScalarText(value) {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'boolean') return value ? '是' : '否';
+    if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString('zh-CN');
+    return String(value);
+}
+
+function agentResultDisplayValue(key, value) {
+    if (String(key || '').toLowerCase() === 'status') {
+        const statusLabels = {
+            queued: '排队中',
+            pending: '待执行',
+            running: '运行中',
+            completed: '已完成',
+            success: '成功',
+            error: '失败',
+            failed: '失败',
+            cancelled: '已停止',
+            skipped: '已跳过',
+            approval_required: '待审批'
+        };
+        const normalized = String(value || '').trim().toLowerCase();
+        if (statusLabels[normalized]) return statusLabels[normalized];
+    }
+    if (String(key || '').toLowerCase() === 'ok' && typeof value === 'boolean') return value ? '成功' : '失败';
+    return agentResultScalarText(value);
+}
+
+function agentResultObjectSummary(value, maxFields = 3) {
+    const parsed = agentParsePayload(value);
+    if (agentResultIsScalar(parsed)) return agentShortText(agentResultScalarText(parsed), 120);
+    if (Array.isArray(parsed)) {
+        const preview = parsed.slice(0, maxFields).map(item => agentResultObjectSummary(item, 2)).filter(Boolean);
+        return `${preview.join('、')}${parsed.length > preview.length ? ` 等 ${parsed.length} 项` : ''}` || `${parsed.length} 项`;
+    }
+    const preferred = agentLlmOutputText(parsed);
+    if (preferred) {
+        const preferredParsed = agentParsePayload(preferred);
+        return preferredParsed === preferred
+            ? agentShortText(preferred, 120)
+            : agentResultObjectSummary(preferredParsed, maxFields);
+    }
+    const parts = Object.entries(parsed || {})
+        .filter(([, item]) => agentResultIsScalar(item) && item !== '' && item !== null && item !== undefined)
+        .slice(0, maxFields)
+        .map(([key, item]) => `${agentResultFieldLabel(key)}：${agentShortText(agentResultScalarText(item), 48)}`);
+    return parts.join(' · ') || `${Object.keys(parsed || {}).length} 项信息`;
+}
+
+function agentResultArrayColumns(rows) {
+    const objectRows = rows.filter(row => row && typeof row === 'object' && !Array.isArray(row));
+    if (!objectRows.length) return [];
+    return [...new Set(objectRows.flatMap(row => Object.keys(row)))].slice(0, 8);
+}
+
+function agentResultTableMarkup(rows, options = {}) {
+    const values = Array.isArray(rows) ? rows : [];
+    if (!values.length) return '';
+    const columns = agentResultArrayColumns(values);
+    if (!columns.length) return '';
+    const maxRows = Math.max(1, Number(options.maxRows || 8));
+    const previewRows = values.slice(0, maxRows);
+    const hiddenCount = Math.max(values.length - previewRows.length, 0);
+    return `
+        <div class="agent-result-table-wrap">
+            <table class="agent-result-table">
+                <thead><tr>${columns.map(column => `<th>${agentEscape(agentResultFieldLabel(column))}</th>`).join('')}</tr></thead>
+                <tbody>
+                    ${previewRows.map(row => `
+                        <tr>${columns.map(column => {
+                            const value = agentParsePayload(row?.[column]);
+                            const text = agentResultIsScalar(value)
+                                ? agentResultDisplayValue(column, value)
+                                : agentResultObjectSummary(value, 2);
+                            return `<td>${agentEscape(text)}</td>`;
+                        }).join('')}</tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${hiddenCount ? `<div class="agent-result-note">已展示前 ${previewRows.length} 条，其余 ${hiddenCount} 条可在原始数据中查看。</div>` : ''}
+    `;
+}
+
+function agentResultArrayMarkup(items, options = {}, depth = 0) {
+    if (!items.length) return '<div class="agent-result-empty">暂无数据</div>';
+    const table = agentResultTableMarkup(items, options);
+    if (table) return table;
+    const maxItems = Math.max(1, Number(options.maxItems || 10));
+    const visibleItems = items.slice(0, maxItems);
+    return `
+        <ul class="agent-result-list">
+            ${visibleItems.map(item => {
+                const parsedItem = agentParsePayload(item);
+                if (agentResultIsScalar(parsedItem)) return `<li>${agentEscape(agentResultScalarText(parsedItem))}</li>`;
+                return `<li>${agentResultReadableMarkup(parsedItem, options, depth + 1)}</li>`;
+            }).join('')}
+        </ul>
+        ${items.length > visibleItems.length ? `<div class="agent-result-note">已展示前 ${visibleItems.length} 项，其余 ${items.length - visibleItems.length} 项可在原始数据中查看。</div>` : ''}
+    `;
+}
+
+function agentResultPrimaryText(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+    return agentLlmOutputText(payload);
+}
+
+function agentResultObjectMarkup(payload, options = {}, depth = 0) {
+    if (isAgentPivotChartSpec(payload)) return renderAgentPivotChartBlock(payload);
+    const type = String(payload.type || '').trim();
+    const markdown = String(payload.markdown || '').trim();
+    if (markdown && ['pivot_table', 'pivot_report', 'format_markdown_table'].includes(type)) {
+        return renderMarkdown(normalizeAgentMarkdown(markdown));
+    }
+    if (payload.structuredContent && typeof payload.structuredContent === 'object') {
+        return agentResultReadableMarkup(payload.structuredContent, options, depth);
+    }
+
+    const primaryText = agentResultPrimaryText(payload);
+    const entries = Object.entries(payload).map(([key, value]) => [key, agentParsePayload(value)]).filter(([key, value]) => {
+        if (value === undefined || value === null || value === '') return false;
+        if (primaryText && AGENT_RESULT_ENVELOPE_FIELDS.has(key)) return false;
+        return true;
+    });
+    const scalarEntries = entries.filter(([, value]) => agentResultIsScalar(value) && String(value).length <= 180 && !String(value).includes('\n'));
+    const scalarKeys = new Set(scalarEntries.map(([key]) => key));
+    const complexEntries = entries.filter(([key]) => !scalarKeys.has(key));
+    const parts = [];
+
+    if (primaryText) {
+        parts.push(`<div class="agent-result-lead">${agentResultReadableMarkup(primaryText, options, depth + 1)}</div>`);
+    }
+    if (scalarEntries.length) {
+        parts.push(`
+            <dl class="agent-result-facts">
+                ${scalarEntries.map(([key, value]) => `
+                    <div><dt>${agentEscape(agentResultFieldLabel(key))}</dt><dd>${agentEscape(agentResultDisplayValue(key, value))}</dd></div>
+                `).join('')}
+            </dl>
+        `);
+    }
+    complexEntries.forEach(([key, value]) => {
+        parts.push(`
+            <section class="agent-result-section">
+                <h4>${agentEscape(agentResultFieldLabel(key))}</h4>
+                ${agentResultReadableMarkup(value, options, depth + 1)}
+            </section>
+        `);
+    });
+    if (parts.length) return parts.join('');
+    return '<div class="agent-result-empty">任务已完成，未返回可展示内容。</div>';
+}
+
+function agentResultReadableMarkup(value, options = {}, depth = 0) {
+    const parsed = agentParsePayload(value);
+    if (parsed === undefined || parsed === null || parsed === '') return '<div class="agent-result-empty">暂无结果</div>';
+    if (depth > 4) return `<p>${agentEscape(agentResultObjectSummary(parsed, 4))}</p>`;
+    if (typeof parsed === 'string') return renderMarkdown(normalizeAgentMarkdown(parsed));
+    if (typeof parsed === 'number' || typeof parsed === 'boolean') return `<p>${agentEscape(agentResultScalarText(parsed))}</p>`;
+    if (Array.isArray(parsed)) return agentResultArrayMarkup(parsed, options, depth);
+    return agentResultObjectMarkup(parsed, options, depth);
+}
+
+function agentResultRawText(value) {
+    const parsed = agentParsePayload(value);
+    if (!parsed || typeof parsed !== 'object') return '';
+    try {
+        return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        return '';
+    }
+}
+
+function renderAgentFinalAnswer(value) {
+    const raw = agentResultRawText(value);
+    return `
+        <div class="agent-final">
+            <div class="agent-final-label">任务结果</div>
+            <div class="agent-result-readable">${agentResultReadableMarkup(value, { maxRows: 10, maxItems: 12 })}</div>
+            ${raw ? `<details class="agent-result-raw"><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
+        </div>
+    `;
+}
+
 function agentStepChartSummaryMarkup(structured) {
     if (!isAgentPivotChartSpec(structured)) return '';
     const typeLabel = {
@@ -120,7 +380,7 @@ function agentStepLlmReadableMarkup(step) {
     if (String(step?.tool_name || '').trim() !== 'agent.llm') return '';
     const text = stripAgentWorkflowReportHeading(agentLlmOutputText(step.output));
     if (!text) return '';
-    return `<div class="agent-step-readable agent-step-llm-output">${renderMarkdown(normalizeAgentMarkdown(text))}</div>`;
+    return `<div class="agent-step-readable agent-step-llm-output">${agentResultReadableMarkup(text, { maxRows: 6, maxItems: 8 })}</div>`;
 }
 
 function agentStepReadableMarkup(step) {
@@ -128,7 +388,9 @@ function agentStepReadableMarkup(step) {
     if (llmReadable) return llmReadable;
     const structured = unwrapAgentStructuredPayload(step.output || step.input || {});
     if (!structured || typeof structured !== 'object') return '';
-    return agentStepChartSummaryMarkup(structured) || agentStepRowsMarkup(structured);
+    return agentStepChartSummaryMarkup(structured)
+        || agentStepRowsMarkup(structured)
+        || `<div class="agent-step-readable agent-result-readable">${agentResultReadableMarkup(structured, { maxRows: 5, maxItems: 6 })}</div>`;
 }
 
 function agentStepPreview(step) {
@@ -166,7 +428,7 @@ function agentStepPreview(step) {
     if (Array.isArray(payload.models)) return `返回 ${payload.models.length} 个可用模型。`;
     if (payload.query) return `查询：${payload.query}`;
     if (payload.status) return `状态：${payload.status}`;
-    return agentShortText(JSON.stringify(payload), 500);
+    return agentResultObjectSummary(payload, 5);
 }
 
 function normalizeAgentMarkdown(text) {

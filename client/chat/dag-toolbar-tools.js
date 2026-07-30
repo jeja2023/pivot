@@ -2,6 +2,8 @@
 
 const TOOL_DISPLAY_OVERRIDES = {
         'agent.llm': ['大模型节点', '调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。'],
+        'agent.delegate': ['委派智能体', '隔离上下文运行具名专家，并将结果交接给 Supervisor。'],
+        'agent.handoff': ['智能体交接', '结构化传递结论、证据、风险和待决问题。'],
         'rag.search': ['知识库检索', '检索当前用户知识库，返回相关片段和来源。'],
         'sessions.search': ['会话检索', '按关键词检索当前用户历史会话。'],
         'sessions.recent': ['最近会话', '列出最近未删除会话。'],
@@ -44,7 +46,7 @@ const TOOL_DISPLAY_OVERRIDES = {
     };
 
 const TOOL_GROUPS = [
-        { key: 'llm', label: '大模型', test: name => /^(agent\.llm|llm\.|model\.generate)/.test(name) },
+        { key: 'llm', label: '大模型', test: name => /^(agent\.(llm|delegate|handoff)|llm\.|model\.generate)/.test(name) },
         { key: 'knowledge', label: '知识与会话', test: name => /^(rag|sessions|knowledge)\./.test(name) },
         { key: 'database', label: '数据库', test: name => /(^|\.)(db)\./.test(name) },
         { key: 'reports', label: '报表与文件', test: name => /^(reports|report)\./.test(name) },

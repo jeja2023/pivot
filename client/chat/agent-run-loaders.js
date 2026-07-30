@@ -232,6 +232,7 @@ function renderAgentPreflight(data) {
     if (!target || !data) return;
     const statusText = data.status === 'blocked' ? '阻断' : data.status === 'warning' ? '有风险' : '可运行';
     const summary = data.summary || {};
+    const contractSummary = data.contracts?.summary || null;
     const deploymentTip = summary.runMode === 'dag'
         ? '工作流适合发布版本、计划运行和审计复用，可作为企业生产任务入口。'
         : '自由任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
@@ -247,6 +248,8 @@ function renderAgentPreflight(data) {
             <span><b>${Number(summary.highRiskToolCount || 0)}</b>高风险工具</span>
             <span><b>${Number(summary.mcpErrorServers || 0)}</b>异常能力</span>
             <span><b>${Number(summary.mcpUncheckedServers || 0)}</b>待刷新能力</span>
+            ${contractSummary ? `<span><b>${Number(contractSummary.inputContractCount || 0)}/${Number(contractSummary.nodeCount || 0)}</b>输入契约</span>` : ''}
+            ${contractSummary ? `<span><b>${Number(contractSummary.outputContractCount || 0)}/${Number(contractSummary.nodeCount || 0)}</b>输出契约</span>` : ''}
         </div>
         <div class="governance-list">
             ${messages.map(item => `<span>${agentEscape(item)}</span>`).join('') || '<span>预检通过。</span>'}

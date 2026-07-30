@@ -4,6 +4,8 @@ const {
     parseJsonObject,
     normalizeDagSpec
 } = require('./agent-validators');
+const { formatToolList } = require('./agent-tool-catalog');
+const { inspectDagContracts } = require('./agent-dag-contracts');
 
 function normalizeDagRunInputs(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -36,15 +38,17 @@ function validateLlmNodePlacement(dagSpec) {
 
 function assertWorkflowHasConfiguredLlm(dagSpec) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const llmNode = nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
-    if (!llmNode) {
+    const llmNodes = nodes.filter(node => String(node?.tool || '').trim() === 'agent.llm');
+    if (!llmNodes.length) {
         const err = new Error('工作流必须包含 1 个大模型节点。');
         err.status = 400;
         throw err;
     }
-    const model = String(llmNode?.input?.model || llmNode?.input?.modelId || llmNode?.input?.model_id || '').trim();
-    if (!model) {
-        const err = new Error('大模型节点需要填写节点模型。');
+    const unconfiguredNode = llmNodes.find(node => !String(
+        node?.input?.model || node?.input?.modelId || node?.input?.model_id || ''
+    ).trim());
+    if (unconfiguredNode) {
+        const err = new Error(`${unconfiguredNode.title || unconfiguredNode.id || '大模型节点'} 需要填写节点模型。`);
         err.status = 400;
         throw err;
     }
@@ -241,6 +245,13 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
 function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
     const resolved = resolveAgentWorkflowVersion(workflowId, user, version || 'current');
     if (!resolved) return null;
+    const contractReport = inspectDagContracts(resolved.dagSpec, formatToolList(user, { toolPolicy: 'all' }));
+    if (contractReport.blockers.length) {
+        const err = new Error(`发布前检查未通过：${contractReport.blockers[0]}`);
+        err.status = 400;
+        err.details = { contracts: contractReport };
+        throw err;
+    }
     const now = getBeijingTimestamp();
     db.prepare(`
         UPDATE agent_workflows

@@ -5,6 +5,13 @@ const { normalizeDagNodePolicy, resolveDagNodeInput } = require('./agent-dag-uti
 const { listSteps } = require('./agent-runs');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeDagSpec, parseJsonObject } = require('./agent-validators');
+const {
+    normalizeJsonSchema,
+    outputValueForContract,
+    schemaHasRules,
+    validateJsonSchemaDefinition,
+    validateValueAgainstSchema
+} = require('./agent-dag-contracts');
 
 function parseMaybeJsonPayload(value) {
     if (!value) return value;
@@ -87,7 +94,9 @@ function buildDagFallbackFinalAnswer(dagSpec, states) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
     const completedNodes = nodes.filter(node => states.get(node.id)?.status === 'completed');
     const reversedCompleted = completedNodes.slice().reverse();
-    const llmNode = reversedCompleted.find(node => String(node.tool || '').trim() === 'agent.llm');
+    const primaryLlmNodeId = String(dagSpec?.primaryLlmNodeId || dagSpec?.primary_llm_node_id || '').trim();
+    const llmNode = completedNodes.find(node => node.id === primaryLlmNodeId && String(node.tool || '').trim() === 'agent.llm')
+        || reversedCompleted.find(node => String(node.tool || '').trim() === 'agent.llm');
     const llmText = llmNode ? extractReadableDagOutput(states.get(llmNode.id)?.output) : '';
     if (llmText) return llmText;
     for (const node of reversedCompleted) {
@@ -105,11 +114,15 @@ function upsertDagNode(runId, node, patch = {}) {
         title: patch.title ?? node.title,
         toolName: patch.toolName ?? node.tool,
         input: patch.input ?? node.input ?? {},
+        inputSchema: patch.inputSchema ?? node.inputSchema ?? {},
+        outputSchema: patch.outputSchema ?? node.outputSchema ?? {},
         dependsOn: patch.dependsOn ?? node.dependsOn ?? [],
         condition: patch.condition ?? node.condition ?? 'success',
         status: patch.status ?? 'pending',
         output: patch.output ?? null,
         errorMessage: patch.errorMessage ?? '',
+        contractStatus: patch.contractStatus ?? 'unchecked',
+        contractIssues: patch.contractIssues ?? [],
         attemptCount: patch.attemptCount ?? 0,
         durationMs: patch.durationMs ?? null,
         startedAt: patch.startedAt ?? null,
@@ -118,18 +131,23 @@ function upsertDagNode(runId, node, patch = {}) {
     if (existing) {
         db.prepare(`
             UPDATE agent_dag_nodes
-            SET title = ?, tool_name = ?, input = ?, depends_on = ?, condition = ?, status = ?,
-                output = ?, error_message = ?, attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?
+            SET title = ?, tool_name = ?, input = ?, input_schema = ?, output_schema = ?, depends_on = ?, condition = ?, status = ?,
+                output = ?, error_message = ?, contract_status = ?, contract_issues = ?,
+                attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?
             WHERE id = ?
         `).run(
             row.title,
             row.toolName,
             JSON.stringify(row.input),
+            JSON.stringify(row.inputSchema),
+            JSON.stringify(row.outputSchema),
             JSON.stringify(row.dependsOn),
             row.condition,
             row.status,
             row.output === null ? null : JSON.stringify(row.output),
             row.errorMessage,
+            row.contractStatus,
+            JSON.stringify(row.contractIssues),
             row.attemptCount,
             row.durationMs,
             row.startedAt,
@@ -140,20 +158,24 @@ function upsertDagNode(runId, node, patch = {}) {
     }
     const info = db.prepare(`
         INSERT INTO agent_dag_nodes (
-            run_id, node_key, title, tool_name, input, depends_on, condition, status,
-            output, error_message, attempt_count, duration_ms, started_at, completed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, condition, status,
+            output, error_message, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         runId,
         node.id,
         row.title,
         row.toolName,
         JSON.stringify(row.input),
+        JSON.stringify(row.inputSchema),
+        JSON.stringify(row.outputSchema),
         JSON.stringify(row.dependsOn),
         row.condition,
         row.status,
         row.output === null ? null : JSON.stringify(row.output),
         row.errorMessage,
+        row.contractStatus,
+        JSON.stringify(row.contractIssues),
         row.attemptCount,
         row.durationMs,
         row.startedAt,
@@ -259,6 +281,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 });
                 deps.insertStep(run.id, stepIndex, {
                     type: 'dag',
+                    nodeId: node.id,
                     title: `跳过 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: node.input,
@@ -278,16 +301,56 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 states,
                 nodeMap
             });
-            if (deps.maybePauseForApproval(run, selectedTool, resolvedInput)) {
-                const err = new Error('DAG 节点需要工具审批。');
-                err.code = 'AGENT_APPROVAL_REQUIRED';
-                throw err;
-            }
+            const explicitInputSchema = normalizeJsonSchema(node.inputSchema || node.input_schema || {});
+            const inputSchema = schemaHasRules(explicitInputSchema)
+                ? explicitInputSchema
+                : normalizeJsonSchema(selectedTool?.input_schema || selectedTool?.inputSchema || selectedTool?.parameters || {});
+            const outputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
+            const inputContractIssues = [];
+            validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, inputContractIssues);
+            validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, inputContractIssues);
+            const outputDefinitionIssues = validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, []);
             const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs);
             const startedAtText = getBeijingTimestamp();
             states.set(node.id, { status: 'running', input: resolvedInput });
-            upsertDagNode(run.id, node, { status: 'running', input: resolvedInput, startedAt: startedAtText });
+            upsertDagNode(run.id, node, {
+                status: 'running',
+                input: resolvedInput,
+                inputSchema,
+                outputSchema,
+                contractStatus: 'validating',
+                contractIssues: [],
+                startedAt: startedAtText
+            });
+            const delegatedAgent = node.tool === 'agent.delegate';
+            const handoffNode = node.tool === 'agent.handoff';
+            const nodeSpanId = deps.startAgentTraceSpan?.(run.id, {
+                type: delegatedAgent ? 'agent' : (handoffNode ? 'handoff' : 'dag_node'),
+                name: node.title || node.id,
+                input: resolvedInput,
+                details: {
+                    nodeId: node.id,
+                    toolName: node.tool,
+                    retryLimit: policy.retryLimit,
+                    agentName: delegatedAgent ? resolvedInput.agentName : undefined,
+                    role: delegatedAgent ? resolvedInput.role : undefined,
+                    handoffTo: delegatedAgent ? 'Supervisor' : (handoffNode ? resolvedInput.toAgent : undefined)
+                }
+            });
             try {
+                if (inputContractIssues.length || outputDefinitionIssues.length) {
+                    const issues = [...inputContractIssues, ...outputDefinitionIssues];
+                    const contractError = new Error(`节点契约校验失败：${issues[0]}`);
+                    contractError.code = 'AGENT_DAG_CONTRACT_INVALID';
+                    contractError.contractIssues = issues;
+                    throw contractError;
+                }
+                if (!selectedTool) throw new Error(`节点工具不可用或无权访问：${node.tool || '-'}`);
+                if (deps.maybePauseForApproval(run, selectedTool, resolvedInput)) {
+                    const approvalError = new Error('DAG 节点需要工具审批。');
+                    approvalError.code = 'AGENT_APPROVAL_REQUIRED';
+                    throw approvalError;
+                }
                 const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy }, deps);
                 deps.assertRunNotCancelled(run.id);
                 if (!result.ok) {
@@ -296,12 +359,25 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     throw result.error;
                 }
                 const { output } = result;
+                const outputContractIssues = schemaHasRules(outputSchema)
+                    ? validateValueAgainstSchema(outputValueForContract(output, node), outputSchema, {}, `${node.title || node.id} 输出`, [])
+                    : [];
+                if (outputContractIssues.length) {
+                    const contractError = new Error(`节点输出不符合契约：${outputContractIssues[0]}`);
+                    contractError.code = 'AGENT_DAG_OUTPUT_CONTRACT';
+                    contractError.contractIssues = outputContractIssues;
+                    contractError.dagAttempt = result.attempt;
+                    contractError.dagDurationMs = result.durationMs;
+                    throw contractError;
+                }
                 const compactOutput = clampText(output, 12000);
                 states.set(node.id, { status: 'completed', input: resolvedInput, output, compactOutput, attemptCount: result.attempt });
                 upsertDagNode(run.id, node, {
                     status: 'completed',
                     input: resolvedInput,
                     output: compactOutput,
+                    contractStatus: 'valid',
+                    contractIssues: [],
                     attemptCount: result.attempt,
                     durationMs: result.durationMs,
                     completedAt: getBeijingTimestamp()
@@ -309,13 +385,27 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, output: compactOutput, attempts: result.attempt });
                 deps.insertStep(run.id, stepIndex, {
                     type: 'dag',
+                    nodeId: node.id,
                     title: `完成 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: compactOutput,
                     durationMs: result.durationMs
                 });
+                deps.finishAgentTraceSpan?.(nodeSpanId, {
+                    output: { nodeId: node.id, result: compactOutput },
+                    details: { nodeId: node.id, toolName: node.tool, contractStatus: 'valid', attempts: result.attempt },
+                    durationMs: result.durationMs
+                });
             } catch (e) {
+                if (e.code === 'AGENT_APPROVAL_REQUIRED') {
+                    deps.finishAgentTraceSpan?.(nodeSpanId, {
+                        status: 'waiting',
+                        details: { nodeId: node.id, toolName: node.tool, reason: 'approval_required' },
+                        errorMessage: e.message
+                    });
+                    throw e;
+                }
                 const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
                 const durationMs = Number(e.dagDurationMs || 0);
                 const status = policy.onError === 'continue' ? 'completed' : 'error';
@@ -332,6 +422,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     input: resolvedInput,
                     output: { error: e.message, onError: policy.onError },
                     errorMessage: e.message,
+                    contractStatus: e.contractIssues?.length ? 'invalid' : 'error',
+                    contractIssues: e.contractIssues || [],
                     attemptCount,
                     durationMs,
                     completedAt: getBeijingTimestamp()
@@ -339,12 +431,20 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
                 deps.insertStep(run.id, stepIndex, {
                     type: 'dag',
+                    nodeId: node.id,
                     title: policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`,
                     toolName: node.tool,
                     input: resolvedInput,
                     output: { error: e.message, onError: policy.onError },
                     errorMessage: e.message,
                     status: policy.onError === 'continue' ? 'success' : 'error',
+                    durationMs
+                });
+                deps.finishAgentTraceSpan?.(nodeSpanId, {
+                    status: 'error',
+                    output: { nodeId: node.id, onError: policy.onError },
+                    details: { nodeId: node.id, toolName: node.tool, contractIssues: e.contractIssues || [] },
+                    errorMessage: e.message,
                     durationMs
                 });
                 if (policy.onError === 'stop') stopErrors.push(e);

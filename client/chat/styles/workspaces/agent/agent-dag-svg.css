@@ -26,9 +26,27 @@
     transition: fill 0.15s ease, stroke 0.15s ease;
 }
 
+.pivot-dag-node.is-llm .pivot-dag-node-body {
+    fill: #f0fdfa;
+    stroke: rgba(13, 148, 136, 0.7);
+}
+
+.pivot-dag-node.is-primary-llm .pivot-dag-node-body {
+    fill: #ecfdf5;
+    stroke: #10a37f;
+    stroke-width: 2;
+}
+
 .pivot-dag-node.is-selected .pivot-dag-node-body {
     fill: rgba(59, 130, 246, 0.08);
     stroke: #3b82f6;
+}
+
+.pivot-dag-primary-mark text {
+    fill: #b7791f;
+    font-size: 13px;
+    font-weight: 900;
+    pointer-events: none;
 }
 
 .pivot-dag-node.has-warning .pivot-dag-node-body {
@@ -146,4 +164,16 @@
 .pivot-dag-edge-ghost {
     stroke-dasharray: 4 3;
     opacity: 0.7;
+}
+
+body.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body {
+    fill: #102f2b;
+    stroke: rgba(45, 212, 191, 0.72);
+}
+
+body.dark-mode .pivot-dag-node.is-primary-llm .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-primary-llm .pivot-dag-node-body {
+    fill: #0d352d;
+    stroke: #34d399;
 }
