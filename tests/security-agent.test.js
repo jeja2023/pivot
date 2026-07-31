@@ -8,6 +8,7 @@ const {
     createAgentRun,
     createAgentSchedule,
     createAgentTemplate,
+    createAgentWorkflow,
     createWorkflowDraftFromRun,
     createAgentWorkbenchSandbox,
     createFakeSseResponse,
@@ -46,7 +47,7 @@ const {
     streamingTools,
     subscribeUserEvents,
     test,
-    assertWorkflowHasConfiguredLlm
+    assertWorkflowLlmNodesConfigured
 } = require('./security-helpers');
 require('./security-agent/preflight-governance');
 require('./security-agent/queue-scheduling');
@@ -71,6 +72,7 @@ function readAgentSourceBundle() {
         'agent-workflows.js',
         'agent-templates.js',
         'agent-schedules.js',
+        'agent-workflow-schedules.js',
         'agent-artifacts.js'
     ].map(fileName => fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', fileName), 'utf8')).join('\n');
 }
@@ -416,46 +418,24 @@ test('agent quick task exposes save template action without opening templates pa
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
 });
 
-test('prompt library serves chat free task and workflow entry points', () => {
+test('prompt library is retired from user-facing workspaces', () => {
     const chatPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
     const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
     const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
     const settingsNav = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'shell-start.html'), 'utf8');
-    const settingsPrompts = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'settings', 'prompts.html'), 'utf8');
+    const settings = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'settings.html'), 'utf8');
     const preAppModals = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
     const app = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'app', 'main.js'), 'utf8');
     const extra = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'extra.js'), 'utf8');
-    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'sessions-prompts.css'), 'utf8');
 
-    assert.match(settingsNav, />提示词库<\/button>/);
-    assert.match(settingsPrompts, /id="prompt-type-filter"/);
-    assert.match(settingsPrompts, /id="prompt-surface-filter"/);
-    assert.match(settingsPrompts, /<option value="workflow">工作流<\/option>/);
-    assert.match(preAppModals, /id="p-type"/);
-    assert.match(preAppModals, /name="p-target-surfaces" value="chat"/);
-    assert.match(preAppModals, /name="p-target-surfaces" value="agent"/);
-    assert.match(preAppModals, /name="p-target-surfaces" value="workflow"/);
-    assert.match(preAppModals, /id="prompt-apply-modal-container"/);
-
-    assert.match(chatPartial, /id="chat-prompt-library-btn"/);
-    assert.doesNotMatch(chatPartial, /id="chat-prompt-library-btn" class="[^"]*chat-tool-toggle/);
-    assert.match(agentPartial, /id="agent-prompt-library-btn"/);
-    assert.match(dagPartial, /id="agent-dag-prompt-library-btn"/);
-    assert.match(app, /bind\('chat-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('chat'\)/);
-    assert.match(app, /bind\('agent-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('agent'\)/);
-    assert.match(app, /bind\('agent-dag-prompt-library-btn'[\s\S]*window\.openPromptLibrary\?\.\('workflow'\)/);
-
-    assert.match(extra, /const PROMPT_TARGETS = \['chat', 'agent', 'workflow'\]/);
-    assert.match(extra, /targetSurfaces: getPromptTargetChecks\(\)/);
-    assert.match(extra, /function renderPromptSurfaceActions/);
-    assert.match(extra, /async function applyPromptToAgent/);
-    assert.match(extra, /agent-context-notes/);
-    assert.match(extra, /async function applyPromptToWorkflow/);
-    assert.match(extra, /agent\.llm/);
-    assert.match(extra, /llmNode\.input\.systemPrompt/);
-    assert.match(extra, /llmNode\.input\.prompt/);
-    assert.match(css, /\.prompt-library-toolbar\s*\{/);
-    assert.match(css, /\.prompt-apply-modal\s*\{/);
+    assert.doesNotMatch(settingsNav, />提示词库<\/button>/);
+    assert.doesNotMatch(settings, /settings\/prompts\.html|tab-content-prompts|prompt-grid/);
+    assert.doesNotMatch(preAppModals, /prompt-modal-container|prompt-apply-modal-container|p-target-surfaces/);
+    assert.doesNotMatch(chatPartial, /chat-prompt-library-btn|套用提示词/);
+    assert.doesNotMatch(agentPartial, /agent-prompt-library-btn|套用提示词/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-prompt-library-btn"/);
+    assert.doesNotMatch(app, /openPromptLibrary|openPromptModal|savePrompt|prompt-library-btn/);
+    assert.doesNotMatch(extra, /PROMPT_TARGETS|openPromptLibrary|applyPromptToWorkflow|prompt-apply-modal/);
 });
 
 test('agent stats chart wizard explains optional database schema field', () => {
@@ -516,9 +496,11 @@ test('agent DAG parameter editor localizes common tool input fields', () => {
 test('agent workflow workbench exposes preview and published-version run controls', () => {
     const dagPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent-dag.html'), 'utf8');
     const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const nodeLibrary = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-dag-node-library.js'), 'utf8');
     const source = readAgentSourceBundle();
     const editor = readDagEditorSourceBundle();
     const css = readAgentCssBundle();
+    const workflowIconSurfaces = `${dagPartial}\n${editor}\n${nodeLibrary}`;
 
     assert.doesNotMatch(dagPartial, /id="agent-dag-preview-run-btn"/);
     assert.doesNotMatch(dagPartial, /id="agent-dag-run-published-btn"/);
@@ -527,9 +509,20 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(dagPartial, /id="agent-dag-console-run-published-btn"/);
     assert.doesNotMatch(dagPartial, /id="agent-dag-console-publish-run-btn"/);
     assert.match(editor, /makeToolbarGroup\(\[/);
-    assert.match(editor, /makeButton\('大模型'[\s\S]*?variant: 'primary'/);
+    assert.match(editor, /makeToolbarDropdown\('添加节点'[\s\S]*?makeButton\('大模型'/);
+    assert.match(editor, /makeToolbarDropdown\('模板'[\s\S]*?makeButton\('多智能体审阅'/);
     assert.match(editor, /makeToolbarDropdown\('发布'/);
     assert.match(editor, /makeToolbarDropdown\('运行'/);
+    assert.match(editor, /const DAG_ICON_SHAPES = \{/);
+    assert.match(editor, /function createDagIcon\(name, className = ''\)/);
+    assert.match(editor, /icon\.appendChild\(createDagIcon\('puzzle'\)\)/);
+    assert.match(editor, /summary\.textContent = label/);
+    assert.doesNotMatch(editor, /pivot-dag-toolbar-summary-icon/);
+    assert.match(nodeLibrary, /collapseBtn\.textContent = '«'/);
+    assert.match(nodeLibrary, /iconEl\.appendChild\(createDagIcon\(item\.svgIcon\)\)/);
+    assert.match(dagPartial, /id="agent-dag-save-btn"[^>]*>保存<\/button>/);
+    assert.match(dagPartial, /agent-workflow-picker-caret[^>]*>⌄<\/span>/);
+    assert.doesNotMatch(workflowIconSurfaces, /[🧠🤝🔀⚙️🌐🔍🗄️📊📋💬📚📝🔌🧩]/u);
     assert.match(editor, /const DEFAULT_VIEW_SCALE = 0\.72/);
     assert.match(editor, /const NODE_WIDTH = 188/);
     assert.match(editor, /const NODE_HEIGHT = 62/);
@@ -542,8 +535,11 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(editor, /makeButton\('预览运行'/);
     assert.match(editor, /makeButton\('运行发布版'/);
     assert.doesNotMatch(editor, /makeButton\('发布并运行'/);
-    assert.match(dagPartial, /id="agent-workflow-current-label"/);
-    assert.match(dagPartial, />步骤\/节点模板</);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-current-label"/);
+    assert.doesNotMatch(dagPartial, /id="agent-dag-save-draft-btn"/);
+    assert.match(dagPartial, /id="agent-workflow-picker"/);
+    assert.match(dagPartial, /id="agent-workflow-management-menu"/);
+    assert.match(dagPartial, /id="agent-workflow-schedule-btn"/);
     assert.match(dagPartial, /id="agent-workflow-lifecycle"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-run-console-status"/);
@@ -559,8 +555,8 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(agentPartial, /<option value="dag">工作流<\/option>/);
     assert.match(source, /function buildAgentWorkflowWorkbenchRunPayload/);
     assert.match(source, /function getAgentWorkflowRunSettings/);
-    assert.match(source, /const primaryLlmNodeId = String\(spec\?\.primaryLlmNodeId/);
-    assert.match(source, /node\.id === primaryLlmNodeId[\s\S]*?agent\.llm/);
+    assert.match(source, /const llmNodes = nodes\.filter/);
+    assert.doesNotMatch(source, /primaryLlmNodeId|primary_llm_node_id/);
     assert.match(source, /modelId: runSettings\.modelId/);
     assert.match(source, /maxSteps: runSettings\.maxSteps/);
     assert.match(source, /async function ensureAgentWorkflowNameForSave/);
@@ -577,6 +573,9 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(source, /window\.cancelAgentWorkflowPreviewRun/);
     assert.match(source, /function agentDagNodeReadableOutputMarkup/);
     assert.match(source, /window\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
+    assert.match(source, /async function openAgentWorkflowSchedules/);
+    assert.match(source, /workflowVersion: 'published'/);
+    assert.match(source, /data-agent-workflow-schedule-toggle/);
     assert.match(source, /data-agent-run-title-full/);
     assert.match(source, /function bindAgentRunTitleTooltip/);
     assert.match(source, /const NODE_W = 112, NODE_H = 34/);
@@ -587,10 +586,15 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.doesNotMatch(source, /agent-workflow-version-label/);
     assert.doesNotMatch(source, /agent-workflow-run-source/);
     assert.doesNotMatch(source, /getSelectedAgentWorkflowRunVersion/);
+    assert.doesNotMatch(source, /function workflowLifecycleChip/);
+    assert.match(source, /workflowManagementMenu\.addEventListener\('toggle'/);
+    assert.match(source, /async function confirmAgentWorkflowDiscard/);
+    assert.match(source, /放弃未保存修改/);
     assert.match(css, /\.agent-workflow-lifecycle\s*\{/);
-    assert.match(css, /\.agent-workflow-lifecycle-chip\s*\{/);
-    assert.match(css, /\.agent-dag-library-select:focus-within\s*\{/);
-    assert.match(css, /\.agent-dag-library-actions\s*\{[\s\S]*?border: 0;[\s\S]*?background: transparent;/);
+    assert.match(css, /\.agent-workflow-lifecycle-summary\s*\{/);
+    assert.doesNotMatch(css, /\.agent-workflow-lifecycle-chip\s*\{/);
+    assert.match(css, /\.agent-workflow-picker-trigger:focus-visible/);
+    assert.match(css, /\.agent-workflow-management-popover\s*\{/);
     assert.doesNotMatch(css, /\.agent-workflow-run-console\s*\{/);
     assert.match(css, /\.pivot-dag-toolbar-dropdown\s*\{/);
     assert.match(css, /\.pivot-dag-toolbar-summary::marker\s*\{/);
@@ -627,20 +631,49 @@ test('agent free task and workflow positioning is explicit in UI and actions', (
     assert.match(agentPartial, /生产周期任务建议使用已发布工作流/);
     assert.match(dagPartial, /工作流编排/);
     assert.match(dagPartial, /发布版本、计划运行和审计复用/);
-    assert.match(dagPartial, />步骤\/节点模板</);
+    assert.match(dagPartial, /aria-label="当前工作流与工作流库"/);
+    assert.match(agentPartial, /data-agent-open-dag/);
+    assert.equal((agentPartial.match(/data-agent-open-dag/g) || []).length, 1);
+    assert.doesNotMatch(agentPartial, /id="agent-open-dag-btn"/);
     assert.match(dagPartial, /返回智能体/);
     assert.match(source, /window\.createWorkflowDraftFromAgentRun/);
     assert.match(source, /workflow-draft/);
     assert.match(source, /data-agent-create-workflow-draft/);
     assert.match(source, /pendingAgentWorkflowDraft/);
     assert.match(source, /自由任务已转为工作流草稿/);
+    assert.match(source, /window\.showMainWorkspace\?\.\('agent'\);[\s\S]*?window\.bindAgentConfigModal\?\.\(\);/);
     assert.match(source, /runType/);
     assert.match(source, /自由任务适合分析、排查和临时处理/);
     assert.match(css, /\.agent-run-type\s*\{/);
     assert.match(css, /\.agent-run-type\.free\s*\{/);
 });
 
-test('agent DAG editor and runtime expose first-class LLM workflow node', () => {
+test('agent quality evaluation modals use global form layout and focused editor states', () => {
+    const agentPartial = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    const evaluations = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-evaluations.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent', 'agent-evaluations.css'), 'utf8');
+    const globalForms = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'base', 'modals-forms.css'), 'utf8');
+
+    assert.match(agentPartial, /<strong>评测概览<\/strong>/);
+    assert.match(evaluations, /classList\.toggle\('is-empty', !agentEvalSuitesCache\.length\)/);
+    assert.match(evaluations, /class="agent-eval-empty"/);
+    assert.match(evaluations, /class="agent-eval-editor-section"/);
+    assert.match(evaluations, /id="agent-eval-case-count"/);
+    assert.match(evaluations, /class="modal-form-grid modal-form-grid--3 agent-eval-suite-fields"/);
+    assert.match(evaluations, /class="modal-form-field modal-form-field--span-2"/);
+    assert.match(evaluations, /class="modal-form-check agent-eval-json-toggle"/);
+    assert.match(css, /#agent-config-modal\[data-agent-config-section="evaluations"\] \.agent-config-modal\s*\{/);
+    assert.match(css, /\.agent-eval-layout\.is-empty\s*\{/);
+    assert.match(css, /\.agent-eval-editor-modal[\s\S]*?text-align: left/);
+    assert.doesNotMatch(css, /\.agent-eval-suite-fields \.form-input/);
+    assert.doesNotMatch(css, /\.agent-eval-case-fields \.form-input/);
+    assert.match(css, /@media \(max-width: 820px\)[\s\S]*?#agent-config-modal\[data-agent-config-section="evaluations"\]/);
+    assert.match(globalForms, /\.modal-form-grid\s*\{/);
+    assert.match(globalForms, /\.modal-form-field > \.form-input\s*\{/);
+    assert.match(globalForms, /\.modal-form-check\s*\{/);
+});
+
+test('agent DAG editor exposes LLM as an optional ordinary workflow node', () => {
     const ui = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'ui.js'), 'utf8');
     const agents = readAgentSourceBundle();
     const editor = readDagEditorSourceBundle();
@@ -662,35 +695,37 @@ test('agent DAG editor and runtime expose first-class LLM workflow node', () => 
     assert.match(editor, /function workflowModelOptions/);
     assert.match(editor, /window\.isSelectableModelForCurrentUser/);
     assert.match(editor, /isLlmModelField && workflowModelOptions\(\)\.length/);
-    assert.match(editor, /createDefaultLlmNode/);
-    assert.match(editor, /工作流必须包含 1 个大模型节点/);
-    assert.match(editor, /工作流必须保留 1 个大模型节点/);
+    assert.doesNotMatch(editor, /createDefaultLlmNode/);
+    assert.doesNotMatch(editor, /工作流必须包含 1 个大模型节点/);
+    assert.doesNotMatch(editor, /工作流必须保留 1 个大模型节点/);
     assert.match(editor, /function validateLlmNodePlacement/);
     assert.match(editor, /缺少上游输入/);
     assert.match(editor, /需要填写节点模型/);
-    assert.match(editor, /makeButton\('大模型'/);
+    assert.match(editor, /makeToolbarDropdown\('添加节点'[\s\S]*?makeButton\('大模型'/);
     assert.match(editor, /patterns: \['agent\.llm'\]/);
     assert.match(editor, /prompt: selectedNode/);
     assert.match(editor, /id: 'llm_summary'[\s\S]*?dependsOn: \['group_count'\]/);
     assert.match(editor, /id: 'group_chart'[\s\S]*?dependsOn: \['group_count'\]/);
-    assert.match(editor, /primaryLlmNodeId: 'llm_summary'/);
-    assert.match(editor, /class: `pivot-dag-node[\s\S]*?is-primary-llm/);
+    assert.doesNotMatch(editor, /primaryLlmNodeId|primary_llm_node_id|is-primary-llm|主大模型节点/);
     assert.match(tools, /name: 'agent\.llm'/);
     assert.match(tools, /maxSteps: \{ type: 'integer'/);
     assert.match(tools, /\['prompt', 'model'\]/);
     assert.match(tools, /async function executeAgentLlmNode/);
     assert.match(tools, /recordAgentModelUsage\(user, modelCfg, messages, content, 'agent_llm_node'/);
-    assert.match(dagRunConfig, /function inferDagLlmRuntimeSettings/);
-    assert.match(runtime, /assertWorkflowHasConfiguredLlm\(runMetadata\.dagSpec\)/);
-    assert.match(runtime, /if \(!effectiveModelId && llmRuntimeSettings\.modelId\)/);
+    assert.doesNotMatch(dagRunConfig, /inferDagLlmRuntimeSettings|primaryLlmNodeId/);
+    assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
+    assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
     assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(\)\)/);
     assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
 });
 
-test('agent workflow rejects LLM start nodes without workflow input', () => {
-    assert.throws(() => assertWorkflowHasConfiguredLlm({
+test('agent workflow allows no LLM and validates configured LLM node inputs', () => {
+    assert.doesNotThrow(() => assertWorkflowLlmNodesConfigured({
+        nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {}, dependsOn: [] }]
+    }));
+    assert.throws(() => assertWorkflowLlmNodesConfigured({
         nodes: [{
             id: 'llm_start',
             title: '大模型处理',
@@ -702,7 +737,7 @@ test('agent workflow rejects LLM start nodes without workflow input', () => {
             dependsOn: []
         }]
     }), /缺少上游输入/);
-    assert.doesNotThrow(() => assertWorkflowHasConfiguredLlm({
+    assert.doesNotThrow(() => assertWorkflowLlmNodesConfigured({
         nodes: [{
             id: 'llm_start',
             title: '大模型处理',
@@ -714,7 +749,7 @@ test('agent workflow rejects LLM start nodes without workflow input', () => {
             dependsOn: []
         }]
     }));
-    assert.doesNotThrow(() => assertWorkflowHasConfiguredLlm({
+    assert.doesNotThrow(() => assertWorkflowLlmNodesConfigured({
         nodes: [
             {
                 id: 'query',
@@ -828,6 +863,15 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
         VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
     `).run(user.id, 'Agent Test Model', 'http://127.0.0.1:65530/v1/chat/completions', 'agent-test-model');
 
+    const toolOnlyWorkflow = createAgentWorkflow(user, {
+        name: '纯工具工作流',
+        dagSpec: {
+            nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {}, dependsOn: [] }]
+        }
+    });
+    assert.equal(toolOnlyWorkflow.dag_spec.nodes.length, 1);
+    assert.equal(toolOnlyWorkflow.dag_spec.nodes[0].tool, 'models.list');
+
     const run = createAgentRun({
         user,
         goal: '整理项目风险',
@@ -925,6 +969,17 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
         }
     });
     cancelAgentRun(workflowRun.id, user);
+    const toolOnlyWorkflowRun = createAgentRun({
+        user,
+        goal: '执行不依赖大模型的工具工作流',
+        runMode: 'dag',
+        toolPolicy: 'builtin_only',
+        dagSpec: {
+            nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {}, dependsOn: [] }]
+        }
+    });
+    assert.equal(toolOnlyWorkflowRun.model_id, null);
+    cancelAgentRun(toolOnlyWorkflowRun.id, user);
     const freeRuns = listRuns(user, { limit: 30, runType: 'free' }).data;
     const workflowRuns = listRuns(user, { limit: 30, runType: 'workflow' }).data;
     assert.equal(freeRuns.some(item => item.id === run.id), true);
@@ -1084,7 +1139,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     cancelAgentRun(dagResumed.id, user);
 });
 
-test('DAG final answer falls back to successful node output when summary is empty', async () => {
+test('DAG final answer uses the terminal node output without an implicit summary call', async () => {
     const axios = require('axios');
     const originalPost = axios.post;
     const suffix = Date.now().toString(36);
@@ -1100,6 +1155,7 @@ test('DAG final answer falls back to successful node output when summary is empt
     `).run(user.id, 'DAG Fallback Model', 'https://example.com/v1/chat/completions', `agent-dag-fallback-${suffix}`);
     const modelId = Number(modelInfo.lastInsertRowid);
     const runId = `agent-dag-fallback-${suffix}`;
+    const toolOnlyRunId = `${runId}-tools`;
     let callCount = 0;
     axios.post = async () => {
         callCount += 1;
@@ -1159,13 +1215,49 @@ test('DAG final answer falls back to successful node output when summary is empt
         assert.equal(detail.dagNodes[0].tool_name, 'agent.llm');
         assert.equal(detail.dagNodes[0].contract_status, 'valid');
         assert.equal(detail.trace.spans.some(span => span.span_type === 'dag_node'), true);
-        assert.equal(callCount, 2);
+        assert.equal(callCount, 1);
+
+        db.prepare(`
+            INSERT INTO agent_runs (
+                id, user_id, model_id, title, goal, status, max_steps, run_mode, tool_policy,
+                tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms, retry_limit,
+                context_config, metadata, model_router, created_at, updated_at
+            ) VALUES (?, ?, NULL, ?, ?, 'queued', 3, 'dag', 'builtin_only', '', 'safe_mcp_auto', 600000, 120000, 0, ?, ?, 'fixed', ?, ?)
+        `).run(
+            toolOnlyRunId,
+            user.id,
+            '纯工具 DAG',
+            '列出当前可用模型',
+            '{}',
+            JSON.stringify({
+                dagSpec: {
+                    nodes: [{
+                        id: 'models',
+                        title: '列出模型',
+                        tool: 'models.list',
+                        input: {},
+                        dependsOn: [],
+                        condition: 'success'
+                    }]
+                }
+            }),
+            now,
+            now
+        );
+        await runAgent(toolOnlyRunId, user);
+        const toolOnlyDetail = getRunDetailForUser(toolOnlyRunId, user);
+        assert.equal(toolOnlyDetail.run.status, 'completed');
+        assert.equal(toolOnlyDetail.run.model_id, null);
+        assert.match(toolOnlyDetail.run.final_answer, /工作流执行完成/);
+        assert.equal(callCount, 1);
     } finally {
         axios.post = originalPost;
-        db.prepare('DELETE FROM agent_notifications WHERE run_id = ?').run(runId);
-        db.prepare('DELETE FROM agent_dag_nodes WHERE run_id = ?').run(runId);
-        db.prepare('DELETE FROM agent_steps WHERE run_id = ?').run(runId);
-        db.prepare('DELETE FROM agent_runs WHERE id = ?').run(runId);
+        [runId, toolOnlyRunId].forEach(id => {
+            db.prepare('DELETE FROM agent_notifications WHERE run_id = ?').run(id);
+            db.prepare('DELETE FROM agent_dag_nodes WHERE run_id = ?').run(id);
+            db.prepare('DELETE FROM agent_steps WHERE run_id = ?').run(id);
+            db.prepare('DELETE FROM agent_runs WHERE id = ?').run(id);
+        });
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);

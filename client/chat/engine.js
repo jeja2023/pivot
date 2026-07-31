@@ -1,5 +1,8 @@
 // --- 数据引擎模块 Engine ---
 let currentAbortController = null;
+// 正在执行的发送任务；新消息发出时先中断它，再串行接管，避免两次发送并发
+let activeSendTask = null;
+let latestSendEpoch = 0;
 let chatLocalMcpBridgeDebug = null;
 let chatLocalMcpHeartbeatStarted = false;
 
@@ -156,12 +159,41 @@ if (document.readyState === 'loading') {
 } else {
     startChatLocalMcpBridgeHeartbeat();
 }
+function hasSendableChatPayload() {
+    const inputEl = document.getElementById('user-input');
+    const text = String(inputEl?.value || '').trim();
+    return Boolean(text) || pendingAttachments.length > 0;
+}
+
+// 发新消息时先中断上一次生成再串行接管，而不是拦下用户输入
 window.sendMessage = async function(isRegenerate = false) {
     const shouldRegenerate = isRegenerate === true;
+    // 空输入不应打断正在进行的生成
+    if (!shouldRegenerate && !hasSendableChatPayload()) return;
+
+    const sendEpoch = ++latestSendEpoch;
     if (currentAbortController) {
-        showToast('当前仍有回答正在生成，请等待完成或先停止生成。', 'warning');
-        return;
+        currentAbortController.pivotSupersededBySend = true;
+        currentAbortController.abort();
     }
+    const previousTask = activeSendTask;
+    if (previousTask) {
+        // 等上一次发送走完 catch/finally，确保 currentAbortController 已复位再接管
+        try { await previousTask; } catch (_e) { /* 上一次发送的异常已在其内部处理 */ }
+    }
+    // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
+    if (sendEpoch !== latestSendEpoch) return;
+
+    const task = runSendMessage(shouldRegenerate);
+    activeSendTask = task;
+    try {
+        await task;
+    } finally {
+        if (activeSendTask === task) activeSendTask = null;
+    }
+};
+
+async function runSendMessage(shouldRegenerate) {
     const userVisibleContent = document.getElementById('user-input').value.trim();
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
@@ -271,7 +303,8 @@ window.sendMessage = async function(isRegenerate = false) {
 
     document.getElementById('send-btn').classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
-    currentAbortController = new AbortController();
+    const myController = new AbortController();
+    currentAbortController = myController;
 
     try {
         const response = await apiFetch(API_BASE + '/chat', {
@@ -565,7 +598,10 @@ window.sendMessage = async function(isRegenerate = false) {
                 fullAiContent += remainingStreamContent;
                 tokenCount = estimateStreamingTokenCount(fullAiContent);
             }
-            fullAiContent += '\n\n[已由用户中断生成]';
+            // 被新消息打断时不追加提示文字，干净截断即可
+            if (!myController.pivotSupersededBySend) {
+                fullAiContent += '\n\n[已由用户中断生成]';
+            }
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, true));
             if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
         } else {

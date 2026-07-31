@@ -155,10 +155,6 @@ bind('clear-input-btn', () => {
         userInput.focus();
     }
 });
-bind('chat-prompt-library-btn', async () => {
-    await window.ensureAdminFeatureScripts?.();
-    window.openPromptLibrary?.('chat');
-});
 bind('context-usage-pill', () => window.compactCurrentSessionContext?.());
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
 bind('session-active-filter', () => window.setArchiveFilter(false));
@@ -180,7 +176,7 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'global-params', 'tool-policy', 'prompts', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
 });
 bind('admin-modal-close', () => window.closeModal());
@@ -230,9 +226,6 @@ bind('monitor-refresh-btn', () => window.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.loadMonitorSummary(), 'change');
 bind('observability-webhook-save', () => window.saveObservabilityWebhook?.());
 bind('rag-embedding-save-btn', () => window.saveEmbeddingSettings());
-bind('prompt-add-btn', () => window.openPromptModal());
-bind('modal-prompt-cancel', () => window.closePromptModal());
-bind('modal-prompt-save', () => window.savePrompt());
 bind('model-add-btn', () => window.openModelModal());
 bind('modal-model-cancel', () => window.closeModelModal());
 bind('modal-model-test', () => window.testModelConfig());
@@ -241,14 +234,6 @@ bind('m-scope', () => window.updateModelScopeControls?.(), 'change');
 bind('agent-refresh-btn', () => window.loadAgentWorkbench?.());
 bind('agent-run-btn', () => window.createAgentRun?.());
 bind('agent-audit-btn', () => window.showAgentRunAudit?.());
-bind('agent-prompt-library-btn', async () => {
-    await window.ensureAdminFeatureScripts?.();
-    window.openPromptLibrary?.('agent');
-});
-bind('agent-dag-prompt-library-btn', async () => {
-    await window.ensureAdminFeatureScripts?.();
-    window.openPromptLibrary?.('workflow');
-});
 window.bindAgentGoalTemplates?.();
 window.bindAgentFilters?.();
 bind('mcp-refresh-btn', () => window.loadMcpWorkbench?.());

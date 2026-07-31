@@ -144,7 +144,7 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             right_path: '右侧报表路径'
         },
         'db.run_readonly_query': {
-            sql: '只读 SQL 语句',
+            sql: '高级 SQL 语句',
             limit: '最大返回行数'
         },
         'db.group_count': {
@@ -396,7 +396,7 @@ const TOOL_FIELD_PLACEHOLDER_OVERRIDES = {
             query: '输入文件名或业务关键词'
         },
         'db.run_readonly_query': {
-            sql: 'SELECT ... FROM ... LIMIT 100'
+            sql: '复杂场景示例：SELECT ... FROM ... WHERE ... LIMIT 100'
         },
         'db.group_count': {
             table: '选择统计数据表',

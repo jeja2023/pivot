@@ -6,7 +6,10 @@
                     <h3>智能体</h3>
                     <p>用 AI 执行自由任务，也可将稳定流程编排为工作流并发布、复用和审计。</p>
                 </div>
-                <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
+                <div class="agent-modal-header-actions">
+                    <button class="btn-secondary" type="button" data-agent-open-dag>工作流编排</button>
+                    <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
+                </div>
             </div>
             <div class="agent-workbench">
                 <div class="agent-run-panel">
@@ -14,7 +17,6 @@
                         <div class="agent-panel-head-row">
                             <h3>快速任务</h3>
                             <div class="agent-panel-head-actions">
-                                <button id="agent-prompt-library-btn" class="btn-secondary" type="button">套用提示词</button>
                                 <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
                                 <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
                             </div>
@@ -113,7 +115,6 @@
                     </div>
                     <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
                     <div class="agent-config-launcher" aria-label="智能体配置面板">
-                        <button id="agent-open-dag-btn" class="btn-secondary" type="button">工作流</button>
                         <button class="btn-secondary" type="button" data-agent-config-open="templates">模板与计划</button>
                         <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
                         <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
@@ -213,7 +214,7 @@
                         <div class="agent-collapse-body agent-eval-center">
                             <div class="agent-eval-toolbar">
                                 <div>
-                                    <strong>智能体质量中心</strong>
+                                    <strong>评测概览</strong>
                                     <span id="agent-eval-center-status">尚未运行评测</span>
                                 </div>
                                 <div class="agent-eval-toolbar-actions">

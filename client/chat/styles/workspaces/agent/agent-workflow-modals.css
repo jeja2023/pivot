@@ -223,3 +223,232 @@
     color: #e2e8f0;
     font-size: 0.68rem;
 }
+
+.agent-workflow-schedule-modal {
+    width: min(860px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 40px));
+    padding: 0;
+    overflow: hidden;
+}
+
+.agent-workflow-schedule-modal .agent-config-modal-head > div {
+    min-width: 0;
+}
+
+.agent-workflow-schedule-modal .agent-config-modal-head span {
+    display: block;
+    min-width: 0;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-schedule-body {
+    display: flex;
+    max-height: calc(100vh - 108px);
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+    padding: 12px;
+    background: var(--surface);
+}
+
+.agent-workflow-schedule-form {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(100px, 0.65fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.agent-workflow-schedule-form .form-input {
+    width: 100%;
+    height: 34px;
+    margin: 0;
+    padding: 6px 9px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+}
+
+.agent-workflow-schedule-form-meta {
+    grid-column: 1 / -2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.agent-workflow-schedule-form-meta span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-schedule-form-meta strong {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.agent-workflow-schedule-form-meta strong.error {
+    color: var(--danger);
+}
+
+.agent-workflow-schedule-form-meta strong.success {
+    color: var(--primary);
+}
+
+.agent-workflow-schedule-form > .btn-primary {
+    grid-column: -2 / -1;
+    grid-row: 2;
+    height: 32px;
+    padding: 0 13px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    white-space: nowrap;
+}
+
+.agent-workflow-schedule-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.agent-workflow-schedule-list-head strong {
+    color: var(--text-main);
+    font-size: 0.82rem;
+}
+
+.agent-workflow-schedule-list-head .btn-secondary {
+    height: 30px;
+    padding: 0 11px;
+    border-radius: 8px;
+    font-size: 0.72rem;
+}
+
+.agent-workflow-schedule-list {
+    display: flex;
+    min-height: 130px;
+    max-height: min(430px, calc(100vh - 300px));
+    flex-direction: column;
+    gap: 7px;
+    overflow: auto;
+}
+
+.agent-workflow-schedule-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.agent-workflow-schedule-item.is-paused {
+    opacity: 0.72;
+}
+
+.agent-workflow-schedule-item-main,
+.agent-workflow-schedule-item-main strong,
+.agent-workflow-schedule-item-main span,
+.agent-workflow-schedule-item-main small {
+    display: block;
+    min-width: 0;
+}
+
+.agent-workflow-schedule-item-main strong,
+.agent-workflow-schedule-item-main span,
+.agent-workflow-schedule-item-main small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-schedule-item-main strong {
+    color: var(--text-main);
+    font-size: 0.8rem;
+}
+
+.agent-workflow-schedule-item-main span,
+.agent-workflow-schedule-item-main small {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.agent-workflow-schedule-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-workflow-schedule-item-actions .btn-secondary,
+.agent-workflow-schedule-item-actions .btn-danger-outline {
+    height: 28px;
+    padding: 0 9px;
+    border-radius: 7px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .agent-workflow-schedule-modal {
+        width: calc(100vw - 20px);
+        max-height: calc(100vh - 20px);
+    }
+
+    .agent-workflow-schedule-body {
+        max-height: calc(100vh - 78px);
+        overflow: auto;
+    }
+
+    .agent-workflow-schedule-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-workflow-schedule-name,
+    .agent-workflow-schedule-form-meta {
+        grid-column: 1 / -1;
+    }
+
+    .agent-workflow-schedule-form-meta {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .agent-workflow-schedule-form-meta span {
+        white-space: normal;
+    }
+
+    .agent-workflow-schedule-form > .btn-primary {
+        grid-column: 1 / -1;
+        grid-row: auto;
+    }
+
+    .agent-workflow-schedule-list {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .agent-workflow-schedule-item {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .agent-workflow-schedule-item-actions {
+        flex-wrap: wrap;
+    }
+}

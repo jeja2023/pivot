@@ -248,6 +248,9 @@ test('多智能体工具提供隔离委派契约与结构化 Handoff', () => {
     assert.ok(delegate);
     assert.ok(handoff);
     assert.deepEqual(delegate.input_schema.required, ['task', 'agentName', 'role', 'model']);
+    assert.match(delegate.description, /调用一次独立模型/);
+    assert.match(delegate.description, /自动附带结构化 Handoff/);
+    assert.match(handoff.description, /不调用模型/);
     const output = executeAgentHandoff({
         fromAgent: '研究员',
         toAgent: 'Supervisor',

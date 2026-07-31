@@ -8,6 +8,8 @@ const { getRunnableModelForUser, getUserRunnableModels } = require('./models');
 const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
+const { safeJsonRequest } = require('./safe-http-client');
+const vm = require('vm');
 
 const MAX_TEXT = 12000;
 
@@ -54,10 +56,10 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.delegate',
             title: '委派智能体',
-            description: '以隔离上下文调用一个具名专家智能体，并将结果封装为可追踪的 Handoff 交给下游 Supervisor。',
+            description: '调用一次独立模型运行具名专家，返回专家结果并自动附带结构化 Handoff；通常无需再连接 agent.handoff。',
             input_schema: asJsonSchema({
                 task: { type: 'string', description: '委派给专家智能体的明确任务，支持工作流模板变量。' },
-                context: { type: 'string', description: '上游事实、证据或其他智能体的交接内容。' },
+                context: { type: 'string', description: '传给专家的上游事实、证据或其他智能体结果。' },
                 agentName: { type: 'string', description: '专家智能体名称。' },
                 role: { type: 'string', enum: ['researcher', 'analyst', 'reviewer', 'writer', 'custom'], default: 'analyst' },
                 instructions: { type: 'string', description: '角色边界、判断标准和禁止事项。' },
@@ -70,7 +72,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.handoff',
             title: '智能体交接',
-            description: '把上游结论、证据、风险和待决问题整理为结构化 Handoff，供另一个智能体或 Supervisor 接收。',
+            description: '只把已有结论、证据、风险和待决问题整理为结构化 Handoff，不调用模型；适合统一格式或汇总多个来源后再交给下游。',
             input_schema: asJsonSchema({
                 fromAgent: { type: 'string' },
                 toAgent: { type: 'string', default: 'Supervisor' },
@@ -81,6 +83,35 @@ function getBuiltInToolDefinitions(user) {
                 openQuestions: { type: 'array', items: { type: 'string' } },
                 confidence: { type: 'number', minimum: 0, maximum: 1, default: 0.7 }
             }, ['fromAgent', 'summary'])
+        },
+        {
+            name: 'agent.code',
+            title: '代码执行',
+            description: '在受限沙箱中执行一段 JavaScript，对上游数据做转换、计算、过滤或格式整理。用 return 返回结果。',
+            input_schema: asJsonSchema({
+                code: { type: 'string', description: '要执行的 JS 代码，使用 return 返回结果。可直接引用 vars 中定义的变量名。' },
+                vars: { type: 'object', description: '注入到代码作用域的变量，支持 {{nodes.*.output}} 等模板引用。' }
+            }, ['code'])
+        },
+        {
+            name: 'agent.http',
+            title: 'HTTP 请求',
+            description: '调用外部 REST API 并返回状态码与响应数据。内网地址会被安全策略拦截。',
+            input_schema: asJsonSchema({
+                url: { type: 'string', description: '请求地址，支持模板变量。' },
+                method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], default: 'GET' },
+                headers: { type: 'object', description: '请求头键值对，例如鉴权 Token。' },
+                body: { type: 'object', description: 'POST/PUT/PATCH 的 JSON 请求体。' },
+                timeoutMs: { type: 'integer', minimum: 1000, maximum: 30000, default: 10000 }
+            }, ['url'])
+        },
+        {
+            name: 'agent.merge',
+            title: '变量聚合',
+            description: '把多个上游节点的输出合并成一个对象，便于下游节点用统一的字段名引用。',
+            input_schema: asJsonSchema({
+                fields: { type: 'object', description: '字段映射，键为目标字段名，值支持 {{nodes.*.output}} 模板引用。' }
+            })
         },
         {
             name: 'rag.search',
@@ -327,6 +358,120 @@ function executeAgentHandoff(input = {}) {
     };
 }
 
+// ——————————————————————————————————————————
+// agent.code：在隔离 VM 沙箱中执行用户内联 JS，并返回 return 语句的值。
+// 安全策略：vm.runInNewContext 禁止访问 require/process/global；超时 5s。
+// ——————————————————————————————————————————
+function executeAgentCode(input = {}) {
+    const code = String(input.code || '').trim();
+    if (!code) throw new Error('代码节点需要填写要执行的 JS 代码。');
+    const rawVars = input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars)
+        ? input.vars
+        : {};
+    const sandbox = {
+        ...rawVars,
+        JSON,
+        Math,
+        Number,
+        String: globalThis.String,
+        Array: globalThis.Array,
+        Object: globalThis.Object,
+        Boolean: globalThis.Boolean,
+        Date: globalThis.Date,
+        console: { log: () => {}, error: () => {} }
+    };
+    let result;
+    try {
+        const wrapped = `(function() { ${code} })()`;
+        result = vm.runInNewContext(wrapped, vm.createContext(sandbox), { timeout: 5000 });
+    } catch (e) {
+        throw new Error(`代码执行失败：${e.message}`);
+    }
+    const output = result === undefined ? null : result;
+    return {
+        output,
+        text: typeof output === 'string'
+            ? output
+            : output === null || output === undefined
+                ? ''
+                : JSON.stringify(output),
+        type: Array.isArray(output) ? 'array' : (output !== null && typeof output === 'object' ? 'object' : typeof output)
+    };
+}
+
+// ——————————————————————————————————————————
+// agent.http：通过已有的安全 HTTP 客户端调用外部 REST API，支持 GET/POST/PUT/DELETE/PATCH。
+// ——————————————————————————————————————————
+async function executeAgentHttp(input = {}, user) {
+    const url = String(input.url || '').trim();
+    if (!url) throw new Error('HTTP 节点需要填写请求 URL。');
+    const method = String(input.method || 'GET').trim().toLowerCase();
+    const allowedMethods = ['get', 'post', 'put', 'delete', 'patch'];
+    if (!allowedMethods.includes(method)) {
+        throw new Error(`HTTP 节点不支持该方法：${method}，允许的方法为 GET/POST/PUT/DELETE/PATCH。`);
+    }
+    const rawHeaders = input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)
+        ? input.headers
+        : {};
+    const headers = Object.fromEntries(
+        Object.entries(rawHeaders).map(([k, v]) => [String(k).trim(), String(v ?? '').trim()]).filter(([k]) => k)
+    );
+    const hasBody = ['post', 'put', 'patch'].includes(method);
+    const bodyRaw = hasBody ? (input.body ?? input.data ?? null) : undefined;
+    const body = bodyRaw !== undefined && bodyRaw !== null && typeof bodyRaw !== 'object'
+        ? { value: bodyRaw }
+        : bodyRaw;
+    let response;
+    try {
+        response = await safeJsonRequest({
+            method,
+            url,
+            data: body,
+            headers,
+            user,
+            timeout: Math.min(parsePositiveInt(input.timeoutMs ?? input.timeout_ms, 10000, 30000), 30000),
+            validateStatus: () => true
+        });
+    } catch (e) {
+        throw new Error(`HTTP 请求失败：${e.message}`);
+    }
+    const responseData = response.data;
+    const responseText = typeof responseData === 'string'
+        ? responseData
+        : (responseData !== null && responseData !== undefined ? JSON.stringify(responseData) : '');
+    return {
+        statusCode: response.status,
+        ok: response.status >= 200 && response.status < 300,
+        headers: response.headers || {},
+        data: responseData,
+        text: clampText(responseText, 8000)
+    };
+}
+
+// ——————————————————————————————————————————
+// agent.merge：将多个上游节点的输出合并为单一对象，支持重命名字段，方便后续节点统一引用。
+// ——————————————————————————————————————————
+function executeAgentMerge(input = {}) {
+    const fields = input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields)
+        ? input.fields
+        : null;
+    if (fields) {
+        // 模式一：显式字段映射 { targetKey: actualValue }
+        const merged = {};
+        Object.entries(fields).forEach(([key, value]) => {
+            merged[String(key).trim()] = value ?? null;
+        });
+        return { merged, keys: Object.keys(merged), count: Object.keys(merged).length };
+    }
+    // 模式二：平铺所有已解析的 inputs 字段（dag-utils 已在调用前解析模板变量）
+    const merged = {};
+    Object.entries(input).forEach(([key, value]) => {
+        if (['fields', 'title', 'tool'].includes(key)) return;
+        merged[String(key).trim()] = value ?? null;
+    });
+    return { merged, keys: Object.keys(merged), count: Object.keys(merged).length };
+}
+
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
@@ -417,6 +562,18 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
 
     if (name === 'viz.build_table') {
         return buildTableBlock(input);
+    }
+
+    if (name === 'agent.code') {
+        return executeAgentCode(input);
+    }
+
+    if (name === 'agent.http') {
+        return executeAgentHttp(input, user);
+    }
+
+    if (name === 'agent.merge') {
+        return executeAgentMerge(input);
     }
 
     if (name === 'system.health') {

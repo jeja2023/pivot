@@ -32,7 +32,7 @@ const {
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,
     getAgentWorkflowForUser,
-    assertWorkflowHasConfiguredLlm,
+    assertWorkflowLlmNodesConfigured,
     listAgentWorkflowVersions,
     listAgentWorkflows,
     normalizeDagInputsPayload,
@@ -106,7 +106,7 @@ const {
 const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
-const { inferDagRunGoal, inferDagLlmRuntimeSettings } = require('./dag-run-config');
+const { inferDagRunGoal } = require('./dag-run-config');
 const { createAgentNotificationFactory } = require('./notifications');
 const { createApprovalHelpers } = require('./approvals');
 
@@ -355,13 +355,10 @@ function buildDagResumeSpec(originalRun, startNodeId = '') {
         ...node,
         dependsOn: (node.dependsOn || []).filter(dep => include.has(dep))
     }));
-    const primaryLlmNodeId = nodes.some(node => node.id === dagSpec.primaryLlmNodeId && node.tool === 'agent.llm')
-        ? dagSpec.primaryLlmNodeId
-        : nodes.find(node => node.tool === 'agent.llm')?.id || '';
     const layout = Object.fromEntries(nodes
         .filter(node => dagSpec.layout?.[node.id])
         .map(node => [node.id, dagSpec.layout[node.id]]));
-    return { dagSpec: { nodes, primaryLlmNodeId, layout }, reusable };
+    return { dagSpec: { nodes, layout }, reusable };
 }
 
 function rerunAgentDagFromNode(runId, user, nodeId = '') {
@@ -601,12 +598,13 @@ async function runAgent(runId, user) {
                 throw err;
             }
         };
+        const dagRun = normalizeRunMode(run.run_mode) === 'dag';
         const initialModelCfg = getRunnableModelForUser(run.model_id, user);
-        if (!initialModelCfg) throw new Error('No accessible model is available for this agent run.');
+        if (!initialModelCfg && !dagRun) throw new Error('No accessible model is available for this agent run.');
         // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
-        if (routerStrategy !== 'fixed') {
+        if (initialModelCfg && routerStrategy !== 'fixed') {
             try {
                 const routed = chooseModel({
                     user,
@@ -680,7 +678,7 @@ async function runAgent(runId, user) {
             updated_at: startedAt
         });
 
-        if (normalizeRunMode(run.run_mode) === 'dag') {
+        if (dagRun) {
             await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps());
             return;
         }
@@ -1065,13 +1063,10 @@ function createAgentRun({
         } else {
             runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
         }
-        assertWorkflowHasConfiguredLlm(runMetadata.dagSpec);
-        const llmRuntimeSettings = inferDagLlmRuntimeSettings(runMetadata.dagSpec);
-        if (!effectiveModelId && llmRuntimeSettings.modelId) effectiveModelId = llmRuntimeSettings.modelId;
-        if (llmRuntimeSettings.maxSteps) effectiveMaxSteps = llmRuntimeSettings.maxSteps;
+        assertWorkflowLlmNodesConfigured(runMetadata.dagSpec);
     }
     const modelCfg = getRunnableModelForUser(effectiveModelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the agent.');
+    if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('Please choose an accessible model for the agent.');
     db.prepare(`
         INSERT INTO agent_runs (
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
@@ -1084,7 +1079,7 @@ function createAgentRun({
         runId,
         user.id,
         sessionId || null,
-        modelCfg.id,
+        modelCfg?.id || null,
         normalizeAgentTitle(title, cleanGoal),
         cleanGoal,
         'queued',

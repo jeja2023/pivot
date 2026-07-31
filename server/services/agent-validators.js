@@ -106,6 +106,52 @@ function serializeContextConfig(value) {
     return JSON.stringify(normalizeContextConfig(value));
 }
 
+const DAG_WHEN_OPERATORS = new Set([
+    'equals',
+    'not_equals',
+    'contains',
+    'not_contains',
+    'starts_with',
+    'ends_with',
+    'greater_than',
+    'greater_or_equal',
+    'less_than',
+    'less_or_equal',
+    'empty',
+    'not_empty',
+    'exists',
+    'not_exists',
+    'is_true',
+    'is_false'
+]);
+
+function normalizeDagWhen(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const rawSource = Array.isArray(value.source || value.variable_selector)
+        ? (value.source || value.variable_selector).join('.')
+        : String(value.source || value.variable || '').trim();
+    const source = rawSource
+        .replace(/^\s*\{\{\s*/, '')
+        .replace(/\s*\}\}\s*$/, '')
+        .trim()
+        .slice(0, 240);
+    if (!source) return null;
+    const operator = DAG_WHEN_OPERATORS.has(String(value.operator || '').trim())
+        ? String(value.operator || '').trim()
+        : 'equals';
+    let expected = value.value;
+    if (expected === undefined || expected === null) expected = '';
+    if (!['string', 'number', 'boolean'].includes(typeof expected)) {
+        try {
+            expected = JSON.stringify(expected);
+        } catch (e) {
+            expected = String(expected || '');
+        }
+    }
+    if (typeof expected === 'string') expected = expected.slice(0, 2000);
+    return { source, operator, value: expected };
+}
+
 function normalizeDagSpec(value) {
     let parsed = value;
     if (typeof value === 'string') {
@@ -130,6 +176,7 @@ function normalizeDagSpec(value) {
         const savedPosition = rawLayout[key] || rawLayout[uniqueKey] || node.position || {};
         const x = normalizeDagCoordinate(savedPosition.x ?? node._x);
         const y = normalizeDagCoordinate(savedPosition.y ?? node._y);
+        const when = normalizeDagWhen(node.when || node.when_rule);
         return {
             id: uniqueKey,
             title: String(node.title || uniqueKey).trim().slice(0, 120),
@@ -138,7 +185,8 @@ function normalizeDagSpec(value) {
             inputSchema: normalizeJsonSchema(node.inputSchema || node.input_schema || {}),
             outputSchema: normalizeJsonSchema(node.outputSchema || node.output_schema || {}),
             dependsOn,
-            condition: ['always', 'success'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success',
+            condition: ['always', 'success', 'failure'].includes(String(node.condition || 'success')) ? String(node.condition || 'success') : 'success',
+            ...(when ? { when } : {}),
             retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
             timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000),
             onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
@@ -155,15 +203,8 @@ function normalizeDagSpec(value) {
         ...node,
         dependsOn: node.dependsOn.filter(dep => validKeys.has(dep) && dep !== node.id)
     }));
-    const requestedPrimaryId = String(
-        (!Array.isArray(parsed) && (parsed?.primaryLlmNodeId ?? parsed?.primary_llm_node_id)) || ''
-    ).trim().replace(/[^\w.-]/g, '_').slice(0, 60);
-    const llmIds = cleanNodes
-        .filter(node => node.tool === 'agent.llm')
-        .map(node => node.id);
     return {
         nodes: cleanNodes,
-        primaryLlmNodeId: llmIds.includes(requestedPrimaryId) ? requestedPrimaryId : (llmIds[0] || ''),
         layout
     };
 }
@@ -239,6 +280,7 @@ module.exports = {
     normalizeContextConfig,
     serializeContextConfig,
     normalizeDagSpec,
+    normalizeDagWhen,
     normalizeToolAllowlist,
     serializeToolAllowlist,
     normalizeAgentGoal,

@@ -250,7 +250,7 @@ function buildWorkflowDraftFromRun(run, steps = []) {
     return {
         name: `由自由任务生成：${sourceTitle || run.id}`.slice(0, 100),
         description: `从自由任务 ${run.id} 生成的工作流草稿。请在编排页检查节点、参数和发布策略后再用于生产任务。`.slice(0, 300),
-        dagSpec: { nodes: [...toolNodes, llmNode], primaryLlmNodeId: llmId },
+        dagSpec: { nodes: [...toolNodes, llmNode] },
         sourceRun: {
             id: run.id,
             title: run.title || '',

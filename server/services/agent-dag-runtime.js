@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
-const { assertWorkflowHasConfiguredLlm, normalizeDagRunInputs } = require('./agent-workflows');
-const { normalizeDagNodePolicy, resolveDagNodeInput } = require('./agent-dag-utils');
+const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs } = require('./agent-workflows');
+const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
 const { listSteps } = require('./agent-runs');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeDagSpec, parseJsonObject } = require('./agent-validators');
@@ -93,12 +93,18 @@ function extractReadableDagOutput(output) {
 function buildDagFallbackFinalAnswer(dagSpec, states) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
     const completedNodes = nodes.filter(node => states.get(node.id)?.status === 'completed');
+    const dependencyIds = new Set(nodes.flatMap(node => Array.isArray(node.dependsOn) ? node.dependsOn : []));
+    const terminalOutputs = completedNodes
+        .filter(node => !dependencyIds.has(node.id))
+        .map(node => ({ node, text: extractReadableDagOutput(states.get(node.id)?.output) }))
+        .filter(item => item.text);
+    if (terminalOutputs.length === 1) return terminalOutputs[0].text;
+    if (terminalOutputs.length > 1) {
+        return terminalOutputs
+            .map(({ node, text }) => `## ${node.title || node.id}\n\n${text}`)
+            .join('\n\n');
+    }
     const reversedCompleted = completedNodes.slice().reverse();
-    const primaryLlmNodeId = String(dagSpec?.primaryLlmNodeId || dagSpec?.primary_llm_node_id || '').trim();
-    const llmNode = completedNodes.find(node => node.id === primaryLlmNodeId && String(node.tool || '').trim() === 'agent.llm')
-        || reversedCompleted.find(node => String(node.tool || '').trim() === 'agent.llm');
-    const llmText = llmNode ? extractReadableDagOutput(states.get(llmNode.id)?.output) : '';
-    if (llmText) return llmText;
     for (const node of reversedCompleted) {
         const text = extractReadableDagOutput(states.get(node.id)?.output);
         if (text) return text;
@@ -239,7 +245,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (!dagSpec.nodes.length) {
         throw new Error('DAG 模式至少需要一个有效节点。');
     }
-    assertWorkflowHasConfiguredLlm(dagSpec);
+    assertWorkflowLlmNodesConfigured(dagSpec);
 
     dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
     const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
@@ -272,11 +278,15 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         const stopErrors = [];
         readyNodes.forEach(node => {
             const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
-            if (node.condition !== 'always' && depStates.some(status => status !== 'completed')) {
-                states.set(node.id, { status: 'skipped' });
+            // 第一道门禁：依赖状态是否满足 condition（success / failure / always）。
+            if (!dagConditionSatisfied(node.condition, depStates)) {
+                const reason = node.condition === 'failure'
+                    ? 'dependency_not_failed'
+                    : 'dependency_not_completed';
+                states.set(node.id, { status: 'skipped', skipReason: reason });
                 upsertDagNode(run.id, node, {
                     status: 'skipped',
-                    output: { status: 'skipped', reason: 'dependency_not_completed' },
+                    output: { status: 'skipped', reason, condition: node.condition },
                     completedAt: getBeijingTimestamp()
                 });
                 deps.insertStep(run.id, stepIndex, {
@@ -285,12 +295,48 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     title: `跳过 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: node.input,
-                    output: { status: 'skipped', dependsOn: node.dependsOn }
+                    output: { status: 'skipped', reason, condition: node.condition, dependsOn: node.dependsOn }
                 });
                 stepIndex += 1;
-            } else {
-                runnable.push(node);
+                return;
             }
+            // 第二道门禁：when 条件规则（Dify 风格的条件分支）。
+            const whenResult = evaluateDagWhen(node.when, {
+                goal: run.goal,
+                inputs: dagInputs,
+                states,
+                nodeMap
+            });
+            if (whenResult.skipped) {
+                states.set(node.id, { status: 'skipped', skipReason: 'when_not_matched', skipDetail: whenResult.reason });
+                upsertDagNode(run.id, node, {
+                    status: 'skipped',
+                    output: {
+                        status: 'skipped',
+                        reason: 'when_not_matched',
+                        when: {
+                            source: whenResult.source,
+                            operator: whenResult.operator,
+                            operatorLabel: whenResult.operatorLabel,
+                            expected: whenResult.expected,
+                            actual: whenResult.actual
+                        }
+                    },
+                    errorMessage: '',
+                    completedAt: getBeijingTimestamp()
+                });
+                deps.insertStep(run.id, stepIndex, {
+                    type: 'dag',
+                    nodeId: node.id,
+                    title: `条件不满足，跳过节点：${node.title || node.id}`,
+                    toolName: node.tool,
+                    input: node.input,
+                    output: { status: 'skipped', reason: whenResult.reason, when: whenResult }
+                });
+                stepIndex += 1;
+                return;
+            }
+            runnable.push(node);
         });
 
         await Promise.all(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {
@@ -474,26 +520,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
     }
 
-    const fallbackAnswer = buildDagFallbackFinalAnswer(dagSpec, states);
-    let answer = '';
-    try {
-        const synthesizedAnswer = await deps.withTimeout(
-            deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, run.id),
-            Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-            'DAG 最终总结'
-        );
-        answer = deps.isMissingFinalAnswer(synthesizedAnswer) && fallbackAnswer
-            ? fallbackAnswer
-            : synthesizedAnswer;
-    } catch (summaryErr) {
-        if (!fallbackAnswer) throw summaryErr;
-        answer = fallbackAnswer;
-        deps.insertStep(run.id, stepIndex + 1, {
-            type: 'control',
-            title: 'DAG 最终总结兜底',
-            output: { warning: summaryErr.message, fallback: 'dag_node_output' }
-        });
-    }
+    const answer = buildDagFallbackFinalAnswer(dagSpec, states)
+        || `工作流执行完成，共 ${dagSpec.nodes.length} 个节点。`;
     deps.updateRun(run.id, {
         status: 'completed',
         final_answer: answer,

@@ -46,6 +46,7 @@ function renderAgentEvalOverview() {
 function renderAgentEvalSuiteList() {
     const list = document.getElementById('agent-eval-suite-list');
     if (!list) return;
+    list.closest('.agent-eval-layout')?.classList.toggle('is-empty', !agentEvalSuitesCache.length);
     PivotSafeHtml.setHtml(list, agentEvalSuitesCache.length ? agentEvalSuitesCache.map(item => {
         const summary = agentEvalSummary(item.latest_summary);
         return `
@@ -61,13 +62,19 @@ function renderAgentEvalSuiteList() {
             </button>
         `;
     }).join('') : `
-        <div class="empty-state agent-empty-state">
+        <div class="agent-eval-empty">
+            <span class="agent-eval-empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </span>
             <strong>暂无评测集</strong>
+            <span>创建第一个评测集，开始记录质量基线。</span>
+            <button type="button" class="btn-primary" data-agent-eval-empty-create>新建评测集</button>
         </div>
     `);
     list.querySelectorAll('[data-agent-eval-suite]').forEach(button => {
         button.addEventListener('click', () => loadAgentEvalSuite(button.dataset.agentEvalSuite));
     });
+    list.querySelector('[data-agent-eval-empty-create]')?.addEventListener('click', () => openAgentEvalEditor());
 }
 
 async function loadAgentEvaluationSuites(options = {}) {
@@ -231,25 +238,27 @@ function renderAgentEvalEditorCases() {
             <div class="agent-eval-case-editor" data-agent-eval-case-index="${index}">
                 <div class="agent-eval-case-editor-head"><strong>用例 ${index + 1}</strong><button type="button" class="btn-danger-outline" data-agent-eval-case-remove="${index}" title="移除用例">移除</button></div>
                 <input type="hidden" data-eval-field="id" value="${agentEscapeAttr(item.id || '')}">
-                <div class="agent-eval-case-fields">
-                    <label><span>名称</span><input class="form-input" data-eval-field="name" value="${agentEscapeAttr(item.name || '')}" maxlength="100"></label>
-                    <label class="wide"><span>任务输入</span><textarea class="form-input" data-eval-field="input" rows="3">${agentEscape(item.input || '')}</textarea></label>
-                    <label><span>必须包含</span><textarea class="form-input" data-eval-field="requiredPhrases" rows="2" placeholder="每行一个关键短语">${agentEscape((assertions.requiredPhrases || []).join('\n'))}</textarea></label>
-                    <label><span>禁止包含</span><textarea class="form-input" data-eval-field="forbiddenPhrases" rows="2" placeholder="每行一个禁用短语">${agentEscape((assertions.forbiddenPhrases || []).join('\n'))}</textarea></label>
-                    <label><span>最少字数</span><input class="form-input" data-eval-field="minLength" type="number" min="0" value="${Number(assertions.minLength || 0)}"></label>
-                    <label><span>最长耗时（毫秒）</span><input class="form-input" data-eval-field="maxDurationMs" type="number" min="0" value="${Number(assertions.maxDurationMs || 0)}"></label>
-                    <label><span>Token 上限</span><input class="form-input" data-eval-field="maxTokens" type="number" min="0" value="${Number(assertions.maxTokens || 0)}"></label>
-                    <label class="agent-eval-json-toggle"><input data-eval-field="requireJson" type="checkbox" ${assertions.requireJson ? 'checked' : ''}><span>必须是有效 JSON</span></label>
+                <div class="modal-form-grid modal-form-grid--3 agent-eval-case-fields">
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-name">名称</label><input id="agent-eval-case-${index}-name" class="form-input" data-eval-field="name" value="${agentEscapeAttr(item.name || '')}" maxlength="100"></div>
+                    <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-case-${index}-input">任务输入</label><textarea id="agent-eval-case-${index}-input" class="form-input" data-eval-field="input" rows="3">${agentEscape(item.input || '')}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-required">必须包含</label><textarea id="agent-eval-case-${index}-required" class="form-input" data-eval-field="requiredPhrases" rows="2" placeholder="每行一个关键短语">${agentEscape((assertions.requiredPhrases || []).join('\n'))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-forbidden">禁止包含</label><textarea id="agent-eval-case-${index}-forbidden" class="form-input" data-eval-field="forbiddenPhrases" rows="2" placeholder="每行一个禁用短语">${agentEscape((assertions.forbiddenPhrases || []).join('\n'))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-min-length">最少字数</label><input id="agent-eval-case-${index}-min-length" class="form-input" data-eval-field="minLength" type="number" min="0" value="${Number(assertions.minLength || 0)}"></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-max-duration">最长耗时（毫秒）</label><input id="agent-eval-case-${index}-max-duration" class="form-input" data-eval-field="maxDurationMs" type="number" min="0" value="${Number(assertions.maxDurationMs || 0)}"></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-max-tokens">Token 上限</label><input id="agent-eval-case-${index}-max-tokens" class="form-input" data-eval-field="maxTokens" type="number" min="0" value="${Number(assertions.maxTokens || 0)}"></div>
+                    <label class="modal-form-check agent-eval-json-toggle"><input data-eval-field="requireJson" type="checkbox" ${assertions.requireJson ? 'checked' : ''}><span>必须是有效 JSON</span></label>
                 </div>
                 <details class="agent-eval-case-advanced">
                     <summary>高级断言与工作流变量</summary>
-                    <label><span>必须包含的参考文本</span><textarea class="form-input" data-eval-field="expectedOutput" rows="2">${agentEscape(item.expected_output || '')}</textarea></label>
-                    <label><span>工作流输入变量（JSON）</span><textarea class="form-input agent-eval-code" data-eval-field="inputVariables" rows="4">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></label>
-                    <label><span>输出结构（JSON Schema）</span><textarea class="form-input agent-eval-code" data-eval-field="outputSchema" rows="5">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></label>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-expected">必须包含的参考文本</label><textarea id="agent-eval-case-${index}-expected" class="form-input" data-eval-field="expectedOutput" rows="2">${agentEscape(item.expected_output || '')}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-variables">工作流输入变量（JSON）</label><textarea id="agent-eval-case-${index}-variables" class="form-input agent-eval-code" data-eval-field="inputVariables" rows="4">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-schema">输出结构（JSON Schema）</label><textarea id="agent-eval-case-${index}-schema" class="form-input agent-eval-code" data-eval-field="outputSchema" rows="5">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></div>
                 </details>
             </div>
         `;
     }).join('') || '<div class="empty-state compact">至少添加一个评测用例</div>');
+    const count = document.getElementById('agent-eval-case-count');
+    if (count) count.textContent = `${agentEvalEditorCases.length} 个用例`;
     list.querySelectorAll('[data-agent-eval-case-remove]').forEach(button => {
         button.addEventListener('click', () => {
             collectAgentEvalEditorCases(false);
@@ -311,21 +320,34 @@ function ensureAgentEvalEditorModal() {
     PivotSafeHtml.setHtml(modal, `
         <div class="modal agent-eval-editor-modal">
             <div class="agent-config-modal-head">
-                <div><h3 id="agent-eval-editor-title">新建评测集</h3></div>
+                <div class="agent-eval-editor-heading">
+                    <h3 id="agent-eval-editor-title">新建评测集</h3>
+                    <p>配置评测目标、通过标准与用例</p>
+                </div>
                 <button type="button" class="btn-secondary" data-agent-eval-editor-close>关闭</button>
             </div>
             <div class="agent-eval-editor-body">
                 <input type="hidden" id="agent-eval-editor-id">
-                <div class="agent-eval-suite-fields">
-                    <label><span>名称</span><input id="agent-eval-editor-name" class="form-input" maxlength="100"></label>
-                    <label><span>目标类型</span><select id="agent-eval-editor-target" class="form-input"><option value="free">自由任务</option><option value="workflow">工作流</option></select></label>
-                    <label><span>模型</span><select id="agent-eval-editor-model" class="form-input"></select></label>
-                    <label data-agent-eval-workflow-field><span>工作流</span><select id="agent-eval-editor-workflow" class="form-input"></select></label>
-                    <label><span>通过线</span><input id="agent-eval-editor-threshold" class="form-input" type="number" min="1" max="100" value="80"></label>
-                    <label class="wide"><span>说明</span><input id="agent-eval-editor-description" class="form-input" maxlength="500"></label>
-                </div>
-                <div class="agent-eval-editor-case-toolbar"><strong>评测用例</strong><button id="agent-eval-add-case" type="button" class="btn-secondary">添加用例</button></div>
-                <div id="agent-eval-editor-cases" class="agent-eval-editor-cases"></div>
+                <section class="agent-eval-editor-section">
+                    <div class="agent-eval-editor-section-head">
+                        <strong>基础设置</strong>
+                    </div>
+                    <div class="modal-form-grid modal-form-grid--3 agent-eval-suite-fields">
+                        <div class="modal-form-field"><label for="agent-eval-editor-name">名称</label><input id="agent-eval-editor-name" class="form-input" maxlength="100"></div>
+                        <div class="modal-form-field"><label for="agent-eval-editor-target">目标类型</label><select id="agent-eval-editor-target" class="form-input"><option value="free">自由任务</option><option value="workflow">工作流</option></select></div>
+                        <div class="modal-form-field"><label for="agent-eval-editor-model">模型</label><select id="agent-eval-editor-model" class="form-input"></select></div>
+                        <div class="modal-form-field" data-agent-eval-workflow-field><label for="agent-eval-editor-workflow">工作流</label><select id="agent-eval-editor-workflow" class="form-input"></select></div>
+                        <div class="modal-form-field"><label for="agent-eval-editor-threshold">通过线</label><input id="agent-eval-editor-threshold" class="form-input" type="number" min="1" max="100" value="80"></div>
+                        <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-editor-description">说明</label><input id="agent-eval-editor-description" class="form-input" maxlength="500"></div>
+                    </div>
+                </section>
+                <section class="agent-eval-editor-section agent-eval-editor-cases-section">
+                    <div class="agent-eval-editor-case-toolbar">
+                        <div><strong>评测用例</strong><span id="agent-eval-case-count">0 个用例</span></div>
+                        <button id="agent-eval-add-case" type="button" class="btn-secondary">添加用例</button>
+                    </div>
+                    <div id="agent-eval-editor-cases" class="agent-eval-editor-cases"></div>
+                </section>
             </div>
             <div class="agent-eval-editor-footer">
                 <button type="button" class="btn-secondary" data-agent-eval-editor-close>取消</button>

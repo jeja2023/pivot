@@ -41,7 +41,9 @@ const cloneDagInput = (value) => {
             if (isDatabaseConnectionField(name, tool)) return '选择要执行该数据库工具的连接；读取表/字段会跟随这个选择。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
-            if (name === 'sql') return '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
+            if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
+                ? '普通查询请使用可视化配置；复杂 JOIN、CTE 等场景再切换到高级 SQL。'
+                : '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
             if (key === 'query' || key === 'prompt') return '可直接输入，也可以插入任务目标或上游节点输出作为上下文。';
             if (key === 'rows' || key === 'columns' || key === 'filters') return '适合引用上游结构化结果；手动填写时请保持 JSON 格式。';
             if (key === 'model' || key === 'temperature' || key === 'max_tokens') return '属于模型调用控制参数，不确定时保持默认或留空。';
@@ -56,7 +58,9 @@ const cloneDagInput = (value) => {
             if (!input || typeof input !== 'object' || Array.isArray(input)) {
                 return '<span class="pivot-dag-input-summary-empty">未配置</span>';
             }
-            const entries = Object.entries(input).slice(0, 6);
+            const entries = Object.entries(input)
+                .filter(([key]) => key !== 'queryBuilder')
+                .slice(0, 6);
             if (!entries.length) {
                 return '<span class="pivot-dag-input-summary-empty">未配置</span>';
             }

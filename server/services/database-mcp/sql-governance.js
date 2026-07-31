@@ -109,7 +109,11 @@ function buildGroupCountSql(input = {}, dialect = 'postgres', fallbackSchema = '
 }
 
 function applySqlLimit(sql, limit, dialect) {
-    if (/\blimit\s+\d+\b/i.test(sql) || /^\s*(show|describe|desc|explain)\b/i.test(sql)) return sql;
+    if (
+        /\blimit\s+\d+\b/i.test(sql)
+        || /^\s*select\s+top\s*(?:\(\s*\d+\s*\)|\d+\b)/i.test(sql)
+        || /^\s*(show|describe|desc|explain)\b/i.test(sql)
+    ) return sql;
     if (dialect === 'sqlserver') {
         return sql.replace(/^\s*select\s+/i, `SELECT TOP (${limit}) `);
     }

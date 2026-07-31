@@ -86,6 +86,158 @@ function resolveDagNodeInput(node, context) {
     return resolved && typeof resolved === 'object' && !Array.isArray(resolved) ? resolved : {};
 }
 
+function isEmptyDagValue(value) {
+    if (value === undefined || value === null) return true;
+    if (typeof value === 'string') return value.trim() === '';
+    if (Array.isArray(value)) return value.length === 0;
+    if (typeof value === 'object') return Object.keys(value).length === 0;
+    return false;
+}
+
+function isTruthyDagValue(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+    if (typeof value === 'string') {
+        const text = value.trim().toLowerCase();
+        if (!text) return false;
+        return !['false', '0', 'no', 'null', 'undefined'].includes(text);
+    }
+    return !isEmptyDagValue(value);
+}
+
+function dagValueToComparableText(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value;
+    return stringifyDagTemplateValue(value);
+}
+
+// 返回 1 / 0 / -1，任一侧不是有限数值时返回 null，让调用方回退到文本比较。
+function compareDagNumbers(actual, expected) {
+    const left = typeof actual === 'number' ? actual : Number(String(actual ?? '').trim());
+    const right = typeof expected === 'number' ? expected : Number(String(expected ?? '').trim());
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+    if (left > right) return 1;
+    if (left < right) return -1;
+    return 0;
+}
+
+const DAG_WHEN_OPERATOR_LABELS = {
+    equals: '等于',
+    not_equals: '不等于',
+    contains: '包含',
+    not_contains: '不包含',
+    starts_with: '开头是',
+    ends_with: '结尾是',
+    greater_than: '大于',
+    greater_or_equal: '大于等于',
+    less_than: '小于',
+    less_or_equal: '小于等于',
+    empty: '为空',
+    not_empty: '不为空',
+    exists: '存在',
+    not_exists: '不存在',
+    is_true: '为真',
+    is_false: '为假'
+};
+
+// 求值节点 when 规则：source 从模板上下文取值，再按 operator 与 value 比较。
+// 返回 { matched, source, operator, expected, actual, reason }，供运行时决定是否跳过节点。
+function evaluateDagWhen(when, context) {
+    if (!when || typeof when !== 'object') return { matched: true, skipped: false };
+    const source = String(when.source || '').trim();
+    const operator = String(when.operator || 'equals').trim();
+    const expected = when.value;
+    if (!source) return { matched: true, skipped: false };
+    const actual = resolveDagTemplateReference(source, context);
+    const actualText = dagValueToComparableText(actual);
+    const expectedText = dagValueToComparableText(expected);
+    let matched = false;
+    switch (operator) {
+        case 'equals':
+            matched = compareDagNumbers(actual, expected) === 0 || actualText === expectedText;
+            break;
+        case 'not_equals':
+            matched = !(compareDagNumbers(actual, expected) === 0 || actualText === expectedText);
+            break;
+        case 'contains':
+            matched = actualText.includes(expectedText);
+            break;
+        case 'not_contains':
+            matched = !actualText.includes(expectedText);
+            break;
+        case 'starts_with':
+            matched = actualText.startsWith(expectedText);
+            break;
+        case 'ends_with':
+            matched = actualText.endsWith(expectedText);
+            break;
+        case 'greater_than':
+            matched = compareDagNumbers(actual, expected) === 1;
+            break;
+        case 'greater_or_equal':
+            matched = [0, 1].includes(compareDagNumbers(actual, expected));
+            break;
+        case 'less_than':
+            matched = compareDagNumbers(actual, expected) === -1;
+            break;
+        case 'less_or_equal':
+            matched = [0, -1].includes(compareDagNumbers(actual, expected));
+            break;
+        case 'empty':
+            matched = isEmptyDagValue(actual);
+            break;
+        case 'not_empty':
+            matched = !isEmptyDagValue(actual);
+            break;
+        case 'exists':
+            matched = actual !== undefined;
+            break;
+        case 'not_exists':
+            matched = actual === undefined;
+            break;
+        case 'is_true':
+            matched = isTruthyDagValue(actual);
+            break;
+        case 'is_false':
+            matched = !isTruthyDagValue(actual);
+            break;
+        default:
+            matched = true;
+            break;
+    }
+    const operatorLabel = DAG_WHEN_OPERATOR_LABELS[operator] || operator;
+    const needsExpected = !['empty', 'not_empty', 'exists', 'not_exists', 'is_true', 'is_false'].includes(operator);
+    return {
+        matched,
+        skipped: !matched,
+        source,
+        operator,
+        operatorLabel,
+        expected: needsExpected ? expected : undefined,
+        actual: clampDagWhenPreview(actual),
+        reason: matched
+            ? ''
+            : `条件不满足：${source} ${operatorLabel}${needsExpected ? ` ${expectedText}` : ''}（实际值：${clampDagWhenPreview(actualText) || '空'}）`
+    };
+}
+
+function clampDagWhenPreview(value, max = 200) {
+    const text = typeof value === 'string' ? value : stringifyDagTemplateValue(value);
+    if (!text) return '';
+    return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+// 依赖状态是否满足节点的 condition 门禁（success/failure/always）。
+function dagConditionSatisfied(condition, dependencyStatuses = []) {
+    const mode = ['always', 'success', 'failure'].includes(String(condition || 'success'))
+        ? String(condition || 'success')
+        : 'success';
+    if (mode === 'always') return true;
+    if (!dependencyStatuses.length) return true;
+    if (mode === 'failure') return dependencyStatuses.some(status => status === 'error');
+    return dependencyStatuses.every(status => status === 'completed');
+}
+
 function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs) {
     const defaultTimeout = normalizePositiveInt(
         run.tool_timeout_ms,
@@ -103,6 +255,9 @@ function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs) {
 }
 
 module.exports = {
+    DAG_WHEN_OPERATOR_LABELS,
+    dagConditionSatisfied,
+    evaluateDagWhen,
     getPathValue,
     normalizeDagNodePolicy,
     resolveDagInputValue,

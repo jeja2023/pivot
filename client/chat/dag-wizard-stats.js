@@ -202,8 +202,7 @@ function createDagWizardStatsController(ctx) {
                         timeoutMs: 0,
                         onError: 'skip_dependents'
                     }
-                ],
-                primaryLlmNodeId: 'llm_summary'
+                ]
             };
             const apply = () => {
                 ctx.spec = ensureDefaults(nextSpec);

@@ -19,17 +19,12 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
         return { valid: false, error: e };
     }
     const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
-    const primaryLlmNodeId = String(spec?.primaryLlmNodeId || spec?.primary_llm_node_id || '').trim();
-    const llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
-        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm')
-        || null;
-    const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
-    const maxSteps = Number.parseInt(input.maxSteps ?? input.max_steps ?? 20, 10);
+    const llmNodes = nodes.filter(node => String(node?.tool || '').trim() === 'agent.llm');
     return {
         valid: true,
-        llmNode,
-        modelId: String(input.model || input.modelId || input.model_id || '').trim(),
-        maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 20,
+        llmNodes,
+        modelId: '',
+        maxSteps: 20,
         toolPolicy: 'all',
         approvalPolicy: 'safe_mcp_auto',
         modelRouter: 'fixed',
@@ -40,11 +35,12 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
     };
 }
 
-function validateAgentWorkflowRunSettings(settings, options = {}) {
-    const requireModel = options.requireModel !== false;
-    if (!settings?.valid) return '工作流 JSON 格式不正确，无法读取 LLM 节点配置';
-    if (!settings.llmNode) return '工作流必须包含 1 个大模型节点';
-    if (requireModel && !settings.modelId) return `${settings.llmNode.title || settings.llmNode.id || '大模型节点'} 需要填写节点模型`;
+function validateAgentWorkflowRunSettings(settings) {
+    if (!settings?.valid) return '工作流 JSON 格式不正确，无法读取节点配置';
+    const unconfiguredNode = settings.llmNodes.find(node => !String(
+        node?.input?.model || node?.input?.modelId || node?.input?.model_id || ''
+    ).trim());
+    if (unconfiguredNode) return `${unconfiguredNode.title || unconfiguredNode.id || '大模型节点'} 需要填写节点模型`;
     return '';
 }
 
@@ -113,7 +109,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
             payload._invalid = true;
             return payload;
         }
-        const settingsError = validateAgentWorkflowRunSettings(runSettings, { requireModel: sourceMode !== 'published' });
+        const settingsError = validateAgentWorkflowRunSettings(runSettings);
         if (settingsError) {
             showToast(settingsError, 'error');
             payload._invalid = true;

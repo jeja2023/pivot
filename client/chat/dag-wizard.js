@@ -13,7 +13,8 @@ function createDagWizardController(ctx) {
             const schema = getToolSchema(tool);
             const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
             const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-            const fields = Object.entries(properties);
+            const isVisualSqlQuery = isVisualSqlQueryTool(tool);
+            const fields = Object.entries(properties).filter(([name]) => !isVisualSqlQuery || !['sql', 'limit'].includes(name));
             const dependencyNodes = buildWizardDependencyNodes(node, ctx.spec.nodes);
             let modal = document.getElementById('pivot-dag-input-wizard');
             if (!modal) {
@@ -42,7 +43,7 @@ function createDagWizardController(ctx) {
                         <button type="button" class="btn-danger-outline" data-pivot-dag-wizard-close="1">关闭</button>
                     </div>
                     <div class="pivot-dag-wizard-body">
-                        <div class="pivot-dag-wizard-form">
+                        <div class="pivot-dag-wizard-form${isVisualSqlQuery ? ' is-visual-sql' : ''}">
                             <section class="pivot-dag-wizard-overview">
                                 <div class="pivot-dag-wizard-overview-head">
                                     <strong>当前配置</strong>
@@ -52,8 +53,11 @@ function createDagWizardController(ctx) {
                                     ${renderInputSummary(initialInput, tool, wizardTools)}
                                 </div>
                             </section>
-                            ${renderDatabaseAssistPanel(node, tool, initialInput, wizardTools)}
-                            ${fieldMarkup}
+                            ${isVisualSqlQuery ? fieldMarkup : ''}
+                            ${isVisualSqlQuery
+                                ? renderVisualSqlBuilder(initialInput)
+                                : renderDatabaseAssistPanel(node, tool, initialInput, wizardTools)}
+                            ${isVisualSqlQuery ? '' : fieldMarkup}
                         </div>
                         <aside class="pivot-dag-wizard-sources">
                             <div class="pivot-dag-wizard-sources-title">变量引用</div>
@@ -193,6 +197,17 @@ function createDagWizardController(ctx) {
                 return selected || modal.querySelector('[data-pivot-dag-db-assist]')?.dataset.pivotDagDbAssist || '';
             };
 
+            const queryBuilder = isVisualSqlQuery
+                ? mountVisualSqlBuilder({
+                    modal,
+                    initialInput,
+                    tool,
+                    wizardTools,
+                    getConnectionId: currentDatabaseConnectionId,
+                    callTool: callWizardTool
+                })
+                : null;
+
             const assistEntry = () => {
                 const serverId = currentDatabaseConnectionId();
                 return databaseWizardConnections(wizardTools).find(entry => entry.serverId === serverId) || null;
@@ -279,6 +294,16 @@ function createDagWizardController(ctx) {
                     delete nextInput.mcp_server_id;
                     if (connectionId) nextInput.connectionId = connectionId;
                 }
+                if (queryBuilder) {
+                    const built = queryBuilder.collect();
+                    if (built.error) {
+                        window.showToast?.(built.error, 'error');
+                        return null;
+                    }
+                    nextInput.sql = built.sql;
+                    nextInput.queryBuilder = built.queryBuilder;
+                    nextInput.limit = built.queryBuilder.limit;
+                }
                 if (missing.length) {
                     const first = fieldsByName.get(missing[0]);
                     const missingLabels = missing.map(name => friendlyFieldLabel(name, properties[name], tool));
@@ -327,6 +352,7 @@ function createDagWizardController(ctx) {
 
             const resetWizard = (draftInput = {}) => {
                 syncFormWithDraft(draftInput);
+                queryBuilder?.hydrate(draftInput);
             };
 
             modal.querySelectorAll('[data-pivot-dag-wizard-field]').forEach(control => {
@@ -340,7 +366,10 @@ function createDagWizardController(ctx) {
             });
             modal.querySelector('[data-pivot-dag-load-tables]')?.addEventListener('click', loadAssistTables);
             modal.querySelector('[data-pivot-dag-load-columns]')?.addEventListener('click', loadAssistColumns);
-            modal.querySelector('[data-pivot-dag-db-connection-select]')?.addEventListener('change', syncAssistConnection);
+            modal.querySelector('[data-pivot-dag-db-connection-select]')?.addEventListener('change', () => {
+                syncAssistConnection();
+                queryBuilder?.onConnectionChange();
+            });
             modal.querySelector('[data-pivot-dag-assist-schema]')?.addEventListener('input', event => syncAssistValue('schema', event.target.value));
             modal.querySelector('[data-pivot-dag-assist-table]')?.addEventListener('input', event => syncAssistValue('table', event.target.value));
             modal.querySelector('[data-pivot-dag-assist-column]')?.addEventListener('input', event => syncAssistValue('groupBy', event.target.value));

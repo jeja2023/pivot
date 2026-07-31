@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { getRunnableModelForUser } = require('./models');
 const { formatToolList } = require('./agent-tool-catalog');
-const { assertWorkflowHasConfiguredLlm, resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { assertWorkflowLlmNodesConfigured, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { isSuperAdmin } = require('../permissions');
 const { inspectDagContracts } = require('./agent-dag-contracts');
 const {
@@ -36,15 +36,6 @@ function getMcpHealthForPreflight(user) {
         FROM mcp_servers
         WHERE ${scope}
     `).get(...params);
-}
-
-function inferDagLlmModelId(dag = {}) {
-    const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
-    const primaryLlmNodeId = String(dag?.primaryLlmNodeId || dag?.primary_llm_node_id || '').trim();
-    const llmNode = nodes.find(node => node.id === primaryLlmNodeId && String(node?.tool || '').trim() === 'agent.llm')
-        || nodes.find(node => String(node?.tool || '').trim() === 'agent.llm');
-    const input = llmNode?.input && typeof llmNode.input === 'object' ? llmNode.input : {};
-    return String(input.model || input.modelId || input.model_id || '').trim();
 }
 
 function preflightAgentRun(user, body = {}) {
@@ -86,10 +77,10 @@ function preflightAgentRun(user, body = {}) {
         }
         dag = dag || normalizeDagSpec(body.dagSpec || body.dag_spec || {});
     }
-    const effectiveModelId = body.modelId || body.model_id || (runMode === 'dag' ? inferDagLlmModelId(dag) : '');
+    const effectiveModelId = body.modelId || body.model_id || '';
     const modelCfg = getRunnableModelForUser(effectiveModelId, user);
     if (goal.length < 4) blockers.push('任务目标过短，智能体无法稳定规划。');
-    if (!modelCfg) blockers.push('未选择可用模型。');
+    if (runMode !== 'dag' && !modelCfg) blockers.push('未选择可用模型。');
     if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
     if (toolPolicy === 'builtin_only' && /mcp|数据库|外部|接口|工具/i.test(goal)) warnings.push('目标可能需要 MCP，但当前设置为仅内置工具。');
     if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有工具箱工具调用都会进入人工审批，长任务可能暂停等待。');
@@ -100,7 +91,7 @@ function preflightAgentRun(user, body = {}) {
         if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
         if (dag.nodes.length) {
             try {
-                assertWorkflowHasConfiguredLlm(dag);
+                assertWorkflowLlmNodesConfigured(dag);
             } catch (e) {
                 blockers.push(e.message || '工作流大模型节点配置不完整。');
             }

@@ -396,7 +396,7 @@
     margin: 7px 0 0;
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 180px;
+    max-height: 380px;
     overflow: auto;
     font-size: 0.68rem;
     line-height: 1.45;
@@ -405,6 +405,61 @@
     border-radius: 6px;
     padding: 9px;
 }
+
+/* ── 暗色模式覆写（run-steps 全局补全）────────────────── */
+body.dark-mode .agent-step,
+.dark-mode .agent-step {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .agent-step.error,
+.dark-mode .agent-step.error {
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+body.dark-mode .agent-step-head strong,
+.dark-mode .agent-step-head strong { color: #e2e8f0; }
+
+body.dark-mode .agent-step-body,
+.dark-mode .agent-step-body {
+    background: #16202e;
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.14);
+}
+
+body.dark-mode .agent-step-result-table th,
+.dark-mode .agent-step-result-table th {
+    background: #1e293b;
+    color: #94a3b8;
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+body.dark-mode .agent-step-result-table td,
+.dark-mode .agent-step-result-table td {
+    background: #16202e;
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.14);
+}
+
+body.dark-mode .agent-step-kpi-pill,
+.dark-mode .agent-step-kpi-pill {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+body.dark-mode .agent-step-llm-output,
+.dark-mode .agent-step-llm-output {
+    color: #cbd5e1;
+}
+
+body.dark-mode .agent-step-llm-output code,
+.dark-mode .agent-step-llm-output code {
+    background: rgba(255, 255, 255, 0.07);
+    color: #7dd3fc;
+}
+
 
 .agent-dag-spec,
 .agent-artifact-content {

@@ -156,7 +156,6 @@
             </div>
         </div>
     </div>
-
     <!-- 自定义标签编辑弹窗 -->
     <div id="tags-container" class="modal-overlay hidden" style="z-index: 1100;">
         <div class="modal" style="width: 340px;">
@@ -438,92 +437,5 @@
                 </div>
                 <div id="pagination-userRecords" class="pagination"></div>
             </div>
-        </div>
-    </div>
-
-    <!-- 提示词编辑弹窗 -->
-    <div id="prompt-modal-container" class="modal-overlay hidden" style="z-index: 200;">
-        <div class="modal model-modal">
-            <div class="model-modal-header">
-                <h3 id="prompt-modal-title">新增提示词</h3>
-                <p class="model-modal-desc">保存常用角色、输出标准和任务方法</p>
-            </div>
-            <div class="model-form">
-                <input type="hidden" id="p-id">
-                <div class="form-item">
-                    <label>名称</label>
-                    <input type="text" id="p-name" class="form-input" placeholder="例如: 项目复盘专家">
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label>分类</label>
-                        <input type="text" id="p-category" class="form-input" placeholder="例如: 办公">
-                    </div>
-                    <div class="form-item">
-                        <label>类型</label>
-                        <select id="p-type" class="form-input">
-                            <option value="role">角色</option>
-                            <option value="output">输出规范</option>
-                            <option value="method">任务方法</option>
-                            <option value="workflow">工作流节点</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label>范围</label>
-                        <select id="p-scope" class="form-input">
-                            <option value="personal">个人</option>
-                            <option value="global">全局</option>
-                        </select>
-                    </div>
-                    <div class="form-item">
-                        <label>适用入口</label>
-                        <div class="prompt-target-checks" role="group" aria-label="适用入口">
-                            <label><input type="checkbox" name="p-target-surfaces" value="chat" checked> 聊天</label>
-                            <label><input type="checkbox" name="p-target-surfaces" value="agent" checked> 自由任务</label>
-                            <label><input type="checkbox" name="p-target-surfaces" value="workflow" checked> 工作流</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-item">
-                    <label>说明</label>
-                    <input type="text" id="p-description" class="form-input" placeholder="简要说明适用场景，可选">
-                </div>
-                <div class="form-item">
-                    <label>提示词内容</label>
-                    <textarea id="p-content" class="form-input" style="height: 160px; padding-top: 12px;"
-                        placeholder="输入角色设定、输出标准或任务执行方法"></textarea>
-                </div>
-                <div class="model-modal-actions">
-                    <button id="modal-prompt-cancel" class="btn-secondary">取消</button>
-                    <button id="modal-prompt-save" class="btn-primary">保存提示词</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 提示词套用弹窗 -->
-    <div id="prompt-apply-modal-container" class="modal-overlay hidden" style="z-index: 2050;">
-        <div class="modal prompt-apply-modal">
-            <div class="model-modal-header">
-                <div>
-                    <h3 id="prompt-apply-title">套用提示词</h3>
-                    <p id="prompt-apply-desc" class="model-modal-desc">选择一条提示词应用到当前入口。</p>
-                </div>
-                <button id="prompt-apply-close" class="btn-danger-outline" type="button">关闭</button>
-            </div>
-            <div class="prompt-apply-controls">
-                <input id="prompt-apply-search" class="form-input" type="search" placeholder="搜索提示词、角色或分类">
-                <select id="prompt-apply-type-filter" class="form-input" aria-label="提示词类型">
-                    <option value="">全部类型</option>
-                    <option value="role">角色</option>
-                    <option value="output">输出规范</option>
-                    <option value="method">任务方法</option>
-                    <option value="workflow">工作流节点</option>
-                </select>
-            </div>
-            <div id="prompt-apply-list" class="prompt-apply-list"></div>
-            <div id="prompt-apply-status" class="prompt-apply-status"></div>
         </div>
     </div>

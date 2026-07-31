@@ -44,42 +44,33 @@ function updateAgentWorkflowRunUi() {
     refreshAgentDagInputsPanel();
 }
 
-function workflowLifecycleChip(label, value, state = '') {
-    return `
-        <span class="agent-workflow-lifecycle-chip ${state}">
-            <strong>${agentEscape(label)}</strong>
-            <em>${agentEscape(value)}</em>
-        </span>
-    `;
-}
-
 function renderAgentWorkflowLifecycle() {
     const target = document.getElementById('agent-workflow-lifecycle');
     if (!target) return;
     const workflow = selectedAgentWorkflow();
     const draftSummary = summarizeAgentDagSpec();
-    const savedSummary = workflow ? summarizeAgentDagSpec(workflow.dag_spec || { nodes: [] }) : null;
     const draftMatchesSaved = workflow ? currentWorkflowMatchesSelected(workflow) : false;
-    const currentText = workflow
-        ? `v${workflow.current_version || 1}`
+    const structureText = draftSummary.valid ? '' : '结构需修正';
+    const saveText = workflow
+        ? (draftMatchesSaved ? '已保存' : '有未保存修改')
         : '未保存';
     const publishedText = workflow?.published_version
-        ? `v${workflow.published_version}`
+        ? `已发布 v${workflow.published_version}`
         : '未发布';
-    const draftText = draftSummary.valid
-        ? `${draftSummary.executableNodeCount || savedSummary?.executableNodeCount || 0} 节点 · ${workflow ? (draftMatchesSaved ? '已同步' : '未保存') : '草稿'}`
-        : '需修正';
-    const runText = workflow?.published_version
-        ? '草稿/发布版'
-        : '仅草稿';
-    if (target) {
-        PivotSafeHtml.setHtml(target, [
-            workflowLifecycleChip('草稿', draftText, draftMatchesSaved ? '' : 'is-draft'),
-            workflowLifecycleChip('当前', currentText, workflow ? 'is-ready' : ''),
-            workflowLifecycleChip('发布', publishedText, workflow?.published_version ? 'is-ready' : 'is-draft'),
-            workflowLifecycleChip('运行', runText, workflow?.published_version ? 'is-ready' : '')
-        ].join(''));
-    }
+    const state = !draftSummary.valid
+        ? 'is-error'
+        : (!draftMatchesSaved ? 'is-draft' : (workflow?.published_version ? 'is-ready' : ''));
+    const statusTitle = [structureText, saveText, publishedText].filter(Boolean).join(' · ');
+    const primaryText = structureText || saveText;
+    const secondarySaveText = structureText ? `<em>${agentEscape(saveText)}</em>` : '';
+    PivotSafeHtml.setHtml(target, `
+        <span class="agent-workflow-lifecycle-summary ${state}" title="${agentEscapeAttr(statusTitle)}">
+            <span class="agent-workflow-status-dot" aria-hidden="true"></span>
+            <strong>${agentEscape(primaryText)}</strong>
+            ${secondarySaveText}
+            <em>${agentEscape(publishedText)}</em>
+        </span>
+    `);
 }
 
 function writeAgentWorkflowText(value) {
@@ -120,7 +111,7 @@ function updateAgentDagNodeDrawer(node) {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     if (title) title.textContent = node?.title || node?.id || '节点配置';
     if (subtitle) subtitle.textContent = node
-        ? `${node.id}${node.tool ? ` · ${node.tool}` : ''}${node.isPrimaryLlm ? ' · 主大模型' : ''}`
+        ? `${node.id}${node.tool ? ` · ${node.tool}` : ''}`
         : '';
 }
 

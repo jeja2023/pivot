@@ -181,6 +181,14 @@
       ]
     },
     {
+      "file": "client/chat/agent-dag-node-library.js",
+      "global": "PivotDagNodeLibrary",
+      "count": 1,
+      "lines": [
+        276
+      ]
+    },
+    {
       "file": "client/chat/agent-run-actions.js",
       "global": "approveAgentRun",
       "count": 1,
@@ -1112,6 +1120,14 @@
       "count": 1,
       "lines": [
         106
+      ]
+    },
+    {
+      "file": "client/chat/dag-render.js",
+      "global": "dagNodeRunStates",
+      "count": 1,
+      "lines": [
+        32
       ]
     },
     {

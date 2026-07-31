@@ -1,5 +1,4 @@
 /* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
-/* global resolvePrimaryLlmNodeId */
 
 
 
@@ -30,8 +29,7 @@ function createDagInspectorController(ctx) {
         onNodeSelectionChange(node ? {
             id: node.id,
             title: node.title,
-            tool: node.tool,
-            isPrimaryLlm: isLlmNode(node) && ctx.spec.primaryLlmNodeId === node.id
+            tool: node.tool
         } : null);
     };
 
@@ -228,6 +226,114 @@ function createDagInspectorController(ctx) {
         requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
     };
 
+    // ── when 条件规则（Dify 风格条件分支）─────────────────
+    const WHEN_OPERATORS = [
+        { value: 'equals', label: '等于' },
+        { value: 'not_equals', label: '不等于' },
+        { value: 'contains', label: '包含' },
+        { value: 'not_contains', label: '不包含' },
+        { value: 'starts_with', label: '开头是' },
+        { value: 'ends_with', label: '结尾是' },
+        { value: 'greater_than', label: '大于' },
+        { value: 'greater_or_equal', label: '大于等于' },
+        { value: 'less_than', label: '小于' },
+        { value: 'less_or_equal', label: '小于等于' },
+        { value: 'empty', label: '为空' },
+        { value: 'not_empty', label: '不为空' },
+        { value: 'exists', label: '存在' },
+        { value: 'not_exists', label: '不存在' },
+        { value: 'is_true', label: '为真' },
+        { value: 'is_false', label: '为假' }
+    ];
+    // 这些操作符只看变量本身，不需要比较值。
+    const WHEN_UNARY_OPERATORS = ['empty', 'not_empty', 'exists', 'not_exists', 'is_true', 'is_false'];
+
+    const renderWhenPanel = (node) => {
+        const when = node.when && typeof node.when === 'object' ? node.when : null;
+        const enabled = Boolean(when && String(when.source || '').trim());
+        const operator = String(when?.operator || 'equals');
+        const needsValue = !WHEN_UNARY_OPERATORS.includes(operator);
+        // 变量候选：上游节点输出 + 工作流目标/输入
+        const suggestions = [
+            { label: '任务目标', value: 'goal' },
+            { label: '运行输入', value: 'inputs' },
+            ...(node.dependsOn || []).flatMap(dep => ([
+                { label: `${dep} 输出`, value: `nodes.${dep}.output` },
+                { label: `${dep} 状态`, value: `nodes.${dep}.status` }
+            ]))
+        ];
+        return `
+            <div class="pivot-dag-when-panel ${enabled ? 'is-active' : ''}">
+                <div class="pivot-dag-when-head">
+                    <label class="pivot-dag-when-toggle">
+                        <input type="checkbox" data-pivot-dag-when-enabled ${enabled ? 'checked' : ''}>
+                        <strong>条件分支</strong>
+                    </label>
+                    <span>只有条件成立时才执行本节点，否则自动跳过</span>
+                </div>
+                ${enabled ? `
+                <div class="pivot-dag-when-body">
+                    <label class="pivot-dag-when-source">
+                        <span>变量</span>
+                        <input type="text" data-pivot-dag-when="source" value="${dagEscapeAttr(when.source || '')}"
+                               placeholder="例如 nodes.search.output.rows" list="pivot-dag-when-vars">
+                        <datalist id="pivot-dag-when-vars">
+                            ${suggestions.map(s => `<option value="${dagEscapeAttr(s.value)}">${dagEscapeHtml(s.label)}</option>`).join('')}
+                        </datalist>
+                    </label>
+                    <label class="pivot-dag-when-operator">
+                        <span>判断</span>
+                        <select data-pivot-dag-when="operator">
+                            ${WHEN_OPERATORS.map(op => `<option value="${op.value}" ${operator === op.value ? 'selected' : ''}>${dagEscapeHtml(op.label)}</option>`).join('')}
+                        </select>
+                    </label>
+                    ${needsValue ? `
+                    <label class="pivot-dag-when-value">
+                        <span>值</span>
+                        <input type="text" data-pivot-dag-when="value" value="${dagEscapeAttr(String(when.value ?? ''))}" placeholder="比较值">
+                    </label>` : ''}
+                </div>
+                <div class="pivot-dag-when-hint">
+                    ${suggestions.length > 2
+                        ? `可用变量：${suggestions.slice(2, 6).map(s => `<code>${dagEscapeHtml(s.value)}</code>`).join('、')}`
+                        : '连接上游节点后可引用其输出作为判断变量'}
+                </div>` : ''}
+            </div>
+        `;
+    };
+
+    const bindWhenPanelEvents = (node) => {
+        inspector.querySelector('[data-pivot-dag-when-enabled]')?.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                const firstDep = (node.dependsOn || [])[0];
+                node.when = {
+                    source: firstDep ? `nodes.${firstDep}.status` : 'goal',
+                    operator: 'equals',
+                    value: firstDep ? 'completed' : ''
+                };
+            } else {
+                node.when = null;
+            }
+            ctx.render?.();
+            ctx.flushOut?.();
+        });
+        inspector.querySelectorAll('[data-pivot-dag-when]').forEach(field => {
+            const commit = (target) => {
+                const key = target.dataset.pivotDagWhen;
+                if (!key) return;
+                node.when = node.when && typeof node.when === 'object' ? node.when : { source: '', operator: 'equals', value: '' };
+                node.when[key] = target.value;
+                ctx.flushOut?.();
+                // operator 变化会影响"值"输入框的显隐，需要整体重绘
+                if (key === 'operator') ctx.render?.();
+            };
+            field.addEventListener('change', (e) => commit(e.target));
+            if (field.tagName === 'INPUT') {
+                field.addEventListener('input', (e) => commit(e.target));
+            }
+        });
+    };
+
     const renderInspector = () => {
         if (!inspector) return;
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
@@ -256,7 +362,6 @@ function createDagInspectorController(ctx) {
         const selectedTool = resolveToolForNode(tools, node.tool);
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
-        const isPrimaryLlm = isLlmNode(node) && ctx.spec.primaryLlmNodeId === node.id;
         const upstreamNodes = getDependencyCandidateNodes(node);
         const dependsChecks = upstreamNodes.map(upstreamNode => `
             <label class="pivot-dag-depends-item">
@@ -284,20 +389,13 @@ function createDagInspectorController(ctx) {
                 <label><span>条件</span>
                     <select data-pivot-dag-field="condition">
                         <option value="success" ${node.condition === 'success' ? 'selected' : ''}>上游成功后执行</option>
+                        <option value="failure" ${node.condition === 'failure' ? 'selected' : ''}>上游失败后执行</option>
                         <option value="always" ${node.condition === 'always' ? 'selected' : ''}>始终执行</option>
                     </select>
                 </label>
             </div>
+            ${renderWhenPanel(node)}
             ${renderSelectedToolMeta(selectedTool)}
-            ${isLlmNode(node) ? `
-                <label class="pivot-dag-primary-llm ${isPrimaryLlm ? 'is-active' : ''}">
-                    <input type="radio" name="pivot-dag-primary-llm" data-pivot-dag-primary-llm="1" ${isPrimaryLlm ? 'checked' : ''}>
-                    <span>
-                        <strong>主大模型节点</strong>
-                        <em>${isPrimaryLlm ? '当前主节点' : '设为主节点'}</em>
-                    </span>
-                </label>
-            ` : ''}
             <div class="pivot-dag-inspector-row pivot-dag-inspector-row-runtime">
                 <label><span>失败策略</span>
                     <select data-pivot-dag-field="onError">
@@ -359,6 +457,7 @@ function createDagInspectorController(ctx) {
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
         inspector.querySelector('[data-pivot-dag-open-json]')?.addEventListener('click', () => openNodeJsonEditor(node.id));
         inspector.querySelector('[data-pivot-dag-edit-contract]')?.addEventListener('click', () => openNodeContractEditor(node.id));
+        bindWhenPanelEvents(node);
         inspector.querySelectorAll('[data-pivot-contract-preset]').forEach(button => {
             button.addEventListener('click', () => {
                 const preset = button.dataset.pivotContractPreset;
@@ -376,12 +475,6 @@ function createDagInspectorController(ctx) {
         });
         inspector.querySelectorAll('[data-pivot-dag-depend]').forEach(checkbox => {
             checkbox.addEventListener('change', (e) => handleDependsToggle(e.target));
-        });
-        inspector.querySelector('[data-pivot-dag-primary-llm]')?.addEventListener('change', () => {
-            ctx.spec.primaryLlmNodeId = node.id;
-            ctx.render?.();
-            ctx.flushOut?.();
-            window.showToast?.(`已将「${node.title || node.id}」设为主大模型节点`, 'success');
         });
         inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
         if (focusSnapshot?.field) {
@@ -418,11 +511,6 @@ function createDagInspectorController(ctx) {
             node.title = String(input.value || '').slice(0, 120);
         } else if (field === 'tool') {
             const nextTool = String(input.value || '');
-            if (isLlmNode(node) && nextTool !== 'agent.llm' && llmNodes(ctx.spec.nodes).length <= 1) {
-                input.value = node.tool;
-                window.showToast?.('工作流必须保留 1 个大模型节点', 'warning');
-                return;
-            }
             node.tool = nextTool;
             node.inputSchema = {};
             node.outputSchema = nextTool === 'agent.llm' ? { type: 'string' } : {};
@@ -430,7 +518,6 @@ function createDagInspectorController(ctx) {
                 node.input = { ...defaultLlmInput(), ...(node.input || {}) };
                 ensureLlmNodeInput(node);
             }
-            ctx.spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(ctx.spec.nodes, ctx.spec.primaryLlmNodeId);
         } else if (field === 'condition') {
             node.condition = ['always', 'success'].includes(input.value) ? input.value : 'success';
         } else if (field === 'onError') {

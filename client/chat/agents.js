@@ -254,7 +254,7 @@ window.bindAgentConfigModal = function() {
             if (event.target === runDetailModal) closeAgentRunDetailModal();
         });
     }
-    document.querySelectorAll('#agent-open-dag-btn').forEach(btn => {
+    document.querySelectorAll('[data-agent-open-dag]').forEach(btn => {
         if (btn.dataset.boundAgentDagOpen === '1') return;
         btn.dataset.boundAgentDagOpen = '1';
         btn.addEventListener('click', () => window.openAgentDagWorkbench?.());

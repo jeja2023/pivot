@@ -92,30 +92,51 @@ function renderDagToolbar(ctx) {
                     input: ({ selectedNode }) => defaultLlmInput(selectedNode)
                 });
             ctx.toolbar.appendChild(makeToolbarGroup([
-                makeButton('大模型', '添加大模型处理节点', addLlmNode, { icon: '+', variant: 'primary', tone: 'llm' }),
-                makeToolbarDropdown('其他节点', [
+                makeToolbarDropdown('添加节点', [
+                    makeButton('大模型', '添加大模型处理节点', addLlmNode, { icon: '+', tone: 'llm' }),
                     makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' }),
-                    makeButton('委派智能体', '添加隔离上下文的专家智能体节点', () => ctx.addPresetNode({
+                    makeButton('委派智能体', '调用一次独立模型，返回专家结果并自动生成交接信息；通常无需另加交接节点', () => ctx.addPresetNode({
                     base: 'delegate',
                     title: '委派智能体',
                     patterns: ['agent.delegate'],
                     input: { agentName: '领域专家', role: 'analyst', model: defaultWorkflowModelId(), task: '{{goal}}', context: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 },
                     outputSchema: { type: 'object', required: ['content', 'agent', 'handoff'], properties: { content: { type: 'string' }, agent: { type: 'object' }, handoff: { type: 'object' } } }
                 }), { icon: '+' }),
-                    makeButton('智能体交接', '添加结构化 Handoff 节点', () => ctx.addPresetNode({
+                    makeButton('智能体交接', '仅整理已有结果，不调用模型；需要统一交接格式或汇总多来源时使用', () => ctx.addPresetNode({
                     base: 'handoff',
                     title: '智能体交接',
                     patterns: ['agent.handoff'],
                     input: { fromAgent: '上游智能体', toAgent: 'Supervisor', summary: '', findings: [], evidence: [], risks: [], openQuestions: [], confidence: 0.7 },
                     outputSchema: { type: 'object', required: ['fromAgent', 'toAgent', 'summary', 'status'], properties: { fromAgent: { type: 'string' }, toAgent: { type: 'string' }, summary: { type: 'string' }, status: { type: 'string' } } }
                 }), { icon: '+' }),
+                    makeButton('代码执行', '添加 JS 代码执行节点，对上游数据做转换/计算', () => ctx.addPresetNode({
+                    base: 'code',
+                    title: '代码执行',
+                    patterns: ['agent.code'],
+                    input: { code: '// 可通过 vars 接收上游数据\n// 用 return 返回结果\nreturn vars.input;', vars: {} },
+                    outputSchema: { type: 'object', properties: { output: {}, text: { type: 'string' } } }
+                }), { icon: '+', tone: 'code' }),
+                    makeButton('HTTP 请求', '调用外部 REST API，支持 GET/POST 等', () => ctx.addPresetNode({
+                    base: 'http',
+                    title: 'HTTP 请求',
+                    patterns: ['agent.http'],
+                    input: { url: '', method: 'GET', headers: {}, body: null },
+                    outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
+                }), { icon: '+', tone: 'http' }),
+                    makeButton('变量聚合', '把多个上游输出合并为一个对象', () => ctx.addPresetNode({
+                    base: 'merge',
+                    title: '变量聚合',
+                    patterns: ['agent.merge'],
+                    input: { fields: {} },
+                    outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' } } }
+                }), { icon: '+', tone: 'merge' }),
                     makeButton('检索', '添加知识检索节点', () => ctx.addPresetNode({
                     base: 'search',
                     title: '知识检索',
                     patterns: ['rag.search', 'knowledge', 'search'],
                     input: { query: '' }
                 }), { icon: '+' }),
-                    makeButton('数据', '添加数据查询节点', () => ctx.addPresetNode({
+                    makeButton('数据', '添加可视化数据库查询节点，也可切换到高级 SQL', () => ctx.addPresetNode({
                     base: 'data',
                     title: '数据查询',
                     patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
@@ -155,7 +176,7 @@ function renderDagToolbar(ctx) {
                 makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.runAgentWorkflowPublished?.())
             ], 'is-run-group'));
             const toolbarStatus = document.createElement('div');
-            toolbarStatus.className = 'pivot-dag-ctx.toolbar-status';
+            toolbarStatus.className = 'pivot-dag-toolbar-status';
             ctx.toolbar.appendChild(toolbarStatus);
         return toolbarStatus;
     }

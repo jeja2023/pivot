@@ -20,6 +20,15 @@ function agentWorkflowVersionText(item) {
     return parts.join(' · ');
 }
 
+function agentWorkflowPickerTriggerMetaText(item) {
+    const currentVersion = Number(item?.current_version || 0);
+    const publishedVersion = Number(item?.published_version || 0);
+    const parts = [];
+    if (currentVersion > 0) parts.push(`v${currentVersion}`);
+    parts.push(publishedVersion > 0 ? `已发布 v${publishedVersion}` : '未发布');
+    return parts.join(' · ');
+}
+
 function agentWorkflowUpdatedText(item) {
     const value = item?.updated_at || item?.version_created_at || item?.created_at || '';
     if (!value) return '';
@@ -67,12 +76,45 @@ function setAgentWorkflowPickerOpen(isOpen, options = {}) {
     }
 }
 
-function selectAgentWorkflowFromPicker(workflowId) {
+async function confirmAgentWorkflowDiscard(message) {
+    const workflow = selectedAgentWorkflow();
+    const draftSummary = summarizeAgentDagSpec();
+    const hasUnsavedWork = workflow
+        ? !currentWorkflowMatchesSelected(workflow)
+        : (!draftSummary.valid || draftSummary.nodeCount > 0);
+    if (!hasUnsavedWork) return true;
+    if (typeof showConfirm === 'function') {
+        return showConfirm('放弃未保存修改', message);
+    }
+    return typeof confirm !== 'function' || confirm(message);
+}
+
+async function selectAgentWorkflowFromPicker(workflowId) {
     const select = document.getElementById('agent-workflow-select');
     if (!select) return;
-    select.value = String(workflowId || '');
+    const targetId = String(workflowId || '');
+    setAgentWorkflowPickerOpen(false, { focusSearch: false });
+    if (targetId === String(activeAgentWorkflowId || '')) return;
+    const confirmed = await confirmAgentWorkflowDiscard('切换工作流会丢失当前画布中尚未保存的修改，确定继续吗？');
+    if (!confirmed) return;
+    select.value = targetId;
     select.dispatchEvent(new Event('change', { bubbles: true }));
     setAgentWorkflowPickerOpen(false);
+    // 选中即立即加载到画布，无需再点"加载"按钮
+    if (workflowId) {
+        const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId));
+        if (workflow) {
+            activeAgentWorkflowId = String(workflow.id);
+            agentWorkflowDraftName = workflow.name || '';
+            agentWorkflowDraftDescription = workflow.description || '';
+            writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+            updateAgentWorkflowRunUi();
+            renderAgentWorkflowLibrary();
+            mountAgentDagEditor();
+            window.refreshAgentDagEditor?.();
+            showToast(`已加载：${workflow.name}`, 'success');
+        }
+    }
 }
 
 function renderAgentWorkflowPicker() {
@@ -96,14 +138,15 @@ function renderAgentWorkflowPicker() {
             return text.includes(query);
         })
         : agentWorkflowsCache;
+    const currentTitle = selected?.name || String(agentWorkflowDraftName || '').trim() || '新建工作流';
     picker.classList.toggle('is-empty', !agentWorkflowsCache.length);
-    title.textContent = selected?.name || '选择已保存工作流';
+    title.textContent = currentTitle;
     trigger.title = selected?.name
-        ? `${selected.name} · ${agentWorkflowVersionText(selected)}`
-        : '选择已保存工作流';
+        ? `${selected.name} · ${agentWorkflowPickerTriggerMetaText(selected)}`
+        : `${currentTitle} · 点击切换已保存工作流`;
     meta.textContent = selected
-        ? agentWorkflowVersionText(selected)
-        : (agentWorkflowsCache.length ? `${agentWorkflowsCache.length} 个可用 · 支持搜索筛选` : '暂无已保存工作流');
+        ? agentWorkflowPickerTriggerMetaText(selected)
+        : (agentWorkflowsCache.length ? `点击切换 · ${agentWorkflowsCache.length} 个已保存工作流` : '尚未保存 · 暂无已保存工作流');
     if (search && search.value !== agentWorkflowPickerQuery) search.value = agentWorkflowPickerQuery;
     if (!agentWorkflowsCache.length) {
         PivotSafeHtml.setHtml(list, '<div class="agent-workflow-picker-empty">保存当前画布后，会在这里选择、搜索和加载工作流。</div>');
@@ -121,7 +164,6 @@ function renderAgentWorkflowPicker() {
 
 function renderAgentWorkflowLibrary() {
     const select = document.getElementById('agent-workflow-select');
-    const currentLabel = document.getElementById('agent-workflow-current-label');
     const current = activeAgentWorkflowId || '';
     const editorOptions = [
         '<option value="">选择已保存工作流</option>',
@@ -141,12 +183,15 @@ function renderAgentWorkflowLibrary() {
         agentWorkflowDraftName = selected.name || agentWorkflowDraftName;
         agentWorkflowDraftDescription = selected.description || agentWorkflowDraftDescription;
     }
-    if (currentLabel) {
-        const canvasLabel = selected
-            ? (currentWorkflowMatchesSelected(selected) ? '已同步' : '未保存更改')
-            : (agentWorkflowDraftName ? '草稿未保存' : '新建草稿');
-        currentLabel.textContent = canvasLabel;
-        currentLabel.title = selected?.name || agentWorkflowDraftName || canvasLabel;
+    // 管理操作按工作流状态开放，避免用户进入后才看到前置条件提示。
+    const deleteBtn = document.getElementById('agent-workflow-delete-btn');
+    const versionsBtn = document.getElementById('agent-workflow-versions-btn');
+    const scheduleBtn = document.getElementById('agent-workflow-schedule-btn');
+    if (deleteBtn) deleteBtn.disabled = !selected;
+    if (versionsBtn) versionsBtn.disabled = !selected;
+    if (scheduleBtn) {
+        scheduleBtn.disabled = !selected?.published_version;
+        scheduleBtn.title = selected?.published_version ? '' : '发布工作流后可创建计划任务';
     }
     renderAgentWorkflowPicker();
     renderAgentWorkflowLifecycle();

@@ -1,6 +1,110 @@
 /* Agent DAG SVG 渲染辅助函数（拆自 agents-dag-editor.js） */
 
+const DAG_ICON_SHAPES = {
+    bot: [
+        ['rect', { x: 4, y: 6, width: 16, height: 12, rx: 2 }],
+        ['path', { d: 'M12 2v4M8 2h8M8 16h8' }],
+        ['circle', { cx: 9, cy: 12, r: 1 }],
+        ['circle', { cx: 15, cy: 12, r: 1 }]
+    ],
+    users: [
+        ['path', { d: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8' }],
+        ['path', { d: 'M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' }]
+    ],
+    shuffle: [
+        ['path', { d: 'M16 3h5v5M4 20l17-17M21 16v5h-5M15 15l6 6M4 4l5 5' }]
+    ],
+    code: [
+        ['polyline', { points: '8 9 4 12 8 15' }],
+        ['polyline', { points: '16 9 20 12 16 15' }],
+        ['line', { x1: 14, y1: 5, x2: 10, y2: 19 }]
+    ],
+    globe: [
+        ['circle', { cx: 12, cy: 12, r: 9 }],
+        ['path', { d: 'M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18' }]
+    ],
+    search: [
+        ['circle', { cx: 11, cy: 11, r: 7 }],
+        ['line', { x1: 20, y1: 20, x2: 16.65, y2: 16.65 }]
+    ],
+    database: [
+        ['ellipse', { cx: 12, cy: 5, rx: 8, ry: 3 }],
+        ['path', { d: 'M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6' }]
+    ],
+    chart: [
+        ['path', { d: 'M4 20V10M10 20V4M16 20v-7M22 20H2' }]
+    ],
+    table: [
+        ['rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }],
+        ['path', { d: 'M3 10h18M9 4v16M15 4v16' }]
+    ],
+    message: [
+        ['path', { d: 'M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z' }]
+    ],
+    'book-open': [
+        ['path', { d: 'M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z' }]
+    ],
+    'file-text': [
+        ['path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8M8 9h2' }]
+    ],
+    plug: [
+        ['path', { d: 'M12 22v-5M9 8V2M15 8V2M6 8h12v3a6 6 0 0 1-12 0z' }]
+    ],
+    puzzle: [
+        ['path', { d: 'M19 13h-2a2 2 0 1 1 0-4h2V5a2 2 0 0 0-2-2h-4v2a2 2 0 1 1-4 0V3H5a2 2 0 0 0-2 2v4h2a2 2 0 1 1 0 4H3v4a2 2 0 0 0 2 2h4v-2a2 2 0 1 1 4 0v2h4a2 2 0 0 0 2-2z' }]
+    ]
+};
 
+function createDagIcon(name, className = '') {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    if (className) svg.setAttribute('class', className);
+    const shapes = DAG_ICON_SHAPES[name] || [];
+    shapes.forEach(([tag, attrs]) => {
+        const shape = document.createElementNS(SVG_NS, tag);
+        Object.entries(attrs).forEach(([key, value]) => shape.setAttribute(key, String(value)));
+        svg.appendChild(shape);
+    });
+    return svg;
+}
+
+// 每种 tool 的视觉元数据：图标、颜色主题、标签。
+const DAG_NODE_VISUAL = {
+    'agent.llm':      { svgIcon: 'bot',       theme: 'llm',      label: '大模型' },
+    'agent.delegate': { svgIcon: 'users',     theme: 'delegate', label: '委派智能体' },
+    'agent.handoff':  { svgIcon: 'shuffle',   theme: 'handoff',  label: '智能体交接' },
+    'agent.code':     { svgIcon: 'code',      theme: 'code',     label: '代码执行' },
+    'agent.http':     { svgIcon: 'globe',     theme: 'http',     label: 'HTTP 请求' },
+    'agent.merge':    { iconText: '⊕',        theme: 'merge',    label: '变量聚合' },
+    'rag.search':     { svgIcon: 'search',    theme: 'rag',      label: '知识检索' },
+    'viz.build_chart':{ svgIcon: 'chart',     theme: 'viz',      label: '图表生成' },
+    'viz.build_table':{ svgIcon: 'table',     theme: 'viz',      label: '表格展示' },
+};
+
+function dagNodeVisual(toolName) {
+    const key = String(toolName || '').trim();
+    if (DAG_NODE_VISUAL[key]) return DAG_NODE_VISUAL[key];
+    // 模糊匹配：db.*、rag.*、sessions.*、knowledge.*、viz.*
+    if (key.startsWith('db.'))         return { svgIcon: 'database',  theme: 'db',      label: '数据库' };
+    if (key.startsWith('rag.'))        return { svgIcon: 'search',    theme: 'rag',     label: '知识检索' };
+    if (key.startsWith('viz.'))        return { svgIcon: 'chart',     theme: 'viz',     label: '可视化' };
+    if (key.startsWith('sessions.'))   return { svgIcon: 'message',   theme: 'session', label: '会话' };
+    if (key.startsWith('knowledge.'))  return { svgIcon: 'book-open', theme: 'rag',     label: '知识库' };
+    if (key.startsWith('report.'))     return { svgIcon: 'file-text', theme: 'report',  label: '报告' };
+    if (key.startsWith('mcp.'))        return { svgIcon: 'plug',      theme: 'mcp',     label: 'MCP 工具' };
+    return { iconText: '▸', theme: 'default', label: '' };
+}
+
+// 运行状态徽章：从外部通过 dagNodeRunStates 注入当前运行状态（画布实例外部写入）。
+// key = node.id，value = { status, durationMs?, error? }
+if (!window.dagNodeRunStates) window.dagNodeRunStates = new Map();
 
 function createEdgePath(fromNode, toNode) {
         const startX = fromNode._x + NODE_WIDTH;
@@ -41,12 +145,24 @@ const renderEdges = () => {
             const tools = ctx.currentTools();
             ctx.spec.nodes.forEach(node => {
                 const llmNode = isLlmNode(node);
-                const primaryLlmNode = llmNode && ctx.spec.primaryLlmNodeId === node.id;
+                const visual = dagNodeVisual(node.tool);
+                const runState = window.dagNodeRunStates.get(node.id);
+                const runStatus = runState?.status || '';
+                const hasVisualIcon = Boolean(visual.svgIcon || visual.iconText);
+
                 const group = makeSvgEl('g', {
-                    class: `pivot-dag-node ${ctx.selectedId === node.id ? 'is-selected' : ''} ${node.tool ? '' : 'has-warning'} ${llmNode ? 'is-llm' : ''} ${primaryLlmNode ? 'is-primary-llm' : ''}`,
+                    class: [
+                        'pivot-dag-node',
+                        ctx.selectedId === node.id ? 'is-selected' : '',
+                        node.tool ? '' : 'has-warning',
+                        llmNode ? 'is-llm' : '',
+                        visual.theme !== 'default' ? `is-${visual.theme}` : '',
+                        runStatus ? `run-${runStatus}` : ''
+                    ].filter(Boolean).join(' '),
                     transform: `translate(${node._x}, ${node._y})`,
                     'data-pivot-dag-id': node.id
                 });
+
                 group.appendChild(makeSvgEl('rect', {
                     class: 'pivot-dag-node-body',
                     width: NODE_WIDTH,
@@ -54,19 +170,33 @@ const renderEdges = () => {
                     rx: 8,
                     ry: 8
                 }));
-                if (primaryLlmNode) {
-                    const primaryMark = makeSvgEl('g', { class: 'pivot-dag-primary-mark' });
-                    const markTitle = makeSvgEl('title');
-                    markTitle.textContent = '主大模型节点';
-                    primaryMark.appendChild(markTitle);
-                    const star = makeSvgEl('text', { x: NODE_WIDTH - 17, y: 18 });
-                    star.textContent = '★';
-                    primaryMark.appendChild(star);
-                    group.appendChild(primaryMark);
+
+                // 节点类型图标（左侧小圆）
+                if (hasVisualIcon) {
+                    const iconWrap = makeSvgEl('foreignObject', {
+                        class: 'pivot-dag-node-icon-foreign',
+                        x: 7,
+                        y: 7,
+                        width: 20,
+                        height: 20
+                    });
+                    const iconEl = document.createElement('div');
+                    iconEl.className = `pivot-dag-node-icon is-${visual.theme}`;
+                    iconEl.setAttribute('aria-hidden', 'true');
+                    if (visual.svgIcon) iconEl.appendChild(createDagIcon(visual.svgIcon));
+                    else iconEl.textContent = visual.iconText;
+                    iconWrap.appendChild(iconEl);
+                    group.appendChild(iconWrap);
                 }
-                const title = makeSvgEl('text', { class: 'pivot-dag-node-title', x: 10, y: 18 });
+
+                const title = makeSvgEl('text', {
+                    class: 'pivot-dag-node-title',
+                    x: hasVisualIcon ? 30 : 10,
+                    y: 18
+                });
                 title.textContent = node.title || node.id;
                 group.appendChild(title);
+
                 const toolDisplay = buildNodeToolDisplay(tools, node.tool);
                 const toolWrap = makeSvgEl('foreignObject', {
                     class: 'pivot-dag-node-tool-foreign',
@@ -94,6 +224,48 @@ const renderEdges = () => {
                 }
                 toolWrap.appendChild(toolBody);
                 group.appendChild(toolWrap);
+
+                // 运行状态徽章：右上角叠加
+                if (runStatus) {
+                    const badgeWrap = makeSvgEl('foreignObject', {
+                        class: 'pivot-dag-run-badge-foreign',
+                        x: NODE_WIDTH - 24,
+                        y: -8,
+                        width: 28,
+                        height: 20
+                    });
+                    const badge = document.createElement('div');
+                    badge.className = `pivot-dag-run-badge is-${runStatus}`;
+                    if (runStatus === 'running') {
+                        const spinner = document.createElement('span');
+                        spinner.className = 'pivot-dag-run-spinner';
+                        badge.appendChild(spinner);
+                    } else if (runStatus === 'completed') {
+                        badge.textContent = '✓';
+                        if (runState.durationMs) badge.title = `${(runState.durationMs / 1000).toFixed(1)}s`;
+                    } else if (runStatus === 'error') {
+                        badge.textContent = '✗';
+                        if (runState.error) badge.title = runState.error;
+                    } else if (runStatus === 'skipped') {
+                        badge.textContent = '↷';
+                        badge.title = '已跳过';
+                    }
+                    badgeWrap.appendChild(badge);
+                    group.appendChild(badgeWrap);
+
+                    // 运行中：节点边框闪烁动画
+                    if (runStatus === 'running') {
+                        const pulseRect = makeSvgEl('rect', {
+                            class: 'pivot-dag-node-pulse',
+                            width: NODE_WIDTH,
+                            height: NODE_HEIGHT,
+                            rx: 8,
+                            ry: 8
+                        });
+                        group.insertBefore(pulseRect, group.firstChild);
+                    }
+                }
+
                 // 出端口（拖出去创建依赖）
                 const outPort = makeSvgEl('circle', {
                     class: 'pivot-dag-port pivot-dag-port-out',

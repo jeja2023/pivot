@@ -104,53 +104,6 @@
     grid-template-columns: minmax(150px, 1fr) minmax(110px, 0.7fr) minmax(130px, 0.85fr);
 }
 
-.pivot-dag-primary-llm {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-height: 42px;
-    padding: 8px 10px;
-    border: 1px solid rgba(13, 148, 136, 0.28);
-    border-radius: 8px;
-    background: #f0fdfa;
-    cursor: pointer;
-}
-
-.pivot-dag-primary-llm.is-active {
-    border-color: rgba(5, 150, 105, 0.5);
-    background: #ecfdf5;
-    box-shadow: inset 3px 0 0 #10a37f;
-}
-
-.pivot-dag-primary-llm input {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    accent-color: #10a37f;
-}
-
-.pivot-dag-primary-llm span {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-}
-
-.pivot-dag-primary-llm strong {
-    color: #065f46;
-    font-size: 0.76rem;
-}
-
-.pivot-dag-primary-llm em {
-    color: #047857;
-    font-size: 0.68rem;
-    font-style: normal;
-    font-weight: 800;
-    white-space: nowrap;
-}
-
 .pivot-dag-inspector-row label,
 .pivot-dag-inspector-input {
     display: flex;
@@ -489,21 +442,142 @@
     }
 }
 
-body.dark-mode .pivot-dag-primary-llm,
-.dark-mode .pivot-dag-primary-llm {
-    border-color: rgba(45, 212, 191, 0.32);
-    background: rgba(13, 148, 136, 0.12);
+/* ── 抽屉过渡动画（取代 display:none 切换）───── */
+.agent-dag-node-drawer {
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    opacity: 1;
+    transform: translateX(0);
 }
 
-body.dark-mode .pivot-dag-primary-llm.is-active,
-.dark-mode .pivot-dag-primary-llm.is-active {
-    border-color: rgba(52, 211, 153, 0.5);
-    background: rgba(16, 185, 129, 0.16);
+.agent-dag-node-drawer.hidden {
+    display: none;
+    opacity: 0;
+    transform: translateX(16px);
 }
 
-body.dark-mode .pivot-dag-primary-llm strong,
-.dark-mode .pivot-dag-primary-llm strong,
-body.dark-mode .pivot-dag-primary-llm em,
-.dark-mode .pivot-dag-primary-llm em {
-    color: #a7f3d0;
+/* ── when 条件面板 ───────────────────────────── */
+.pivot-dag-when-panel {
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 7px;
+    background: #fafafa;
+}
+
+.pivot-dag-when-panel.is-active {
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.03);
+}
+
+.pivot-dag-when-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.pivot-dag-when-toggle {
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    cursor: pointer;
+}
+
+.pivot-dag-when-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: #3b82f6;
+}
+
+.pivot-dag-when-toggle strong {
+    color: #1e293b;
+    font-size: 0.77rem;
+    font-weight: 800;
+}
+
+.pivot-dag-when-head > span {
+    color: #64748b;
+    font-size: 0.67rem;
+}
+
+.pivot-dag-when-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pivot-dag-when-body label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pivot-dag-when-body label span {
+    color: #64748b;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.pivot-dag-when-body input,
+.pivot-dag-when-body select {
+    height: 28px;
+    padding: 0 7px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 5px;
+    background: #fff;
+    color: #0f172a;
+    font-family: inherit;
+    font-size: 0.74rem;
+}
+
+.pivot-dag-when-body input:focus,
+.pivot-dag-when-body select:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+
+.pivot-dag-when-source { grid-column: 1; }
+.pivot-dag-when-operator { grid-column: 2; }
+.pivot-dag-when-value { grid-column: 1 / -1; }
+
+.pivot-dag-when-hint {
+    margin-top: 5px;
+    color: #94a3b8;
+    font-size: 0.64rem;
+    line-height: 1.5;
+}
+
+.pivot-dag-when-hint code {
+    padding: 0 3px;
+    border-radius: 3px;
+    background: rgba(15, 23, 42, 0.06);
+    font-size: 0.6rem;
+}
+
+/* 深色模式 */
+body.dark-mode .pivot-dag-when-panel,
+.dark-mode .pivot-dag-when-panel {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: #1a2535;
+}
+
+body.dark-mode .pivot-dag-when-panel.is-active,
+.dark-mode .pivot-dag-when-panel.is-active {
+    border-color: rgba(96, 165, 250, 0.4);
+    background: rgba(59, 130, 246, 0.07);
+}
+
+body.dark-mode .pivot-dag-when-toggle strong,
+.dark-mode .pivot-dag-when-toggle strong { color: #e2e8f0; }
+
+body.dark-mode .pivot-dag-when-body input,
+body.dark-mode .pivot-dag-when-body select,
+.dark-mode .pivot-dag-when-body input,
+.dark-mode .pivot-dag-when-body select {
+    border-color: rgba(148, 163, 184, 0.28);
+    background: #1e293b;
+    color: #e2e8f0;
 }

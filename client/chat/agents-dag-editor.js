@@ -24,7 +24,7 @@
  *   - CSP 兼容：所有事件都用 addEventListener，无内联 onclick
  *   - 多次 mount 同一容器幂等：先 destroy 旧实例
  */
-/* global placeNewNode, resolvePrimaryLlmNodeId */
+/* global createDagIcon, placeNewNode */
 (function () {
 if (window.PivotDagEditor) return;
 
@@ -97,9 +97,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                     ry: 4,
                     fill: selectedId === node.id
                         ? '#3b82f6'
-                        : spec.primaryLlmNodeId === node.id
-                            ? '#10a37f'
-                            : isLlmNode(node) ? '#5eead4' : '#cbd5e1',
+                        : isLlmNode(node) ? '#5eead4' : '#cbd5e1',
                     opacity: '0.7'
                 });
                 minimap.nodesLayer.appendChild(rect);
@@ -207,9 +205,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const byId = new Map(spec.nodes.map(node => [node.id, node]));
             const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
             if (!spec.nodes.length) errors.push('至少需要 1 个节点');
-            const requiredLlmNodes = llmNodes(spec.nodes);
-            if (!requiredLlmNodes.length) errors.push('工作流必须包含 1 个大模型节点');
-            requiredLlmNodes.forEach(node => {
+            llmNodes(spec.nodes).forEach(node => {
                 if (!llmNodeModel(node)) errors.push(`${node.title || node.id} 需要填写节点模型`);
             });
             validateLlmNodePlacement(spec.nodes).forEach(message => errors.push(message));
@@ -247,8 +243,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const state = report.errors.length ? 'error' : report.warnings.length ? 'warn' : 'ok';
             toolbarStatus.className = `pivot-dag-toolbar-status ${state}`;
             const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
-            const parallelNote = report.nodeCount > 1 ? ` · 运行时最多并发执行` : '';
-            toolbarStatus.textContent = `${report.nodeCount} 节点 · ${report.edgeCount} 依赖 · ${message}${parallelNote}`;
+            toolbarStatus.textContent = `${report.nodeCount} 节点 · ${report.edgeCount} 依赖 · ${message}`;
             toolbarStatus.title = [
                 ...report.errors, ...report.warnings,
                 '提示：互不依赖的节点会并行执行，可在环境变量 AGENT_DAG_NODE_CONCURRENCY 调整并发数（默认 4）。'
@@ -280,13 +275,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const deleteNode = (id) => {
             const node = spec.nodes.find(n => n.id === id);
             if (!node) return false;
-            if (isLlmNode(node) && llmNodes(spec.nodes).length <= 1) {
-                window.showToast?.('工作流必须保留 1 个大模型节点', 'warning');
-                return false;
-            }
             spec.nodes = spec.nodes.filter(n => n.id !== id);
             clampDependsOn(spec.nodes);
-            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             if (selectedId === id) selectedId = null;
             render();
             flushOut();
@@ -318,7 +308,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const anchorNode = spec.nodes.find(n => n.id === anchorId);
             spec.nodes.push(node);
             placeNewNode(spec.nodes, node, anchorId);
-            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             selectedId = node.id;
             render();
             flushOut();
@@ -350,7 +339,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             };
             spec.nodes.push(node);
             placeNewNode(spec.nodes, node, selectedId);
-            spec.primaryLlmNodeId = resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId);
             selectedId = node.id;
             render();
             flushOut();
@@ -363,13 +351,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const addAgentTeamTemplate = () => {
-            const replacePlaceholder = spec.nodes.length === 1
-                && isLlmNode(spec.nodes[0])
-                && ['大模型处理', '大模型节点'].includes(String(spec.nodes[0].title || ''));
-            if (replacePlaceholder) {
-                spec.nodes = [];
-                selectedId = '';
-            }
             const existingIds = spec.nodes.map(node => node.id);
             const anchorId = selectedId || '';
             const model = defaultWorkflowModelId();
@@ -429,7 +410,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 dependsOn: [researcherId, reviewerId], condition: 'success', retryLimit: 0, timeoutMs: 0, onError: 'stop'
             };
             spec.nodes.push(...delegates, supervisor);
-            spec.primaryLlmNodeId = supervisorId;
             autoLayout(spec.nodes);
             selectedId = supervisorId;
             render();
@@ -451,12 +431,37 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             get selectedId() { return selectedId; }
         });
 
+        // 空画布引导：无节点时在画布中央提示从左侧节点库开始
+        let emptyHintEl = null;
+        const renderEmptyHint = () => {
+            const isEmpty = !spec.nodes.length;
+            if (!isEmpty) {
+                emptyHintEl?.remove();
+                emptyHintEl = null;
+                return;
+            }
+            if (emptyHintEl?.isConnected) return;
+            emptyHintEl = document.createElement('div');
+            emptyHintEl.className = 'pivot-dag-empty-hint';
+            const icon = document.createElement('span');
+            icon.className = 'pivot-dag-empty-hint-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.appendChild(createDagIcon('puzzle'));
+            const title = document.createElement('strong');
+            title.textContent = '画布还是空的';
+            const desc = document.createElement('small');
+            desc.textContent = '从左侧「节点」面板点选类型即可添加，拖动节点端口可连成依赖。也可用工具栏「模板」一键生成。';
+            emptyHintEl.append(icon, title, desc);
+            canvas.appendChild(emptyHintEl);
+        };
+
         const render = () => {
             updateViewBox();
             renderEdges();
             renderNodes();
             renderInspector();
             renderToolbarStatus();
+            renderEmptyHint();
         };
 
         // —— 交互：节点拖拽、端口连线、选中 ——
@@ -513,6 +518,42 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             onOpenJson
         });
 
+        // —— 左侧节点库面板 ——
+        let nodeLibraryInstance = null;
+        let libraryExpandBtn = null;
+        const setLibraryCollapsed = (collapsed) => {
+            canvas.classList.toggle('is-library-collapsed', !!collapsed);
+            if (libraryExpandBtn) libraryExpandBtn.hidden = !collapsed;
+            updateViewBox();
+        };
+        const mountNodeLibrary = () => {
+            if (!window.PivotDagNodeLibrary) return;
+            // host 必须挂在 canvas 本身内部，才能正确相对定位
+            let host = canvas.querySelector('.pivot-dag-node-library-host');
+            if (!host) {
+                host = document.createElement('div');
+                host.className = 'pivot-dag-node-library-host';
+                canvas.appendChild(host);
+            }
+            nodeLibraryInstance = window.PivotDagNodeLibrary.mount({
+                container: host,
+                onAddNode: (preset) => addPresetNode(preset),
+                onToggleCollapse: (collapsed) => setLibraryCollapsed(collapsed)
+            });
+            // 折叠态下的展开按钮
+            libraryExpandBtn = document.createElement('button');
+            libraryExpandBtn.type = 'button';
+            libraryExpandBtn.className = 'pivot-node-library-toggle';
+            libraryExpandBtn.title = '展开节点面板';
+            libraryExpandBtn.setAttribute('aria-label', '展开节点面板');
+            libraryExpandBtn.textContent = '»';
+            libraryExpandBtn.hidden = true;
+            libraryExpandBtn.addEventListener('click', () => setLibraryCollapsed(false));
+            canvas.appendChild(libraryExpandBtn);
+            canvas.classList.add('has-node-library');
+        };
+        mountNodeLibrary();
+
         // —— textarea 外部改动同步回画布 ——
         const onTextareaInput = () => {
             if (suppressTextareaSync) return;
@@ -540,6 +581,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 minimap.svg.removeEventListener('click', minimapClickHandler);
             }
             if (textarea) textarea.removeEventListener('input', onTextareaInput);
+            emptyHintEl?.remove();
+            emptyHintEl = null;
+            libraryExpandBtn?.remove();
+            libraryExpandBtn = null;
+            nodeLibraryInstance?.destroy?.();
+            canvas.classList.remove('has-node-library', 'is-library-collapsed');
             canvas.replaceChildren();
             if (minimap?.wrap?.parentNode === canvas) {
                 // canvas.replaceChildren 已清空

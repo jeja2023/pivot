@@ -105,12 +105,6 @@ function placeNewNode(nodes, node, anchorId = '') {
         return node;
     }
 
-function resolvePrimaryLlmNodeId(nodes = [], requestedId = '') {
-        const llmIds = nodes.filter(isLlmNode).map(node => node.id);
-        const requested = String(requestedId || '').trim();
-        return llmIds.includes(requested) ? requested : (llmIds[0] || '');
-    }
-
 function ensureDefaults(spec) {
         const savedLayout = spec?.layout && typeof spec.layout === 'object' && !Array.isArray(spec.layout)
             ? spec.layout
@@ -127,7 +121,10 @@ function ensureDefaults(spec) {
                 ? n.outputSchema
                 : (n.output_schema && typeof n.output_schema === 'object' ? n.output_schema : {}),
             dependsOn: Array.isArray(n.dependsOn) ? n.dependsOn.slice() : [],
-            condition: ['always', 'success'].includes(n.condition) ? n.condition : 'success',
+            condition: ['always', 'success', 'failure'].includes(n.condition) ? n.condition : 'success',
+            when: (n.when && typeof n.when === 'object' && !Array.isArray(n.when) && n.when.source)
+                ? { source: String(n.when.source || '').trim(), operator: String(n.when.operator || 'equals').trim(), value: n.when.value ?? '' }
+                : null,
             retryLimit: Math.max(0, Math.min(Number.parseInt(n.retryLimit ?? n.retry_limit ?? 0, 10) || 0, 5)),
             timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
             onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
@@ -135,7 +132,6 @@ function ensureDefaults(spec) {
             _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? Number(savedLayout[n.id]?.x ?? n._x) : undefined,
             _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? Number(savedLayout[n.id]?.y ?? n._y) : undefined
         })) : [];
-        if (!nodes.length) nodes.push(createDefaultLlmNode([]));
         nodes.forEach(ensureLlmNodeInput);
         clampDependsOn(nodes);
         const missingPositionNodes = nodes.filter(n => n._x === undefined || n._y === undefined);
@@ -144,34 +140,33 @@ function ensureDefaults(spec) {
         } else {
             missingPositionNodes.forEach(node => placeNewNode(nodes, node, node.dependsOn?.[0] || ''));
         }
-        return {
-            nodes,
-            primaryLlmNodeId: resolvePrimaryLlmNodeId(nodes, spec?.primaryLlmNodeId ?? spec?.primary_llm_node_id)
-        };
+        return { nodes };
     }
 
 function serialize(spec) {
-        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, retryLimit, timeoutMs, onError }) => ({
-            id,
-            title,
-            tool,
-            input,
-            inputSchema: inputSchema && typeof inputSchema === 'object' ? inputSchema : {},
-            outputSchema: outputSchema && typeof outputSchema === 'object' ? outputSchema : {},
-            dependsOn: [...(dependsOn || [])],
-            condition,
-            retryLimit: Number(retryLimit || 0),
-            timeoutMs: Number(timeoutMs || 0),
-            onError: onError || 'skip_dependents'
-        }));
+        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, when, retryLimit, timeoutMs, onError }) => {
+            const node = {
+                id,
+                title,
+                tool,
+                input,
+                inputSchema: inputSchema && typeof inputSchema === 'object' ? inputSchema : {},
+                outputSchema: outputSchema && typeof outputSchema === 'object' ? outputSchema : {},
+                dependsOn: [...(dependsOn || [])],
+                condition,
+                retryLimit: Number(retryLimit || 0),
+                timeoutMs: Number(timeoutMs || 0),
+                onError: onError || 'skip_dependents'
+            };
+            if (when && typeof when === 'object' && String(when.source || '').trim()) {
+                node.when = { source: String(when.source).trim(), operator: String(when.operator || 'equals').trim(), value: when.value ?? '' };
+            }
+            return node;
+        });
         const layout = Object.fromEntries(spec.nodes
             .filter(node => Number.isFinite(node._x) && Number.isFinite(node._y))
             .map(node => [node.id, { x: Math.max(0, node._x), y: Math.max(0, node._y) }]));
-        return {
-            nodes,
-            primaryLlmNodeId: resolvePrimaryLlmNodeId(spec.nodes, spec.primaryLlmNodeId),
-            layout
-        };
+        return { nodes, layout };
     }
 
 function readJson(text) {
@@ -264,24 +259,6 @@ function ensureLlmNodeInput(node) {
         if (!llmNodeModel(node)) {
             node.input.model = defaultWorkflowModelId();
         }
-    }
-
-function createDefaultLlmNode(existingIds = []) {
-        return {
-            id: uniqueId(existingIds, 'llm'),
-            title: '大模型处理',
-            tool: 'agent.llm',
-            input: defaultLlmInput(),
-            inputSchema: {},
-            outputSchema: { type: 'string' },
-            dependsOn: [],
-            condition: 'success',
-            retryLimit: 0,
-            timeoutMs: 0,
-            onError: 'skip_dependents',
-            _x: PADDING,
-            _y: PADDING
-        };
     }
 
 function writeJson(textarea, spec) {

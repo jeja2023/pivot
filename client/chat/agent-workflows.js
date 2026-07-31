@@ -46,18 +46,17 @@ window.closeAgentDagWorkbench = function() {
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
     window.showMainWorkspace?.('agent');
+    window.bindAgentConfigModal?.();
 };
 
 window.bindAgentDagWorkbench = function() {
     const newBtn = document.getElementById('agent-workflow-new-btn');
     if (newBtn && newBtn.dataset.boundAgentWorkflowNew !== '1') {
         newBtn.dataset.boundAgentWorkflowNew = '1';
-        newBtn.addEventListener('click', () => newAgentWorkflow());
-    }
-    const draftBtn = document.getElementById('agent-dag-save-draft-btn');
-    if (draftBtn && draftBtn.dataset.boundAgentDagDraft !== '1') {
-        draftBtn.dataset.boundAgentDagDraft = '1';
-        draftBtn.addEventListener('click', () => window.saveAgentWorkflowDraft?.());
+        newBtn.addEventListener('click', async () => {
+            const confirmed = await confirmAgentWorkflowDiscard('新建工作流会清空当前画布中尚未保存的修改，确定继续吗？');
+            if (confirmed) newAgentWorkflow();
+        });
     }
     const saveBtn = document.getElementById('agent-dag-save-btn');
     if (saveBtn && saveBtn.dataset.boundAgentDagSave !== '1') {
@@ -73,9 +72,11 @@ window.bindAgentDagWorkbench = function() {
     const workflowPickerTrigger = document.getElementById('agent-workflow-picker-trigger');
     const workflowPickerSearch = document.getElementById('agent-workflow-picker-search');
     const workflowPickerList = document.getElementById('agent-workflow-picker-list');
+    const workflowManagementMenu = document.getElementById('agent-workflow-management-menu');
     if (workflowPickerTrigger && workflowPickerTrigger.dataset.boundAgentWorkflowPicker !== '1') {
         workflowPickerTrigger.dataset.boundAgentWorkflowPicker = '1';
         workflowPickerTrigger.addEventListener('click', () => {
+            if (workflowManagementMenu) workflowManagementMenu.open = false;
             const isOpen = workflowPicker?.classList.contains('is-open');
             setAgentWorkflowPickerOpen(!isOpen);
         });
@@ -133,6 +134,24 @@ window.bindAgentDagWorkbench = function() {
             if (!workflowPicker.contains(event.target)) setAgentWorkflowPickerOpen(false, { focusSearch: false });
         });
     }
+    if (workflowManagementMenu && workflowManagementMenu.dataset.boundAgentWorkflowManagement !== '1') {
+        workflowManagementMenu.dataset.boundAgentWorkflowManagement = '1';
+        workflowManagementMenu.addEventListener('toggle', () => {
+            if (workflowManagementMenu.open) setAgentWorkflowPickerOpen(false, { focusSearch: false });
+        });
+        workflowManagementMenu.addEventListener('click', event => {
+            if (event.target.closest('button')) workflowManagementMenu.open = false;
+        });
+        workflowManagementMenu.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            workflowManagementMenu.open = false;
+            workflowManagementMenu.querySelector('summary')?.focus();
+        });
+        document.addEventListener('click', event => {
+            if (!workflowManagementMenu.contains(event.target)) workflowManagementMenu.open = false;
+        });
+    }
     const workflowSelect = document.getElementById('agent-workflow-select');
     if (workflowSelect && workflowSelect.dataset.boundAgentWorkflowSelect !== '1') {
         workflowSelect.dataset.boundAgentWorkflowSelect = '1';
@@ -149,15 +168,15 @@ window.bindAgentDagWorkbench = function() {
             updateAgentWorkflowRunUi();
         });
     }
-    const loadBtn = document.getElementById('agent-workflow-load-btn');
-    if (loadBtn && loadBtn.dataset.boundAgentWorkflowLoad !== '1') {
-        loadBtn.dataset.boundAgentWorkflowLoad = '1';
-        loadBtn.addEventListener('click', loadSelectedAgentWorkflow);
-    }
     const versionsBtn = document.getElementById('agent-workflow-versions-btn');
     if (versionsBtn && versionsBtn.dataset.boundAgentWorkflowVersions !== '1') {
         versionsBtn.dataset.boundAgentWorkflowVersions = '1';
         versionsBtn.addEventListener('click', openAgentWorkflowVersions);
+    }
+    const scheduleBtn = document.getElementById('agent-workflow-schedule-btn');
+    if (scheduleBtn && scheduleBtn.dataset.boundAgentWorkflowSchedule !== '1') {
+        scheduleBtn.dataset.boundAgentWorkflowSchedule = '1';
+        scheduleBtn.addEventListener('click', () => openAgentWorkflowSchedules());
     }
     const deleteBtn = document.getElementById('agent-workflow-delete-btn');
     if (deleteBtn && deleteBtn.dataset.boundAgentWorkflowDelete !== '1') {

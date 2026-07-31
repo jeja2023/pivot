@@ -106,7 +106,7 @@ function listAgentSchedules(user) {
 function createAgentSchedule(user, body = {}) {
     const data = normalizeSchedulePayload(body);
     const modelCfg = getRunnableModelForUser(data.modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
+    if (!modelCfg && data.runConfig.runMode !== 'dag') throw new Error('请选择当前账号可用的模型后再创建计划。');
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
         resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
     }
@@ -117,7 +117,7 @@ function createAgentSchedule(user, body = {}) {
             status, run_config, next_run_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-        user.id, data.templateId, modelCfg.id, data.name, data.goal, data.frequency,
+        user.id, data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency,
         data.timeOfDay, data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
         data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
         now, now
@@ -130,7 +130,7 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     if (!schedule) return null;
     const data = normalizeSchedulePayload(body);
     const modelCfg = getRunnableModelForUser(data.modelId, user);
-    if (!modelCfg) throw new Error('Please choose an accessible model for the schedule.');
+    if (!modelCfg && data.runConfig.runMode !== 'dag') throw new Error('请选择当前账号可用的模型后再更新计划。');
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
         resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
     }
@@ -141,7 +141,7 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
             day_of_week = ?, status = ?, run_config = ?, next_run_at = ?, updated_at = ?
         WHERE id = ?
     `).run(
-        data.templateId, modelCfg.id, data.name, data.goal, data.frequency, data.timeOfDay,
+        data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency, data.timeOfDay,
         data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
         data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
         now, scheduleId

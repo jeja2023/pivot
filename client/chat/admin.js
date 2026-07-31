@@ -106,7 +106,7 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'prompts', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'report', 'announcements']);
 
 function getDefaultSettingsTab() {
@@ -172,7 +172,7 @@ window.openAdminPanel = async (options = {}) => {
     if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
     if (descEl) descEl.innerText = isAdmin
         ? '集中管理模型、用户、审计、监控、用量、API 接入与账号安全。'
-        : '管理你的模型、提示词库、附件、用量、API 接入与账号安全。';
+        : '管理你的模型、附件、用量、API 接入与账号安全。';
 
     if (isAdmin) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
@@ -216,7 +216,6 @@ async function loadTabData(tab, page = 1) {
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
     if (tab === 'stats' && window.loadStats) loadStats(page);
     if (tab === 'report' && window.loadReport) loadReport();
-    if (tab === 'prompts' && window.loadPrompts) window.loadPrompts();
     if (tab === 'memories' && window.loadMemories) window.loadMemories(page);
     if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
     if (tab === 'announcements' && window.loadAnnouncementsAdmin) window.loadAnnouncementsAdmin(page);

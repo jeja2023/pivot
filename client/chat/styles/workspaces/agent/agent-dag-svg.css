@@ -31,22 +31,9 @@
     stroke: rgba(13, 148, 136, 0.7);
 }
 
-.pivot-dag-node.is-primary-llm .pivot-dag-node-body {
-    fill: #ecfdf5;
-    stroke: #10a37f;
-    stroke-width: 2;
-}
-
 .pivot-dag-node.is-selected .pivot-dag-node-body {
     fill: rgba(59, 130, 246, 0.08);
     stroke: #3b82f6;
-}
-
-.pivot-dag-primary-mark text {
-    fill: #b7791f;
-    font-size: 13px;
-    font-weight: 900;
-    pointer-events: none;
 }
 
 .pivot-dag-node.has-warning .pivot-dag-node-body {
@@ -172,8 +159,101 @@ body.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body,
     stroke: rgba(45, 212, 191, 0.72);
 }
 
-body.dark-mode .pivot-dag-node.is-primary-llm .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-primary-llm .pivot-dag-node-body {
-    fill: #0d352d;
-    stroke: #34d399;
+/* ── 节点类型主题色 ───────────────────────────── */
+.pivot-dag-node.is-code .pivot-dag-node-body   { fill: #fff7ed; stroke: rgba(234, 88, 12, 0.55); }
+.pivot-dag-node.is-http .pivot-dag-node-body   { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.55); }
+.pivot-dag-node.is-merge .pivot-dag-node-body  { fill: #f0fdf4; stroke: rgba(22, 163, 74, 0.55); }
+.pivot-dag-node.is-delegate .pivot-dag-node-body{ fill: #faf5ff; stroke: rgba(124, 58, 237, 0.55); }
+.pivot-dag-node.is-handoff .pivot-dag-node-body { fill: #fdf4ff; stroke: rgba(168, 85, 247, 0.55); }
+.pivot-dag-node.is-rag .pivot-dag-node-body    { fill: #f0f9ff; stroke: rgba(2, 132, 199, 0.55); }
+.pivot-dag-node.is-db .pivot-dag-node-body     { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
+.pivot-dag-node.is-viz .pivot-dag-node-body    { fill: #fefce8; stroke: rgba(161, 98, 7, 0.55); }
+.pivot-dag-node.is-report .pivot-dag-node-body { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.45); }
+.pivot-dag-node.is-mcp .pivot-dag-node-body    { fill: #f5f3ff; stroke: rgba(109, 40, 217, 0.45); }
+
+/* 深色模式 */
+body.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body    { fill: #1c0f00; stroke: rgba(251, 146, 60, 0.6); }
+body.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body    { fill: #0c1a36; stroke: rgba(96, 165, 250, 0.6); }
+body.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body   { fill: #052e16; stroke: rgba(74, 222, 128, 0.6); }
+body.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body{ fill: #1e1030; stroke: rgba(167, 139, 250, 0.6); }
+body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body     { fill: #082030; stroke: rgba(56, 189, 248, 0.6); }
+
+/* ── 节点图标 ───────────────────────────────── */
+.pivot-dag-node-icon-foreign { pointer-events: none; overflow: visible; }
+.pivot-dag-node-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+    background: rgba(0,0,0,0.04);
 }
+
+.pivot-dag-node-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* ── 运行状态徽章 ──────────────────────────── */
+.pivot-dag-run-badge-foreign { pointer-events: none; overflow: visible; }
+.pivot-dag-run-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+.pivot-dag-run-badge.is-completed{ background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
+.pivot-dag-run-badge.is-error    { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
+.pivot-dag-run-badge.is-skipped  { background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; }
+
+/* 节点边框光晕动画（运行中）*/
+.pivot-dag-node-pulse {
+    fill: none;
+    stroke: #3b82f6;
+    stroke-width: 2.5;
+    opacity: 0;
+    animation: pivot-dag-pulse 1.4s ease-in-out infinite;
+}
+@keyframes pivot-dag-pulse {
+    0%, 100% { opacity: 0; stroke-width: 2.5; }
+    50%       { opacity: 0.6; stroke-width: 4; }
+}
+
+/* 运行中 spinner（纯 CSS） */
+.pivot-dag-run-spinner {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid #93c5fd;
+    border-top-color: #1d4ed8;
+    border-radius: 50%;
+    animation: pivot-dag-spin 0.7s linear infinite;
+}
+@keyframes pivot-dag-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 节点边框：各运行状态 */
+.pivot-dag-node.run-running .pivot-dag-node-body  { stroke: #3b82f6; stroke-width: 2; }
+.pivot-dag-node.run-completed .pivot-dag-node-body{ stroke: #22c55e; stroke-width: 2; }
+.pivot-dag-node.run-error .pivot-dag-node-body    { stroke: #ef4444; stroke-width: 2; }
+.pivot-dag-node.run-skipped .pivot-dag-node-body  { opacity: 0.55; }

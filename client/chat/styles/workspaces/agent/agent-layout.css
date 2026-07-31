@@ -68,6 +68,22 @@
     color: var(--danger);
 }
 
+.agent-modal-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.agent-modal-header-actions > .btn-secondary:not(.agent-modal-close) {
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
 .agent-modal > .agent-workbench {
     flex: 1;
     min-height: 0;
@@ -273,7 +289,7 @@
 
 .agent-config-launcher {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin: 8px 0 0;
 }
@@ -740,5 +756,17 @@
     .agent-workflow-version-actions {
         justify-content: flex-start;
         flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 640px) {
+    .agent-modal-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .agent-modal-header-actions {
+        width: 100%;
+        justify-content: flex-start;
     }
 }

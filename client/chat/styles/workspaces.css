@@ -16,6 +16,7 @@
 @import url("./workspaces/agent/agent-dag-drawer-inspector.css");
 @import url("./workspaces/agent/agent-dag-input-overview.css");
 @import url("./workspaces/agent/agent-dag-input-wizard.css");
+@import url("./workspaces/agent/agent-dag-query-builder.css");
 @import url("./workspaces/agent/agent-dag-minimap.css");
 @import url("./workspaces/agent-runtime.css");
 @import url("./workspaces/shared.css");

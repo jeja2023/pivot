@@ -7,45 +7,51 @@
                     <p>用于编排节点、发布版本、计划运行和审计复用，适合企业生产任务和标准化流程。</p>
                 </div>
                 <div class="agent-dag-header-actions">
-                    <button id="agent-dag-prompt-library-btn" class="btn-secondary" type="button">套用提示词</button>
-                    <button id="agent-dag-save-draft-btn" class="btn-secondary" type="button">保存草稿</button>
-                    <button id="agent-dag-save-btn" class="btn-primary" type="button">保存工作流</button>
+                    <button id="agent-dag-save-btn" class="btn-primary" type="button">保存</button>
                     <button id="agent-dag-back-btn" class="btn-secondary" type="button">返回智能体</button>
                 </div>
             </div>
-            <div class="agent-dag-library-bar">
-                <div class="agent-dag-library-fields">
-                    <div class="agent-dag-current-draft" aria-live="polite">
-                        <span>当前画布</span>
-                        <strong id="agent-workflow-current-label">新建草稿</strong>
+            <div class="agent-dag-library-bar" aria-label="工作流库与状态">
+                <button id="agent-workflow-new-btn" class="btn-secondary agent-dag-new-btn" type="button" title="清空画布并新建工作流">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>新建</span>
+                </button>
+                <div id="agent-workflow-picker" class="agent-workflow-picker" role="group" aria-label="当前工作流与工作流库">
+                    <button id="agent-workflow-picker-trigger" class="agent-workflow-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="agent-workflow-picker-menu">
+                        <span class="agent-workflow-picker-trigger-copy">
+                            <strong id="agent-workflow-picker-title">新建工作流</strong>
+                            <small id="agent-workflow-picker-meta">点击切换已保存工作流</small>
+                        </span>
+                        <span class="agent-workflow-picker-caret" aria-hidden="true">⌄</span>
+                    </button>
+                    <div id="agent-workflow-picker-menu" class="agent-workflow-picker-menu hidden" role="presentation">
+                        <input id="agent-workflow-picker-search" class="form-input agent-workflow-picker-search" autocomplete="off" placeholder="搜索工作流名称、版本、节点数" aria-label="搜索已保存工作流">
+                        <div id="agent-workflow-picker-list" class="agent-workflow-picker-list" role="listbox" aria-label="已保存工作流列表"></div>
                     </div>
-                    <div class="agent-dag-library-select" role="group" aria-labelledby="agent-workflow-library-label">
-                        <span id="agent-workflow-library-label">步骤/节点模板</span>
-                        <div id="agent-workflow-picker" class="agent-workflow-picker">
-                            <button id="agent-workflow-picker-trigger" class="agent-workflow-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="agent-workflow-picker-menu">
-                                <span class="agent-workflow-picker-trigger-copy">
-                                    <strong id="agent-workflow-picker-title">选择已保存工作流</strong>
-                                    <small id="agent-workflow-picker-meta">可按名称、版本或节点数筛选</small>
-                                </span>
-                                <span class="agent-workflow-picker-caret" aria-hidden="true">⌄</span>
-                            </button>
-                            <div id="agent-workflow-picker-menu" class="agent-workflow-picker-menu hidden" role="presentation">
-                                <input id="agent-workflow-picker-search" class="form-input agent-workflow-picker-search" autocomplete="off" placeholder="搜索工作流名称、版本、节点数" aria-label="搜索已保存工作流">
-                                <div id="agent-workflow-picker-list" class="agent-workflow-picker-list" role="listbox" aria-label="已保存工作流列表"></div>
-                            </div>
-                            <select id="agent-workflow-select" class="form-input agent-workflow-native-select" aria-label="已保存工作流">
-                                <option value="">选择已保存工作流</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="agent-dag-library-actions" aria-label="已保存工作流操作">
-                    <button id="agent-workflow-new-btn" class="btn-secondary" type="button">新建工作流</button>
-                    <button id="agent-workflow-load-btn" class="btn-secondary" type="button">加载</button>
-                    <button id="agent-workflow-versions-btn" class="btn-secondary" type="button">版本</button>
-                    <button id="agent-workflow-delete-btn" class="btn-danger-outline" type="button">删除</button>
+                    <select id="agent-workflow-select" class="form-input agent-workflow-native-select" aria-label="已保存工作流">
+                        <option value="">选择已保存工作流</option>
+                    </select>
                 </div>
                 <div id="agent-workflow-lifecycle" class="agent-workflow-lifecycle" aria-live="polite"></div>
+                <details id="agent-workflow-management-menu" class="agent-workflow-management-menu">
+                    <summary class="btn-secondary agent-workflow-management-trigger" aria-label="更多工作流操作" title="更多工作流操作">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                    </summary>
+                    <div class="agent-workflow-management-popover" role="menu">
+                        <button id="agent-workflow-versions-btn" class="agent-workflow-management-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+                            <span>版本历史</span>
+                        </button>
+                        <button id="agent-workflow-schedule-btn" class="agent-workflow-management-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
+                            <span>计划任务</span>
+                        </button>
+                        <button id="agent-workflow-delete-btn" class="agent-workflow-management-item is-danger" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>
+                            <span>删除工作流</span>
+                        </button>
+                    </div>
+                </details>
             </div>
             <div class="agent-dag-workbench">
                 <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">

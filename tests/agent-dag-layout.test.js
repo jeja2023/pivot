@@ -5,7 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { normalizeDagSpec } = require('../server/services/agent-validators');
-const { inferDagLlmRuntimeSettings } = require('../server/services/agent-runtime/dag-run-config');
+const { applySqlLimit } = require('../server/services/database-mcp/sql-governance');
 
 function loadDagCore() {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-core.js'), 'utf8');
@@ -20,7 +20,63 @@ function loadDagCore() {
     return sandbox;
 }
 
-test('normalizeDagSpec preserves layout and selected primary LLM node', () => {
+function loadQueryBuilder() {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-query-builder.js'), 'utf8');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'dag-query-builder.js' });
+    return vm.runInContext('({ buildVisualSqlQuery, normalizeVisualSqlQueryBuilder })', sandbox);
+}
+
+test('visual SQL builder generates bounded dialect-safe readonly queries', () => {
+    const { buildVisualSqlQuery } = loadQueryBuilder();
+    const result = buildVisualSqlQuery({
+        table: 'customers',
+        columns: ['id', 'name', 'status'],
+        filters: [{ field: 'status', operator: 'eq', value: "active' OR 1=1" }],
+        sortBy: 'name',
+        sortOrder: 'asc',
+        limit: 40
+    }, 'sqlite');
+    assert.equal(result.issues.length, 0);
+    assert.match(result.sql, /^SELECT "id", "name", "status"/);
+    assert.match(result.sql, /WHERE "status" = 'active'' OR 1=1'/);
+    assert.match(result.sql, /ORDER BY "name" ASC/);
+    assert.match(result.sql, /LIMIT 40$/);
+
+    const invalid = buildVisualSqlQuery({ table: 'customers', columns: ['profile..name'] }, 'sqlite');
+    assert.equal(invalid.sql, '');
+    assert.match(invalid.issues.join(' '), /字段/);
+
+    const invalidSort = buildVisualSqlQuery({ table: 'customers', columns: ['id'], sortBy: '__metric__' }, 'sqlite');
+    assert.equal(invalidSort.sql, '');
+    assert.match(invalidSort.issues.join(' '), /普通查询不能按统计值/);
+});
+
+test('visual SQL builder supports grouped aggregation and SQL Server limits', () => {
+    const { buildVisualSqlQuery } = loadQueryBuilder();
+    const result = buildVisualSqlQuery({
+        schema: 'dbo',
+        table: 'orders',
+        aggregation: 'count',
+        groupBy: 'status',
+        sortBy: '__metric__',
+        sortOrder: 'desc',
+        limit: 20
+    }, 'sqlserver');
+    assert.equal(result.issues.length, 0);
+    assert.match(result.sql, /^SELECT TOP \(20\) \[status\] AS \[group_value\], COUNT\(\*\) AS \[metric_value\]/);
+    assert.match(result.sql, /FROM \[dbo\]\.\[orders\]/);
+    assert.match(result.sql, /GROUP BY \[status\]/);
+    assert.match(result.sql, /ORDER BY \[metric_value\] DESC$/);
+    assert.equal(applySqlLimit(result.sql, 20, 'sqlserver'), result.sql);
+    assert.equal(
+        applySqlLimit('SELECT id FROM customers', 20, 'sqlserver'),
+        'SELECT TOP (20) id FROM customers'
+    );
+});
+
+test('normalizeDagSpec preserves layout and ignores legacy primary LLM metadata', () => {
     const normalized = normalizeDagSpec({
         primaryLlmNodeId: 'llm_final',
         layout: {
@@ -40,8 +96,8 @@ test('normalizeDagSpec preserves layout and selected primary LLM node', () => {
         llm_first: { x: 310, y: 20 },
         llm_final: { x: 580, y: 120 }
     });
-    assert.equal(normalized.primaryLlmNodeId, 'llm_final');
-    assert.deepEqual(inferDagLlmRuntimeSettings(normalized), { modelId: 'model-b', maxSteps: 31 });
+    assert.equal(Object.hasOwn(normalized, 'primaryLlmNodeId'), false);
+    assert.deepEqual(normalized.nodes.map(node => node.id), ['source', 'llm_first', 'llm_final']);
 });
 
 test('DAG core migrates legacy coordinates and keeps layout separate from nodes', () => {
@@ -66,9 +122,18 @@ test('DAG core migrates legacy coordinates and keeps layout separate from nodes'
         source: { x: 41, y: 53 },
         llm: { x: 333, y: 127 }
     });
-    assert.equal(serialized.primaryLlmNodeId, 'llm');
+    assert.equal(Object.hasOwn(serialized, 'primaryLlmNodeId'), false);
     assert.equal(Object.hasOwn(serialized.nodes[0], '_x'), false);
     assert.equal(Object.hasOwn(serialized.nodes[0], '_y'), false);
+});
+
+test('DAG core keeps a new workflow empty until the user adds a node', () => {
+    const core = loadDagCore();
+    const internal = core.ensureDefaults({ nodes: [] });
+    const serialized = JSON.parse(JSON.stringify(core.serialize(internal)));
+
+    assert.deepEqual(serialized.nodes, []);
+    assert.deepEqual(serialized.layout, {});
 });
 
 test('incremental node placement leaves existing manual positions unchanged', () => {
@@ -123,4 +188,22 @@ test('editor dependency rules are independent from canvas direction', () => {
     assert.doesNotMatch(interaction, /isForwardDependency/);
     assert.match(editor, /!wouldCreateCycle\(candidate\.id, node\?\.id\)/);
     assert.match(interaction, /ctx\.wouldCreateCycle\(connecting\.fromId, targetId\)/);
+});
+
+test('visual SQL wizard styles are bundled with agent workspaces', () => {
+    const workspaceCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces.css'), 'utf8');
+    const agentCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
+    const wizard = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard.js'), 'utf8');
+
+    assert.match(workspaceCss, /agent-dag-query-builder\.css/);
+    assert.match(agentCss, /agent-dag-query-builder\.css/);
+    assert.match(wizard, /pivot-dag-wizard-form\$\{isVisualSqlQuery \? ' is-visual-sql' : ''\}/);
+});
+
+test('visual SQL mode switch keeps the clicked query mode', () => {
+    const queryBuilder = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-query-builder.js'), 'utf8');
+
+    assert.match(queryBuilder, /const updatePreview = \(modeOverride = ''\) =>/);
+    assert.match(queryBuilder, /if \(modeOverride\) \{\s+config\.mode = modeOverride;\s+\}/);
+    assert.match(queryBuilder, /config\.mode = modeButton\.dataset\.pivotDagQueryMode === 'advanced' \? 'advanced' : 'visual';[\s\S]+updatePreview\(config\.mode\);/);
 });

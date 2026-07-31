@@ -36,7 +36,7 @@ async function runAgentSchedule(scheduleId) {
 }
 
 function deleteAgentSchedule(scheduleId) {
-    showConfirm('删除自由任务计划', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
+    showConfirm('删除计划任务', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除计划失败', 'error');

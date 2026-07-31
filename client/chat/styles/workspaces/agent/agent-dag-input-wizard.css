@@ -84,6 +84,28 @@
     padding-right: 2px;
 }
 
+.pivot-dag-wizard-form.is-visual-sql {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+}
+
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-wizard-overview,
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-wizard-field.is-database-connection,
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-query-builder {
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-wizard-overview,
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-wizard-field.is-database-connection {
+    min-height: 0;
+    padding: 10px 12px;
+}
+
+.pivot-dag-wizard-form.is-visual-sql .pivot-dag-wizard-field.is-database-connection .form-input {
+    height: 38px;
+    min-height: 38px;
+}
+
 .pivot-dag-wizard-overview,
 .pivot-dag-wizard-sources,
 .pivot-dag-wizard-field,

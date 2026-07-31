@@ -2,8 +2,8 @@
 
 const TOOL_DISPLAY_OVERRIDES = {
         'agent.llm': ['大模型节点', '调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。'],
-        'agent.delegate': ['委派智能体', '隔离上下文运行具名专家，并将结果交接给 Supervisor。'],
-        'agent.handoff': ['智能体交接', '结构化传递结论、证据、风险和待决问题。'],
+        'agent.delegate': ['委派智能体', '调用一次独立模型运行具名专家，返回分析结果并自动附带 Handoff；通常无需另接交接节点。'],
+        'agent.handoff': ['智能体交接', '只整理已有结论、证据、风险和待决问题，不调用模型；用于统一交给下游智能体。'],
         'rag.search': ['知识库检索', '检索当前用户知识库，返回相关片段和来源。'],
         'sessions.search': ['会话检索', '按关键词检索当前用户历史会话。'],
         'sessions.recent': ['最近会话', '列出最近未删除会话。'],
@@ -14,7 +14,7 @@ const TOOL_DISPLAY_OVERRIDES = {
         'db.list_tables': ['列出数据表', '列出当前数据库中可查询的表和视图。'],
         'db.count_tables': ['统计数据表数量', '统计当前数据库中可查询的数据表和视图数量。'],
         'db.describe_table': ['查看表结构', '查看表字段、类型和可空性。'],
-        'db.run_readonly_query': ['只读 SQL 查询', '执行 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等只读查询。'],
+        'db.run_readonly_query': ['只读数据查询', '默认用可视化条件生成只读 SQL，也支持切换到高级 SQL。'],
         'db.group_count': ['分组统计', '按指定表字段分组并统计数量，用于快速生成分布图。'],
         'db.list_collections': ['列出集合', '列出 MongoDB 数据库集合。'],
         'db.count_collections': ['统计集合数量', '统计 MongoDB 数据库中的集合数量。'],

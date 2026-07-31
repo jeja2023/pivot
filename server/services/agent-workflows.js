@@ -36,14 +36,9 @@ function validateLlmNodePlacement(dagSpec) {
         .map(node => `${node.title || node.id} 缺少上游输入，请连接数据/检索节点，或在提示词中引用 {{goal}} / {{inputs.*}}。`);
 }
 
-function assertWorkflowHasConfiguredLlm(dagSpec) {
+function assertWorkflowLlmNodesConfigured(dagSpec) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
     const llmNodes = nodes.filter(node => String(node?.tool || '').trim() === 'agent.llm');
-    if (!llmNodes.length) {
-        const err = new Error('工作流必须包含 1 个大模型节点。');
-        err.status = 400;
-        throw err;
-    }
     const unconfiguredNode = llmNodes.find(node => !String(
         node?.input?.model || node?.input?.modelId || node?.input?.model_id || ''
     ).trim());
@@ -68,7 +63,7 @@ function normalizeWorkflowPayload(body = {}, fallback = {}) {
         err.status = 400;
         throw err;
     }
-    assertWorkflowHasConfiguredLlm(dagSpec);
+    assertWorkflowLlmNodesConfigured(dagSpec);
     return {
         name,
         description: String(body.description || fallback.description || '').trim().slice(0, 300),
@@ -402,7 +397,7 @@ function restoreAgentWorkflow(workflowId, user) {
 }
 
 module.exports = {
-    assertWorkflowHasConfiguredLlm,
+    assertWorkflowLlmNodesConfigured,
     createAgentWorkflow,
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,

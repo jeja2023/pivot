@@ -333,6 +333,7 @@ const {
     createAgentSchedule,
     createAgentTemplate,
     createAgentRun,
+    createAgentWorkflow,
     listAgentArtifacts,
     listAgentNotifications,
     listAgentSchedules,
@@ -351,7 +352,7 @@ const {
     softDeleteAgentRun
 } = require('../server/services/agent-runtime');
 
-const { assertWorkflowHasConfiguredLlm } = require('../server/services/agent-workflows');
+const { assertWorkflowLlmNodesConfigured } = require('../server/services/agent-workflows');
 
 const { resolveDagNodeInput } = require('../server/services/agent-dag-utils');
 
@@ -716,7 +717,7 @@ module.exports = {
     assert,
     assertSafeMcpOutboundUrl,
     assertSafeOutboundUrl,
-    assertWorkflowHasConfiguredLlm,
+    assertWorkflowLlmNodesConfigured,
     backupDatabase,
     buildChatCompletionsUrl,
     buildComplianceAuditPackage,
@@ -758,6 +759,7 @@ module.exports = {
     countVisibleConversationMessages,
     createAdminUsersRouter,
     createAgentRun,
+    createAgentWorkflow,
     createAgentSchedule,
     createAgentTemplate,
     createAgentWorkbenchSandbox,

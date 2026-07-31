@@ -166,10 +166,6 @@ const ROUTE_NAME_MAP = {
     '/api/rag/query': '知识库语义检索测试',
     '/api/rag/status': 'RAG 引擎状态检测',
     
-    // 提示词库
-    '/api/prompts': '提示词库管理',
-    '/api/prompts/:id': '更新/删除提示词',
-    
     // OpenAI 兼容网关 (v1)
     '/v1/chat/completions': 'OpenAI 接口兼容补全',
     '/v1/models': 'OpenAI 兼容模型列表',
@@ -227,6 +223,7 @@ const ROUTE_NAME_MAP = {
     '/chat/dag-toolbar-field-overrides.js': 'DAG 字段覆盖脚本',
     '/chat/dag-toolbar-fields.js': 'DAG 字段辅助脚本',
     '/chat/dag-wizard-db.js': 'DAG 向导数据库脚本',
+    '/chat/dag-query-builder.js': 'DAG 可视化查询脚本',
     '/chat/dag-wizard-input.js': 'DAG 向导输入脚本',
     '/chat/dag-wizard-fields.js': 'DAG 向导字段脚本',
     '/chat/dag-wizard-stats.js': 'DAG 向导统计脚本',
@@ -238,6 +235,7 @@ const ROUTE_NAME_MAP = {
     '/chat/agent-workflow-core.js': '工作流状态与抽屉脚本',
     '/chat/agent-workflow-runners.js': '工作流运行与发布脚本',
     '/chat/agent-workflows.js': '工作流工作台入口脚本',
+    '/chat/agent-workflow-schedules.js': '工作流计划任务脚本',
     '/chat/agent-run-renderers.js': '智能体运行渲染脚本',
     '/chat/agent-run-utils.js': '智能体运行工具脚本',
     '/chat/agent-run-tool-labels.js': '智能体工具标签脚本',
@@ -271,7 +269,7 @@ const ROUTE_NAME_MAP = {
     '/chat/styles/workspaces/apps.css': '应用中心工作区样式',
     '/chat/styles/workspaces/agent.css': '智能体工作区样式入口',
     '/chat/styles/workspaces/mcp.css': 'MCP 工作区样式入口',
-    '/chat/styles/sessions-prompts.css': '会话与提示词库样式入口',
+    '/chat/styles/sessions-prompts.css': '会话与工作区样式入口',
     '/chat.css': '界面主样式表',
     '/common/styles/theme.css': '全局主题样式',
     '/common/styles/layout.css': '通用布局样式',
