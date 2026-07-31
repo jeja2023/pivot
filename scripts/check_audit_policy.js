@@ -12,10 +12,13 @@ const { spawnSync } = require('child_process');
 // 当前无需豁免：axios、js-yaml、sharp 与 body-parser 的历史告警已通过依赖升级清零。
 const allowed = new Map([]);
 
-function runAudit() {
+function runAudit({ omitDev = false } = {}) {
     // Windows 下直接调用 npm.cmd，避免使用 shell 选项传参触发 DEP0190 安全弃用告警。
     const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const result = spawnSync(npmCommand, ['audit', '--omit=dev', '--audit-level=high', '--json'], {
+    const args = ['audit'];
+    if (omitDev) args.push('--omit=dev');
+    args.push('--audit-level=high', '--json');
+    const result = spawnSync(npmCommand, args, {
         encoding: 'utf8'
     });
     const output = result.stdout || result.stderr || '{}';
@@ -25,6 +28,14 @@ function runAudit() {
         console.error(output);
         throw new Error(`无法解析 npm audit 的 JSON 输出：${error.message}`);
     }
+}
+
+function selectAuditPackages(auditResult, packageNames) {
+    const names = new Set(packageNames || []);
+    const vulnerabilities = Object.fromEntries(
+        Object.entries(auditResult?.vulnerabilities || {}).filter(([name]) => names.has(name))
+    );
+    return { ...auditResult, vulnerabilities };
 }
 
 function advisoryText(item) {
@@ -91,7 +102,17 @@ function classifyAuditFindings(auditResult, exceptions = allowed) {
 }
 
 function main() {
-    const { accepted, failures } = classifyAuditFindings(runAudit());
+    const production = classifyAuditFindings(runAudit({ omitDev: true }));
+    const desktopRuntimeAudit = selectAuditPackages(runAudit(), ['electron']);
+    const desktopRuntime = classifyAuditFindings(desktopRuntimeAudit);
+    const accepted = [
+        ...production.accepted.map(item => `[production] ${item}`),
+        ...desktopRuntime.accepted.map(item => `[desktop-runtime] ${item}`)
+    ];
+    const failures = [
+        ...production.failures.map(item => `[production] ${item}`),
+        ...desktopRuntime.failures.map(item => `[desktop-runtime] ${item}`)
+    ];
 
     if (accepted.length > 0) {
         console.log('已接受的临时依赖审计豁免：');
@@ -112,5 +133,6 @@ if (require.main === module) main();
 
 module.exports = {
     classifyAuditFindings,
-    evaluateException
+    evaluateException,
+    selectAuditPackages
 };

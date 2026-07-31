@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
@@ -59,6 +60,22 @@ const migrations = [
                 ORDER BY id ASC
             `).all();
             deletedUsers.forEach(user => archiveDeletedUsername(db, user.id));
+        }
+    },
+    {
+        id: '202607310001_hash_refresh_tokens',
+        description: 'Hash refresh tokens at rest while preserving active client sessions.',
+        up(db) {
+            const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'refresh_tokens'").get();
+            if (!table) return;
+            const rows = db.prepare('SELECT id, token FROM refresh_tokens').all();
+            const update = db.prepare('UPDATE refresh_tokens SET token = ? WHERE id = ?');
+            rows.forEach((row) => {
+                const token = String(row.token || '');
+                if (/^[0-9a-f]{64}$/i.test(token)) return;
+                const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+                update.run(tokenHash, row.id);
+            });
         }
     },
     ...regulationsMigrations

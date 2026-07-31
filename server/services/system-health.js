@@ -4,6 +4,10 @@ const path = require('path');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 
+const DEFAULT_HEALTH_CACHE_TTL_MS = 10_000;
+let cachedDetailedSnapshot = null;
+let detailedSnapshotExpiresAt = 0;
+
 function checkDatabase() {
     try {
         db.prepare('SELECT 1').get();
@@ -76,7 +80,29 @@ function overallStatus(checks) {
     return 'ok';
 }
 
-function getSystemHealthSnapshot() {
+function getPublicSystemHealthSnapshot() {
+    const checks = [];
+    try {
+        db.prepare('SELECT 1').get();
+        checks.push({ name: 'database', status: 'ok' });
+    } catch (_error) {
+        checks.push({ name: 'database', status: 'error' });
+    }
+    const memory = checkMemory();
+    checks.push({ name: 'memory', status: memory.status });
+    return {
+        status: overallStatus(checks),
+        timestamp: getBeijingTimestamp(),
+        checks
+    };
+}
+
+function getSystemHealthSnapshot(options = {}) {
+    if (options.public === true) return getPublicSystemHealthSnapshot();
+    const cacheTtlMs = Math.max(0, Number(process.env.HEALTH_DETAIL_CACHE_TTL_MS) || DEFAULT_HEALTH_CACHE_TTL_MS);
+    if (options.force !== true && cachedDetailedSnapshot && Date.now() < detailedSnapshotExpiresAt) {
+        return cachedDetailedSnapshot;
+    }
     const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../data');
     const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
         ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -89,11 +115,14 @@ function getSystemHealthSnapshot() {
         { name: 'disk', ...checkDiskUsage(dataDir) }
     ];
 
-    return {
+    const snapshot = {
         status: overallStatus(checks),
         timestamp: getBeijingTimestamp(),
         checks
     };
+    cachedDetailedSnapshot = snapshot;
+    detailedSnapshotExpiresAt = Date.now() + cacheTtlMs;
+    return snapshot;
 }
 
 module.exports = {
@@ -101,6 +130,7 @@ module.exports = {
     checkDiskUsage,
     checkMemory,
     checkWritableDirectory,
+    getPublicSystemHealthSnapshot,
     getSystemHealthSnapshot,
     overallStatus
 };

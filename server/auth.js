@@ -39,7 +39,13 @@ const ACCESS_COOKIE_OPTIONS = {
 
 const REFRESH_COOKIE_OPTIONS = {
     ...COOKIE_OPTIONS,
-    path: '/api/auth/refresh', // 仅刷新接口可见，提高安全性
+    path: '/api/auth',
+    maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
+};
+
+const LEGACY_REFRESH_COOKIE_OPTIONS = {
+    ...COOKIE_OPTIONS,
+    path: '/api/auth/refresh',
     maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
 };
 
@@ -86,14 +92,29 @@ function generateAccessToken(user) {
     );
 }
 
+function hashRefreshToken(token) {
+    return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
 function generateRefreshToken(userId) {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
     
-    stmts.insertRefreshToken.run(userId, token, expiresAtStr);
+    stmts.insertRefreshToken.run(userId, hashRefreshToken(token), expiresAtStr);
     return token;
+}
+
+function rotateRefreshToken(tokenHash, userId) {
+    const rotate = db.transaction(() => {
+        const deleted = stmts.deleteRefreshToken.run(tokenHash);
+        if (deleted.changes !== 1) {
+            throw new Error('Refresh token has already been used. Please sign in again.');
+        }
+        return generateRefreshToken(userId);
+    });
+    return rotate();
 }
 
 function validatePassword(password) {
@@ -210,7 +231,8 @@ function login(username, password) {
 
 // 刷新 Token
 function refreshTokens(token) {
-    const refreshTokenData = stmts.getRefreshToken.get(token);
+    const tokenHash = hashRefreshToken(token);
+    const refreshTokenData = stmts.getRefreshToken.get(tokenHash);
     if (!refreshTokenData) {
         throw new Error('无效的刷新令牌');
     }
@@ -218,7 +240,7 @@ function refreshTokens(token) {
     // 检查是否过期
     const now = getBeijingTimestamp();
     if (refreshTokenData.expires_at < now) {
-        stmts.deleteRefreshToken.run(token);
+        stmts.deleteRefreshToken.run(tokenHash);
         throw new Error('刷新令牌已过期，请重新登录');
     }
 
@@ -231,8 +253,7 @@ function refreshTokens(token) {
     const accessToken = generateAccessToken(user);
     
     // 实施 Refresh Token 轮换（可选，为了更安全，生成一个新的并删除旧的）
-    const newRefreshToken = generateRefreshToken(user.id);
-    stmts.deleteRefreshToken.run(token);
+    const newRefreshToken = rotateRefreshToken(tokenHash, user.id);
 
     return { accessToken, refreshToken: newRefreshToken };
 }
@@ -290,11 +311,13 @@ module.exports = {
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
+    LEGACY_REFRESH_COOKIE_OPTIONS,
     generateCsrfToken,
     csrfMiddleware,
     hashApiKey,
     previewApiKey,
     UserInputError,
     PASSWORD_RULE_DESCRIPTION,
-    getPasswordValidationMessage
+    getPasswordValidationMessage,
+    hashRefreshToken
 };

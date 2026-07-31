@@ -17,6 +17,7 @@ function assertIncludes(file, marker) {
 function main() {
     const manifest = JSON.parse(read('package.json'));
     const requiredFiles = [
+        'scripts/run_e2e_tests.js',
         'tests/e2e/playwright.config.js',
         'tests/e2e/smoke.spec.js'
     ];
@@ -25,13 +26,15 @@ function main() {
     });
 
     assertIncludes('tests/e2e/playwright.config.js', 'PIVOT_E2E_BASE_URL');
+    assertIncludes('scripts/run_e2e_tests.js', "path.join('tests', 'e2e', 'playwright.config.js')");
+    assertIncludes('scripts/run_e2e_tests.js', 'PIVOT_E2E_OUTPUT_DIR');
     assertIncludes('tests/e2e/playwright.config.js', 'reuseExistingServer');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.ui"]');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.attachments"]');
     assertIncludes('tests/e2e/smoke.spec.js', '#rag-debug-history');
     assertIncludes('client/chat/partials/scripts.html', '/chat/pivot-core.js');
     assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-history"');
-    if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'playwright test --config tests/e2e/playwright.config.js') {
+    if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'node scripts/run_e2e_tests.js') {
         throw new Error('package.json is missing test:e2e Playwright runner script');
     }
     if (!manifest.devDependencies || !manifest.devDependencies['@playwright/test']) {

@@ -107,7 +107,7 @@ test('非 root 管理员不能创建全局提示词或共享 MCP 服务', async 
         const mcpReq = {
             body: {
                 name: `MCP ${suffix}`,
-                base_url: 'https://mcp-resource.example/rpc',
+                base_url: 'https://192.0.2.10/rpc',
                 shared: true
             },
             user: adminUser
@@ -336,5 +336,13 @@ test('数据库 MCP 治理会限制表字段并脱敏敏感字段', async () => 
         }
         db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
         fs.rmSync(sqlitePath, { force: true });
+    }
+});
+test('MCP outbound policy normalizes IPv4-mapped IPv6 literals', async () => {
+    for (const host of ['127.0.0.1', '10.0.0.1', '169.254.169.254']) {
+        await assert.rejects(
+            assertSafeMcpOutboundUrl(`http://[::ffff:${host}]:3001/rpc`, { role: 'user' }),
+            /private or local MCP endpoints|sensitive local|metadata target/
+        );
     }
 });

@@ -10,8 +10,10 @@ const {
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
+    LEGACY_REFRESH_COOKIE_OPTIONS,
     generateCsrfToken,
-    resolveAuthenticatedUser
+    resolveAuthenticatedUser,
+    hashRefreshToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
 const { db, stmts } = require('../db');
@@ -22,13 +24,15 @@ const { getApiAccessSetting } = require('../services/api-access-settings');
 function createAuthRouter({
     authMiddleware,
     loginLimiter,
+    registerLimiter,
     isPublicRegistrationEnabled,
     logAction,
     publicUrl
 }) {
     const router = express.Router();
+    const effectiveRegisterLimiter = registerLimiter || ((_req, _res, next) => next());
 
-    router.post('/auth/register', asyncHandler(async (req, res) => {
+    router.post('/auth/register', effectiveRegisterLimiter, asyncHandler(async (req, res) => {
         if (!isPublicRegistrationEnabled()) {
             logAction(req, '注册拦截', `尝试注册账号: ${req.body?.username || '-'}`);
             return res.status(403).json({ error: '当前已关闭公开注册，请联系管理员创建账号' });
@@ -65,6 +69,7 @@ function createAuthRouter({
             
             // 设置两个 Cookie
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
+            res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
@@ -93,6 +98,7 @@ function createAuthRouter({
         try {
             const data = refreshTokens(refreshToken);
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
+            res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
@@ -131,11 +137,12 @@ function createAuthRouter({
         // 尝试从 Cookie 中获取并删除数据库中的 Refresh Token
         const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
         if (refreshToken) {
-            stmts.deleteRefreshToken.run(refreshToken);
+            stmts.deleteRefreshToken.run(hashRefreshToken(refreshToken));
         }
 
         res.clearCookie(AUTH_COOKIE_NAME, { ...ACCESS_COOKIE_OPTIONS, maxAge: 0 });
         res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+        res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
         res.clearCookie(CSRF_COOKIE_NAME, { sameSite: 'lax', path: '/', secure: process.env.COOKIE_SECURE === 'true', maxAge: 0 });
         res.json({ success: true });
     });

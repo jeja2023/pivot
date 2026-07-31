@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const { assertAllowedUpdateFeedUrl } = require('./update-policy');
 
 let activeController = null;
+let activeAuthorizeIpc = null;
 let ipcRegistered = false;
 
 function serializeError(error) {
@@ -56,22 +57,27 @@ function createInitialState(app, updateConfig) {
 function registerIpcHandlers() {
     if (ipcRegistered) return;
     ipcRegistered = true;
-    ipcMain.handle('pivot-updater:status', async () => (
+    const authorize = (event) => activeAuthorizeIpc?.(event);
+    ipcMain.handle('pivot-updater:status', async (event) => (
+        authorize(event),
         activeController ? activeController.getState() : { enabled: false, status: 'not-ready' }
     ));
-    ipcMain.handle('pivot-updater:check', async () => (
+    ipcMain.handle('pivot-updater:check', async (event) => (
+        authorize(event),
         activeController ? activeController.checkForUpdates(true) : { enabled: false, status: 'not-ready' }
     ));
-    ipcMain.handle('pivot-updater:download', async () => (
+    ipcMain.handle('pivot-updater:download', async (event) => (
+        authorize(event),
         activeController ? activeController.downloadUpdate() : { enabled: false, status: 'not-ready' }
     ));
-    ipcMain.handle('pivot-updater:install', async () => {
+    ipcMain.handle('pivot-updater:install', async (event) => {
+        authorize(event);
         if (!activeController) return { enabled: false, status: 'not-ready' };
         return activeController.installUpdate();
     });
 }
 
-function setupAutoUpdater({ app, mainWindow, config }) {
+function setupAutoUpdater({ app, mainWindow, config, authorizeIpc }) {
     const updateConfig = config.autoUpdate || {};
     let state = createInitialState(app, updateConfig);
 
@@ -127,6 +133,7 @@ function setupAutoUpdater({ app, mainWindow, config }) {
         return getState();
     }
 
+    activeAuthorizeIpc = typeof authorizeIpc === 'function' ? authorizeIpc : null;
     registerIpcHandlers();
     activeController = { getState, checkForUpdates, downloadUpdate, installUpdate };
 

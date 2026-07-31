@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,6 +11,7 @@ const { runVersionedMigrations } = require('../server/db/migrations/runner');
 
 const migrationId = '202606260001_rag_search_content_backfill';
 const deletedUsernameMigrationId = '202607150001_release_deleted_usernames';
+const refreshTokenMigrationId = '202607310001_hash_refresh_tokens';
 const sampleText = 'alpha \u4e2d\u6587 \u68c0\u7d22';
 const legacyText = 'legacy \u4e2d\u6587 \u5206\u5757';
 
@@ -169,5 +171,30 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
         removeDir(dataDir);
+    }
+});
+test('refresh token migration hashes legacy plaintext values and is idempotent', () => {
+    const db = new Sqlite(':memory:');
+    try {
+        db.exec(`
+            CREATE TABLE refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT UNIQUE NOT NULL
+            );
+        `);
+        const legacyToken = 'a'.repeat(80);
+        const hashedToken = 'b'.repeat(64);
+        db.prepare('INSERT INTO refresh_tokens (token) VALUES (?)').run(legacyToken);
+        db.prepare('INSERT INTO refresh_tokens (token) VALUES (?)').run(hashedToken);
+
+        const migration = migrations.find(item => item.id === refreshTokenMigrationId);
+        assert.ok(migration);
+        assert.deepEqual(runVersionedMigrations(db, [migration]), [refreshTokenMigrationId]);
+        const rows = db.prepare('SELECT token FROM refresh_tokens ORDER BY id').all();
+        assert.equal(rows[0].token, crypto.createHash('sha256').update(legacyToken).digest('hex'));
+        assert.equal(rows[1].token, hashedToken);
+        assert.deepEqual(runVersionedMigrations(db, [migration]), []);
+    } finally {
+        db.close();
     }
 });

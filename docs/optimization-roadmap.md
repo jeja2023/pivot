@@ -6,6 +6,7 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.0.237 (2026-07-31) 完成隔离局域网纯 HTTP 部署加固：统一 IPv4-mapped IPv6 出站判定、Electron 同源导航和 IPC 来源校验、refresh token 摘要与一次性轮换、健康/指标接口分层、主动内容治理、临时目录测试隔离及 Windows 打包瘦身；Electron 升级到 39.8.10，生产依赖审计 0 项，Node 回归 376/376、E2E 2/2 与 unpacked 打包通过。
 - v0.0.236 (2026-07-31) 完成智能体工作台和工作流编排收口：去除重复入口、统一顶部命令区和已保存工作流选择器，移除用户侧提示词库，明确 `agent.delegate` / `agent.handoff` 语义，质量评测弹窗统一全局表单布局，新增只读 SQL 可视化查询构建器并保留高级 SQL；查询继续复用后端只读治理，SQL Server `TOP` 限流兼容问题已修复。
 - v0.0.233 (2026-07-30) 正式汇总发布智能体产品化升级：结构化可读结果、稳定 DAG 布局、显式主大模型节点、Agent Trace、节点数据契约、发布治理、持久化检查点、质量评测中心、确定性回归基线、`agent.delegate`、结构化 `agent.handoff` 和 Supervisor 模板完整贯通；完成 1440px/390px 视觉验收与全仓 691 项回归。模型裁判、自动 CI 发布门禁、原生工具调用能力探测和角色级独立预算仍作为二期治理项。
 - v0.0.232 (2026-07-30) 完成智能体质量评测与多智能体协作第一阶段：评测集、真实任务批量回归、确定性规则评分、历史基线对比、任务追踪回链、`agent.delegate`、结构化 `agent.handoff` 和 Supervisor 工作流模板落地；模型裁判、自动发布门禁与原生工具调用能力探测继续作为后续治理项。
@@ -42,6 +43,9 @@ This document records optimization work that is intentionally staged instead of 
 - 智能体“能力与结果”弹窗内容已使用受限面板，长工具列表和结果沉淀列表会在弹窗内滚动，不再向外撑开视口。
 - Frontend code can migrate from loose `window.*` globals into `Pivot.registerModule()` / `Pivot.getModule()` incrementally; `chat.ui` and `chat.attachments` now publish module APIs with legacy global aliases during migration.
 - Chat frontend rendering routes raw HTML updates through `PivotSafeHtml.setHtml()`, `npm run check:safe-html` blocks raw `innerHTML`, and `npm run check:window-globals` blocks new legacy `window.*` exposure.
+- Active-content controls force HTML attachments to download with `nosniff`, route dynamic insertion through `PivotSafeHtml`, remove the print path's `document.write`, and scan `innerHTML`, `insertAdjacentHTML`, `createContextualFragment`, `document.write`, and `srcdoc` in CI.
+- Refresh tokens are stored as SHA-256 digests and rotated transactionally; legacy plaintext rows migrate in place without invalidating active sessions, while registration has an independent per-IP rate limit.
+- Public health checks expose no filesystem paths, detailed diagnostics require authentication and use a short cache, and Prometheus metrics are closed unless a bearer token or explicit isolated-LAN override is configured.
 - Permission capability payloads now expose policy object types, data classification levels, and organization/team placeholders.
 - Deployment profile payloads describe SQLite WAL single-node defaults, provider contract status, and the Postgres/object-storage/distributed-queue/distributed-lock prerequisites for multi-node mode.
 - CI 使用 `npm run audit:policy` 拦截新增 high/critical 依赖告警；豁免必须登记理由与复查日期，到期自动失效，上游已有修复版本时一律不接受豁免（`tests/audit-policy.test.js` 覆盖该机制）。生产依赖当前无豁免项。
@@ -82,8 +86,10 @@ This document records optimization work that is intentionally staged instead of 
 
 6. Desktop distribution — 🔄 进行中
    - ✅ Electron 沙箱默认开启。
-   - ✅ 生产更新源要求 HTTPS；离线局域网 HTTP 需显式开关加来源白名单（v0.0.203/204）。
-   - ⏸ **Electron 主版本升级仍未评估**：v0.0.191 因「避免未经桌面启动、打包和原生模块验证的破坏性升级混入生产依赖修复」而暂缓，当时约定「后续按桌面运行时升级单独评估」，至今未执行。当前 electron 38 已落后 5 个大版本（最新 43），属于桌面端最大的一笔技术债，需要单独排期并完整验证启动、打包、原生模块（better-sqlite3 / sharp / duckdb）与自动更新。
+   - ✅ Electron 38 → 39 主版本升级已完成，并通过 Windows unpacked 打包、ASAR 内容和原生模块打包链路验证（v0.0.237）。未来主版本仍按一次一版、完整回归的节奏推进。
+   - ✅ 导航、重定向和特权 IPC 已绑定配置目标同源，适配私有 IP、IPv6 字面量与局域网主机名，不依赖域名或证书（v0.0.237）。
+   - ✅ 无证书环境默认关闭自动更新；若在可信隔离局域网启用 HTTP 更新，需显式开关和精确来源白名单（v0.0.203/204/237）。
+   - ✅ 打包排除历史安装器，正式发布生成 SHA-256 清单，支持受控离线分发（v0.0.237）。
    - ⬜ 为受信任的文档/更新域配置 `allowedExternalOrigins`。
 
 7. Agent quality platform — 🔄 进行中
@@ -98,6 +104,7 @@ This document records optimization work that is intentionally staged instead of 
 
 ## 已知技术债与判断
 
+- **桌面构建链审计**：生产依赖与直接 Electron 运行时审计均为 0；完整 `npm audit` 的 16 项 high、0 项 critical 位于 electron-builder 间接构建链。尝试 `npm audit` 建议的降级版本会扩大到 28 项并引入 critical，因此保留 26.15.3 并等待上游修复，不以降级换取表面清零。
 - **大文件治理**：`apps-workbench-editor.js` 1418 行、`rag-documents.js` 1251 行、`admin-settings.js` 1131 行超出《开发规范》3.1 的可维护边界。建议在下次改到这些文件时顺手按功能边界拆分，不做专项重构。
 - **依赖跨主版本落后**：除 Electron 外，`express` 4→5、`better-sqlite3` 11→13、`mongodb` 6→7、`uuid` 11→14、`bcryptjs` 2→3 均为跨主版本升级，需按「一次一个、带回归」的节奏推进，不做批量升级。
 - **同步文件 IO**：`server/routes` 与 `server/services` 中约 19 处 `readFileSync` / `writeFileSync`，需逐个确认是否落在请求热路径上；启动期与低频管理操作可保留。

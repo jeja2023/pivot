@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { loadDesktopConfig } = require('./config');
+const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 
 let mainWindow = null;
@@ -307,6 +308,32 @@ function shouldOpenExternal(targetUrl) {
     }
 }
 
+function trustedRendererOptions() {
+    return { allowedFilePaths: [path.join(__dirname, 'error.html')] };
+}
+
+function isTrustedMainRendererUrl(targetUrl) {
+    return isTrustedRendererUrl(targetUrl, currentTargetUrl, trustedRendererOptions());
+}
+
+function assertTrustedIpcSender(event) {
+    const senderUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || '';
+    if (!isTrustedMainRendererUrl(senderUrl)) {
+        const error = new Error('Blocked privileged desktop IPC from an untrusted renderer origin.');
+        error.code = 'PIVOT_UNTRUSTED_RENDERER';
+        throw error;
+    }
+    return true;
+}
+
+function handleRendererNavigation(event, targetUrl, openExternal) {
+    if (isTrustedMainRendererUrl(targetUrl)) return;
+    event.preventDefault();
+    if (openExternal && shouldOpenExternal(targetUrl)) {
+        shell.openExternal(targetUrl).catch(() => {});
+    }
+}
+
 function createMainWindow(config) {
     mainWindow = new BrowserWindow({
         width: 1320,
@@ -338,6 +365,12 @@ function createMainWindow(config) {
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
         if (shouldOpenExternal(targetUrl)) shell.openExternal(targetUrl);
         return { action: 'deny' };
+    });
+    mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+        handleRendererNavigation(event, targetUrl, true);
+    });
+    mainWindow.webContents.on('will-redirect', (event, targetUrl) => {
+        handleRendererNavigation(event, targetUrl, false);
     });
     mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
         if (!isMainFrame || !mainWindow || String(validatedUrl || '').startsWith('file://')) return;
@@ -563,32 +596,48 @@ async function shutdownServer() {
     pivotServer = null;
 }
 
-ipcMain.handle('pivot-local-auth:status', async () => buildLocalAuthorizationStatus());
+ipcMain.handle('pivot-local-auth:status', async (event) => {
+    assertTrustedIpcSender(event);
+    return buildLocalAuthorizationStatus();
+});
 
-ipcMain.handle('pivot-local-auth:grant', async (_event, type) => grantLocalAuthorization(String(type || '')));
+ipcMain.handle('pivot-local-auth:grant', async (event, type) => {
+    assertTrustedIpcSender(event);
+    return grantLocalAuthorization(String(type || ''));
+});
 
-ipcMain.handle('pivot-local-auth:revoke', async (_event, type) => revokeLocalAuthorization(String(type || '')));
+ipcMain.handle('pivot-local-auth:revoke', async (event, type) => {
+    assertTrustedIpcSender(event);
+    return revokeLocalAuthorization(String(type || ''));
+});
 
-ipcMain.handle('pivot-local-auth:execute-tool', async (_event, payload) => {
+ipcMain.handle('pivot-local-auth:execute-tool', async (event, payload) => {
+    assertTrustedIpcSender(event);
     try {
         return { success: true, result: await executeLocalMcpTool(payload || {}) };
     } catch (error) {
         return { success: false, error: normalizeLocalMcpExecutionError(error) };
     }
 });
-ipcMain.handle('pivot-desktop:retry', async () => {
+ipcMain.handle('pivot-desktop:retry', async (event) => {
+    assertTrustedIpcSender(event);
     lastLoadError = null;
     await loadTarget();
     return true;
 });
 
-ipcMain.handle('pivot-desktop:reload', async (_event, options = {}) => reloadDesktop({
-    clearCache: options && options.clearCache === true
-}));
+ipcMain.handle('pivot-desktop:reload', async (event, options = {}) => {
+    assertTrustedIpcSender(event);
+    return reloadDesktop({ clearCache: options && options.clearCache === true });
+});
 
-ipcMain.handle('pivot-desktop:window-action', async (_event, action) => runWindowAction(String(action || '')));
+ipcMain.handle('pivot-desktop:window-action', async (event, action) => {
+    assertTrustedIpcSender(event);
+    return runWindowAction(String(action || ''));
+});
 
-ipcMain.handle('pivot-desktop:quit', async () => {
+ipcMain.handle('pivot-desktop:quit', async (event) => {
+    assertTrustedIpcSender(event);
     app.quit();
     return true;
 });
@@ -598,12 +647,15 @@ ipcMain.handle('pivot-about:close', async (event) => {
     if (window && !window.isDestroyed()) window.close();
     return true;
 });
-ipcMain.handle('pivot-desktop:status', async () => ({
-    config: runtimeConfig,
-    targetUrl: currentTargetUrl,
-    lastLoadError,
-    updateState: updaterController ? updaterController.getState() : { enabled: false, status: 'not-ready' }
-}));
+ipcMain.handle('pivot-desktop:status', async (event) => {
+    assertTrustedIpcSender(event);
+    return {
+        config: runtimeConfig,
+        targetUrl: currentTargetUrl,
+        lastLoadError,
+        updateState: updaterController ? updaterController.getState() : { enabled: false, status: 'not-ready' }
+    };
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -622,7 +674,12 @@ if (!gotLock) {
             runtimeConfig = loadDesktopConfig(app);
             createMainWindow(runtimeConfig);
             await loadTarget();
-            updaterController = setupAutoUpdater({ app, mainWindow, config: runtimeConfig });
+            updaterController = setupAutoUpdater({
+                app,
+                mainWindow,
+                config: runtimeConfig,
+                authorizeIpc: assertTrustedIpcSender
+            });
         } catch (err) {
             dialog.showErrorBox('Pivot 启动失败', err && err.stack ? err.stack : String(err));
             app.quit();

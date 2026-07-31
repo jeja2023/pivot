@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const os = require('os');
 const { db } = require('./db');
 const { aiSemaphore } = require('./services/concurrency');
@@ -441,11 +442,15 @@ function renderPrometheusMetrics() {
 
 function metricsAuthMiddleware(req, res, next) {
     const token = process.env.METRICS_TOKEN;
-    if (!token) return next();
+    if (!token) {
+        if (process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN === 'true') return next();
+        return res.status(503).type('text/plain').send('metrics token is not configured\n');
+    }
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    const queryToken = req.query.token;
-    if (bearer === token || queryToken === token) return next();
+    const expected = Buffer.from(token);
+    const actual = Buffer.from(bearer);
+    if (expected.length === actual.length && crypto.timingSafeEqual(expected, actual)) return next();
     return res.status(401).type('text/plain').send('unauthorized\n');
 }
 

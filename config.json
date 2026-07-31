@@ -6,16 +6,14 @@
   "windowTitle": "Pivot 智枢",
   "allowExternalOpen": true,
   "autoUpdate": {
-    "enabled": true,
+    "enabled": false,
     "path": "/downloads/",
     "url": "",
     "checkOnStart": true,
     "autoDownload": true,
     "allowPrerelease": false,
-    "allowInsecureHttp": true,
-    "allowedOrigins": [
-      "http://50.64.150.51:9006"
-    ],
+    "allowInsecureHttp": false,
+    "allowedOrigins": [],
     "installOnQuit": true
   }
 }

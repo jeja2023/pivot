@@ -47,8 +47,34 @@ function decryptSecret(value) {
     }
 }
 
+function mappedIpv4Address(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    const compactMatch = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+    if (compactMatch && net.isIP(compactMatch[1]) === 4) return compactMatch[1];
+
+    const hexMatch = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (hexMatch) {
+        const high = parseInt(hexMatch[1], 16);
+        const low = parseInt(hexMatch[2], 16);
+        return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
+    }
+
+    const fullMatch = host.match(/^(?:0{1,4}:){5}ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (fullMatch) {
+        const high = parseInt(fullMatch[1], 16);
+        const low = parseInt(fullMatch[2], 16);
+        return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
+    }
+    return '';
+}
+
+function normalizeHostForPolicy(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    return mappedIpv4Address(host) || host;
+}
+
 function isPrivateHost(hostname) {
-    const host = String(hostname || '').toLowerCase();
+    const host = normalizeHostForPolicy(hostname);
     if (['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(host)) return true;
     if (host.endsWith('.local') || host.endsWith('.internal')) return true;
 
@@ -69,7 +95,7 @@ function isPrivateHost(hostname) {
 }
 
 function isSensitiveOutboundHost(hostname) {
-    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    const host = normalizeHostForPolicy(hostname);
     if (['localhost', 'metadata.google.internal'].includes(host)) return true;
 
     const ipType = net.isIP(host);
@@ -86,7 +112,7 @@ function isSensitiveOutboundHost(hostname) {
 }
 
 function isLoopbackHost(hostname) {
-    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    const host = normalizeHostForPolicy(hostname);
     if (host === 'localhost' || host === '::1') return true;
     if (net.isIP(host) === 4) {
         const parts = host.split('.').map(Number);
@@ -458,6 +484,7 @@ module.exports = {
     createSafeHttpAgentsForUser,
     createSafeLookup,
     getSafeOutboundOptionsForUser,
+    normalizeHostForPolicy,
     isPrivateHost,
     isLoopbackHost,
     isSensitiveOutboundHost,

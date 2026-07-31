@@ -644,7 +644,7 @@ test('visible global models can be tested by admins but not regular users', asyn
     const modelInfo = db.prepare(`
         INSERT INTO models (user_id, name, url, api_key, model_name, allowed_units, created_at)
         VALUES (NULL, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(`Visible Global ${suffix}`, 'https://global-visible.example/v1', encryptSecret(`global-secret-${suffix}`), 'global-visible-chat', 'OPS');
+    `).run(`Visible Global ${suffix}`, 'https://192.0.2.20/v1', encryptSecret(`global-secret-${suffix}`), 'global-visible-chat', 'OPS');
 
     const makeRouter = user => createModelsRouter({
         authMiddleware: (req, _res, next) => { req.user = user; next(); },
@@ -1100,4 +1100,60 @@ test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the fi
     assert.equal(res.statusCode, 400);
     assert.match(res.body.error, /文件内容/);
     assert.equal(fs.existsSync(badPath), false);
+});
+test('refresh tokens are hashed at rest and rotated once', () => {
+    const { hashRefreshToken, login, refreshTokens, register } = require('../server/auth');
+    const suffix = Date.now().toString(36);
+    const username = `refresh_hash_${suffix}`;
+    const password = 'Pivot-Test-123!';
+    const user = register(username, password, 'Refresh Token Test', 'QA');
+    try {
+        const signedIn = login(username, password);
+        const stored = db.prepare('SELECT token FROM refresh_tokens WHERE user_id = ?').get(user.id);
+        assert.ok(stored);
+        assert.equal(stored.token, hashRefreshToken(signedIn.refreshToken));
+        assert.notEqual(stored.token, signedIn.refreshToken);
+
+        const rotated = refreshTokens(signedIn.refreshToken);
+        assert.equal(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken)), undefined);
+        assert.ok(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(rotated.refreshToken)));
+        assert.throws(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
+    } finally {
+        db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
+test('metrics requires a bearer token unless LAN anonymous access is explicit', () => {
+    const { metricsAuthMiddleware } = require('../server/metrics');
+    const previousToken = process.env.METRICS_TOKEN;
+    const previousLanFlag = process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN;
+    const run = (req) => {
+        let nextCalled = false;
+        const res = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            type() { return this; },
+            send(body) { this.body = body; return this; }
+        };
+        metricsAuthMiddleware(req, res, () => { nextCalled = true; });
+        return { nextCalled, res };
+    };
+
+    try {
+        process.env.METRICS_TOKEN = 'metrics-test-token';
+        delete process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN;
+        assert.equal(run({ headers: {}, query: { token: 'metrics-test-token' } }).res.statusCode, 401);
+        assert.equal(run({ headers: { authorization: 'Bearer metrics-test-token' }, query: {} }).nextCalled, true);
+
+        delete process.env.METRICS_TOKEN;
+        assert.equal(run({ headers: {}, query: {} }).res.statusCode, 503);
+        process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN = 'true';
+        assert.equal(run({ headers: {}, query: {} }).nextCalled, true);
+    } finally {
+        if (previousToken === undefined) delete process.env.METRICS_TOKEN;
+        else process.env.METRICS_TOKEN = previousToken;
+        if (previousLanFlag === undefined) delete process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN;
+        else process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN = previousLanFlag;
+    }
 });

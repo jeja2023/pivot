@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
+const { pathToFileURL } = require('node:url');
 
 const {
     assertAllowedUpdateFeedUrl,
@@ -7,6 +9,7 @@ const {
     normalizeUpdateFeedUrl
 } = require('../desktop/update-policy');
 const { normalizeAutoUpdate, normalizeConfig, normalizeUpdatePath, resolveUpdateUrlFromRemote } = require('../desktop/config');
+const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
 
 test('desktop update policy requires https for remote feeds', () => {
     assert.equal(
@@ -118,4 +121,14 @@ test('desktop config can derive LAN HTTP downloads feed when explicitly allowed'
 
     assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');
     assert.equal(config.autoUpdate.allowInsecureHttp, true);
+});
+test('desktop renderer policy supports LAN HTTP origins without trusting redirects', () => {
+    assert.equal(isTrustedRendererUrl('http://192.168.10.20:9006/chat', 'http://192.168.10.20:9006/'), true);
+    assert.equal(isTrustedRendererUrl('http://192.168.10.21:9006/chat', 'http://192.168.10.20:9006/'), false);
+    assert.equal(isTrustedRendererUrl('https://192.168.10.20:9006/chat', 'http://192.168.10.20:9006/'), false);
+
+    const errorPage = path.join(__dirname, '..', 'desktop', 'error.html');
+    assert.equal(isTrustedRendererUrl(pathToFileURL(errorPage).toString(), 'http://192.168.10.20:9006/', {
+        allowedFilePaths: [errorPage]
+    }), true);
 });

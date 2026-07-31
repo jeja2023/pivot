@@ -43,10 +43,16 @@ function validateConfig() {
 
     const { logger } = require('./logger');
     if (process.env.NODE_ENV === 'production' && !cookieSecure) {
-        logger.warn('配置提醒: 生产环境建议在 HTTPS 部署时设置 COOKIE_SECURE=true');
+        logger.warn('配置提醒: 当前使用 HTTP Cookie；仅适用于访问受控的隔离局域网，请通过防火墙限制服务端口');
     }
     if (!process.env.DATA_ENCRYPTION_KEY) {
         logger.warn('配置提醒: 未配置 DATA_ENCRYPTION_KEY，将从 JWT_SECRET 派生加密密钥');
+    }
+    if (!process.env.METRICS_TOKEN && process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN !== 'true') {
+        logger.warn('配置提醒: 未配置 METRICS_TOKEN，/api/metrics 将保持关闭');
+    }
+    if (String(process.env.DEFAULT_ADMIN_PASSWORD || '').trim()) {
+        logger.warn('配置提醒: DEFAULT_ADMIN_PASSWORD 仅用于空数据库首次初始化；初始化后请删除该配置并在界面中轮换管理员密码');
     }
 
     return {

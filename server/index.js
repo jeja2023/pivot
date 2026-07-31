@@ -185,6 +185,20 @@ const loginLimiter = rateLimit({
     message: { error: '登录请求过于频繁，请15分钟后再试' }
 });
 
+const registerLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    keyGenerator: (req) => getClientIp(req),
+    message: { error: '注册请求过于频繁，请15分钟后再试' }
+});
+
+const healthLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: (req) => getClientIp(req),
+    message: { error: '健康检查请求过于频繁，请稍后再试' }
+});
+
 // 开启 Helmet 安全防护 (精细化安全配置)
 app.use(helmet({
     contentSecurityPolicy: {
@@ -236,6 +250,7 @@ const embeddingLimiter = rateLimit({
 });
 
 app.locals.loginLimiter = loginLimiter;
+app.locals.registerLimiter = registerLimiter;
 app.locals.chatLimiter = chatLimiter;
 app.locals.probeLimiter = probeLimiter;
 app.locals.embeddingLimiter = embeddingLimiter;
@@ -250,7 +265,16 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use('/api', csrfMiddleware);
 app.use('/v1', csrfMiddleware);
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', healthLimiter, (req, res) => {
+    const health = getSystemHealthSnapshot({ public: true });
+    return res.status(health.status === 'error' ? 503 : 200).json({
+        service: 'pivot-ai',
+        timestamp: getBeijingTimestamp(),
+        ...health
+    });
+});
+
+app.get('/api/health/details', healthLimiter, authMiddleware, (req, res) => {
     const health = getSystemHealthSnapshot();
     return res.status(health.status === 'error' ? 503 : 200).json({
         service: 'pivot-ai',
@@ -463,6 +487,7 @@ app.get('/', (req, res) => {
 app.use('/api', createAuthRouter({
     authMiddleware,
     loginLimiter: app.locals.loginLimiter,
+    registerLimiter: app.locals.registerLimiter,
     isPublicRegistrationEnabled,
     logAction,
     publicUrl: appConfig.publicUrl

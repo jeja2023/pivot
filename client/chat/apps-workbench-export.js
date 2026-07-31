@@ -89,15 +89,20 @@ function exportOfficialWriting(type) {
     }
     const html = buildOfficialWritingExportHtml();
     if (type === 'pdf') {
-        const win = window.open('', '_blank', 'noopener,noreferrer');
+        const printUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+        const win = window.open(printUrl, '_blank');
         if (!win) {
+            URL.revokeObjectURL(printUrl);
             showToast('浏览器阻止了打印窗口，请允许弹窗后重试', 'warning');
             return;
         }
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-        win.print();
+        win.opener = null;
+        win.addEventListener('load', () => {
+            win.focus();
+            win.print();
+            setTimeout(() => URL.revokeObjectURL(printUrl), 1000);
+        }, { once: true });
+        setTimeout(() => URL.revokeObjectURL(printUrl), 60_000);
         showToast('已打开打印窗口，可另存为 PDF');
         return;
     }

@@ -106,6 +106,10 @@ function createAttachmentsRouter({
         if (!fs.existsSync(target)) return res.status(404).json({ error: '附件文件不存在' });
 
         res.setHeader('Cache-Control', 'private, max-age=604800');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (['.html', '.htm'].includes(path.extname(target).toLowerCase())) {
+            res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+        }
         res.sendFile(target);
     }));
 

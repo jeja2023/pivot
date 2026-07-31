@@ -1,4 +1,5 @@
 const cp = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -80,6 +81,16 @@ function copyReleaseArtifactsToDownloads(rawArgs) {
     const latestInstallerTarget = path.join(downloadsDir, 'Pivot-Setup.exe');
     fs.copyFileSync(installerSource, latestInstallerTarget);
     copied.push(path.relative(root, latestInstallerTarget));
+
+    const checksumFiles = [...requiredArtifacts, 'Pivot-Setup.exe'];
+    const checksumLines = checksumFiles.map((fileName) => {
+        const content = fs.readFileSync(path.join(downloadsDir, fileName));
+        const digest = crypto.createHash('sha256').update(content).digest('hex');
+        return `${digest}  ${fileName}`;
+    });
+    const checksumTarget = path.join(downloadsDir, 'SHA256SUMS.txt');
+    fs.writeFileSync(checksumTarget, `${checksumLines.join('\n')}\n`, 'utf8');
+    copied.push(path.relative(root, checksumTarget));
 
     console.log(`> copied desktop update artifacts to downloads: ${copied.join(', ')}`);
 }

@@ -30,12 +30,17 @@ function lineTextAt(text, index) {
     return text.slice(start, end === -1 ? text.length : end).trim().slice(0, 180);
 }
 
-function findUnsafeInnerHtmlAssignments(file, rel) {
+function findUnsafeHtmlSinks(file, rel) {
     const text = fs.readFileSync(file, 'utf8');
     const findings = [];
     const patterns = [
         /\.innerHTML\s*(?:=|\+=)/g,
-        /\[['\"]innerHTML['\"]\]\s*(?:=|\+=)/g
+        /\[['\"]innerHTML['\"]\]\s*(?:=|\+=)/g,
+        /\.insertAdjacentHTML\s*\(/g,
+        /\.createContextualFragment\s*\(/g,
+        /\bdocument\.write(?:ln)?\s*\(/g,
+        /\.srcdoc\s*=/g,
+        /\[['\"]srcdoc['\"]\]\s*=/g
     ];
     for (const pattern of patterns) {
         let match;
@@ -54,15 +59,15 @@ function findUnsafeInnerHtmlAssignments(file, rel) {
 const findings = [];
 for (const file of walk(clientRoot)) {
     const rel = path.relative(root, file).replace(/\\/g, '/');
-    findings.push(...findUnsafeInnerHtmlAssignments(file, rel));
+    findings.push(...findUnsafeHtmlSinks(file, rel));
 }
 
 if (findings.length === 0) {
-    console.log('Safe HTML scan passed: no raw innerHTML assignments outside PivotSafeHtml.');
+    console.log('Safe HTML scan passed: no raw HTML sinks outside PivotSafeHtml.');
     process.exit(0);
 }
 
-console.error(`Safe HTML scan failed: ${findings.length} raw innerHTML assignment(s) found.`);
+console.error(`Safe HTML scan failed: ${findings.length} raw HTML sink(s) found.`);
 findings.slice(0, 30).forEach(item => {
     console.error(` - ${item.file}:${item.line} ${item.text}`);
 });

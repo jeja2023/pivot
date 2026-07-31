@@ -1191,3 +1191,10 @@ test('api access disabled blocks openai router at the router level', async () =>
         assert.equal(getApiAccessSetting(), previousValue);
     }
 });
+test('public health snapshot is lightweight and does not expose filesystem paths', () => {
+    const health = getSystemHealthSnapshot({ public: true });
+    assert.ok(['ok', 'degraded', 'error'].includes(health.status));
+    assert.ok(health.checks.some(item => item.name === 'database'));
+    assert.equal(JSON.stringify(health).includes('path'), false);
+    assert.equal(health.checks.some(item => item.name === 'dataDir' || item.name === 'uploadsDir' || item.name === 'disk'), false);
+});

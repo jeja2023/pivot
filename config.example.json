@@ -1,7 +1,7 @@
 {
   "mode": "remote",
   "environmentName": "Production LAN",
-  "remoteUrl": "http://pivot.example.local:3000/",
+  "remoteUrl": "http://192.168.10.20:3000/",
   "partition": "persist:pivot-production",
   "windowTitle": "智枢 Pivot",
   "allowExternalOpen": true,
@@ -12,10 +12,8 @@
     "checkOnStart": true,
     "autoDownload": true,
     "allowPrerelease": false,
-    "allowInsecureHttp": true,
-    "allowedOrigins": [
-      "http://pivot.example.local:3000"
-    ],
+    "allowInsecureHttp": false,
+    "allowedOrigins": [],
     "installOnQuit": true
   }
 }

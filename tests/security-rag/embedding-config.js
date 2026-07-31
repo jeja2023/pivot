@@ -191,7 +191,7 @@ test('非 root 管理员会把嵌入配置保存为个人设置', async () => {
     const req = {
         body: {
             rag_embedding_mode: 'http',
-            rag_embedding_api_url: 'https://personal-admin.example/v1',
+            rag_embedding_api_url: 'https://192.0.2.30/v1',
             rag_embedding_model: 'personal-admin-model'
         },
         user: adminUser
@@ -206,11 +206,11 @@ test('非 root 管理员会把嵌入配置保存为个人设置', async () => {
     try {
         await runExpressHandlers(embeddingRoute.route.stack.map(layer => layer.handle), req, res);
         assert.equal(res.statusCode, 200);
-        assert.equal(getEmbeddingConfig(adminUser.id).http.url, 'https://personal-admin.example/v1');
+        assert.equal(getEmbeddingConfig(adminUser.id).http.url, 'https://192.0.2.30/v1');
         assert.equal(getEmbeddingConfig(adminUser.id).http.model, 'personal-admin-model');
-        assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(RAG_CONFIG_KEYS.embeddingApiUrl)?.value === 'https://personal-admin.example/v1', false);
+        assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(RAG_CONFIG_KEYS.embeddingApiUrl)?.value === 'https://192.0.2.30/v1', false);
 
-        const deniedReq = { body: { rag_embedding_api_url: 'https://global-denied.example/v1' }, user: adminUser };
+        const deniedReq = { body: { rag_embedding_api_url: 'https://192.0.2.31/v1' }, user: adminUser };
         const deniedRes = {
             statusCode: 200,
             status(code) { this.statusCode = code; return this; },
@@ -322,7 +322,7 @@ test('RAG 嵌入请求会暴露友好的超时错误', async () => {
         let caught = null;
         try {
             await requestEmbedding('hello', {
-                url: 'https://embedding.example/v1',
+                url: 'https://192.0.2.40/v1',
                 model: 'embedding-test',
                 apiKey: ''
             }, { timeoutMs: 45000 });

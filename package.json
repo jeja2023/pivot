@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.236",
+  "version": "0.0.237",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -18,7 +18,7 @@
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
     "check": "npm run check:text && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:window-globals && npm run check:e2e-smoke",
-    "test:all": "node --test --test-concurrency=1 \"tests/*.test.js\"",
+    "test:all": "node scripts/run_node_tests.js",
     "test": "npm run check && npm run lint && npm run test:all",
     "verify": "npm test",
     "backup": "node scripts/backup_db.js",
@@ -28,7 +28,7 @@
     "desktop:icon": "node scripts/build_desktop_icon.js",
     "check:window-globals": "node scripts/check_window_globals_usage.js",
     "check:e2e-smoke": "node scripts/check_e2e_smoke.js",
-    "test:e2e": "playwright test --config tests/e2e/playwright.config.js"
+    "test:e2e": "node scripts/run_e2e_tests.js"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.4-r.1",
@@ -60,8 +60,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "electron": "^38.4.0",
-    "electron-builder": "^26.0.12",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.3.0",
     "nodemon": "^3.1.0"
   },
@@ -75,6 +75,7 @@
       "desktop/**",
       "server/**",
       "client/**",
+      "!client/*.exe",
       "scripts/**",
       "package.json",
       "package-lock.json",

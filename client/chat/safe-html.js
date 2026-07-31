@@ -36,11 +36,25 @@
         element.replaceChildren(...Array.from(scratch.childNodes));
     };
 
+    const prependHtml = (element, html, options = {}) => {
+        if (!element) return;
+        const raw = String(html ?? '');
+        if (!window.DOMPurify) {
+            element.prepend(document.createTextNode(raw));
+            return;
+        }
+        const scratch = createContextElement(element);
+        scratch.innerHTML = raw;
+        DOMPurify.sanitize(scratch, { ...options, IN_PLACE: true });
+        element.prepend(...Array.from(scratch.childNodes));
+    };
+
     const api = {
         escapeHtml,
         escapeAttr,
         sanitizeHtml,
-        setHtml
+        setHtml,
+        prependHtml
     };
 
     window.PivotSafeHtml = api;

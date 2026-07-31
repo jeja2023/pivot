@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { classifyAuditFindings } = require('../scripts/check_audit_policy');
+const { classifyAuditFindings, selectAuditPackages } = require('../scripts/check_audit_policy');
 
 // 构造一份最小可用的 npm audit JSON 结果。
 function buildAuditResult({ name = 'demo-pkg', severity = 'high', fixAvailable = false, title = '示例高危漏洞', url = 'https://example.test/GHSA-demo' } = {}) {
@@ -93,4 +93,14 @@ test('中低危漏洞不进入门禁拦截范围', () => {
     const { failures, accepted } = classifyAuditFindings(buildAuditResult({ severity: 'moderate' }), new Map());
     assert.equal(failures.length, 0);
     assert.equal(accepted.length, 0);
+});
+test('packaged desktop runtime audit includes Electron without build-only tooling', () => {
+    const audit = {
+        vulnerabilities: {
+            electron: { name: 'electron', severity: 'high', via: [] },
+            'electron-builder': { name: 'electron-builder', severity: 'high', via: [] }
+        }
+    };
+    const selected = selectAuditPackages(audit, ['electron']);
+    assert.deepEqual(Object.keys(selected.vulnerabilities), ['electron']);
 });

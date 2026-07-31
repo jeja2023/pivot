@@ -116,7 +116,7 @@ async function showAgentWorkflowVersionDiff(workflow, version) {
     const existing = body.querySelector('.agent-workflow-diff-panel');
     existing?.remove();
     if (!res.ok) return showToast(data.error || '版本对比失败', 'error');
-    body.insertAdjacentHTML('afterbegin', agentWorkflowDiffMarkup(data));
+    PivotSafeHtml.prependHtml(body, agentWorkflowDiffMarkup(data));
 }
 
 async function openAgentWorkflowVersions() {
