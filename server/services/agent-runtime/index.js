@@ -25,7 +25,8 @@ const {
     createAgentTemplate,
     deleteAgentTemplate,
     listAgentTemplates,
-    updateAgentTemplate
+    updateAgentTemplate,
+    assertTemplateAccess
 } = require('../agent-templates');
 const {
     createAgentWorkflow,
@@ -191,7 +192,16 @@ function getRunStatus(runId) {
 }
 
 function getRunUser(runId) {
-    return db.prepare("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?").get(runId);
+    return db.prepare("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL").get(runId);
+}
+
+function assertRunUserActive(user) {
+    const active = db.prepare("SELECT id FROM users WHERE id = ? AND COALESCE(status, 'active') != 'disabled' AND deleted_at IS NULL").get(user?.id);
+    if (!active) {
+        const err = new Error('任务所属账号已被禁用或删除。');
+        err.code = 'AGENT_USER_REVOKED';
+        throw err;
+    }
 }
 
 function markRunError(runId, message) {
@@ -211,6 +221,7 @@ function getAgentQueue() {
             logger,
             instanceId: AGENT_INSTANCE_ID,
             maxConcurrent: getAgentMaxConcurrentRuns(),
+            maxConcurrentPerUser: Math.max(Number.parseInt(process.env.AGENT_MAX_CONCURRENT_PER_USER || '2', 10) || 2, 1),
             lockMs: AGENT_QUEUE_LOCK_MS,
             getRunUser,
             runAgent,
@@ -581,6 +592,7 @@ function getAgentRuntimeDeps() {
 
 async function runAgent(runId, user) {
     try {
+        assertRunUserActive(user);
         const run = getRunForUser(runId, user, { includeDeleted: true });
         if (!run) throw new Error('Agent run not found.');
         if (run.deleted_at) return;
@@ -747,6 +759,7 @@ async function runAgent(runId, user) {
 
             const startedAt = Date.now();
             try {
+                assertRunUserActive(user);
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
@@ -864,6 +877,19 @@ async function runAgent(runId, user) {
             return;
         }
         logger.error({ err: e.message, runId }, '智能体运行失败');
+        if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId)) {
+            const currentStatus = getRunStatus(runId);
+            if (currentStatus !== 'cancelled' && currentStatus !== 'deleted') {
+                updateRun(runId, {
+                    status: 'cancelled',
+                    error_message: e.message,
+                    cancelled_at: getBeijingTimestamp(),
+                    completed_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                });
+            }
+            return;
+        }
         const retryRow = db.prepare('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?').get(runId);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
@@ -1033,8 +1059,40 @@ function createAgentRun({
     dagInputs = null,
     workflowId = null,
     workflowVersion = null,
-    modelRouter = 'fixed'
+    modelRouter = 'fixed',
+    dedupeKey = null
 }) {
+    assertRunUserActive(user);
+    const normalizedScheduleId = scheduleId === null || scheduleId === '' ? null : Number(scheduleId);
+    if (normalizedScheduleId !== null && (!Number.isInteger(normalizedScheduleId) || normalizedScheduleId <= 0)) {
+        const err = new Error('计划标识无效。');
+        err.status = 400;
+        throw err;
+    }
+    if (normalizedScheduleId !== null && !db.prepare('SELECT id FROM agent_schedules WHERE id = ? AND user_id = ?').get(normalizedScheduleId, user.id)) {
+        const err = new Error('计划不存在或无权使用。');
+        err.status = 403;
+        throw err;
+    }
+    const normalizedTemplateId = templateId === null || templateId === '' ? null : Number(templateId);
+    if (normalizedTemplateId !== null && (!Number.isInteger(normalizedTemplateId) || normalizedTemplateId <= 0)) {
+        const err = new Error('任务模板标识无效。');
+        err.status = 400;
+        throw err;
+    }
+    if (normalizedTemplateId !== null) {
+        const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(normalizedTemplateId);
+        if (!assertTemplateAccess(template, user, false)) {
+            const err = new Error('任务模板不存在或无权使用。');
+            err.status = 403;
+            throw err;
+        }
+    }
+    const normalizedDedupeKey = dedupeKey ? String(dedupeKey).trim().slice(0, 240) : null;
+    if (normalizedDedupeKey) {
+        const existing = db.prepare('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
+        if (existing) return existing;
+    }
     const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
     const normalizedRunMode = normalizeRunMode(runMode);
     const normalizedRouter = normalizeRouterStrategy(modelRouter);
@@ -1073,15 +1131,17 @@ function createAgentRun({
     }
     const modelCfg = getRunnableModelForUser(effectiveModelId, user);
     if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('Please choose an accessible model for the agent.');
-    db.prepare(`
+    const insert = db.prepare(`
         INSERT INTO agent_runs (
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
             priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
-            retry_limit, max_token_budget, template_id, schedule_id, context_config, resume_from_step,
+            retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
             metadata, model_router, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    try {
+        insert.run(
         runId,
         user.id,
         sessionId || null,
@@ -1100,15 +1160,23 @@ function createAgentRun({
         normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
         normalizePositiveInt(retryLimit, 1, 0, 5),
         normalizePositiveInt(maxTokenBudget, 0, 0, 10000000),
-        templateId || null,
-        scheduleId || null,
+        normalizedTemplateId,
+        normalizedScheduleId,
+        normalizedDedupeKey,
         serializeContextConfig(contextConfig),
         normalizePositiveInt(resumeFromStep, 0, 0, 999),
         JSON.stringify(runMetadata),
         normalizedRouter,
         now,
         now
-    );
+        );
+    } catch (err) {
+        if (normalizedDedupeKey && String(err.code || '').includes('CONSTRAINT')) {
+            const existing = db.prepare('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
+            if (existing) return existing;
+        }
+        throw err;
+    }
     enqueueAgentRun(runId, user);
     const run = getRunForUser(runId, user);
     publishAgentRunEvent(runId, 'created');

@@ -112,3 +112,7 @@ This document records optimization work that is intentionally staged instead of 
 - **依赖跨主版本落后**：除 Electron 外，`express` 4→5、`better-sqlite3` 11→13、`mongodb` 6→7、`uuid` 11→14、`bcryptjs` 2→3 均为跨主版本升级，需按「一次一个、带回归」的节奏推进，不做批量升级。
 - **同步文件 IO**：`server/routes` 与 `server/services` 中约 19 处 `readFileSync` / `writeFileSync`，需逐个确认是否落在请求热路径上；启动期与低频管理操作可保留。
 - **内置工具库覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支尚未覆盖，其中 IM 涉及内网出站通知，建议下一轮优先补齐。
+
+## v0.0.241 自动化治理收口（2026-08-03）
+
+本版本完成自动化计划的产品级可靠性收口：账号撤权会暂停计划并取消未完成运行；调度器使用租约与计划时段幂等键，保证崩溃恢复时不丢计划、不重复建任务；计划输入、模板和工作流关联由服务端严格校验；失败采用指数退避并记录错误；计划数量、账号级并发和自动化写操作均有边界；任务中心按计划 ID 查询历史运行。新增回归覆盖周日计算、非法计划输入、手动运行幂等和撤权后的调度隔离。

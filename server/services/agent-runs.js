@@ -57,6 +57,13 @@ function listRuns(user, options = {}) {
     const runType = normalizeRunTypeFilter(options.runType || options.run_type || options.type);
     const where = ['r.user_id = ?', 'r.deleted_at IS NULL'];
     const params = [user.id];
+    const scheduleId = options.scheduleId === undefined || options.scheduleId === null || options.scheduleId === ''
+        ? null
+        : Number(options.scheduleId);
+    if (scheduleId !== null && Number.isInteger(scheduleId) && scheduleId > 0) {
+        where.push('r.schedule_id = ?');
+        params.push(scheduleId);
+    }
     if (!normalizeBooleanOption(options.includePreview)) {
         where.push(previewRunFilterSql('r'));
     }

@@ -51,6 +51,7 @@ const {
 } = require('./security-helpers');
 const { MAX_DAG_NODES, inspectDagTopology, normalizeDagSpec } = require('../server/services/agent-validators');
 const { dagConditionSatisfied } = require('../server/services/agent-dag-utils');
+const { runDueAgentSchedules } = require('../server/services/agent-schedules');
 require('./security-agent/preflight-governance');
 require('./security-agent/queue-scheduling');
 
@@ -1508,4 +1509,63 @@ test('agent.streaming SSE 事件按用户隔离并携带累加快照字段', () 
     assert.match(text, /tool_calls/);
     // 不应泄漏到其他用户
     assert.doesNotMatch(other.chunks.join(''), /run_streaming_test/);
+});
+
+test('automation schedules validate Sunday, reject malformed payloads, and deduplicate manual runs', () => {
+    const suffix = Date.now();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`schedule_guard_${suffix}`, 'hash', 'Schedule Guard', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `schedule_guard_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Schedule Guard Model', 'http://127.0.0.1:65530/v1/chat/completions', `schedule-guard-${suffix}`);
+    const modelId = Number(modelInfo.lastInsertRowid);
+
+    assert.match(computeNextScheduleRun('weekly', '09:00', 0, '2026-05-16 10:00:00'), /^2026-05-17 09:00/);
+    assert.throws(() => createAgentSchedule(user, {
+        name: 'Invalid schedule',
+        goal: 'Validate malformed schedule input',
+        modelId,
+        frequency: 'hourly',
+        timeOfDay: '09:00'
+    }), /周期无效/);
+    assert.throws(() => createAgentSchedule(user, {
+        name: 'Invalid time',
+        goal: 'Validate malformed schedule input',
+        modelId,
+        frequency: 'daily',
+        timeOfDay: '25:99'
+    }), /HH:MM/);
+
+    const schedule = createAgentSchedule(user, {
+        name: 'Idempotent schedule',
+        goal: 'Run a guarded scheduled task',
+        modelId,
+        frequency: 'manual',
+        timeOfDay: '09:00'
+    });
+    const first = runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
+    const second = runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
+    assert.equal(second.id, first.id);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_runs WHERE schedule_id = ?').get(schedule.id).count, 1);
+    assert.equal(listRuns(user, { scheduleId: schedule.id, limit: 10 }).data.length, 1);
+    cancelAgentRun(first.id, user);
+});
+
+test('revoked accounts cannot dispatch due automation schedules', () => {
+    const suffix = Date.now();
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`schedule_revoked_${suffix}`, 'hash', 'Schedule Revoked', 'QA', 'user', 'disabled');
+    const userId = Number(userInfo.lastInsertRowid);
+    db.prepare(`
+        INSERT INTO agent_schedules (user_id, name, goal, frequency, time_of_day, day_of_week, status, next_run_at, run_config, created_at, updated_at)
+        VALUES (?, ?, ?, 'daily', '09:00', 1, 'active', datetime('now', '+8 hours', '-1 day'), '{}', datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, 'Revoked schedule', 'Should not dispatch after account revocation');
+    assert.deepEqual(runDueAgentSchedules(10), []);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_runs WHERE user_id = ?').get(userId).count, 0);
 });

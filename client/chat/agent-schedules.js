@@ -247,13 +247,42 @@ async function saveAgentScheduleEditor() {
     }
 }
 
-async function runAgentSchedule(scheduleId) {
+async function runAgentScheduleLegacy(scheduleId) {
     const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}/run`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
     showToast('计划任务已入队', 'success');
     await window.openAgentWorkbench?.();
     await window.openAgentRun(data.run.id);
+}
+
+async function runAgentSchedule(scheduleId) {
+    const targetId = String(scheduleId);
+    const buttons = [...document.querySelectorAll('[data-agent-workflow-schedule-run], [data-automation-schedule-run]')]
+        .filter(button => button.dataset.agentWorkflowScheduleRun === targetId || button.dataset.automationScheduleRun === targetId);
+    const key = typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    buttons.forEach(button => {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+    });
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}/run`, {
+            method: 'POST',
+            headers: { 'Idempotency-Key': key }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
+        showToast('计划任务已入队', 'success');
+        await window.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
+        await window.openAgentRun(data.run.id);
+    } finally {
+        buttons.forEach(button => {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+        });
+    }
 }
 
 async function toggleAgentSchedule(scheduleId) {
@@ -285,7 +314,7 @@ async function toggleAgentSchedule(scheduleId) {
 async function openAgentScheduleRuns(scheduleId) {
     const schedule = agentSchedulesCache.find(item => String(item.id) === String(scheduleId));
     if (!schedule) return;
-    await window.openAgentWorkbench?.({ query: schedule.name || '', runType: 'scheduled' });
+    await window.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
 }
 
 function deleteAgentSchedule(scheduleId) {

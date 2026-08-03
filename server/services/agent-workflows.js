@@ -402,6 +402,15 @@ function deleteAgentWorkflow(workflowId, user) {
     if (!workflow) return null;
     const now = getBeijingTimestamp();
     db.prepare('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, workflow.id);
+    db.prepare(`
+        UPDATE agent_schedules
+        SET status = 'paused', next_run_at = NULL, dispatch_retry_at = NULL,
+            claim_token = NULL, claim_expires_at = NULL,
+            last_error = '引用的工作流已删除', updated_at = ?
+        WHERE user_id = ? AND deleted_at IS NULL
+          AND json_valid(run_config)
+          AND CAST(json_extract(run_config, '$.workflowId') AS INTEGER) = ?
+    `).run(now, user.id, workflow.id);
     return workflow;
 }
 

@@ -116,6 +116,7 @@ function deleteAgentTemplate(templateId, user) {
 }
 
 module.exports = {
+    assertTemplateAccess,
     createAgentTemplate,
     deleteAgentTemplate,
     listAgentTemplates,

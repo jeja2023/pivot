@@ -28,6 +28,22 @@ const {
     withPermissionFlags
 } = require('../permissions');
 
+function revokeUserAutomation(userId, now, reason = '账号已被禁用或删除') {
+    db.prepare(`
+        UPDATE agent_schedules
+        SET status = 'paused', next_run_at = NULL, dispatch_retry_at = NULL,
+            claim_token = NULL, claim_expires_at = NULL, last_error = ?, updated_at = ?
+        WHERE user_id = ? AND deleted_at IS NULL
+    `).run(reason, now, userId);
+    db.prepare(`
+        UPDATE agent_runs
+        SET status = 'cancelled', error_message = ?, cancelled_at = ?, completed_at = ?,
+            locked_by = NULL, lock_expires_at = NULL, updated_at = ?
+        WHERE user_id = ? AND deleted_at IS NULL
+          AND status IN ('queued', 'running', 'approval_required')
+    `).run(reason, now, now, now, userId);
+}
+
 function createAdminUsersRouter({
     authMiddleware,
     adminMiddleware,
@@ -109,8 +125,14 @@ function createAdminUsersRouter({
         if (targetUserId === req.user.id && (safeRole !== 'admin' || safeStatus === 'disabled')) {
             return res.status(400).json({ error: '不能降低或禁用自己的管理员权限' });
         }
-        const info = db.prepare('UPDATE users SET nickname = ?, unit = ?, role = ?, status = ? WHERE id = ?')
-          .run(nickname, unit, safeRole, safeStatus, targetUserId);
+        const now = getBeijingTimestamp();
+        const updateUserTx = db.transaction(() => {
+            const info = db.prepare('UPDATE users SET nickname = ?, unit = ?, role = ?, status = ? WHERE id = ?')
+                .run(nickname, unit, safeRole, safeStatus, targetUserId);
+            if (safeStatus === 'disabled' && info.changes > 0) revokeUserAutomation(targetUserId, now);
+            return info;
+        });
+        const info = updateUserTx();
         if (info.changes === 0) return res.status(404).json({ error: '用户不存在' });
         logAction(req, '修改用户', `用户ID: ${targetUserId}，角色: ${safeRole}，状态: ${safeStatus}`);
         res.json({ success: true });
@@ -455,6 +477,7 @@ function createAdminUsersRouter({
         }
         const deleteUserTx = db.transaction(() => {
             const now = getBeijingTimestamp();
+            revokeUserAutomation(targetUserId, now);
             db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(targetUserId);
             db.prepare("UPDATE api_keys SET status = 'disabled' WHERE user_id = ?").run(targetUserId);
             db.prepare('UPDATE sessions SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL').run(now, targetUserId);

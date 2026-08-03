@@ -229,6 +229,13 @@ const chatLimiter = rateLimit({
     message: { error: '您的提问速度过快，请稍作休息' }
 });
 
+const automationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    keyGenerator: (req) => req.user ? `user_${req.user.id}` : getClientIp(req),
+    message: { error: '自动化操作过于频繁，请稍后再试' }
+});
+
 const probeLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 20,
@@ -254,6 +261,7 @@ app.locals.registerLimiter = registerLimiter;
 app.locals.chatLimiter = chatLimiter;
 app.locals.probeLimiter = probeLimiter;
 app.locals.embeddingLimiter = embeddingLimiter;
+app.locals.automationLimiter = automationLimiter;
 
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
 if (corsOrigins.length > 0) {
@@ -559,7 +567,8 @@ app.use('/api', createMemoriesRouter({
 
 app.use('/api', createAgentsRouter({
     authMiddleware,
-    logAction
+    logAction,
+    automationLimiter: app.locals.automationLimiter
 }));
 
 app.use('/api', createEventsRouter({

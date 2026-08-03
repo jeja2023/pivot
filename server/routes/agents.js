@@ -62,8 +62,9 @@ const {
     updateAgentWorkflow
 } = require('../services/agent-runtime');
 
-function createAgentsRouter({ authMiddleware, logAction }) {
+function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     const router = express.Router();
+    const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: formatToolList(req.user) });
@@ -232,7 +233,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         res.json({ data: listAgentSchedules(req.user) });
     }));
 
-    router.post('/agents/schedules', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/agents/schedules', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const schedule = createAgentSchedule(req.user, req.body || {});
         logAction(req, '创建智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}`);
         res.status(201).json({ success: true, schedule });
@@ -245,8 +246,8 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         res.json({ success: true, schedule });
     }));
 
-    router.post('/agents/schedules/:id/run', authMiddleware, asyncHandler(async (req, res) => {
-        const run = runAgentScheduleNow(req.params.id, req.user);
+    router.post('/agents/schedules/:id/run', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const run = runAgentScheduleNow(req.params.id, req.user, { idempotencyKey: req.get('Idempotency-Key') });
         if (!run) return res.status(404).json({ error: '智能体计划不存在。' });
         logAction(req, '手动运行智能体计划', `任务ID: ${run.id}，计划ID: ${req.params.id}`);
         res.status(202).json({ success: true, run });
@@ -306,6 +307,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             status: req.query.status,
             query: req.query.query,
             runType: req.query.runType || req.query.run_type || req.query.type,
+            scheduleId: req.query.scheduleId || req.query.schedule_id,
             includePreview: req.query.includePreview || req.query.include_preview
         });
         res.json(result);
@@ -315,7 +317,7 @@ function createAgentsRouter({ authMiddleware, logAction }) {
         res.json({ data: listDeletedRunsForAdmin(req.user, normalizeLimit(req.query.limit, 100, 200)) });
     }));
 
-    router.post('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/agents/runs', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const run = createAgentRun({
             user: req.user,
             goal: req.body?.goal,
@@ -333,7 +335,8 @@ function createAgentsRouter({ authMiddleware, logAction }) {
             retryLimit: req.body?.retryLimit,
             maxTokenBudget: req.body?.maxTokenBudget,
             templateId: req.body?.templateId,
-            scheduleId: req.body?.scheduleId,
+            scheduleId: null,
+            dedupeKey: req.get('Idempotency-Key') ? `manual:${String(req.get('Idempotency-Key')).trim().slice(0, 180)}` : null,
             contextConfig: req.body?.contextConfig,
             metadata: req.body?.metadata,
             dagSpec: req.body?.dagSpec,

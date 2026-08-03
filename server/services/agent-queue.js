@@ -5,6 +5,7 @@ function createAgentQueue({
     logger,
     instanceId,
     maxConcurrent,
+    maxConcurrentPerUser = 2,
     lockMs = DEFAULT_LOCK_MS,
     getRunUser,
     runAgent,
@@ -15,8 +16,10 @@ function createAgentQueue({
     const activeStartedAt = new Map();
     const lockRenewTimers = new Map();
     const queuedHints = new Set();
+    const activeUserCounts = new Map();
     let processScheduled = false;
     let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
+    const safeMaxConcurrentPerUser = Math.max(Number.parseInt(maxConcurrentPerUser, 10) || 2, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
     const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
 
@@ -33,7 +36,7 @@ function createAgentQueue({
 
     function claimNextRun() {
         const rows = db.prepare(`
-            SELECT id
+            SELECT id, user_id
             FROM agent_runs
             WHERE status = 'queued'
               AND deleted_at IS NULL
@@ -43,10 +46,11 @@ function createAgentQueue({
                   OR lock_expires_at <= datetime('now', '+8 hours')
               )
             ORDER BY priority DESC, created_at ASC
-            LIMIT 10
+            LIMIT 50
         `).all();
 
         for (const row of rows) {
+            if ((activeUserCounts.get(row.user_id) || 0) >= safeMaxConcurrentPerUser) continue;
             const now = getTimestamp();
             const result = db.prepare(`
                 UPDATE agent_runs
@@ -66,7 +70,7 @@ function createAgentQueue({
                   )
             `).run(instanceId, lockExpiresAt(), now, now, now, row.id);
 
-            if (result.changes === 1) return row.id;
+            if (result.changes === 1) return row;
         }
 
         return null;
@@ -119,16 +123,21 @@ function createAgentQueue({
 
     function processQueue() {
         while (activeRunIds.size < safeMaxConcurrent) {
-            const runId = claimNextRun();
-            if (!runId || activeRunIds.has(runId)) break;
+            const claimed = claimNextRun();
+            if (!claimed || activeRunIds.has(claimed.id)) break;
+            const runId = claimed.id;
             const user = getRunUser(runId);
             if (!user) {
-                markRunError(runId, 'Agent run user no longer exists.');
+                const status = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status;
+                if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors'].includes(status)) {
+                    markRunError(runId, 'Agent run user no longer exists.');
+                }
                 releaseRun(runId);
                 continue;
             }
 
             activeRunIds.add(runId);
+            activeUserCounts.set(user.id, (activeUserCounts.get(user.id) || 0) + 1);
             activeStartedAt.set(runId, Date.now());
             startLockRenewal(runId);
             queuedHints.delete(runId);
@@ -137,6 +146,9 @@ function createAgentQueue({
                 markRunError(runId, err.message);
             }).finally(() => {
                 activeRunIds.delete(runId);
+                const nextUserCount = Math.max((activeUserCounts.get(user.id) || 1) - 1, 0);
+                if (nextUserCount === 0) activeUserCounts.delete(user.id);
+                else activeUserCounts.set(user.id, nextUserCount);
                 activeStartedAt.delete(runId);
                 stopLockRenewal(runId);
                 releaseRun(runId);
@@ -195,6 +207,7 @@ function createAgentQueue({
             queued,
             hinted: queuedHints.size,
             maxConcurrent: safeMaxConcurrent,
+            maxConcurrentPerUser: safeMaxConcurrentPerUser,
             oldestQueuedRunId: oldestQueued?.id || null,
             oldestQueuedAgeMs: Math.max(0, Number(oldestQueued?.age_ms || 0))
         };

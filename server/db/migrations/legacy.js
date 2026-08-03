@@ -678,6 +678,7 @@ function runMigrations() {
     ensureColumn('agent_runs', 'deleted_at', 'DATETIME');
     ensureColumn('agent_runs', 'deleted_by_user', 'INTEGER');
     ensureColumn('agent_runs', 'delete_reason', 'TEXT');
+    ensureColumn('agent_runs', 'dedupe_key', 'TEXT');
     ensureColumn('agent_steps', 'error_message', 'TEXT');
     ensureColumn('agent_steps', 'duration_ms', 'INTEGER DEFAULT 0');
     ensureColumn('agent_steps', 'started_at', 'DATETIME');
@@ -965,6 +966,11 @@ function runMigrations() {
     ensureColumn('agent_schedules', 'next_run_at', 'DATETIME');
     ensureColumn('agent_schedules', 'last_run_at', 'DATETIME');
     ensureColumn('agent_schedules', 'last_run_id', 'TEXT');
+    ensureColumn('agent_schedules', 'claim_token', 'TEXT');
+    ensureColumn('agent_schedules', 'claim_expires_at', 'DATETIME');
+    ensureColumn('agent_schedules', 'dispatch_failures', 'INTEGER DEFAULT 0');
+    ensureColumn('agent_schedules', 'dispatch_retry_at', 'DATETIME');
+    ensureColumn('agent_schedules', 'last_error', 'TEXT');
     ensureColumn('agent_schedules', 'deleted_at', 'DATETIME');
     ensureColumn('agent_workflows', 'description', 'TEXT');
     ensureColumn('agent_workflows', 'current_version_id', 'INTEGER');
@@ -1033,11 +1039,13 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_status_created ON agent_runs(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_status_priority ON agent_runs(status, priority, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_queue_claim ON agent_runs(status, priority, created_at, locked_by, lock_expires_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_user_dedupe ON agent_runs(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_runs_deleted ON agent_runs(deleted_at, user_id);
         CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
         CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_dispatch ON agent_schedules(status, dispatch_retry_at, claim_expires_at, next_run_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);

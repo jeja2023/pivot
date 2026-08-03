@@ -12,6 +12,8 @@ let agentTemplatesCache = [];
 
 let agentSchedulesCache = [];
 
+let agentScheduleFilterId = '';
+
 let agentArtifactsCache = [];
 
 let agentRealtimeSource = null;
@@ -155,6 +157,7 @@ window.openAgentWorkbench = async function(options = {}) {
     if (!panel) return;
     const queryInput = document.getElementById('agent-filter-query');
     const runTypeInput = document.getElementById('agent-filter-run-type');
+    agentScheduleFilterId = Object.hasOwn(options, 'scheduleId') ? String(options.scheduleId || '') : '';
     if (queryInput && Object.hasOwn(options, 'query')) queryInput.value = String(options.query || '');
     if (runTypeInput && Object.hasOwn(options, 'runType')) runTypeInput.value = String(options.runType || '');
     panel.querySelectorAll('.admin-root-only').forEach(el => {

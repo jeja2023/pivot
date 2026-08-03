@@ -297,6 +297,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     if (status) params.set('status', status);
     if (runType) params.set('runType', runType);
     if (query) params.set('query', query);
+    if (agentScheduleFilterId) params.set('scheduleId', agentScheduleFilterId);
     const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '任务列表加载失败');

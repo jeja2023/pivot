@@ -653,6 +653,7 @@ function initSchema() {
             export_count INTEGER DEFAULT 0,
             template_id INTEGER,
             schedule_id INTEGER,
+            dedupe_key TEXT,
             context_config TEXT,
             resume_from_step INTEGER DEFAULT 0,
             metadata TEXT,
@@ -854,6 +855,11 @@ function initSchema() {
             next_run_at DATETIME,
             last_run_at DATETIME,
             last_run_id TEXT,
+            claim_token TEXT,
+            claim_expires_at DATETIME,
+            dispatch_failures INTEGER DEFAULT 0,
+            dispatch_retry_at DATETIME,
+            last_error TEXT,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,
@@ -1147,6 +1153,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_user ON api_call_logs(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_key ON api_call_logs(api_key_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_user_dedupe ON agent_runs(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
         CREATE INDEX IF NOT EXISTS idx_agent_traces_user_created ON agent_traces(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_run_started ON agent_trace_spans(run_id, started_at, id);
@@ -1160,6 +1167,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_templates_user ON agent_templates(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_schedules_dispatch ON agent_schedules(status, dispatch_retry_at, claim_expires_at, next_run_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
