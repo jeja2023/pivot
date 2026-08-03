@@ -228,7 +228,9 @@ function setMessageActionId(messageContent, id) {
 
 window.setMessageActionId = setMessageActionId;
 
+/* Legacy attachment renderer kept as a compatibility reference. The modern renderer below is canonical.
 function renderAttachmentPreviews() {
+    if (typeof renderAttachmentPreviewsModern === 'function') return renderAttachmentPreviewsModern();
     const previewArea = document.getElementById('attachment-preview');
     if (pendingAttachments.length === 0) {
         previewArea.classList.add('hidden');
@@ -274,6 +276,110 @@ function renderAttachmentPreviews() {
         }
         return `<div class="preview-card file-card preview-card-local">${icon}<div class="file-main"><div class="file-name">${escapeCodeHtml(file.name)}</div>${badge}</div>${removeButton(index)}</div>`;
     }).join(''));
+}
+
+*/
+function renderAttachmentPreviews() {
+    const previewArea = document.getElementById('attachment-preview');
+    if (!previewArea) return;
+    if (pendingAttachments.length === 0) {
+        previewArea.classList.add('hidden');
+        PivotSafeHtml.setHtml(previewArea, '');
+        previewArea.title = '';
+        previewArea.removeAttribute('aria-label');
+        return;
+    }
+
+    const maxAttachments = typeof window.getMaxPendingAttachments === 'function'
+        ? window.getMaxPendingAttachments()
+        : (window.MAX_PENDING_ATTACHMENTS || 5);
+    if (pendingAttachments.length > maxAttachments) pendingAttachments.splice(maxAttachments);
+    if (typeof window.syncPendingAttachmentsGlobal === 'function') window.syncPendingAttachmentsGlobal();
+    previewArea.classList.remove('hidden');
+    const imageCount = pendingAttachments.filter(file => typeof window.isChatImageAttachment === 'function'
+        ? window.isChatImageAttachment(file)
+        : String(file.type || '').startsWith('image/')).length;
+    const fileCount = Math.max(0, pendingAttachments.length - imageCount);
+    previewArea.title = [`附件 ${pendingAttachments.length}`, `图片 ${imageCount}`, `文件 ${fileCount}`].join(' · ');
+    previewArea.setAttribute('aria-label', previewArea.title);
+
+    const removeButton = index => `
+        <button type="button" class="remove-preview" data-remove-attachment="${index}" aria-label="移除附件" title="移除附件">
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path>
+            </svg>
+        </button>
+    `;
+    const imageIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><circle cx="9" cy="9" r="1.5"></circle><path d="M21 16l-5-5-4 4-2-2-5 5"></path></svg>';
+    const renderImageCard = (file, index, previewUrl, isLocal) => {
+        const name = String(file?.name || '图片');
+        const hasPreviewUrl = Boolean(previewUrl);
+        const fallbackTitle = hasPreviewUrl ? '正在读取图片' : (isLocal ? '图片待发送' : '图片预览不可用');
+        const fallbackDetail = hasPreviewUrl ? '预览加载中' : (isLocal ? '发送时上传' : '可打开原文件');
+        return `
+            <div class="preview-card image-card preview-card-local" data-image-preview-card data-preview-local="${isLocal ? 'true' : 'false'}" data-preview-state="${hasPreviewUrl ? 'loading' : 'empty'}" title="${escapeAttrValue(name)}">
+                <div class="preview-image-frame${hasPreviewUrl ? ' is-loading' : ' is-empty'}" data-preview-image-frame>
+                    ${hasPreviewUrl ? `<img class="preview-image" data-preview-image data-preview-src="${escapeAttrValue(previewUrl)}" alt="" decoding="async">` : ''}
+                    <div class="preview-image-fallback" data-preview-fallback aria-live="polite">
+                        <span class="preview-image-fallback-icon">${imageIcon}</span>
+                        <span class="preview-image-fallback-copy">
+                            <strong data-preview-fallback-title>${fallbackTitle}</strong>
+                            <small data-preview-fallback-detail>${fallbackDetail}</small>
+                        </span>
+                    </div>
+                </div>
+                <div class="file-main">
+                    <div class="file-name">${escapeCodeHtml(name)}</div>
+                    <span class="preview-state-badge">${isLocal ? '待上传' : '已上传'}</span>
+                </div>
+                ${removeButton(index)}
+            </div>
+        `;
+    };
+    const renderFileCard = (file, index, isLocal) => {
+        const icon = `<div class="file-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>`;
+        const name = String(file?.name || '附件');
+        return `<div class="preview-card file-card preview-card-local">${icon}<div class="file-main"><div class="file-name">${escapeCodeHtml(name)}</div>${isLocal ? '<span class="preview-state-badge">待上传</span>' : ''}</div>${removeButton(index)}</div>`;
+    };
+
+    PivotSafeHtml.setHtml(previewArea, pendingAttachments.map((file, index) => {
+        const isImage = typeof window.isChatImageAttachment === 'function'
+            ? window.isChatImageAttachment(file)
+            : String(file.type || '').startsWith('image/');
+        const isLocal = file?.kind === 'local' || file?.status === 'local';
+        const previewUrl = isLocal ? String(file.previewUrl || '') : String(file.url || '');
+        return isImage ? renderImageCard(file, index, previewUrl, isLocal) : renderFileCard(file, index, isLocal);
+    }).join(''));
+
+    previewArea.querySelectorAll('[data-preview-image]').forEach(image => {
+        const frame = image.closest('[data-preview-image-frame]');
+        const card = image.closest('[data-image-preview-card]');
+        const fallbackTitle = frame?.querySelector('[data-preview-fallback-title]');
+        const fallbackDetail = frame?.querySelector('[data-preview-fallback-detail]');
+        const setReady = () => {
+            if (!frame || !card) return;
+            frame.classList.remove('is-loading', 'is-error');
+            frame.classList.add('is-ready');
+            card.dataset.previewState = 'ready';
+        };
+        const setError = () => {
+            if (!frame || !card) return;
+            frame.classList.remove('is-loading', 'is-ready');
+            frame.classList.add('is-error');
+            card.dataset.previewState = 'error';
+            const isLocal = card.dataset.previewLocal === 'true';
+            if (fallbackTitle) fallbackTitle.textContent = isLocal ? '图片已添加' : '图片预览不可用';
+            if (fallbackDetail) fallbackDetail.textContent = isLocal ? '预览不可用，发送时上传' : '可打开原文件';
+        };
+        image.addEventListener('load', setReady, { once: true });
+        image.addEventListener('error', setError, { once: true });
+        const previewSrc = image.dataset.previewSrc || '';
+        if (previewSrc) image.src = previewSrc;
+        if (image.complete) {
+            if (Number(image.naturalWidth || 0) > 0) setReady();
+            else setError();
+        }
+    });
 }
 
 document.addEventListener('click', (event) => {

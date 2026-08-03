@@ -222,7 +222,7 @@ window.openAgentRun = async function(runId, options = {}) {
                 ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
                 ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}" title="${Number(checkpoints.total || 0) ? `从最近的 ${Number(checkpoints.total)} 个持久化检查点恢复上下文` : '当前任务没有可用检查点，将按历史错误上下文续跑'}">${Number(checkpoints.total || 0) ? '从检查点续跑' : '断点续跑'}</button>` : ''}
-                ${canCreateWorkflowDraft ? `<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">生成工作流草稿</button>` : ''}
+                ${canCreateWorkflowDraft ? `<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>` : ''}
                 ${!isPreview && (run.final_answer || run.error_message) ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
                 ${!isPreview && !isAgentRunActive(run.status) ? `<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>` : ''}
                 ${!isPreview ? `<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>` : ''}

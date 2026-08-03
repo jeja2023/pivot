@@ -15,7 +15,7 @@
             connections = (Array.isArray(data.data) ? data.data : []).filter(item => item.server_type === 'database');
         } catch (_e) { /* 空处理 */ }
         if (!connections.length) {
-            toast('没有可用的服务器可访问数据库，请先在「工具箱」中配置服务器可访问数据库', 'warning');
+            toast('没有可用的服务器可访问数据库，请先在「工具库」中配置服务器可访问数据库', 'warning');
             return;
         }
 

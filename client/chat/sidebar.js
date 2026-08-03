@@ -173,6 +173,29 @@ document.addEventListener('click', async (event) => {
         return;
     }
 
+    const globalSearchTab = event.target.closest('[data-global-search-type]');
+    if (globalSearchTab) {
+        window.Pivot.moduleApi('sidebar.search').setType?.(globalSearchTab.dataset.globalSearchType);
+        return;
+    }
+
+    const taskSearchResult = event.target.closest('[data-global-search-task-id]');
+    if (taskSearchResult) {
+        const runId = taskSearchResult.dataset.globalSearchTaskId;
+        window.closeSessionSearchModal?.();
+        await window.openAgentWorkbench?.();
+        await window.openAgentRun?.(runId);
+        return;
+    }
+
+    const workflowSearchResult = event.target.closest('[data-global-search-workflow-id]');
+    if (workflowSearchResult) {
+        const workflowId = workflowSearchResult.dataset.globalSearchWorkflowId;
+        window.closeSessionSearchModal?.();
+        await window.openAgentDagWorkbench?.({ workflowId, editor: true });
+        return;
+    }
+
     const modalSelector = event.target.closest('#session-search-modal [data-session-select-id]');
     if (modalSelector) {
         const id = String(modalSelector.dataset.sessionSelectId || '');

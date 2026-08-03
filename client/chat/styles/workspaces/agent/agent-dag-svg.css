@@ -148,6 +148,37 @@
     pointer-events: none;
 }
 
+.pivot-dag-edge-hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14;
+    cursor: pointer;
+    pointer-events: stroke;
+}
+
+.pivot-dag-edge-group.is-selected .pivot-dag-edge {
+    stroke: #2563eb;
+    stroke-width: 2.5;
+}
+
+.pivot-dag-edge-label {
+    fill: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    paint-order: stroke;
+    pointer-events: none;
+    stroke: #fff;
+    stroke-width: 4px;
+}
+
+.pivot-dag-selection-box {
+    fill: rgba(37, 99, 235, 0.08);
+    stroke: #2563eb;
+    stroke-dasharray: 5 3;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
 .pivot-dag-edge-ghost {
     stroke-dasharray: 4 3;
     opacity: 0.7;
@@ -170,6 +201,13 @@ body.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body,
 .pivot-dag-node.is-viz .pivot-dag-node-body    { fill: #fefce8; stroke: rgba(161, 98, 7, 0.55); }
 .pivot-dag-node.is-report .pivot-dag-node-body { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.45); }
 .pivot-dag-node.is-mcp .pivot-dag-node-body    { fill: #f5f3ff; stroke: rgba(109, 40, 217, 0.45); }
+.pivot-dag-node.is-input .pivot-dag-node-body  { fill: #ecfdf5; stroke: rgba(5, 150, 105, 0.55); }
+.pivot-dag-node.is-output .pivot-dag-node-body { fill: #f0fdfa; stroke: rgba(13, 148, 136, 0.55); }
+.pivot-dag-node.is-condition .pivot-dag-node-body { fill: #fff7ed; stroke: rgba(217, 119, 6, 0.58); }
+.pivot-dag-node.is-approval .pivot-dag-node-body { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.52); }
+.pivot-dag-node.is-loop .pivot-dag-node-body { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.5); }
+.pivot-dag-node.is-subflow .pivot-dag-node-body { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
+.pivot-dag-node.is-delay .pivot-dag-node-body { fill: #fefce8; stroke: rgba(161, 98, 7, 0.5); }
 
 /* 深色模式 */
 body.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body,
@@ -223,6 +261,7 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
 .pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
 .pivot-dag-run-badge.is-completed{ background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
 .pivot-dag-run-badge.is-error    { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
+.pivot-dag-run-badge.is-continued_error { background: #ffedd5; color: #c2410c; border: 1.5px solid #fdba74; }
 .pivot-dag-run-badge.is-skipped  { background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; }
 
 /* 节点边框光晕动画（运行中）*/
@@ -256,4 +295,5 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
 .pivot-dag-node.run-running .pivot-dag-node-body  { stroke: #3b82f6; stroke-width: 2; }
 .pivot-dag-node.run-completed .pivot-dag-node-body{ stroke: #22c55e; stroke-width: 2; }
 .pivot-dag-node.run-error .pivot-dag-node-body    { stroke: #ef4444; stroke-width: 2; }
+.pivot-dag-node.run-continued_error .pivot-dag-node-body { stroke: #f97316; stroke-width: 2; }
 .pivot-dag-node.run-skipped .pivot-dag-node-body  { opacity: 0.55; }

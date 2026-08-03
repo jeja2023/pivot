@@ -43,8 +43,38 @@ function hideAgentRunTitleTooltip(target = null) {
     agentRunTitleTooltipTarget = null;
 }
 
+function translateAgentNotificationText(value) {
+    let text = String(value || '').trim();
+    if (!text) return '';
+    [
+        [/\bDAG\s+run\s+completed\b/gi, '工作流运行完成'],
+        [/\bDAG\s+run\s+(?:failed|failure)\b/gi, '工作流运行失败'],
+        [/\bDAG\s+run\s+error\b/gi, '工作流运行异常'],
+        [/\bagent\s+run\s+completed\b/gi, '任务运行完成'],
+        [/\bagent\s+run\s+cancelled\b/gi, '任务运行已停止'],
+        [/\bagent\s+approval\s+rejected\b/gi, '审批未通过'],
+        [/\bagent\s+run\s+requires\s+tool\s+approval\b/gi, '任务需要审批']
+    ].forEach(([pattern, replacement]) => {
+        text = text.replace(pattern, replacement);
+    });
+    return text;
+}
+
 function agentNotificationTitle(item) {
     const title = String(item?.title || '').trim();
+    const translatedText = translateAgentNotificationText(title);
+    if (translatedText && translatedText !== title) return translatedText;
+    const normalizedTitle = title.toLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const translatedTitle = {
+        'dag run completed': '工作流运行完成',
+        'dag run failed': '工作流运行失败',
+        'dag run error': '工作流运行异常',
+        'agent run completed': '任务运行完成',
+        'agent run cancelled': '任务运行已停止',
+        'agent approval rejected': '审批未通过',
+        'agent run requires tool approval': '任务需要审批'
+    }[normalizedTitle];
+    if (translatedTitle) return translatedTitle;
     if (!agentLooksLikeCorruptTitle(title)) return title;
     const body = String(item?.body || '').trim();
     if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
@@ -53,6 +83,8 @@ function agentNotificationTitle(item) {
 
 function agentNotificationBody(item) {
     const body = String(item?.body || item?.created_at || '').trim();
+    const translatedBody = translateAgentNotificationText(body);
+    if (translatedBody && translatedBody !== body) return agentShortText(translatedBody, 72);
     if (!agentLooksLikeCorruptTitle(body)) return agentShortText(body, 72);
     return item?.created_at || '任务状态已更新';
 }
@@ -62,6 +94,7 @@ function agentStatusLabel(status) {
         queued: '排队中',
         running: '运行中',
         completed: '已完成',
+        completed_with_errors: '完成但有错误',
         error: '失败',
         cancelled: '已停止',
         approval_required: '待审批'
@@ -79,7 +112,7 @@ function agentRunModeLabel(mode) {
 }
 
 function agentToolPolicyLabel(policy) {
-    return policy === 'builtin_only' ? '仅系统工具' : '系统 + 工具箱';
+    return policy === 'builtin_only' ? '仅系统工具' : '系统 + 工具库';
 }
 
 function agentDownload(url) {

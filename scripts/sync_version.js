@@ -73,23 +73,11 @@ function syncReadme(version) {
     writeText('README.md', readme);
 }
 
-function syncHelp(version) {
-    let help = readText('使用帮助.md');
-    help = replaceOrFail(
-        help,
-        /(适用版本：`v)(\d+\.\d+\.\d+)(`)/,
-        `$1${version}$3`,
-        '使用帮助版本号'
-    );
-    writeText('使用帮助.md', help);
-}
-
 function main() {
     const version = getLatestVersionFromChangelog();
     syncPackageJson(version);
     syncPackageLock(version);
     syncReadme(version);
-    syncHelp(version);
     console.log(`Synced project version to v${version} from CHANGELOG.md`);
 }
 

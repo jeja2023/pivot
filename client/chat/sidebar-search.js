@@ -5,6 +5,8 @@ const sessionMenuData = new Map();
 const selectedSessionIds = new Set();
 let sessionBatchMode = false;
 let sessionSearchArchived = false;
+let globalSearchType = 'sessions';
+let globalSearchRequestId = 0;
 // 共享全局：搜索框输入防抖计时器，由后加载的 sidebar.js 使用（两文件共享全局作用域，勿删）
 let sessionSearchTimer = null;
 
@@ -36,6 +38,7 @@ function getSessionSearchEls() {
         status: document.getElementById('session-search-modal-status'),
         activeTab: document.getElementById('session-search-modal-active'),
         archiveTab: document.getElementById('session-search-modal-archive'),
+        sessionScope: document.getElementById('session-search-scope'),
         openButton: document.getElementById('session-search-open')
     };
 }
@@ -101,7 +104,7 @@ function renderSessionSearchResults(sessions) {
     }).join(''));
 }
 
-async function loadSessionSearchResults() {
+async function loadSessionOnlySearchResults() {
     const { input, activeTab, archiveTab, results } = getSessionSearchEls();
     if (!results) return;
     const { keyword, tag } = parseSessionSearchValue(input?.value || '');
@@ -141,10 +144,162 @@ async function loadSessionSearchResults() {
     }
 }
 
+function globalSearchStatusLabel(status) {
+    return {
+        queued: '排队中',
+        running: '运行中',
+        approval_required: '待审批',
+        completed: '已完成',
+        error: '失败',
+        cancelled: '已停止'
+    }[status] || String(status || '未知');
+}
+
+function globalSearchTime(value) {
+    if (!value) return '';
+    if (typeof window.formatChatDateTime === 'function') return window.formatChatDateTime(value);
+    return String(value);
+}
+
+function renderGlobalTaskResults(tasks) {
+    const { results } = getSessionSearchEls();
+    if (!results) return;
+    if (!tasks.length) {
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的任务</div>');
+        return;
+    }
+    PivotSafeHtml.setHtml(results, tasks.map(task => {
+        const title = String(task.title || task.goal || '未命名任务');
+        const taskType = task.run_mode === 'dag' ? '工作流任务' : '自主任务';
+        const model = task.model_name || '未指定模型';
+        return `
+            <button class="global-search-result" type="button" data-global-search-task-id="${sessionEscapeAttr(task.id)}">
+                <span class="global-search-result-main">
+                    <span class="global-search-result-title">${sessionEscapeHtml(title)}</span>
+                    <span class="global-search-result-meta">${sessionEscapeHtml(taskType)} · ${sessionEscapeHtml(model)} · ${sessionEscapeHtml(globalSearchStatusLabel(task.status))}</span>
+                </span>
+                <span class="global-search-result-side">${sessionEscapeHtml(globalSearchTime(task.updated_at || task.created_at))}</span>
+            </button>
+        `;
+    }).join(''));
+}
+
+function renderGlobalWorkflowResults(workflows) {
+    const { results } = getSessionSearchEls();
+    if (!results) return;
+    if (!workflows.length) {
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的工作流</div>');
+        return;
+    }
+    PivotSafeHtml.setHtml(results, workflows.map(workflow => {
+        const nodes = Array.isArray(workflow?.dag_spec?.nodes) ? workflow.dag_spec.nodes.length : Number(workflow.node_count || 0);
+        const publishedVersion = Number(workflow.published_version || 0);
+        return `
+            <button class="global-search-result" type="button" data-global-search-workflow-id="${sessionEscapeAttr(workflow.id)}">
+                <span class="global-search-result-main">
+                    <span class="global-search-result-title">${sessionEscapeHtml(workflow.name || '未命名工作流')}</span>
+                    <span class="global-search-result-meta">v${Number(workflow.current_version || 1)} · ${nodes} 个节点 · ${publishedVersion ? `已发布 v${publishedVersion}` : '未发布'}</span>
+                </span>
+                <span class="global-search-result-side">${sessionEscapeHtml(globalSearchTime(workflow.updated_at || workflow.created_at))}</span>
+            </button>
+        `;
+    }).join(''));
+}
+
+async function loadGlobalTaskSearchResults() {
+    const { input, results } = getSessionSearchEls();
+    if (!results) return;
+    const requestId = ++globalSearchRequestId;
+    const query = String(input?.value || '').trim();
+    setSessionSearchStatus('正在搜索...');
+    try {
+        const params = new URLSearchParams({ page: '1', limit: '50' });
+        if (query) params.set('query', query);
+        const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '任务搜索失败');
+        if (requestId !== globalSearchRequestId || globalSearchType !== 'tasks') return;
+        const tasks = data.data || [];
+        renderGlobalTaskResults(tasks);
+        setSessionSearchStatus(tasks.length ? `共找到 ${Number(data.total || tasks.length)} 个任务` : '');
+    } catch (error) {
+        if (requestId !== globalSearchRequestId) return;
+        console.error('搜索任务失败:', error);
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">任务搜索失败，请稍后重试</div>');
+        setSessionSearchStatus('');
+    }
+}
+
+async function loadGlobalWorkflowSearchResults() {
+    const { input, results } = getSessionSearchEls();
+    if (!results) return;
+    const requestId = ++globalSearchRequestId;
+    const query = String(input?.value || '').trim().toLowerCase();
+    setSessionSearchStatus('正在搜索...');
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/workflows`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '工作流搜索失败');
+        if (requestId !== globalSearchRequestId || globalSearchType !== 'workflows') return;
+        const workflows = (data.data || []).filter(workflow => !query || [
+            workflow.name,
+            workflow.description,
+            workflow.current_version,
+            workflow.published_version
+        ].filter(value => value !== undefined && value !== null).join(' ').toLowerCase().includes(query));
+        renderGlobalWorkflowResults(workflows);
+        setSessionSearchStatus(workflows.length ? `共找到 ${workflows.length} 个工作流` : '');
+    } catch (error) {
+        if (requestId !== globalSearchRequestId) return;
+        console.error('搜索工作流失败:', error);
+        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">工作流搜索失败，请稍后重试</div>');
+        setSessionSearchStatus('');
+    }
+}
+
+function updateGlobalSearchUi() {
+    const { input, sessionScope } = getSessionSearchEls();
+    document.querySelectorAll('[data-global-search-type]').forEach(button => {
+        const isActive = button.dataset.globalSearchType === globalSearchType;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    sessionScope?.classList.toggle('hidden', globalSearchType !== 'sessions');
+    document.getElementById('session-tag-tools')?.classList.toggle('hidden', globalSearchType !== 'sessions');
+    if (input) {
+        input.placeholder = {
+            sessions: '搜索会话标题、消息内容，或输入 #标签',
+            tasks: '搜索任务名称或目标',
+            workflows: '搜索工作流名称、说明或版本'
+        }[globalSearchType];
+    }
+}
+
+function setGlobalSearchType(type = 'sessions') {
+    globalSearchType = ['sessions', 'tasks', 'workflows'].includes(type) ? type : 'sessions';
+    globalSearchRequestId += 1;
+    if (globalSearchType !== 'sessions' && sessionBatchMode) setSessionBatchMode(false);
+    updateGlobalSearchUi();
+    loadSessionSearchResults();
+}
+
+window.Pivot.exposeModule('sidebar.search', {
+    setType: setGlobalSearchType
+});
+
+async function loadSessionSearchResults() {
+    updateGlobalSearchUi();
+    if (globalSearchType === 'tasks') return loadGlobalTaskSearchResults();
+    if (globalSearchType === 'workflows') return loadGlobalWorkflowSearchResults();
+    return loadSessionOnlySearchResults();
+}
+
 window.openSessionSearchModal = function(prefill = '') {
     const { modal, input, openButton } = getSessionSearchEls();
     if (!modal) return;
-    sessionSearchArchived = Boolean(sidebarState.archived);
+    globalSearchType = 'sessions';
+    sessionSearchArchived = false;
+    globalSearchRequestId += 1;
     modal.classList.remove('hidden');
     openButton?.classList.add('active');
     if (input) {
@@ -152,6 +307,7 @@ window.openSessionSearchModal = function(prefill = '') {
         setTimeout(() => input.focus(), 0);
     }
     updateSessionBatchBar();
+    updateGlobalSearchUi();
     loadSessionSearchResults();
 };
 

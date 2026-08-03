@@ -10,6 +10,37 @@ function createDagInspectorController(ctx) {
     const wouldCreateCycle = (...args) => Boolean(ctx.wouldCreateCycle?.(...args));
     const openNodeInputWizard = (...args) => ctx.openNodeInputWizard?.(...args);
     const renderInputSummary = (...args) => ctx.renderInputSummary?.(...args) || '';
+    const testNode = async (node) => {
+        const button = inspector.querySelector('[data-pivot-dag-test-node]');
+        const result = inspector.querySelector('[data-pivot-dag-test-result]');
+        if (!node?.tool || !button || !result) return;
+        button.disabled = true;
+        button.textContent = '测试中…';
+        result.hidden = false;
+        result.className = 'pivot-dag-test-result is-running';
+        result.textContent = '正在执行当前节点…';
+        try {
+            const response = await apiFetch(`${API_BASE}/agents/tools/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool: node.tool,
+                    input: node.input || {},
+                    dagInputs: window.collectAgentDagInputs?.() || {}
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '节点测试失败');
+            result.className = 'pivot-dag-test-result is-success';
+            result.textContent = `${data.durationMs || 0} ms\n${JSON.stringify(data.output, null, 2)}`;
+        } catch (error) {
+            result.className = 'pivot-dag-test-result is-error';
+            result.textContent = error.message || '节点测试失败';
+        } finally {
+            button.disabled = false;
+            button.textContent = '测试节点';
+        }
+    };
     const schemaSummary = (schema = {}) => {
         const value = schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
         const typeLabels = { object: '对象', array: '列表', string: '文本', number: '数值', integer: '整数', boolean: '布尔值' };
@@ -110,6 +141,7 @@ function createDagInspectorController(ctx) {
         const applyJson = () => {
             const parsed = parseInput();
             if (!parsed) return;
+            ctx.recordHistory?.();
             node.input = parsed;
             ctx.render?.();
             ctx.flushOut?.();
@@ -214,6 +246,7 @@ function createDagInspectorController(ctx) {
         modal.querySelector('[data-pivot-contract-apply]')?.addEventListener('click', () => {
             const schemas = parseSchemas();
             if (!schemas) return;
+            ctx.recordHistory?.();
             node.inputSchema = schemas.inputSchema;
             node.outputSchema = schemas.outputSchema;
             ctx.render?.();
@@ -304,6 +337,7 @@ function createDagInspectorController(ctx) {
 
     const bindWhenPanelEvents = (node) => {
         inspector.querySelector('[data-pivot-dag-when-enabled]')?.addEventListener('change', (e) => {
+            ctx.recordHistory?.();
             if (e.target.checked) {
                 const firstDep = (node.dependsOn || [])[0];
                 node.when = {
@@ -321,6 +355,7 @@ function createDagInspectorController(ctx) {
             const commit = (target) => {
                 const key = target.dataset.pivotDagWhen;
                 if (!key) return;
+                ctx.recordHistory?.();
                 node.when = node.when && typeof node.when === 'object' ? node.when : { source: '', operator: 'equals', value: '' };
                 node.when[key] = target.value;
                 ctx.flushOut?.();
@@ -407,11 +442,12 @@ function createDagInspectorController(ctx) {
                 <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
                 <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
             </div>
-            <div class="pivot-dag-contract-panel">
-                <div class="pivot-dag-contract-panel-head">
-                    <strong>数据契约</strong>
-                    <button type="button" class="btn-secondary" data-pivot-dag-edit-contract="1">编辑契约</button>
-                </div>
+            <details class="pivot-dag-contract-panel">
+                <summary class="pivot-dag-contract-panel-head">
+                    <strong>高级：数据契约</strong>
+                    <span>输入 / 输出运行时校验</span>
+                </summary>
+                <button type="button" class="btn-secondary" data-pivot-dag-edit-contract="1">编辑契约</button>
                 <div class="pivot-dag-contract-grid">
                     <div class="pivot-dag-contract-card ${inputContract.configured ? 'is-ready' : 'is-warning'}">
                         <span>输入</span>
@@ -431,7 +467,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" data-pivot-contract-preset="array">列表</button>
                     <button type="button" data-pivot-contract-preset="clear">清除</button>
                 </div>
-            </div>
+            </details>
             <div class="pivot-dag-inspector-depends">
                 <div class="pivot-dag-inspector-depends-head">
                     <strong>上游节点</strong>
@@ -451,7 +487,9 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-primary" data-pivot-dag-open-wizard="1">配置参数</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑 JSON</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
+                    <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
                 </div>
+                <pre class="pivot-dag-test-result" data-pivot-dag-test-result hidden></pre>
             </div>
         `);
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
@@ -461,6 +499,7 @@ function createDagInspectorController(ctx) {
         inspector.querySelectorAll('[data-pivot-contract-preset]').forEach(button => {
             button.addEventListener('click', () => {
                 const preset = button.dataset.pivotContractPreset;
+                ctx.recordHistory?.();
                 node.outputSchema = preset === 'clear' ? {} : preset === 'array'
                     ? { type: 'array', items: {} }
                     : { type: preset };
@@ -477,6 +516,7 @@ function createDagInspectorController(ctx) {
             checkbox.addEventListener('change', (e) => handleDependsToggle(e.target));
         });
         inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
+        inspector.querySelector('[data-pivot-dag-test-node]')?.addEventListener('click', () => testNode(node));
         if (focusSnapshot?.field) {
             const next = inspector.querySelector(`[data-pivot-dag-field="${cssEscape(focusSnapshot.field)}"]`);
             next?.focus?.({ preventScroll: true });
@@ -497,7 +537,8 @@ function createDagInspectorController(ctx) {
         if (!node) return;
         const tool = resolveToolForNode(currentTools(), node.tool);
         const template = buildToolInputTemplate(tool);
-        node.input = { ...template, ...(node.input || {}) };
+        ctx.recordHistory?.();
+        node.input = { ...template };
         ctx.render?.();
         ctx.flushOut?.();
         window.showToast?.('已套用工具参数模板', 'success');
@@ -507,6 +548,7 @@ function createDagInspectorController(ctx) {
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
         if (!node) return;
         const field = input.dataset.pivotDagField;
+        ctx.recordHistory?.();
         if (field === 'title') {
             node.title = String(input.value || '').slice(0, 120);
         } else if (field === 'tool') {
@@ -515,11 +557,13 @@ function createDagInspectorController(ctx) {
             node.inputSchema = {};
             node.outputSchema = nextTool === 'agent.llm' ? { type: 'string' } : {};
             if (node.tool === 'agent.llm') {
-                node.input = { ...defaultLlmInput(), ...(node.input || {}) };
+                node.input = { ...defaultLlmInput() };
                 ensureLlmNodeInput(node);
+            } else {
+                node.input = { ...buildToolInputTemplate(resolveToolForNode(currentTools(), nextTool)) };
             }
         } else if (field === 'condition') {
-            node.condition = ['always', 'success'].includes(input.value) ? input.value : 'success';
+            node.condition = ['always', 'success', 'failure'].includes(input.value) ? input.value : 'success';
         } else if (field === 'onError') {
             node.onError = ['skip_dependents', 'continue', 'stop'].includes(input.value) ? input.value : 'skip_dependents';
         } else if (field === 'retryLimit') {
@@ -555,6 +599,7 @@ function createDagInspectorController(ctx) {
         } else {
             deps.delete(dep);
         }
+        ctx.recordHistory?.();
         node.dependsOn = [...deps];
         clampDependsOn(ctx.spec.nodes);
         ctx.render?.();

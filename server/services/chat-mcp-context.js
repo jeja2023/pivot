@@ -81,7 +81,7 @@ function buildMcpTracePayload(tool) {
     };
 }
 
-function buildMcpTraceMessage(actionName, serverName, fallback = '工具服务', prefix = '正在使用工具箱') {
+function buildMcpTraceMessage(actionName, serverName, fallback = '工具服务', prefix = '正在使用工具库') {
     const service = cleanCapabilityDisplayName(serverName || fallback) || fallback;
     return `${prefix}：${service} / ${actionName || '工具'}`;
 }
@@ -165,7 +165,7 @@ function detectExplicitMcpCapabilityIntent(userPrompt = '') {
         || wantsChartOutput
         || wantsReportOutput
         || wantsDataOperation
-        || /工具箱|能力库|mcp|工具调用|调用工具/.test(prompt);
+        || /工具库|能力库|mcp|工具调用|调用工具/.test(prompt);
 }
 
 // 从用户自然语言中尝试提取表名
@@ -382,7 +382,7 @@ function localBridgeReportMissingReason(tools = [], user = null, userPrompt = ''
         if (debug?.statusAvailable === true && debug?.grants?.local_report_dir !== true) {
             return '聊天页已读取桌面端本机授权状态，但没有报表目录授权；请在“我的电脑/管理本机资源授权”里授权报表目录。';
         }
-        return '没有收到桌面端本机执行器心跳；请确认使用桌面客户端打开、工具箱已开启，并重新发送消息。';
+        return '没有收到桌面端本机执行器心跳；请确认使用桌面客户端打开、工具库已开启，并重新发送消息。';
     }
     const hasReportGrant = devices.some(device => device?.grants?.local_report_dir?.authorized === true);
     if (!hasReportGrant) {
@@ -514,7 +514,7 @@ function buildChatMcpPlannerMessages(history, userPrompt, tools) {
         {
             role: 'system',
             content: [
-                '你是 Pivot 普通对话里的工具箱工具调度器。',
+                '你是 Pivot 普通对话里的工具库工具调度器。',
                 '你只能返回严格 JSON，不要返回 Markdown、解释或多余文本。',
                 'Schema: {"action":"none|tool","tool":"mcp.server.tool","input":{},"reason":"简短中文原因"}',
                 '核心原则：只要用户的请求可以通过可用工具列表中的能力来完成，就必须选择 action=tool，不要返回 action=none。主模型无法自行查询数据库、访问外部数据或生成真正的交互式图表，你返回 none 会导致主模型编造数据或生成无效代码。',
@@ -524,8 +524,8 @@ function buildChatMcpPlannerMessages(history, userPrompt, tools) {
                 '当用户同时要求查询数据库/报表并生成图表时，优先选择数据查询工具；系统会在查询结果返回后自动调用图表生成能力。',
                 '只有用户明确要求生成报告、报表、周报、月报或固定格式文档时，才可以选择 report.* 工具。',
                 '一轮最多选择一个工具。数据库查询必须保持只读，只生成 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等读取类输入。',
-                '仅当用户问题与任何可用工具都完全无关时（如闲聊、写作建议、纯知识问答），才返回 {"action":"none","reason":"不需要工具箱"}。',
-                '可用工具箱工具:',
+                '仅当用户问题与任何可用工具都完全无关时（如闲聊、写作建议、纯知识问答），才返回 {"action":"none","reason":"不需要工具库"}。',
+                '可用工具库工具:',
                 compactText(formatMcpToolsForPlanner(tools), 18000)
             ].join('\n')
         },
@@ -591,10 +591,10 @@ function buildMcpToolsHint(tools, reason = '') {
     const list = toolNames.join('、');
     const note = reason ? `未调用的原因：${reason}。` : '本轮未调用。';
     return [
-        '以下是本轮可用的工具箱工具（仅供了解，本轮未实际调用）：',
+        '以下是本轮可用的工具库工具（仅供了解，本轮未实际调用）：',
         `可用工具：${list}。`,
         note,
-        '如果用户的问题涉及数据查询、统计分析或图表展示，请不要自行生成 Python/JavaScript 图表代码。你可以建议用户重新提问以触发工具调用，或在回答中说明需要开启哪些工具箱服务。'
+        '如果用户的问题涉及数据查询、统计分析或图表展示，请不要自行生成 Python/JavaScript 图表代码。你可以建议用户重新提问以触发工具调用，或在回答中说明需要开启哪些工具库服务。'
     ].join('\n');
 }
 
@@ -602,13 +602,13 @@ function buildMcpMissingToolHint(tools, reason = '') {
     const toolNames = tools.slice(0, 8).map(t => t.name || t.fullName || '').filter(Boolean);
     const availability = toolNames.length
         ? `当前可用工具：${toolNames.join('、')}。`
-        : '当前没有可用的工具箱工具缓存。';
-    const note = reason ? `无法调用的原因：${reason}。` : '无法调用的原因：没有匹配用户请求的工具箱工具。';
+        : '当前没有可用的工具库工具缓存。';
+    const note = reason ? `无法调用的原因：${reason}。` : '无法调用的原因：没有匹配用户请求的工具库工具。';
     return [
-        '本轮用户请求需要工具箱工具，但当前没有匹配的工具箱工具，因此未实际调用。',
+        '本轮用户请求需要工具库工具，但当前没有匹配的工具库工具，因此未实际调用。',
         availability,
         note,
-        '请直接告诉用户当前缺少对应工具箱工具，无法完成该类实时查询、数据库查询或外部工具调用；不要把未调用原因描述成用户请求不需要工具，也不要编造工具结果。'
+        '请直接告诉用户当前缺少对应工具库工具，无法完成该类实时查询、数据库查询或外部工具调用；不要把未调用原因描述成用户请求不需要工具，也不要编造工具结果。'
     ].join('\n');
 }
 
@@ -624,16 +624,16 @@ function buildMcpFailureMessage(error, stage = 'planning') {
         return '工具规划暂时失败，已跳过本轮工具调用。';
     }
     if (statusCode === 429) return '工具服务请求过多，本轮工具调用暂未完成，请稍后重试。';
-    if (statusCode === 401 || statusCode === 403) return '工具服务鉴权失败，请检查工具箱连接配置。';
-    return '工具箱工具调用失败，请稍后重试或检查工具箱配置。';
+    if (statusCode === 401 || statusCode === 403) return '工具服务鉴权失败，请检查工具库连接配置。';
+    return '工具库工具调用失败，请稍后重试或检查工具库配置。';
 }
 
 function buildMcpToolResultContext(lines = []) {
     const body = Array.isArray(lines) ? lines : [String(lines || '')];
     return [
         'PIVOT_MCP_TOOL_RESULT_BEGIN',
-        '【工具箱结果：本轮最新事实】',
-        '本轮已经通过 Pivot 工具箱完成了授权工具调用。下面的“结果”是刚刚实时返回的内容，不是长期记忆、历史猜测或模型常识。',
+        '【工具库结果：本轮最新事实】',
+        '本轮已经通过 Pivot 工具库完成了授权工具调用。下面的“结果”是刚刚实时返回的内容，不是长期记忆、历史猜测或模型常识。',
         '回答用户时必须优先使用下面的工具结果；不得与工具结果相反地声称无法访问本机目录、数据库或工具资源。若结果不足，只说明结果不足。',
         ...body,
         'PIVOT_MCP_TOOL_RESULT_END'
@@ -648,7 +648,7 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
         type: 'mcp',
         status: 'running',
         ...trace,
-        message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具箱工具')
+        message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具库工具')
     }));
     try {
         const result = await executeMcpTool(selectedTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
@@ -661,10 +661,10 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
             type: 'mcp',
             status: 'done',
             ...trace,
-            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
+            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具库工具已完成')
         }));
         return buildMcpToolResultContext([
-            '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+            '以下是本轮普通对话启用工具库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
             `工具: ${selectedTool.fullName}`,
             `调用原因: ${fallback.reason || ''}`,
             `输入: ${JSON.stringify(fallbackInput)}`,
@@ -682,13 +682,13 @@ function buildMcpFailureHint(error, stage = 'planning') {
     const statusText = statusCode ? `HTTP ${statusCode}` : '未知状态';
     if (stage === 'planning') {
         return [
-            '本轮已开启工具箱，但用于判断是否需要调用工具的模型请求失败，因此没有实际调用工具。',
+            '本轮已开启工具库，但用于判断是否需要调用工具的模型请求失败，因此没有实际调用工具。',
             `失败原因：${statusText}。`,
             '请向用户说明工具规划暂时不可用，不要编造工具调用结果。'
         ].join('\n');
     }
     return [
-        '本轮已开启工具箱，但工具执行阶段失败，因此没有可用的工具结果。',
+        '本轮已开启工具库，但工具执行阶段失败，因此没有可用的工具结果。',
         `失败原因：${statusText}。`,
         '请向用户说明工具调用暂时不可用，不要编造工具调用结果。'
     ].join('\n');
@@ -703,10 +703,10 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         writeSse(JSON.stringify({
             type: 'mcp',
             status: 'empty',
-            message: explicitToolIntent ? (reason || '没有可用的工具箱工具，无法完成本轮工具调用') : '没有可用的工具箱工具缓存',
+            message: explicitToolIntent ? (reason || '没有可用的工具库工具，无法完成本轮工具调用') : '没有可用的工具库工具缓存',
             reason
         }));
-        return explicitToolIntent ? buildMcpMissingToolHint([], reason || '没有可用的工具箱工具缓存') : '';
+        return explicitToolIntent ? buildMcpMissingToolHint([], reason || '没有可用的工具库工具缓存') : '';
     }
     const intentTools = filterMcpToolsForChatIntent(tools, userPrompt);
     if (!intentTools.length) {
@@ -717,12 +717,12 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             type: 'mcp',
             status: 'skipped',
             message: explicitToolIntent
-                ? (reason || '没有匹配用户请求的工具箱工具')
-                : '本轮没有匹配用户意图的工具箱工具',
+                ? (reason || '没有匹配用户请求的工具库工具')
+                : '本轮没有匹配用户意图的工具库工具',
             reason
         }));
         if (explicitToolIntent) {
-            return buildMcpMissingToolHint(tools, reason || '没有匹配用户请求的工具箱工具');
+            return buildMcpMissingToolHint(tools, reason || '没有匹配用户请求的工具库工具');
         }
         // 注入可用工具提示，防止主模型自行生成代码
         const dataTools = tools.filter(isDataResultMcpTool);
@@ -733,7 +733,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
     }
     let mcpStage = 'planning';
     try {
-        writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用工具箱工具' }));
+        writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用工具库工具' }));
         const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
         if (!plannerTools.length) {
             const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
@@ -743,8 +743,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 type: 'mcp',
                 status: 'skipped',
                 message: explicitToolIntent
-                    ? (reason || '没有适合本轮请求的工具箱工具')
-                    : '本轮没有适合优先调用的工具箱工具',
+                    ? (reason || '没有适合本轮请求的工具库工具')
+                    : '本轮没有适合优先调用的工具库工具',
                 reason
             }));
             return explicitToolIntent
@@ -804,10 +804,10 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 }
             }
             if (explicitToolIntent) {
-                writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '没有匹配用户请求的工具箱工具，无法完成本轮工具调用' }));
+                writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '没有匹配用户请求的工具库工具，无法完成本轮工具调用' }));
                 return buildMcpMissingToolHint(plannerTools, plan?.reason || '规划器未选择工具，且没有可确定执行的匹配工具');
             }
-            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用工具箱工具' }));
+            writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用工具库工具' }));
             // 注入可用工具提示，防止主模型自行生成代码
             return buildMcpToolsHint(plannerTools, plan?.reason || '规划器判断不需要调用');
         }
@@ -830,10 +830,10 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             type: 'mcp',
             status: 'done',
             ...trace,
-            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具箱工具已完成')
+            message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '工具库工具已完成')
         }));
         return buildMcpToolResultContext([
-            '以下是本轮普通对话启用工具箱后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
+            '以下是本轮普通对话启用工具库后取得的工具结果。请基于结果回答用户；如果结果不足，请说明不足。',
             '如果工具结果包含 ```pivot-echart 代码块，且用户需要图表，请在最终回答中原样保留该代码块，前端会自动渲染为可视化图表。',
             `工具: ${selected.fullName}`,
             `调用原因: ${plan.reason || ''}`,
@@ -841,7 +841,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             resultText
         ]);
     } catch (e) {
-        log?.warn?.({ err: e.message, statusCode: getAxiosStatusCode(e), stage: mcpStage }, '普通对话工具箱调用失败');
+        log?.warn?.({ err: e.message, statusCode: getAxiosStatusCode(e), stage: mcpStage }, '普通对话工具库调用失败');
         const message = buildMcpFailureMessage(e, mcpStage);
         writeSse(JSON.stringify({
             type: 'mcp',

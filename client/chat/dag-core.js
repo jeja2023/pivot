@@ -133,7 +133,6 @@ function ensureDefaults(spec) {
             _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? Number(savedLayout[n.id]?.y ?? n._y) : undefined
         })) : [];
         nodes.forEach(ensureLlmNodeInput);
-        clampDependsOn(nodes);
         const missingPositionNodes = nodes.filter(n => n._x === undefined || n._y === undefined);
         if (missingPositionNodes.length === nodes.length) {
             autoLayout(nodes);

@@ -8,7 +8,7 @@ const {
     validateValueAgainstSchema
 } = require('./agent-dag-contracts');
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'cancelled']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled']);
 const MAX_CASES_PER_SUITE = 50;
 
 function parseJson(value, fallback) {

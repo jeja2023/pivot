@@ -28,16 +28,16 @@ function buildMcpFollowupInstruction(mcpContext = '') {
     const hasToolResult = String(mcpContext || '').includes('PIVOT_MCP_TOOL_RESULT_BEGIN');
     if (hasToolResult) {
         return [
-            '请基于上面的 PIVOT_MCP_TOOL_RESULT_BEGIN 工具箱结果回答我刚才的问题。',
+            '请基于上面的 PIVOT_MCP_TOOL_RESULT_BEGIN 工具库结果回答我刚才的问题。',
             '这些结果是本轮最新事实，优先于长期记忆、历史对话和模型常识。',
             '如果工具结果来自本机报表目录或 mcp.0，本轮已经通过授权通道访问了本机资源；不得声称无法访问本机文件系统或要求用户自行查看目录。',
             '若工具结果不足，只说明结果不足，并列出仍缺少的信息。'
         ].join('\n');
     }
     return [
-        '请结合上面的 PIVOT_MCP_CONTEXT_BEGIN 工具箱上下文回答我刚才的问题。',
-        '不要忽略工具箱上下文，也不要用长期记忆或历史对话覆盖本轮工具箱状态。',
-        '只有当工具箱上下文明示工具未执行、失败或缺少授权时，才说明无法完成对应的实时工具查询。'
+        '请结合上面的 PIVOT_MCP_CONTEXT_BEGIN 工具库上下文回答我刚才的问题。',
+        '不要忽略工具库上下文，也不要用长期记忆或历史对话覆盖本轮工具库状态。',
+        '只有当工具库上下文明示工具未执行、失败或缺少授权时，才说明无法完成对应的实时工具查询。'
     ].join('\n');
 }
 

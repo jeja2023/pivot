@@ -2,15 +2,218 @@
 // Agent 工作流功能从 agents.js 拆分而来。
 // Split from agents.js.
 /* eslint-disable no-undef */
+let activeAutomationTab = 'workflows';
+let automationAssetQuery = '';
+
+function automationScheduleConfig(schedule) {
+    const value = schedule?.run_config;
+    if (value && typeof value === 'object') return value;
+    try {
+        return JSON.parse(value || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function automationFrequencyText(schedule) {
+    if (schedule?.frequency === 'weekly') {
+        const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        return `每周${weekdays[Number(schedule.day_of_week || 0)] || '周一'} ${schedule.time_of_day || '09:00'}`;
+    }
+    if (schedule?.frequency === 'daily') return `每天 ${schedule.time_of_day || '09:00'}`;
+    return '手动运行';
+}
+
+function selectAutomationWorkflow(workflowId) {
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId));
+    if (!workflow) return null;
+    activeAgentWorkflowId = String(workflow.id);
+    agentWorkflowDraftName = workflow.name || '';
+    agentWorkflowDraftDescription = workflow.description || '';
+    writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
+    renderAgentWorkflowLibrary();
+    return workflow;
+}
+
+function setAutomationTab(tab = 'workflows') {
+    activeAutomationTab = tab === 'schedules' ? 'schedules' : 'workflows';
+    window.syncAutomationPrimaryTabs?.(activeAutomationTab);
+    document.getElementById('automation-workflows-panel')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
+    document.getElementById('automation-schedules-panel')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
+    document.getElementById('automation-new-workflow-btn')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
+    document.getElementById('automation-new-schedule-btn')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
+    const input = document.getElementById('automation-assets-search-input');
+    if (input) input.placeholder = activeAutomationTab === 'workflows' ? '搜索工作流' : '搜索计划任务';
+    const description = document.getElementById('automation-workspace-description');
+    if (description) {
+        description.textContent = activeAutomationTab === 'workflows'
+            ? '编排、发布和复用可控的多步骤工作流。'
+            : '统一安排自主任务和已发布工作流的单次或周期执行。';
+    }
+    renderAutomationAssetCenter();
+}
+
+function renderAutomationAssetCenter() {
+    const workflowList = document.getElementById('automation-workflow-assets-list');
+    const scheduleList = document.getElementById('automation-schedule-assets-list');
+    if (!workflowList || !scheduleList) return;
+    const publishedCount = agentWorkflowsCache.filter(item => Number(item.published_version || 0) > 0).length;
+    const activeScheduleCount = agentSchedulesCache.filter(item => item.status !== 'paused').length;
+    const workflowCount = document.getElementById('automation-workflow-count');
+    const published = document.getElementById('automation-published-count');
+    const scheduleCount = document.getElementById('automation-schedule-count');
+    if (workflowCount) workflowCount.textContent = String(agentWorkflowsCache.length);
+    if (published) published.textContent = String(publishedCount);
+    if (scheduleCount) scheduleCount.textContent = String(activeScheduleCount);
+
+    const query = String(automationAssetQuery || '').trim().toLowerCase();
+    const workflows = agentWorkflowsCache.filter(item => !query || [
+        item.name,
+        item.description,
+        agentWorkflowVersionText(item)
+    ].filter(Boolean).join(' ').toLowerCase().includes(query));
+    PivotSafeHtml.setHtml(workflowList, workflows.length ? `
+        <div class="automation-table-wrap">
+            <table class="data-table automation-assets-table">
+                <thead><tr><th>工作流</th><th>状态</th><th>版本</th><th>节点</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>${workflows.map(workflow => {
+        const publishedVersion = Number(workflow.published_version || 0);
+        return `
+                    <tr>
+                        <td><strong>${agentEscape(workflow.name || '未命名工作流')}</strong><small>${agentEscape(workflow.description || '暂无说明')}</small></td>
+                        <td><span class="automation-status ${publishedVersion ? 'published' : 'draft'}">${publishedVersion ? '已发布' : '草稿'}</span></td>
+                        <td>v${Number(workflow.current_version || 1)}${publishedVersion ? ` / 发布 v${publishedVersion}` : ''}</td>
+                        <td>${agentWorkflowNodeCount(workflow)}</td>
+                        <td>${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</td>
+                        <td><div class="automation-row-actions">
+                            <button class="btn-secondary" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">编辑</button>
+                            ${publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
+                            <button class="btn-secondary" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}">版本</button>
+                            <button class="btn-secondary" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}" ${publishedVersion ? '' : 'disabled title="发布后可创建计划"'}>计划</button>
+                        </div></td>
+                    </tr>`;
+    }).join('')}</tbody>
+            </table>
+        </div>
+    ` : '<div class="automation-empty-state"><strong>暂无匹配的工作流</strong><span>新建工作流后，可在这里统一管理版本、发布和计划。</span></div>');
+
+    const schedules = agentSchedulesCache.filter(schedule => {
+        const config = automationScheduleConfig(schedule);
+        const workflow = agentWorkflowsCache.find(item => String(item.id) === String(config.workflowId || config.workflow_id || ''));
+        const text = [schedule.name, schedule.goal, workflow?.name, automationFrequencyText(schedule)].filter(Boolean).join(' ').toLowerCase();
+        return !query || text.includes(query);
+    });
+    PivotSafeHtml.setHtml(scheduleList, schedules.length ? `
+        <div class="automation-table-wrap">
+            <table class="data-table automation-assets-table automation-schedules-table">
+                <thead><tr><th>计划任务</th><th>来源</th><th>周期</th><th>状态</th><th>下次运行</th><th>操作</th></tr></thead>
+                <tbody>${schedules.map(schedule => {
+        const config = automationScheduleConfig(schedule);
+        const workflowId = config.workflowId || config.workflow_id || '';
+        const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId));
+        const paused = schedule.status === 'paused';
+        return `
+                    <tr>
+                        <td><strong>${agentEscape(schedule.name || '未命名计划')}</strong><small>${agentEscape(schedule.goal || '暂无说明')}</small></td>
+                        <td>${workflow ? `<button type="button" class="automation-link-button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">${agentEscape(workflow.name)}</button>` : '自主任务'}</td>
+                        <td>${agentEscape(automationFrequencyText(schedule))}</td>
+                        <td><span class="automation-status ${paused ? 'paused' : 'published'}">${paused ? '已暂停' : '已启用'}</span></td>
+                        <td>${agentEscape(paused ? '-' : (schedule.next_run_at || '-'))}</td>
+                        <td><div class="automation-row-actions">
+                            <button class="btn-secondary" type="button" data-automation-schedule-edit="${agentEscapeAttr(schedule.id)}">编辑</button>
+                            <button class="btn-secondary" type="button" data-automation-schedule-toggle="${agentEscapeAttr(schedule.id)}">${paused ? '启用' : '暂停'}</button>
+                            <button class="btn-secondary" type="button" data-automation-schedule-runs="${agentEscapeAttr(schedule.id)}">运行记录</button>
+                            <button class="btn-secondary" type="button" data-automation-schedule-run="${agentEscapeAttr(schedule.id)}">立即运行</button>
+                            <button class="btn-danger-outline" type="button" data-automation-schedule-delete="${agentEscapeAttr(schedule.id)}">删除</button>
+                        </div></td>
+                    </tr>`;
+    }).join('')}</tbody>
+            </table>
+        </div>
+    ` : '<div class="automation-empty-state"><strong>暂无匹配的计划任务</strong><span>可为自主任务或已发布工作流创建手动、每天或每周执行的计划。</span></div>');
+
+    workflowList.querySelectorAll('[data-automation-workflow-edit], [data-automation-workflow-run], [data-automation-workflow-versions], [data-automation-workflow-schedule]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const workflowId = button.dataset.automationWorkflowEdit
+                || button.dataset.automationWorkflowRun
+                || button.dataset.automationWorkflowVersions
+                || button.dataset.automationWorkflowSchedule;
+            const workflow = selectAutomationWorkflow(workflowId);
+            if (!workflow) return;
+            if (button.dataset.automationWorkflowEdit) return showAutomationWorkflowEditor(workflowId);
+            if (button.dataset.automationWorkflowRun) return window.runAgentWorkflowPublished?.();
+            if (button.dataset.automationWorkflowVersions) return openAgentWorkflowVersions();
+            if (button.dataset.automationWorkflowSchedule) return openAgentWorkflowSchedules();
+        });
+    });
+    scheduleList.querySelectorAll('[data-automation-workflow-edit]').forEach(button => {
+        button.addEventListener('click', () => showAutomationWorkflowEditor(button.dataset.automationWorkflowEdit));
+    });
+    const scheduleApi = window.Pivot.moduleApi('agent.schedules');
+    scheduleList.querySelectorAll('[data-automation-schedule-edit]').forEach(button => {
+        button.addEventListener('click', () => scheduleApi.openEditor?.(button.dataset.automationScheduleEdit));
+    });
+    scheduleList.querySelectorAll('[data-automation-schedule-toggle]').forEach(button => {
+        button.addEventListener('click', () => scheduleApi.toggle?.(button.dataset.automationScheduleToggle));
+    });
+    scheduleList.querySelectorAll('[data-automation-schedule-runs]').forEach(button => {
+        button.addEventListener('click', () => scheduleApi.openRuns?.(button.dataset.automationScheduleRuns));
+    });
+    scheduleList.querySelectorAll('[data-automation-schedule-run]').forEach(button => {
+        button.addEventListener('click', () => runAgentSchedule(button.dataset.automationScheduleRun));
+    });
+    scheduleList.querySelectorAll('[data-automation-schedule-delete]').forEach(button => {
+        button.addEventListener('click', () => deleteAgentSchedule(button.dataset.automationScheduleDelete));
+    });
+}
+
+function showAutomationAssetCenter(options = {}) {
+    closeAgentDagJsonModal();
+    closeAgentDagNodeDrawer();
+    document.getElementById('automation-assets-view')?.classList.remove('hidden');
+    document.getElementById('automation-editor-view')?.classList.add('hidden');
+    document.getElementById('automation-new-workflow-btn')?.classList.remove('hidden');
+    document.getElementById('automation-refresh-btn')?.classList.remove('hidden');
+    document.getElementById('agent-dag-save-btn')?.classList.add('hidden');
+    document.getElementById('agent-dag-back-btn')?.classList.add('hidden');
+    const title = document.getElementById('automation-workspace-title');
+    const description = document.getElementById('automation-workspace-description');
+    if (title) title.textContent = '自动化';
+    if (description) description.textContent = '集中管理工作流与计划任务，并跟踪发布和运行状态。';
+    setAutomationTab(options.tab || activeAutomationTab);
+}
+
+function showAutomationWorkflowEditor(workflowId = '', options = {}) {
+    window.syncAutomationPrimaryTabs?.('workflows');
+    document.getElementById('automation-assets-view')?.classList.add('hidden');
+    document.getElementById('automation-editor-view')?.classList.remove('hidden');
+    document.getElementById('automation-new-workflow-btn')?.classList.add('hidden');
+    document.getElementById('automation-new-schedule-btn')?.classList.add('hidden');
+    document.getElementById('automation-refresh-btn')?.classList.add('hidden');
+    document.getElementById('agent-dag-save-btn')?.classList.remove('hidden');
+    document.getElementById('agent-dag-back-btn')?.classList.remove('hidden');
+    const title = document.getElementById('automation-workspace-title');
+    const description = document.getElementById('automation-workspace-description');
+    if (title) title.textContent = workflowId ? '编辑工作流' : '新建工作流';
+    if (description) description.textContent = '编排节点、校验流程并管理发布版本。';
+    if (workflowId) selectAutomationWorkflow(workflowId);
+    else if (!options.keepDraft) newAgentWorkflow({ showToast: false, clearSnapshots: true, remount: false });
+    mountAgentDagEditor();
+    window.refreshAgentDagEditor?.();
+    updateAgentWorkflowRunUi();
+}
+
 window.openAgentDagWorkbench = async function(options = {}) {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');
-    const requestedWorkflowId = activeAgentWorkflowId || '';
+    const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
+    window.bindUnifiedAutomationTabs?.();
     await Promise.all([
         loadAgentModels(),
         agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
-        loadAgentWorkflows()
+        loadAgentWorkflows(),
+        loadAgentSchedules()
     ]);
     if (incomingDraft) {
         pendingAgentWorkflowDraft = null;
@@ -23,30 +226,25 @@ window.openAgentDagWorkbench = async function(options = {}) {
         });
         writeAgentWorkflowText(incomingDraft.dagSpec || incomingDraft.dag_spec || { nodes: [] });
         renderAgentWorkflowLibrary();
-        showToast('自由任务已转为工作流草稿，检查节点后可保存、发布或计划运行。', 'success');
+        showAutomationWorkflowEditor('', { keepDraft: true });
+        showToast('自主任务已转为工作流草稿，检查节点后可保存、发布或计划运行。', 'success');
+    } else if (options.editor || requestedWorkflowId) {
+        showAutomationWorkflowEditor(requestedWorkflowId);
     } else {
-        const workflow = agentWorkflowsCache.find(item => String(item.id) === String(requestedWorkflowId));
-        if (workflow) {
-            activeAgentWorkflowId = String(workflow.id);
-            agentWorkflowDraftName = workflow.name || '';
-            agentWorkflowDraftDescription = workflow.description || '';
-            writeAgentWorkflowText(workflow.dag_spec || { nodes: [] });
-            renderAgentWorkflowLibrary();
-        } else {
-            newAgentWorkflow({ showToast: false, clearSnapshots: false, remount: false });
+        showAutomationAssetCenter({ tab: options.tab });
+        if (options.scheduleDraft) {
+            window.Pivot.moduleApi('agent.schedules').openEditor?.('', { draft: options.scheduleDraft });
         }
     }
-    mountAgentDagEditor();
-    window.refreshAgentDagEditor?.();
     window.bindAgentDagWorkbench?.();
-    updateAgentWorkflowRunUi();
 };
 
-window.closeAgentDagWorkbench = function() {
+window.closeAgentDagWorkbench = async function() {
+    const confirmed = await confirmAgentWorkflowDiscard('关闭工作流编排会放弃当前画布中尚未保存的修改，确定继续吗？');
+    if (!confirmed) return;
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
-    window.showMainWorkspace?.('agent');
-    window.bindAgentConfigModal?.();
+    window.showMainWorkspace?.('chat');
 };
 
 window.bindAgentDagWorkbench = function() {
@@ -66,7 +264,41 @@ window.bindAgentDagWorkbench = function() {
     const backBtn = document.getElementById('agent-dag-back-btn');
     if (backBtn && backBtn.dataset.boundAgentDagBack !== '1') {
         backBtn.dataset.boundAgentDagBack = '1';
-        backBtn.addEventListener('click', () => window.closeAgentDagWorkbench?.());
+        backBtn.addEventListener('click', async () => {
+            const confirmed = await confirmAgentWorkflowDiscard('返回资产中心会放弃当前画布中尚未保存的修改，确定继续吗？');
+            if (confirmed) showAutomationAssetCenter();
+        });
+    }
+    const newWorkflowBtn = document.getElementById('automation-new-workflow-btn');
+    if (newWorkflowBtn && newWorkflowBtn.dataset.boundAutomationNew !== '1') {
+        newWorkflowBtn.dataset.boundAutomationNew = '1';
+        newWorkflowBtn.addEventListener('click', () => showAutomationWorkflowEditor());
+    }
+    const refreshAutomationBtn = document.getElementById('automation-refresh-btn');
+    if (refreshAutomationBtn && refreshAutomationBtn.dataset.boundAutomationRefresh !== '1') {
+        refreshAutomationBtn.dataset.boundAutomationRefresh = '1';
+        refreshAutomationBtn.addEventListener('click', async () => {
+            await Promise.all([loadAgentWorkflows(), loadAgentSchedules()]);
+            showToast('自动化资产已刷新', 'success');
+        });
+    }
+    const closeAutomationBtn = document.getElementById('automation-close-btn');
+    if (closeAutomationBtn && closeAutomationBtn.dataset.boundAutomationClose !== '1') {
+        closeAutomationBtn.dataset.boundAutomationClose = '1';
+        closeAutomationBtn.addEventListener('click', () => window.closeAgentDagWorkbench?.());
+    }
+    const newScheduleBtn = document.getElementById('automation-new-schedule-btn');
+    if (newScheduleBtn && newScheduleBtn.dataset.boundAutomationScheduleNew !== '1') {
+        newScheduleBtn.dataset.boundAutomationScheduleNew = '1';
+        newScheduleBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.schedules').openEditor?.());
+    }
+    const automationSearch = document.getElementById('automation-assets-search-input');
+    if (automationSearch && automationSearch.dataset.boundAutomationSearch !== '1') {
+        automationSearch.dataset.boundAutomationSearch = '1';
+        automationSearch.addEventListener('input', () => {
+            automationAssetQuery = automationSearch.value || '';
+            renderAutomationAssetCenter();
+        });
     }
     const workflowPicker = document.getElementById('agent-workflow-picker');
     const workflowPickerTrigger = document.getElementById('agent-workflow-picker-trigger');
@@ -217,3 +449,11 @@ window.bindAgentDagWorkbench = function() {
         inputsRefreshBtn.addEventListener('click', refreshAgentDagInputsPanel);
     }
 };
+
+window.Pivot.exposeModule('agent.automation', {
+    renderAssetCenter: renderAutomationAssetCenter,
+    showAssetCenter: showAutomationAssetCenter,
+    showWorkflowEditor: showAutomationWorkflowEditor,
+    listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),
+    currentWorkflowId: () => String(activeAgentWorkflowId || '')
+});

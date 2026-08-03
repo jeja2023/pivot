@@ -55,30 +55,67 @@ function refreshAgentDagInputsPanel() {
         return refs;
     };
     let dagText = '';
-    try { dagText = document.getElementById('agent-dag-spec')?.value || ''; } catch (e) { dagText = ''; }
-    const refs = scanRefs(dagText);
-    if (!refs.size) {
+    let dag = { nodes: [] };
+    try {
+        dagText = document.getElementById('agent-dag-spec')?.value || '';
+        dag = JSON.parse(dagText || '{"nodes":[]}');
+    } catch (e) { dag = { nodes: [] }; }
+    const definitions = new Map();
+    (Array.isArray(dag.nodes) ? dag.nodes : []).filter(node => node?.tool === 'workflow.input').forEach(node => {
+        const input = node.input && typeof node.input === 'object' ? node.input : {};
+        const key = String(input.name || '').trim();
+        if (!key) return;
+        definitions.set(key, {
+            key,
+            label: String(input.label || key),
+            type: ['text', 'number', 'boolean', 'object', 'array'].includes(input.type) ? input.type : 'text',
+            required: Boolean(input.required),
+            defaultValue: input.defaultValue,
+            description: String(input.description || '')
+        });
+    });
+    scanRefs(dagText).forEach(key => {
+        if (!definitions.has(key)) definitions.set(key, { key, label: key, type: 'text', required: false, defaultValue: '', description: '' });
+    });
+    if (!definitions.size) {
         panel.classList.add('hidden');
         return;
     }
     panel.classList.remove('hidden');
     const existing = {};
-    list.querySelectorAll('.agent-dag-input-item input').forEach(input => {
-        existing[input.dataset.dagInputKey || input.name] = input.value;
+    list.querySelectorAll('[data-dag-input-key]').forEach(input => {
+        existing[input.dataset.dagInputKey || input.name] = input.type === 'checkbox' ? input.checked : input.value;
     });
-    PivotSafeHtml.setHtml(list, [...refs].map(key => `
+    PivotSafeHtml.setHtml(list, [...definitions.values()].map(definition => {
+        const key = definition.key;
+        const fallback = definition.defaultValue === undefined || definition.defaultValue === null
+            ? ''
+            : (typeof definition.defaultValue === 'string' ? definition.defaultValue : JSON.stringify(definition.defaultValue, null, 2));
+        const value = existing[key] ?? fallback;
+        const control = definition.type === 'boolean'
+            ? `<input type="checkbox" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="boolean" ${value === true || String(value).toLowerCase() === 'true' ? 'checked' : ''}>`
+            : ['object', 'array'].includes(definition.type)
+                ? `<textarea class="form-input" rows="2" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="${definition.type}" placeholder="${definition.type === 'array' ? '[]' : '{}'}">${agentEscape(value)}</textarea>`
+                : `<input class="form-input" type="${definition.type === 'number' ? 'number' : 'text'}" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="${definition.type}" value="${agentEscape(value)}" placeholder="输入 ${agentEscape(definition.label)}">`;
+        return `
         <label class="agent-dag-input-item">
-            <span>${agentEscape(key)}</span>
-            <input class="form-input" type="text" data-dag-input-key="${agentEscape(key)}" value="${agentEscape(existing[key] || '')}" placeholder="输入 ${agentEscape(key)} 的值">
+            <span>${agentEscape(definition.label)}${definition.required ? '<em>必填</em>' : ''}</span>
+            ${control}
+            ${definition.description ? `<small>${agentEscape(definition.description)}</small>` : ''}
         </label>
-    `).join(''));
+    `; }).join(''));
 }
 
 function collectAgentDagInputs() {
     const result = {};
     document.querySelectorAll('#agent-dag-inputs-list [data-dag-input-key]').forEach(input => {
         const key = String(input.dataset.dagInputKey || '').trim();
-        const value = String(input.value || '').trim();
+        const type = input.dataset.dagInputType || 'text';
+        let value = input.type === 'checkbox' ? input.checked : String(input.value || '').trim();
+        if (type === 'number' && value !== '') value = Number(value);
+        if (['object', 'array'].includes(type) && value) {
+            try { value = JSON.parse(value); } catch (e) { /* 服务端会返回明确的字段校验错误 */ }
+        }
         if (key) result[key] = value;
     });
     return result;

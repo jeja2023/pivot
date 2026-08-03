@@ -79,6 +79,15 @@
     font-size: 0.78rem;
 }
 
+.pivot-dag-editor-inspector > .pivot-dag-inspector-row-main { order: 1; }
+.pivot-dag-editor-inspector > .pivot-dag-inspector-row-tool { order: 2; }
+.pivot-dag-editor-inspector > .pivot-dag-input-overview { order: 3; }
+.pivot-dag-editor-inspector > .pivot-dag-inspector-depends { order: 4; }
+.pivot-dag-editor-inspector > .pivot-dag-when-panel { order: 5; }
+.pivot-dag-editor-inspector > .pivot-dag-inspector-row-runtime { order: 6; }
+.pivot-dag-editor-inspector > .pivot-dag-tool-meta { order: 7; }
+.pivot-dag-editor-inspector > .pivot-dag-contract-panel { order: 8; }
+
 .pivot-dag-inspector-empty {
     color: var(--text-muted);
     font-size: 0.78rem;
@@ -154,6 +163,24 @@
     font-size: 0.66rem;
     line-height: 1.35;
 }
+
+.pivot-dag-test-result {
+    max-height: 220px;
+    margin: 10px 0 0;
+    padding: 9px;
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.pivot-dag-test-result.is-error { border-color: #f87171; color: #fecaca; }
+.pivot-dag-test-result.is-success { border-color: #34d399; }
 
 .pivot-dag-tool-meta {
     display: flex;
@@ -311,7 +338,10 @@
 
 .pivot-dag-contract-panel-head {
     justify-content: space-between;
+    cursor: pointer;
 }
+
+.pivot-dag-contract-panel-head span { color: #64748b; font-size: 0.68rem; font-weight: 500; }
 
 .pivot-dag-contract-panel-head strong {
     color: #0f172a;

@@ -37,6 +37,7 @@ function getAgentMetrics(user, days = 7) {
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+            SUM(CASE WHEN status = 'completed_with_errors' THEN 1 ELSE 0 END) AS completedWithErrors,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
             SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
             SUM(CASE WHEN status IN ('queued','running','approval_required') THEN 1 ELSE 0 END) AS active,
@@ -57,6 +58,7 @@ function getAgentMetrics(user, days = 7) {
         days: safeDays,
         total: Number(summary.total || 0),
         completed: Number(summary.completed || 0),
+        completedWithErrors: Number(summary.completedWithErrors || 0),
         error: Number(summary.error || 0),
         cancelled: Number(summary.cancelled || 0),
         active: Number(summary.active || 0),

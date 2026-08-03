@@ -28,6 +28,35 @@
     min-height: 30px;
 }
 
+@media (max-width: 900px) {
+    .agent-history-toolbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .agent-history-filters {
+        grid-template-columns: 112px 112px minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .agent-history-filters {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-metrics span {
+        width: 100%;
+        justify-content: center;
+        box-sizing: border-box;
+        white-space: nowrap;
+    }
+}
+
 .agent-model-caps {
     display: flex;
     align-items: center;

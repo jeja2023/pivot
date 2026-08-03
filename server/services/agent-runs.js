@@ -44,6 +44,7 @@ function normalizeRunTypeFilter(value) {
     const normalized = String(value || '').trim().toLowerCase();
     if (['free', 'standard', 'quick'].includes(normalized)) return 'free';
     if (['workflow', 'dag'].includes(normalized)) return 'workflow';
+    if (['scheduled', 'schedule'].includes(normalized)) return 'scheduled';
     return '';
 }
 
@@ -64,9 +65,11 @@ function listRuns(user, options = {}) {
         params.push(status);
     }
     if (runType === 'workflow') {
-        where.push("r.run_mode = 'dag'");
+        where.push("r.run_mode = 'dag' AND r.schedule_id IS NULL");
     } else if (runType === 'free') {
-        where.push("r.run_mode != 'dag'");
+        where.push("r.run_mode != 'dag' AND r.schedule_id IS NULL");
+    } else if (runType === 'scheduled') {
+        where.push('r.schedule_id IS NOT NULL');
     }
     if (query) {
         where.push('(r.title LIKE ? OR r.goal LIKE ? OR m.name LIKE ?)');
@@ -347,7 +350,7 @@ function getRunProgress(run, steps = []) {
         stepCount: steps.length,
         totalDurationMs,
         isLimitReached: active && Math.max(planCount, toolCount) >= maxSteps,
-        percent: active ? Math.min(Math.round((Math.max(planCount, toolCount) / maxSteps) * 100), 95) : (run?.status === 'completed' ? 100 : 0)
+        percent: active ? Math.min(Math.round((Math.max(planCount, toolCount) / maxSteps) * 100), 95) : (['completed', 'completed_with_errors'].includes(run?.status) ? 100 : 0)
     };
 }
 

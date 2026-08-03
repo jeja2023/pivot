@@ -12,6 +12,7 @@
             const isEnum = Array.isArray(schema.enum) && schema.enum.length > 0;
             const fieldName = String(name || '');
             const isDatabaseConnection = isDatabaseConnectionField(name, tool);
+            const isSubworkflowSelector = toolValue(tool) === 'workflow.subworkflow' && normalizeFieldKey(name) === 'workflowid';
             const codeTextArea = type === 'array'
                 || type === 'object'
                 || /rows|sections|sql|json/i.test(fieldName);
@@ -21,7 +22,7 @@
             const fieldValue = formatWizardFieldValue(schema, value);
             const suggestions = isDatabaseConnection ? [] : buildWizardFieldSuggestions(name, schema, dependencyNodes);
             const isLlmModelField = toolValue(tool) === 'agent.llm' && normalizeFieldKey(name) === 'model';
-            const isSelect = isDatabaseConnection || isLlmModelField || isEnum;
+            const isSelect = isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
             const fieldClasses = [
                 'pivot-dag-wizard-field',
@@ -47,6 +48,17 @@
                                 return `<option value="${dagEscapeAttr(option.serverId)}" ${String(option.serverId) === String(selectedId) ? 'selected' : ''}>${dagEscapeHtml(optionLabel)}</option>`;
                             }).join('')
                             : '<option value="">暂无可用数据库连接</option>'}
+                    </select>
+                `;
+            } else if (isSubworkflowSelector) {
+                const automation = window.Pivot.moduleApi('agent.automation');
+                const currentId = automation.currentWorkflowId?.() || '';
+                const workflows = (automation.listWorkflows?.() || [])
+                    .filter(item => Number(item.published_version || 0) > 0 && String(item.id) !== String(currentId));
+                controlHtml = `
+                    <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}">
+                        <option value="">— 选择已发布工作流 —</option>
+                        ${workflows.map(item => `<option value="${dagEscapeAttr(item.id)}" ${String(item.id) === String(value ?? '') ? 'selected' : ''}>${dagEscapeHtml(`${item.name} · v${item.published_version}`)}</option>`).join('')}
                     </select>
                 `;
             } else if (type === 'boolean') {

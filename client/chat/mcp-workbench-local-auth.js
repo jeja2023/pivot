@@ -1,4 +1,4 @@
-// 工具箱本机授权中心。负责授权状态与本机资源选择；只读查询/扫描由桌面端或本地助手执行器完成。
+// 工具库本机授权中心。负责授权状态与本机资源选择；只读查询/扫描由桌面端或本地助手执行器完成。
 const MCP_LOCAL_AUTH_TYPES = [
     {
         type: 'local_database',
@@ -327,7 +327,7 @@ function renderMcpLocalAuthorizationCenter(status) {
         </div>
         <div class="mcp-local-auth-note">
             <strong>安全边界</strong>
-            <span>本步骤只建立当前设备的授权记录；工具箱仍不会让服务器主动访问你的 localhost、本机数据库或本机文件夹，后续查询会通过桌面端或本地助手只读执行。</span>
+            <span>本步骤只建立当前设备的授权记录；工具库仍不会让服务器主动访问你的 localhost、本机数据库或本机文件夹，后续查询会通过桌面端或本地助手只读执行。</span>
         </div>
     `);
     bindMcpLocalAuthorizationCenter(status);

@@ -2,7 +2,8 @@ const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const {
     parseJsonObject,
-    normalizeDagSpec
+    normalizeDagSpec,
+    inspectDagTopology
 } = require('./agent-validators');
 const { formatToolList } = require('./agent-tool-catalog');
 const { inspectDagContracts } = require('./agent-dag-contracts');
@@ -61,6 +62,13 @@ function normalizeWorkflowPayload(body = {}, fallback = {}) {
     if (!dagSpec.nodes.length) {
         const err = new Error('保存工作流需要至少一个有效节点。');
         err.status = 400;
+        throw err;
+    }
+    const topology = inspectDagTopology(dagSpec);
+    if (topology.blockers.length) {
+        const err = new Error(`工作流结构无效：${topology.blockers[0]}`);
+        err.status = 400;
+        err.details = { topology };
         throw err;
     }
     assertWorkflowLlmNodesConfigured(dagSpec);
@@ -220,6 +228,13 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
     const current = db.prepare('SELECT * FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(workflowId, user.id);
     if (!current) return null;
     const data = normalizeWorkflowPayload(body, current);
+    const currentVersion = db.prepare('SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?')
+        .get(current.current_version_id, current.id);
+    const unchanged = currentVersion
+        && String(current.name || '') === data.name
+        && String(current.description || '') === data.description
+        && JSON.stringify(normalizeDagSpec(parseJsonObject(currentVersion.dag_spec) || {})) === JSON.stringify(data.dagSpec);
+    if (unchanged) return getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
     const update = db.transaction(() => {
         const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(current.id)?.next || 1);
@@ -240,6 +255,13 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
 function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
     const resolved = resolveAgentWorkflowVersion(workflowId, user, version || 'current');
     if (!resolved) return null;
+    const topology = inspectDagTopology(resolved.dagSpec);
+    if (topology.blockers.length) {
+        const err = new Error(`发布前检查未通过：${topology.blockers[0]}`);
+        err.status = 400;
+        err.details = { topology };
+        throw err;
+    }
     const contractReport = inspectDagContracts(resolved.dagSpec, formatToolList(user, { toolPolicy: 'all' }));
     if (contractReport.blockers.length) {
         const err = new Error(`发布前检查未通过：${contractReport.blockers[0]}`);

@@ -37,7 +37,20 @@ test('DOMPurify 不可用时安全 HTML 兜底会转义输入', () => {
     );
 });
 
-test('知识库和工具箱工作台入口保持可点击', () => {
+test('聊天图片附件预览不会暴露浏览器破损图标', () => {
+    const renderMessages = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'render-messages.js'), 'utf8');
+    const attachmentsCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'attachments.css'), 'utf8');
+
+    assert.match(renderMessages, /data-preview-image/);
+    assert.match(renderMessages, /data-preview-fallback/);
+    assert.match(renderMessages, /预览不可用，发送时上传/);
+    assert.match(renderMessages, /addEventListener\('error', setError/);
+    assert.match(renderMessages, /alt="" decoding="async"/);
+    assert.match(attachmentsCss, /\.preview-image-frame\.is-ready \.preview-image/);
+    assert.match(attachmentsCss, /\.preview-image-frame\.is-error \.preview-image-fallback/);
+});
+
+test('知识库和工具库工作台入口保持可点击', () => {
     const ragPanels = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-documents-panels.js'), 'utf8');
     const ragDocs = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-documents.js'), 'utf8');
     const ragCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag.js'), 'utf8');
@@ -137,7 +150,7 @@ test('知识库和工具箱工作台入口保持可点击', () => {
     assert.match(appWorkspaces, /\/rag\/summary/);
     assert.match(appWorkspaces, /\/mcp\/tools/);
     assert.match(appWorkspaces, /打开知识库/);
-    assert.match(appWorkspaces, /打开工具箱/);
+    assert.match(appWorkspaces, /打开工具库/);
     assert.match(appWorkspaces, /pivot_chat_mcp_enabled/);
     assert.match(chatShellPartial, /data-chat-tool-toggle="mcp"/);
     assert.doesNotMatch(mcpWorkbench, /mcp-next-step-card/);
@@ -250,7 +263,7 @@ test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息',
     assert.match(graphCss, /overflow:\s*auto/);
 });
 
-test('聊天回答会保留知识库和工具箱状态提示', () => {
+test('聊天回答会保留知识库和工具库状态提示', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine.js'), 'utf8');
     const streaming = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8');
     const markdownCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'markdown.css'), 'utf8');
@@ -262,10 +275,10 @@ test('聊天回答会保留知识库和工具箱状态提示', () => {
     assert.match(streaming, /sources\.join/);
     assert.match(streaming, /知识库未命中足够相关内容，本轮会按普通聊天继续/);
     assert.match(streaming, /getAssistantTraceMcpActionName/);
-    assert.match(streaming, /正在使用工具箱/);
-    assert.match(streaming, /工具箱工具已完成/);
+    assert.match(streaming, /正在使用工具库/);
+    assert.match(streaming, /工具库工具已完成/);
     assert.match(streaming, /补充资料/);
-    assert.match(streaming, /检查工具箱/);
+    assert.match(streaming, /检查工具库/);
     assert.match(streaming, /openKnowledgeWorkbench/);
     assert.match(streaming, /openMcpWorkbench/);
     assert.match(markdownCss, /\.chat-answer-trace/);
@@ -670,4 +683,17 @@ test('模型适配器将聊天消息转换为 Responses API 输入', () => {
     assert.equal(headers.Authorization, 'Bearer secret');
     assert.equal(headers['x-api-key'], 'secret');
     assert.equal(headers.Accept, 'application/json');
+});
+
+test('任务模板通知中心会将运行结果统一显示为中文', () => {
+    const agentUtils = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'agent-run-utils.js'), 'utf8');
+    const agentSchedules = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'agent-schedules.js'), 'utf8');
+
+    assert.match(agentUtils, /translateAgentNotificationText/);
+    assert.match(agentUtils, /DAG\\s\+run\\s\+completed/);
+    assert.match(agentUtils, /工作流运行完成/);
+    assert.match(agentUtils, /工作流运行失败/);
+    assert.match(agentUtils, /agentNotificationBody/);
+    assert.match(agentSchedules, /agentNotificationTitle\(item\)/);
+    assert.match(agentSchedules, /agentNotificationBody\(item\)/);
 });

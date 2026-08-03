@@ -11,146 +11,16 @@
 (function () {
 if (window.PivotDagNodeLibrary) return;
 
-// ────────────────────────────────────────────────────────────
-// 节点类型目录（与工具栏 preset 格式一致）
-// ────────────────────────────────────────────────────────────
-const NODE_PRESETS = [
-    {
-        group: '智能体',
-        items: [
-            {
-                base: 'llm',
-                title: '大模型',
-                svgIcon: 'bot',
-                theme: 'llm',
-                desc: '调用大模型分析、生成或改写内容',
-                patterns: ['agent.llm'],
-                getInput: () => typeof defaultLlmInput === 'function' ? defaultLlmInput(null) : { model: '', prompt: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 }
-            },
-            {
-                base: 'delegate',
-                title: '委派智能体',
-                svgIcon: 'users',
-                theme: 'delegate',
-                desc: '调用一次独立模型，返回专家结果并自动生成交接信息',
-                patterns: ['agent.delegate'],
-                input: { agentName: '领域专家', role: 'analyst', model: '', task: '{{goal}}', context: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 },
-                outputSchema: { type: 'object', required: ['content', 'agent', 'handoff'], properties: { content: { type: 'string' }, agent: { type: 'object' }, handoff: { type: 'object' } } }
-            },
-            {
-                base: 'handoff',
-                title: '智能体交接',
-                svgIcon: 'shuffle',
-                theme: 'handoff',
-                desc: '仅整理已有结果，不调用模型；用于统一传给下游智能体',
-                patterns: ['agent.handoff'],
-                input: { fromAgent: '上游智能体', toAgent: 'Supervisor', summary: '', findings: [], evidence: [], risks: [], openQuestions: [], confidence: 0.7 }
-            }
-        ]
-    },
-    {
-        group: '逻辑控制',
-        items: [
-            {
-                base: 'code',
-                title: '代码执行',
-                svgIcon: 'code',
-                theme: 'code',
-                desc: '在沙箱中执行 JS，对数据做转换/计算',
-                patterns: ['agent.code'],
-                input: { code: '// 用 return 返回结果\nreturn vars.input;', vars: {} },
-                outputSchema: { type: 'object', properties: { output: {}, text: { type: 'string' } } }
-            },
-            {
-                base: 'http',
-                title: 'HTTP 请求',
-                svgIcon: 'globe',
-                theme: 'http',
-                desc: '调用外部 REST API，支持 GET/POST 等',
-                patterns: ['agent.http'],
-                input: { url: '', method: 'GET', headers: {}, body: null },
-                outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
-            },
-            {
-                base: 'merge',
-                title: '变量聚合',
-                iconText: '⊕',
-                theme: 'merge',
-                desc: '把多个上游输出合并为单一对象',
-                patterns: ['agent.merge'],
-                input: { fields: {} },
-                outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' } } }
-            }
-        ]
-    },
-    {
-        group: '数据与检索',
-        items: [
-            {
-                base: 'search',
-                title: '知识检索',
-                svgIcon: 'search',
-                theme: 'rag',
-                desc: '从知识库按语义检索相关片段',
-                patterns: ['rag.search', 'knowledge', 'search'],
-                input: { query: '' }
-            },
-            {
-                base: 'data',
-                title: '数据查询',
-                svgIcon: 'database',
-                theme: 'db',
-                desc: '可视化选择表、字段和筛选条件，自动生成只读查询',
-                patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
-                input: {}
-            }
-        ]
-    },
-    {
-        group: '可视化与报告',
-        items: [
-            {
-                base: 'chart',
-                title: '图表生成',
-                svgIcon: 'chart',
-                theme: 'viz',
-                desc: '基于数据行生成可渲染图表',
-                patterns: ['viz.build_chart', 'chart'],
-                input: {}
-            },
-            {
-                base: 'report',
-                title: '报告编排',
-                svgIcon: 'file-text',
-                theme: 'report',
-                desc: '聚合多节点结果生成结构化报告',
-                patterns: ['report.compose', 'report'],
-                input: {}
-            }
-        ]
-    }
-];
+const NODE_PRESETS = window.Pivot.moduleApi('agent.dagNodePresets').groups || [];
 
 // ────────────────────────────────────────────────────────────
 // 挂载函数
 // ────────────────────────────────────────────────────────────
-function mount({ container, onAddNode, onToggleCollapse }) {
+function mount({ container, onAddNode, onToggleCollapse, getTools }) {
     if (!container) return null;
     if (container._pivotNodeLibDestroy) container._pivotNodeLibDestroy();
 
     let searchQuery = '';
-
-    function buildPreset(item) {
-        const input = typeof item.getInput === 'function' ? item.getInput() : (item.input || {});
-        return {
-            base: item.base,
-            title: item.title,
-            patterns: item.patterns || [],
-            input: typeof input === 'function' ? input : { ...input },
-            inputSchema: item.inputSchema || {},
-            outputSchema: item.outputSchema || {}
-        };
-    }
 
     function filteredGroups() {
         const q = searchQuery.trim().toLowerCase();
@@ -238,10 +108,15 @@ function mount({ container, onAddNode, onToggleCollapse }) {
             itemsEl.className = 'pivot-node-library-items';
 
             group.items.forEach(item => {
+                const availability = window.Pivot.moduleApi('agent.dagNodePresets').availability?.(item, typeof getTools === 'function' ? getTools() : [])
+                    || { available: true, reason: '' };
                 const card = document.createElement('button');
                 card.type = 'button';
                 card.className = `pivot-node-library-card is-${item.theme}`;
-                card.title = `添加「${item.title}」节点 — ${item.desc}`;
+                card.disabled = !availability.available;
+                card.title = availability.available
+                    ? `添加「${item.title}」节点 - ${item.desc}`
+                    : availability.reason;
 
                 const iconEl = document.createElement('span');
                 iconEl.className = `pivot-node-library-card-icon is-${item.theme}`;
@@ -255,7 +130,7 @@ function mount({ container, onAddNode, onToggleCollapse }) {
 
                 const descEl = document.createElement('span');
                 descEl.className = 'pivot-node-library-card-desc';
-                descEl.textContent = item.desc;
+                descEl.textContent = availability.available ? item.desc : availability.reason;
 
                 card.appendChild(iconEl);
                 card.appendChild(labelEl);
@@ -263,7 +138,7 @@ function mount({ container, onAddNode, onToggleCollapse }) {
 
                 card.addEventListener('click', () => {
                     if (typeof onAddNode === 'function') {
-                        onAddNode(buildPreset(item));
+                        onAddNode(item);
                     }
                 });
 

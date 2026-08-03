@@ -143,14 +143,13 @@ function renderMarkdown(markdown) {
     return chunks.join('\n');
 }
 
-function renderManualHtml(markdown, { appVersion = '', nonce = '', embedded = false } = {}) {
+function renderManualHtml(markdown, { nonce = '', embedded = false } = {}) {
     const body = renderMarkdown(stripVersionUpdateSections(markdown));
-    const safeVersion = escapeHtml(appVersion || '');
     const safeNonce = escapeHtml(nonce || '');
     const topbarHtml = embedded ? '' : `        <header class="manual-topbar">
             <div class="manual-brand">
                 <strong>Pivot 使用帮助</strong>
-                <span>版本 ${safeVersion || 'current'} · 面向普通用户的操作说明</span>
+                <span>面向普通用户的操作说明</span>
             </div>
             <nav class="manual-actions" aria-label="帮助操作">
                 <a href="/chat">返回系统</a>

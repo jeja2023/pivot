@@ -1,37 +1,44 @@
-<!-- 智能体工作台 -->
+<!-- 自动化：任务运行 -->
     <section id="agent-workbench-modal" class="main-workspace-view agent-workspace-view hidden">
         <div class="agent-modal">
             <div class="agent-modal-header">
                 <div>
-                    <h3>智能体</h3>
-                    <p>用 AI 执行自由任务，也可将稳定流程编排为工作流并发布、复用和审计。</p>
+                    <h3>自动化</h3>
+                    <p>运行一次性多步骤任务，并统一查看所有自动化执行记录。</p>
                 </div>
                 <div class="agent-modal-header-actions">
-                    <button class="btn-secondary" type="button" data-agent-open-dag>工作流编排</button>
+                    <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog" aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
+                    <button id="agent-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
                 </div>
             </div>
+            <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
+                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-selected="true">任务运行</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-selected="false">工作流</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-selected="false">计划任务</button>
+            </div>
             <div class="agent-workbench">
-                <div class="agent-run-panel">
-                    <div class="agent-panel-head">
-                        <div class="agent-panel-head-row">
-                            <h3>快速任务</h3>
-                            <div class="agent-panel-head-actions">
-                                <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
-                                <button id="agent-refresh-btn" class="btn-secondary">刷新</button>
+                <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog" aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
+                    <div id="agent-run-panel" class="modal agent-task-editor-modal">
+                        <div class="agent-config-modal-head">
+                            <div>
+                                <h3 id="agent-task-editor-title">新建任务</h3>
+                                <span>由 AI 根据目标自主规划并执行多步骤任务</span>
                             </div>
+                            <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
                         </div>
-                        <p>选择模型并设定目标，适合先探索路径，再从任务结果生成工作流草稿。</p>
-                    </div>
-                    <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
-                    <div class="agent-quick-goals" aria-label="常用自由任务目标">
-                        <button type="button" data-agent-run-mode="audit" data-agent-mcp="true" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
-                        <button type="button" data-agent-run-mode="standard" data-agent-mcp="false" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
-                        <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
-                    </div>
-                    <div class="agent-run-primary">
-                        <div class="agent-run-controls">
-                            <label>
+                        <div class="agent-task-editor-body">
+                            <label class="modal-form-field agent-task-goal-field">
+                                <span>任务目标</span>
+                                <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
+                            </label>
+                            <div class="agent-quick-goals" aria-label="常用自主任务目标">
+                                <button type="button" data-agent-run-mode="audit" data-agent-mcp="true" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
+                                <button type="button" data-agent-run-mode="standard" data-agent-mcp="false" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
+                                <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
+                            </div>
+                            <div class="modal-form-grid modal-form-grid--3 agent-task-primary-fields">
+                            <label class="modal-form-field modal-form-field--span-2">
                                 <span>模型</span>
                                 <select id="agent-model-select" class="form-input hidden"></select>
                                 <div id="agent-model-picker" class="agent-model-picker">
@@ -42,21 +49,19 @@
                                     <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
                                 </div>
                             </label>
-                            <label class="agent-steps-field">
-                                <span>步骤</span>
+                            <label class="modal-form-field agent-steps-field">
+                                <span>最大步骤</span>
                                 <input id="agent-max-steps" class="form-input" type="number" min="1" max="50" value="10" title="最大步骤">
                             </label>
-                            <button id="agent-run-btn" class="btn-primary">运行</button>
                         </div>
-                    </div>
                     <div class="agent-inline-settings" aria-label="高级设置">
                         <div class="agent-inline-settings-head">
                             <strong>高级设置</strong>
                         </div>
                         <div class="agent-policy-controls">
-                            <label class="agent-toggle-field" title="开启后，自由任务可以调用已接入的工具箱工具。关闭时仅使用系统只读工具。">
+                            <label class="agent-toggle-field" title="开启后，自主任务可以调用已接入的工具库工具。关闭时仅使用系统只读工具。">
                                 <input id="agent-allow-mcp" type="checkbox" checked>
-                                <span>允许工具箱工具</span>
+                                <span>允许工具库工具</span>
                                 <i class="agent-switch-track" aria-hidden="true"></i>
                             </label>
                             <label>
@@ -114,72 +119,26 @@
                         </div>
                     </div>
                     <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
-                    <div class="agent-config-launcher" aria-label="智能体配置面板">
-                        <button class="btn-secondary" type="button" data-agent-config-open="templates">模板与计划</button>
-                        <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
-                        <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
-                    </div>
                     <div id="agent-config-section-store" class="agent-config-section-store">
                     <details class="agent-collapse-section" data-agent-config-section="templates">
                         <summary>
-                            <span>自由任务模板与计划</span>
-                            <small>目标/参数复用、临时计划、通知</small>
+                            <span>自主任务模板</span>
+                            <small>复用目标、模型和执行参数</small>
                         </summary>
                         <div class="agent-collapse-body">
                             <div class="agent-template-strip">
                                 <div class="agent-tool-section-head compact">
-                                    <strong>自由任务模板库</strong>
+                                    <strong>自主任务模板库</strong>
                                     <button id="agent-save-template-btn" class="btn-secondary" type="button" data-agent-save-template>保存当前任务</button>
                                 </div>
                                 <div id="agent-template-list" class="agent-template-list"></div>
                             </div>
-                            <div class="agent-schedule-panel">
+                            <div class="agent-template-notifications">
                                 <div class="agent-tool-section-head compact">
-                                    <strong>计划设置</strong>
-                                    <span>自由任务适合临时计划；生产周期任务建议使用已发布工作流</span>
+                                    <strong>通知中心</strong>
+                                    <span>审批、失败与完成</span>
                                 </div>
-                                <div class="agent-schedule-controls">
-                                    <label>
-                                        <span>执行方式</span>
-                                        <select id="agent-schedule-frequency" class="form-input">
-                                            <option value="manual">立即运行</option>
-                                            <option value="daily">每天</option>
-                                            <option value="weekly">每周</option>
-                                        </select>
-                                    </label>
-                                    <label>
-                                        <span>时间</span>
-                                        <input id="agent-schedule-time" class="form-input" type="time" value="09:00">
-                                    </label>
-                                    <label>
-                                        <span>星期</span>
-                                        <select id="agent-schedule-weekday" class="form-input">
-                                            <option value="1">周一</option>
-                                            <option value="2">周二</option>
-                                            <option value="3">周三</option>
-                                            <option value="4">周四</option>
-                                            <option value="5">周五</option>
-                                            <option value="6">周六</option>
-                                            <option value="0">周日</option>
-                                        </select>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="agent-ops-grid">
-                                <div>
-                                    <div class="agent-tool-section-head compact">
-                                        <strong>计划队列</strong>
-                                        <span>定时与手动计划</span>
-                                    </div>
-                                    <div id="agent-schedule-list" class="agent-ops-list"></div>
-                                </div>
-                                <div>
-                                    <div class="agent-tool-section-head compact">
-                                        <strong>通知中心</strong>
-                                        <span>审批、失败与完成</span>
-                                    </div>
-                                    <div id="agent-notification-list" class="agent-ops-list"></div>
-                                </div>
+                                <div id="agent-notification-list" class="agent-ops-list"></div>
                             </div>
                         </div>
                     </details>
@@ -200,7 +159,7 @@
                             <div class="agent-results-panel agent-results-artifacts-panel">
                                 <div class="agent-tool-section-head compact">
                                     <strong>结果沉淀</strong>
-                                    <span>已保存的自由任务输出</span>
+                                    <span>已保存的自主任务输出</span>
                                 </div>
                                 <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
                             </div>
@@ -230,14 +189,31 @@
                         </div>
                     </details>
                     </div>
+                        </div>
+                        <div class="agent-task-editor-footer">
+                            <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
+                            <div>
+                                <button id="task-create-cancel-btn" class="btn-secondary" type="button">取消</button>
+                                <button id="agent-save-plan-btn" class="btn-secondary" type="button">保存为计划</button>
+                                <button id="agent-run-btn" class="btn-primary" type="button">运行任务</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="agent-history-panel">
                     <div class="agent-history-head">
                         <div>
-                            <h3>任务记录</h3>
-                            <p>统一查看自由任务与工作流任务；自由任务可沉淀为工作流草稿。</p>
+                            <h3>运行记录</h3>
+                            <p>统一查看自主任务、工作流任务及计划运行记录。</p>
                         </div>
-                        <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                        <div class="agent-history-head-actions">
+                            <div class="agent-history-tools" aria-label="任务工具">
+                                <button class="btn-secondary" type="button" data-agent-config-open="templates">任务模板</button>
+                                <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
+                                <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
+                            </div>
+                            <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                        </div>
                     </div>
                     <div class="agent-history-toolbar">
                         <div id="agent-metrics" class="agent-runtime-status agent-metrics"></div>
@@ -248,13 +224,15 @@
                                 <option value="running">运行中</option>
                                 <option value="approval_required">待审批</option>
                                 <option value="completed">已完成</option>
+                                <option value="completed_with_errors">完成但有错误</option>
                                 <option value="error">失败</option>
                                 <option value="cancelled">已停止</option>
                             </select>
                             <select id="agent-filter-run-type" class="form-input">
                                 <option value="">全部类型</option>
-                                <option value="free">自由任务</option>
+                                <option value="free">自主任务</option>
                                 <option value="workflow">工作流任务</option>
+                                <option value="scheduled">计划执行</option>
                             </select>
                             <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
                         </div>

@@ -275,7 +275,7 @@ function cancelAgentRun(runId, user) {
         title: 'User cancelled run',
         output: { status: 'cancelled' }
     });
-    createAgentNotification(user.id, runId, 'cancelled', 'Agent run cancelled', getAgentRunTitle(run));
+    createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
     return getRunForUser(runId, user);
 }
 
@@ -741,7 +741,7 @@ async function runAgent(runId, user) {
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
+                createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
                 return;
             }
 
@@ -853,7 +853,7 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'completed', 'Agent run completed', getAgentRunTitle(run));
+        createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
     } catch (e) {
         if (e.code === 'AGENT_RUN_CANCELLED') {
             updateRun(runId, { updated_at: getBeijingTimestamp() });
@@ -957,12 +957,18 @@ function approveAgentTool(runId, user, approve = true) {
             toolName: pending.tool || '',
             output: { status: 'rejected' }
         });
-        createAgentNotification(user.id, runId, 'cancelled', 'Agent approval rejected', pending.tool || getAgentRunTitle(run));
+        createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
         return getRunForUser(runId, user);
     }
     const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
-    if (pending.tool) approvedTools.add(pending.tool);
-    setRunMetadata(runId, { pendingApproval: null, approvedTools: [...approvedTools] });
+    const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
+    if (pending.key) approvedApprovalKeys.add(pending.key);
+    else if (pending.tool) approvedTools.add(pending.tool);
+    setRunMetadata(runId, {
+        pendingApproval: null,
+        approvedTools: [...approvedTools],
+        approvedApprovalKeys: [...approvedApprovalKeys]
+    });
     updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'approval',

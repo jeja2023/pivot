@@ -44,7 +44,7 @@ async function loadAgentModels() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>');
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自主任务的模型</div>');
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -71,7 +71,7 @@ async function _loadAgentModelsLegacy() {
     const select = document.getElementById('agent-model-select');
     if (!select) return;
     const res = await apiFetch(`${API_BASE}/models/available`);
-    if (!res.ok) throw new Error('自由任务模型列表加载失败');
+    if (!res.ok) throw new Error('自主任务模型列表加载失败');
     const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
         ? window.isSelectableModelForCurrentUser
         : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
@@ -96,7 +96,7 @@ async function _loadAgentModelsLegacy() {
                     <span class="agent-model-caps">${agentModelCapabilityMarkup(model)}</span>
                 </button>
             `;
-        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自由任务的模型</div>');
+        }).join('') : '<div class="agent-model-option is-empty">暂无可用于自主任务的模型</div>');
         list.querySelectorAll('[data-agent-model-id]').forEach(item => {
             item.addEventListener('click', () => selectAgentModel(item.dataset.agentModelId));
         });
@@ -137,7 +137,7 @@ async function loadAgentModelRouters() {
         `).join(''));
         select.value = strategies.some(strategy => String(strategy.code) === String(current)) ? current : 'fixed';
     } catch (e) {
-        // 保留 HTML 中的默认策略，避免路由接口异常影响自由任务工作台打开。
+        // 保留 HTML 中的默认策略，避免路由接口异常影响自主任务创建。
     }
 }
 
@@ -170,7 +170,7 @@ async function loadAgentTools() {
             const showOwner = agentShouldShowToolOwner(tool);
             const tags = [
                 isAdminOnlyAgentTool(tool) ? '管理员' : '',
-                tool.source === 'mcp' ? '工具箱' : '系统',
+                tool.source === 'mcp' ? '工具库' : '系统',
                 showOwner && ownerLabel ? `所属：${ownerLabel}` : '',
                 tool.requiresApproval ? '需审批' : ''
             ].filter(Boolean);
@@ -235,13 +235,13 @@ function renderAgentPreflight(data) {
     const contractSummary = data.contracts?.summary || null;
     const deploymentTip = summary.runMode === 'dag'
         ? '工作流适合发布版本、计划运行和审计复用，可作为企业生产任务入口。'
-        : '自由任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
+        : '自主任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
     const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || []), deploymentTip].slice(0, 5);
     target.className = `workspace-governance-panel agent-preflight-panel ${agentEscape(data.status || 'ready')}`;
     PivotSafeHtml.setHtml(target, `
         <div class="governance-head">
             <strong>任务预检：${agentEscape(statusText)}</strong>
-            <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具箱 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
+            <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
         </div>
         <div class="governance-metrics">
             <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入Token</span>
@@ -317,8 +317,8 @@ async function loadAgentRuns(page = agentRunsPage) {
         closeAgentRunDetailModal();
         PivotSafeHtml.setHtml(list, `
             <div class="agent-empty-state agent-empty-hero">
-                <strong>还没有自由任务</strong>
-                <span>在左侧输入目标并点击运行后，这里会显示统一任务记录。自由任务可继续生成工作流草稿。</span>
+                <strong>还没有任务记录</strong>
+                <span>新建自主任务或运行工作流后，这里会统一展示执行状态和结果。</span>
             </div>
         `);
         return;
@@ -354,7 +354,9 @@ async function loadAgentRuns(page = agentRunsPage) {
                     ${displayRuns.map((run, index) => {
         const title = agentDisplayTitle(run);
         const mode = agentRunModeLabel(run.run_mode);
-        const runTypeLabel = run.run_mode === 'dag' ? '工作流任务' : '自由任务';
+        const isScheduled = Boolean(run.schedule_id);
+        const runTypeLabel = isScheduled ? '计划执行' : (run.run_mode === 'dag' ? '工作流任务' : '自主任务');
+        const runTypeClass = isScheduled ? 'scheduled' : (run.run_mode === 'dag' ? 'workflow' : 'free');
         const tokenTotal = Number(run.total_tokens || 0);
         const inputTokens = Number(run.input_tokens || 0);
         const outputTokens = Number(run.output_tokens || 0);
@@ -369,7 +371,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <td class="agent-runs-title-cell">
                     <strong tabindex="0" aria-label="${agentEscapeAttr(taskTooltip)}" data-agent-run-title-full="${agentEscapeAttr(taskTooltip)}">${agentEscape(title)}</strong>
                 </td>
-                <td><span class="agent-run-type ${run.run_mode === 'dag' ? 'workflow' : 'free'}">${agentEscape(runTypeLabel)}</span></td>
+                <td><span class="agent-run-type ${runTypeClass}">${agentEscape(runTypeLabel)}</span></td>
                 <td>
                     <strong class="agent-runs-compact">${agentEscape(run.model_name || '-')}</strong>
                 </td>

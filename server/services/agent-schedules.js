@@ -108,7 +108,8 @@ function createAgentSchedule(user, body = {}) {
     const modelCfg = getRunnableModelForUser(data.modelId, user);
     if (!modelCfg && data.runConfig.runMode !== 'dag') throw new Error('请选择当前账号可用的模型后再创建计划。');
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
-        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+        const resolved = resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+        if (!resolved) throw new Error('请选择当前账号可用且已发布的工作流。');
     }
     const now = getBeijingTimestamp();
     const info = db.prepare(`
@@ -132,7 +133,8 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     const modelCfg = getRunnableModelForUser(data.modelId, user);
     if (!modelCfg && data.runConfig.runMode !== 'dag') throw new Error('请选择当前账号可用的模型后再更新计划。');
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
-        resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+        const resolved = resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
+        if (!resolved) throw new Error('请选择当前账号可用且已发布的工作流。');
     }
     const now = getBeijingTimestamp();
     db.prepare(`

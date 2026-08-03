@@ -11,6 +11,56 @@
     margin-bottom: 10px;
 }
 
+.agent-history-head > div:first-child {
+    min-width: 0;
+}
+
+.agent-history-head-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+}
+
+.agent-history-head-actions > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.agent-history-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.agent-history-tools .btn-secondary {
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    .agent-history-head {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .agent-history-head-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .agent-history-tools {
+        flex-wrap: wrap;
+    }
+}
+
 .agent-history-head h3 {
     margin: 0 0 3px;
     font-size: 1rem;
@@ -222,6 +272,12 @@
     color: #047857;
 }
 
+.agent-run-type.scheduled {
+    border-color: rgba(217, 119, 6, 0.3);
+    background: #fffbeb;
+    color: #b45309;
+}
+
 .agent-runs-muted {
     margin-top: 3px;
     color: var(--text-muted);
@@ -366,6 +422,12 @@
 .agent-run-status.approval_required {
     background: #fef3c7;
     color: #92400e;
+}
+
+.agent-run-status.completed_with_errors {
+    border-color: rgba(249, 115, 22, 0.4);
+    background: rgba(255, 237, 213, 0.8);
+    color: #c2410c;
 }
 
 .agent-run-status.cancelled {

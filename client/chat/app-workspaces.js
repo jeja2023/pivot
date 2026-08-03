@@ -38,14 +38,14 @@ const CHAT_TOOL_STATUS_COPY = {
         action: '打开知识库'
     },
     mcp: {
-        label: '工具箱',
+        label: '工具库',
         ready: '已打开，可按需调用。',
         checking: '检查中',
         empty: '暂无可用工具',
         loading: '检查中',
         error: '状态异常',
         offline: '状态未确认',
-        action: '打开工具箱'
+        action: '打开工具库'
     }
 };
 
@@ -199,7 +199,7 @@ async function fetchChatToolReadiness(tool) {
 
     if (tool === 'mcp') {
         const res = await apiFetch(`${API_BASE}/mcp/tools`);
-        if (!res.ok) throw new Error('工具箱状态获取失败');
+        if (!res.ok) throw new Error('工具库状态获取失败');
         const data = await res.json();
         const count = Array.isArray(data.tools) ? data.tools.length : 0;
         if (count > 0) return { tone: 'ready', text: `${count} 个工具可用` };
@@ -328,6 +328,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
     agent: [
         '/chat/dag-core.js',
         '/chat/dag-render.js',
+        '/chat/dag-node-presets.js',
         '/chat/dag-interaction.js',
         '/chat/dag-toolbar-tools.js',
         '/chat/dag-toolbar-db.js',
@@ -477,7 +478,9 @@ window.showMainWorkspace = function(view = 'chat') {
         document.getElementById(id)?.classList.toggle('hidden', key !== target);
     });
     document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.workspaceView === target);
+        const view = btn.dataset.workspaceView;
+        const isAutomation = view === 'automation' && (target === 'agent' || target === 'agent-dag');
+        btn.classList.toggle('active', view === target || isAutomation);
     });
     document.querySelectorAll('.footer-mini-btn[data-workspace-view]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.workspaceView === target);

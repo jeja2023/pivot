@@ -207,6 +207,7 @@ async function loadAgentWorkflows() {
         if (!res.ok) throw new Error(data.error || '已保存工作流加载失败');
         agentWorkflowsCache = data.data || [];
         renderAgentWorkflowLibrary();
+        window.Pivot.moduleApi('agent.automation').renderAssetCenter?.();
     } catch (e) {
         showToast(e.message || '已保存工作流加载失败', 'error');
     }
@@ -303,22 +304,11 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         showToast('工作流 JSON 格式不正确', 'error');
         return null;
     }
-    // 保存前主动校验，发现错误时弹出确认门禁
+    // 结构错误会导致发布或运行结果不可预测，因此保存时直接阻断。
     const validation = dagEditorInstance?.validate?.();
     if (validation && validation.errors.length) {
-        const blockingLlmError = validation.errors.find(item => /大模型节点|节点模型/.test(String(item || '')));
-        if (blockingLlmError) {
-            showToast(blockingLlmError, 'error');
-            return null;
-        }
-        const msg = [
-            `工作流存在 ${validation.errors.length} 个问题：`,
-            ...validation.errors.map((e, i) => `${i + 1}. ${e}`),
-            '',
-            '确定仍要保存吗？'
-        ].join('\n');
-        const confirmed = await (window.showConfirm?.('工作流校验未通过', msg) || Promise.resolve(window.confirm(msg)));
-        if (!confirmed) return null;
+        showToast(`无法保存：${validation.errors[0]}（共 ${validation.errors.length} 项）`, 'error');
+        return null;
     }
     const workflowName = await ensureAgentWorkflowNameForSave();
     if (!workflowName) return null;
@@ -449,12 +439,13 @@ window.saveAgentWorkflowDraft = function() {
 };
 
 window.saveAgentWorkflow = async function() {
-    if (!persistAgentWorkflow(AGENT_WORKFLOW_SAVED_KEY, '保存工作流')) return;
-    updateAgentWorkflowRunUi();
+    const saved = await saveAgentWorkflowToLibrary();
+    if (!saved) return;
+    persistAgentWorkflow(AGENT_WORKFLOW_SAVED_KEY, '保存工作流');
     try {
         localStorage.removeItem(AGENT_WORKFLOW_DRAFT_KEY);
     } catch (e) {
         // 忽略存储清理失败
     }
-    await saveAgentWorkflowToLibrary();
+    updateAgentWorkflowRunUi();
 };

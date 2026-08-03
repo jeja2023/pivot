@@ -9,16 +9,24 @@
                             <span class="brand-text-cn">智枢</span>
                         </span>
                     </div>
-                    <button id="new-chat-btn" class="new-chat-circle-btn" title="发起新对话">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="3">
-                            <line x1="12" y1="5" x2="12" y2="19" />
-                            <line x1="5" y1="12" x2="19" y2="12" />
-                        </svg>
-                    </button>
+                    <div class="sidebar-header-actions">
+                        <button id="new-chat-btn" class="new-chat-circle-btn" title="发起新对话">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                        </button>
+                        <button id="sidebar-mobile-close-btn" class="sidebar-mobile-close-btn" type="button" title="收起侧边栏" aria-label="收起侧边栏">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                <path d="M6 6l12 12"></path>
+                                <path d="M18 6L6 18"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="sidebar-tools">
-                    <button id="session-search-open" class="sidebar-tool-btn sidebar-search-trigger" type="button" title="搜索会话">
+                    <button id="session-search-open" class="sidebar-tool-btn sidebar-search-trigger" type="button" title="全局搜索">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
                             stroke-width="2.3">
                             <circle cx="11" cy="11" r="8" />
@@ -45,7 +53,7 @@
                         </svg>
                         <span>知识库</span>
                     </button>
-                    <button id="mcp-workbench-btn" class="sidebar-tool-btn" data-workspace-view="mcp" title="工具箱">
+                    <button id="mcp-workbench-btn" class="sidebar-tool-btn" data-workspace-view="mcp" title="工具库">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3">
                             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
@@ -54,24 +62,20 @@
                             <path d="M6.5 10v4"></path>
                             <path d="M10 17.5h3.5a3.5 3.5 0 0 0 3.5-3.5V10"></path>
                         </svg>
-                        <span>工具箱</span>
+                        <span>工具库</span>
                     </button>
-                    <button id="agent-workbench-btn" class="sidebar-tool-btn" data-workspace-view="agent" title="智能体">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4">
-                            <path d="M12 2v4"></path>
-                            <path d="M12 18v4"></path>
-                            <path d="m4.93 4.93 2.83 2.83"></path>
-                            <path d="m16.24 16.24 2.83 2.83"></path>
-                            <path d="M2 12h4"></path>
-                            <path d="M18 12h4"></path>
-                            <path d="m4.93 19.07 2.83-2.83"></path>
-                            <path d="m16.24 7.76 2.83-2.83"></path>
-                            <circle cx="12" cy="12" r="4"></circle>
+                    <button id="automation-workbench-btn" class="sidebar-tool-btn" data-workspace-view="automation" title="自动化">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="6" height="6" rx="1.5"></rect>
+                            <rect x="15" y="15" width="6" height="6" rx="1.5"></rect>
+                            <path d="M9 6h3a3 3 0 0 1 3 3v6"></path>
+                            <path d="m12 12 3 3 3-3"></path>
                         </svg>
-                        <span>智能体</span>
+                        <span>自动化</span>
                     </button>
                 </div>
             </div>
+            <div class="sidebar-session-section-label">最近会话</div>
             <div id="session-list" class="session-list"></div>
             <div class="sidebar-footer">
                 <div class="footer-row">
@@ -102,7 +106,7 @@
                             </svg>
                             <span>帮助</span>
                         </button>
-                        <button id="admin-panel-btn" class="footer-mini-btn" data-workspace-view="settings" title="系统设置">
+                        <button id="admin-panel-btn" class="footer-mini-btn" data-workspace-view="settings" title="设置">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2.5">
                                 <path
@@ -129,10 +133,15 @@
             <div class="modal session-search-dialog">
                 <div class="session-search-head">
                     <div>
-                        <h3>搜索会话</h3>
-                        <p>按标题、内容或标签快速定位历史对话。</p>
+                        <h3>全局搜索</h3>
+                        <p>搜索会话、任务和工作流。</p>
                     </div>
                     <button id="session-search-close" class="btn-secondary btn-red-outline" type="button">关闭</button>
+                </div>
+                <div class="global-search-types" role="tablist" aria-label="搜索范围">
+                    <button id="global-search-tab-sessions" class="global-search-type active" type="button" data-global-search-type="sessions" role="tab" aria-selected="true">会话</button>
+                    <button id="global-search-tab-tasks" class="global-search-type" type="button" data-global-search-type="tasks" role="tab" aria-selected="false">任务</button>
+                    <button id="global-search-tab-workflows" class="global-search-type" type="button" data-global-search-type="workflows" role="tab" aria-selected="false">工作流</button>
                 </div>
                 <div class="session-search-controls">
                     <div class="session-search-input-wrap">
@@ -144,11 +153,13 @@
                         <input type="text" id="session-search-modal-input" class="form-input"
                             placeholder="搜索会话标题、消息内容，或输入 #标签">
                     </div>
-                    <div class="tab-switcher-mini session-search-tabs">
-                        <button id="session-search-modal-active" class="tab-btn-mini active" type="button">当前</button>
-                        <button id="session-search-modal-archive" class="tab-btn-mini" type="button">归档</button>
+                    <div id="session-search-scope" class="session-search-scope">
+                        <div class="tab-switcher-mini session-search-tabs">
+                            <button id="session-search-modal-active" class="tab-btn-mini active" type="button">当前</button>
+                            <button id="session-search-modal-archive" class="tab-btn-mini" type="button">归档</button>
+                        </div>
+                        <div id="session-batch-slot" class="session-batch-slot"></div>
                     </div>
-                    <div id="session-batch-slot" class="session-batch-slot"></div>
                 </div>
                 <div id="session-search-modal-results" class="session-search-results"></div>
                 <div id="session-search-modal-status" class="session-search-status"></div>
@@ -168,20 +179,6 @@
                         </svg>
                     </button>
                     <h3 id="current-title">请选择或新建对话</h3>
-                </div>
-                <div class="header-right">
-
-                    <div id="model-selector-container" class="model-dropdown-container">
-                        <input type="hidden" id="model-selector">
-                        <button id="model-selector-btn" class="model-selector-trigger">
-                            <span id="selected-model-name">正在加载...</span>
-                            <div id="selected-model-caps" class="selected-caps"></div>
-                            <svg class="chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        </button>
-                        <div id="model-dropdown-list" class="model-dropdown-list hidden">
-                            <!-- 动态填充模型列表 -->
-                        </div>
-                    </div>
                 </div>
             </header>
             <div id="message-container" class="message-container"></div>
@@ -216,7 +213,7 @@
                         <select id="chat-rag-tag-scope" class="form-input chat-rag-scope hidden" title="知识库标签" aria-label="知识库标签" aria-hidden="true" disabled>
                             <option value="">全部标签</option>
                         </select>
-                        <button type="button" id="chat-mcp-enabled" class="chat-tool-toggle chat-tool-mcp" data-chat-tool-toggle="mcp" data-tooltip="允许本轮对话按需调用工具箱工具" aria-label="允许本轮对话按需调用工具箱工具" aria-pressed="false">
+                        <button type="button" id="chat-mcp-enabled" class="chat-tool-toggle chat-tool-mcp" data-chat-tool-toggle="mcp" data-tooltip="允许本轮对话按需调用工具库工具" aria-label="允许本轮对话按需调用工具库工具" aria-pressed="false">
                             <span class="chat-tool-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
@@ -234,21 +231,20 @@
                         <button type="button" id="context-usage-pill" class="context-usage-btn has-tooltip" title="当前会话上下文用量，点击手动压缩" data-tooltip="上下文用量: -">
                             <div class="context-mini-ring" id="context-usage-ring" style="--progress: 0;"></div>
                         </button>
-                        <button id="clear-input-btn" class="btn-icon has-tooltip" data-tooltip="清空输入框">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M7 3h10v5H7z"></path>
-                                <path d="M10.5 3v5"></path>
-                                <path d="M13.5 3v5"></path>
-                                <path d="M5 8h14a1 1 0 0 1 1 1v1a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a1 1 0 0 1 1-1Z"></path>
-                                <path d="M12 12v8"></path>
-                                <path d="M10 20h4"></path>
-                            </svg>
-                        </button>
                         <button id="stop-btn" class="btn-danger hidden" title="停止生成">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                 <rect x="5" y="5" width="14" height="14" rx="2" />
                             </svg>
                         </button>
+                        <div id="model-selector-container" class="model-dropdown-container input-model-selector">
+                            <input type="hidden" id="model-selector">
+                            <button id="model-selector-btn" class="model-selector-trigger" type="button" title="切换模型">
+                                <span id="selected-model-name">正在加载...</span>
+                            </button>
+                            <div id="model-dropdown-list" class="model-dropdown-list hidden">
+                                <!-- 动态填充模型列表 -->
+                            </div>
+                        </div>
                         <button id="send-btn" class="btn-primary" title="发送 (Enter)">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
                                 xmlns="http://www.w3.org/2000/svg">

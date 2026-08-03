@@ -2,6 +2,7 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    width: 100%;
     min-width: 0;
     min-height: 0;
 }
@@ -32,6 +33,7 @@
 
 #agent-config-modal[data-agent-config-section="evaluations"] .agent-collapse-evaluations[open] .agent-collapse-body {
     min-height: 0;
+    width: 100%;
     padding: 16px;
     overflow: hidden;
 }
@@ -45,6 +47,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.agent-eval-toolbar,
+.agent-eval-overview,
+.agent-eval-layout {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .agent-eval-toolbar > div:first-child,
@@ -120,6 +129,8 @@
 
 .agent-eval-layout.is-empty {
     display: block;
+    flex: 0 0 auto;
+    min-height: 250px;
 }
 
 .agent-eval-suite-list {
@@ -131,7 +142,7 @@
 
 .agent-eval-layout.is-empty .agent-eval-suite-list {
     display: grid;
-    height: 100%;
+    height: auto;
     min-height: 250px;
     place-items: center;
     padding: 20px;
@@ -177,11 +188,6 @@
 .agent-eval-empty > span:not(.agent-eval-empty-icon) {
     font-size: 12px;
     line-height: 1.55;
-}
-
-.agent-eval-empty .btn-primary {
-    height: 34px;
-    margin-top: 6px;
 }
 
 .agent-eval-suite-item {
@@ -557,6 +563,24 @@
 .agent-eval-editor-footer .btn-secondary {
     min-width: 72px;
     height: 34px;
+}
+
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty {
+    height: min(540px, calc(100vh - 32px));
+}
+
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty .agent-config-modal-body,
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty .agent-collapse-evaluations[open] {
+    flex: 0 0 auto;
+}
+
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty .agent-config-modal-body,
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty .agent-collapse-evaluations[open] .agent-collapse-body {
+    overflow: visible;
+}
+
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty .agent-eval-layout.is-empty {
+    min-height: 250px;
 }
 
 body.dark-mode .agent-eval-rule.passed,

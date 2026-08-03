@@ -44,7 +44,11 @@ function makeButton(label, title, onClick, options = {}) {
             btn.textContent = label;
         }
         if (title) btn.title = title;
-        btn.addEventListener('click', onClick);
+        if (options.disabled) {
+            btn.disabled = true;
+            btn.setAttribute('aria-disabled', 'true');
+        }
+        if (typeof onClick === 'function') btn.addEventListener('click', onClick);
         return btn;
     }
 
@@ -85,75 +89,22 @@ function makeToolbarGroup(items, className = '') {
 function renderDagToolbar(ctx) {
         if (!ctx.toolbar) return null;
             ctx.toolbar.replaceChildren();
-            const addLlmNode = () => ctx.addPresetNode({
-                    base: 'llm',
-                    title: '大模型处理',
-                    patterns: ['agent.llm'],
-                    input: ({ selectedNode }) => defaultLlmInput(selectedNode)
-                });
+            const tools = typeof ctx.currentTools === 'function' ? ctx.currentTools() : [];
+            const registry = window.Pivot.moduleApi('agent.dagNodePresets');
+            const presetButtons = (registry?.groups || []).flatMap(group => group.items.map(preset => {
+                const availability = registry.availability(preset, tools);
+                const label = preset.advanced ? `${preset.title}（高级）` : preset.title;
+                return makeButton(
+                    label,
+                    availability.available ? preset.desc : availability.reason,
+                    () => ctx.addPresetNode(preset),
+                    { icon: '+', tone: preset.theme || '', disabled: !availability.available }
+                );
+            }));
             ctx.toolbar.appendChild(makeToolbarGroup([
                 makeToolbarDropdown('添加节点', [
-                    makeButton('大模型', '添加大模型处理节点', addLlmNode, { icon: '+', tone: 'llm' }),
                     makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' }),
-                    makeButton('委派智能体', '调用一次独立模型，返回专家结果并自动生成交接信息；通常无需另加交接节点', () => ctx.addPresetNode({
-                    base: 'delegate',
-                    title: '委派智能体',
-                    patterns: ['agent.delegate'],
-                    input: { agentName: '领域专家', role: 'analyst', model: defaultWorkflowModelId(), task: '{{goal}}', context: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 },
-                    outputSchema: { type: 'object', required: ['content', 'agent', 'handoff'], properties: { content: { type: 'string' }, agent: { type: 'object' }, handoff: { type: 'object' } } }
-                }), { icon: '+' }),
-                    makeButton('智能体交接', '仅整理已有结果，不调用模型；需要统一交接格式或汇总多来源时使用', () => ctx.addPresetNode({
-                    base: 'handoff',
-                    title: '智能体交接',
-                    patterns: ['agent.handoff'],
-                    input: { fromAgent: '上游智能体', toAgent: 'Supervisor', summary: '', findings: [], evidence: [], risks: [], openQuestions: [], confidence: 0.7 },
-                    outputSchema: { type: 'object', required: ['fromAgent', 'toAgent', 'summary', 'status'], properties: { fromAgent: { type: 'string' }, toAgent: { type: 'string' }, summary: { type: 'string' }, status: { type: 'string' } } }
-                }), { icon: '+' }),
-                    makeButton('代码执行', '添加 JS 代码执行节点，对上游数据做转换/计算', () => ctx.addPresetNode({
-                    base: 'code',
-                    title: '代码执行',
-                    patterns: ['agent.code'],
-                    input: { code: '// 可通过 vars 接收上游数据\n// 用 return 返回结果\nreturn vars.input;', vars: {} },
-                    outputSchema: { type: 'object', properties: { output: {}, text: { type: 'string' } } }
-                }), { icon: '+', tone: 'code' }),
-                    makeButton('HTTP 请求', '调用外部 REST API，支持 GET/POST 等', () => ctx.addPresetNode({
-                    base: 'http',
-                    title: 'HTTP 请求',
-                    patterns: ['agent.http'],
-                    input: { url: '', method: 'GET', headers: {}, body: null },
-                    outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
-                }), { icon: '+', tone: 'http' }),
-                    makeButton('变量聚合', '把多个上游输出合并为一个对象', () => ctx.addPresetNode({
-                    base: 'merge',
-                    title: '变量聚合',
-                    patterns: ['agent.merge'],
-                    input: { fields: {} },
-                    outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' } } }
-                }), { icon: '+', tone: 'merge' }),
-                    makeButton('检索', '添加知识检索节点', () => ctx.addPresetNode({
-                    base: 'search',
-                    title: '知识检索',
-                    patterns: ['rag.search', 'knowledge', 'search'],
-                    input: { query: '' }
-                }), { icon: '+' }),
-                    makeButton('数据', '添加可视化数据库查询节点，也可切换到高级 SQL', () => ctx.addPresetNode({
-                    base: 'data',
-                    title: '数据查询',
-                    patterns: ['db.run_readonly_query', 'db.list_tables', 'database'],
-                    input: {}
-                }), { icon: '+' }),
-                    makeButton('图表', '添加图表生成节点', () => ctx.addPresetNode({
-                    base: 'chart',
-                    title: '图表生成',
-                    patterns: ['viz.build_chart', 'chart'],
-                    input: {}
-                }), { icon: '+' }),
-                    makeButton('报告', '添加报告编排节点', () => ctx.addPresetNode({
-                    base: 'report',
-                    title: '报告编排',
-                    patterns: ['report.compose', 'report'],
-                    input: {}
-                }), { icon: '+' })
+                    ...presetButtons
                 ])
             ], 'is-node-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
@@ -161,6 +112,11 @@ function renderDagToolbar(ctx) {
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
             ], 'is-template-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('操作', [
+                makeButton('撤销', '撤销上一步画布修改', ctx.undo, { icon: '↶' }),
+                makeButton('重做', '恢复刚撤销的画布修改', ctx.redo, { icon: '↷' }),
+                makeButton('复制节点', '复制当前选中的节点', ctx.copySelection),
+                makeButton('粘贴节点', '粘贴已复制的节点', ctx.pasteSelection),
+                makeButton('创建副本', '复制并立即粘贴当前节点', ctx.duplicateSelection),
                 makeButton('校验', '校验节点、依赖和工具可用性', ctx.showValidationResult),
                 makeButton('自动布局', '按依赖层次重新排列', ctx.resetLayout),
                 makeButton('适配画布', '重置缩放和平移到默认视角', ctx.fitToContent),

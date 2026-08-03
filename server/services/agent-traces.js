@@ -2,7 +2,7 @@ const { randomUUID } = require('crypto');
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 
-const TERMINAL_TRACE_STATUSES = new Set(['completed', 'error', 'cancelled', 'deleted']);
+const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled', 'deleted']);
 const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
 const MAX_SUMMARY_LENGTH = 6000;
 

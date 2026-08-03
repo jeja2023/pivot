@@ -1,4 +1,4 @@
-// 聊天工具箱工作台数据加载与操作 Chat MCP workbench data loading and actions
+// 聊天工具库工作台数据加载与操作 Chat MCP workbench data loading and actions
 function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
     const badge = count ? `${count} 个` : service.badge;
     const cardMeta = metaText || (count ? '可继续添加连接' : '配置后可查看工具');

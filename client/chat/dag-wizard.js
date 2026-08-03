@@ -342,6 +342,7 @@ function createDagWizardController(ctx) {
             const applyWizard = () => {
                 const nextInput = collectWizardInput();
                 if (!nextInput) return;
+                ctx.recordHistory?.();
                 if (tool && toolValue(tool)) node.tool = toolValue(tool);
                 node.input = nextInput;
                 render();

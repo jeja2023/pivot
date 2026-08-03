@@ -6,6 +6,9 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.0.240 (2026-08-03) 完成聊天附件预览与自动化通知体验优化：图片附件改为稳定的缩略图卡片，明确展示读取中、待上传和预览不可用状态，避免浏览器破损图标及文件名误导；对象 URL 在 DOM 插入后再绑定，预览失败时仍保留附件并提示发送时上传；任务模板通知中心将工作流运行、智能体运行和审批相关历史英文状态统一转换为中文。新增专项回归测试，聊天渲染、智能体通知、资源检查和 ESLint 验证通过。
+- v0.0.239 (2026-08-03) 完成会话输入区精简：移除清空输入框按钮，将模型选择器移动到输入框右侧、发送箭头左侧并收口为纯模型名称显示，保留列表中的能力说明和键盘操作；重构《使用帮助》为不含版本记录、管理员配置和实现细节的普通用户操作手册，版本同步脚本不再改写帮助文档，并新增文档职责门禁。桌面与 `390×844` 移动端实际页面验证、`npm run check`、`npm run lint` 和 `git diff --check` 通过。
+- v0.0.238 (2026-08-01) 完成产品信息架构升级：左侧导航收口为单层搜索、应用、任务、自动化、知识库、工具库、最近会话和设置；全局搜索打通会话/任务/工作流，统一任务中心汇总三类运行记录，自动化首页改为工作流与计划资产中心，用户侧统一“工具库”和“自主任务”命名并移除“工具箱”输入兼容；完成移动端侧栏、任务筛选和搜索弹窗适配，`npm run check`、`npm run lint`、Node 回归 376/376、智能体安全回归 40/40 及桌面/移动端视觉检查通过。
 - v0.0.237 (2026-07-31) 完成隔离局域网纯 HTTP 部署加固：统一 IPv4-mapped IPv6 出站判定、Electron 同源导航和 IPC 来源校验、refresh token 摘要与一次性轮换、健康/指标接口分层、主动内容治理、临时目录测试隔离及 Windows 打包瘦身；Electron 升级到 39.8.10，生产依赖审计 0 项，Node 回归 376/376、E2E 2/2 与 unpacked 打包通过。
 - v0.0.236 (2026-07-31) 完成智能体工作台和工作流编排收口：去除重复入口、统一顶部命令区和已保存工作流选择器，移除用户侧提示词库，明确 `agent.delegate` / `agent.handoff` 语义，质量评测弹窗统一全局表单布局，新增只读 SQL 可视化查询构建器并保留高级 SQL；查询继续复用后端只读治理，SQL Server `TOP` 限流兼容问题已修复。
 - v0.0.233 (2026-07-30) 正式汇总发布智能体产品化升级：结构化可读结果、稳定 DAG 布局、显式主大模型节点、Agent Trace、节点数据契约、发布治理、持久化检查点、质量评测中心、确定性回归基线、`agent.delegate`、结构化 `agent.handoff` 和 Supervisor 模板完整贯通；完成 1440px/390px 视觉验收与全仓 691 项回归。模型裁判、自动 CI 发布门禁、原生工具调用能力探测和角色级独立预算仍作为二期治理项。
@@ -15,7 +18,7 @@ This document records optimization work that is intentionally staged instead of 
 - v0.0.229 (2026-07-26) 完成生产依赖高危清零、审计门禁、CI 全量校验与内置报表 CSV 中文乱码修复。
 - v0.0.191–v0.0.228 (2026-07-05 ~ 2026-07-25) 按主题归并（逐版本明细见 CHANGELOG）：
   - **公文写作与文档处理**：公文写作分步化与审校体验重构；文档处理底座落地，文字识别/PDF 工具接入应用中心；OCR 彻底外置为独立服务并固化 HTTP 对接协议。
-  - **工具箱数据接入**：数据接入边界清晰化、SQLite 数据集导入、数据来源工作台、数据管理入口统一与卡片可读性修复。
+  - **工具库数据接入**：数据接入边界清晰化、SQLite 数据集导入、数据来源工作台、数据管理入口统一与卡片可读性修复。
   - **本机资源反向执行**：remote 模式下桌面端本机 SQLite/报表目录反向执行通道，授权中心、执行器诊断与打包态路径修复（v0.0.207–v0.0.216 连续收口）。
   - **桌面客户端**：自动更新接入 downloads 发布目录、离线局域网 HTTP 更新放行、顶部菜单与关于窗口重组、登录态过期自动回到登录页。
   - **API 兼容层**：推理模型代码补全修复，`/v1/completions` 参数、批量 prompt、多 choice、流式错误与诊断完整收口；Qwen3 增加 llama.cpp thinking 硬开关。
@@ -51,7 +54,7 @@ This document records optimization work that is intentionally staged instead of 
 - CI 使用 `npm run audit:policy` 拦截新增 high/critical 依赖告警；豁免必须登记理由与复查日期，到期自动失效，上游已有修复版本时一律不接受豁免（`tests/audit-policy.test.js` 覆盖该机制）。生产依赖当前无豁免项。
 - CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件）。
 - E2E smoke coverage has a runnable Playwright path through `npm run test:e2e`; `npm run check:e2e-smoke` keeps the E2E config, spec, dependency, and runner script present in lightweight checks.
-- 内置工具箱（Built-in MCP）的分发层、格式转换、数据处理与报表目录授权边界已有回归覆盖（`tests/security-builtin-mcp.test.js`），含路径穿越、非白名单扩展名与 CSV 编码断言。
+- 内置工具库（Built-in MCP）的分发层、格式转换、数据处理与报表目录授权边界已有回归覆盖（`tests/security-builtin-mcp.test.js`），含路径穿越、非白名单扩展名与 CSV 编码断言。
 
 ## Next Architecture Milestones
 
@@ -74,7 +77,7 @@ This document records optimization work that is intentionally staged instead of 
    - ⬜ 启用多实例时，用分布式提供者替换进程内锁与队列。
 
 4. Permission expansion — ⬜ 未开始
-   - ⬜ 为模型、知识库集合、工具箱服务与智能体工作流增加组织/团队归属表。
+   - ⬜ 为模型、知识库集合、工具库服务与智能体工作流增加组织/团队归属表。
    - ⬜ 为模型使用、工具审批、数据分级、留存与审计导出实现策略对象。
    - ⬜ 超级管理员的破窗访问保持可审计，且对租户自有密钥默认关闭。
 
@@ -108,4 +111,4 @@ This document records optimization work that is intentionally staged instead of 
 - **大文件治理**：`apps-workbench-editor.js` 1418 行、`rag-documents.js` 1251 行、`admin-settings.js` 1131 行超出《开发规范》3.1 的可维护边界。建议在下次改到这些文件时顺手按功能边界拆分，不做专项重构。
 - **依赖跨主版本落后**：除 Electron 外，`express` 4→5、`better-sqlite3` 11→13、`mongodb` 6→7、`uuid` 11→14、`bcryptjs` 2→3 均为跨主版本升级，需按「一次一个、带回归」的节奏推进，不做批量升级。
 - **同步文件 IO**：`server/routes` 与 `server/services` 中约 19 处 `readFileSync` / `writeFileSync`，需逐个确认是否落在请求热路径上；启动期与低频管理操作可保留。
-- **内置工具箱覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支尚未覆盖，其中 IM 涉及内网出站通知，建议下一轮优先补齐。
+- **内置工具库覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支尚未覆盖，其中 IM 涉及内网出站通知，建议下一轮优先补齐。

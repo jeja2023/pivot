@@ -207,11 +207,44 @@
     height: 34px;
     flex: 0 0 auto;
 }
+.global-search-types {
+    display: inline-flex;
+    width: fit-content;
+    padding: 3px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.global-search-type {
+    min-width: 78px;
+    height: 30px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.global-search-type:hover {
+    color: var(--text-main);
+}
+.global-search-type.active {
+    background: #fff;
+    color: var(--primary);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
 .session-search-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+}
+.session-search-scope {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 .session-search-input-wrap {
     position: relative;
@@ -233,6 +266,54 @@
 .session-search-tabs {
     flex: 0 0 auto;
     width: 150px;
+}
+.global-search-result {
+    width: 100%;
+    min-height: 64px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: center;
+    padding: 11px 14px;
+    border: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    background: #fff;
+    color: var(--text-main);
+    text-align: left;
+    cursor: pointer;
+}
+.global-search-result:last-child {
+    border-bottom: 0;
+}
+.global-search-result:hover {
+    background: #f8fafc;
+}
+.global-search-result-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.global-search-result-title {
+    overflow: hidden;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.global-search-result-meta,
+.global-search-result-side {
+    color: #64748b;
+    font-size: 0.72rem;
+}
+.global-search-result-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.global-search-result-side {
+    white-space: nowrap;
 }
 .session-search-results {
     flex: 1;
@@ -367,11 +448,28 @@
         grid-template-columns: 1fr;
     }
     .session-search-tabs {
+        width: auto;
+        min-width: 0;
+    }
+    .global-search-types {
         width: 100%;
+    }
+    .session-search-scope {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .global-search-type {
+        flex: 1;
+        min-width: 0;
+    }
+    .global-search-result {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
     }
     .session-batch-slot,
     .session-batch-toggle {
-        width: 100%;
+        width: auto;
     }
 }
 

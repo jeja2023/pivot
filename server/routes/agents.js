@@ -21,6 +21,7 @@ const {
     updateAgentEvalSuite
 } = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
+const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
 const {
     cancelAgentRun,
     approveAgentTool,
@@ -66,6 +67,23 @@ function createAgentsRouter({ authMiddleware, logAction }) {
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: formatToolList(req.user) });
+    }));
+
+    router.post('/agents/tools/test', authMiddleware, asyncHandler(async (req, res) => {
+        const toolName = String(req.body?.tool || '').trim();
+        const input = req.body?.input && typeof req.body.input === 'object' && !Array.isArray(req.body.input) ? req.body.input : {};
+        const tools = formatToolList(req.user);
+        const tool = findAgentToolByName(toolName, tools);
+        if (!tool) return res.status(403).json({ error: '工具不可用或无权访问。' });
+        if (['workflow.approval', 'workflow.subworkflow'].includes(toolName)) {
+            return res.status(400).json({ error: '人工审批和子工作流节点需要在完整工作流中测试。' });
+        }
+        const startedAt = Date.now();
+        const output = await executeToolByName(toolName, input, req.user, tools, {
+            dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {}
+        });
+        logAction(req, '测试智能体工具节点', `工具: ${toolName}`);
+        res.json({ success: true, output, durationMs: Date.now() - startedAt });
     }));
 
     // 公开支持的模型路由策略，供前端下拉填充

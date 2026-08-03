@@ -90,10 +90,10 @@ test('聊天 MCP 上下文会为明确能力请求报告缺少匹配工具', asy
     });
 
     assert.deepEqual(events.filter(event => event.type === 'mcp').map(event => event.status), ['skipped']);
-    assert.match(events[0].message, /没有匹配用户请求的工具箱工具/);
-    assert.match(context, /需要工具箱工具/);
-    assert.match(context, /没有匹配的工具箱工具/);
-    assert.doesNotMatch(context, /本轮不需要调用工具箱工具/);
+    assert.match(events[0].message, /没有匹配用户请求的工具库工具/);
+    assert.match(context, /需要工具库工具/);
+    assert.match(context, /没有匹配的工具库工具/);
+    assert.doesNotMatch(context, /本轮不需要调用工具库工具/);
 });
 
 test('聊天 MCP 本机目录请求不会误用数据库工具', async () => {
@@ -205,7 +205,7 @@ test('聊天 MCP 会将本机目录文件清单请求确定性路由到报表工
     const plannerServer = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({ action: 'none', reason: '不需要工具箱' }) } }]
+            choices: [{ message: { content: JSON.stringify({ action: 'none', reason: '不需要工具库' }) } }]
         }));
     });
 
@@ -445,7 +445,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
             } else if (requestText.includes('数据表的数量')) {
                 plannerContent = {
                     action: 'none',
-                    reason: '不需要工具箱'
+                    reason: '不需要工具库'
                 };
             } else {
                 plannerContent = {

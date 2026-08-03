@@ -11,6 +11,8 @@ const MAX_STEPS = 50;
 const DEFAULT_STEPS = 10;
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required']);
 const MAX_GOAL_LENGTH = 2000;
+const MAX_DAG_NODES = 100;
+const MAX_DAG_DEPENDENCIES = 50;
 const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly']);
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
 const RUN_MODES = new Set(['standard', 'deep', 'audit', 'dag']);
@@ -162,24 +164,33 @@ function normalizeDagSpec(value) {
         }
     }
     const rawNodes = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.nodes) ? parsed.nodes : []);
+    if (rawNodes.length > MAX_DAG_NODES) {
+        const err = new Error(`工作流最多允许 ${MAX_DAG_NODES} 个节点，当前为 ${rawNodes.length} 个。`);
+        err.status = 400;
+        err.code = 'AGENT_DAG_NODE_LIMIT';
+        throw err;
+    }
     const rawLayout = !Array.isArray(parsed) && parsed?.layout && typeof parsed.layout === 'object' && !Array.isArray(parsed.layout)
         ? parsed.layout
         : {};
-    const seen = new Set();
-    const nodes = rawNodes.slice(0, 24).map((node, index) => {
+    const nodes = rawNodes.map((node, index) => {
         const key = String(node.id || node.key || `node_${index + 1}`).trim().replace(/[^\w.-]/g, '_').slice(0, 60) || `node_${index + 1}`;
-        const uniqueKey = seen.has(key) ? `${key}_${index + 1}` : key;
-        seen.add(uniqueKey);
         const dependsOn = Array.isArray(node.dependsOn || node.depends_on)
-            ? (node.dependsOn || node.depends_on).map(item => String(item || '').trim()).filter(Boolean).slice(0, 12)
-            : String(node.dependsOn || node.depends_on || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 12);
-        const savedPosition = rawLayout[key] || rawLayout[uniqueKey] || node.position || {};
+            ? (node.dependsOn || node.depends_on).map(item => String(item || '').trim()).filter(Boolean)
+            : String(node.dependsOn || node.depends_on || '').split(',').map(item => item.trim()).filter(Boolean);
+        if (dependsOn.length > MAX_DAG_DEPENDENCIES) {
+            const err = new Error(`节点“${node.title || key}”最多允许 ${MAX_DAG_DEPENDENCIES} 个上游依赖。`);
+            err.status = 400;
+            err.code = 'AGENT_DAG_DEPENDENCY_LIMIT';
+            throw err;
+        }
+        const savedPosition = rawLayout[key] || node.position || {};
         const x = normalizeDagCoordinate(savedPosition.x ?? node._x);
         const y = normalizeDagCoordinate(savedPosition.y ?? node._y);
         const when = normalizeDagWhen(node.when || node.when_rule);
         return {
-            id: uniqueKey,
-            title: String(node.title || uniqueKey).trim().slice(0, 120),
+            id: key,
+            title: String(node.title || key).trim().slice(0, 120),
             tool: String(node.tool || node.toolName || node.tool_name || '').trim(),
             input: node.input && typeof node.input === 'object' ? node.input : {},
             inputSchema: normalizeJsonSchema(node.inputSchema || node.input_schema || {}),
@@ -194,19 +205,67 @@ function normalizeDagSpec(value) {
                 : 'skip_dependents',
             _layout: x === null || y === null ? null : { x, y }
         };
-    }).filter(node => node.tool);
-    const validKeys = new Set(nodes.map(node => node.id));
+    });
     const layout = Object.fromEntries(nodes
         .filter(node => node._layout)
         .map(node => [node.id, node._layout]));
-    const cleanNodes = nodes.map(({ _layout, ...node }) => ({
-        ...node,
-        dependsOn: node.dependsOn.filter(dep => validKeys.has(dep) && dep !== node.id)
-    }));
+    const cleanNodes = nodes.map(({ _layout, ...node }) => node);
     return {
         nodes: cleanNodes,
         layout
     };
+}
+
+function inspectDagTopology(value) {
+    const dag = value && Array.isArray(value.nodes) ? value : normalizeDagSpec(value);
+    const nodes = dag.nodes || [];
+    const blockers = [];
+    const warnings = [];
+    if (!nodes.length) blockers.push('工作流至少需要一个节点。');
+    if (nodes.length > MAX_DAG_NODES) blockers.push(`工作流最多允许 ${MAX_DAG_NODES} 个节点。`);
+    const counts = new Map();
+    nodes.forEach(node => counts.set(node.id, (counts.get(node.id) || 0) + 1));
+    [...counts.entries()].filter(([, count]) => count > 1).forEach(([id]) => blockers.push(`节点 ID 重复：${id}`));
+    const ids = new Set(nodes.map(node => node.id));
+    nodes.forEach(node => {
+        if (!String(node.tool || '').trim()) blockers.push(`节点“${node.title || node.id}”未选择工具。`);
+        const dependencies = Array.isArray(node.dependsOn) ? node.dependsOn : [];
+        if (dependencies.length > MAX_DAG_DEPENDENCIES) blockers.push(`节点“${node.title || node.id}”的上游依赖超过 ${MAX_DAG_DEPENDENCIES} 个。`);
+        if (new Set(dependencies).size !== dependencies.length) blockers.push(`节点“${node.title || node.id}”存在重复依赖。`);
+        dependencies.forEach(dep => {
+            if (dep === node.id) blockers.push(`节点“${node.title || node.id}”不能依赖自身。`);
+            else if (!ids.has(dep)) blockers.push(`节点“${node.title || node.id}”依赖了不存在的节点：${dep}`);
+        });
+    });
+    const colors = new Map();
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const visit = id => {
+        if (colors.get(id) === 1) return true;
+        if (colors.get(id) === 2) return false;
+        colors.set(id, 1);
+        const cyclic = (byId.get(id)?.dependsOn || []).some(dep => byId.has(dep) && visit(dep));
+        colors.set(id, 2);
+        return cyclic;
+    };
+    if (nodes.some(node => visit(node.id))) blockers.push('工作流存在循环依赖。');
+    if (nodes.length > 1) {
+        const linked = new Map(nodes.map(node => [node.id, new Set()]));
+        nodes.forEach(node => (node.dependsOn || []).forEach(dep => {
+            if (!linked.has(dep)) return;
+            linked.get(node.id).add(dep);
+            linked.get(dep).add(node.id);
+        }));
+        const seen = new Set();
+        const stack = [nodes[0].id];
+        while (stack.length) {
+            const id = stack.pop();
+            if (seen.has(id)) continue;
+            seen.add(id);
+            linked.get(id)?.forEach(next => stack.push(next));
+        }
+        if (seen.size !== nodes.length) warnings.push('工作流包含彼此不连通的节点组；它们会并行执行并产生多个终点输出。');
+    }
+    return { blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], nodeCount: nodes.length };
 }
 
 function normalizeToolAllowlist(value) {
@@ -265,6 +324,8 @@ module.exports = {
     DEFAULT_STEPS,
     ACTIVE_STATUSES,
     MAX_GOAL_LENGTH,
+    MAX_DAG_NODES,
+    MAX_DAG_DEPENDENCIES,
     SCHEDULE_FREQUENCIES,
     TOOL_POLICIES,
     RUN_MODES,
@@ -280,6 +341,7 @@ module.exports = {
     normalizeContextConfig,
     serializeContextConfig,
     normalizeDagSpec,
+    inspectDagTopology,
     normalizeDagWhen,
     normalizeToolAllowlist,
     serializeToolAllowlist,

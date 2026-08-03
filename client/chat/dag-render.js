@@ -52,6 +52,33 @@ const DAG_ICON_SHAPES = {
     ],
     puzzle: [
         ['path', { d: 'M19 13h-2a2 2 0 1 1 0-4h2V5a2 2 0 0 0-2-2h-4v2a2 2 0 1 1-4 0V3H5a2 2 0 0 0-2 2v4h2a2 2 0 1 1 0 4H3v4a2 2 0 0 0 2 2h4v-2a2 2 0 1 1 4 0v2h4a2 2 0 0 0 2-2z' }]
+    ],
+    'log-in': [
+        ['path', { d: 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3' }]
+    ],
+    'log-out': [
+        ['path', { d: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9' }]
+    ],
+    'git-branch': [
+        ['line', { x1: 6, y1: 3, x2: 6, y2: 15 }],
+        ['circle', { cx: 18, cy: 6, r: 3 }],
+        ['circle', { cx: 6, cy: 18, r: 3 }],
+        ['path', { d: 'M18 9a9 9 0 0 1-9 9' }]
+    ],
+    'user-check': [
+        ['path', { d: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8M16 11l2 2 4-4' }]
+    ],
+    repeat: [
+        ['path', { d: 'M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3' }]
+    ],
+    workflow: [
+        ['rect', { x: 3, y: 3, width: 6, height: 6, rx: 1 }],
+        ['rect', { x: 15, y: 15, width: 6, height: 6, rx: 1 }],
+        ['path', { d: 'M9 6h4a5 5 0 0 1 5 5v4M15 18h-4a5 5 0 0 1-5-5V9' }]
+    ],
+    clock: [
+        ['circle', { cx: 12, cy: 12, r: 9 }],
+        ['path', { d: 'M12 7v5l3 2' }]
     ]
 };
 
@@ -83,6 +110,13 @@ const DAG_NODE_VISUAL = {
     'agent.code':     { svgIcon: 'code',      theme: 'code',     label: '代码执行' },
     'agent.http':     { svgIcon: 'globe',     theme: 'http',     label: 'HTTP 请求' },
     'agent.merge':    { iconText: '⊕',        theme: 'merge',    label: '变量聚合' },
+    'workflow.input': { svgIcon: 'log-in',    theme: 'input',    label: '工作流输入' },
+    'workflow.output':{ svgIcon: 'log-out',   theme: 'output',   label: '工作流输出' },
+    'workflow.condition': { svgIcon: 'git-branch', theme: 'condition', label: '条件路由' },
+    'workflow.approval': { svgIcon: 'user-check', theme: 'approval', label: '人工审批' },
+    'workflow.foreach': { svgIcon: 'repeat', theme: 'loop', label: '循环 / 批处理' },
+    'workflow.subworkflow': { svgIcon: 'workflow', theme: 'subflow', label: '子工作流' },
+    'workflow.delay': { svgIcon: 'clock', theme: 'delay', label: '延时' },
     'rag.search':     { svgIcon: 'search',    theme: 'rag',      label: '知识检索' },
     'viz.build_chart':{ svgIcon: 'chart',     theme: 'viz',      label: '图表生成' },
     'viz.build_table':{ svgIcon: 'table',     theme: 'viz',      label: '表格展示' },
@@ -130,12 +164,41 @@ const renderEdges = () => {
                 (node.dependsOn || []).forEach(depId => {
                     const from = byId.get(depId);
                     if (!from) return;
+                    const selected = ctx.selectedEdge?.fromId === depId && ctx.selectedEdge?.toId === node.id;
+                    const group = makeSvgEl('g', {
+                        class: `pivot-dag-edge-group${selected ? ' is-selected' : ''}`,
+                        'data-pivot-dag-edge-from': depId,
+                        'data-pivot-dag-edge-to': node.id,
+                        tabindex: '0',
+                        role: 'button',
+                        'aria-label': `依赖连线：${from.title || from.id} 到 ${node.title || node.id}`
+                    });
+                    const d = createEdgePath(from, node);
+                    const hit = makeSvgEl('path', {
+                        class: 'pivot-dag-edge-hit',
+                        d,
+                        'data-pivot-dag-edge-from': depId,
+                        'data-pivot-dag-edge-to': node.id
+                    });
                     const path = makeSvgEl('path', {
                         class: 'pivot-dag-edge',
-                        d: createEdgePath(from, node),
+                        d,
+                        'data-pivot-dag-edge-from': depId,
+                        'data-pivot-dag-edge-to': node.id,
                         'marker-end': 'url(#pivot-dag-arrow)'
                     });
-                    ctx.edgesLayer.appendChild(path);
+                    group.append(hit, path);
+                    const conditionLabel = node.when ? '条件' : node.condition === 'failure' ? '失败' : node.condition === 'always' ? '始终' : '';
+                    if (conditionLabel) {
+                        const label = makeSvgEl('text', {
+                            class: 'pivot-dag-edge-label',
+                            x: (from._x + NODE_WIDTH + node._x) / 2,
+                            y: (from._y + node._y) / 2 + NODE_HEIGHT / 2 - 6
+                        });
+                        label.textContent = conditionLabel;
+                        group.appendChild(label);
+                    }
+                    ctx.edgesLayer.appendChild(group);
                 });
             });
         };
@@ -153,14 +216,17 @@ const renderEdges = () => {
                 const group = makeSvgEl('g', {
                     class: [
                         'pivot-dag-node',
-                        ctx.selectedId === node.id ? 'is-selected' : '',
+                        (ctx.isNodeSelected?.(node.id) || ctx.selectedId === node.id) ? 'is-selected' : '',
                         node.tool ? '' : 'has-warning',
                         llmNode ? 'is-llm' : '',
                         visual.theme !== 'default' ? `is-${visual.theme}` : '',
                         runStatus ? `run-${runStatus}` : ''
                     ].filter(Boolean).join(' '),
                     transform: `translate(${node._x}, ${node._y})`,
-                    'data-pivot-dag-id': node.id
+                    'data-pivot-dag-id': node.id,
+                    tabindex: '0',
+                    role: 'button',
+                    'aria-label': `${node.title || node.id}，${visual.label || node.tool || '未选择工具'}`
                 });
 
                 group.appendChild(makeSvgEl('rect', {
@@ -243,7 +309,7 @@ const renderEdges = () => {
                     } else if (runStatus === 'completed') {
                         badge.textContent = '✓';
                         if (runState.durationMs) badge.title = `${(runState.durationMs / 1000).toFixed(1)}s`;
-                    } else if (runStatus === 'error') {
+                    } else if (runStatus === 'error' || runStatus === 'continued_error') {
                         badge.textContent = '✗';
                         if (runState.error) badge.title = runState.error;
                     } else if (runStatus === 'skipped') {

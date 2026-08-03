@@ -32,6 +32,29 @@
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
+.sidebar-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+.sidebar-mobile-close-btn {
+    width: 32px;
+    height: 32px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.8);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.sidebar-mobile-close-btn:hover {
+    color: var(--text-main);
+    border-color: rgba(148, 163, 184, 0.38);
+    background: #fff;
+}
 .app-brand-mini {
     display: flex;
     align-items: center;
@@ -180,6 +203,15 @@ body.pivot-desktop-runtime .desktop-app-menu {
     flex-direction: column;
     gap: 3px;
     padding-bottom: 4px;
+}
+.sidebar-session-section-label {
+    flex: 0 0 auto;
+    padding: 10px 16px 2px;
+    color: #94a3b8;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.2;
+    user-select: none;
 }
 .sidebar-tool-btn {
     width: 100%;
@@ -601,6 +633,15 @@ body.pivot-desktop-runtime .desktop-app-menu {
 .sidebar-copyright {
     margin-top: 6px;
     font-size: 0.68rem;
+}
+
+@media (max-width: 720px) {
+    .sidebar {
+        --sidebar-width: min(336px, calc(100vw - 48px));
+    }
+    .sidebar-mobile-close-btn {
+        display: inline-flex;
+    }
 }
 
 .sidebar-header + .session-list::-webkit-scrollbar,

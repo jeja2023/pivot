@@ -3,7 +3,7 @@
 /* Agent 工作台布局、控件、模板、工具与共享面板样式。拆自 agent.css。 */
 .agent-workbench {
     display: grid;
-    grid-template-columns: minmax(360px, 410px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     min-height: 0;
 }
@@ -36,9 +36,12 @@
     background: #fff;
 }
 
-.agent-modal-header h3 {
+.agent-modal-header h3,
+.agent-dag-modal-header h3 {
     margin: 0 0 4px;
     font-size: 1.08rem;
+    font-weight: 800;
+    line-height: 1.25;
     color: var(--text-main);
 }
 
@@ -84,6 +87,59 @@
     font-weight: 700;
 }
 
+.automation-primary-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 24px;
+    min-height: 43px;
+    padding: 0 18px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+    scrollbar-width: none;
+}
+
+.automation-primary-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.automation-primary-tab {
+    position: relative;
+    align-self: stretch;
+    flex: 0 0 auto;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.automation-primary-tab::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: transparent;
+}
+
+.automation-primary-tab:hover {
+    color: var(--text-main);
+}
+
+.automation-primary-tab.active {
+    color: var(--primary);
+}
+
+.automation-primary-tab.active::after {
+    background: var(--primary);
+}
+
 .agent-modal > .agent-workbench {
     flex: 1;
     min-height: 0;
@@ -92,7 +148,6 @@
     background: #f8fafc;
 }
 
-.agent-run-panel,
 .agent-history-panel,
 .mcp-form,
 .mcp-list-wrap {
@@ -109,17 +164,11 @@
     padding: 12px;
 }
 
-.agent-run-panel,
 .agent-history-panel {
     display: flex;
     flex-direction: column;
     min-height: 0;
     box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
-}
-
-.agent-run-panel {
-    overflow-x: hidden;
-    overflow-y: auto;
 }
 
 .agent-history-panel {
@@ -129,48 +178,59 @@
     padding: 10px;
 }
 
-.agent-panel-head {
+.agent-task-editor-modal {
+    width: min(760px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 40px));
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-    margin-bottom: 10px;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
 }
 
-.agent-panel-head-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+.agent-task-editor-modal .agent-config-modal-head > div {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
 }
 
-.agent-panel-head-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
+.agent-task-editor-modal .agent-config-modal-head h3 {
+    padding: 0;
+    text-align: left;
 }
 
-.agent-panel-head-actions .btn-secondary {
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 8px;
-}
-
-.agent-panel-head h3 {
-    margin: 0;
-    font-size: 1rem;
-}
-
-.agent-panel-head p {
-    margin: 0;
+.agent-task-editor-modal .agent-config-modal-head span {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
     color: var(--text-muted);
-    font-size: 0.72rem;
-    line-height: 1.4;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.agent-goal-input {
-    min-height: 104px;
+.agent-task-editor-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+    padding: 16px;
+    background: #fff;
+}
+
+.agent-task-editor-body .modal-form-field > span {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.agent-task-editor-modal .modal-form-field > textarea.agent-goal-input {
+    width: 100%;
+    min-height: 112px;
     flex: 0 0 auto;
     resize: vertical;
     line-height: 1.5;
@@ -180,51 +240,41 @@
     border-radius: 8px;
 }
 
-.agent-run-primary {
-    margin: 10px 0 8px;
-    padding: 10px;
-    border: 1px solid rgba(16, 185, 129, 0.18);
-    border-radius: 8px;
-    background: linear-gradient(180deg, rgba(236, 253, 245, 0.65), rgba(255, 255, 255, 0.95));
+.agent-task-editor-modal .agent-quick-goals {
+    margin: -5px 0 0;
 }
 
-.agent-run-panel .agent-run-controls {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 66px 56px;
-    gap: 7px;
-    align-items: end;
-    margin: 0;
+.agent-task-primary-fields .agent-model-trigger {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 0.88rem;
 }
 
-.agent-run-panel .agent-run-controls label {
+.agent-task-editor-footer {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px 16px;
+    border-top: 1px solid var(--border);
+    background: #fff;
 }
 
-.agent-run-panel .agent-run-controls label span {
-    color: var(--text-muted);
-    font-size: 0.68rem;
-    font-weight: 700;
+.agent-task-editor-footer > div {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
-.agent-run-controls .form-input,
-.agent-run-controls select {
-    margin: 0;
-    height: 32px;
-    padding: 4px 9px;
-    font-size: 0.82rem;
+.agent-task-editor-footer .btn-primary,
+.agent-task-editor-footer .btn-secondary {
+    height: 36px;
+    padding: 0 13px;
     border-radius: 8px;
-}
-
-.agent-run-controls .btn-primary,
-.agent-run-controls .btn-secondary {
-    height: 32px;
+    font-size: 0.78rem;
     white-space: nowrap;
-    padding: 0 11px;
-    font-size: 0.8rem;
-    border-radius: 8px;
 }
 
 .agent-collapse-section {
@@ -285,22 +335,6 @@
     padding: 10px;
     border-top: 1px solid rgba(148, 163, 184, 0.16);
     background: #fbfdff;
-}
-
-.agent-config-launcher {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin: 8px 0 0;
-}
-
-.agent-config-launcher .btn-secondary {
-    height: 34px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 0.78rem;
-    font-weight: 700;
-    background: #ffffff;
 }
 
 .agent-config-section-store {
@@ -459,11 +493,8 @@
 
 #agent-config-modal[data-agent-config-section="templates"] .agent-collapse-body {
     display: grid;
-    grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1fr) minmax(340px, 1fr);
-    grid-template-rows: max-content minmax(0, 1fr);
-    grid-template-areas:
-        "templates schedule notifications"
-        "templates queue notifications";
+    grid-template-columns: minmax(360px, 1fr) minmax(300px, 0.72fr);
+    grid-template-areas: "templates notifications";
     gap: 14px;
     align-items: stretch;
     padding: 12px;
@@ -506,49 +537,20 @@
     min-height: 60px;
 }
 
-#agent-config-modal[data-agent-config-section="templates"] .agent-schedule-panel {
-    grid-area: schedule;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-    padding: 12px;
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 8px;
-    background: #f8fafc;
-}
-
-#agent-config-modal[data-agent-config-section="templates"] .agent-schedule-controls {
-    grid-template-columns: minmax(0, 1fr) 104px 92px;
-    gap: 8px;
-    margin: 0;
-}
-
-#agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid {
-    display: contents;
-}
-
-#agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid > div {
+#agent-config-modal[data-agent-config-section="templates"] .agent-template-notifications {
+    grid-area: notifications;
     display: flex;
     flex-direction: column;
     gap: 8px;
     min-width: 0;
     min-height: 0;
+    padding: 12px;
     border: 1px solid rgba(148, 163, 184, 0.18);
     border-radius: 8px;
     background: #f8fafc;
-    padding: 12px;
 }
 
-#agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid > div:nth-child(1) {
-    grid-area: queue;
-}
-
-#agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid > div:nth-child(2) {
-    grid-area: notifications;
-}
-
-#agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid .agent-ops-list {
+#agent-config-modal[data-agent-config-section="templates"] .agent-template-notifications .agent-ops-list {
     flex: 1;
     min-height: 0;
     max-height: none;
@@ -729,20 +731,6 @@
         overflow: auto;
     }
 
-    #agent-config-modal[data-agent-config-section="templates"] .agent-schedule-controls {
-        grid-template-columns: 1fr;
-    }
-
-    #agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
-
-    #agent-config-modal[data-agent-config-section="templates"] .agent-ops-grid > div {
-        grid-area: auto;
-    }
-
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-tool-list,
     #agent-config-modal[data-agent-config-section="results"] .agent-collapse-results[open] #agent-artifact-list {
         max-height: none;
@@ -759,6 +747,27 @@
     }
 }
 
+@media (max-width: 720px) {
+    .agent-task-editor-modal {
+        width: calc(100vw - 20px);
+        max-height: calc(100vh - 20px);
+    }
+
+    .agent-task-editor-body {
+        padding: 12px;
+    }
+
+    .agent-task-editor-footer {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 12px;
+    }
+
+    .agent-task-editor-footer > div {
+        flex-wrap: wrap;
+    }
+}
+
 @media (max-width: 640px) {
     .agent-modal-header {
         align-items: flex-start;
@@ -768,5 +777,21 @@
     .agent-modal-header-actions {
         width: 100%;
         justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .automation-primary-tabs {
+        gap: 18px;
+        padding: 0 14px;
+    }
+
+    .agent-task-editor-modal .agent-policy-controls,
+    .agent-task-editor-modal .agent-enterprise-controls,
+    .agent-task-editor-modal .agent-context-controls {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .agent-task-editor-modal .agent-context-notes-field {
+        grid-column: auto;
     }
 }

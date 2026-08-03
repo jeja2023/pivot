@@ -3,18 +3,20 @@ const RUN_STATUSES = new Set([
     'running',
     'approval_required',
     'completed',
+    'completed_with_errors',
     'error',
     'cancelled',
     'deleted'
 ]);
 
-const TERMINAL_STATUSES = new Set(['completed', 'error', 'cancelled', 'deleted']);
+const TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled', 'deleted']);
 
 const TRANSITIONS = {
     queued: new Set(['running', 'cancelled', 'error', 'deleted']),
-    running: new Set(['approval_required', 'completed', 'error', 'cancelled', 'queued', 'deleted']),
+    running: new Set(['approval_required', 'completed', 'completed_with_errors', 'error', 'cancelled', 'queued', 'deleted']),
     approval_required: new Set(['queued', 'cancelled', 'error', 'deleted']),
     completed: new Set(['deleted']),
+    completed_with_errors: new Set(['deleted']),
     error: new Set(['queued', 'deleted']),
     cancelled: new Set(['queued', 'deleted']),
     deleted: new Set([])

@@ -149,6 +149,7 @@ function agentDagNodeMarkup(node) {
     const status = String(node.status || 'pending').toLowerCase();
     const statusLabel = {
         completed: '完成',
+        continued_error: '失败后继续',
         running: '运行中',
         error: '错误',
         skipped: '跳过',

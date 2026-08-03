@@ -234,8 +234,8 @@ function dagConditionSatisfied(condition, dependencyStatuses = []) {
         : 'success';
     if (mode === 'always') return true;
     if (!dependencyStatuses.length) return true;
-    if (mode === 'failure') return dependencyStatuses.some(status => status === 'error');
-    return dependencyStatuses.every(status => status === 'completed');
+    if (mode === 'failure') return dependencyStatuses.some(status => ['error', 'continued_error'].includes(status));
+    return dependencyStatuses.every(status => ['completed', 'continued_error'].includes(status));
 }
 
 function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs) {

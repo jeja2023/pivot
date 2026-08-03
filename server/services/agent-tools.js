@@ -101,6 +101,9 @@ function getBuiltInToolDefinitions(user) {
                 url: { type: 'string', description: '请求地址，支持模板变量。' },
                 method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], default: 'GET' },
                 headers: { type: 'object', description: '请求头键值对，例如鉴权 Token。' },
+                credentialSecret: { type: 'string', description: '凭据环境变量后缀，例如 CRM_API；运行时读取 PIVOT_WORKFLOW_SECRET_CRM_API。' },
+                credentialHeader: { type: 'string', default: 'Authorization', description: '注入凭据的请求头名称。' },
+                credentialPrefix: { type: 'string', default: 'Bearer ', description: '凭据值前缀。' },
                 body: { type: 'object', description: 'POST/PUT/PATCH 的 JSON 请求体。' },
                 timeoutMs: { type: 'integer', minimum: 1000, maximum: 30000, default: 10000 }
             }, ['url'])
@@ -112,6 +115,93 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({
                 fields: { type: 'object', description: '字段映射，键为目标字段名，值支持 {{nodes.*.output}} 模板引用。' }
             })
+        },
+        {
+            name: 'workflow.input',
+            title: '工作流输入',
+            description: '声明并读取运行参数，支持必填校验、默认值和基础类型转换。',
+            input_schema: asJsonSchema({
+                name: { type: 'string', description: '参数名，只允许字母、数字、下划线和短横线。' },
+                label: { type: 'string', description: '运行表单中展示的名称。' },
+                type: { type: 'string', enum: ['text', 'number', 'boolean', 'object', 'array'], default: 'text' },
+                required: { type: 'boolean', default: false },
+                defaultValue: { description: '未提供参数时使用的默认值。' },
+                description: { type: 'string' }
+            }, ['name'])
+        },
+        {
+            name: 'workflow.output',
+            title: '工作流输出',
+            description: '声明工作流最终输出，便于调用方按名称读取交付结果。',
+            input_schema: asJsonSchema({
+                name: { type: 'string', default: 'result' },
+                value: { description: '要作为最终结果返回的值。' },
+                format: { type: 'string', enum: ['auto', 'text', 'json'], default: 'auto' }
+            }, ['name', 'value'])
+        },
+        {
+            name: 'workflow.condition',
+            title: '条件路由',
+            description: '比较输入值并返回 matched 与 route，供下游 when 条件引用。',
+            input_schema: asJsonSchema({
+                value: { description: '待判断的值。' },
+                operator: { type: 'string', enum: ['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than', 'is_empty', 'not_empty', 'is_true', 'is_false'], default: 'not_empty' },
+                compareTo: { description: '比较目标值。' }
+            }, ['operator'])
+        },
+        {
+            name: 'workflow.approval',
+            title: '人工审批',
+            description: '暂停工作流等待用户确认，同一个审批节点通过后才会继续。',
+            alwaysRequiresApproval: true,
+            input_schema: asJsonSchema({
+                title: { type: 'string', default: '请审批本节点' },
+                summary: { description: '需要审批的内容摘要。' },
+                instructions: { type: 'string' }
+            }, ['title'])
+        },
+        {
+            name: 'workflow.foreach',
+            title: '循环 / 批处理',
+            description: '对数组逐项执行受限 JavaScript 转换，并汇总结果和错误。',
+            input_schema: asJsonSchema({
+                items: { type: 'array' },
+                code: { type: 'string', default: 'return item;' },
+                vars: { type: 'object' },
+                concurrency: { type: 'integer', minimum: 1, maximum: 20, default: 4 },
+                stopOnError: { type: 'boolean', default: true }
+            }, ['items', 'code'])
+        },
+        {
+            name: 'workflow.subworkflow',
+            title: '子工作流',
+            description: '调用另一个已发布工作流；运行时限制递归深度并阻止循环调用。',
+            input_schema: asJsonSchema({
+                workflowId: { type: 'integer' },
+                version: { type: 'string', default: 'published' },
+                goal: { type: 'string' },
+                inputs: { type: 'object' }
+            }, ['workflowId'])
+        },
+        {
+            name: 'workflow.delay',
+            title: '延时',
+            description: '等待指定毫秒数后继续，最长 10 分钟。',
+            input_schema: asJsonSchema({
+                durationMs: { type: 'integer', minimum: 0, maximum: 600000, default: 1000 },
+                reason: { type: 'string' }
+            })
+        },
+        {
+            name: 'report.compose',
+            title: '报告编排',
+            description: '将摘要和章节组装为结构化 Markdown 报告。',
+            input_schema: asJsonSchema({
+                title: { type: 'string', default: '工作流报告' },
+                summary: { description: '可选摘要。' },
+                sections: { type: 'object', description: '章节标题到内容的映射。' },
+                includeToc: { type: 'boolean', default: true }
+            }, ['title'])
         },
         {
             name: 'rag.search',
@@ -369,6 +459,7 @@ function executeAgentCode(input = {}) {
         ? input.vars
         : {};
     const sandbox = {
+        vars: rawVars,
         ...rawVars,
         JSON,
         Math,
@@ -416,6 +507,17 @@ async function executeAgentHttp(input = {}, user) {
     const headers = Object.fromEntries(
         Object.entries(rawHeaders).map(([k, v]) => [String(k).trim(), String(v ?? '').trim()]).filter(([k]) => k)
     );
+    const credentialSecret = String(input.credentialSecret || input.credential_secret || '').trim();
+    if (credentialSecret) {
+        if (!/^[A-Za-z0-9_]+$/.test(credentialSecret)) {
+            throw new Error('HTTP 凭据引用只能包含字母、数字和下划线。');
+        }
+        const secret = process.env[`PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`];
+        if (!secret) throw new Error(`未配置 HTTP 凭据环境变量：PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`);
+        const header = String(input.credentialHeader || input.credential_header || 'Authorization').trim();
+        if (!header || /[\r\n:]/.test(header)) throw new Error('HTTP 凭据请求头名称无效。');
+        headers[header] = `${String(input.credentialPrefix ?? input.credential_prefix ?? 'Bearer ')}${secret}`;
+    }
     const hasBody = ['post', 'put', 'patch'].includes(method);
     const bodyRaw = hasBody ? (input.body ?? input.data ?? null) : undefined;
     const body = bodyRaw !== undefined && bodyRaw !== null && typeof bodyRaw !== 'object'
@@ -472,6 +574,127 @@ function executeAgentMerge(input = {}) {
     return { merged, keys: Object.keys(merged), count: Object.keys(merged).length };
 }
 
+function renderWorkflowValue(value) {
+    if (typeof value === 'string') return value;
+    if (value === undefined || value === null) return '';
+    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+}
+
+function coerceWorkflowInput(value, type, name) {
+    if (type === 'text') return typeof value === 'string' ? value : renderWorkflowValue(value);
+    if (type === 'number') {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) throw new Error(`工作流输入“${name}”必须是数字。`);
+        return parsed;
+    }
+    if (type === 'boolean') {
+        if (typeof value === 'boolean') return value;
+        if (['true', '1', 'yes', 'on'].includes(String(value).toLowerCase())) return true;
+        if (['false', '0', 'no', 'off'].includes(String(value).toLowerCase())) return false;
+        throw new Error(`工作流输入“${name}”必须是布尔值。`);
+    }
+    if (type === 'object' || type === 'array') {
+        let parsed = value;
+        if (typeof value === 'string') {
+            try { parsed = JSON.parse(value); } catch (e) { throw new Error(`工作流输入“${name}”必须是合法 JSON。`); }
+        }
+        if (type === 'array' ? !Array.isArray(parsed) : (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+            throw new Error(`工作流输入“${name}”必须是${type === 'array' ? '数组' : '对象'}。`);
+        }
+        return parsed;
+    }
+    return value;
+}
+
+function executeWorkflowInput(input = {}, context = {}) {
+    const name = String(input.name || '').trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_-]{0,79}$/.test(name)) throw new Error('工作流输入参数名无效。');
+    const values = context.dagInputs && typeof context.dagInputs === 'object' ? context.dagInputs : {};
+    const supplied = Object.hasOwn(values, name);
+    let value = supplied ? values[name] : input.defaultValue;
+    if ((value === undefined || value === null || value === '') && input.required) {
+        throw new Error(`缺少必填工作流输入：${input.label || name}`);
+    }
+    const type = ['text', 'number', 'boolean', 'object', 'array'].includes(input.type) ? input.type : 'text';
+    if (value !== undefined && value !== null && value !== '') value = coerceWorkflowInput(value, type, name);
+    return { name, label: String(input.label || name), type, value: value ?? null, supplied, text: renderWorkflowValue(value) };
+}
+
+function executeWorkflowOutput(input = {}) {
+    const name = String(input.name || 'result').trim() || 'result';
+    const value = input.value;
+    return { name, value, format: String(input.format || 'auto'), text: renderWorkflowValue(value) };
+}
+
+function executeWorkflowCondition(input = {}) {
+    const value = input.value;
+    const compareTo = input.compareTo;
+    const operator = String(input.operator || 'not_empty');
+    const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+    let matched;
+    if (operator === 'equals') matched = value === compareTo || String(value) === String(compareTo);
+    else if (operator === 'not_equals') matched = !(value === compareTo || String(value) === String(compareTo));
+    else if (operator === 'contains') matched = Array.isArray(value) ? value.includes(compareTo) : String(value ?? '').includes(String(compareTo ?? ''));
+    else if (operator === 'not_contains') matched = Array.isArray(value) ? !value.includes(compareTo) : !String(value ?? '').includes(String(compareTo ?? ''));
+    else if (operator === 'greater_than') matched = Number(value) > Number(compareTo);
+    else if (operator === 'less_than') matched = Number(value) < Number(compareTo);
+    else if (operator === 'is_empty') matched = empty;
+    else if (operator === 'is_true') matched = value === true || String(value).toLowerCase() === 'true';
+    else if (operator === 'is_false') matched = value === false || String(value).toLowerCase() === 'false';
+    else matched = !empty;
+    return { matched, value, compareTo, operator, route: matched ? 'matched' : 'unmatched', text: matched ? 'matched' : 'unmatched' };
+}
+
+async function executeWorkflowForeach(input = {}) {
+    const items = Array.isArray(input.items) ? input.items : [];
+    if (items.length > 500) throw new Error('循环节点单次最多处理 500 项。');
+    const code = String(input.code || 'return item;').trim();
+    const commonVars = input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? input.vars : {};
+    const output = new Array(items.length);
+    const errors = [];
+    const concurrency = Math.max(1, Math.min(Number.parseInt(input.concurrency, 10) || 4, 20));
+    const runItem = async (item, index) => {
+        try {
+            const sandbox = { item, index, items, vars: commonVars, JSON, Math, Number, String, Array, Object, Boolean, Date };
+            const result = vm.runInNewContext(`(function() { ${code} })()`, vm.createContext(sandbox), { timeout: 1000 });
+            output[index] = await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('单项异步执行超时')), 1000);
+                Promise.resolve(result).then(
+                    value => { clearTimeout(timer); resolve(value); },
+                    error => { clearTimeout(timer); reject(error); }
+                );
+            });
+        } catch (e) {
+            errors.push({ index, message: e.message });
+            if (input.stopOnError !== false) throw new Error(`循环第 ${index + 1} 项执行失败：${e.message}`);
+            output[index] = null;
+        }
+    };
+    for (let start = 0; start < items.length; start += concurrency) {
+        const batch = items.slice(start, start + concurrency);
+        await Promise.all(batch.map((item, offset) => runItem(item, start + offset)));
+    }
+    return { items: output, count: output.length, errors, concurrency, text: renderWorkflowValue(output) };
+}
+
+async function executeWorkflowDelay(input = {}) {
+    const durationMs = Math.max(0, Math.min(Number.parseInt(input.durationMs ?? input.duration_ms, 10) || 0, 600000));
+    if (durationMs) await new Promise(resolve => setTimeout(resolve, durationMs));
+    return { durationMs, reason: String(input.reason || ''), completedAt: new Date().toISOString() };
+}
+
+function executeReportCompose(input = {}) {
+    const title = String(input.title || '工作流报告').trim() || '工作流报告';
+    const sections = input.sections && typeof input.sections === 'object' && !Array.isArray(input.sections) ? input.sections : {};
+    const headings = Object.keys(sections);
+    const blocks = [`# ${title}`];
+    if (input.includeToc !== false && headings.length) blocks.push(`## 目录\n${headings.map((name, index) => `${index + 1}. ${name}`).join('\n')}`);
+    if (input.summary !== undefined && input.summary !== null && input.summary !== '') blocks.push(`## 摘要\n${renderWorkflowValue(input.summary)}`);
+    headings.forEach(name => blocks.push(`## ${name}\n${renderWorkflowValue(sections[name])}`));
+    const markdown = blocks.join('\n\n');
+    return { markdown, text: markdown, sectionCount: headings.length, title };
+}
+
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
@@ -482,6 +705,17 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.handoff') {
         return executeAgentHandoff(input);
     }
+    if (name === 'workflow.input') return executeWorkflowInput(input, context);
+    if (name === 'workflow.output') return executeWorkflowOutput(input);
+    if (name === 'workflow.condition') return executeWorkflowCondition(input);
+    if (name === 'workflow.approval') return { approved: true, summary: input.summary ?? '', text: renderWorkflowValue(input.summary) };
+    if (name === 'workflow.foreach') return executeWorkflowForeach(input);
+    if (name === 'workflow.subworkflow') {
+        if (typeof context.executeSubworkflow !== 'function') throw new Error('当前运行环境不支持子工作流。');
+        return context.executeSubworkflow(input);
+    }
+    if (name === 'workflow.delay') return executeWorkflowDelay(input);
+    if (name === 'report.compose') return executeReportCompose(input);
 
     if (name === 'rag.search') {
         const query = String(input.query || '').trim();

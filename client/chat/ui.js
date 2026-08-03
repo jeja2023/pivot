@@ -176,7 +176,7 @@ async function refreshModelSelector() {
         const { models, defaultModelId } = await loadSelectableModels();
 
         if (models.length === 0) {
-            PivotSafeHtml.setHtml(triggerBtn, '<span>暂无可用模型</span>');
+            PivotSafeHtml.setHtml(triggerBtn, '<span id="selected-model-name">暂无可用模型</span>');
             triggerBtn.disabled = true;
             return;
         }
@@ -224,7 +224,7 @@ async function refreshModelSelector() {
         
     } catch (e) {
         console.error('刷新模型列表失败:', e);
-        PivotSafeHtml.setHtml(triggerBtn, '<span>列表加载失败</span>');
+        PivotSafeHtml.setHtml(triggerBtn, '<span id="selected-model-name">列表加载失败</span>');
     }
 };
 
@@ -267,23 +267,6 @@ function selectDropdownModel(id, shouldClose = true) {
     document.getElementById('selected-model-name').innerText = model.name + (model.user_id ? ' (个人)' : '');
     
     const hasVision = Number(model.supports_vision || 0) === 1;
-    const hasReasoning = Number(model.supports_reasoning || 0) === 1;
-
-    const textIcon = `
-        <div class="cap-icon text" title="文本模型">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
-        </div>`;
-    
-    const visionIcon = hasVision ? `
-        <div class="cap-icon vision" title="支持视觉">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-        </div>` : '';
-    const reasoningIcon = hasReasoning ? `
-        <div class="cap-icon reasoning" title="支持思考">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg>
-        </div>` : '';
-    
-    PivotSafeHtml.setHtml(document.getElementById('selected-model-caps'), textIcon + visionIcon + reasoningIcon);
 
     document.querySelectorAll('.model-item').forEach(el => {
         el.classList.toggle('active', String(el.dataset.id) === String(id));

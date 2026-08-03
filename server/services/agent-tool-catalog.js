@@ -25,7 +25,8 @@ function formatToolList(user, options = {}) {
         input_schema: tool.input_schema,
         source: 'builtin',
         risk: 'low',
-        requiresApproval: false,
+        requiresApproval: Boolean(tool.alwaysRequiresApproval),
+        alwaysRequiresApproval: Boolean(tool.alwaysRequiresApproval),
         admin: Boolean(tool.admin)
     })).filter(tool => isAllowed(tool.name, 'builtin'));
     // 内置工具已统一提供 viz.build_chart 等能力；当用户另外添加了系统可视化等内置 MCP 服务时，

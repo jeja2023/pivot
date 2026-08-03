@@ -139,8 +139,8 @@ function renderSelectedToolMeta(tool) {
         const source = tool.source === 'builtin'
             ? '系统内置'
             : tool.serverName
-                ? `工具箱 · ${tool.serverName}`
-                : '工具箱';
+                ? `工具库 · ${tool.serverName}`
+                : '工具库';
         const badges = [
             toolGroupLabel(tool),
             source,
@@ -170,7 +170,7 @@ function findPreferredTool(tools, patterns) {
             const value = String(toolValue(tool)).toLowerCase();
             const title = String(tool?.title || '').toLowerCase();
             return patterns.some(pattern => value.includes(pattern) || title.includes(pattern));
-        }) || list[0] || null;
+        }) || null;
     }
 
 function findGenericDatabaseToolForFullName(tools, value) {

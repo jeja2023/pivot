@@ -7,6 +7,7 @@ const { inspectDagContracts } = require('./agent-dag-contracts');
 const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
+    inspectDagTopology,
     normalizeMaxSteps,
     normalizePositiveInt,
     normalizeRunMode,
@@ -64,8 +65,8 @@ function preflightAgentRun(user, body = {}) {
     const blockers = [];
     let dag = null;
     let contractReport = null;
-    if (mcpTools.length > 0 && Number(mcpHealth.error || 0) > 0) warnings.push('工具箱存在异常服务，本次任务可能遇到工具调用失败。');
-    if (mcpTools.length > 0 && Number(mcpHealth.unchecked || 0) > 0) warnings.push('工具箱存在未刷新工具列表的服务，建议先刷新工具缓存。');
+    if (mcpTools.length > 0 && Number(mcpHealth.error || 0) > 0) warnings.push('工具库存在异常服务，本次任务可能遇到工具调用失败。');
+    if (mcpTools.length > 0 && Number(mcpHealth.unchecked || 0) > 0) warnings.push('工具库存在未刷新工具列表的服务，建议先刷新工具缓存。');
     if (runMode === 'dag') {
         const workflowId = body.workflowId || body.workflow_id;
         if (workflowId) {
@@ -83,13 +84,16 @@ function preflightAgentRun(user, body = {}) {
     if (runMode !== 'dag' && !modelCfg) blockers.push('未选择可用模型。');
     if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
     if (toolPolicy === 'builtin_only' && /mcp|数据库|外部|接口|工具/i.test(goal)) warnings.push('目标可能需要 MCP，但当前设置为仅内置工具。');
-    if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有工具箱工具调用都会进入人工审批，长任务可能暂停等待。');
-    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险工具箱工具会在执行前等待人工审批。');
+    if (mcpTools.length > 0 && approvalPolicy === 'approve_all_mcp') warnings.push('所有工具库工具调用都会进入人工审批，长任务可能暂停等待。');
+    if (highRiskTools.length > 0 && approvalPolicy === 'safe_mcp_auto') warnings.push('高风险工具库工具会在执行前等待人工审批。');
     if (Number(knowledge.ready || 0) === 0 && /知识库|资料|文档|依据|引用/i.test(goal)) warnings.push('目标提到了资料或知识库，但当前没有启用且就绪的知识库文档。');
     if (Number(knowledge.error || 0) > 0) warnings.push('知识库存在索引失败文档，可能影响召回完整性。');
     if (runMode === 'dag') {
         if (!dag.nodes.length) blockers.push('工作流编排模式需要至少一个有效节点。');
         if (dag.nodes.length) {
+            const topology = inspectDagTopology(dag);
+            blockers.push(...topology.blockers);
+            warnings.push(...topology.warnings);
             try {
                 assertWorkflowLlmNodesConfigured(dag);
             } catch (e) {

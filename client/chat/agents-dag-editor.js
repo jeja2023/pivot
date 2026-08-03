@@ -28,6 +28,13 @@
 (function () {
 if (window.PivotDagEditor) return;
 
+const raf = typeof globalThis.requestAnimationFrame === 'function'
+    ? callback => globalThis.requestAnimationFrame(callback)
+    : callback => setTimeout(callback, 16);
+const caf = typeof globalThis.cancelAnimationFrame === 'function'
+    ? handle => globalThis.cancelAnimationFrame(handle)
+    : handle => clearTimeout(handle);
+
 function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange }) {
         if (!canvas) return null;
 
@@ -38,11 +45,59 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         let spec = ensureDefaults(initialParsedSpec);
         const shouldFlushInitialDefaults = !Array.isArray(initialParsedSpec?.nodes) || initialParsedSpec.nodes.length === 0;
         let selectedId = null;
+        let selectedIds = new Set();
+        let selectedEdge = null;
+        let clipboardNodes = [];
+        const undoStack = [];
+        const redoStack = [];
         let pendingFlush = null;
         let suppressTextareaSync = false;
         let toolbarStatus = null;
         // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
         const viewState = { x: 0, y: 0, scale: DEFAULT_VIEW_SCALE };
+
+        const snapshot = () => JSON.stringify(serialize(spec));
+        const recordHistory = () => {
+            const current = snapshot();
+            if (undoStack[undoStack.length - 1] !== current) undoStack.push(current);
+            if (undoStack.length > 100) undoStack.shift();
+            redoStack.length = 0;
+        };
+        const restoreSnapshot = (value) => {
+            spec = ensureDefaults(JSON.parse(value));
+            selectedId = null;
+            selectedIds = new Set();
+            selectedEdge = null;
+            render();
+            flushOut();
+        };
+        const undo = () => {
+            const previous = undoStack.pop();
+            if (!previous) return window.showToast?.('没有可撤销的修改', 'info');
+            redoStack.push(snapshot());
+            restoreSnapshot(previous);
+        };
+        const redo = () => {
+            const next = redoStack.pop();
+            if (!next) return window.showToast?.('没有可重做的修改', 'info');
+            undoStack.push(snapshot());
+            restoreSnapshot(next);
+        };
+        const setSelection = (ids = [], primaryId = '') => {
+            selectedIds = new Set(ids.filter(id => spec.nodes.some(node => node.id === id)));
+            selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : ([...selectedIds][0] || null);
+            selectedEdge = null;
+        };
+        const selectNode = (id, additive = false) => {
+            const next = additive ? new Set(selectedIds) : new Set();
+            if (additive && next.has(id)) next.delete(id); else if (id) next.add(id);
+            setSelection([...next], next.has(id) ? id : [...next][0]);
+        };
+        const clearSelection = () => {
+            selectedId = null;
+            selectedIds = new Set();
+            selectedEdge = null;
+        };
 
         const root = makeSvgEl('svg', {
             class: 'pivot-dag-svg',
@@ -95,7 +150,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                     height: NODE_HEIGHT,
                     rx: 4,
                     ry: 4,
-                    fill: selectedId === node.id
+                    fill: selectedIds.has(node.id)
                         ? '#3b82f6'
                         : isLlmNode(node) ? '#5eead4' : '#cbd5e1',
                     opacity: '0.7'
@@ -173,10 +228,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             get spec() { return spec; },
             set spec(value) { spec = value; },
             get selectedId() { return selectedId; },
-            set selectedId(value) { selectedId = value; },
+            set selectedId(value) { setSelection(value ? [value] : [], value); },
             textarea,
             render: () => render(),
             flushOut: () => flushOut(),
+            recordHistory,
             fitToContent: () => fitToContent()
         });
 
@@ -205,6 +261,10 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const byId = new Map(spec.nodes.map(node => [node.id, node]));
             const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
             if (!spec.nodes.length) errors.push('至少需要 1 个节点');
+            if (spec.nodes.length > 100) errors.push(`节点数量超过上限（100），当前为 ${spec.nodes.length}`);
+            const idCounts = new Map();
+            spec.nodes.forEach(node => idCounts.set(node.id, (idCounts.get(node.id) || 0) + 1));
+            [...idCounts.entries()].filter(([, count]) => count > 1).forEach(([id]) => errors.push(`节点 ID 重复：${id}`));
             llmNodes(spec.nodes).forEach(node => {
                 if (!llmNodeModel(node)) errors.push(`${node.title || node.id} 需要填写节点模型`);
             });
@@ -214,6 +274,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 if (node.tool && toolNames.size && !isKnownToolValue(tools, node.tool)) warnings.push(`${node.title || node.id} 使用的工具当前不可用`);
                 (node.dependsOn || []).forEach(dep => {
                     if (!byId.has(dep)) errors.push(`${node.title || node.id} 依赖了不存在的节点 ${dep}`);
+                    if (dep === node.id) errors.push(`${node.title || node.id} 不能依赖自身`);
                 });
             });
             const visiting = new Set();
@@ -264,26 +325,85 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             get spec() { return spec; },
             set spec(value) { spec = value; },
             get selectedId() { return selectedId; },
-            set selectedId(value) { selectedId = value; },
+            set selectedId(value) { setSelection(value ? [value] : [], value); },
             openNodeInputWizard,
             renderInputSummary,
             getDependencyCandidateNodes,
             wouldCreateCycle,
             render: () => render(),
-            flushOut: () => flushOut()
+            flushOut: () => flushOut(),
+            recordHistory
         });
         const deleteNode = (id) => {
             const node = spec.nodes.find(n => n.id === id);
             if (!node) return false;
+            recordHistory();
             spec.nodes = spec.nodes.filter(n => n.id !== id);
             clampDependsOn(spec.nodes);
-            if (selectedId === id) selectedId = null;
+            selectedIds.delete(id);
+            if (selectedId === id) selectedId = [...selectedIds][0] || null;
             render();
             flushOut();
             return true;
         };
 
+        const deleteSelection = () => {
+            if (selectedEdge) {
+                const target = spec.nodes.find(node => node.id === selectedEdge.toId);
+                if (!target) return;
+                recordHistory();
+                target.dependsOn = (target.dependsOn || []).filter(dep => dep !== selectedEdge.fromId);
+                selectedEdge = null;
+                render();
+                flushOut();
+                return;
+            }
+            const ids = new Set(selectedIds);
+            if (!ids.size && selectedId) ids.add(selectedId);
+            if (!ids.size) return;
+            recordHistory();
+            spec.nodes = spec.nodes.filter(node => !ids.has(node.id));
+            clampDependsOn(spec.nodes);
+            clearSelection();
+            render();
+            flushOut();
+        };
+
+        const copySelection = () => {
+            const ids = new Set(selectedIds);
+            if (!ids.size && selectedId) ids.add(selectedId);
+            clipboardNodes = spec.nodes.filter(node => ids.has(node.id)).map(node => JSON.parse(JSON.stringify(node)));
+            window.showToast?.(clipboardNodes.length ? `已复制 ${clipboardNodes.length} 个节点` : '请先选择节点', clipboardNodes.length ? 'success' : 'warning');
+        };
+
+        const pasteSelection = () => {
+            if (!clipboardNodes.length) return window.showToast?.('剪贴板中没有节点', 'warning');
+            recordHistory();
+            const existing = spec.nodes.map(node => node.id);
+            const idMap = new Map();
+            clipboardNodes.forEach(node => {
+                const nextId = uniqueId(existing, String(node.id || 'node').replace(/_\d+$/, '') || 'node');
+                existing.push(nextId);
+                idMap.set(node.id, nextId);
+            });
+            const pasted = clipboardNodes.map(node => ({
+                ...JSON.parse(JSON.stringify(node)),
+                id: idMap.get(node.id),
+                title: `${node.title || node.id} 副本`.slice(0, 120),
+                dependsOn: (node.dependsOn || []).map(dep => idMap.get(dep) || dep),
+                _x: Number(node._x || 0) + 40,
+                _y: Number(node._y || 0) + 40
+            }));
+            spec.nodes.push(...pasted);
+            setSelection(pasted.map(node => node.id), pasted[0]?.id);
+            clipboardNodes = pasted.map(node => JSON.parse(JSON.stringify(node)));
+            render();
+            flushOut();
+        };
+        const duplicateSelection = () => { copySelection(); if (clipboardNodes.length) pasteSelection(); };
+
         const addNode = () => {
+            recordHistory();
             const baseId = uniqueId(spec.nodes.map(n => n.id));
             const tools = currentTools();
             // 智能推断默认工具：统计当前画布上使用最多的工具
@@ -308,7 +428,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const anchorNode = spec.nodes.find(n => n.id === anchorId);
             spec.nodes.push(node);
             placeNewNode(spec.nodes, node, anchorId);
-            selectedId = node.id;
+            setSelection([node.id], node.id);
             render();
             flushOut();
             window.showToast?.(anchorNode ? `已在「${anchorNode.title || anchorNode.id}」后添加新节点` : '已添加新的起始节点', 'success');
@@ -316,21 +436,28 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
 
         const addPresetNode = (preset) => {
             const tools = currentTools();
-            const preferred = findPreferredTool(tools, preset.patterns || []);
+            const registry = window.Pivot.moduleApi('agent.dagNodePresets');
+            const preferred = registry?.resolveTool(preset, tools)
+                || (!registry ? findPreferredTool(tools, preset.patterns || []) : null);
+            if (!preferred) {
+                const reason = registry?.availability(preset, tools)?.reason || `当前没有可用的“${preset.title || '节点'}”工具`;
+                window.showToast?.(reason, 'warning');
+                return null;
+            }
+            recordHistory();
             const baseId = uniqueId(spec.nodes.map(n => n.id), preset.base || 'node');
             const selectedNode = spec.nodes.find(n => n.id === selectedId);
-            const inputTemplate = typeof preset.input === 'function'
-                ? preset.input({ selectedId, selectedNode, baseId })
-                : (preset.input || {});
+            const materialized = registry?.build(preset, { selectedId, selectedNode, baseId }) || preset;
+            const inputTemplate = typeof materialized.input === 'function'
+                ? materialized.input({ selectedId, selectedNode, baseId })
+                : (materialized.input || {});
             const node = {
                 id: baseId,
-                title: preset.title,
-                tool: toolValue(preferred) || ((preset.patterns || []).includes('agent.llm') ? 'agent.llm' : ''),
+                title: materialized.title,
+                tool: toolValue(preferred),
                 input: { ...inputTemplate },
-                inputSchema: preset.inputSchema && typeof preset.inputSchema === 'object' ? preset.inputSchema : {},
-                outputSchema: preset.outputSchema && typeof preset.outputSchema === 'object'
-                    ? preset.outputSchema
-                    : ((preset.patterns || []).includes('agent.llm') ? { type: 'string' } : {}),
+                inputSchema: materialized.inputSchema && typeof materialized.inputSchema === 'object' ? materialized.inputSchema : {},
+                outputSchema: materialized.outputSchema && typeof materialized.outputSchema === 'object' ? materialized.outputSchema : {},
                 dependsOn: selectedId ? [selectedId] : [],
                 condition: 'success',
                 retryLimit: 0,
@@ -339,7 +466,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             };
             spec.nodes.push(node);
             placeNewNode(spec.nodes, node, selectedId);
-            selectedId = node.id;
+            setSelection([node.id], node.id);
             render();
             flushOut();
             window.showToast?.(
@@ -351,6 +478,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const addAgentTeamTemplate = () => {
+            recordHistory();
             const existingIds = spec.nodes.map(node => node.id);
             const anchorId = selectedId || '';
             const model = defaultWorkflowModelId();
@@ -411,24 +539,27 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             };
             spec.nodes.push(...delegates, supervisor);
             autoLayout(spec.nodes);
-            selectedId = supervisorId;
+            setSelection([supervisorId], supervisorId);
             render();
             flushOut();
             window.showToast?.('已添加并行专家与 Supervisor，可继续调整角色、模型和交接契约', 'success');
         };
 
         const resetLayout = () => {
+            recordHistory();
             autoLayout(spec.nodes);
             render();
             flushOut();
         };
 
-                const { renderEdges, renderNodes } = createDagRenderController({
+        const { renderEdges, renderNodes } = createDagRenderController({
             edgesLayer,
             nodesLayer,
             currentTools,
             get spec() { return spec; },
-            get selectedId() { return selectedId; }
+            get selectedId() { return selectedId; },
+            isNodeSelected: id => selectedIds.has(id),
+            get selectedEdge() { return selectedEdge; }
         });
 
         // 空画布引导：无节点时在画布中央提示从左侧节点库开始
@@ -483,13 +614,31 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             onNodeSelectionChange,
             get spec() { return spec; },
             get selectedId() { return selectedId; },
-            set selectedId(value) { selectedId = value; },
+            set selectedId(value) { setSelection(value ? [value] : [], value); },
+            get selectedIds() { return selectedIds; },
+            get selectedEdge() { return selectedEdge; },
+            set selectedEdge(value) { selectedEdge = value; if (value) { selectedId = null; selectedIds = new Set(); } },
+            selectNode,
+            setSelection,
+            clearSelection,
             contentBounds,
             updateViewBox,
             render: () => render(),
             renderEdges: () => renderEdges(),
             flushOut: () => flushOut(),
+            recordHistory,
             deleteNode: (id) => deleteNode(id),
+            deleteSelection,
+            copySelection,
+            pasteSelection,
+            duplicateSelection,
+            undo,
+            redo,
+            addNodeAt: point => {
+                addNode();
+                const node = spec.nodes.find(item => item.id === selectedId);
+                if (node && point) { node._x = Math.max(0, point.x - NODE_WIDTH / 2); node._y = Math.max(0, point.y - NODE_HEIGHT / 2); render(); flushOut(); }
+            },
             wouldCreateCycle: (fromId, targetId) => wouldCreateCycle(fromId, targetId)
         });
         document.addEventListener('keydown', onKeyDown);
@@ -506,11 +655,17 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         root.addEventListener('wheel', onWheel, { passive: false });
 
         // —— 工具栏 ——
-                toolbarStatus = renderDagToolbar({
+        toolbarStatus = renderDagToolbar({
             toolbar,
             addNode,
             addPresetNode,
             addAgentTeamTemplate,
+            currentTools,
+            undo,
+            redo,
+            copySelection,
+            pasteSelection,
+            duplicateSelection,
             fitToContent,
             openStatsChartWizard,
             resetLayout,
@@ -538,7 +693,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             nodeLibraryInstance = window.PivotDagNodeLibrary.mount({
                 container: host,
                 onAddNode: (preset) => addPresetNode(preset),
-                onToggleCollapse: (collapsed) => setLibraryCollapsed(collapsed)
+                onToggleCollapse: (collapsed) => setLibraryCollapsed(collapsed),
+                getTools: currentTools
             });
             // 折叠态下的展开按钮
             libraryExpandBtn = document.createElement('button');
@@ -560,7 +716,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const parsed = readJson(textarea.value);
             if (!parsed) return;
             spec = ensureDefaults(parsed);
-            selectedId = null;
+            clearSelection();
             render();
         };
         if (textarea) textarea.addEventListener('input', onTextareaInput);
@@ -602,12 +758,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             getValue: () => serialize(spec),
             setValue: (value) => {
                 spec = ensureDefaults(value || { nodes: [] });
-                selectedId = null;
+                clearSelection();
                 render();
                 flushOut();
             },
             clearSelection: () => {
-                selectedId = null;
+                clearSelection();
                 render();
             },
             deleteSelectedNode: () => {
@@ -621,7 +777,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                     return false;
                 }
                 spec = ensureDefaults(parsed);
-                selectedId = null;
+                clearSelection();
                 render();
                 flushOut();
                 return true;

@@ -132,6 +132,13 @@ window.saveSessionTags = async () => {
 // --- 事件绑定 (集中管理以增强 CSP 安全性) ---
 const bind = (id, fn, event = 'click') => document.getElementById(id)?.addEventListener(event, fn);
 
+const sidebarViewportMedia = window.matchMedia('(max-width: 720px)');
+const syncSidebarForViewport = (media = sidebarViewportMedia) => {
+    document.querySelector('.sidebar')?.classList.toggle('collapsed', media.matches);
+};
+syncSidebarForViewport();
+sidebarViewportMedia.addEventListener?.('change', syncSidebarForViewport);
+
 // 会话管理
 bind('new-chat-btn', async () => {
     window.showMainWorkspace('chat');
@@ -148,15 +155,9 @@ bind('upload-btn', () => {
     }
     document.getElementById('file-input').click();
 });
-bind('clear-input-btn', () => {
-    if (userInput) {
-        userInput.value = '';
-        window.resizeUserInput();
-        userInput.focus();
-    }
-});
 bind('context-usage-pill', () => window.compactCurrentSessionContext?.());
 bind('sidebar-toggle-btn', () => window.toggleSidebar());
+bind('sidebar-mobile-close-btn', () => document.querySelector('.sidebar')?.classList.add('collapsed'));
 bind('session-active-filter', () => window.setArchiveFilter(false));
 bind('session-archive-filter', () => window.setArchiveFilter(true));
 
@@ -182,7 +183,7 @@ bind('pw-update-btn', () => window.updatePassword());
 bind('admin-modal-close', () => window.closeModal());
 bind('apps-workbench-btn', () => window.openAppsWorkbench?.());
 bind('admin-panel-btn', () => window.openAdminPanel());
-bind('agent-workbench-btn', () => window.openAgentWorkbench?.());
+bind('automation-workbench-btn', () => window.openAgentWorkbench?.());
 bind('agent-modal-close', () => window.closeAgentWorkbench?.());
 bind('knowledge-workbench-btn', () => window.openKnowledgeWorkbench?.());
 bind('knowledge-modal-close', () => window.closeKnowledgeWorkbench?.());
@@ -232,6 +233,9 @@ bind('modal-model-test', () => window.testModelConfig());
 bind('m-submit-btn', () => window.addModel());
 bind('m-scope', () => window.updateModelScopeControls?.(), 'change');
 bind('agent-refresh-btn', () => window.loadAgentWorkbench?.());
+bind('task-create-open-btn', () => window.setTaskComposerOpen?.(true));
+bind('task-create-close-btn', () => window.setTaskComposerOpen?.(false));
+bind('task-create-cancel-btn', () => window.setTaskComposerOpen?.(false));
 bind('agent-run-btn', () => window.createAgentRun?.());
 bind('agent-audit-btn', () => window.showAgentRunAudit?.());
 window.bindAgentGoalTemplates?.();

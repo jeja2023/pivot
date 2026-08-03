@@ -404,7 +404,104 @@
     white-space: nowrap;
 }
 
+.agent-schedule-editor-modal {
+    width: min(760px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 40px));
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.agent-schedule-editor-modal .agent-config-modal-head > div {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+}
+
+.agent-schedule-editor-modal .agent-config-modal-head h3 {
+    padding: 0;
+    text-align: left;
+}
+
+.agent-schedule-editor-modal .agent-config-modal-head span {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-schedule-editor-form {
+    display: flex;
+    max-height: calc(100vh - 106px);
+    flex-direction: column;
+    gap: 16px;
+    overflow: auto;
+    padding: 16px;
+    background: #fff;
+}
+
+.agent-schedule-editor-form .modal-form-field > span {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.agent-schedule-editor-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.agent-schedule-editor-footer > div {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-schedule-editor-footer strong {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.agent-schedule-editor-footer strong.error {
+    color: var(--danger);
+}
+
+.agent-schedule-editor-footer strong.running {
+    color: #b45309;
+}
+
 @media (max-width: 720px) {
+    .agent-schedule-editor-modal {
+        width: calc(100vw - 20px);
+        max-height: calc(100vh - 20px);
+    }
+
+    .agent-schedule-editor-form {
+        max-height: calc(100vh - 78px);
+        padding: 12px;
+    }
+
+    .agent-schedule-editor-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .agent-schedule-editor-footer > div {
+        justify-content: flex-end;
+    }
+
     .agent-workflow-schedule-modal {
         width: calc(100vw - 20px);
         max-height: calc(100vh - 20px);

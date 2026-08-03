@@ -46,14 +46,16 @@ function renderAgentEvalOverview() {
 function renderAgentEvalSuiteList() {
     const list = document.getElementById('agent-eval-suite-list');
     if (!list) return;
-    list.closest('.agent-eval-layout')?.classList.toggle('is-empty', !agentEvalSuitesCache.length);
+    const isEmpty = !agentEvalSuitesCache.length;
+    list.closest('.agent-eval-layout')?.classList.toggle('is-empty', isEmpty);
+    document.querySelector('#agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal')?.classList.toggle('is-empty', isEmpty);
     PivotSafeHtml.setHtml(list, agentEvalSuitesCache.length ? agentEvalSuitesCache.map(item => {
         const summary = agentEvalSummary(item.latest_summary);
         return `
             <button type="button" class="agent-eval-suite-item ${String(item.id) === String(activeAgentEvalSuiteId) ? 'is-active' : ''}" data-agent-eval-suite="${agentEscapeAttr(item.id)}">
                 <span class="agent-eval-suite-main">
                     <strong>${agentEscape(item.name)}</strong>
-                    <small>${item.target_type === 'workflow' ? `工作流 · ${agentEscape(item.workflow_name || '未选择')}` : `自由任务 · ${agentEscape(item.model_name || '未选择模型')}`}</small>
+                    <small>${item.target_type === 'workflow' ? `工作流 · ${agentEscape(item.workflow_name || '未选择')}` : `自主任务 · ${agentEscape(item.model_name || '未选择模型')}`}</small>
                 </span>
                 <span class="agent-eval-suite-stats">
                     <em>${Number(item.case_count || 0)} 例</em>
@@ -68,13 +70,11 @@ function renderAgentEvalSuiteList() {
             </span>
             <strong>暂无评测集</strong>
             <span>创建第一个评测集，开始记录质量基线。</span>
-            <button type="button" class="btn-primary" data-agent-eval-empty-create>新建评测集</button>
         </div>
     `);
     list.querySelectorAll('[data-agent-eval-suite]').forEach(button => {
         button.addEventListener('click', () => loadAgentEvalSuite(button.dataset.agentEvalSuite));
     });
-    list.querySelector('[data-agent-eval-empty-create]')?.addEventListener('click', () => openAgentEvalEditor());
 }
 
 async function loadAgentEvaluationSuites(options = {}) {
@@ -173,7 +173,7 @@ function renderAgentEvalSuiteDetail(payload = {}) {
         <div class="agent-eval-detail-head">
             <div>
                 <strong>${agentEscape(suite.name || '评测集')}</strong>
-                <span>${suite.target_type === 'workflow' ? `工作流 · ${agentEscape(suite.workflow_name || '-')}` : `自由任务 · ${agentEscape(suite.model_name || '-')}`} · 通过线 ${Number(suite.run_config?.passThreshold || 80)} 分</span>
+                <span>${suite.target_type === 'workflow' ? `工作流 · ${agentEscape(suite.workflow_name || '-')}` : `自主任务 · ${agentEscape(suite.model_name || '-')}`} · 通过线 ${Number(suite.run_config?.passThreshold || 80)} 分</span>
             </div>
             <div class="agent-eval-detail-actions">
                 <button type="button" class="btn-secondary" data-agent-eval-edit>编辑</button>
@@ -334,7 +334,7 @@ function ensureAgentEvalEditorModal() {
                     </div>
                     <div class="modal-form-grid modal-form-grid--3 agent-eval-suite-fields">
                         <div class="modal-form-field"><label for="agent-eval-editor-name">名称</label><input id="agent-eval-editor-name" class="form-input" maxlength="100"></div>
-                        <div class="modal-form-field"><label for="agent-eval-editor-target">目标类型</label><select id="agent-eval-editor-target" class="form-input"><option value="free">自由任务</option><option value="workflow">工作流</option></select></div>
+                        <div class="modal-form-field"><label for="agent-eval-editor-target">目标类型</label><select id="agent-eval-editor-target" class="form-input"><option value="free">自主任务</option><option value="workflow">工作流</option></select></div>
                         <div class="modal-form-field"><label for="agent-eval-editor-model">模型</label><select id="agent-eval-editor-model" class="form-input"></select></div>
                         <div class="modal-form-field" data-agent-eval-workflow-field><label for="agent-eval-editor-workflow">工作流</label><select id="agent-eval-editor-workflow" class="form-input"></select></div>
                         <div class="modal-form-field"><label for="agent-eval-editor-threshold">通过线</label><input id="agent-eval-editor-threshold" class="form-input" type="number" min="1" max="100" value="80"></div>

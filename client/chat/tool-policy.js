@@ -203,7 +203,7 @@ function renderToolPolicyTools() {
     renderToolPolicyPagination(page);
     if (!toolPolicyToolsCache.length) {
         toolPolicySelectedToolKey = '';
-        renderToolPolicyMessage(toolPolicyPackagesCache.length ? '暂无可治理工具，请先在工具箱刷新工具列表。' : '暂无全局工具包');
+        renderToolPolicyMessage(toolPolicyPackagesCache.length ? '暂无可治理工具，请先在工具库刷新工具列表。' : '暂无全局工具包');
         renderToolPolicyGovernancePanel(null);
         return;
     }

@@ -638,7 +638,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const server = getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const tools = await refreshMcpTools(server, req.user);
-        logAction(req, '刷新工具箱工具', `${server.name}: ${tools.length}`);
+        logAction(req, '刷新工具库工具', `${server.name}: ${tools.length}`);
         res.json({ success: true, tools });
     }));
 
@@ -733,7 +733,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             let testResult = null;
             if (action === 'test') {
                 const target = String(req.body?.target || '').trim();
-                const message = String(req.body?.message || 'Pivot 工具箱 IM 通知测试').slice(0, 1000);
+                const message = String(req.body?.message || 'Pivot 工具库 IM 通知测试').slice(0, 1000);
                 testResult = await executeBuiltinMcpTool(server, 'im.send_markdown', {
                     target,
                     markdown: message

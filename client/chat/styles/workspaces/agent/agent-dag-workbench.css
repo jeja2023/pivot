@@ -11,6 +11,30 @@
     overflow: hidden;
 }
 
+.agent-dag-inputs-panel {
+    flex: 0 0 auto;
+    margin: 8px 14px 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(16, 185, 129, 0.28);
+    border-radius: 7px;
+    background: rgba(236, 253, 245, 0.72);
+}
+
+.agent-dag-inputs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.agent-dag-inputs-head > div { display: flex; align-items: baseline; gap: 8px; }
+.agent-dag-inputs-head span, .agent-dag-input-item small { color: #64748b; font-size: 12px; }
+.agent-dag-inputs-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-top: 8px; }
+.agent-dag-input-item { display: grid; gap: 4px; min-width: 0; }
+.agent-dag-input-item > span { font-size: 12px; font-weight: 700; }
+.agent-dag-input-item em { margin-left: 6px; color: #dc2626; font-size: 10px; font-style: normal; }
+.agent-dag-input-item textarea { resize: vertical; }
+
 .agent-dag-workbench .pivot-dag-editor-wrap {
     min-height: 0;
     height: auto;

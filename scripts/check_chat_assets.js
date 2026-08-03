@@ -61,9 +61,20 @@ if (!renderChartsJs.includes("loadScriptOnce('/common/vendor/echarts.min.js')"))
 const manualPath = path.join(rootDir, '使用帮助.md');
 if (!fs.existsSync(manualPath)) fail('使用帮助.md is required for the /manual page and Docker deployment');
 const manualMarkdown = fs.readFileSync(manualPath, 'utf8');
-const renderedManualHtml = renderManualHtml(manualMarkdown, { appVersion: 'v0.0.0', embedded: true });
+if (/适用版本：|^##\s+(?:\[?v?\d+\.\d+\.\d+\]?\s*)?(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)\s*$/im.test(manualMarkdown)) {
+    fail('使用帮助.md must remain a version-free guide for ordinary users');
+}
+const manualTechnicalMarkers = /\b(?:API|HTTP|HTTPS|JWT|SQLite|SSE|MCP|RAG|DAG|JSON|SQL|Token|Embedding)\b|环境变量|服务日志|接口路径|技术实现/i;
+if (manualTechnicalMarkers.test(manualMarkdown)) {
+    fail('使用帮助.md must not contain implementation or integration details');
+}
+const renderedManualHtml = renderManualHtml(manualMarkdown, { embedded: true });
 if (/<h2>(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))<\/h2>/i.test(renderedManualHtml)) {
     fail('/manual page must not render version update records from 使用帮助.md');
+}
+const standaloneManualHtml = renderManualHtml(manualMarkdown);
+if (/版本\s+v?\d+\.\d+\.\d+/i.test(standaloneManualHtml)) {
+    fail('/manual page must not display an application version in the ordinary-user help header');
 }
 const syntheticManual = '# 标题\n\n适用版本：`v0.0.1`\n\n## 版本更新记录\n\n- 不应显示\n\n## v0.0.2 更新提示\n\n- 也不应显示\n\n## 1. 登录\n\n正文';
 const strippedSyntheticManual = stripVersionUpdateSections(syntheticManual);

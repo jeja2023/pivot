@@ -1,16 +1,59 @@
-<!-- 工作流编排工作台 -->
+<!-- 自动化资产中心与工作流编排器 -->
     <section id="agent-dag-workbench-modal" class="main-workspace-view agent-dag-workspace-view hidden">
         <div class="agent-dag-modal">
             <div class="agent-dag-modal-header">
                 <div>
-                    <h3>工作流编排</h3>
-                    <p>用于编排节点、发布版本、计划运行和审计复用，适合企业生产任务和标准化流程。</p>
+                    <h3 id="automation-workspace-title">自动化</h3>
+                    <p id="automation-workspace-description">集中管理工作流与计划任务，并跟踪发布和运行状态。</p>
                 </div>
                 <div class="agent-dag-header-actions">
-                    <button id="agent-dag-save-btn" class="btn-primary" type="button">保存</button>
-                    <button id="agent-dag-back-btn" class="btn-secondary" type="button">返回智能体</button>
+                    <button id="automation-new-workflow-btn" class="btn-primary" type="button">新建工作流</button>
+                    <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
+                    <button id="automation-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                    <button id="agent-dag-save-btn" class="btn-primary hidden" type="button">保存</button>
+                    <button id="agent-dag-back-btn" class="btn-secondary hidden" type="button">返回资产中心</button>
+                    <button id="automation-close-btn" class="btn-secondary agent-modal-close" type="button">关闭</button>
                 </div>
             </div>
+            <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
+                <button class="automation-primary-tab" type="button" data-automation-section="tasks" role="tab" aria-selected="false">任务运行</button>
+                <button class="automation-primary-tab active" type="button" data-automation-section="workflows" role="tab" aria-selected="true">工作流</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-selected="false">计划任务</button>
+            </div>
+            <div id="automation-assets-view" class="automation-assets-view">
+                <div class="automation-summary-grid" aria-label="自动化资产概览">
+                    <div class="automation-summary-item">
+                        <span>工作流</span>
+                        <strong id="automation-workflow-count">0</strong>
+                        <small>已保存资产</small>
+                    </div>
+                    <div class="automation-summary-item">
+                        <span>已发布</span>
+                        <strong id="automation-published-count">0</strong>
+                        <small>可稳定运行</small>
+                    </div>
+                    <div class="automation-summary-item">
+                        <span>已启用计划</span>
+                        <strong id="automation-schedule-count">0</strong>
+                        <small>自动执行</small>
+                    </div>
+                </div>
+                <div class="automation-assets-toolbar">
+                    <div class="automation-assets-actions">
+                        <div class="automation-assets-search">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                            <input id="automation-assets-search-input" class="form-input" type="search" placeholder="搜索工作流" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+                <div id="automation-workflows-panel" class="automation-assets-panel" role="tabpanel" aria-labelledby="automation-tab-workflows">
+                    <div id="automation-workflow-assets-list" class="automation-assets-list"></div>
+                </div>
+                <div id="automation-schedules-panel" class="automation-assets-panel hidden" role="tabpanel" aria-labelledby="automation-tab-schedules">
+                    <div id="automation-schedule-assets-list" class="automation-assets-list"></div>
+                </div>
+            </div>
+            <div id="automation-editor-view" class="automation-editor-view hidden">
             <div class="agent-dag-library-bar" aria-label="工作流库与状态">
                 <button id="agent-workflow-new-btn" class="btn-secondary agent-dag-new-btn" type="button" title="清空画布并新建工作流">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -53,6 +96,16 @@
                     </div>
                 </details>
             </div>
+            <section id="agent-dag-inputs-panel" class="agent-dag-inputs-panel hidden" aria-labelledby="agent-dag-inputs-title">
+                <div class="agent-dag-inputs-head">
+                    <div>
+                        <strong id="agent-dag-inputs-title">运行输入</strong>
+                        <span>预览和运行当前工作流时使用</span>
+                    </div>
+                    <button id="agent-dag-inputs-refresh" class="btn-secondary" type="button" title="重新读取输入节点">刷新</button>
+                </div>
+                <div id="agent-dag-inputs-list" class="agent-dag-inputs-list"></div>
+            </section>
             <div class="agent-dag-workbench">
                 <div class="pivot-dag-editor-wrap" id="agent-dag-editor-wrap">
                     <div class="pivot-dag-editor-toolbar" id="agent-dag-editor-toolbar"></div>
@@ -73,6 +126,7 @@
                         <div class="pivot-dag-editor-inspector" id="agent-dag-editor-inspector"></div>
                     </div>
                 </aside>
+            </div>
             </div>
             <div id="agent-dag-json-modal" class="modal-overlay hidden agent-dag-json-modal-overlay" style="z-index: 1920;">
                 <div class="modal agent-dag-json-modal">

@@ -132,6 +132,17 @@
     transform: translateY(-1px);
 }
 
+.pivot-node-library-card:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    transform: none;
+}
+
+.pivot-node-library-card:disabled:hover {
+    border-color: rgba(148, 163, 184, 0.3);
+    background: #fff;
+}
+
 .pivot-node-library-card:active {
     transform: translateY(0);
 }
@@ -202,6 +213,13 @@
 .pivot-node-library-card-icon.is-db       { background: rgba(71, 85, 105, 0.12); color: #475569; }
 .pivot-node-library-card-icon.is-viz      { background: rgba(161, 98, 7, 0.12); color: #a16207; }
 .pivot-node-library-card-icon.is-report   { background: rgba(225, 29, 72, 0.12); color: #be123c; }
+.pivot-node-library-card-icon.is-input    { background: rgba(5, 150, 105, 0.12); color: #047857; }
+.pivot-node-library-card-icon.is-output   { background: rgba(13, 148, 136, 0.12); color: #0f766e; }
+.pivot-node-library-card-icon.is-condition{ background: rgba(217, 119, 6, 0.12); color: #b45309; }
+.pivot-node-library-card-icon.is-approval { background: rgba(225, 29, 72, 0.12); color: #be123c; }
+.pivot-node-library-card-icon.is-loop     { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+.pivot-node-library-card-icon.is-subflow  { background: rgba(71, 85, 105, 0.12); color: #475569; }
+.pivot-node-library-card-icon.is-delay    { background: rgba(161, 98, 7, 0.12); color: #a16207; }
 
 /* ── 深色模式 ─────────────────────────────── */
 body.dark-mode .pivot-node-library,

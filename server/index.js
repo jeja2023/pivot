@@ -435,7 +435,6 @@ app.get(['/manual', '/manual/'], async (req, res) => {
     try {
         const markdown = await fs.promises.readFile(MANUAL_PATH, 'utf8');
         res.type('html').send(renderManualHtml(markdown, {
-            appVersion,
             nonce: res.locals.cspNonce,
             embedded: req.query.embed === '1'
         }));

@@ -1,4 +1,4 @@
-// 工具箱工作台逻辑
+// 工具库工作台逻辑
 const mcpEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 let mcpServersCache = [];
 let mcpCallLogsCache = [];

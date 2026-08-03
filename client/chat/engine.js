@@ -106,7 +106,7 @@ async function registerChatLocalMcpBridgeDirectly() {
         body: JSON.stringify(payload)
     });
     if (!response.ok) {
-        const message = await response.text() || '本机工具箱同步失败。';
+        const message = await response.text() || '本机工具库同步失败。';
         updateChatLocalMcpBridgeDebug({ status: 'heartbeat_failed', ...bridgeState, grants, reason: message.slice(0, 300) });
         throw new Error(message);
     }
@@ -134,11 +134,11 @@ async function syncChatLocalMcpBridgeBeforeSend() {
         if (payload) return payload;
         return await registerChatLocalMcpBridgeDirectly();
     } catch (error) {
-        console.debug?.('[pivot] 本机工具箱同步失败，继续发送消息', error?.message || error);
+        console.debug?.('[pivot] 本机工具库同步失败，继续发送消息', error?.message || error);
         try {
             return await registerChatLocalMcpBridgeDirectly();
         } catch (fallbackError) {
-            console.debug?.('[pivot] 本机工具箱直接同步失败', fallbackError?.message || fallbackError);
+            console.debug?.('[pivot] 本机工具库直接同步失败', fallbackError?.message || fallbackError);
         }
     }
     return null;
@@ -464,8 +464,8 @@ async function runSendMessage(shouldRegenerate) {
                 }
                 if (data.type === 'mcp') {
                     window.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    updateAssistantStatus(data.message || '正在处理工具箱工具');
-                    if (data.status === 'error') showToast(data.message || '工具箱工具调用失败', 'warning');
+                    updateAssistantStatus(data.message || '正在处理工具库工具');
+                    if (data.status === 'error') showToast(data.message || '工具库工具调用失败', 'warning');
                     return;
                 }
                 if (data.type === 'chart') {

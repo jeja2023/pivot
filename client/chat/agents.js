@@ -72,7 +72,7 @@ function agentDisplayTitle(item) {
     const title = String(item?.title || '').trim();
     const goal = String(item?.goal || '').trim();
     if (!agentLooksLikeCorruptTitle(title)) return title;
-    return goal || '自由任务';
+    return goal || '自主任务';
 }
 
 function agentPreviewDisplayTitle(value) {
@@ -103,22 +103,75 @@ window.loadAgentWorkbench = async function() {
     }
 };
 
-window.openAgentWorkbench = async function() {
+window.setTaskComposerOpen = function(isOpen = true) {
+    const modal = document.getElementById('agent-task-editor-modal');
+    const openButton = document.getElementById('task-create-open-btn');
+    if (!modal) return;
+    if (modal.dataset.boundTaskEditorOverlay !== '1') {
+        modal.dataset.boundTaskEditorOverlay = '1';
+        modal.addEventListener('click', event => {
+            if (event.target === modal) window.setTaskComposerOpen(false);
+        });
+    }
+    const wasOpen = !modal.classList.contains('hidden');
+    modal.classList.toggle('hidden', !isOpen);
+    modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    openButton?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) setTimeout(() => document.getElementById('agent-goal-input')?.focus(), 0);
+    else if (wasOpen && modal.contains(document.activeElement)) openButton?.focus();
+};
+
+window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
+    document.querySelectorAll('[data-automation-section]').forEach(button => {
+        const isActive = button.dataset.automationSection === activeSection;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+};
+
+window.bindUnifiedAutomationTabs = function() {
+    document.querySelectorAll('[data-automation-section]').forEach(button => {
+        if (button.dataset.boundAutomationSection === '1') return;
+        button.dataset.boundAutomationSection = '1';
+        button.addEventListener('click', async () => {
+            const section = button.dataset.automationSection;
+            const isWorkflowEditorOpen = document.body?.dataset.activeWorkspace === 'agent-dag'
+                && !document.getElementById('automation-editor-view')?.classList.contains('hidden');
+            if (isWorkflowEditorOpen && section === 'workflows') return;
+            if (isWorkflowEditorOpen && typeof confirmAgentWorkflowDiscard === 'function') {
+                const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
+                if (!confirmed) return;
+            }
+            if (section === 'tasks') return window.openAgentWorkbench?.();
+            return window.openAgentDagWorkbench?.({ tab: section });
+        });
+    });
+};
+
+window.openAgentWorkbench = async function(options = {}) {
     window.showMainWorkspace?.('agent');
+    window.syncAutomationPrimaryTabs('tasks');
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;
+    const queryInput = document.getElementById('agent-filter-query');
+    const runTypeInput = document.getElementById('agent-filter-run-type');
+    if (queryInput && Object.hasOwn(options, 'query')) queryInput.value = String(options.query || '');
+    if (runTypeInput && Object.hasOwn(options, 'runType')) runTypeInput.value = String(options.runType || '');
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
+    window.setTaskComposerOpen(Boolean(options.create));
     await window.loadAgentWorkbench();
     window.bindAgentFilters?.();
     window.bindAgentEnterpriseControls?.();
     window.bindAgentConfigModal?.();
+    window.bindUnifiedAutomationTabs?.();
 };
 
 window.closeAgentWorkbench = function() {
     closeAgentConfigModal();
     closeAgentRunDetailModal();
+    window.setTaskComposerOpen(false);
     window.showMainWorkspace?.('chat');
     updateAgentAutoRefresh();
 };
@@ -165,18 +218,15 @@ window.bindAgentEnterpriseControls = function() {
         saveTemplateBtn.dataset.boundAgentTemplateSave = '1';
         saveTemplateBtn.addEventListener('click', saveCurrentAgentTemplate);
     });
-    const frequency = document.getElementById('agent-schedule-frequency');
-    const weekday = document.getElementById('agent-schedule-weekday');
-    if (frequency && frequency.dataset.boundAgentSchedule !== '1') {
-        frequency.dataset.boundAgentSchedule = '1';
-        const update = () => weekday?.classList.toggle('is-disabled', frequency.value !== 'weekly');
-        frequency.addEventListener('change', update);
-        update();
+    const savePlanButton = document.getElementById('agent-save-plan-btn');
+    if (savePlanButton && savePlanButton.dataset.boundAgentPlanSave !== '1') {
+        savePlanButton.dataset.boundAgentPlanSave = '1';
+        savePlanButton.addEventListener('click', saveCurrentAgentTaskAsSchedule);
     }
 };
 
 const agentConfigSectionTitles = {
-    templates: '模板与计划',
+    templates: '任务模板',
     results: '能力与结果',
     evaluations: '质量评测'
 };
@@ -205,7 +255,7 @@ function openAgentConfigSection(sectionKey) {
     closeAgentConfigModal();
     activeAgentConfigSection = sectionKey;
     modal.dataset.agentConfigSection = sectionKey;
-    if (title) title.textContent = agentConfigSectionTitles[sectionKey] || '智能体配置';
+    if (title) title.textContent = agentConfigSectionTitles[sectionKey] || '任务配置';
     section.open = true;
     body.appendChild(section);
     modal.classList.remove('hidden');
@@ -254,9 +304,4 @@ window.bindAgentConfigModal = function() {
             if (event.target === runDetailModal) closeAgentRunDetailModal();
         });
     }
-    document.querySelectorAll('[data-agent-open-dag]').forEach(btn => {
-        if (btn.dataset.boundAgentDagOpen === '1') return;
-        btn.dataset.boundAgentDagOpen = '1';
-        btn.addEventListener('click', () => window.openAgentDagWorkbench?.());
-    });
 };
