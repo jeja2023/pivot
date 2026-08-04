@@ -74,6 +74,16 @@ if (!manualMarkdown.includes('点击左侧“自动化”') || !manualMarkdown.i
 if (/点击左侧“任务”/.test(manualMarkdown)) {
     fail('使用帮助.md must not describe the removed task navigation item');
 }
+const manualNavSection = /### 1\.2 认识左侧导航([\s\S]*?)(?=\n### 1\.3)/.exec(manualMarkdown)?.[1] || '';
+const expectedSidebarLabels = ['**搜索**', '**应用**', '**知识库**', '**工具库**', '**自动化**'];
+let lastSidebarLabelIndex = -1;
+expectedSidebarLabels.forEach(label => {
+    const index = manualNavSection.indexOf(label);
+    if (index <= lastSidebarLabelIndex) {
+        fail('使用帮助.md sidebar navigation order does not match the current homepage');
+    }
+    lastSidebarLabelIndex = index;
+});
 const renderedManualHtml = renderManualHtml(manualMarkdown, { embedded: true });
 if (/<h2>(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))<\/h2>/i.test(renderedManualHtml)) {
     fail('/manual page must not render version update records from 使用帮助.md');
