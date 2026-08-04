@@ -26,7 +26,11 @@ function removeDir(dir) {
 function clearServerDbModules() {
     Object.keys(require.cache).forEach(key => {
         const normalized = key.replace(/\\/g, '/');
-        if (normalized.includes('/server/db/') || normalized.endsWith('/server/db.js')) {
+        if (
+            normalized.includes('/server/db/')
+            || normalized.endsWith('/server/db.js')
+            || normalized.endsWith('/server/services/app-settings.js')
+        ) {
             delete require.cache[key];
         }
     });
@@ -173,6 +177,64 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
         removeDir(dataDir);
     }
 });
+
+test('database boot migrates legacy automation columns before creating dependent indexes', () => {
+    const previousDataDir = process.env.DATA_DIR;
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-automation-migration-'));
+    const dbPath = path.join(dataDir, 'chat.db');
+    const legacyDb = new Sqlite(dbPath);
+    legacyDb.exec(`
+        CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT, updated_at DATETIME);
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at DATETIME
+        );
+        CREATE TABLE agent_runs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            goal TEXT NOT NULL,
+            status TEXT DEFAULT 'queued',
+            created_at DATETIME
+        );
+        CREATE TABLE agent_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            next_run_at DATETIME,
+            deleted_at DATETIME
+        );
+    `);
+    legacyDb.close();
+
+    try {
+        process.env.DATA_DIR = dataDir;
+        clearServerDbModules();
+        const booted = require('../server/db');
+        const runColumns = booted.db.prepare('PRAGMA table_info(agent_runs)').all().map(column => column.name);
+        const scheduleColumns = booted.db.prepare('PRAGMA table_info(agent_schedules)').all().map(column => column.name);
+        const runIndexes = booted.db.prepare('PRAGMA index_list(agent_runs)').all().map(index => index.name);
+        const scheduleIndexes = booted.db.prepare('PRAGMA index_list(agent_schedules)').all().map(index => index.name);
+
+        assert.ok(runColumns.includes('dedupe_key'));
+        assert.ok(scheduleColumns.includes('claim_token'));
+        assert.ok(scheduleColumns.includes('dispatch_retry_at'));
+        assert.ok(scheduleColumns.includes('last_error'));
+        assert.ok(runIndexes.includes('idx_agent_runs_user_dedupe'));
+        assert.ok(scheduleIndexes.includes('idx_agent_schedules_dispatch'));
+        booted.db.close();
+    } finally {
+        clearServerDbModules();
+        if (previousDataDir === undefined) delete process.env.DATA_DIR;
+        else process.env.DATA_DIR = previousDataDir;
+        removeDir(dataDir);
+    }
+});
+
 test('refresh token migration hashes legacy plaintext values and is idempotent', () => {
     const db = new Sqlite(':memory:');
     try {

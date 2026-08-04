@@ -68,6 +68,12 @@ const manualTechnicalMarkers = /\b(?:API|HTTP|HTTPS|JWT|SQLite|SSE|MCP|RAG|DAG|J
 if (manualTechnicalMarkers.test(manualMarkdown)) {
     fail('使用帮助.md must not contain implementation or integration details');
 }
+if (!manualMarkdown.includes('点击左侧“自动化”') || !manualMarkdown.includes('“任务运行”标签')) {
+    fail('使用帮助.md must describe task access through the automation workspace');
+}
+if (/点击左侧“任务”/.test(manualMarkdown)) {
+    fail('使用帮助.md must not describe the removed task navigation item');
+}
 const renderedManualHtml = renderManualHtml(manualMarkdown, { embedded: true });
 if (/<h2>(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))<\/h2>/i.test(renderedManualHtml)) {
     fail('/manual page must not render version update records from 使用帮助.md');

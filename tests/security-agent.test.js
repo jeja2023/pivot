@@ -474,6 +474,7 @@ test('agent quick task uses a modal editor with complete actions', () => {
     assert.match(source, /modal\.classList\.toggle\('hidden', !isOpen\)/);
     assert.match(source, /if \(event\.target === modal\) window\.setTaskComposerOpen\(false\)/);
     assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?width: min\(760px,[\s\S]*?text-align: left;/);
+    assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?max-height: min\(860px, calc\(100dvh - 32px\)\);/);
     assert.match(css, /\.agent-task-editor-footer\s*\{/);
     assert.doesNotMatch(css, /\.agent-workbench\.task-composer-open/);
 });
