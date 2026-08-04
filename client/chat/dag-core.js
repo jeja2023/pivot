@@ -260,6 +260,25 @@ function ensureLlmNodeInput(node) {
         }
     }
 
+function syncLlmOutputContract(node, input = null) {
+        if (!isLlmNode(node)) return;
+        const nextInput = input && typeof input === 'object' ? input : (node.input || {});
+        const hasExplicitFormat = Object.prototype.hasOwnProperty.call(nextInput, 'responseFormat')
+            || Object.prototype.hasOwnProperty.call(nextInput, 'response_format');
+        if (!hasExplicitFormat) return;
+        const format = String(nextInput.responseFormat || nextInput.response_format || 'markdown').trim();
+        const schema = node.outputSchema && typeof node.outputSchema === 'object' && !Array.isArray(node.outputSchema)
+            ? node.outputSchema
+            : {};
+        const schemaKeys = Object.keys(schema);
+        const isDefaultStringSchema = schema.type === 'string' && schemaKeys.every(key => key === 'type');
+        if (format === 'json' && isDefaultStringSchema) {
+            node.outputSchema = {};
+        } else if (format !== 'json' && !schemaKeys.length) {
+            node.outputSchema = { type: 'string' };
+        }
+    }
+
 function writeJson(textarea, spec) {
         if (!textarea) return;
         textarea.value = JSON.stringify(serialize(spec), null, 2);

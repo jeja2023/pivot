@@ -118,6 +118,15 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             responseFormat: '输出格式',
             response_format: '输出格式'
         },
+        'workflow.output': {
+            name: '输出名称',
+            value: '输出值',
+            format: '输出格式',
+            presentation: '增强交付',
+            tableTitle: '表格标题',
+            tableColumns: '表格列',
+            fileRef: '文件引用'
+        },
         'sessions.search': {
             query: '会话关键词'
         },
@@ -293,6 +302,11 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             maxSteps: '本工作流运行允许的最大步骤数，作为运行任务的上限。',
             max_steps: '本工作流运行允许的最大步骤数，作为运行任务的上限。',
             responseFormat: '选择格式化内容、纯文本或结构化数据；结构化模式会校验返回格式。'
+        },
+        'workflow.output': {
+            format: '选择调用方接收最终结果的形式。',
+            presentation: '默认结果保留原始值；表格模式整理行列；文件产物模式保留文件引用。',
+            fileRef: '文件模式下填写上游返回的文件引用对象，不上传或复制文件内容。'
         },
         'sessions.search': {
             query: '输入要查找的历史会话关键词或问题。'

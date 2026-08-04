@@ -97,6 +97,30 @@ const cloneDagInput = (value) => {
             .map(depId => specNodes.find(n => n.id === depId))
             .filter(Boolean);
 
+        const buildSchemaReferenceTokens = (node, max = 24) => {
+            const schema = node?.outputSchema && typeof node.outputSchema === 'object' && !Array.isArray(node.outputSchema)
+                ? node.outputSchema
+                : {};
+            const tokens = [];
+            const walk = (current, path = [], depth = 0) => {
+                if (!current || typeof current !== 'object' || depth > 4 || tokens.length >= max) return;
+                const properties = current.properties && typeof current.properties === 'object' && !Array.isArray(current.properties)
+                    ? current.properties
+                    : {};
+                Object.entries(properties).forEach(([key, child]) => {
+                    if (tokens.length >= max) return;
+                    const nextPath = [...path, key];
+                    const tokenPath = nextPath.join('.');
+                    const label = child?.description ? `${tokenPath} · ${child.description}` : tokenPath;
+                    tokens.push({ label, token: `{{nodes.${node.id}.output.${tokenPath}}}` });
+                    if (child?.type === 'object' || child?.properties) walk(child, nextPath, depth + 1);
+                    if (child?.type === 'array' && child?.items?.type === 'object') walk(child.items, [...nextPath, '0'], depth + 1);
+                });
+            };
+            walk(schema);
+            return tokens;
+        };
+
         const buildWizardReferenceGroups = (node, dependencyNodes = buildWizardDependencyNodes(node)) => {
             const groups = [
                 {
@@ -111,16 +135,18 @@ const cloneDagInput = (value) => {
             if (dependencyNodes.length) {
                 dependencyNodes.forEach(depNode => {
                     const depLabel = depNode.title || depNode.id;
+                    const schemaTokens = buildSchemaReferenceTokens(depNode);
                     groups.push({
                         label: depLabel,
-                        note: '前序节点还没运行也没关系，先写路径，执行时会自动解析。',
+                        note: schemaTokens.length ? '可直接引用完整结果，或按输出契约选择字段。' : '前序节点还没运行也没关系，先写路径，执行时会自动解析。',
                         tokens: [
                             { label: '完整结果', token: `{{nodes.${depNode.id}.output}}` },
                             { label: '结构化结果', token: `{{nodes.${depNode.id}.output.structuredContent}}` },
                             { label: '结果行', token: `{{nodes.${depNode.id}.output.rows}}` },
                             { label: '结构化行', token: `{{nodes.${depNode.id}.output.structuredContent.rows}}` },
                             { label: '状态', token: `{{nodes.${depNode.id}.status}}` },
-                            { label: '错误', token: `{{nodes.${depNode.id}.error}}` }
+                            { label: '错误', token: `{{nodes.${depNode.id}.error}}` },
+                            ...schemaTokens
                         ]
                     });
                 });
@@ -153,6 +179,9 @@ const cloneDagInput = (value) => {
                 suggestions.push(isListLike
                     ? { label: `${depLabel} 结构化行`, token: `{{nodes.${primaryDep.id}.output.structuredContent.rows}}` }
                     : { label: `${depLabel} 结构化结果`, token: `{{nodes.${primaryDep.id}.output.structuredContent}}` });
+                buildSchemaReferenceTokens(primaryDep, 12).forEach(item => {
+                    suggestions.push({ label: `${depLabel} · ${item.label}`, token: item.token });
+                });
             }
             if (dependencyNodes.length > 1) {
                 const secondaryDep = dependencyNodes[1];
@@ -162,7 +191,7 @@ const cloneDagInput = (value) => {
                     token: `{{nodes.${secondaryDep.id}.output}}`
                 });
             }
-            return [...new Map(suggestions.map(item => [item.token, item])).values()].slice(0, 4);
+            return [...new Map(suggestions.map(item => [item.token, item])).values()].slice(0, 12);
         };
 
         const renderWizardFieldSources = (node, dependencyNodes = buildWizardDependencyNodes(node)) => buildWizardReferenceGroups(node, dependencyNodes).map(group => `

@@ -345,6 +345,7 @@ function createDagWizardController(ctx) {
                 ctx.recordHistory?.();
                 if (tool && toolValue(tool)) node.tool = toolValue(tool);
                 node.input = nextInput;
+                syncLlmOutputContract(node, nextInput);
                 render();
                 flushOut();
                 closeWizard();

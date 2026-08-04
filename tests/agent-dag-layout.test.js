@@ -170,6 +170,17 @@ test('DAG core keeps a new workflow empty until the user adds a node', () => {
     assert.deepEqual(serialized.layout, {});
 });
 
+test('LLM output mode keeps the default output contract aligned', () => {
+    const core = loadDagCore();
+    const jsonNode = { tool: 'agent.llm', input: { responseFormat: 'json' }, outputSchema: { type: 'string' } };
+    core.syncLlmOutputContract(jsonNode, jsonNode.input);
+    assert.equal(JSON.stringify(jsonNode.outputSchema), '{}');
+
+    const textNode = { tool: 'agent.llm', input: { responseFormat: 'text' }, outputSchema: {} };
+    core.syncLlmOutputContract(textNode, textNode.input);
+    assert.equal(JSON.stringify(textNode.outputSchema), JSON.stringify({ type: 'string' }));
+});
+
 test('incremental node placement leaves existing manual positions unchanged', () => {
     const core = loadDagCore();
     const internal = core.ensureDefaults({

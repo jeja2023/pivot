@@ -197,6 +197,7 @@ const chatBundleGlobals = Object.fromEntries([
     'ensureChatMcpConsent',
     'ensureDefaults',
     'ensureLlmNodeInput',
+    'syncLlmOutputContract',
     'ensureSessionTagTools',
     'estimateStreamingTokenCount',
     'FIELD_DESCRIPTION_OVERRIDES',

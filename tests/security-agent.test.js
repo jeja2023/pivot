@@ -489,6 +489,11 @@ test('agent DAG inspector uses modal entry points for parameter editing', () => 
     assert.match(source, /数据库命名空间/);
     assert.match(source, /pivot-dag-tool-meta-badges/);
     assert.match(source, /pivot-dag-tool-meta-body/);
+    assert.match(source, /<strong>输出模式<\/strong>/);
+    assert.match(source, /data-pivot-schema-add-field/);
+    assert.match(source, /data-pivot-schema-preview/);
+    assert.match(source, /data-pivot-dag-output-presentation/);
+    assert.match(source, /buildSchemaReferenceTokens/);
     assert.match(source, /const upstreamNodes = getDependencyCandidateNodes\(node\)/);
     assert.match(source, />上游节点</);
     assert.match(source, />上游成功后执行</);
@@ -890,7 +895,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
     assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(\)\)/);
-    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, \.\.\.executionContext \}\)/);
+    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
 });
@@ -1022,6 +1027,61 @@ test('agent model calls wait for global model queue instead of failing immediate
     } finally {
         axios.post = originalPost;
         if (!releasedGlobal) aiSemaphore.release();
+    }
+});
+
+test('JSON 输出优先使用原生 Schema，失败后自动降级并修复一次', async () => {
+    const axios = require('axios');
+    const originalPost = axios.post;
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, 'user', 'active', datetime('now', '+8 hours'))
+    `).run(`structured_output_${suffix}`, 'hash', '结构化输出测试', 'QA');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `structured_output_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = db.prepare(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(user.id, 'Structured Output Model', 'https://example.com/v1/chat/completions', `structured-${suffix}`);
+    const payloads = [];
+    let callCount = 0;
+    axios.post = async (_url, payload) => {
+        payloads.push(payload);
+        callCount += 1;
+        if (callCount === 1) {
+            const error = new Error('response_format json_schema unsupported');
+            error.response = { status: 400, data: { error: { message: 'response_format is not supported' } } };
+            throw error;
+        }
+        return {
+            data: {
+                choices: [{ message: { content: callCount === 2 ? '这不是 JSON' : '{"name":"甲"}' } }]
+            }
+        };
+    };
+    try {
+        const result = await executeBuiltInTool('agent.llm', {
+            model: String(modelInfo.lastInsertRowid),
+            prompt: '抽取客户姓名',
+            responseFormat: 'json'
+        }, user, {
+            node: {
+                id: 'extract',
+                outputSchema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['name'],
+                    properties: { name: { type: 'string' } }
+                }
+            }
+        });
+        assert.equal(result.content, '{"name":"甲"}');
+        assert.equal(result.structuredOutput.native, false);
+        assert.equal(callCount, 3);
+        assert.equal(payloads[0].response_format.type, 'json_schema');
+        assert.equal(payloads[0].response_format.json_schema.schema.properties.name.type, 'string');
+    } finally {
+        axios.post = originalPost;
     }
 });
 

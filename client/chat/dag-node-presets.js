@@ -35,9 +35,44 @@ const NODE_PRESET_GROUPS = [
                 getInput: ({ selectedNode }) => ({
                     name: 'result',
                     value: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}',
-                    format: 'auto'
+                    format: 'markdown',
+                    presentation: 'default'
                 }),
-                outputSchema: { type: 'object', required: ['name', 'value'], properties: { name: { type: 'string' }, value: {}, text: { type: 'string' } } }
+                outputSchema: {
+                    type: 'object',
+                    required: ['name', 'value'],
+                    properties: {
+                        name: { type: 'string' },
+                        value: {},
+                        format: { type: 'string' },
+                        presentation: { type: 'string' },
+                        table: {
+                            type: 'object',
+                            properties: {
+                                title: { type: 'string' },
+                                columns: { type: 'array', items: { type: 'string' } },
+                                rows: { type: 'array', items: { type: 'object' } },
+                                rowCount: { type: 'integer' },
+                                truncated: { type: 'boolean' }
+                            }
+                        },
+                        file: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                fileId: { type: 'string' },
+                                name: { type: 'string' },
+                                mimeType: { type: 'string' },
+                                size: { type: 'number' },
+                                url: { type: 'string' },
+                                downloadUrl: { type: 'string' },
+                                path: { type: 'string' },
+                                storageKey: { type: 'string' }
+                            }
+                        },
+                        text: { type: 'string' }
+                    }
+                }
             }
         ]
     },

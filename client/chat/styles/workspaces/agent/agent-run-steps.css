@@ -327,6 +327,69 @@
     background: #fff;
 }
 
+.agent-workflow-output-table {
+    margin-top: 6px;
+}
+
+.agent-result-table-title {
+    margin-bottom: 7px;
+    color: #0f172a;
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.agent-workflow-output-file {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid rgba(14, 165, 164, 0.24);
+    border-radius: 8px;
+    background: #f5fffe;
+}
+
+.agent-workflow-output-file-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    background: #dff8f4;
+    color: #047857;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.agent-workflow-output-file-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.agent-workflow-output-file-main strong {
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-output-file-main span {
+    color: #64748b;
+    font-size: 0.68rem;
+}
+
+.agent-workflow-output-file .btn-secondary {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 0.68rem;
+}
+
 .agent-result-table {
     width: 100%;
     min-width: 420px;

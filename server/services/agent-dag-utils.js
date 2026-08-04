@@ -26,6 +26,14 @@ function stringifyDagTemplateValue(value) {
     }
 }
 
+function parseStructuredNodeOutput(output) {
+    if (!output || typeof output !== 'object') return undefined;
+    if (output.structuredContent !== undefined) return output.structuredContent;
+    if (typeof output.content !== 'string') return undefined;
+    const text = output.content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    try { return JSON.parse(text); } catch (e) { return undefined; }
+}
+
 function resolveDagTemplateReference(expression, context) {
     const expr = String(expression || '').trim();
     if (!expr) return undefined;
@@ -54,7 +62,8 @@ function resolveDagTemplateReference(expression, context) {
             const path = parts.slice(3);
             const direct = getPathValue(state.output, path);
             if (direct !== undefined || !path.length) return direct;
-            return getPathValue(state.output?.structuredContent, path);
+            const structured = parseStructuredNodeOutput(state.output);
+            return getPathValue(structured, path);
         }
     }
     return undefined;

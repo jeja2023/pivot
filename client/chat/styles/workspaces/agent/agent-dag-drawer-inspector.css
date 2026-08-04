@@ -329,6 +329,290 @@
     background: #f8fafc;
 }
 
+.pivot-dag-output-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 11px;
+    border: 1px solid rgba(14, 165, 164, 0.24);
+    border-radius: 8px;
+    background: #f5fffe;
+}
+
+.pivot-dag-output-panel-head,
+.pivot-dag-output-contract {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pivot-dag-output-panel-head > div,
+.pivot-dag-output-contract > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.pivot-dag-output-panel-head strong,
+.pivot-dag-output-contract strong {
+    color: #0f172a;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-output-panel-head span,
+.pivot-dag-output-contract span {
+    color: #64748b;
+    font-size: 0.66rem;
+}
+
+.pivot-dag-output-current {
+    flex: 0 0 auto;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #dff8f4;
+    color: #047857 !important;
+    font-size: 0.64rem !important;
+    font-weight: 700;
+}
+
+.pivot-dag-output-modes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.pivot-dag-output-mode {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    min-height: 54px;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    border-radius: 7px;
+    background: #fff;
+    color: #334155;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pivot-dag-output-mode strong {
+    font-size: 0.7rem;
+    line-height: 1.2;
+}
+
+.pivot-dag-output-mode span {
+    color: #64748b;
+    font-size: 0.62rem;
+    line-height: 1.2;
+}
+
+.pivot-dag-output-mode:hover,
+.pivot-dag-output-mode.is-active {
+    border-color: #0ea5a4;
+    box-shadow: 0 0 0 2px rgba(14, 165, 164, 0.1);
+}
+
+.pivot-dag-output-mode.is-active {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.pivot-dag-output-contract {
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pivot-dag-output-contract .btn-secondary {
+    min-height: 26px;
+    padding: 3px 9px;
+    font-size: 0.68rem;
+}
+
+.pivot-dag-output-presentation {
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pivot-dag-output-presentation-modes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.pivot-dag-output-presentation-note {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 0.64rem;
+    line-height: 1.35;
+}
+
+.pivot-dag-schema-builder-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.pivot-dag-schema-builder-head,
+.pivot-dag-schema-preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pivot-dag-schema-builder-head > span,
+.pivot-dag-schema-preview-head > span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pivot-dag-schema-builder-head strong,
+.pivot-dag-schema-preview-head strong {
+    color: #0f172a;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-schema-builder-head em,
+.pivot-dag-schema-preview-head span {
+    color: #64748b;
+    font-size: 0.66rem;
+    font-style: normal;
+}
+
+.pivot-dag-schema-root-type,
+.pivot-dag-schema-item-type {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 260px;
+}
+
+.pivot-dag-schema-root-type span,
+.pivot-dag-schema-item-type span {
+    color: #475569;
+    font-size: 0.68rem;
+    white-space: nowrap;
+}
+
+.pivot-dag-schema-root-type select,
+.pivot-dag-schema-item-type select {
+    min-height: 30px;
+}
+
+.pivot-dag-schema-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pivot-dag-schema-field-block {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.pivot-dag-schema-fields.is-nested {
+    margin: 0 0 0 14px;
+    padding-left: 9px;
+    border-left: 2px solid rgba(14, 165, 164, 0.2);
+}
+
+.pivot-dag-schema-field {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) 92px minmax(120px, 1.2fr) auto auto;
+    align-items: center;
+    gap: 6px;
+    padding: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 7px;
+    background: #f8fafc;
+}
+
+.pivot-dag-schema-field .form-input {
+    min-width: 0;
+    min-height: 28px;
+    padding: 4px 7px;
+    font-size: 0.68rem;
+}
+
+.pivot-dag-schema-required {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: #475569;
+    font-size: 0.64rem;
+    white-space: nowrap;
+}
+
+.pivot-dag-schema-field .btn-danger-outline {
+    min-height: 26px;
+    padding: 3px 7px;
+    font-size: 0.64rem;
+}
+
+.pivot-dag-schema-empty {
+    padding: 10px;
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    color: #64748b;
+    font-size: 0.68rem;
+    text-align: center;
+}
+
+.pivot-dag-schema-add-nested {
+    align-self: flex-start;
+    min-height: 26px;
+    padding: 3px 8px;
+    font-size: 0.64rem;
+}
+
+.pivot-dag-schema-preview {
+    max-height: 160px;
+    margin: 0;
+    padding: 9px;
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 7px;
+    background: #0f172a;
+    color: #d1fae5;
+    font-size: 0.68rem;
+    line-height: 1.45;
+}
+
+.pivot-dag-schema-preview-head .is-valid { color: #047857; }
+.pivot-dag-schema-preview-head .is-error { color: #b91c1c; }
+
+.pivot-dag-schema-raw {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pivot-dag-schema-raw summary {
+    color: #475569;
+    cursor: pointer;
+    font-size: 0.68rem;
+}
+
+.pivot-dag-schema-raw textarea {
+    min-height: 130px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.68rem;
+}
+
+.pivot-dag-schema-raw .btn-secondary {
+    align-self: flex-start;
+    min-height: 26px;
+    padding: 3px 8px;
+    font-size: 0.66rem;
+}
+
 .pivot-dag-contract-panel-head,
 .pivot-dag-contract-presets {
     display: flex;
@@ -461,7 +745,27 @@
     line-height: 1.5;
 }
 
+.pivot-dag-contract-editor-body .pivot-dag-schema-raw textarea {
+    min-height: 130px;
+}
+
 @media (max-width: 720px) {
+    .pivot-dag-output-modes {
+        grid-template-columns: 1fr;
+    }
+
+    .pivot-dag-output-presentation-modes {
+        grid-template-columns: 1fr;
+    }
+
+    .pivot-dag-schema-field {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .pivot-dag-schema-field [data-pivot-schema-description] {
+        grid-column: 1 / -1;
+    }
+
     .pivot-dag-contract-editor-body,
     .pivot-dag-contract-grid {
         grid-template-columns: 1fr;

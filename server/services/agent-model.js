@@ -50,18 +50,22 @@ async function callModelJson(modelCfg, messages, options = {}) {
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
         const maxTokens = resolveAgentMaxTokens(modelCfg, options);
+        const data = {
+            model: modelCfg.model_name || modelCfg.name,
+            messages,
+            stream: false,
+            temperature,
+            max_tokens: maxTokens
+        };
+        if (options.responseFormat && typeof options.responseFormat === 'object') {
+            data.response_format = options.responseFormat;
+        }
         const response = await forwardChatCompletion({
             modelCfg,
             user: options.user || null,
             url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
-            data: {
-                model: modelCfg.model_name || modelCfg.name,
-                messages,
-                stream: false,
-                temperature,
-                max_tokens: maxTokens
-            },
+            data,
             timeout: 180000
         });
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';

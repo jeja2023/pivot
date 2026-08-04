@@ -200,7 +200,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         deps.assertRunNotCancelled(run.id);
         try {
             const output = await deps.withTimeout(
-                executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, ...executionContext }),
+                executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext }),
                 Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
                 `执行 DAG 节点：${node.title || node.id}`
             );
@@ -303,7 +303,13 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
     const outputs = {};
     dagSpec.nodes.filter(node => node.tool === 'workflow.output').forEach(node => {
         const value = states.get(node.id)?.output;
-        if (value?.name) outputs[value.name] = value.value;
+        if (value?.name) {
+            outputs[value.name] = value.presentation === 'table'
+                ? { value: value.value, format: value.format, presentation: value.presentation, table: value.table, text: value.text }
+                : value.presentation === 'file'
+                    ? { value: value.value, format: value.format, presentation: value.presentation, file: value.file, text: value.text }
+                    : value.value;
+        }
     });
     const fallback = buildDagFallbackFinalAnswer(dagSpec, states);
     const outputNames = Object.keys(outputs);

@@ -15,6 +15,7 @@ const {
     startAgentTraceSpan
 } = require('../server/services/agent-traces');
 const { normalizeDagSpec } = require('../server/services/agent-validators');
+const { resolveDagTemplateReference } = require('../server/services/agent-dag-utils');
 const {
     buildAgentResumeContext,
     listAgentCheckpointsForUser,
@@ -29,7 +30,7 @@ const {
     startAgentEvaluation,
     updateAgentEvalSuite
 } = require('../server/services/agent-evaluations');
-const { executeAgentHandoff, getBuiltInToolDefinitions } = require('../server/services/agent-tools');
+const { executeAgentHandoff, executeBuiltInTool, getBuiltInToolDefinitions } = require('../server/services/agent-tools');
 const { listRuns } = require('../server/services/agent-runs');
 
 test('DAG 规范化保留节点输入输出契约', () => {
@@ -265,4 +266,38 @@ test('多智能体工具提供隔离委派契约与结构化 Handoff', () => {
     assert.equal(output.toAgent, 'Supervisor');
     assert.equal(output.findings[0], '结论 A');
     assert.equal(output.confidence, 0.8);
+});
+
+test('工作流输出提供轻量的交付格式选项', () => {
+    const tools = getBuiltInToolDefinitions({ id: 1, role: 'user' });
+    const output = tools.find(tool => tool.name === 'workflow.output');
+    assert.ok(output);
+    assert.deepEqual(output.input_schema.properties.format.enum, ['markdown', 'text', 'json']);
+    assert.deepEqual(output.input_schema.properties.presentation.enum, ['default', 'table', 'file']);
+});
+
+test('工作流输出支持表格数据和文件引用交付', async () => {
+    const table = await executeBuiltInTool('workflow.output', {
+        name: 'rows',
+        value: [{ customer: '甲', total: 2 }, { customer: '乙', total: 3 }],
+        presentation: 'table'
+    }, { id: 1 });
+    assert.equal(table.presentation, 'table');
+    assert.deepEqual(table.table.columns, ['customer', 'total']);
+    assert.equal(table.table.rowCount, 2);
+
+    const file = await executeBuiltInTool('workflow.output', {
+        name: 'download',
+        value: { id: 'file-1', name: '结果.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        presentation: 'file'
+    }, { id: 1 });
+    assert.equal(file.presentation, 'file');
+    assert.equal(file.file.id, 'file-1');
+    await assert.rejects(() => executeBuiltInTool('workflow.output', { name: 'bad', value: 'not-a-file', presentation: 'file' }, { id: 1 }), /文件产物需要提供文件引用对象/);
+});
+
+test('下游字段引用可以读取大模型 JSON 内容的嵌套路径', () => {
+    const states = new Map([['extract', { output: { content: '{"customer":{"name":"甲"}}' } }]]);
+    const nodeMap = new Map([['extract', { id: 'extract', title: '抽取' }]]);
+    assert.equal(resolveDagTemplateReference('nodes.extract.output.customer.name', { states, nodeMap }), '甲');
 });

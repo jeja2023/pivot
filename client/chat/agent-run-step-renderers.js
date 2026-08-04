@@ -153,6 +153,10 @@ const AGENT_RESULT_FIELD_LABELS = {
     columnDefault: '默认值',
     column_default: '默认值',
     responseFormat: '返回格式',
+    format: '输出格式',
+    presentation: '交付方式',
+    fileRef: '文件引用',
+    file: '文件产物',
     temperature: '生成随机性',
     maxTokens: '最大输出量',
     finishReason: '结束原因',
@@ -291,6 +295,37 @@ function agentResultTableMarkup(rows, options = {}) {
     `;
 }
 
+function agentWorkflowTableMarkup(table = {}) {
+    const rows = Array.isArray(table.rows) ? table.rows : [];
+    const columns = Array.isArray(table.columns) && table.columns.length ? table.columns : agentResultArrayColumns(rows);
+    if (!columns.length) return '<div class="agent-result-empty">暂无表格数据</div>';
+    return `
+        <div class="agent-result-table-wrap agent-workflow-output-table">
+            ${table.title ? `<div class="agent-result-table-title">${agentEscape(table.title)}</div>` : ''}
+            <table class="agent-result-table">
+                <thead><tr>${columns.map(column => `<th>${agentEscape(agentResultFieldLabel(column))}</th>`).join('')}</tr></thead>
+                <tbody>${rows.slice(0, 20).map(row => `<tr>${columns.map(column => `<td>${agentEscape(agentResultDisplayValue(column, agentParsePayload(row?.[column])))}</td>`).join('')}</tr>`).join('')}</tbody>
+            </table>
+            ${Number(table.rowCount || rows.length) > rows.slice(0, 20).length ? `<div class="agent-result-note">已展示前 20 行，共 ${Number(table.rowCount || rows.length)} 行。</div>` : ''}
+        </div>
+    `;
+}
+
+function agentWorkflowFileMarkup(file = {}) {
+    const href = String(file.downloadUrl || file.url || '').trim();
+    const safeHref = /^(?:https?:\/\/|\/(?!\/))/i.test(href) ? href : '';
+    return `
+        <div class="agent-workflow-output-file">
+            <div class="agent-workflow-output-file-icon">文件</div>
+            <div class="agent-workflow-output-file-main">
+                <strong>${agentEscape(file.name || file.fileId || file.id || '文件产物')}</strong>
+                <span>${agentEscape(file.mimeType || '文件引用')}${file.size ? ` · ${agentEscape(String(file.size))} 字节` : ''}</span>
+            </div>
+            ${safeHref ? `<a class="btn-secondary" href="${agentEscapeAttr(safeHref)}" target="_blank" rel="noopener noreferrer">打开</a>` : '<span class="agent-result-note">已保留引用</span>'}
+        </div>
+    `;
+}
+
 function agentResultArrayMarkup(items, options = {}, depth = 0) {
     if (!items.length) return '<div class="agent-result-empty">暂无数据</div>';
     const table = agentResultTableMarkup(items, options);
@@ -316,6 +351,8 @@ function agentResultPrimaryText(payload) {
 
 function agentResultObjectMarkup(payload, options = {}, depth = 0) {
     if (isAgentPivotChartSpec(payload)) return renderAgentPivotChartBlock(payload);
+    if (payload.presentation === 'table' && payload.table) return agentWorkflowTableMarkup(payload.table);
+    if (payload.presentation === 'file' && payload.file) return agentWorkflowFileMarkup(payload.file);
     const type = String(payload.type || '').trim();
     const markdown = String(payload.markdown || '').trim();
     if (markdown && ['pivot_table', 'pivot_report', 'format_markdown_table'].includes(type)) {

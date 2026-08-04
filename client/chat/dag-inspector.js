@@ -51,6 +51,71 @@ function createDagInspectorController(ctx) {
         const label = types.map(type => typeLabels[type] || type).join(' / ') || '任意类型';
         return { configured: true, text: `${label}${fieldCount ? ` · ${fieldCount} 个字段` : ''}${requiredCount ? ` · ${requiredCount} 项必填` : ''}` };
     };
+    const renderOutputPanel = (node) => {
+        const toolName = String(node?.tool || '');
+        const isLlm = toolName === 'agent.llm';
+        const isWorkflowOutput = toolName === 'workflow.output';
+        if (!isLlm && !isWorkflowOutput) return '';
+        const input = node.input && typeof node.input === 'object' ? node.input : {};
+        const format = isLlm
+            ? (['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
+                ? String(input.responseFormat || input.response_format || 'markdown')
+                : 'markdown')
+            : (['markdown', 'text', 'json'].includes(String(input.format || 'markdown'))
+                ? String(input.format || 'markdown')
+                : 'markdown');
+        const options = isLlm
+            ? [
+                { value: 'markdown', label: '格式化文本', hint: '适合报告和说明' },
+                { value: 'text', label: '纯文本', hint: '适合继续拼接' },
+                { value: 'json', label: '结构化数据', hint: '适合字段引用' }
+            ]
+            : [
+                { value: 'markdown', label: '格式化文本', hint: '适合报告和说明' },
+                { value: 'text', label: '纯文本', hint: '适合继续拼接' },
+                { value: 'json', label: '结构化数据', hint: '适合接口消费' }
+            ];
+        const presentation = isWorkflowOutput && ['default', 'table', 'file'].includes(String(input.presentation || 'default'))
+            ? String(input.presentation || 'default')
+            : 'default';
+        const contract = schemaSummary(node.outputSchema || {});
+        return `
+            <section class="pivot-dag-output-panel">
+                <div class="pivot-dag-output-panel-head">
+                    <div>
+                        <strong>输出模式</strong>
+                        <span>${isLlm ? '选择下游节点最容易消费的形式' : '选择调用方接收最终结果的形式'}</span>
+                    </div>
+                    <span class="pivot-dag-output-current">${dagEscapeHtml(options.find(option => option.value === format)?.label || '格式化文本')}</span>
+                </div>
+                <div class="pivot-dag-output-modes" role="group" aria-label="输出模式">
+                    ${options.map(option => `
+                        <button type="button" class="pivot-dag-output-mode ${option.value === format ? 'is-active' : ''}" data-pivot-dag-output-format="${option.value}" aria-pressed="${option.value === format ? 'true' : 'false'}">
+                            <strong>${option.label}</strong><span>${option.hint}</span>
+                        </button>
+                    `).join('')}
+                </div>
+                ${isWorkflowOutput ? `<div class="pivot-dag-output-presentation">
+                    <div class="pivot-dag-output-contract"><div><span>增强交付</span><strong>${presentation === 'table' ? '表格' : presentation === 'file' ? '文件产物' : '默认结果'}</strong></div></div>
+                    <div class="pivot-dag-output-presentation-modes" role="group" aria-label="增强交付">
+                        ${[
+                            { value: 'default', label: '默认结果', hint: '保留原始 JSON' },
+                            { value: 'table', label: '表格', hint: '按行列展示' },
+                            { value: 'file', label: '文件产物', hint: '保留文件引用' }
+                        ].map(option => `<button type="button" class="pivot-dag-output-mode ${option.value === presentation ? 'is-active' : ''}" data-pivot-dag-output-presentation="${option.value}" aria-pressed="${option.value === presentation ? 'true' : 'false'}"><strong>${option.label}</strong><span>${option.hint}</span></button>`).join('')}
+                    </div>
+                    <div class="pivot-dag-output-presentation-note">${presentation === 'table' ? '上游值可为数组，或包含 rows / data / items 的对象。' : presentation === 'file' ? '上游值需包含文件 id、URL、路径或存储键。' : '可继续使用 markdown、纯文本或结构化数据格式。'}</div>
+                </div>` : ''}
+                ${isLlm ? `<div class="pivot-dag-output-contract ${format === 'json' ? 'is-json' : ''}">
+                    <div>
+                        <span>输出契约</span>
+                        <strong>${format === 'json' ? dagEscapeHtml(contract.configured ? contract.text : '未设置（可选）') : '文本'}</strong>
+                    </div>
+                    ${format === 'json' ? '<button type="button" class="btn-secondary" data-pivot-dag-edit-contract-short="1">设置字段</button>' : ''}
+                </div>` : ''}
+            </section>
+        `;
+    };
     const effectiveInputSchema = (node, tool) => {
         const explicit = node?.inputSchema && typeof node.inputSchema === 'object' ? node.inputSchema : {};
         return Object.keys(explicit).length ? explicit : getToolSchema(tool);
@@ -180,6 +245,58 @@ function createDagInspectorController(ctx) {
         const node = ctx.spec.nodes.find(n => n.id === nodeId);
         if (!node) return;
         const tool = resolveToolForNode(currentTools(), node.tool);
+        const schemaTypes = ['string', 'number', 'integer', 'boolean', 'object', 'array'];
+        const cloneSchema = value => {
+            try { return JSON.parse(JSON.stringify(value || {})); } catch (e) { return {}; }
+        };
+        const normalizeVisualSchema = value => {
+            const schema = value && typeof value === 'object' && !Array.isArray(value) ? cloneSchema(value) : {};
+            const type = schemaTypes.includes(schema.type) ? schema.type : 'object';
+            if (type === 'object') {
+                schema.type = 'object';
+                schema.properties = schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) ? schema.properties : {};
+                schema.required = Array.isArray(schema.required) ? schema.required.filter(key => Object.hasOwn(schema.properties, key)) : [];
+                schema.additionalProperties = false;
+            } else if (type === 'array') {
+                schema.type = 'array';
+                schema.items = schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items) ? schema.items : { type: 'string' };
+            } else {
+                schema.type = type;
+                delete schema.properties;
+                delete schema.required;
+                delete schema.additionalProperties;
+            }
+            return schema;
+        };
+        const sampleForSchema = schema => {
+            const type = schema?.type;
+            if (type === 'object') return Object.fromEntries(Object.entries(schema.properties || {}).map(([key, child]) => [key, sampleForSchema(child)]));
+            if (type === 'array') return [sampleForSchema(schema.items || { type: 'string' })];
+            if (type === 'number' || type === 'integer') return 0;
+            if (type === 'boolean') return false;
+            return '示例文本';
+        };
+        const validateSample = (value, schema, path = '示例') => {
+            const issues = [];
+            const type = schema?.type;
+            if (type === 'object') {
+                if (!value || typeof value !== 'object' || Array.isArray(value)) issues.push(`${path} 应为对象`);
+                (schema.required || []).forEach(key => {
+                    if (!Object.hasOwn(value || {}, key)) issues.push(`${path}.${key} 缺少必填字段`);
+                });
+                Object.entries(schema.properties || {}).forEach(([key, child]) => {
+                    if (Object.hasOwn(value || {}, key)) issues.push(...validateSample(value[key], child, `${path}.${key}`));
+                });
+            } else if (type === 'array') {
+                if (!Array.isArray(value)) issues.push(`${path} 应为数组`);
+                else value.slice(0, 10).forEach((item, index) => issues.push(...validateSample(item, schema.items || {}, `${path}[${index}]`)));
+            } else if (type === 'number' && typeof value !== 'number') issues.push(`${path} 应为数值`);
+            else if (type === 'integer' && (!Number.isInteger(value))) issues.push(`${path} 应为整数`);
+            else if (type === 'boolean' && typeof value !== 'boolean') issues.push(`${path} 应为布尔值`);
+            else if (type === 'string' && typeof value !== 'string') issues.push(`${path} 应为文本`);
+            return issues;
+        };
+        let outputSchema = normalizeVisualSchema(node.outputSchema || {});
         let modal = document.getElementById('pivot-dag-contract-editor');
         if (!modal) {
             modal = document.createElement('div');
@@ -201,10 +318,20 @@ function createDagInspectorController(ctx) {
                         <span><strong>输入契约</strong><em>留空时自动使用工具参数契约</em></span>
                         <textarea class="form-input" data-pivot-contract-input spellcheck="false">${dagEscapeHtml(JSON.stringify(node.inputSchema || {}, null, 2))}</textarea>
                     </label>
-                    <label>
-                        <span><strong>输出契约</strong><em>用于校验节点业务输出并向下游提供字段约束</em></span>
-                        <textarea class="form-input" data-pivot-contract-output spellcheck="false">${dagEscapeHtml(JSON.stringify(node.outputSchema || {}, null, 2))}</textarea>
-                    </label>
+                    <div class="pivot-dag-schema-builder-wrap">
+                        <div class="pivot-dag-schema-builder-head">
+                            <span><strong>输出契约</strong><em>用字段和类型定义 JSON 输出，运行时会自动校验</em></span>
+                            <button type="button" class="btn-secondary" data-pivot-schema-add-field="1">添加字段</button>
+                        </div>
+                        <div class="pivot-dag-schema-builder" data-pivot-schema-builder></div>
+                        <div class="pivot-dag-schema-preview-head"><strong>输出预览</strong><span data-pivot-schema-validation></span></div>
+                        <pre class="pivot-dag-schema-preview" data-pivot-schema-preview></pre>
+                        <details class="pivot-dag-schema-raw">
+                            <summary>高级 JSON Schema</summary>
+                            <textarea class="form-input" data-pivot-contract-output spellcheck="false"></textarea>
+                            <button type="button" class="btn-secondary" data-pivot-schema-import="1">从 JSON 同步</button>
+                        </details>
+                    </div>
                 </div>
                 <div class="pivot-dag-json-error" data-pivot-contract-error></div>
                 <div class="agent-workflow-create-actions pivot-dag-json-actions">
@@ -217,16 +344,148 @@ function createDagInspectorController(ctx) {
         const inputEl = modal.querySelector('[data-pivot-contract-input]');
         const outputEl = modal.querySelector('[data-pivot-contract-output]');
         const errorEl = modal.querySelector('[data-pivot-contract-error]');
+        const builderEl = modal.querySelector('[data-pivot-schema-builder]');
+        const previewEl = modal.querySelector('[data-pivot-schema-preview]');
+        const validationEl = modal.querySelector('[data-pivot-schema-validation]');
+        const syncOutputRaw = () => { outputEl.value = JSON.stringify(outputSchema, null, 2); };
+        const schemaNodeAtPath = path => (Array.isArray(path) ? path : []).reduce((current, part) => {
+            if (!current || typeof current !== 'object') return {};
+            if (part === '@items') return current.items && typeof current.items === 'object' ? current.items : {};
+            return current.properties && current.properties[part] && typeof current.properties[part] === 'object'
+                ? current.properties[part]
+                : {};
+        }, outputSchema);
+        const parseSchemaPath = value => {
+            try {
+                const path = JSON.parse(value || '[]');
+                return Array.isArray(path) ? path : [];
+            } catch (e) {
+                return [];
+            }
+        };
+        const renderObjectFields = (schema, path = []) => {
+            const props = schema.properties || {};
+            return `<div class="pivot-dag-schema-fields ${path.length ? 'is-nested' : ''}">
+                ${Object.entries(props).map(([name, child]) => {
+                    const propertyPath = [...path, name];
+                    const childObject = child?.type === 'object' || child?.properties;
+                    const childArrayObject = child?.type === 'array' && child?.items?.type === 'object';
+                    return `<div class="pivot-dag-schema-field-block">
+                        <div class="pivot-dag-schema-field" data-pivot-schema-path="${dagEscapeAttr(JSON.stringify(propertyPath))}">
+                            <input class="form-input" data-pivot-schema-name value="${dagEscapeAttr(name)}" placeholder="字段名">
+                            <select class="form-input" data-pivot-schema-type>${schemaTypes.map(item => `<option value="${item}" ${item === child.type ? 'selected' : ''}>${item === 'object' ? '对象' : item === 'array' ? '列表' : item === 'string' ? '文本' : item === 'boolean' ? '布尔值' : item === 'integer' ? '整数' : '数值'}</option>`).join('')}</select>
+                            <input class="form-input" data-pivot-schema-description value="${dagEscapeAttr(child.description || '')}" placeholder="字段说明">
+                            <label class="pivot-dag-schema-required"><input type="checkbox" data-pivot-schema-required ${schema.required?.includes(name) ? 'checked' : ''}>必填</label>
+                            <button type="button" class="btn-danger-outline" data-pivot-schema-remove="1" title="删除字段">删除</button>
+                        </div>
+                        ${childObject ? renderObjectFields(child, propertyPath) : ''}
+                        ${childArrayObject ? renderObjectFields(child.items, [...propertyPath, '@items']) : ''}
+                    </div>`;
+                }).join('') || `<div class="pivot-dag-schema-empty">${path.length ? '还没有子字段。' : '还没有字段，点击“添加字段”开始定义输出。'}</div>`}
+                ${path.length ? `<button type="button" class="btn-secondary pivot-dag-schema-add-nested" data-pivot-schema-add-nested="${dagEscapeAttr(JSON.stringify(path))}">添加子字段</button>` : ''}
+            </div>`;
+        };
+        const renderSchemaBuilder = () => {
+            const type = outputSchema.type;
+            PivotSafeHtml.setHtml(builderEl, `
+                <label class="pivot-dag-schema-root-type"><span>根类型</span>
+                    <select data-pivot-schema-root-type>${schemaTypes.map(item => `<option value="${item}" ${item === type ? 'selected' : ''}>${item === 'object' ? '对象' : item === 'array' ? '列表' : item === 'string' ? '文本' : item === 'boolean' ? '布尔值' : item === 'integer' ? '整数' : '数值'}</option>`).join('')}</select>
+                </label>
+                ${type === 'object' ? renderObjectFields(outputSchema) : type === 'array' ? `<label class="pivot-dag-schema-item-type"><span>列表项类型</span><select data-pivot-schema-item-type>${schemaTypes.map(item => `<option value="${item}" ${item === outputSchema.items?.type ? 'selected' : ''}>${item}</option>`).join('')}</select></label>${outputSchema.items?.type === 'object' ? renderObjectFields(outputSchema.items, ['@items']) : ''}` : '<div class="pivot-dag-schema-empty">基础类型不需要额外字段。</div>'}
+            `);
+            syncOutputRaw();
+            const sample = sampleForSchema(outputSchema);
+            previewEl.textContent = JSON.stringify(sample, null, 2);
+            const issues = validateSample(sample, outputSchema);
+            validationEl.textContent = issues.length ? issues.join('；') : '示例校验通过';
+            validationEl.className = issues.length ? 'is-error' : 'is-valid';
+            builderEl.querySelector('[data-pivot-schema-root-type]')?.addEventListener('change', event => {
+                outputSchema = normalizeVisualSchema({ type: event.target.value });
+                renderSchemaBuilder();
+            });
+            builderEl.querySelector('[data-pivot-schema-item-type]')?.addEventListener('change', event => {
+                outputSchema.items = { ...(outputSchema.items || {}), type: event.target.value };
+                renderSchemaBuilder();
+            });
+            builderEl.querySelectorAll('[data-pivot-schema-path]').forEach(row => {
+                const fieldPath = parseSchemaPath(row.dataset.pivotSchemaPath);
+                const originalName = fieldPath[fieldPath.length - 1] || '';
+                const parent = schemaNodeAtPath(fieldPath.slice(0, -1));
+                row.querySelector('[data-pivot-schema-name]')?.addEventListener('change', event => {
+                    const nextName = String(event.target.value || '').trim();
+                    if (!nextName || nextName === originalName || Object.hasOwn(parent.properties || {}, nextName)) {
+                        event.target.value = originalName;
+                        return;
+                    }
+                    parent.properties[nextName] = parent.properties[originalName] || { type: 'string' };
+                    delete parent.properties[originalName];
+                    parent.required = (parent.required || []).map(key => key === originalName ? nextName : key);
+                    renderSchemaBuilder();
+                });
+                row.querySelector('[data-pivot-schema-type]')?.addEventListener('change', event => {
+                    const previous = parent.properties[originalName] || {};
+                    const type = event.target.value;
+                    parent.properties[originalName] = type === 'object'
+                        ? { ...previous, type, properties: previous.properties || {}, required: previous.required || [], additionalProperties: false }
+                        : type === 'array'
+                            ? { ...previous, type, items: previous.items || { type: 'string' } }
+                            : { ...previous, type };
+                    renderSchemaBuilder();
+                });
+                row.querySelector('[data-pivot-schema-description]')?.addEventListener('change', event => {
+                    const schema = parent.properties[originalName] || { type: 'string' };
+                    schema.description = String(event.target.value || '').trim();
+                    if (!schema.description) delete schema.description;
+                    parent.properties[originalName] = schema;
+                    syncOutputRaw();
+                });
+                row.querySelector('[data-pivot-schema-required]')?.addEventListener('change', event => {
+                    const required = new Set(parent.required || []);
+                    if (event.target.checked) required.add(originalName); else required.delete(originalName);
+                    parent.required = [...required];
+                    renderSchemaBuilder();
+                });
+                row.querySelector('[data-pivot-schema-remove]')?.addEventListener('click', () => {
+                    delete parent.properties[originalName];
+                    parent.required = (parent.required || []).filter(key => key !== originalName);
+                    renderSchemaBuilder();
+                });
+            });
+            builderEl.querySelectorAll('[data-pivot-schema-add-nested]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const path = parseSchemaPath(button.dataset.pivotSchemaAddNested);
+                    const parent = schemaNodeAtPath(path);
+                    parent.type = 'object';
+                    parent.properties = parent.properties || {};
+                    parent.required = parent.required || [];
+                    let name = 'field';
+                    let index = 1;
+                    while (Object.hasOwn(parent.properties, name)) name = `field_${index++}`;
+                    parent.properties[name] = { type: 'string' };
+                    renderSchemaBuilder();
+                });
+            });
+        };
+        const inputSchemaValue = () => {
+            try {
+                const value = JSON.parse(inputEl.value || '{}');
+                if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('输入契约必须是结构化对象。');
+                return value;
+            } catch (e) {
+                inputEl.classList.add('is-invalid');
+                throw e;
+            }
+        };
+        syncOutputRaw();
+        renderSchemaBuilder();
         const parseSchemas = () => {
             try {
-                const inputSchema = JSON.parse(inputEl.value || '{}');
-                const outputSchema = JSON.parse(outputEl.value || '{}');
-                if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) throw new Error('输入契约必须是结构化对象。');
+                const inputSchema = inputSchemaValue();
                 if (!outputSchema || typeof outputSchema !== 'object' || Array.isArray(outputSchema)) throw new Error('输出契约必须是结构化对象。');
                 inputEl.classList.remove('is-invalid');
                 outputEl.classList.remove('is-invalid');
                 errorEl.textContent = '';
-                return { inputSchema, outputSchema };
+                return { inputSchema, outputSchema: cloneSchema(outputSchema) };
             } catch (e) {
                 errorEl.textContent = e.message || '契约格式不正确。';
                 return null;
@@ -236,6 +495,25 @@ function createDagInspectorController(ctx) {
         modal.querySelector('[data-pivot-contract-close]')?.addEventListener('click', close);
         modal.querySelector('[data-pivot-contract-sync]')?.addEventListener('click', () => {
             inputEl.value = JSON.stringify(getToolSchema(tool), null, 2);
+        });
+        modal.querySelector('[data-pivot-schema-add-field]')?.addEventListener('click', () => {
+            if (outputSchema.type !== 'object') outputSchema = normalizeVisualSchema({ type: 'object' });
+            const base = 'field';
+            let name = base;
+            let index = 1;
+            while (Object.hasOwn(outputSchema.properties, name)) name = `${base}_${index++}`;
+            outputSchema.properties[name] = { type: 'string', description: '' };
+            renderSchemaBuilder();
+            builderEl.querySelector('[data-pivot-schema-name]')?.focus();
+        });
+        modal.querySelector('[data-pivot-schema-import]')?.addEventListener('click', () => {
+            try {
+                outputSchema = normalizeVisualSchema(JSON.parse(outputEl.value || '{}'));
+                renderSchemaBuilder();
+                errorEl.textContent = '';
+            } catch (e) {
+                errorEl.textContent = e.message || 'JSON Schema 格式不正确。';
+            }
         });
         modal.querySelector('[data-pivot-contract-format]')?.addEventListener('click', () => {
             const schemas = parseSchemas();
@@ -431,6 +709,7 @@ function createDagInspectorController(ctx) {
             </div>
             ${renderWhenPanel(node)}
             ${renderSelectedToolMeta(selectedTool)}
+            ${renderOutputPanel(node)}
             <div class="pivot-dag-inspector-row pivot-dag-inspector-row-runtime">
                 <label><span>失败策略</span>
                     <select data-pivot-dag-field="onError">
@@ -494,7 +773,34 @@ function createDagInspectorController(ctx) {
         `);
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
         inspector.querySelector('[data-pivot-dag-open-json]')?.addEventListener('click', () => openNodeJsonEditor(node.id));
-        inspector.querySelector('[data-pivot-dag-edit-contract]')?.addEventListener('click', () => openNodeContractEditor(node.id));
+        inspector.querySelectorAll('[data-pivot-dag-edit-contract], [data-pivot-dag-edit-contract-short]').forEach(button => {
+            button.addEventListener('click', () => openNodeContractEditor(node.id));
+        });
+        inspector.querySelectorAll('[data-pivot-dag-output-format]').forEach(button => {
+            button.addEventListener('click', () => {
+                const format = button.dataset.pivotDagOutputFormat || 'markdown';
+                ctx.recordHistory?.();
+                node.input = node.input && typeof node.input === 'object' ? node.input : {};
+                if (node.tool === 'workflow.output') {
+                    node.input.format = format;
+                } else {
+                    node.input.responseFormat = format;
+                    syncLlmOutputContract(node, node.input);
+                }
+                ctx.render?.();
+                ctx.flushOut?.();
+            });
+        });
+        inspector.querySelectorAll('[data-pivot-dag-output-presentation]').forEach(button => {
+            button.addEventListener('click', () => {
+                const presentation = button.dataset.pivotDagOutputPresentation || 'default';
+                ctx.recordHistory?.();
+                node.input = node.input && typeof node.input === 'object' ? node.input : {};
+                node.input.presentation = presentation;
+                ctx.render?.();
+                ctx.flushOut?.();
+            });
+        });
         bindWhenPanelEvents(node);
         inspector.querySelectorAll('[data-pivot-contract-preset]').forEach(button => {
             button.addEventListener('click', () => {

@@ -9,6 +9,12 @@ const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
 const { safeJsonRequest } = require('./safe-http-client');
+const {
+    normalizeJsonSchema,
+    schemaHasRules,
+    validateJsonSchemaDefinition,
+    validateValueAgainstSchema
+} = require('./agent-dag-contracts');
 const vm = require('vm');
 
 const MAX_TEXT = 12000;
@@ -136,7 +142,11 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({
                 name: { type: 'string', default: 'result' },
                 value: { description: '要作为最终结果返回的值。' },
-                format: { type: 'string', enum: ['auto', 'text', 'json'], default: 'auto' }
+                format: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' },
+                presentation: { type: 'string', enum: ['default', 'table', 'file'], default: 'default', description: '可选的交付增强方式，底层仍返回 JSON 数据或文件引用。' },
+                tableTitle: { type: 'string', description: '表格标题。' },
+                tableColumns: { type: 'array', items: { type: 'string' }, description: '表格列名；留空时从首行自动推断。' },
+                fileRef: { type: 'object', description: '文件引用，可包含 id、name、mimeType、url 或 downloadUrl。' }
             }, ['name', 'value'])
         },
         {
@@ -322,6 +332,75 @@ function chooseAgentLlmModel(input = {}, user, context = {}) {
     return first ? getRunnableModelForUser(first.id, user) : null;
 }
 
+function parseJsonOutputText(value) {
+    if (value && typeof value === 'object') return value;
+    const text = String(value || '').trim();
+    if (!text) return null;
+    const withoutFence = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    try { return JSON.parse(withoutFence); } catch (e) {}
+    const first = withoutFence.indexOf('{');
+    const last = withoutFence.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+        try { return JSON.parse(withoutFence.slice(first, last + 1)); } catch (e) {}
+    }
+    const arrayFirst = withoutFence.indexOf('[');
+    const arrayLast = withoutFence.lastIndexOf(']');
+    if (arrayFirst >= 0 && arrayLast > arrayFirst) {
+        try { return JSON.parse(withoutFence.slice(arrayFirst, arrayLast + 1)); } catch (e) {}
+    }
+    return null;
+}
+
+function structuredOutputName(value) {
+    const raw = String(value || 'workflow_output').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z_]+/, '');
+    return (raw || 'workflow_output').slice(0, 64);
+}
+
+function isNativeStructuredOutputUnsupported(error) {
+    const status = Number(error?.response?.status || error?.status || 0);
+    const payload = error?.response?.data;
+    const text = `${error?.message || ''} ${typeof payload === 'string' ? payload : JSON.stringify(payload || {})}`.toLowerCase();
+    if ([400, 404, 422].includes(status)) return true;
+    return /response_format|json_schema|structured output/.test(text) && /unsupported|unrecognized|unknown|invalid/.test(text);
+}
+
+function outputSchemaForNode(context = {}) {
+    const schema = normalizeJsonSchema(context.node?.outputSchema || context.node?.output_schema || {});
+    return schemaHasRules(schema) ? schema : {};
+}
+
+function validateStructuredOutput(content, schema = {}) {
+    const parsed = parseJsonOutputText(content);
+    if (parsed === null) return { value: null, issues: ['结果不是合法 JSON。'] };
+    const definitionIssues = [];
+    if (schemaHasRules(schema)) validateJsonSchemaDefinition(schema, '输出契约', definitionIssues);
+    if (definitionIssues.length) return { value: parsed, issues: definitionIssues };
+    const issues = schemaHasRules(schema)
+        ? validateValueAgainstSchema(parsed, schema, {}, '输出', [])
+        : [];
+    return { value: parsed, issues };
+}
+
+async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName }) {
+    const responseFormat = schemaHasRules(schema)
+        ? {
+            type: 'json_schema',
+            json_schema: {
+                name: structuredOutputName(schemaName),
+                strict: true,
+                schema
+            }
+        }
+        : null;
+    const content = await callModelText(modelCfg, messages, {
+        user,
+        temperature,
+        maxTokens,
+        ...(responseFormat ? { responseFormat } : {})
+    });
+    return { content, native: Boolean(responseFormat) };
+}
+
 async function executeAgentLlmNode(input = {}, user, context = {}) {
     const prompt = String(input.prompt || input.input || input.text || '').trim();
     if (!prompt) throw new Error('大模型节点需要填写提示词。');
@@ -343,8 +422,54 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
     ];
     const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
     const maxTokens = parsePositiveInt(input.maxTokens ?? input.max_tokens, 1200, 8000);
-    const content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
-    recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+    const outputSchema = outputSchemaForNode(context);
+    let content = '';
+    let nativeStructured = false;
+    if (responseFormat === 'json') {
+        try {
+            const result = await requestStructuredOutput({
+                modelCfg,
+                messages,
+                user,
+                temperature,
+                maxTokens,
+                schema: outputSchema,
+                schemaName: context.node?.id || 'workflow_output'
+            });
+            content = result.content;
+            nativeStructured = result.native;
+        } catch (error) {
+            if (!isNativeStructuredOutputUnsupported(error)) throw error;
+            content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
+        }
+        recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        let validation = validateStructuredOutput(content, outputSchema);
+        if (validation.issues.length) {
+            const repairMessages = [
+                {
+                    role: 'system',
+                    content: `${systemPrompt}\n请修复下面的模型结果，只输出合法 JSON，不要输出解释、Markdown 代码块或额外文字。${schemaHasRules(outputSchema) ? `\n输出必须符合以下 JSON Schema：\n${JSON.stringify(outputSchema)}` : ''}`
+                },
+                {
+                    role: 'user',
+                    content: `原始结果：\n${String(content || '').slice(0, 16000)}\n\n校验问题：\n${validation.issues.join('\n')}`
+                }
+            ];
+            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens });
+            recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '');
+            content = repaired;
+            validation = validateStructuredOutput(content, outputSchema);
+            if (validation.issues.length) {
+                const error = new Error(`大模型结构化输出校验失败：${validation.issues[0]}`);
+                error.code = 'AGENT_JSON_OUTPUT_INVALID';
+                error.contractIssues = validation.issues;
+                throw error;
+            }
+        }
+    } else {
+        content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
+        recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+    }
     return {
         content,
         text: content,
@@ -354,6 +479,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             model_name: modelCfg.model_name
         },
         responseFormat,
+        structuredOutput: responseFormat === 'json' ? { native: nativeStructured, schema: outputSchema } : undefined,
         temperature,
         maxTokens
     };
@@ -623,7 +749,51 @@ function executeWorkflowInput(input = {}, context = {}) {
 function executeWorkflowOutput(input = {}) {
     const name = String(input.name || 'result').trim() || 'result';
     const value = input.value;
-    return { name, value, format: String(input.format || 'auto'), text: renderWorkflowValue(value) };
+    const format = ['markdown', 'text', 'json'].includes(String(input.format || 'markdown'))
+        ? String(input.format || 'markdown')
+        : 'markdown';
+    const presentation = ['default', 'table', 'file'].includes(String(input.presentation || 'default'))
+        ? String(input.presentation || 'default')
+        : 'default';
+    const result = { name, value, format, presentation, text: renderWorkflowValue(value) };
+    if (presentation === 'table') {
+        const rows = Array.isArray(value)
+            ? value
+            : (value && typeof value === 'object'
+                ? (Array.isArray(value.rows) ? value.rows : (Array.isArray(value.data) ? value.data : (Array.isArray(value.items) ? value.items : [])))
+                : []);
+        const normalizedRows = rows.filter(row => row && typeof row === 'object' && !Array.isArray(row)).slice(0, 500);
+        const explicitColumns = Array.isArray(input.tableColumns)
+            ? input.tableColumns.map(column => String(column || '').trim()).filter(Boolean).slice(0, 50)
+            : [];
+        const columns = explicitColumns.length
+            ? explicitColumns
+            : [...new Set(normalizedRows.flatMap(row => Object.keys(row)))].slice(0, 50);
+        result.table = {
+            title: String(input.tableTitle || '').trim() || '工作流结果',
+            columns,
+            rows: normalizedRows,
+            rowCount: normalizedRows.length,
+            truncated: rows.length > normalizedRows.length
+        };
+        result.text = result.table.title + (normalizedRows.length ? `（${normalizedRows.length} 行）` : '（暂无数据）');
+    }
+    if (presentation === 'file') {
+        const source = input.fileRef && typeof input.fileRef === 'object' ? input.fileRef : value;
+        if (!source || typeof source !== 'object' || Array.isArray(source)) {
+            throw new Error('文件产物需要提供文件引用对象。');
+        }
+        const file = {};
+        ['id', 'fileId', 'name', 'mimeType', 'size', 'url', 'downloadUrl', 'path', 'storageKey'].forEach(key => {
+            if (source[key] !== undefined && source[key] !== null && source[key] !== '') file[key] = source[key];
+        });
+        if (!Object.keys(file).some(key => ['id', 'fileId', 'url', 'downloadUrl', 'path', 'storageKey'].includes(key))) {
+            throw new Error('文件引用至少需要 id、url、downloadUrl、path 或 storageKey。');
+        }
+        result.file = file;
+        result.text = `文件产物：${file.name || file.fileId || file.id || '已生成文件'}`;
+    }
+    return result;
 }
 
 function executeWorkflowCondition(input = {}) {
