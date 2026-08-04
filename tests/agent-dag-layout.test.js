@@ -110,6 +110,49 @@ test('visual SQL builder supports OR filters and temporal field controls', () =>
     assert.equal(result.config.filterRelation, 'or');
 });
 
+test('visual SQL builder supports relative filters against the current day', () => {
+    const { buildVisualSqlQuery } = loadQueryBuilder();
+    const sqlite = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filters: [{ field: 'created_at', fieldType: 'datetime', operator: 'afterToday' }]
+    }, 'sqlite');
+    assert.equal(sqlite.issues.length, 0);
+    assert.match(sqlite.sql, /WHERE date\("created_at"\) > date\('now', '\+8 hours'\)/);
+
+    const postgres = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filters: [{ field: 'created_at', fieldType: 'timestamp with time zone', operator: 'beforeToday' }]
+    }, 'postgres');
+    assert.equal(postgres.issues.length, 0);
+    assert.match(postgres.sql, /WHERE CAST\("created_at" AS date\) < CURRENT_DATE/);
+
+    const mysql = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filters: [{ field: 'created_at', fieldType: 'datetime', operator: 'today' }]
+    }, 'mysql');
+    assert.equal(mysql.issues.length, 0);
+    assert.match(mysql.sql, /WHERE DATE\(`created_at`\) = CURRENT_DATE/);
+
+    const sqlserver = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filters: [{ field: 'created_at', fieldType: 'datetime2', operator: 'afterToday' }]
+    }, 'sqlserver');
+    assert.equal(sqlserver.issues.length, 0);
+    assert.match(sqlserver.sql, /WHERE CAST\(\[created_at\] AS date\) > CAST\(GETDATE\(\) AS date\)/);
+
+    const unsupported = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filters: [{ field: 'created_at', fieldType: 'time', operator: 'afterToday' }]
+    }, 'sqlite');
+    assert.equal(unsupported.sql, '');
+    assert.match(unsupported.issues.join(' '), /只有日期或日期时间字段支持/);
+});
+
 test('normalizeDagSpec preserves layout and ignores legacy primary LLM metadata', () => {
     const normalized = normalizeDagSpec({
         primaryLlmNodeId: 'llm_final',

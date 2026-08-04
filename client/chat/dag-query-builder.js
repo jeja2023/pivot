@@ -13,8 +13,13 @@ const VISUAL_SQL_OPERATOR_OPTIONS = [
     ['between', '介于'],
     ['in', '属于列表'],
     ['isNull', '为空'],
-    ['notNull', '不为空']
+    ['notNull', '不为空'],
+    ['today', '当天'],
+    ['beforeToday', '早于当天'],
+    ['afterToday', '晚于当天']
 ];
+
+const VISUAL_SQL_TODAY_OPERATORS = new Set(['today', 'beforeToday', 'afterToday']);
 
 const VISUAL_SQL_AGGREGATION_OPTIONS = [
     ['', '不做汇总'],
@@ -35,7 +40,10 @@ const VISUAL_SQL_TEMPORAL_OPERATOR_LABELS = {
     between: '时间范围',
     in: '属于列表',
     isNull: '为空',
-    notNull: '不为空'
+    notNull: '不为空',
+    today: '当天',
+    beforeToday: '早于当天',
+    afterToday: '晚于当天'
 };
 
 function isVisualSqlQueryTool(tool) {
@@ -125,6 +133,7 @@ function queryBuilderDialect(databaseType = '') {
     const type = queryBuilderString(databaseType).toLowerCase();
     if (type === 'mysql' || type === 'mariadb') return 'mysql';
     if (type === 'sqlserver' || type === 'mssql') return 'sqlserver';
+    if (type === 'postgres' || type === 'postgresql') return 'postgres';
     return 'sqlite';
 }
 
@@ -162,9 +171,34 @@ function queryBuilderField(value, dialect) {
     return queryBuilderQuoteIdentifier(value, dialect);
 }
 
+function queryBuilderCurrentDateSql(dialect = 'sqlite') {
+    if (dialect === 'mysql') return 'CURRENT_DATE';
+    if (dialect === 'sqlserver') return 'CAST(GETDATE() AS date)';
+    if (dialect === 'postgres') return 'CURRENT_DATE';
+    return "date('now', '+8 hours')";
+}
+
+function queryBuilderDatePartSql(field, dialect, temporalKind) {
+    if (temporalKind === 'date') return field;
+    if (dialect === 'mysql') return `DATE(${field})`;
+    if (dialect === 'sqlserver' || dialect === 'postgres') return `CAST(${field} AS date)`;
+    return `date(${field})`;
+}
+
+function queryBuilderTodayFilterSql(filter, dialect, field) {
+    const temporalKind = queryBuilderTemporalKind(filter.fieldType);
+    if (!['date', 'datetime'].includes(temporalKind)) return '';
+    const datePart = queryBuilderDatePartSql(field, dialect, temporalKind);
+    const today = queryBuilderCurrentDateSql(dialect);
+    if (filter.operator === 'beforeToday') return `${datePart} < ${today}`;
+    if (filter.operator === 'afterToday') return `${datePart} > ${today}`;
+    return `${datePart} = ${today}`;
+}
+
 function queryBuilderFilterSql(filter, dialect) {
     const field = queryBuilderField(filter.field, dialect);
     if (!field) return '';
+    if (VISUAL_SQL_TODAY_OPERATORS.has(filter.operator)) return queryBuilderTodayFilterSql(filter, dialect, field);
     const filterValue = queryBuilderTemporalSqlValue(filter.value, filter.fieldType);
     const filterValue2 = queryBuilderTemporalSqlValue(filter.value2, filter.fieldType);
     const value = queryBuilderLiteral(filterValue);
@@ -237,7 +271,12 @@ function buildVisualSqlQuery(config = {}, databaseType = '') {
             issues.push('筛选条件缺少字段。');
             return '';
         }
-        if (!['isNull', 'notNull'].includes(filter.operator) && !filter.value && filter.operator !== 'in') {
+        const temporalKind = queryBuilderTemporalKind(filter.fieldType);
+        if (VISUAL_SQL_TODAY_OPERATORS.has(filter.operator) && !['date', 'datetime'].includes(temporalKind)) {
+            issues.push(`筛选字段 ${filter.field} 只有日期或日期时间字段支持“当天”关系。`);
+            return '';
+        }
+        if (!['isNull', 'notNull', ...VISUAL_SQL_TODAY_OPERATORS].includes(filter.operator) && !filter.value && filter.operator !== 'in') {
             issues.push(`筛选字段 ${filter.field} 缺少条件值。`);
             return '';
         }
@@ -496,16 +535,20 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
             operatorControl?.querySelectorAll('option').forEach(option => {
                 const defaultLabel = VISUAL_SQL_OPERATOR_OPTIONS.find(([value]) => value === option.value)?.[1] || option.textContent;
                 option.textContent = temporalKind ? (VISUAL_SQL_TEMPORAL_OPERATOR_LABELS[option.value] || defaultLabel) : defaultLabel;
-                const unavailable = Boolean(temporalKind && textOnlyOperators.has(option.value));
+                const unavailable = Boolean(
+                    (temporalKind && textOnlyOperators.has(option.value))
+                    || (VISUAL_SQL_TODAY_OPERATORS.has(option.value) && !['date', 'datetime'].includes(temporalKind))
+                );
                 option.disabled = unavailable;
                 option.hidden = unavailable;
             });
             if (temporalKind && textOnlyOperators.has(operatorControl?.value)) operatorControl.value = 'eq';
+            if (VISUAL_SQL_TODAY_OPERATORS.has(operatorControl?.value) && !['date', 'datetime'].includes(temporalKind)) operatorControl.value = 'eq';
             const operator = operatorControl?.value || 'eq';
             const value = row.querySelector('[data-pivot-dag-query-filter-value]');
             const value2 = row.querySelector('[data-pivot-dag-query-filter-value2]');
-            const noValue = operator === 'isNull' || operator === 'notNull';
-            const inputKind = temporalKind && operator !== 'in' ? temporalKind : '';
+            const noValue = operator === 'isNull' || operator === 'notNull' || VISUAL_SQL_TODAY_OPERATORS.has(operator);
+            const inputKind = temporalKind && operator !== 'in' && !VISUAL_SQL_TODAY_OPERATORS.has(operator) ? temporalKind : '';
             const inputType = inputKind === 'datetime' ? 'datetime-local' : (inputKind || 'text');
             [value, value2].forEach(input => {
                 if (!input) return;
@@ -523,7 +566,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
             if (hint) {
                 const label = temporalKind === 'date' ? '日期' : temporalKind === 'time' ? '时间' : '日期时间';
                 hint.textContent = temporalKind
-                    ? `${label}字段${fieldType ? ` · ${fieldType}` : ''}${operator === 'in' ? ' · 多个值使用英文逗号分隔' : ' · 不自动转换时区'}`
+                    ? `${label}字段${fieldType ? ` · ${fieldType}` : ''}${VISUAL_SQL_TODAY_OPERATORS.has(operator) ? ' · 使用数据库当天日期' : operator === 'in' ? ' · 多个值使用英文逗号分隔' : ' · 不自动转换时区'}`
                     : '';
                 hint.classList.toggle('hidden', !temporalKind);
             }
