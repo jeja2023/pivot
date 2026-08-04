@@ -32,7 +32,7 @@ function createDagInspectorController(ctx) {
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '节点测试失败');
             result.className = 'pivot-dag-test-result is-success';
-            result.textContent = `${data.durationMs || 0} ms\n${JSON.stringify(data.output, null, 2)}`;
+            result.textContent = `节点执行完成 · 耗时 ${data.durationMs || 0} 毫秒\n${JSON.stringify(data.output, null, 2)}`;
         } catch (error) {
             result.className = 'pivot-dag-test-result is-error';
             result.textContent = error.message || '节点测试失败';
@@ -89,7 +89,7 @@ function createDagInspectorController(ctx) {
             <div class="modal rag-detail-modal pivot-dag-json-input-editor">
                 <div class="rag-detail-header pivot-dag-input-head">
                     <div>
-                        <h3>编辑 JSON 参数</h3>
+                        <h3>编辑高级参数</h3>
                         <p class="model-modal-desc">${dagEscapeHtml([friendlyToolTitle(tool), node.title || node.id].filter(Boolean).join(' · '))}</p>
                     </div>
                     <button type="button" class="btn-danger-outline" data-pivot-dag-json-close="1">关闭</button>
@@ -128,13 +128,13 @@ function createDagInspectorController(ctx) {
         const parseInput = () => {
             try {
                 const parsed = JSON.parse(textareaEl.value || '{}');
-                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('JSON 参数必须是对象。');
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('高级参数必须是对象。');
                 setError('');
                 textareaEl.classList.remove('is-invalid');
                 return parsed;
             } catch (e) {
                 textareaEl.classList.add('is-invalid');
-                setError(e.message || 'JSON 格式不正确。');
+                setError(e.message || '高级参数格式不正确。');
                 return null;
             }
         };
@@ -146,7 +146,7 @@ function createDagInspectorController(ctx) {
             ctx.render?.();
             ctx.flushOut?.();
             closeJson();
-            window.showToast?.('JSON 参数已更新', 'success');
+            window.showToast?.('高级参数已更新', 'success');
         };
         const insertToken = token => {
             if (!token || !textareaEl) return;
@@ -221,8 +221,8 @@ function createDagInspectorController(ctx) {
             try {
                 const inputSchema = JSON.parse(inputEl.value || '{}');
                 const outputSchema = JSON.parse(outputEl.value || '{}');
-                if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) throw new Error('输入契约必须是 JSON 对象。');
-                if (!outputSchema || typeof outputSchema !== 'object' || Array.isArray(outputSchema)) throw new Error('输出契约必须是 JSON 对象。');
+                if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) throw new Error('输入契约必须是结构化对象。');
+                if (!outputSchema || typeof outputSchema !== 'object' || Array.isArray(outputSchema)) throw new Error('输出契约必须是结构化对象。');
                 inputEl.classList.remove('is-invalid');
                 outputEl.classList.remove('is-invalid');
                 errorEl.textContent = '';
@@ -440,7 +440,7 @@ function createDagInspectorController(ctx) {
                     </select>
                 </label>
                 <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
-                <label><span>超时 ms</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
+                <label><span>调用超时（毫秒）</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
             </div>
             <details class="pivot-dag-contract-panel">
                 <summary class="pivot-dag-contract-panel-head">
@@ -485,7 +485,7 @@ function createDagInspectorController(ctx) {
                 <div class="pivot-dag-input-overview-summary">${renderInputSummary(node.input, selectedTool, tools)}</div>
                 <div class="pivot-dag-input-overview-actions">
                     <button type="button" class="btn-primary" data-pivot-dag-open-wizard="1">配置参数</button>
-                    <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑 JSON</button>
+                    <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑高级参数</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
                 </div>

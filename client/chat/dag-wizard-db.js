@@ -76,14 +76,51 @@
             return [option.serverName || `数据库 ${option.serverId}`, option.databaseType].filter(Boolean).join(' · ');
         };
 
+        const resolveWizardToolCall = (tool, input = {}) => {
+            if (!tool) return { name: '', input };
+            const rawName = String(toolValue(tool) || '').trim();
+            if (!tool.databaseTool || !rawName.startsWith('db.')) {
+                return { name: rawName, input };
+            }
+            const selectedId = databaseConnectionInputValue(input);
+            const connections = databaseConnectionsFromTool(tool);
+            const connection = connections.find(item => (
+                String(item.connectionId ?? item.serverId ?? '') === selectedId
+                || String(item.serverId ?? '') === selectedId
+            )) || (connections.length === 1 ? connections[0] : null);
+            const name = connection?.fullName || rawName;
+            if (!name || name === rawName) return { name, input };
+            const nextInput = { ...(input && typeof input === 'object' ? input : {}) };
+            delete nextInput.connectionId;
+            delete nextInput.connection_id;
+            delete nextInput.databaseConnectionId;
+            delete nextInput.database_connection_id;
+            delete nextInput.mcpServerId;
+            delete nextInput.mcp_server_id;
+            return { name, input: nextInput };
+        };
+
         const callWizardTool = async (tool, input = {}) => {
             if (!tool) throw new Error('工具不可用。');
+            const request = resolveWizardToolCall(tool, input);
+            if (!request.name) throw new Error('工具不可用。');
             const res = await apiFetch(`${API_BASE}/mcp/tools/call`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: toolValue(tool), input })
+                body: JSON.stringify(request)
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || '工具调用失败。');
+            if (!res.ok) {
+                const message = typeof data.error === 'string'
+                    ? data.error
+                    : (typeof data.message === 'string' ? data.message : '工具调用失败。');
+                const error = new Error(message);
+                error.code = data.code || '';
+                error.status = res.status;
+                error.detail = data.detail || '';
+                error.hint = data.hint || '';
+                error.diagnostics = data.diagnostics || null;
+                throw error;
+            }
             return data.result?.structuredContent ?? data.result;
         };

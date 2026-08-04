@@ -13,7 +13,7 @@ function parseAgentWorkflowText(raw = getAgentWorkflowText()) {
     }
     if (Array.isArray(raw)) return { nodes: raw };
     if (typeof raw === 'object') return raw;
-    throw new Error('Invalid workflow JSON payload.');
+    throw new Error('工作流配置格式不正确。');
 }
 
 function summarizeAgentDagSpec(raw = getAgentWorkflowText()) {
@@ -55,7 +55,7 @@ function renderAgentWorkflowLifecycle() {
         ? (draftMatchesSaved ? '已保存' : '有未保存修改')
         : '未保存';
     const publishedText = workflow?.published_version
-        ? `已发布 v${workflow.published_version}`
+        ? `已发布版本 ${workflow.published_version}`
         : '未发布';
     const state = !draftSummary.valid
         ? 'is-error'
@@ -96,7 +96,7 @@ function closeAgentDagJsonModal() {
 function syncAgentDagJsonToCanvas() {
     if (dagEditorInstance?.syncFromJson?.()) {
         updateAgentWorkflowRunUi();
-        showToast('JSON 已同步到画布', 'success');
+        showToast('高级配置已同步到画布', 'success');
         closeAgentDagJsonModal();
     }
 }

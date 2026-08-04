@@ -23,7 +23,7 @@ function withTimeout(promise, timeoutMs, label = 'operation') {
     const safeTimeout = Math.max(Number(timeoutMs) || 0, 1000);
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
-            const err = new Error(`${label} timed out`);
+            const err = new Error(`${label}执行超时`);
             err.code = 'AGENT_TIMEOUT';
             reject(err);
         }, safeTimeout);

@@ -460,6 +460,14 @@
     max-height: calc(100vh - 20px);
 }
 
+body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-config-section="templates"] .agent-config-modal,
+body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-config-section="results"] .agent-config-modal {
+    height: calc(100vh - 50px);
+    height: calc(100dvh - 50px);
+    max-height: calc(100vh - 50px);
+    max-height: calc(100dvh - 50px);
+}
+
 #agent-config-modal[data-agent-config-section="templates"] .agent-config-modal-body,
 #agent-config-modal[data-agent-config-section="results"] .agent-config-modal-body {
     display: flex;
@@ -468,6 +476,14 @@
     min-height: 0;
     height: calc(100vh - 76px);
     max-height: calc(100vh - 76px);
+}
+
+body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-config-section="templates"] .agent-config-modal-body,
+body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-config-section="results"] .agent-config-modal-body {
+    height: calc(100vh - 106px);
+    height: calc(100dvh - 106px);
+    max-height: calc(100vh - 106px);
+    max-height: calc(100dvh - 106px);
 }
 
 #agent-config-modal[data-agent-config-section="templates"] .agent-config-modal-body .agent-collapse-section,

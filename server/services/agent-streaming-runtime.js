@@ -107,7 +107,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                deps.createAgentNotification(user.id, runId, 'completed', 'Agent 运行已完成', deps.getAgentRunTitle(run));
+        deps.createAgentNotification(user.id, runId, 'completed', '任务运行已完成', deps.getAgentRunTitle(run));
                 return { completed: true };
             }
 

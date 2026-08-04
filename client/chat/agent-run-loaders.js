@@ -223,7 +223,7 @@ async function loadAgentMetrics() {
         <span>7日任务 ${Number(data.total || 0)}</span>
         <span>成功率 ${Number(data.successRate || 0)}%</span>
         <span>失败 ${Number(data.error || 0)}</span>
-        <span>Token ${agentEscape(formatAgentCompactCount(data.totalTokens || 0))}</span>
+        <span>模型用量 ${agentEscape(formatAgentCompactCount(data.totalTokens || 0))}</span>
     `);
 }
 
@@ -244,7 +244,7 @@ function renderAgentPreflight(data) {
             <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
         </div>
         <div class="governance-metrics">
-            <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入Token</span>
+            <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入用量</span>
             <span><b>${Number(summary.highRiskToolCount || 0)}</b>高风险工具</span>
             <span><b>${Number(summary.mcpErrorServers || 0)}</b>异常能力</span>
             <span><b>${Number(summary.mcpUncheckedServers || 0)}</b>待刷新能力</span>
@@ -343,9 +343,9 @@ async function loadAgentRuns(page = agentRunsPage) {
                         <th>步骤</th>
                         <th>工具</th>
                         <th>错误</th>
-                        <th>输入Token</th>
-                        <th>输出Token</th>
-                        <th>总Token</th>
+                        <th>输入用量</th>
+                        <th>输出用量</th>
+                        <th>总用量</th>
                         <th>创建时间</th>
                         <th>状态</th>
                         <th>操作</th>

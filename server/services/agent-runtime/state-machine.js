@@ -52,7 +52,7 @@ function transitionAgentRunStatus(fromStatus, toStatus, details = {}) {
 function assertAgentRunStatusTransition(fromStatus, toStatus, details = {}) {
     const transition = transitionAgentRunStatus(fromStatus, toStatus, details);
     if (!transition.allowed) {
-        const err = new Error(`Invalid agent run status transition: ${transition.from || '<new>'} -> ${transition.to || '<invalid>'}`);
+        const err = new Error(`任务状态变更无效：${transition.from || '<new>'} -> ${transition.to || '<invalid>'}`);
         err.code = 'AGENT_INVALID_STATUS_TRANSITION';
         err.transition = transition;
         throw err;

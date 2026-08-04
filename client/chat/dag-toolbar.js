@@ -108,7 +108,7 @@ function renderDagToolbar(ctx) {
                 ])
             ], 'is-node-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
-                makeButton('多智能体审阅', '添加并行研究员、审阅员与 Supervisor 裁决节点', ctx.addAgentTeamTemplate),
+                makeButton('多智能体审阅', '添加并行研究员、审阅员与主管智能体裁决节点', ctx.addAgentTeamTemplate),
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
             ], 'is-template-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('操作', [
@@ -120,7 +120,7 @@ function renderDagToolbar(ctx) {
                 makeButton('校验', '校验节点、依赖和工具可用性', ctx.showValidationResult),
                 makeButton('自动布局', '按依赖层次重新排列', ctx.resetLayout),
                 makeButton('适配画布', '重置缩放和平移到默认视角', ctx.fitToContent),
-                makeButton('JSON 视图', '打开高级 JSON 编辑弹窗', () => {
+                makeButton('高级配置', '打开高级配置编辑窗口', () => {
                     if (typeof ctx.onOpenJson === 'function') ctx.onOpenJson();
                 })
             ], 'is-action-group'));

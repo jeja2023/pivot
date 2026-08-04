@@ -25,6 +25,19 @@ const VISUAL_SQL_AGGREGATION_OPTIONS = [
     ['max', '最大值']
 ];
 
+const VISUAL_SQL_TEMPORAL_OPERATOR_LABELS = {
+    eq: '等于',
+    neq: '不等于',
+    gt: '晚于',
+    gte: '不早于',
+    lt: '早于',
+    lte: '不晚于',
+    between: '时间范围',
+    in: '属于列表',
+    isNull: '为空',
+    notNull: '不为空'
+};
+
 function isVisualSqlQueryTool(tool) {
     return toolShortName(tool) === 'db.run_readonly_query';
 }
@@ -45,10 +58,41 @@ function normalizeVisualSqlFilter(filter = {}) {
         : 'eq';
     return {
         field: queryBuilderString(filter.field),
+        fieldType: queryBuilderString(filter.fieldType || filter.field_type),
         operator,
         value: queryBuilderString(filter.value),
         value2: queryBuilderString(filter.value2)
     };
+}
+
+function normalizeVisualSqlFilterRelation(value) {
+    return queryBuilderString(value).toLowerCase() === 'or' ? 'or' : 'and';
+}
+
+function queryBuilderTemporalKind(fieldType = '') {
+    const type = queryBuilderString(fieldType).toLowerCase();
+    if (!type) return '';
+    if (/(datetime|timestamp|timestamptz|smalldatetime|datetimeoffset)/.test(type)) return 'datetime';
+    if (/\bdate\b/.test(type)) return 'date';
+    if (/\btime\b/.test(type)) return 'time';
+    return '';
+}
+
+function queryBuilderTemporalInputValue(value, kind = '') {
+    const text = queryBuilderString(value);
+    if (!text || !kind) return text;
+    if (kind === 'date') return text.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '';
+    if (kind === 'time') return text.match(/^\d{2}:\d{2}(?::\d{2})?/)?.[0] || '';
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?/);
+    return match ? `${match[1]}T${match[2]}${match[3] ? `:${match[3]}` : ''}` : '';
+}
+
+function queryBuilderTemporalSqlValue(value, fieldType = '') {
+    const kind = queryBuilderTemporalKind(fieldType);
+    const normalized = queryBuilderTemporalInputValue(value, kind);
+    if (kind !== 'datetime' || !normalized) return normalized;
+    const [date, time] = normalized.split('T');
+    return `${date} ${time.length === 5 ? `${time}:00` : time}`;
 }
 
 function normalizeVisualSqlQueryBuilder(input = {}) {
@@ -67,6 +111,7 @@ function normalizeVisualSqlQueryBuilder(input = {}) {
         table: queryBuilderString(source.table),
         columns: uniqueQueryBuilderStrings(source.columns),
         filters: (Array.isArray(source.filters) ? source.filters : []).map(normalizeVisualSqlFilter).slice(0, 12),
+        filterRelation: normalizeVisualSqlFilterRelation(source.filterRelation || source.filter_relation || source.filterLogic || source.filter_logic),
         aggregation,
         aggregationField: queryBuilderString(source.aggregationField || source.aggregation_field),
         groupBy: queryBuilderString(source.groupBy || source.group_by),
@@ -120,8 +165,10 @@ function queryBuilderField(value, dialect) {
 function queryBuilderFilterSql(filter, dialect) {
     const field = queryBuilderField(filter.field, dialect);
     if (!field) return '';
-    const value = queryBuilderLiteral(filter.value);
-    const value2 = queryBuilderLiteral(filter.value2);
+    const filterValue = queryBuilderTemporalSqlValue(filter.value, filter.fieldType);
+    const filterValue2 = queryBuilderTemporalSqlValue(filter.value2, filter.fieldType);
+    const value = queryBuilderLiteral(filterValue);
+    const value2 = queryBuilderLiteral(filterValue2);
     switch (filter.operator) {
         case 'neq': return `${field} <> ${value}`;
         case 'contains': return `${field} LIKE ${queryBuilderLiteral(`%${filter.value}%`)}`;
@@ -134,7 +181,7 @@ function queryBuilderFilterSql(filter, dialect) {
         case 'between': return `${field} BETWEEN ${value} AND ${value2}`;
         case 'in': {
             const values = filter.value.split(',').map(item => item.trim()).filter(Boolean);
-            return values.length ? `${field} IN (${values.map(queryBuilderLiteral).join(', ')})` : '';
+            return values.length ? `${field} IN (${values.map(item => queryBuilderLiteral(queryBuilderTemporalSqlValue(item, filter.fieldType))).join(', ')})` : '';
         }
         case 'isNull': return `${field} IS NULL`;
         case 'notNull': return `${field} IS NOT NULL`;
@@ -205,7 +252,10 @@ function buildVisualSqlQuery(config = {}, databaseType = '') {
 
     const tableSql = tableName;
     const lines = [`SELECT ${selectParts.join(', ')}`, `FROM ${tableSql}`];
-    if (whereParts.length) lines.push(`WHERE ${whereParts.join('\n  AND ')}`);
+    if (whereParts.length) {
+        const relation = builder.filterRelation === 'or' ? 'OR' : 'AND';
+        lines.push(`WHERE ${whereParts.join(`\n  ${relation} `)}`);
+    }
     if (groupBy && builder.aggregation) lines.push(`GROUP BY ${groupBy}`);
     const sortBy = builder.sortBy === '__metric__'
         ? queryBuilderQuoteIdentifier('metric_value', dialect)
@@ -243,28 +293,28 @@ function renderVisualSqlBuilder(initialInput = {}) {
             <header class="pivot-dag-query-builder-head">
                 <div>
                     <strong>查询方式</strong>
-                    <span>普通用户使用可视化查询，复杂 JOIN、CTE 等场景切换到高级 SQL。</span>
+                    <span>常规查询直接选择数据表、字段和条件；复杂查询可切换到高级模式。</span>
                 </div>
-                <div class="pivot-dag-query-mode" role="group" aria-label="SQL 查询方式">
+                <div class="pivot-dag-query-mode" role="group" aria-label="查询方式">
                     <button type="button" class="is-active" data-pivot-dag-query-mode="visual">可视化查询</button>
-                    <button type="button" data-pivot-dag-query-mode="advanced">高级 SQL</button>
+                    <button type="button" data-pivot-dag-query-mode="advanced">高级查询</button>
                 </div>
             </header>
             <div class="pivot-dag-query-visual" data-pivot-dag-query-visual>
                 <div class="pivot-dag-query-source">
-                    <label><span>Schema / 命名空间</span><input class="form-input" data-pivot-dag-query-schema value="${dagEscapeAttr(config.schema)}" placeholder="可选，例如 public / dbo"></label>
+                    <label><span>数据库模式 / 命名空间</span><input class="form-input" data-pivot-dag-query-schema value="${dagEscapeAttr(config.schema)}" placeholder="可选，例如 public / dbo"></label>
                     <label><span>数据表</span><input class="form-input" data-pivot-dag-query-table list="pivot-dag-query-tables" value="${dagEscapeAttr(config.table)}" placeholder="读取后选择或手动输入"></label>
-                    <div class="pivot-dag-query-source-actions"><button type="button" class="btn-secondary" data-pivot-dag-query-load-tables>读取数据表</button><button type="button" class="btn-secondary" data-pivot-dag-query-load-columns>读取字段</button></div>
+                    <div class="pivot-dag-query-source-actions"><button type="button" class="btn-secondary" data-pivot-dag-query-load-tables>读取数据表</button><button type="button" class="btn-secondary" data-pivot-dag-query-load-columns>读取字段</button><span class="pivot-dag-query-source-status" data-pivot-dag-query-source-status role="status" aria-live="polite">读取请求由 Pivot 服务端发起；“本机地址”指服务端或容器，而不是当前浏览器所在电脑。</span></div>
                     <datalist id="pivot-dag-query-tables"></datalist>
                 </div>
                 <div class="pivot-dag-query-section">
-                    <div class="pivot-dag-query-section-head"><strong>返回字段</strong><span data-pivot-dag-query-columns-help>至少选择一个字段；选择后会自动生成 SELECT。</span></div>
+                    <div class="pivot-dag-query-section-head"><strong>返回字段</strong><span data-pivot-dag-query-columns-help>至少选择一个字段；选择后会自动生成查询语句。</span></div>
                     <div class="pivot-dag-query-columns" data-pivot-dag-query-columns>${fieldList}</div>
                 </div>
                 <div class="pivot-dag-query-section">
-                    <div class="pivot-dag-query-section-head"><strong>筛选条件</strong><button type="button" class="btn-secondary" data-pivot-dag-query-add-filter>添加条件</button></div>
+                    <div class="pivot-dag-query-section-head"><strong>筛选条件</strong><div class="pivot-dag-query-filter-actions"><div class="pivot-dag-query-filter-relation" role="group" aria-label="筛选条件关系"><button type="button" class="${config.filterRelation === 'and' ? 'is-active' : ''}" data-pivot-dag-query-filter-relation="and" aria-pressed="${config.filterRelation === 'and'}">全部满足</button><button type="button" class="${config.filterRelation === 'or' ? 'is-active' : ''}" data-pivot-dag-query-filter-relation="or" aria-pressed="${config.filterRelation === 'or'}">任一满足</button></div><button type="button" class="btn-secondary" data-pivot-dag-query-add-filter>添加条件</button></div></div>
                     <div class="pivot-dag-query-filters" data-pivot-dag-query-filters>${filters.map((filter, index) => renderVisualSqlFilterRow(filter, index)).join('')}</div>
-                    <span class="pivot-dag-query-help">多个条件会按 AND 组合；文本值会自动转义。</span>
+                    <span class="pivot-dag-query-help" data-pivot-dag-query-filter-help>多个条件会按${config.filterRelation === 'or' ? '“任一满足”' : '“全部满足”'}组合；文本值会自动处理。</span>
                 </div>
                 <div class="pivot-dag-query-section pivot-dag-query-aggregate-section">
                     <div class="pivot-dag-query-section-head"><strong>汇总与排序</strong><span>需要统计时选择汇总方式，否则保持“不做汇总”。</span></div>
@@ -277,10 +327,10 @@ function renderVisualSqlBuilder(initialInput = {}) {
                         <label><span>最多返回</span><input class="form-input" type="number" min="1" max="1000" step="1" data-pivot-dag-query-limit value="${dagEscapeAttr(config.limit)}"></label>
                     </div>
                 </div>
-                <div class="pivot-dag-query-preview"><div class="pivot-dag-query-preview-head"><strong>SQL 预览</strong><span data-pivot-dag-query-status>填写条件后自动更新</span></div><pre data-pivot-dag-query-preview></pre></div>
+                <div class="pivot-dag-query-preview"><div class="pivot-dag-query-preview-head"><strong>查询预览</strong><span data-pivot-dag-query-status>填写条件后自动更新</span></div><pre data-pivot-dag-query-preview></pre></div>
             </div>
             <div class="pivot-dag-query-advanced hidden" data-pivot-dag-query-advanced>
-                <label class="pivot-dag-query-sql-field"><span>只读 SQL</span><textarea class="form-input" data-pivot-dag-query-sql spellcheck="false" placeholder="例如：SELECT id, name FROM customers WHERE status = 'active' LIMIT 100">${dagEscapeHtml(initialInput.sql || '')}</textarea><small>仅允许 SELECT、WITH、SHOW、DESCRIBE、EXPLAIN；执行时仍会进行权限和行数校验。</small></label>
+                <label class="pivot-dag-query-sql-field"><span>只读查询语句</span><textarea class="form-input" data-pivot-dag-query-sql spellcheck="false" placeholder="例如：SELECT id, name FROM customers WHERE status = 'active' LIMIT 100">${dagEscapeHtml(initialInput.sql || '')}</textarea><small>仅允许读取和分析数据；执行时仍会进行权限和返回行数校验。</small></label>
             </div>
         </section>
     `;
@@ -288,12 +338,20 @@ function renderVisualSqlBuilder(initialInput = {}) {
 
 function renderVisualSqlFilterRow(filter = {}, index = 0) {
     const operatorMarkup = VISUAL_SQL_OPERATOR_OPTIONS.map(([value, label]) => `<option value="${dagEscapeAttr(value)}" ${value === filter.operator ? 'selected' : ''}>${dagEscapeHtml(label)}</option>`).join('');
-    return `<div class="pivot-dag-query-filter-row" data-pivot-dag-query-filter-row data-filter-index="${index}">
+    const fieldType = queryBuilderString(filter.fieldType || filter.field_type);
+    const temporalKind = queryBuilderTemporalKind(fieldType);
+    const inputKind = temporalKind && filter.operator !== 'in' ? temporalKind : '';
+    const inputType = inputKind === 'datetime' ? 'datetime-local' : (inputKind || 'text');
+    const inputStep = inputKind === 'datetime' || inputKind === 'time' ? ' step="1"' : '';
+    const value = queryBuilderTemporalInputValue(filter.value, inputKind);
+    const value2 = queryBuilderTemporalInputValue(filter.value2, inputKind);
+    return `<div class="pivot-dag-query-filter-row" data-pivot-dag-query-filter-row data-filter-index="${index}" data-filter-field-name="${dagEscapeAttr(filter.field || '')}" data-filter-field-type="${dagEscapeAttr(fieldType)}">
         <input class="form-input" data-pivot-dag-query-filter-field list="pivot-dag-query-columns-list" value="${dagEscapeAttr(filter.field || '')}" placeholder="字段">
         <select class="form-input" data-pivot-dag-query-filter-operator>${operatorMarkup}</select>
-        <input class="form-input" data-pivot-dag-query-filter-value value="${dagEscapeAttr(filter.value || '')}" placeholder="条件值">
-        <input class="form-input hidden" data-pivot-dag-query-filter-value2 value="${dagEscapeAttr(filter.value2 || '')}" placeholder="第二个值">
+        <input class="form-input" type="${inputType}"${inputStep} data-pivot-dag-query-filter-value value="${dagEscapeAttr(value)}" placeholder="条件值">
+        <input class="form-input hidden" type="${inputType}"${inputStep} data-pivot-dag-query-filter-value2 value="${dagEscapeAttr(value2)}" placeholder="第二个值">
         <button type="button" class="btn-danger-outline" data-pivot-dag-query-remove-filter aria-label="删除筛选条件" title="删除筛选条件">删除</button>
+        <span class="pivot-dag-query-filter-type ${temporalKind ? '' : 'hidden'}" data-pivot-dag-query-filter-type-hint></span>
     </div>`;
 }
 
@@ -311,6 +369,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
     const readConfig = () => {
         const filters = [...root.querySelectorAll('[data-pivot-dag-query-filter-row]')].map(row => normalizeVisualSqlFilter({
             field: row.querySelector('[data-pivot-dag-query-filter-field]')?.value,
+            fieldType: row.dataset.filterFieldType,
             operator: row.querySelector('[data-pivot-dag-query-filter-operator]')?.value,
             value: row.querySelector('[data-pivot-dag-query-filter-value]')?.value,
             value2: row.querySelector('[data-pivot-dag-query-filter-value2]')?.value
@@ -322,6 +381,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
             table: root.querySelector('[data-pivot-dag-query-table]')?.value,
             columns: selectedFieldNames(),
             filters,
+            filterRelation: root.querySelector('[data-pivot-dag-query-filter-relation].is-active')?.dataset.pivotDagQueryFilterRelation || config.filterRelation,
             aggregation: root.querySelector('[data-pivot-dag-query-aggregation]')?.value,
             aggregationField: root.querySelector('[data-pivot-dag-query-aggregation-field]')?.value,
             groupBy: root.querySelector('[data-pivot-dag-query-group-by]')?.value,
@@ -336,6 +396,32 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         if (!status) return;
         status.textContent = message || '';
         status.className = `pivot-dag-query-status ${tone}`;
+    };
+
+    const setSourceStatus = (message, tone = '') => {
+        const status = root.querySelector('[data-pivot-dag-query-source-status]');
+        if (!status) return;
+        status.textContent = message || '';
+        status.className = `pivot-dag-query-source-status ${tone}`;
+    };
+
+    const formatDatabaseReadError = (error, action) => {
+        const code = String(error?.code || '').toUpperCase();
+        const detail = String(error?.message || '').trim();
+        const hint = String(error?.hint || '').trim();
+        if (code === 'MCP_PRIVATE_HOST_RESTRICTED' || /内网|本机|localhost|loopback|云元数据/i.test(`${detail} ${hint}`)) {
+            return `${action}按钮已触发，但数据库访问被服务端安全策略拦截。请确认连接目标是 Pivot 服务端可访问的地址；浏览器不会直接访问用户电脑的 localhost。`;
+        }
+        if (code === 'DB_CONNECTION_REFUSED' || /ECONNREFUSED|拒绝连接/i.test(detail)) {
+            return `${action}按钮已触发，但数据库拒绝连接。请检查数据库监听地址、端口和防火墙规则。`;
+        }
+        if (code === 'DB_CONNECTION_TIMEOUT' || code === 'DB_CONNECTION_TEST_TIMEOUT' || /timeout|超时/i.test(detail)) {
+            return `${action}按钮已触发，但连接数据库超时。请检查 Pivot 服务端到数据库的网络连通性。`;
+        }
+        if (code === 'DB_AUTH_FAILED' || /access denied|authentication failed|认证失败|登录失败/i.test(detail)) {
+            return `${action}按钮已触发，但数据库账号认证失败。请检查账号、密码及来源地址授权。`;
+        }
+        return `${action}按钮已触发，但数据库读取失败：${detail || '服务端未返回具体原因。'}${hint ? ` ${hint}` : ''}`;
     };
 
     const refreshFieldOptions = () => {
@@ -364,6 +450,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         root.querySelectorAll('[data-pivot-dag-query-filter-field]').forEach(input => {
             input.setAttribute('list', 'pivot-dag-query-columns-list');
         });
+        syncFilterValueFields();
     };
 
     const renderColumns = () => {
@@ -384,14 +471,62 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         syncFilterValueFields();
     };
 
+    const syncFilterRelation = (relation = config.filterRelation) => {
+        const normalized = normalizeVisualSqlFilterRelation(relation);
+        root.querySelectorAll('[data-pivot-dag-query-filter-relation]').forEach(button => {
+            const active = button.dataset.pivotDagQueryFilterRelation === normalized;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', String(active));
+        });
+        const help = root.querySelector('[data-pivot-dag-query-filter-help]');
+        if (help) help.textContent = `多个条件会按${normalized === 'or' ? '“任一满足”' : '“全部满足”'}组合；文本值会自动处理。`;
+    };
+
     const syncFilterValueFields = () => {
         root.querySelectorAll('[data-pivot-dag-query-filter-row]').forEach(row => {
-            const operator = row.querySelector('[data-pivot-dag-query-filter-operator]')?.value || 'eq';
+            const field = queryBuilderString(row.querySelector('[data-pivot-dag-query-filter-field]')?.value);
+            const fieldMeta = columns.find(item => item.name === field);
+            const retainedType = row.dataset.filterFieldName === field ? row.dataset.filterFieldType : '';
+            const fieldType = queryBuilderString(fieldMeta?.type || retainedType);
+            const temporalKind = queryBuilderTemporalKind(fieldType);
+            row.dataset.filterFieldName = field;
+            row.dataset.filterFieldType = fieldType;
+            const operatorControl = row.querySelector('[data-pivot-dag-query-filter-operator]');
+            const textOnlyOperators = new Set(['contains', 'startsWith', 'endsWith']);
+            operatorControl?.querySelectorAll('option').forEach(option => {
+                const defaultLabel = VISUAL_SQL_OPERATOR_OPTIONS.find(([value]) => value === option.value)?.[1] || option.textContent;
+                option.textContent = temporalKind ? (VISUAL_SQL_TEMPORAL_OPERATOR_LABELS[option.value] || defaultLabel) : defaultLabel;
+                const unavailable = Boolean(temporalKind && textOnlyOperators.has(option.value));
+                option.disabled = unavailable;
+                option.hidden = unavailable;
+            });
+            if (temporalKind && textOnlyOperators.has(operatorControl?.value)) operatorControl.value = 'eq';
+            const operator = operatorControl?.value || 'eq';
             const value = row.querySelector('[data-pivot-dag-query-filter-value]');
             const value2 = row.querySelector('[data-pivot-dag-query-filter-value2]');
             const noValue = operator === 'isNull' || operator === 'notNull';
+            const inputKind = temporalKind && operator !== 'in' ? temporalKind : '';
+            const inputType = inputKind === 'datetime' ? 'datetime-local' : (inputKind || 'text');
+            [value, value2].forEach(input => {
+                if (!input) return;
+                const previous = input.value;
+                input.type = inputType;
+                if (inputKind === 'datetime' || inputKind === 'time') input.step = '1';
+                else input.removeAttribute('step');
+                input.placeholder = operator === 'in' && temporalKind ? '多个时间值，用英文逗号分隔' : (input === value2 ? '结束值' : '条件值');
+                if (inputKind) input.value = queryBuilderTemporalInputValue(previous, inputKind);
+                else if (input.value !== previous) input.value = previous;
+            });
             value?.classList.toggle('hidden', noValue);
             value2?.classList.toggle('hidden', operator !== 'between');
+            const hint = row.querySelector('[data-pivot-dag-query-filter-type-hint]');
+            if (hint) {
+                const label = temporalKind === 'date' ? '日期' : temporalKind === 'time' ? '时间' : '日期时间';
+                hint.textContent = temporalKind
+                    ? `${label}字段${fieldType ? ` · ${fieldType}` : ''}${operator === 'in' ? ' · 多个值使用英文逗号分隔' : ' · 不自动转换时区'}`
+                    : '';
+                hint.classList.toggle('hidden', !temporalKind);
+            }
         });
     };
 
@@ -433,6 +568,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         if (modeOverride) {
             config.mode = modeOverride;
         }
+        syncFilterRelation(config.filterRelation);
         syncAggregationControls(config);
         const mode = config.mode;
         const visual = root.querySelector('[data-pivot-dag-query-visual]');
@@ -441,29 +577,38 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         advanced?.classList.toggle('hidden', mode !== 'advanced');
         root.querySelectorAll('[data-pivot-dag-query-mode]').forEach(button => button.classList.toggle('is-active', button.dataset.pivotDagQueryMode === mode));
         if (mode === 'advanced') {
-            setStatus('高级 SQL 将在保存和运行时进行只读校验。');
+            setStatus('高级查询将在保存和运行时进行只读校验。');
             return;
         }
         const result = buildVisualSqlQuery(config, root.dataset.databaseType || 'sqlite');
         const preview = root.querySelector('[data-pivot-dag-query-preview]');
-        if (preview) preview.textContent = result.sql || '完成数据表、字段和筛选条件后，将在这里生成 SQL。';
-        setStatus(result.issues[0] || 'SQL 已生成，可在下方预览。', result.issues.length ? 'warn' : 'success');
+        if (preview) preview.textContent = result.sql || '完成数据表、字段和筛选条件后，将在这里生成查询语句。';
+        setStatus(result.issues[0] || '查询语句已生成，可在下方预览。', result.issues.length ? 'warn' : 'success');
     };
 
     const loadTables = async () => {
         config = readConfig();
         const entry = databaseEntry();
         const tableTool = entry?.tools?.['db.list_tables'];
-        if (!tableTool) return setStatus('当前数据库连接暂不支持读取数据表。', 'error');
+        if (!tableTool) {
+            const message = '读取数据表按钮已触发，但当前数据库连接没有可用的表列表工具。';
+            setSourceStatus(message, 'error');
+            return setStatus(message, 'error');
+        }
+        setSourceStatus('读取数据表按钮已触发，正在连接数据库...', '');
         setStatus('正在读取数据表...');
         try {
             const result = await callTool(tableTool, config.schema ? { schema: config.schema } : {});
             tables = visualSqlTableNames(result);
             const list = root.querySelector('#pivot-dag-query-tables');
             if (list) PivotSafeHtml.setHtml(list, tables.map(name => `<option value="${dagEscapeAttr(name)}"></option>`).join(''));
-            setStatus(tables.length ? `已读取 ${tables.length} 个数据表，请选择后读取字段。` : '没有读取到数据表，可手动输入。', tables.length ? '' : 'warn');
+            const message = tables.length ? `已读取 ${tables.length} 个数据表，请选择后读取字段。` : '没有读取到数据表，可手动输入。';
+            setSourceStatus(message, tables.length ? 'success' : 'warn');
+            setStatus(message, tables.length ? '' : 'warn');
         } catch (error) {
-            setStatus(error.message || '读取数据表失败。', 'error');
+            const message = formatDatabaseReadError(error, '读取数据表');
+            setSourceStatus(message, 'error');
+            setStatus(message, 'error');
         }
     };
 
@@ -472,8 +617,17 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         const entry = databaseEntry();
         const tableTool = entry?.tools?.['db.describe_table'];
         const table = queryBuilderString(root.querySelector('[data-pivot-dag-query-table]')?.value);
-        if (!table) return setStatus('请先选择或填写数据表。', 'error');
-        if (!tableTool) return setStatus('当前数据库连接暂不支持读取字段。', 'error');
+        if (!table) {
+            const message = '读取字段按钮已触发，但尚未选择或填写数据表。';
+            setSourceStatus(message, 'error');
+            return setStatus(message, 'error');
+        }
+        if (!tableTool) {
+            const message = '读取字段按钮已触发，但当前数据库连接没有可用的表结构工具。';
+            setSourceStatus(message, 'error');
+            return setStatus(message, 'error');
+        }
+        setSourceStatus('读取字段按钮已触发，正在连接数据库...', '');
         setStatus('正在读取字段...');
         try {
             const result = await callTool(tableTool, { table, ...(config.schema ? { schema: config.schema } : {}) });
@@ -494,9 +648,13 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
             renderColumns();
             refreshFieldOptions();
             updatePreview();
-            setStatus(columns.length ? `已读取 ${columns.length} 个字段，已默认选择前 ${Math.min(columns.length, 8)} 个。` : '没有读取到字段，请检查表名。', columns.length ? 'success' : 'warn');
+            const message = columns.length ? `已读取 ${columns.length} 个字段，已默认选择前 ${Math.min(columns.length, 8)} 个。` : '没有读取到字段，请检查表名。';
+            setSourceStatus(message, columns.length ? 'success' : 'warn');
+            setStatus(message, columns.length ? 'success' : 'warn');
         } catch (error) {
-            setStatus(error.message || '读取字段失败。', 'error');
+            const message = formatDatabaseReadError(error, '读取字段');
+            setSourceStatus(message, 'error');
+            setStatus(message, 'error');
         }
     };
 
@@ -504,7 +662,7 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         config = readConfig();
         if (config.mode === 'advanced') {
             const sql = queryBuilderString(root.querySelector('[data-pivot-dag-query-sql]')?.value);
-            if (!sql) return { error: '请填写只读 SQL，或切换到可视化查询。' };
+            if (!sql) return { error: '请填写只读查询语句，或切换到可视化查询。' };
             return { sql, queryBuilder: { ...config, mode: 'advanced' } };
         }
         const result = buildVisualSqlQuery(config, root.dataset.databaseType || 'sqlite');
@@ -535,9 +693,13 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         if (sql) sql.value = input.sql || '';
         renderColumns();
         renderFilters();
+        syncFilterRelation(config.filterRelation);
         refreshFieldOptions();
         updatePreview(config.mode);
     };
+
+    root.querySelector('[data-pivot-dag-query-load-tables]')?.addEventListener('click', loadTables);
+    root.querySelector('[data-pivot-dag-query-load-columns]')?.addEventListener('click', loadColumns);
 
     root.addEventListener('click', event => {
         const modeButton = event.target.closest('[data-pivot-dag-query-mode]');
@@ -554,8 +716,14 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
             updatePreview(config.mode);
             return;
         }
-        if (event.target.closest('[data-pivot-dag-query-load-tables]')) return loadTables();
-        if (event.target.closest('[data-pivot-dag-query-load-columns]')) return loadColumns();
+        const relationButton = event.target.closest('[data-pivot-dag-query-filter-relation]');
+        if (relationButton) {
+            config = readConfig();
+            config.filterRelation = normalizeVisualSqlFilterRelation(relationButton.dataset.pivotDagQueryFilterRelation);
+            syncFilterRelation(config.filterRelation);
+            updatePreview();
+            return;
+        }
         if (event.target.closest('[data-pivot-dag-query-add-filter]')) {
             config = readConfig();
             config.filters.push(normalizeVisualSqlFilter({ field: columns[0]?.name || '' }));
@@ -573,11 +741,11 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         }
     });
     root.addEventListener('input', event => {
-        if (event.target.matches('[data-pivot-dag-query-filter-operator]')) syncFilterValueFields();
+        if (event.target.matches('[data-pivot-dag-query-filter-field], [data-pivot-dag-query-filter-operator]')) syncFilterValueFields();
         updatePreview();
     });
     root.addEventListener('change', event => {
-        if (event.target.matches('[data-pivot-dag-query-filter-operator]')) syncFilterValueFields();
+        if (event.target.matches('[data-pivot-dag-query-filter-field], [data-pivot-dag-query-filter-operator]')) syncFilterValueFields();
         updatePreview();
     });
 
@@ -589,7 +757,9 @@ function mountVisualSqlBuilder({ modal, initialInput, wizardTools, getConnection
         loadedTable = '';
         renderColumns();
         refreshFieldOptions();
-        setStatus('数据库连接已切换，请重新读取表和字段。', 'warn');
+        const message = '数据库连接已切换，请重新读取表和字段。';
+        setSourceStatus(message, 'warn');
+        setStatus(message, 'warn');
     };
 
     hydrate(initialInput);

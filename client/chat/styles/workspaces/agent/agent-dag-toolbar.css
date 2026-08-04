@@ -115,6 +115,15 @@
     box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
 }
 
+.pivot-dag-toolbar-group.is-node-group .pivot-dag-toolbar-menu {
+    box-sizing: border-box;
+    max-height: min(60vh, 520px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
 .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn {
     width: 100%;
     justify-content: flex-start;

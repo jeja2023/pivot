@@ -23,7 +23,7 @@
                         <div class="agent-config-modal-head">
                             <div>
                                 <h3 id="agent-task-editor-title">新建任务</h3>
-                                <span>由 AI 根据目标自主规划并执行多步骤任务</span>
+                                <span>由智能助手根据目标自主规划并执行多步骤任务</span>
                             </div>
                             <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
                         </div>
@@ -83,7 +83,7 @@
                             </label>
                             <label>
                                 <span>模型路由</span>
-                                <select id="agent-model-router" class="form-input" title="按策略自动从可见模型中选择，fixed 保持原行为">
+                                <select id="agent-model-router" class="form-input" title="按策略自动从可见模型中选择；固定模型会保持当前选择">
                                     <option value="fixed">固定模型</option>
                                     <option value="auto-vision">视觉优先</option>
                                     <option value="auto-context">上下文匹配</option>
@@ -93,7 +93,7 @@
                                 </select>
                             </label>
                             <label>
-                                <span>Token 预算</span>
+                                <span>模型用量上限</span>
                                 <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="不限">
                             </label>
                             <label>

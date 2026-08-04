@@ -11,7 +11,7 @@ async function loadAgentArtifacts() {
     PivotSafeHtml.setHtml(list, agentArtifactsCache.length ? agentArtifactsCache.slice(0, 4).map(item => `
         <button type="button" class="agent-ops-item" data-agent-artifact-id="${agentEscape(item.id)}">
             <strong>${agentEscape(item.title)}</strong>
-            <span>v${Number(item.current_version || 1)} · ${Number(item.version_count || 1)} 版 · ${agentEscape(formatDateToCN(item.updated_at || item.created_at))}</span>
+            <span>版本 ${Number(item.current_version || 1)} · 共 ${Number(item.version_count || 1)} 版 · ${agentEscape(formatDateToCN(item.updated_at || item.created_at))}</span>
         </button>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无沉淀结果</div>');
     list.querySelectorAll('[data-agent-artifact-id]').forEach(btn => {
@@ -66,7 +66,7 @@ async function loadAgentArtifactModal(artifactId) {
     const artifact = data.artifact || {};
     const versions = data.versions || [];
     modal.querySelector('#agent-artifact-title').textContent = artifact.title || '结果版本';
-    modal.querySelector('#agent-artifact-desc').textContent = `${versions.length} 个版本 · 当前 v${artifact.current_version || 1}`;
+    modal.querySelector('#agent-artifact-desc').textContent = `${versions.length} 个版本 · 当前版本 ${artifact.current_version || 1}`;
     modal.querySelector('#agent-artifact-content').value = artifact.content || '';
     modal.querySelector('#agent-artifact-note').value = '';
     PivotSafeHtml.setHtml(modal.querySelector('#agent-artifact-diff'), '');
@@ -88,7 +88,7 @@ async function loadAgentArtifactModal(artifactId) {
     PivotSafeHtml.setHtml(list, versions.map(version => `
         <div class="agent-artifact-version ${version.id === artifact.current_version_id ? 'current' : ''}">
             <div>
-                <strong>v${Number(version.version)}</strong>
+                <strong>版本 ${Number(version.version)}</strong>
                 <span>${agentEscape(version.note || '无备注')}</span>
                 <small>${agentEscape(formatDateToCN(version.created_at))}</small>
             </div>
@@ -105,14 +105,14 @@ async function loadAgentArtifactModal(artifactId) {
             const diffData = await diffRes.json().catch(() => ({}));
             if (!diffRes.ok) return showToast(diffData.error || '对比失败', 'error');
             PivotSafeHtml.setHtml(modal.querySelector('#agent-artifact-diff'), `
-                <strong>v${to - 1} → v${to}</strong>
+                <strong>版本 ${to - 1} → 版本 ${to}</strong>
                 <pre>${agentEscape((diffData.diff || []).filter(row => row.type !== 'same').map(row => `${row.type === 'add' ? '+' : row.type === 'remove' ? '-' : ' '} ${row.text}`).join('\n') || '无差异')}</pre>
             `);
         });
     });
     list.querySelectorAll('[data-artifact-rollback]').forEach(btn => {
         btn.addEventListener('click', () => {
-            showConfirm('回滚结果版本', `确定回滚到 v${btn.dataset.artifactRollback} 吗？会生成一个新的当前版本。`, async () => {
+            showConfirm('回滚结果版本', `确定回滚到版本 ${btn.dataset.artifactRollback} 吗？会生成一个新的当前版本。`, async () => {
                 const rollbackRes = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/rollback`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

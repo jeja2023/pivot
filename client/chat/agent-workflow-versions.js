@@ -51,7 +51,7 @@ function agentWorkflowVersionMarkup(item, workflow) {
     return `
         <div class="agent-workflow-version-item ${isCurrent ? 'current' : ''}">
             <div>
-                <strong>v${Number(item.version || 0)}${isCurrent ? ' · 当前' : ''}${isPublished ? ' · 已发布' : ''}</strong>
+                <strong>版本 ${Number(item.version || 0)}${isCurrent ? ' · 当前' : ''}${isPublished ? ' · 已发布' : ''}</strong>
                 <span>${nodeCount} 节点 · ${agentEscape(item.created_at || '-')}</span>
                 ${item.note ? `<small>${agentEscape(agentShortText(item.note, 120))}</small>` : ''}
             </div>
@@ -88,14 +88,14 @@ function agentWorkflowDiffMarkup(diff) {
     if (!hasDiff) {
         return `
             <section class="agent-workflow-diff-panel">
-                <header>v${agentEscape(diff.from?.version)} 与 v${agentEscape(diff.to?.version)} 没有节点差异</header>
+                <header>版本 ${agentEscape(diff.from?.version)} 与版本 ${agentEscape(diff.to?.version)} 没有节点差异</header>
             </section>
         `;
     }
     return `
         <section class="agent-workflow-diff-panel">
             <header>
-                <strong>v${agentEscape(diff.from?.version)} → v${agentEscape(diff.to?.version)}</strong>
+                <strong>版本 ${agentEscape(diff.from?.version)} → 版本 ${agentEscape(diff.to?.version)}</strong>
                 <span>新增 ${Number(summary.added || 0)} · 删除 ${Number(summary.removed || 0)} · 修改 ${Number(summary.changed || 0)}</span>
             </header>
             ${diff.added?.length ? `<h4>新增节点</h4>${renderSimple(diff.added, 'added')}` : ''}
@@ -147,7 +147,7 @@ async function openAgentWorkflowVersions() {
             mountAgentDagEditor();
             window.refreshAgentDagEditor?.();
             updateAgentWorkflowRunUi();
-            showToast(`已加载 v${version.version} 到画布，保存后会生成新版本`, 'success');
+            showToast(`已加载版本 ${version.version} 到画布，保存后会生成新版本`, 'success');
         });
     });
     body.querySelectorAll('[data-agent-workflow-version-publish]').forEach(btn => {
@@ -162,7 +162,7 @@ async function openAgentWorkflowVersions() {
     body.querySelectorAll('[data-agent-workflow-version-restore]').forEach(btn => {
         btn.addEventListener('click', () => {
             const version = btn.dataset.agentWorkflowVersionRestore;
-            showConfirm('回滚工作流版本', `确定将工作流回滚到 v${version} 吗？系统会生成一个新的当前版本。`, async () => {
+        showConfirm('回滚工作流版本', `确定将工作流回滚到版本 ${version} 吗？系统会生成一个新的当前版本。`, async () => {
                 const restoreRes = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(version)}/restore`, { method: 'POST' });
                 const restoreData = await restoreRes.json().catch(() => ({}));
                 if (!restoreRes.ok) return showToast(restoreData.error || '版本回滚失败', 'error');
@@ -174,7 +174,7 @@ async function openAgentWorkflowVersions() {
                 mountAgentDagEditor();
                 window.refreshAgentDagEditor?.();
                 updateAgentWorkflowRunUi();
-                showToast(`已回滚为 v${restoreData.workflow.current_version}`, 'success');
+            showToast(`已回滚为版本 ${restoreData.workflow.current_version}`, 'success');
                 openAgentWorkflowVersions();
             });
         });

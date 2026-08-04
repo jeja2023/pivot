@@ -45,16 +45,22 @@ function agentStepRowsMarkup(structured) {
             <div class="agent-step-table-wrap">
                 <table class="agent-step-table">
                     <thead>
-                        <tr>${columns.map(column => `<th>${agentEscape(column)}</th>`).join('')}</tr>
+                            <tr>${columns.map(column => `<th>${agentEscape(AGENT_RESULT_FIELD_LABELS[column] || column)}</th>`).join('')}</tr>
                     </thead>
                     <tbody>
                         ${previewRows.map(row => `
-                            <tr>${columns.map(column => `<td>${agentEscape(agentReadableCell(row[column]))}</td>`).join('')}</tr>
+                            <tr>${columns.map(column => {
+                                const value = row[column];
+                                const display = agentResultIsScalar(value)
+                                    ? agentResultDisplayValue(column, value)
+                                    : agentReadableCell(value);
+                                return `<td>${agentEscape(display)}</td>`;
+                            }).join('')}</tr>
                         `).join('')}
                     </tbody>
                 </table>
             </div>
-            ${hiddenCount ? `<div class="agent-step-readable-note">仅展示前 ${previewRows.length} 行，还有 ${hiddenCount} 行可在原始数据中查看。</div>` : ''}
+            ${(hiddenCount || structured.__partial) ? `<div class="agent-step-readable-note">${structured.__partial ? `工具返回内容较多，已展示前 ${previewRows.length} 行。` : `仅展示前 ${previewRows.length} 行，还有 ${hiddenCount} 行可在原始数据中查看。`}</div>` : ''}
         </div>
     `;
 }
@@ -69,13 +75,16 @@ const AGENT_RESULT_FIELD_LABELS = {
     message: '消息',
     title: '标题',
     name: '名称',
+    id: '标识',
+    arguments: '参数',
+    argument: '参数',
     status: '状态',
     type: '类型',
     error: '错误',
     warning: '提示',
     warnings: '提示',
     query: '查询条件',
-    sql: 'SQL',
+    sql: '查询语句',
     total: '总数',
     count: '数量',
     limit: '返回上限',
@@ -112,7 +121,45 @@ const AGENT_RESULT_FIELD_LABELS = {
     groupBy: '分组字段',
     group_by: '分组字段',
     value: '值',
-    ok: '执行状态'
+    ok: '执行状态',
+    governance: '数据安全',
+    tableAllowlistActive: '数据表白名单',
+    fieldAllowlistActive: '字段白名单',
+    sensitiveMaskingActive: '敏感信息脱敏',
+    queryTimeoutMs: '查询超时时间（毫秒）',
+    cost: '查询开销',
+    operation: '操作类型',
+    databaseType: '数据库类型',
+    boundedByLimit: '已限制返回数量',
+    estimate: '预计开销',
+    tables: '涉及数据表',
+    fields: '涉及字段',
+    columns: '字段信息',
+    tableSchema: '数据库模式',
+    table_schema: '数据库模式',
+    TABLE_SCHEMA: '数据库模式',
+    tableName: '数据表名称',
+    table_name: '数据表名称',
+    TABLE_NAME: '数据表名称',
+    tableType: '数据表类型',
+    table_type: '数据表类型',
+    TABLE_TYPE: '数据表类型',
+    columnName: '字段名称',
+    column_name: '字段名称',
+    dataType: '数据类型',
+    data_type: '数据类型',
+    isNullable: '允许为空',
+    is_nullable: '允许为空',
+    columnDefault: '默认值',
+    column_default: '默认值',
+    responseFormat: '返回格式',
+    temperature: '生成随机性',
+    maxTokens: '最大输出量',
+    finishReason: '结束原因',
+    toolCalls: '工具调用',
+    modelName: '模型文件',
+    input: '输入数据',
+    output: '输出数据'
 };
 
 const AGENT_RESULT_ENVELOPE_FIELDS = new Set([
@@ -125,6 +172,9 @@ function agentResultFieldLabel(key) {
     const value = String(key || '').trim();
     if (!value) return '信息';
     if (AGENT_RESULT_FIELD_LABELS[value]) return AGENT_RESULT_FIELD_LABELS[value];
+    const compact = value.replace(/[\s_-]+/g, '').toLowerCase();
+    const knownKey = Object.keys(AGENT_RESULT_FIELD_LABELS).find(item => item.replace(/[\s_-]+/g, '').toLowerCase() === compact);
+    if (knownKey) return AGENT_RESULT_FIELD_LABELS[knownKey];
     return value
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
         .replace(/[_-]+/g, ' ')
@@ -143,7 +193,8 @@ function agentResultScalarText(value) {
 }
 
 function agentResultDisplayValue(key, value) {
-    if (String(key || '').toLowerCase() === 'status') {
+    const normalizedKey = String(key || '').replace(/[\s_-]+/g, '').toLowerCase();
+    if (normalizedKey === 'status') {
         const statusLabels = {
             queued: '排队中',
             pending: '待执行',
@@ -159,7 +210,28 @@ function agentResultDisplayValue(key, value) {
         const normalized = String(value || '').trim().toLowerCase();
         if (statusLabels[normalized]) return statusLabels[normalized];
     }
-    if (String(key || '').toLowerCase() === 'ok' && typeof value === 'boolean') return value ? '成功' : '失败';
+    if (normalizedKey === 'ok' && typeof value === 'boolean') return value ? '成功' : '失败';
+    if (normalizedKey === 'name' && typeof value === 'string' && value.includes('.') && typeof agentToolTitle === 'function') {
+        const friendlyName = agentToolTitle(value);
+        if (friendlyName && friendlyName !== value) return friendlyName;
+    }
+    if (normalizedKey === 'finishreason') {
+        const finishReasonLabels = {
+            stop: '正常结束',
+            tool_calls: '调用工具',
+            function_call: '调用函数',
+            length: '达到输出上限',
+            content_filter: '内容安全拦截'
+        };
+        const normalized = String(value || '').trim().toLowerCase();
+        if (finishReasonLabels[normalized]) return finishReasonLabels[normalized];
+    }
+    if (normalizedKey === 'operation' && String(value || '').toLowerCase() === 'readonly_sql') return '只读查询';
+    if (normalizedKey === 'tabletype') {
+        const typeLabels = { 'base table': '数据表', view: '视图', 'system view': '系统视图' };
+        const normalized = String(value || '').trim().toLowerCase();
+        if (typeLabels[normalized]) return typeLabels[normalized];
+    }
     return agentResultScalarText(value);
 }
 
@@ -344,8 +416,8 @@ function agentStepChartSummaryMarkup(structured) {
             </div>
             <div class="agent-step-kpis">
                 ${structured.title ? `<span><em>标题</em><strong>${agentEscape(structured.title)}</strong></span>` : ''}
-                ${xAxis ? `<span><em>X 轴</em><strong>${agentEscape(xAxis)}</strong></span>` : ''}
-                ${yAxis ? `<span><em>Y 轴</em><strong>${agentEscape(yAxis)}</strong></span>` : ''}
+                ${xAxis ? `<span><em>横轴</em><strong>${agentEscape(xAxis)}</strong></span>` : ''}
+                ${yAxis ? `<span><em>纵轴</em><strong>${agentEscape(yAxis)}</strong></span>` : ''}
                 <span><em>数据点</em><strong>${Number(points || 0)}</strong></span>
                 ${series.length ? `<span><em>系列</em><strong>${series.map(item => agentEscape(item?.name || '数据')).join('、')}</strong></span>` : ''}
             </div>
@@ -386,7 +458,10 @@ function agentStepLlmReadableMarkup(step) {
 function agentStepReadableMarkup(step) {
     const llmReadable = agentStepLlmReadableMarkup(step);
     if (llmReadable) return llmReadable;
-    const structured = unwrapAgentStructuredPayload(step.output || step.input || {});
+    const normalized = agentNormalizeToolPayload(step.output || step.input || {});
+    const structured = normalized && typeof normalized === 'object'
+        ? (unwrapAgentStructuredPayload(normalized) || normalized)
+        : null;
     if (!structured || typeof structured !== 'object') return '';
     return agentStepChartSummaryMarkup(structured)
         || agentStepRowsMarkup(structured)
@@ -398,10 +473,14 @@ function agentStepPreview(step) {
         const llmText = stripAgentWorkflowReportHeading(agentLlmOutputText(step.output));
         if (llmText) return agentShortText(llmText, 500);
     }
-    const payload = agentParsePayload(step.output || step.input || {});
+    const normalized = agentNormalizeToolPayload(step.output || step.input || {});
+    const payload = normalized && typeof normalized !== 'string'
+        ? normalized
+        : agentParsePayload(normalized);
     if (typeof payload === 'string') return agentShortText(payload, 500);
     if (Array.isArray(payload)) return `返回 ${payload.length} 条结果。`;
     if (!payload || typeof payload !== 'object') return agentShortText(payload || '');
+    if (payload?.__partial && Array.isArray(payload.rows)) return `工具返回内容较多，已读取前 ${payload.rows.length} 行。`;
     const structuredSummary = agentStepStructuredSummary(payload);
     if (structuredSummary) return structuredSummary;
     if (payload.answer) return payload.answer;
@@ -497,6 +576,64 @@ function unwrapAgentStructuredPayload(value) {
         }
     }
     return payload;
+}
+
+function agentDecodeResultEntities(value) {
+    return String(value || '')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+}
+
+function agentExtractMcpContentText(value) {
+    const source = String(value || '');
+    const match = source.match(/["']text["']\s*:\s*"((?:\\.|[^"\\])*)/s);
+    if (!match) return '';
+    try {
+        return JSON.parse(`"${match[1]}"`);
+    } catch (e) {
+        return agentDecodeResultEntities(match[1])
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+    }
+}
+
+function agentExtractPartialRows(value, maxRows = 8) {
+    const source = agentDecodeResultEntities(value);
+    const matches = source.match(/\{[^{}]*\}/g) || [];
+    const rows = [];
+    matches.some(fragment => {
+        try {
+            const row = JSON.parse(fragment);
+            if (row && typeof row === 'object' && !Array.isArray(row)) rows.push(row);
+        } catch (e) {
+            // 长文本被截断时，忽略不完整的最后一行。
+        }
+        return rows.length >= maxRows;
+    });
+    return rows;
+}
+
+function agentNormalizeToolPayload(value) {
+    const parsed = agentParsePayload(value);
+    if (!parsed || typeof parsed !== 'string') return parsed;
+    const text = agentExtractMcpContentText(parsed);
+    if (!text) return parsed;
+    const nested = agentParsePayload(text);
+    if (Array.isArray(nested)) return { rows: nested, __partial: /\.\.\.\[truncated\]/i.test(text) };
+    if (nested && typeof nested === 'object') {
+        return nested.structuredContent && typeof nested.structuredContent === 'object'
+            ? nested.structuredContent
+            : nested;
+    }
+    const rows = agentExtractPartialRows(text);
+    if (rows.length) return { rows, __partial: true };
+    return { text: agentShortText(agentDecodeResultEntities(text), 900), __mcpText: true };
 }
 
 function isAgentPivotChartSpec(value) {

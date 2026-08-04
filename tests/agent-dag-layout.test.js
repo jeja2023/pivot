@@ -25,7 +25,7 @@ function loadQueryBuilder() {
     const sandbox = {};
     vm.createContext(sandbox);
     vm.runInContext(source, sandbox, { filename: 'dag-query-builder.js' });
-    return vm.runInContext('({ buildVisualSqlQuery, normalizeVisualSqlQueryBuilder })', sandbox);
+    return vm.runInContext('({ buildVisualSqlQuery, normalizeVisualSqlQueryBuilder, queryBuilderTemporalKind, queryBuilderTemporalInputValue, queryBuilderTemporalSqlValue })', sandbox);
 }
 
 test('visual SQL builder generates bounded dialect-safe readonly queries', () => {
@@ -74,6 +74,40 @@ test('visual SQL builder supports grouped aggregation and SQL Server limits', ()
         applySqlLimit('SELECT id FROM customers', 20, 'sqlserver'),
         'SELECT TOP (20) id FROM customers'
     );
+});
+
+test('visual SQL builder supports OR filters and temporal field controls', () => {
+    const {
+        buildVisualSqlQuery,
+        normalizeVisualSqlQueryBuilder,
+        queryBuilderTemporalKind,
+        queryBuilderTemporalInputValue,
+        queryBuilderTemporalSqlValue
+    } = loadQueryBuilder();
+    const normalized = normalizeVisualSqlQueryBuilder({ queryBuilder: {
+        filter_relation: 'OR',
+        filters: [{ field: 'created_at', field_type: 'timestamp without time zone', operator: 'gte', value: '2026-08-04 13:44:28' }]
+    } });
+    assert.equal(normalized.filterRelation, 'or');
+    assert.equal(normalized.filters[0].fieldType, 'timestamp without time zone');
+    assert.equal(queryBuilderTemporalKind('timestamp without time zone'), 'datetime');
+    assert.equal(queryBuilderTemporalKind('DATE'), 'date');
+    assert.equal(queryBuilderTemporalKind('time(6)'), 'time');
+    assert.equal(queryBuilderTemporalInputValue('2026-08-04 13:44:28', 'datetime'), '2026-08-04T13:44:28');
+    assert.equal(queryBuilderTemporalSqlValue('2026-08-04T13:44', 'timestamp'), '2026-08-04 13:44:00');
+
+    const result = buildVisualSqlQuery({
+        table: 'orders',
+        columns: ['id', 'created_at'],
+        filterRelation: 'or',
+        filters: [
+            { field: 'created_at', fieldType: 'datetime', operator: 'gte', value: '2026-08-01T00:00:00' },
+            { field: 'created_at', fieldType: 'datetime', operator: 'lt', value: '2026-09-01T00:00:00' }
+        ]
+    }, 'mysql');
+    assert.equal(result.issues.length, 0);
+    assert.match(result.sql, /WHERE `created_at` >= '2026-08-01 00:00:00'\n  OR `created_at` < '2026-09-01 00:00:00'/);
+    assert.equal(result.config.filterRelation, 'or');
 });
 
 test('normalizeDagSpec preserves layout and ignores legacy primary LLM metadata', () => {

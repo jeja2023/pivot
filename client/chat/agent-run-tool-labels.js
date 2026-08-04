@@ -44,6 +44,8 @@ function selectAgentModel(id, close = true) {
 }
 
 const agentToolDisplayMap = {
+    plan: { title: '任务规划', description: '根据当前任务安排后续执行步骤。' },
+    flow_rule: { title: '流程规则', description: '按照工作流规则推进任务。' },
     'agent.llm': { title: '大模型节点', description: '在工作流中调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。' },
     'rag.search': { title: '知识库检索', description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。' },
     'sessions.search': { title: '会话检索', description: '按关键词检索当前用户的历史会话内容。' },
@@ -55,7 +57,7 @@ const agentToolDisplayMap = {
     'db.list_tables': { title: '列出数据表', description: '列出当前数据库中可查询的表和视图。' },
     'db.count_tables': { title: '统计数据表数量', description: '统计当前数据库中可查询的数据表和视图数量。' },
     'db.describe_table': { title: '查看表结构', description: '查看表字段、类型和可空性。' },
-    'db.run_readonly_query': { title: '只读 SQL 查询', description: '执行 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等只读查询。' },
+    'db.run_readonly_query': { title: '只读数据库查询', description: '执行安全的只读查询，并遵守权限和返回数量限制。' },
     'db.group_count': { title: '分组统计', description: '按指定表字段分组并统计数量。' },
     'db.list_collections': { title: '列出集合', description: '列出 MongoDB 数据库集合。' },
     'db.count_collections': { title: '统计集合数量', description: '统计 MongoDB 数据库中的集合数量。' },
@@ -136,6 +138,11 @@ function isAdminOnlyAgentTool(tool) {
 
 function agentStepTitle(step) {
     const raw = step?.title || step?.type || '';
+    if (raw === 'plan') return '任务规划';
+    if (raw === 'flow_rule') return '流程规则';
+    if (raw === 'tool') return `调用工具：${agentToolTitle(step?.tool_name)}`;
+    if (raw === 'dag_node') return `工作流节点：${agentToolTitle(step?.tool_name)}`;
+    if (raw === 'control') return '任务控制';
     if (raw === 'Planning') return '规划下一步';
     if (raw.startsWith('Tool failed: ')) return `工具调用失败：${agentToolTitle(raw.replace('Tool failed: ', ''))}`;
     if (raw.startsWith('Tool: ')) return `调用工具：${agentToolTitle(raw.replace('Tool: ', ''))}`;

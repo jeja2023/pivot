@@ -58,7 +58,7 @@
                 controlHtml = `
                     <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}">
                         <option value="">— 选择已发布工作流 —</option>
-                        ${workflows.map(item => `<option value="${dagEscapeAttr(item.id)}" ${String(item.id) === String(value ?? '') ? 'selected' : ''}>${dagEscapeHtml(`${item.name} · v${item.published_version}`)}</option>`).join('')}
+                        ${workflows.map(item => `<option value="${dagEscapeAttr(item.id)}" ${String(item.id) === String(value ?? '') ? 'selected' : ''}>${dagEscapeHtml(`${item.name} · 已发布版本 ${item.published_version}`)}</option>`).join('')}
                     </select>
                 `;
             } else if (type === 'boolean') {
@@ -102,7 +102,7 @@
             const usageHint = type === 'array' || type === 'object'
                 ? '适合填结构化数据，也可以直接插入上游结果行。'
                 : isTextualSchemaField(name, schema)
-                    ? '适合填文字、提示词、SQL 或 Markdown。'
+                    ? '适合填写文字、提示词、查询语句或格式化文本。'
                     : '可以直接填写，必要时也能插入变量。';
             const suggestionHtml = suggestions.length
                 ? `
@@ -160,7 +160,7 @@
                     </div>
                     <div class="pivot-dag-wizard-assist-grid">
                         <label>
-                            <span>Schema / 命名空间</span>
+                            <span>数据库模式 / 命名空间</span>
                             <input class="form-input" data-pivot-dag-assist-schema value="${dagEscapeAttr(initialInput.schema || '')}" placeholder="可选，例如 public / dbo">
                         </label>
                         ${canLoadTables ? `

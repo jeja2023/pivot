@@ -260,6 +260,63 @@ test('agent step details render structured tool output as readable summaries', (
     assert.match(llmHtml, /responseFormat/);
 });
 
+test('agent step details unwrap double-serialized MCP envelopes', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const rows = Array.from({ length: 7 }, (_, index) => ({
+        TABLE_SCHEMA: 'pivot',
+        TABLE_NAME: `table_${index + 1}`,
+        TABLE_TYPE: 'BASE TABLE'
+    }));
+    const envelope = {
+        content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }]
+    };
+    const storedOutput = JSON.stringify(JSON.stringify(envelope, null, 2));
+    const html = sandbox.agentStepMarkup({
+        step_index: 2,
+        status: 'completed',
+        type: 'tool',
+        tool_name: 'mcp.1.db.list_tables',
+        duration_ms: 586,
+        output: storedOutput
+    });
+    const readable = html.slice(0, html.indexOf('agent-step-raw'));
+    assert.match(readable, /调用工具：列出数据表/);
+    assert.match(readable, /agent-result-table/);
+    assert.match(readable, /\u6570\u636e\u5e93\u6a21\u5f0f/);
+    assert.match(readable, /\u5df2\u5c55\u793a\u524d/);
+    assert.match(readable, />数据表</);
+    assert.doesNotMatch(readable, /BASE TABLE/);
+    assert.doesNotMatch(readable, /&quot;content&quot;|TABLE_SCHEMA/);
+});
+
+test('agent step metadata renders finish reason and tool calls in Chinese', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const html = sandbox.agentStepMarkup({
+        step_index: 1,
+        status: 'completed',
+        type: 'plan',
+        duration_ms: 6884,
+        output: {
+            finish_reason: 'tool_calls',
+            tool_calls: [{
+                id: 'call_1',
+                name: 'db.describe_table',
+                arguments: { table: 'table_account' }
+            }]
+        }
+    });
+    const readable = html.slice(0, html.indexOf('agent-step-raw'));
+    assert.match(readable, /结束原因/);
+    assert.match(readable, /调用工具/);
+    assert.match(readable, /工具调用/);
+    assert.match(readable, /标识/);
+    assert.match(readable, /参数/);
+    assert.match(readable, /查看表结构/);
+    assert.match(html, /<strong>1\. 任务规划<\/strong>/);
+    assert.doesNotMatch(readable, /Finish Reason|Tool Calls|Arguments/);
+    assert.doesNotMatch(html, /\bplan\b/);
+});
+
 test('agent result renderer turns JSON payloads into readable UI', () => {
     const sandbox = createAgentWorkbenchSandbox();
     const payload = JSON.stringify({
@@ -424,12 +481,12 @@ test('agent preview run display strips redundant report heading', () => {
 test('agent DAG inspector uses modal entry points for parameter editing', () => {
     const source = readDagEditorSourceBundle();
     assert.match(source, /data-pivot-dag-open-wizard="1">配置参数/);
-    assert.match(source, /data-pivot-dag-open-json="1">编辑 JSON/);
+    assert.match(source, /data-pivot-dag-open-json="1">编辑高级参数/);
     assert.match(source, /data-pivot-dag-node-id-display/);
     assert.match(source, /readonly aria-readonly="true"/);
     assert.doesNotMatch(source, /data-pivot-dag-field="id"/);
     assert.match(source, /function friendlyFieldLabel/);
-    assert.match(source, /数据库 Schema \/ 命名空间/);
+    assert.match(source, /数据库命名空间/);
     assert.match(source, /pivot-dag-tool-meta-badges/);
     assert.match(source, /pivot-dag-tool-meta-body/);
     assert.match(source, /const upstreamNodes = getDependencyCandidateNodes\(node\)/);
@@ -501,7 +558,7 @@ test('prompt library is retired from user-facing workspaces', () => {
 
 test('agent stats chart wizard explains optional database schema field', () => {
     const source = readDagEditorSourceBundle();
-    assert.match(source, /Schema \/ 命名空间（可选）/);
+    assert.match(source, /数据库模式 \/ 命名空间（可选）/);
     assert.match(source, /SQLite\/MySQL 通常留空/);
     assert.match(source, /不确定就留空，系统会使用当前连接的默认数据库范围/);
     assert.match(source, /正在读取默认范围的数据表/);
@@ -533,7 +590,7 @@ test('agent DAG tool meta card uses compact full-width summary styling', () => {
 test('agent DAG parameter editor localizes common tool input fields', () => {
     const source = readDagEditorSourceBundle();
     assert.match(source, /query: '检索问题 \/ 查询条件'/);
-    assert.match(source, /sql: 'SQL 语句'/);
+    assert.match(source, /sql: '查询语句'/);
     assert.match(source, /topK: '返回片段数'/);
     assert.match(source, /candidateLimit: '候选数量上限'/);
     assert.match(source, /columns: '字段列表'/);
@@ -1167,7 +1224,7 @@ test('agent model visibility excludes other users private models', () => {
         goal: '检查其他用户私有模型是否可用于自动化',
         modelId: privateId,
         maxSteps: 3
-    }), /accessible model/);
+    }), /可用的模型/);
 });
 
 test('enterprise agent templates schedules artifacts and resume are user scoped', () => {

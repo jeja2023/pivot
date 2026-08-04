@@ -14,9 +14,9 @@ function agentWorkflowVersionText(item) {
     const currentVersion = Number(item?.current_version || 0);
     const publishedVersion = Number(item?.published_version || 0);
     const parts = [];
-    if (currentVersion > 0) parts.push(`v${currentVersion}`);
+    if (currentVersion > 0) parts.push(`版本 ${currentVersion}`);
     parts.push(`${agentWorkflowNodeCount(item)} 节点`);
-    parts.push(publishedVersion > 0 ? `已发布 v${publishedVersion}` : '未发布');
+    parts.push(publishedVersion > 0 ? `已发布版本 ${publishedVersion}` : '未发布');
     return parts.join(' · ');
 }
 
@@ -24,8 +24,8 @@ function agentWorkflowPickerTriggerMetaText(item) {
     const currentVersion = Number(item?.current_version || 0);
     const publishedVersion = Number(item?.published_version || 0);
     const parts = [];
-    if (currentVersion > 0) parts.push(`v${currentVersion}`);
-    parts.push(publishedVersion > 0 ? `已发布 v${publishedVersion}` : '未发布');
+    if (currentVersion > 0) parts.push(`版本 ${currentVersion}`);
+    parts.push(publishedVersion > 0 ? `已发布版本 ${publishedVersion}` : '未发布');
     return parts.join(' · ');
 }
 
@@ -168,7 +168,7 @@ function renderAgentWorkflowLibrary() {
     const editorOptions = [
         '<option value="">选择已保存工作流</option>',
         ...agentWorkflowsCache.map(item => {
-            const version = item.current_version ? ` v${item.current_version}` : '';
+            const version = item.current_version ? ` 版本 ${item.current_version}` : '';
             return `<option value="${agentEscape(item.id)}">${agentEscape(item.name)}${agentEscape(version)}</option>`;
         })
     ].join('');
@@ -301,7 +301,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     try {
         parsed = parseAgentWorkflowText();
     } catch (e) {
-        showToast('工作流 JSON 格式不正确', 'error');
+        showToast('工作流配置格式不正确', 'error');
         return null;
     }
     // 结构错误会导致发布或运行结果不可预测，因此保存时直接阻断。
@@ -336,7 +336,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     agentWorkflowDraftName = data.workflow.name || workflowName;
     agentWorkflowDraftDescription = data.workflow.description || currentAgentWorkflowDescription();
     await loadAgentWorkflows();
-    if (showSuccess) showToast(`工作流已保存：v${data.workflow.current_version || 1}`, 'success');
+    if (showSuccess) showToast(`工作流已保存：版本 ${data.workflow.current_version || 1}`, 'success');
     return data.workflow;
 }
 
@@ -406,7 +406,7 @@ async function publishSelectedAgentWorkflow(version = 'current') {
     agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
     agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;
     await loadAgentWorkflows();
-    showToast(`工作流已发布：v${data.workflow.published_version || data.workflow.current_version || ''}`, 'success');
+    showToast(`工作流已发布：版本 ${data.workflow.published_version || data.workflow.current_version || ''}`, 'success');
     return data.workflow;
 }
 
@@ -417,7 +417,7 @@ function persistAgentWorkflow(key, label) {
     try {
         parsed = parseAgentWorkflowText(raw);
     } catch (e) {
-        showToast('工作流 JSON 格式不正确', 'error');
+        showToast('工作流配置格式不正确', 'error');
         return false;
     }
     try {

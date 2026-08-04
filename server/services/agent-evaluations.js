@@ -290,11 +290,11 @@ function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) 
     }
     const totalTokens = Number(run.total_tokens || 0);
     if (assertions.maxTokens > 0) {
-        addRule(rules, 'max_tokens', `Token 不超过 ${assertions.maxTokens}`, totalTokens <= assertions.maxTokens, totalTokens);
+        addRule(rules, 'max_tokens', `模型用量不超过 ${assertions.maxTokens}`, totalTokens <= assertions.maxTokens, totalTokens);
     }
     const parsedOutput = parseOutputForSchema(output);
     if (assertions.requireJson) {
-        addRule(rules, 'valid_json', '结果是有效 JSON', typeof parsedOutput !== 'string', typeof parsedOutput);
+        addRule(rules, 'valid_json', '结果是有效结构化数据', typeof parsedOutput !== 'string', typeof parsedOutput);
     }
     if (schemaHasRules(assertions.outputSchema)) {
         const schemaErrors = [];

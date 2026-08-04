@@ -108,7 +108,7 @@ const DAG_NODE_VISUAL = {
     'agent.delegate': { svgIcon: 'users',     theme: 'delegate', label: '委派智能体' },
     'agent.handoff':  { svgIcon: 'shuffle',   theme: 'handoff',  label: '智能体交接' },
     'agent.code':     { svgIcon: 'code',      theme: 'code',     label: '代码执行' },
-    'agent.http':     { svgIcon: 'globe',     theme: 'http',     label: 'HTTP 请求' },
+    'agent.http':     { svgIcon: 'globe',     theme: 'http',     label: '网络请求' },
     'agent.merge':    { iconText: '⊕',        theme: 'merge',    label: '变量聚合' },
     'workflow.input': { svgIcon: 'log-in',    theme: 'input',    label: '工作流输入' },
     'workflow.output':{ svgIcon: 'log-out',   theme: 'output',   label: '工作流输出' },
@@ -132,7 +132,7 @@ function dagNodeVisual(toolName) {
     if (key.startsWith('sessions.'))   return { svgIcon: 'message',   theme: 'session', label: '会话' };
     if (key.startsWith('knowledge.'))  return { svgIcon: 'book-open', theme: 'rag',     label: '知识库' };
     if (key.startsWith('report.'))     return { svgIcon: 'file-text', theme: 'report',  label: '报告' };
-    if (key.startsWith('mcp.'))        return { svgIcon: 'plug',      theme: 'mcp',     label: 'MCP 工具' };
+    if (key.startsWith('mcp.'))        return { svgIcon: 'plug',      theme: 'mcp',     label: '外部工具' };
     return { iconText: '▸', theme: 'default', label: '' };
 }
 

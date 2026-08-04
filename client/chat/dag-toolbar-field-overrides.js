@@ -7,8 +7,8 @@
 
 const FIELD_LABEL_OVERRIDES = {
         aggregation: '聚合方式',
-        apiKey: 'API 密钥',
-        api_key: 'API 密钥',
+        apiKey: '访问密钥',
+        api_key: '访问密钥',
         body: '请求内容',
         candidateLimit: '候选数量上限',
         candidate_limit: '候选数量上限',
@@ -36,7 +36,7 @@ const FIELD_LABEL_OVERRIDES = {
         leftPath: '左侧文件路径',
         left_path: '左侧文件路径',
         limit: '返回数量',
-        markdown: 'Markdown 内容',
+        markdown: '格式化内容',
         matchMode: '匹配方式',
         match_mode: '匹配方式',
         maxChars: '最大字符数',
@@ -53,7 +53,7 @@ const FIELD_LABEL_OVERRIDES = {
         model: '模型',
         path: '文件路径',
         pipeline: '聚合管道',
-        pretty: '美化 JSON',
+        pretty: '美化结构化数据',
         prompt: '提示词',
         query: '检索问题 / 查询条件',
         renameMap: '字段重命名规则',
@@ -65,14 +65,14 @@ const FIELD_LABEL_OVERRIDES = {
         rows: '数据行',
         sampleRows: '样本行数',
         sample_rows: '样本行数',
-        schema: '数据库 Schema / 命名空间',
+        schema: '数据库命名空间',
         sections: '报告段落',
         sheet: '工作表',
         sortBy: '排序依据',
         sort_by: '排序依据',
         sortOrder: '排序方向',
         sort_order: '排序方向',
-        sql: 'SQL 语句',
+        sql: '查询语句',
         stream: '流式输出',
         subtitle: '副标题',
         systemPrompt: '系统提示词',
@@ -144,7 +144,7 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             right_path: '右侧报表路径'
         },
         'db.run_readonly_query': {
-            sql: '高级 SQL 语句',
+            sql: '高级查询语句',
             limit: '最大返回行数'
         },
         'db.group_count': {
@@ -178,7 +178,7 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             pretty: '格式化输出'
         },
         'format.extract_json': {
-            text: '包含 JSON 的文本'
+            text: '包含结构化数据的文本'
         },
         'format.normalize_text': {
             text: '待规范化文本'
@@ -197,7 +197,7 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             target: '接收对象',
             targetType: '接收对象类型',
             target_type: '接收对象类型',
-            markdown: 'Markdown 消息'
+            markdown: '格式化消息'
         }
     };
 
@@ -210,8 +210,8 @@ const FIELD_DESCRIPTION_OVERRIDES = {
         chartType: '选择柱状图、折线图、面积图或饼图等展示方式。',
         chart_type: '选择柱状图、折线图、面积图或饼图等展示方式。',
         collection: 'MongoDB 集合名称。',
-        columns: '需要读取、展示或输出的字段列表，可填写 JSON 数组。',
-        filters: '按字段设置筛选条件，可填写 JSON 对象。',
+        columns: '需要读取、展示或输出的字段列表，可填写结构化数组。',
+        filters: '按字段设置筛选条件，可填写结构化对象。',
         groupBy: '选择要按哪个字段分组统计。',
         group_by: '选择要按哪个字段分组统计。',
         groupAlias: '结果里分组字段的输出名称，通常保持默认即可。',
@@ -222,7 +222,7 @@ const FIELD_DESCRIPTION_OVERRIDES = {
         countAlias: '结果里数量字段的输出名称，通常保持默认即可。',
         count_alias: '结果里数量字段的输出名称，通常保持默认即可。',
         limit: '限制最多返回多少条结果，避免一次拉取过多数据。',
-        markdown: '填写 Markdown 正文，支持插入上游变量。',
+        markdown: '填写格式化正文，支持插入上游变量。',
         matchMode: '选择精确匹配或包含匹配。',
         match_mode: '选择精确匹配或包含匹配。',
         maxChars: '限制每段或每次处理的最大字符数。',
@@ -231,39 +231,39 @@ const FIELD_DESCRIPTION_OVERRIDES = {
         max_headings: '最多提取多少个标题。',
         maxItems: '最多提取多少个条目。',
         max_items: '最多提取多少个条目。',
-        maxTokens: '限制模型最多输出多少 token。',
-        max_tokens: '限制模型最多输出多少 token。',
+        maxTokens: '限制模型最多输出多少内容。',
+        max_tokens: '限制模型最多输出多少内容。',
         message: '要发送给目标用户或群组的正文。',
         model: '选择或填写本节点调用的模型名称。',
         path: '报表、数据文件或文档的路径。',
-        pipeline: 'MongoDB 聚合管道，填写 JSON 数组。',
-        pretty: '开启后输出带缩进的 JSON，便于阅读。',
+        pipeline: 'MongoDB 聚合管道，填写结构化数组。',
+        pretty: '开启后输出带缩进的结构化数据，便于阅读。',
         prompt: '写清任务目标、口径、约束和期望输出格式。',
         query: '输入要检索或查询的问题、关键词或条件。',
-        renameMap: '字段旧名到新名的映射，填写 JSON 对象。',
-        rename_map: '字段旧名到新名的映射，填写 JSON 对象。',
+        renameMap: '字段旧名到新名的映射，填写结构化对象。',
+        rename_map: '字段旧名到新名的映射，填写结构化对象。',
         responseFormat: '指定模型或工具返回内容的格式。',
         response_format: '指定模型或工具返回内容的格式。',
         rows: '表格数据行，通常引用上游节点的 rows 输出。',
         sampleRows: '读取文件摘要时展示的样本行数量。',
         sample_rows: '读取文件摘要时展示的样本行数量。',
         schema: '可选。用于限定数据库命名空间/模式，例如 PostgreSQL 的 public 或 SQL Server 的 dbo；MySQL、SQLite 通常留空。',
-        sections: '报告段落配置，填写 JSON 数组。',
+        sections: '报告段落配置，填写结构化数组。',
         sheet: 'Excel 工作表名称；CSV 文件通常留空。',
         sortBy: '选择按标签还是按数值排序。',
         sort_by: '选择按标签还是按数值排序。',
         sortOrder: '统计结果按升序或降序排列。',
         sort_order: '统计结果按升序或降序排列。',
-        sql: '只允许填写 SELECT、WITH、SHOW、DESCRIBE、EXPLAIN 等只读语句。',
+        sql: '只允许填写安全的只读查询语句。',
         stream: '开启后可流式返回内容；工作流节点通常保持默认即可。',
         table: '选择或输入要读取的数据表。',
         target: '要发送通知的用户、群组或目标标识。',
         targetType: '选择目标是用户还是群组。',
         target_type: '选择目标是用户还是群组。',
         temperature: '控制模型回复随机性，数值越高越发散。',
-        text: '待处理的普通文本或 Markdown 内容。',
+        text: '待处理的普通文本或格式化内容。',
         title: '输出内容、图表、报告或消息标题。',
-        tools: '可供模型或下游步骤调用的工具列表，填写 JSON 数组。',
+        tools: '可供模型或下游步骤调用的工具列表，填写结构化数组。',
         topK: '最终返回给下游节点的片段数量。',
         top_k: '最终返回给下游节点的片段数量。',
         trimStrings: '开启后会去除文本字段首尾空格。',
@@ -292,7 +292,7 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             model: '必填。填写本节点调用的模型 ID 或 model_name，工作流运行会从这里读取模型。',
             maxSteps: '本工作流运行允许的最大步骤数，作为运行任务的上限。',
             max_steps: '本工作流运行允许的最大步骤数，作为运行任务的上限。',
-            responseFormat: '选择 Markdown、纯文本或 JSON，JSON 模式会要求模型只返回合法 JSON。'
+            responseFormat: '选择格式化内容、纯文本或结构化数据；结构化模式会校验返回格式。'
         },
         'sessions.search': {
             query: '输入要查找的历史会话关键词或问题。'
@@ -326,7 +326,7 @@ const FIELD_PLACEHOLDER_OVERRIDES = {
         instructions: '写清执行要求和输出口径',
         language: '例如 中文',
         limit: '例如 50',
-        markdown: '填写 Markdown 正文，或插入上游变量',
+        markdown: '填写格式化正文，或插入上游变量',
         maxChars: '例如 2000',
         max_chars: '例如 2000',
         maxHeadings: '例如 20',
@@ -338,18 +338,18 @@ const FIELD_PLACEHOLDER_OVERRIDES = {
         message: '填写要发送的消息内容',
         model: '填写模型名称',
         path: '选择或输入文件路径',
-        pipeline: '填写 JSON 数组，例如 [{"$limit": 20}]',
+        pipeline: '填写结构化数组，例如 [{"$limit": 20}]',
         prompt: '写清任务、口径和输出要求',
         query: '输入要检索的问题或关键词',
         renameMap: '例如 {"old_name": "new_name"}',
         rename_map: '例如 {"old_name": "new_name"}',
-        responseFormat: '例如 json 或 markdown',
-        response_format: '例如 json 或 markdown',
-        rows: '插入上游 rows 变量，或粘贴 JSON 数组',
+        responseFormat: '例如结构化数据或格式化文本',
+        response_format: '例如结构化数据或格式化文本',
+        rows: '插入上游数据行变量，或粘贴结构化数组',
         sampleRows: '例如 20',
         sample_rows: '例如 20',
         schema: '不确定就留空；PostgreSQL 可填 public，SQL Server 可填 dbo',
-        sections: '填写报告段落 JSON 数组',
+        sections: '填写报告段落结构化数组',
         sheet: '输入工作表名，CSV 可留空',
         sql: 'SELECT ... FROM ...',
         stream: '不确定时保持默认',
@@ -358,7 +358,7 @@ const FIELD_PLACEHOLDER_OVERRIDES = {
         temperature: '0 到 2，越高越发散',
         text: '输入文本，或插入上游变量',
         title: '不填则自动生成',
-        tools: '填写 JSON 数组，或留空使用默认工具',
+        tools: '填写工具列表，或留空使用默认工具',
         topK: '例如 5',
         top_k: '例如 5',
         value: '输入内容，或插入上游变量',
@@ -387,7 +387,7 @@ const TOOL_FIELD_PLACEHOLDER_OVERRIDES = {
             max_steps: '例如 20',
             maxTokens: '例如 1200',
             max_tokens: '例如 1200',
-            responseFormat: 'markdown / text / json'
+            responseFormat: '格式化文本 / 纯文本 / 结构化数据'
         },
         'sessions.search': {
             query: '输入会话关键词'

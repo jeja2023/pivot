@@ -525,13 +525,13 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             ];
             const supervisor = {
                 id: supervisorId,
-                title: 'Supervisor 裁决',
+                title: '主管智能体裁决',
                 tool: 'agent.llm',
                 input: {
                     model,
                     maxSteps: 20,
-                    systemPrompt: '你是多智能体团队的 Supervisor。请核对各专家的事实依据与分歧，拒绝未经支持的结论，并形成最终可交付结果。',
-                    prompt: `工作流目标：\n{{goal}}\n\n研究员 Handoff：\n{{nodes.${researcherId}.output.handoff.summary}}\n\n审阅员 Handoff：\n{{nodes.${reviewerId}.output.handoff.summary}}\n\n请先解决分歧，再给出结论、依据、风险和下一步。`,
+                    systemPrompt: '你是多智能体团队的主管智能体。请核对各专家的事实依据与分歧，拒绝未经支持的结论，并形成最终可交付结果。',
+                    prompt: `工作流目标：\n{{goal}}\n\n研究员交接摘要：\n{{nodes.${researcherId}.output.handoff.summary}}\n\n审阅员交接摘要：\n{{nodes.${reviewerId}.output.handoff.summary}}\n\n请先解决分歧，再给出结论、依据、风险和下一步。`,
                     responseFormat: 'markdown', temperature: 0.1, maxTokens: 1600
                 },
                 inputSchema: {}, outputSchema: { type: 'string' },
@@ -542,7 +542,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             setSelection([supervisorId], supervisorId);
             render();
             flushOut();
-            window.showToast?.('已添加并行专家与 Supervisor，可继续调整角色、模型和交接契约', 'success');
+            window.showToast?.('已添加并行专家与主管智能体，可继续调整角色、模型和交接契约', 'success');
         };
 
         const resetLayout = () => {

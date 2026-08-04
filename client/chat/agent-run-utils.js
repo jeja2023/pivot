@@ -127,7 +127,7 @@ function agentDownload(url) {
 function formatAgentTokenUsage(run) {
     const total = Number(run?.total_tokens || 0);
     if (!total) return '';
-    return `Token ${total}（入 ${Number(run.input_tokens || 0)} / 出 ${Number(run.output_tokens || 0)}）`;
+    return `模型用量 ${total}（输入 ${Number(run.input_tokens || 0)} / 输出 ${Number(run.output_tokens || 0)}）`;
 }
 
 function formatAgentCompactCount(value) {
@@ -182,14 +182,21 @@ function agentShortText(value, max = 260) {
 
 function agentParsePayload(payload) {
     if (typeof payload !== 'string') return payload;
-    const text = payload.trim();
-    if (!text) return '';
-    if (!text.startsWith('{') && !text.startsWith('[')) return text;
-    try {
-        return JSON.parse(text);
-    } catch (e) {
-        return text;
+    let candidate = payload.trim();
+    if (!candidate) return '';
+    for (let depth = 0; depth < 3; depth += 1) {
+        if (!candidate.startsWith('{') && !candidate.startsWith('[') && !candidate.startsWith('"')) return candidate;
+        try {
+            const parsed = JSON.parse(candidate);
+            if (typeof parsed !== 'string') return parsed;
+            const next = parsed.trim();
+            if (!next || next === candidate) return parsed;
+            candidate = next;
+        } catch (e) {
+            return candidate;
+        }
     }
+    return candidate;
 }
 
 function agentSummarizeInput(input) {

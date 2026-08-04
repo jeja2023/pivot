@@ -1141,6 +1141,9 @@ body.pivot-desktop-runtime #app {
     height: calc(100dvh - 30px);
     margin-top: 30px;
 }
+body.pivot-desktop-runtime:not(.auth-active) #app {
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
 body.pivot-desktop-runtime.auth-active #app {
     margin-top: 0;
 }
@@ -1156,12 +1159,15 @@ body.pivot-desktop-runtime .desktop-window-drag-region {
     display: flex;
     align-items: center;
     background: #ffffff;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    border-bottom: 0;
     -webkit-app-region: drag;
     z-index: 2600;
 }
 body.pivot-desktop-runtime.auth-active .desktop-window-drag-region {
     display: none;
+}
+body.pivot-desktop-runtime:not(.auth-active) .modal-overlay {
+    inset: 30px 0 0;
 }
 body.pivot-desktop-runtime .desktop-app-menu-trigger,
 body.pivot-desktop-runtime button,

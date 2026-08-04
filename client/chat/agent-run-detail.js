@@ -74,6 +74,13 @@ function agentTraceDuration(value) {
     return `${Math.round(ms)} 毫秒`;
 }
 
+function agentTraceDisplayName(span = {}) {
+    const name = String(span.name || '').trim();
+    if (!name) return '运行步骤';
+    if (/^(?:mcp\.\d+\.)?[a-z][\w-]*(?:\.[\w-]+)+$/i.test(name)) return agentToolTitle(name);
+    return name;
+}
+
 function agentTraceTimestamp(value) {
     const text = String(value || '').trim();
     if (!text) return 0;
@@ -136,10 +143,10 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
                         <article class="agent-trace-item ${status}">
                             <div class="agent-trace-item-meta">
                                 <span class="agent-trace-type">${agentEscape(agentTraceTypeLabel(span.span_type))}</span>
-                                <strong>${agentEscape(span.name || '运行步骤')}</strong>
+                                <strong>${agentEscape(agentTraceDisplayName(span))}</strong>
                                 <em>${agentEscape(agentTraceDuration(span.duration_ms))}</em>
                             </div>
-                            <div class="agent-trace-track" aria-label="${agentEscape(span.name || '运行步骤')}，耗时 ${agentEscape(agentTraceDuration(span.duration_ms))}">
+                            <div class="agent-trace-track" aria-label="${agentEscape(agentTraceDisplayName(span))}，耗时 ${agentEscape(agentTraceDuration(span.duration_ms))}">
                                 <span style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></span>
                             </div>
                             ${agentTraceReadableDetail(span)}
@@ -149,6 +156,51 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
             </div>
         </details>
     `;
+}
+
+function agentRunDurationLabel(value) {
+    const ms = Math.max(Number(value) || 0, 0);
+    if (!ms) return '—';
+    if (ms >= 60000) return `${(ms / 60000).toFixed(ms >= 600000 ? 0 : 1)} 分钟`;
+    if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} 秒`;
+    return `${Math.round(ms)} 毫秒`;
+}
+
+function agentRunFriendlySummary(run = {}, progress = {}) {
+    const status = String(run.status || '').toLowerCase();
+    const steps = Number(progress.stepCount || 0);
+    const maxSteps = Number(progress.maxSteps || run.max_steps || 0);
+    if (status === 'queued') return '任务已进入队列，稍后将自动开始。';
+    if (status === 'running') {
+        return maxSteps > 0 ? `正在执行第 ${Math.min(steps + 1, maxSteps)} 步，共 ${maxSteps} 步。` : `正在执行第 ${steps + 1} 步。`;
+    }
+    if (status === 'approval_required') return '任务需要确认工具权限，确认后才会继续。';
+    if (status === 'completed') return `${steps || 0} 个步骤已完成，结果已生成。`;
+    if (status === 'completed_with_errors') return `${steps || 0} 个步骤已完成，但有部分步骤需要留意。`;
+    if (status === 'error') return '任务未能完成，请查看失败步骤并重试。';
+    if (status === 'cancelled') return '任务已停止，当前没有新的结果。';
+    return agentStatusLabel(status) || '任务状态已更新。';
+}
+
+function agentRunActionMarkup(run = {}, options = {}) {
+    const { isPreview = false, canCancel = false, canApprove = false, canRerun = false,
+        canCreateWorkflowDraft = false, checkpoints = {}, isActive = false } = options;
+    const actions = [];
+    if (canCancel) actions.push(`<button class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止任务</button>`);
+    if (canApprove) actions.push(`<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准并继续</button>`);
+    if (canApprove) actions.push(`<button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝工具</button>`);
+    if (canRerun) actions.push(`<button class="btn-primary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>`);
+    if (!isPreview && !isActive && (run.final_answer || run.error_message)) {
+        actions.push(`<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>`);
+    }
+    if (!isPreview && !isActive) actions.push(`<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出结果</button>`);
+    const secondary = [];
+    if (canRerun) {
+        secondary.push(`<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">${Number(checkpoints.total || 0) ? '从检查点继续' : '从断点继续'}</button>`);
+    }
+    if (canCreateWorkflowDraft) secondary.push(`<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
+    if (!isPreview && !isActive) secondary.push(`<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
+    return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary>更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
 }
 
 function closeAgentRunDetailModal() {
@@ -205,47 +257,79 @@ window.openAgentRun = async function(runId, options = {}) {
     const showDagNodeDetails = dagNodes.length > 0;
     const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
-    if (title) title.textContent = isPreview ? `预览运行：${agentPreviewDisplayTitle(agentDisplayTitle(run))}` : agentDisplayTitle(run);
+    if (title) {
+        title.textContent = isPreview ? '工作流预览结果' : '任务执行结果';
+        title.setAttribute('title', agentDisplayTitle(run));
+    }
+    const runStatus = String(run.status || '').toLowerCase();
+    const statusLabel = agentStatusLabel(runStatus);
+    const friendlySummary = agentRunFriendlySummary(run, progress);
+    const durationLabel = agentRunDurationLabel(progress.totalDurationMs);
+    const friendlyTokenUsage = tokenUsage
+        ? tokenUsage.replace(/^模型用量\s*/u, '总计 ')
+        : '';
+    const actionMarkup = agentRunActionMarkup(run, {
+        isPreview,
+        canCancel,
+        canApprove,
+        canRerun,
+        canCreateWorkflowDraft,
+        checkpoints,
+        isActive: isAgentRunActive(run.status)
+    });
+    const processExpanded = ['error', 'approval_required', 'running'].includes(runStatus) ? ' open' : '';
+    const technicalSummary = [
+        `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
+        `<div><dt>工具权限</dt><dd>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</dd></div>`,
+        `<div><dt>工具调用</dt><dd>${Number(progress.toolCount || 0)} 次</dd></div>`,
+        `<div><dt>检查点</dt><dd>${Number(checkpoints.total || 0)} 个</dd></div>`,
+        friendlyTokenUsage ? `<div><dt>模型用量</dt><dd>${agentEscape(friendlyTokenUsage)}</dd></div>` : ''
+    ].join('');
     PivotSafeHtml.setHtml(detail, `
-        <div class="agent-progress-summary">
-            <div class="agent-progress-bar"><span style="width: ${progressPercent}%"></span></div>
-            <div class="agent-progress-meta">
-                <span>${agentEscape(progressLabel)}</span>
-                <span>工具 ${Number(progress.toolCount || 0)}</span>
-                <span>错误 ${Number(progress.errorCount || 0)}</span>
-                <span>检查点 ${Number(checkpoints.total || 0)}</span>
-                <span>耗时 ${Number(progress.totalDurationMs || 0)} 毫秒</span>
-                <span>${agentEscape(agentRunModeLabel(run.run_mode))}</span>
-                <span>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</span>
-                ${tokenUsage ? `<span>${agentEscape(tokenUsage)}</span>` : ''}
-                ${canCancel ? `<button class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止</button>` : ''}
-                ${canApprove ? `<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准工具</button><button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝</button>` : ''}
-                ${canRerun ? `<button class="btn-secondary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>` : ''}
-                ${canRerun ? `<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}" title="${Number(checkpoints.total || 0) ? `从最近的 ${Number(checkpoints.total)} 个持久化检查点恢复上下文` : '当前任务没有可用检查点，将按历史错误上下文续跑'}">${Number(checkpoints.total || 0) ? '从检查点续跑' : '断点续跑'}</button>` : ''}
-                ${canCreateWorkflowDraft ? `<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>` : ''}
-                ${!isPreview && (run.final_answer || run.error_message) ? `<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>` : ''}
-                ${!isPreview && !isAgentRunActive(run.status) ? `<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>` : ''}
-                ${!isPreview ? `<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出</button>` : ''}
+        <section class="agent-run-overview ${agentEscape(runStatus)}">
+            <div class="agent-run-overview-top">
+                <div class="agent-run-status-copy">
+                    <span class="agent-run-status-icon" aria-hidden="true"></span>
+                    <div>
+                        <span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span>
+                        <h4>${agentEscape(statusLabel)}</h4>
+                        <p>${agentEscape(friendlySummary)}</p>
+                    </div>
+                </div>
+                <div class="agent-run-actions">${actionMarkup}</div>
             </div>
-        </div>
+            <div class="agent-run-goal"><span>任务目标</span><strong>${agentEscape(agentDisplayTitle(run))}</strong></div>
+            <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
+            <dl class="agent-run-key-metrics">
+                <div><dt>执行步骤</dt><dd>${Number(progress.stepCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>
+                <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
+                <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
+            </dl>
+        </section>
+        <details class="agent-run-technical-summary">
+            <summary><span>运行信息</span><em>${agentEscape(progressLabel)} · ${agentEscape(agentRunModeLabel(run.run_mode))}</em></summary>
+            <dl>${technicalSummary}</dl>
+        </details>
         ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
-        ${renderAgentTrace(trace, run.status)}
         ${visualOutputs}
-        ${showDagNodeDetails ? `
-            <div class="agent-dag-list">
-                <div class="agent-tool-section-head compact">
-                    <strong>工作流节点</strong>
-                    <span>${dagNodes.length} 个节点</span>
-                </div>
-                ${renderAgentDagRunGraph(dagNodes)}
-                ${dagNodes.map(node => agentDagNodeMarkup(node)).join('')}
+        <details class="agent-run-process"${processExpanded}>
+            <summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary>
+            <div class="agent-run-process-body">
+                ${showDagNodeDetails ? `
+                    <div class="agent-dag-list">
+                        ${renderAgentDagRunGraph(dagNodes)}
+                        <div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>
+                        ${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}
+                    </div>
+                ` : ''}
+                ${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}
+                ${showDagNodeDetails ? '' : `<div class="agent-step-list">
+                    ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
+                </div>`}
+                ${renderAgentTrace(trace, run.status)}
             </div>
-        ` : ''}
-        ${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}
-        ${showDagNodeDetails ? '' : `<div class="agent-step-list">
-            ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
-        </div>`}
+        </details>
     `);
     detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
         if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);

@@ -44,7 +44,7 @@ function createDagWizardStatsController(ctx) {
                         </select>
                     </label>
                     <label class="agent-workflow-create-field pivot-dag-stats-schema">
-                        <span>Schema / 命名空间（可选）</span>
+                        <span>数据库模式 / 命名空间（可选）</span>
                         <input class="form-input" data-stats-field="schema" placeholder="SQLite/MySQL 通常留空；PostgreSQL 可填 public，SQL Server 可填 dbo">
                         <small>不确定就留空，系统会使用当前连接的默认数据库范围。</small>
                     </label>

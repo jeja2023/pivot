@@ -217,7 +217,7 @@ function exportAgentRun(runId, user, format = 'json') {
             `- 模型：${detail.run.model_name || detail.run.model_id || '-'}`,
             `- 运行模式：${detail.run.run_mode || 'standard'}`,
             `- 工具范围：${detail.run.tool_policy || 'all'}`,
-            `- Token：${Number(detail.run.total_tokens || 0)}`,
+            `- 模型用量：${Number(detail.run.total_tokens || 0)}`,
             '',
             '## 目标',
             detail.run.goal || '',

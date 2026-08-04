@@ -73,7 +73,7 @@ function preflightAgentRun(user, body = {}) {
             try {
                 dag = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current')?.dagSpec;
             } catch (e) {
-                blockers.push(e.message || 'Workflow version is not available.');
+                blockers.push(e.message || '工作流版本不可用。');
             }
         }
         dag = dag || normalizeDagSpec(body.dagSpec || body.dag_spec || {});
@@ -105,8 +105,8 @@ function preflightAgentRun(user, body = {}) {
         }
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
-    if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('Token 预算偏低，可能导致任务提前停止。');
-    if (maxTokenBudget > 0 && estimatedInputTokens > maxTokenBudget) warnings.push('预估输入 Token 已超过预算，建议提高预算或缩小任务范围。');
+    if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('模型用量上限偏低，可能导致任务提前停止。');
+    if (maxTokenBudget > 0 && estimatedInputTokens > maxTokenBudget) warnings.push('预估输入用量已超过上限，建议提高上限或缩小任务范围。');
     const status = blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'ready');
     let readinessScore = 100;
     readinessScore -= blockers.length * 35;

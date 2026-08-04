@@ -115,7 +115,7 @@ function renderAgentEvalRunDetail(payload = {}) {
             <div><span>平均分</span><strong>${Number(summary.averageScore || 0)}</strong>${delta ? `<small class="${Number(delta.score) >= 0 ? 'up' : 'down'}">${Number(delta.score) >= 0 ? '+' : ''}${Number(delta.score)} 对比上次</small>` : '<small>首次基线</small>'}</div>
             <div><span>通过率</span><strong>${Number(summary.passRate || 0)}%</strong>${delta ? `<small class="${Number(delta.passRate) >= 0 ? 'up' : 'down'}">${Number(delta.passRate) >= 0 ? '+' : ''}${Number(delta.passRate)}%</small>` : '<small>首次基线</small>'}</div>
             <div><span>进度</span><strong>${Number(summary.completed || 0)}/${Number(summary.total || 0)}</strong><small>${agentEscape(agentEvalStatusLabel(batch.status))}</small></div>
-            <div><span>总 Token</span><strong>${Number(summary.totalTokens || 0).toLocaleString()}</strong><small>${Number(summary.durationMs || 0).toLocaleString()} 毫秒</small></div>
+            <div><span>总用量</span><strong>${Number(summary.totalTokens || 0).toLocaleString()}</strong><small>${Number(summary.durationMs || 0).toLocaleString()} 毫秒</small></div>
         </div>
         <div class="agent-eval-results">
             ${results.map(result => {
@@ -124,7 +124,7 @@ function renderAgentEvalRunDetail(payload = {}) {
                     <details class="agent-eval-result ${result.passed ? 'passed' : result.status === 'error' ? 'error' : 'failed'}">
                         <summary>
                             <span><strong>${agentEscape(result.case_name)}</strong><small>${agentEscape(agentEvalStatusLabel(result.agent_run_status === 'approval_required' ? 'approval_required' : result.status))}</small></span>
-                            <span><em>${Number(result.score || 0)} 分</em><small>${Number(result.duration_ms || 0)} ms · ${Number(result.total_tokens || 0)} tokens</small></span>
+                            <span><em>${Number(result.score || 0)} 分</em><small>${Number(result.duration_ms || 0)} 毫秒 · ${Number(result.total_tokens || 0)} 用量</small></span>
                         </summary>
                         <div class="agent-eval-result-body">
                             ${result.error_message ? `<div class="agent-eval-error">${agentEscape(result.error_message)}</div>` : ''}
@@ -245,14 +245,14 @@ function renderAgentEvalEditorCases() {
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-forbidden">禁止包含</label><textarea id="agent-eval-case-${index}-forbidden" class="form-input" data-eval-field="forbiddenPhrases" rows="2" placeholder="每行一个禁用短语">${agentEscape((assertions.forbiddenPhrases || []).join('\n'))}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-min-length">最少字数</label><input id="agent-eval-case-${index}-min-length" class="form-input" data-eval-field="minLength" type="number" min="0" value="${Number(assertions.minLength || 0)}"></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-max-duration">最长耗时（毫秒）</label><input id="agent-eval-case-${index}-max-duration" class="form-input" data-eval-field="maxDurationMs" type="number" min="0" value="${Number(assertions.maxDurationMs || 0)}"></div>
-                    <div class="modal-form-field"><label for="agent-eval-case-${index}-max-tokens">Token 上限</label><input id="agent-eval-case-${index}-max-tokens" class="form-input" data-eval-field="maxTokens" type="number" min="0" value="${Number(assertions.maxTokens || 0)}"></div>
-                    <label class="modal-form-check agent-eval-json-toggle"><input data-eval-field="requireJson" type="checkbox" ${assertions.requireJson ? 'checked' : ''}><span>必须是有效 JSON</span></label>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-max-tokens">输出用量上限</label><input id="agent-eval-case-${index}-max-tokens" class="form-input" data-eval-field="maxTokens" type="number" min="0" value="${Number(assertions.maxTokens || 0)}"></div>
+                    <label class="modal-form-check agent-eval-json-toggle"><input data-eval-field="requireJson" type="checkbox" ${assertions.requireJson ? 'checked' : ''}><span>必须是有效的结构化数据</span></label>
                 </div>
                 <details class="agent-eval-case-advanced">
                     <summary>高级断言与工作流变量</summary>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-expected">必须包含的参考文本</label><textarea id="agent-eval-case-${index}-expected" class="form-input" data-eval-field="expectedOutput" rows="2">${agentEscape(item.expected_output || '')}</textarea></div>
-                    <div class="modal-form-field"><label for="agent-eval-case-${index}-variables">工作流输入变量（JSON）</label><textarea id="agent-eval-case-${index}-variables" class="form-input agent-eval-code" data-eval-field="inputVariables" rows="4">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></div>
-                    <div class="modal-form-field"><label for="agent-eval-case-${index}-schema">输出结构（JSON Schema）</label><textarea id="agent-eval-case-${index}-schema" class="form-input agent-eval-code" data-eval-field="outputSchema" rows="5">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-variables">工作流输入变量（结构化配置）</label><textarea id="agent-eval-case-${index}-variables" class="form-input agent-eval-code" data-eval-field="inputVariables" rows="4">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-schema">输出结构（高级配置）</label><textarea id="agent-eval-case-${index}-schema" class="form-input agent-eval-code" data-eval-field="outputSchema" rows="5">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></div>
                 </details>
             </div>
         `;
@@ -278,7 +278,7 @@ function collectAgentEvalEditorCases(throwOnInvalid = true) {
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
                 return parsed;
             } catch (error) {
-                if (throwOnInvalid) throw new Error(`用例 ${index + 1} 的${label}必须是 JSON 对象`);
+                if (throwOnInvalid) throw new Error(`用例 ${index + 1} 的${label}必须是结构化对象`);
                 return {};
             }
         };
@@ -382,7 +382,7 @@ async function openAgentEvalEditor(payload = null, seed = null) {
     const workflows = await loadAgentEvalWorkflows();
     const models = window._cachedAgentModels || [];
     PivotSafeHtml.setHtml(modal.querySelector('#agent-eval-editor-model'), `<option value="">自动选择</option>${models.map(model => `<option value="${agentEscapeAttr(model.id)}">${agentEscape(model.name)}</option>`).join('')}`);
-    PivotSafeHtml.setHtml(modal.querySelector('#agent-eval-editor-workflow'), `<option value="">请选择已发布工作流</option>${workflows.filter(item => item.is_published).map(item => `<option value="${agentEscapeAttr(item.id)}">${agentEscape(item.name)} · v${Number(item.published_version || 0)}</option>`).join('')}`);
+    PivotSafeHtml.setHtml(modal.querySelector('#agent-eval-editor-workflow'), `<option value="">请选择已发布工作流</option>${workflows.filter(item => item.is_published).map(item => `<option value="${agentEscapeAttr(item.id)}">${agentEscape(item.name)} · 版本 ${Number(item.published_version || 0)}</option>`).join('')}`);
     modal.querySelector('#agent-eval-editor-id').value = suite.id || '';
     modal.querySelector('#agent-eval-editor-name').value = suite.name || (seed ? `${agentDisplayTitle(seed)}质量回归` : '');
     modal.querySelector('#agent-eval-editor-description').value = suite.description || '';

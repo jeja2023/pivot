@@ -157,7 +157,7 @@ function openAgentScheduleEditor(scheduleId = '', options = {}) {
     replaceAgentScheduleOptions(
         document.getElementById('agent-schedule-editor-workflow'),
         agentWorkflowsCache.filter(workflow => Number(workflow.published_version || 0) > 0)
-            .map(workflow => ({ value: workflow.id, label: `${workflow.name || '未命名工作流'} · 发布 v${workflow.published_version}` })),
+            .map(workflow => ({ value: workflow.id, label: `${workflow.name || '未命名工作流'} · 已发布版本 ${workflow.published_version}` })),
         '选择已发布工作流'
     );
 

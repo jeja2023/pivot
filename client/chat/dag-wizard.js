@@ -47,7 +47,7 @@ function createDagWizardController(ctx) {
                             <section class="pivot-dag-wizard-overview">
                                 <div class="pivot-dag-wizard-overview-head">
                                     <strong>当前配置</strong>
-                                    <span>表单会写入节点 input；需要写复杂结构时再打开 JSON 编辑。</span>
+                                    <span>表单会保存到节点参数；需要填写复杂结构时再打开高级参数编辑。</span>
                                 </div>
                                 <div class="pivot-dag-wizard-overview-body">
                                     ${renderInputSummary(initialInput, tool, wizardTools)}

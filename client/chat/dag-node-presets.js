@@ -56,7 +56,7 @@ const NODE_PRESET_GROUPS = [
                 base: 'delegate', title: '委派智能体', svgIcon: 'users', theme: 'delegate',
                 desc: '调用独立专家并返回结果与结构化交接', toolName: 'agent.delegate',
                 getInput: ({ selectedNode }) => ({
-                    agentName: '领域专家', role: 'analyst', model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
+                    agentName: '领域专家', role: '分析专家', model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
                     task: '{{goal}}',
                     context: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}',
                     responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200
@@ -67,7 +67,7 @@ const NODE_PRESET_GROUPS = [
                 base: 'handoff', title: '智能体交接', svgIcon: 'shuffle', theme: 'handoff', advanced: true,
                 desc: '统一已有结果的交接格式，不调用模型', toolName: 'agent.handoff',
                 getInput: ({ selectedNode }) => ({
-                    fromAgent: selectedNode?.title || '上游智能体', toAgent: 'Supervisor',
+                    fromAgent: selectedNode?.title || '上游智能体', toAgent: '主管智能体',
                     summary: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '',
                     findings: [], evidence: [], risks: [], openQuestions: [], confidence: 0.7
                 }),
@@ -123,8 +123,8 @@ const NODE_PRESET_GROUPS = [
         group: '集成与数据',
         items: [
             {
-                base: 'http', title: 'HTTP 请求', svgIcon: 'globe', theme: 'http',
-                desc: '调用 REST API，支持安全凭据引用和节点测试', toolName: 'agent.http',
+                base: 'http', title: '网络请求', svgIcon: 'globe', theme: 'http',
+                desc: '调用外部服务接口，支持安全凭据引用和节点测试', toolName: 'agent.http',
                 input: { url: '', method: 'GET', headers: {}, credentialSecret: '', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', body: null, timeoutMs: 10000 },
                 outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
             },
@@ -161,7 +161,7 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'table', title: '表格输出', svgIcon: 'table', theme: 'viz',
-                desc: '把数据行整理成可阅读的 Markdown 表格', toolName: 'viz.build_table',
+                desc: '把数据行整理成清晰易读的表格', toolName: 'viz.build_table',
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], columns: [], title: '', limit: 50 })
             },
             {

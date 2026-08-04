@@ -36,7 +36,7 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
 }
 
 function validateAgentWorkflowRunSettings(settings) {
-    if (!settings?.valid) return '工作流 JSON 格式不正确，无法读取节点配置';
+    if (!settings?.valid) return '工作流配置格式不正确，无法读取节点配置';
     const unconfiguredNode = settings.llmNodes.find(node => !String(
         node?.input?.model || node?.input?.modelId || node?.input?.model_id || ''
     ).trim());
@@ -75,7 +75,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
     if (sourceMode === 'draft') {
         const summary = summaryForSettings;
         if (!summary.valid) {
-            showToast('工作流 JSON 格式不正确，无法预览运行', 'error');
+            showToast('工作流配置格式不正确，无法预览运行', 'error');
             payload._invalid = true;
             return payload;
         }

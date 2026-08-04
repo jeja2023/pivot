@@ -2,7 +2,7 @@
 
 const TOOL_DISPLAY_OVERRIDES = {
         'agent.llm': ['大模型节点', '调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。'],
-        'agent.delegate': ['委派智能体', '调用一次独立模型运行具名专家，返回分析结果并自动附带 Handoff；通常无需另接交接节点。'],
+        'agent.delegate': ['委派智能体', '调用一次独立模型运行具名专家，返回分析结果并自动附带交接信息；通常无需另接交接节点。'],
         'agent.handoff': ['智能体交接', '只整理已有结论、证据、风险和待决问题，不调用模型；用于统一交给下游智能体。'],
         'rag.search': ['知识库检索', '检索当前用户知识库，返回相关片段和来源。'],
         'sessions.search': ['会话检索', '按关键词检索当前用户历史会话。'],
@@ -14,35 +14,35 @@ const TOOL_DISPLAY_OVERRIDES = {
         'db.list_tables': ['列出数据表', '列出当前数据库中可查询的表和视图。'],
         'db.count_tables': ['统计数据表数量', '统计当前数据库中可查询的数据表和视图数量。'],
         'db.describe_table': ['查看表结构', '查看表字段、类型和可空性。'],
-        'db.run_readonly_query': ['只读数据查询', '默认用可视化条件生成只读 SQL，也支持切换到高级 SQL。'],
+        'db.run_readonly_query': ['只读数据查询', '默认用可视化条件生成安全查询，也支持切换到高级查询。'],
         'db.group_count': ['分组统计', '按指定表字段分组并统计数量，用于快速生成分布图。'],
-        'db.list_collections': ['列出集合', '列出 MongoDB 数据库集合。'],
-        'db.count_collections': ['统计集合数量', '统计 MongoDB 数据库中的集合数量。'],
+        'db.list_collections': ['列出集合', '列出文档数据库中的集合。'],
+        'db.count_collections': ['统计集合数量', '统计文档数据库中的集合数量。'],
         'db.sample_collection': ['读取集合样本', '读取集合小样本，辅助理解字段结构。'],
         'db.aggregate': ['Mongo 聚合查询', '执行只读统计分析聚合管道。'],
         'reports.list_files': ['列出报表文件', '列出可访问的报表或数据文件。'],
         'reports.read_file_summary': ['读取报表摘要', '读取报表文件元数据、工作表和样本行。'],
-        'reports.query_table': ['查询报表表格', '按列筛选 CSV/XLS/XLSX 表格行。'],
+        'reports.query_table': ['查询报表表格', '按列筛选逗号分隔文件或电子表格中的数据行。'],
         'reports.compare_files': ['对比报表文件', '对比两个报表文件的工作表、表头和样本行。'],
-        'report.compose': ['组合报告', '将摘要、表格、图表和 Markdown 片段组合成报告。'],
+        'report.compose': ['组合报告', '将摘要、表格、图表和格式化片段组合成报告。'],
         'report.validate_template': ['校验报告模板', '在执行编排前验证报告模板结构。'],
         'viz.build_chart': ['生成图表', '基于表格行生成可渲染图表配置。'],
-        'viz.build_table': ['生成表格', '基于表格行生成 Markdown 表格。'],
+        'viz.build_table': ['生成表格', '基于表格行生成清晰易读的表格。'],
         'data.profile_rows': ['分析表格字段', '分析字段类型、填充率和样本值。'],
         'data.filter_rows': ['筛选表格行', '按精确匹配或包含关系筛选行。'],
         'data.group_summary': ['分组汇总', '按字段分组并计算数量、求和、均值、最小值或最大值。'],
         'data.normalize_fields': ['规范字段', '重命名字段并清理字符串值。'],
-        'doc.extract_outline': ['提取文档大纲', '从文本或 Markdown 中提取轻量大纲。'],
+        'doc.extract_outline': ['提取文档大纲', '从文本或格式化内容中提取轻量大纲。'],
         'doc.extract_key_values': ['提取键值信息', '从文档文本中抽取键值样式信息。'],
         'doc.chunk_text': ['拆分长文本', '按段落拆分长文本供后续分析。'],
-        'format.to_markdown_table': ['转 Markdown 表格', '将行数据转换为 Markdown 表格。'],
-        'format.to_json': ['转 JSON', '将值序列化为紧凑或美化 JSON。'],
-        'format.extract_json': ['提取 JSON', '从文本中提取并解析第一个 JSON 对象或数组。'],
+        'format.to_markdown_table': ['转为表格', '将行数据转换为清晰易读的表格。'],
+        'format.to_json': ['转为结构化数据', '将内容转换为紧凑或易读的结构化数据。'],
+        'format.extract_json': ['提取结构化数据', '从文本中提取并解析第一个结构化对象或数组。'],
         'format.normalize_text': ['规范文本', '清理空白并可选转换大小写。'],
-        'im.list_allowed_targets': ['列出通知目标', '列出当前允许通知的 LAN IM 目标。'],
-        'im.send_user_message': ['发送用户消息', '向允许的 LAN IM 用户发送纯文本消息。'],
-        'im.send_group_message': ['发送群组消息', '向允许的 LAN IM 群组发送纯文本消息。'],
-        'im.send_markdown': ['发送 Markdown 消息', '向允许的 LAN IM 目标发送 Markdown 消息。']
+        'im.list_allowed_targets': ['列出通知目标', '列出当前允许通知的局域网即时通讯目标。'],
+        'im.send_user_message': ['发送用户消息', '向允许的局域网即时通讯用户发送纯文本消息。'],
+        'im.send_group_message': ['发送群组消息', '向允许的局域网即时通讯群组发送纯文本消息。'],
+        'im.send_markdown': ['发送格式化消息', '向允许的局域网消息目标发送格式化内容。']
     };
 
 const TOOL_GROUPS = [
@@ -156,7 +156,7 @@ function renderSelectedToolMeta(tool) {
                 <div class="pivot-dag-tool-meta-body">
                     <p>${dagEscapeHtml(friendlyToolDescription(tool))}</p>
                     <div class="pivot-dag-tool-meta-id">
-                        <span>工具 ID</span>
+                        <span>工具标识</span>
                         <code>${dagEscapeHtml(toolValue(tool))}</code>
                     </div>
                 </div>

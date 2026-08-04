@@ -22,7 +22,7 @@ function mountAgentDagEditor() {
         onNodeSelectionChange: updateAgentDagNodeDrawer,
         onChange: (result) => {
             if (result && result.error === 'invalid_json') {
-                showToast('工作流 JSON 格式不正确', 'error');
+                showToast('工作流配置格式不正确', 'error');
             } else {
                 updateAgentWorkflowRunUi();
                 // 同步刷新运行时输入面板

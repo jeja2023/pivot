@@ -263,7 +263,7 @@ function isRunCancelled(runId) {
 
 function assertRunNotCancelled(runId) {
     if (isRunCancelled(runId)) {
-        const err = new Error('Agent run has been cancelled.');
+        const err = new Error('任务已停止。');
         err.code = 'AGENT_RUN_CANCELLED';
         throw err;
     }
@@ -381,13 +381,13 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
         throw err;
     }
     if (run.run_mode !== 'dag') {
-        const err = new Error('Only DAG runs can be rerun from a node.');
+        const err = new Error('只有工作流任务可以从节点重新运行。');
         err.status = 400;
         throw err;
     }
     const resume = buildDagResumeSpec(run, nodeId);
     if (!resume || !resume.dagSpec.nodes.length) {
-        const err = new Error('No reusable DAG node was found for rerun.');
+        const err = new Error('没有找到可重用的工作流节点。');
         err.status = 400;
         throw err;
     }
@@ -481,7 +481,7 @@ function softDeleteAgentRun(runId, user, reason = '') {
     const run = getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status)) {
-        const err = new Error('Active agent runs cannot be deleted.');
+        const err = new Error('正在执行的任务不能删除。');
         err.status = 400;
         throw err;
     }
@@ -594,7 +594,7 @@ async function runAgent(runId, user) {
     try {
         assertRunUserActive(user);
         const run = getRunForUser(runId, user, { includeDeleted: true });
-        if (!run) throw new Error('Agent run not found.');
+        if (!run) throw new Error('任务不存在。');
         if (run.deleted_at) return;
         ensureAgentTrace(run, {
             runMode: run.run_mode,
@@ -605,7 +605,7 @@ async function runAgent(runId, user) {
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
         const assertRunWithinBudget = () => {
             if (Date.now() > deadline) {
-                const err = new Error('Agent run timed out.');
+                const err = new Error('任务执行超时。');
                 err.code = 'AGENT_TIMEOUT';
                 throw err;
             }
@@ -679,7 +679,7 @@ async function runAgent(runId, user) {
             toolAllowlist: run.tool_allowlist
         });
         if (toolList.length === 0) {
-            throw new Error('No available tools match this agent configuration.');
+            throw new Error('没有可用工具符合当前任务配置。');
         }
         assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
@@ -943,7 +943,7 @@ function recoverAgentRuns() {
     staleRunning.forEach(run => {
         updateRun(run.id, {
             status: 'error',
-            error_message: 'Service restarted or heartbeat timed out; run marked as error.',
+            error_message: '服务已重启或心跳超时，任务已标记为失败。',
             completed_at: now,
             updated_at: now,
             last_heartbeat_at: now,
@@ -1114,7 +1114,7 @@ function createAgentRun({
         if (requestedWorkflowId && requestedWorkflowVersion) {
             const resolvedWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
             if (!resolvedWorkflow) {
-                const err = new Error('Workflow version is not available.');
+                const err = new Error('工作流版本不可用。');
                 err.status = 404;
                 throw err;
             }
@@ -1130,7 +1130,7 @@ function createAgentRun({
         assertWorkflowLlmNodesConfigured(runMetadata.dagSpec);
     }
     const modelCfg = getRunnableModelForUser(effectiveModelId, user);
-    if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('Please choose an accessible model for the agent.');
+    if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');
     const insert = db.prepare(`
         INSERT INTO agent_runs (
             id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,

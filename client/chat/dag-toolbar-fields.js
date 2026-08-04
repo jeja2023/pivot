@@ -71,8 +71,8 @@ function genericFieldDescription(name, schema = {}) {
         const type = normalizeSchemaType(schema);
         if (type === 'boolean') return '开启或关闭该选项。';
         if (type === 'integer' || type === 'number') return '填写数字，具体范围以工具要求为准。';
-        if (type === 'array') return '填写 JSON 数组，或插入上游节点输出。';
-        if (type === 'object') return '填写 JSON 对象，用于传递结构化配置。';
+        if (type === 'array') return '填写结构化列表，或插入上游节点输出。';
+        if (type === 'object') return '填写结构化对象，用于传递高级配置。';
         if (/id$/i.test(String(name || ''))) return '填写对应对象的标识。';
         return '填写文本内容，可直接输入或插入变量。';
     }
@@ -105,9 +105,9 @@ function friendlyFieldPlaceholder(name, schema = {}, required = false, tool = nu
         const globalOverride = readFieldOverride(FIELD_PLACEHOLDER_OVERRIDES, name);
         const type = normalizeSchemaType(schema);
         const fallback = type === 'array'
-            ? '填写 JSON 数组'
+            ? '填写结构化列表'
             : type === 'object'
-                ? '填写 JSON 对象'
+                ? '填写结构化对象'
                 : type === 'integer' || type === 'number'
                     ? '填写数字'
                     : '填写文本';
@@ -132,8 +132,8 @@ function friendlyEnumOptionLabel(name, option) {
             'mode:lower': '转小写',
             'mode:plain': '保持原样',
             'mode:upper': '转大写',
-            'response_format:json': 'JSON',
-            'response_format:markdown': 'Markdown',
+            'response_format:json': '结构化数据',
+            'response_format:markdown': '格式化文本',
             'response_format:text': '纯文本',
             'sort_by:label': '按标签',
             'sort_by:value': '按数值',

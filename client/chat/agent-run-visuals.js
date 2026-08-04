@@ -89,10 +89,10 @@ function buildAgentToolStatsMarkup(steps) {
         const avg = entry.count > 0 ? Math.round(entry.durationMs / entry.count) : 0;
         return `
             <div class="agent-tool-stat-row ${entry.errors > 0 ? 'has-error' : ''}">
-                <span class="agent-tool-stat-name" title="${agentEscape(entry.name)}">${agentEscape(entry.name)}</span>
+                <span class="agent-tool-stat-name" title="${agentEscape(entry.name)}">${agentEscape(agentToolTitle(entry.name))}</span>
                 <div class="agent-tool-stat-bar"><div class="agent-tool-stat-bar-fill" style="width:${widthPct.toFixed(1)}%"></div></div>
                 <span class="agent-tool-stat-count">${entry.count} 次</span>
-                <span class="agent-tool-stat-extra">${entry.durationMs} ms · 均 ${avg} ms${entry.errors > 0 ? ` · <em>${entry.errors} 失败</em>` : ''}</span>
+                <span class="agent-tool-stat-extra">${agentRunDurationLabel(entry.durationMs)} · 平均 ${agentRunDurationLabel(avg)}${entry.errors > 0 ? ` · <em>${entry.errors} 次失败</em>` : ''}</span>
             </div>
         `;
     }).join('');
@@ -140,7 +140,17 @@ function agentDagNodeReadableOutputMarkup(node) {
     return `<div class="agent-dag-node-readable-output${modeClass}">${agentResultReadableMarkup(parsed, { maxRows: 8, maxItems: 10 })}</div>`;
 }
 
-function agentDagNodeMarkup(node) {
+function agentDagNodeDisplayTitle(node = {}) {
+    const title = String(node.title || '').trim();
+    const key = String(node.node_key || '').trim();
+    const tool = String(node.tool_name || '').trim();
+    const looksTechnical = !title
+        || [key, tool, agentToolShortName(tool)].includes(title)
+        || /^(?:mcp\.\d+\.)?[a-z][\w-]*(?:\.[\w-]+)+$/i.test(title);
+    return looksTechnical ? agentToolTitle(tool || key || title) : title;
+}
+
+function agentDagNodeMarkup(node, index = null) {
     const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
@@ -148,57 +158,58 @@ function agentDagNodeMarkup(node) {
     const canRerun = String(node.status || '').toLowerCase() === 'error';
     const status = String(node.status || 'pending').toLowerCase();
     const statusLabel = {
-        completed: '完成',
+        completed: '已完成',
         continued_error: '失败后继续',
         running: '运行中',
-        error: '错误',
+        error: '执行失败',
         skipped: '跳过',
         pending: '待执行'
     }[status] || agentStatusLabel(status);
-    const contractStatus = String(node.contract_status || '');
-    const contractLabel = contractStatus === 'valid'
-        ? '契约通过'
-        : contractStatus === 'invalid'
-            ? '契约未通过'
-            : contractStatus === 'validating'
-                ? '契约校验中'
-                : '';
     const contractIssues = Array.isArray(node.contract_issues) ? node.contract_issues : [];
     const depText = deps.length ? deps.join(', ') : '无依赖';
     const toolName = agentToolTitle(node.tool_name || '-');
     const delegateName = node.tool_name === 'agent.delegate'
         ? String(node.input?.agentName || node.input?.agent_name || '').trim()
         : '';
+    const displayTitle = agentDagNodeDisplayTitle(node);
+    const detailOpen = ['error', 'running'].includes(status) ? ' open' : '';
+    const stepNumber = Number.isInteger(index) ? `<span class="agent-dag-node-index">${index + 1}</span>` : '';
     return `
-        <div class="agent-dag-node ${agentEscape(node.status)}">
-            <div class="agent-dag-node-head">
-                <div class="agent-dag-node-title">
-                    <strong>${agentEscape(node.title || node.node_key)}</strong>
-                    ${node.node_key ? `<span>${agentEscape(node.node_key)}</span>` : ''}
+        <div class="agent-dag-node ${agentEscape(status)}">
+            <details class="agent-dag-node-details"${detailOpen}>
+                <summary class="agent-dag-node-head">
+                    <div class="agent-dag-node-title">
+                        ${stepNumber}
+                        <div><strong>${agentEscape(displayTitle)}</strong><span>${agentEscape(toolName)}</span></div>
+                    </div>
+                    <div class="agent-dag-node-badges">
+                        <span class="agent-dag-node-status ${agentEscape(status)}">${agentEscape(statusLabel)}</span>
+                        <em>${agentEscape(agentRunDurationLabel(node.duration_ms))}</em>
+                    </div>
+                </summary>
+                <div class="agent-dag-node-body">
+                    ${delegateName ? `<div class="agent-dag-node-agent">${agentEscape(delegateName)}</div>` : ''}
+                    ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
+                    ${contractIssues.length ? `<div class="agent-dag-contract-issues"><strong>结果校验未通过</strong><span>${agentEscape(contractIssues.join('；'))}</span></div>` : ''}
+                    ${readableOutput ? `<section class="agent-dag-node-result"><h5>本步骤结果</h5>${readableOutput}</section>` : ''}
+                    <details class="agent-dag-node-technical">
+                        <summary>查看技术信息</summary>
+                        <div class="agent-dag-node-meta">
+                            <span><em>前置步骤</em><strong>${agentEscape(depText)}</strong></span>
+                            <span><em>尝试次数</em><strong>${Number(node.attempt_count || 0)} 次</strong></span>
+                            <span><em>耗时</em><strong>${agentEscape(agentRunDurationLabel(node.duration_ms))}</strong></span>
+                            <span><em>执行条件</em><strong>${agentEscape(node.condition || '无')}</strong></span>
+                        </div>
+                        ${(input || output) ? `
+                            <div class="agent-dag-node-folders">
+                                ${input ? `<details><summary>查看输入数据</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
+                                ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
+                            </div>
+                        ` : ''}
+                    </details>
+                    ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">只重试这一步</button>` : ''}
                 </div>
-                <div class="agent-dag-node-badges">
-                    <span class="agent-dag-node-status ${agentEscape(status)}">${agentEscape(statusLabel)}</span>
-                    ${contractLabel ? `<span class="agent-dag-node-contract ${agentEscape(contractStatus)}">${agentEscape(contractLabel)}</span>` : ''}
-                    ${delegateName ? `<span class="agent-dag-node-agent">${agentEscape(delegateName)}</span>` : ''}
-                    <span class="agent-dag-node-tool">${agentEscape(toolName)}</span>
-                </div>
-            </div>
-            <div class="agent-dag-node-meta">
-                <span><em>依赖</em><strong>${agentEscape(depText)}</strong></span>
-                <span><em>尝试</em><strong>${Number(node.attempt_count || 0)} 次</strong></span>
-                <span><em>耗时</em><strong>${Number(node.duration_ms || 0)} ms</strong></span>
-                <span><em>条件</em><strong>${agentEscape(node.condition || '-')}</strong></span>
-            </div>
-            ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
-            ${contractIssues.length ? `<div class="agent-dag-contract-issues"><strong>契约问题</strong><span>${agentEscape(contractIssues.join('；'))}</span></div>` : ''}
-            ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">重跑此节点</button>` : ''}
-            ${readableOutput}
-            ${(input || output) ? `
-                <div class="agent-dag-node-folders">
-                    ${input ? `<details><summary>节点输入</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
-                    ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
-                </div>
-            ` : ''}
+            </details>
         </div>
     `;
 }
@@ -268,12 +279,13 @@ function renderAgentDagRunGraph(dagNodes) {
     const nodes = dagNodes.map(n => {
         const pos = positions.get(n.node_key);
         const c = statusColor(n.status);
-        const label = (n.title || n.node_key || '').slice(0, 12);
+        const label = agentDagNodeDisplayTitle(n).slice(0, 12);
+        const statusLabel = ({ completed: '已完成', running: '运行中', error: '失败', skipped: '跳过', pending: '待执行' })[String(n.status || '').toLowerCase()] || '待执行';
         return `
             <g transform="translate(${pos.x},${pos.y})">
                 <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5" opacity="0.9"/>
                 <text x="${NODE_W/2}" y="${NODE_H/2 + 3}" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${agentEscape(label)}</text>
-                <text x="${NODE_W/2}" y="${NODE_H - 5}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">${agentEscape(n.status || 'pending')}</text>
+                <text x="${NODE_W/2}" y="${NODE_H - 5}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">${agentEscape(statusLabel)}</text>
             </g>
         `;
     });

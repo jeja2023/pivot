@@ -76,7 +76,7 @@ function optionalRequire(packageName, installHint) {
 }
 
 function createTimeoutError(connection, timeoutMs, phase = 'database connection test') {
-    const err = new Error(`${phase} timed out after ${timeoutMs}ms`);
+    const err = new Error(`${phase}执行超时（${timeoutMs}毫秒）`);
     err.code = 'DB_CONNECTION_TEST_TIMEOUT';
     err.status = 504;
     err.connection = databaseConnectionDiagnostics(connection);

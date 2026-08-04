@@ -173,7 +173,7 @@ async function openAgentWorkflowSchedules() {
     const name = document.getElementById('agent-workflow-schedule-name');
     const inputSummary = document.getElementById('agent-workflow-schedule-input-summary');
     const inputs = collectAgentDagInputs();
-    if (subtitle) subtitle.textContent = `${workflow.name || '未命名工作流'} · 发布版 v${workflow.published_version}`;
+    if (subtitle) subtitle.textContent = `${workflow.name || '未命名工作流'} · 已发布版本 ${workflow.published_version}`;
     if (name) name.value = `${workflow.name || '工作流'}计划`.slice(0, 100);
     if (inputSummary) inputSummary.textContent = Object.keys(inputs).length
         ? `将当前填写的 ${Object.keys(inputs).length} 个输入变量固定到计划中`

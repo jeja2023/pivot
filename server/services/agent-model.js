@@ -161,7 +161,7 @@ function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent
         `).run(inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId);
         const run = db.prepare('SELECT max_token_budget, total_tokens FROM agent_runs WHERE id = ?').get(runId);
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
-            const err = new Error(`智能体任务已超过 Token 预算 ${run.max_token_budget}`);
+            const err = new Error(`智能体任务已超过模型用量上限 ${run.max_token_budget}`);
             err.code = 'AGENT_BUDGET_EXCEEDED';
             throw err;
         }

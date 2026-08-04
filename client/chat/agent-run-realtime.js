@@ -91,19 +91,27 @@ function renderAgentStreamingPanel(payload) {
         container.insertBefore(panel, container.firstChild || null);
     }
     const step = Number(payload.step) || 0;
-    const finish = payload.finishReason ? agentEscape(payload.finishReason) : '—';
+    const finishReasonLabels = {
+        stop: '已完成',
+        tool_calls: '正在调用工具',
+        length: '达到输出上限',
+        content_filter: '内容安全拦截'
+    };
+    const finish = payload.finishReason
+        ? agentEscape(finishReasonLabels[payload.finishReason] || payload.finishReason)
+        : '—';
     const completed = Boolean(payload.completed);
     const content = String(payload.content || '');
     const partial = Array.isArray(payload.partialToolCalls) ? payload.partialToolCalls : [];
     const toolHtml = partial.length === 0
         ? '<div class="agent-streaming-empty">尚未发现工具调用增量</div>'
         : partial.map((call, idx) => {
-            const name = agentEscape(call.name || `工具#${idx + 1}`);
+            const name = agentEscape(agentToolTitle(call.name || `工具#${idx + 1}`));
             const argsLen = String(call.argumentsRaw || '').length;
             const preview = agentEscape(String(call.argumentsRaw || '').slice(0, 240));
             return `
                 <div class="agent-streaming-tool">
-                    <div class="agent-streaming-tool-head"><strong>${name}</strong><span>arguments ${argsLen} 字符</span></div>
+                    <div class="agent-streaming-tool-head"><strong>${name}</strong><span>参数 ${argsLen} 个字符</span></div>
                     <pre class="agent-streaming-tool-args">${preview}${argsLen > 240 ? '…' : ''}</pre>
                 </div>
             `;
@@ -111,10 +119,10 @@ function renderAgentStreamingPanel(payload) {
     PivotSafeHtml.setHtml(panel, `
         <header class="agent-streaming-head">
             <strong>流式生成（实验）</strong>
-            <span>第 ${step} 步 · finish_reason: ${finish}${completed ? ' · 已完成' : ''}</span>
+            <span>第 ${step} 步 · ${finish}${completed ? ' · 已完成' : ''}</span>
         </header>
         <div class="agent-streaming-body">
-            <div class="agent-streaming-content">${agentEscape(content) || '<em>等待第一个 token…</em>'}</div>
+            <div class="agent-streaming-content">${agentEscape(content) || '<em>等待首段内容…</em>'}</div>
             <div class="agent-streaming-tools">${toolHtml}</div>
         </div>
     `);

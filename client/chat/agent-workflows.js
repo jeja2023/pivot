@@ -82,7 +82,7 @@ function renderAutomationAssetCenter() {
                     <tr>
                         <td><strong>${agentEscape(workflow.name || '未命名工作流')}</strong><small>${agentEscape(workflow.description || '暂无说明')}</small></td>
                         <td><span class="automation-status ${publishedVersion ? 'published' : 'draft'}">${publishedVersion ? '已发布' : '草稿'}</span></td>
-                        <td>v${Number(workflow.current_version || 1)}${publishedVersion ? ` / 发布 v${publishedVersion}` : ''}</td>
+                        <td>版本 ${Number(workflow.current_version || 1)}${publishedVersion ? ` / 已发布版本 ${publishedVersion}` : ''}</td>
                         <td>${agentWorkflowNodeCount(workflow)}</td>
                         <td>${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</td>
                         <td><div class="automation-row-actions">

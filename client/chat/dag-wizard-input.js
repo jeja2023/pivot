@@ -42,15 +42,15 @@ const cloneDagInput = (value) => {
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
             if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
-                ? '普通查询请使用可视化配置；复杂 JOIN、CTE 等场景再切换到高级 SQL。'
+                ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'
                 : '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
             if (key === 'query' || key === 'prompt') return '可直接输入，也可以插入任务目标或上游节点输出作为上下文。';
-            if (key === 'rows' || key === 'columns' || key === 'filters') return '适合引用上游结构化结果；手动填写时请保持 JSON 格式。';
+            if (key === 'rows' || key === 'columns' || key === 'filters') return '适合引用上游结构化结果；手动填写时请保持结构化格式。';
             if (key === 'model' || key === 'temperature' || key === 'max_tokens') return '属于模型调用控制参数，不确定时保持默认或留空。';
             const type = normalizeSchemaType(schema);
             if (type === 'array' || type === 'object') return '适合填结构化数据，也可以直接插入上游结果行。';
             return isTextualSchemaField(name, schema)
-                ? '适合填文字、提示词、SQL 或 Markdown。'
+                ? '适合填写文字、提示词、查询语句或格式化文本。'
                 : '可以直接填写，必要时也能插入变量。';
         };
 

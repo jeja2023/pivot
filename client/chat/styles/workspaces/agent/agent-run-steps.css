@@ -368,6 +368,16 @@
 }
 
 @media (max-width: 640px) {
+    .agent-step-head {
+        display: block;
+    }
+
+    .agent-step-head span {
+        display: block;
+        margin-top: 3px;
+        white-space: normal;
+    }
+
     .agent-result-facts {
         grid-template-columns: 1fr;
     }
@@ -377,7 +387,17 @@
     }
 
     .agent-result-table {
-        min-width: 360px;
+        min-width: 0;
+        table-layout: fixed;
+    }
+
+    .agent-result-table th,
+    .agent-result-table td,
+    .agent-step-table th,
+    .agent-step-table td {
+        padding: 6px 7px;
+        font-size: 0.68rem;
+        overflow-wrap: anywhere;
     }
 }
 
