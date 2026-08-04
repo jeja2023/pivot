@@ -68,11 +68,14 @@ const manualTechnicalMarkers = /\b(?:API|HTTP|HTTPS|JWT|SQLite|SSE|MCP|RAG|DAG|J
 if (manualTechnicalMarkers.test(manualMarkdown)) {
     fail('使用帮助.md must not contain implementation or integration details');
 }
-if (!manualMarkdown.includes('点击左侧“自动化”') || !manualMarkdown.includes('“任务运行”标签')) {
-    fail('使用帮助.md must describe task access through the automation workspace');
+if (!manualMarkdown.includes('点击左侧“自动化”') || !manualMarkdown.includes('“工作流”标签') || !manualMarkdown.includes('“计划任务”标签')) {
+    fail('使用帮助.md must describe workflow and schedule access through the automation workspace');
 }
 if (/点击左侧“任务”/.test(manualMarkdown)) {
     fail('使用帮助.md must not describe the removed task navigation item');
+}
+if (/任务运行/.test(manualMarkdown)) {
+    fail('使用帮助.md must not describe the removed task-run workspace');
 }
 const manualNavSection = /### 1\.2 认识左侧导航([\s\S]*?)(?=\n### 1\.3)/.exec(manualMarkdown)?.[1] || '';
 const expectedSidebarLabels = ['**搜索**', '**应用**', '**知识库**', '**工具库**', '**自动化**'];
