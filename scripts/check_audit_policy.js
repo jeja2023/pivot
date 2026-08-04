@@ -12,22 +12,50 @@ const { spawnSync } = require('child_process');
 // 当前无需豁免：axios、js-yaml、sharp 与 body-parser 的历史告警已通过依赖升级清零。
 const allowed = new Map([]);
 
+function buildAuditInvocation(args, platform = process.platform, env = process.env) {
+    if (platform === 'win32') {
+        return {
+            command: env.ComSpec || 'cmd.exe',
+            args: ['/d', '/s', '/c', 'npm.cmd', ...args]
+        };
+    }
+    return { command: 'npm', args };
+}
+
 function runAudit({ omitDev = false } = {}) {
-    // Windows 下直接调用 npm.cmd，避免使用 shell 选项传参触发 DEP0190 安全弃用告警。
-    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     const args = ['audit'];
     if (omitDev) args.push('--omit=dev');
     args.push('--audit-level=high', '--json');
-    const result = spawnSync(npmCommand, args, {
-        encoding: 'utf8'
-    });
-    const output = result.stdout || result.stderr || '{}';
+    // 新版 Node 在 Windows 上直接 spawn npm.cmd 可能返回 EINVAL；通过 cmd.exe 调用静态命令参数。
+    const invocation = buildAuditInvocation(args);
+    const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8' });
+
+    if (result.error) {
+        throw new Error(`无法启动 npm audit：${result.error.message}`);
+    }
+
+    const output = result.stdout || result.stderr || '';
+    if (!output.trim()) {
+        throw new Error(`npm audit 未返回审计结果（退出码 ${result.status ?? '未知'}）`);
+    }
+
+    let auditResult;
     try {
-        return JSON.parse(output);
+        auditResult = JSON.parse(output);
     } catch (error) {
         console.error(output);
         throw new Error(`无法解析 npm audit 的 JSON 输出：${error.message}`);
     }
+
+    if (auditResult?.error) {
+        const detail = auditResult.error.summary || auditResult.error.detail || auditResult.error.code || '未知错误';
+        throw new Error(`npm audit 执行失败：${detail}`);
+    }
+    if (result.status !== 0 && !auditResult?.vulnerabilities) {
+        throw new Error(`npm audit 异常退出（退出码 ${result.status}）`);
+    }
+
+    return auditResult;
 }
 
 function selectAuditPackages(auditResult, packageNames) {
@@ -132,6 +160,7 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
+    buildAuditInvocation,
     classifyAuditFindings,
     evaluateException,
     selectAuditPackages

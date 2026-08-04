@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { classifyAuditFindings, selectAuditPackages } = require('../scripts/check_audit_policy');
+const { buildAuditInvocation, classifyAuditFindings, selectAuditPackages } = require('../scripts/check_audit_policy');
 
 // 构造一份最小可用的 npm audit JSON 结果。
 function buildAuditResult({ name = 'demo-pkg', severity = 'high', fixAvailable = false, title = '示例高危漏洞', url = 'https://example.test/GHSA-demo' } = {}) {
@@ -103,4 +103,16 @@ test('packaged desktop runtime audit includes Electron without build-only toolin
     };
     const selected = selectAuditPackages(audit, ['electron']);
     assert.deepEqual(Object.keys(selected.vulnerabilities), ['electron']);
+});
+
+test('npm audit uses a platform-safe invocation', () => {
+    const args = ['audit', '--omit=dev', '--json'];
+    assert.deepEqual(buildAuditInvocation(args, 'win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' }), {
+        command: 'C:\\Windows\\System32\\cmd.exe',
+        args: ['/d', '/s', '/c', 'npm.cmd', ...args]
+    });
+    assert.deepEqual(buildAuditInvocation(args, 'linux', {}), {
+        command: 'npm',
+        args
+    });
 });
