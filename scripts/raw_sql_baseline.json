@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 1524,
+  "total": 1530,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -105,7 +105,7 @@
     },
     {
       "file": "server/services/agent-artifacts.js",
-      "count": 17
+      "count": 22
     },
     {
       "file": "server/services/agent-checkpoints.js",
@@ -253,7 +253,7 @@
     },
     {
       "file": "server/services/rag-documents.js",
-      "count": 33
+      "count": 32
     },
     {
       "file": "server/services/rag-index/index.js",
@@ -341,7 +341,7 @@
     },
     {
       "file": "tests/security-agent.test.js",
-      "count": 29
+      "count": 31
     },
     {
       "file": "tests/security-agent/preflight-governance.js",

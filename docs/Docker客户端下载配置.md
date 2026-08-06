@@ -93,7 +93,7 @@ docker-compose up -d
 
 1. **将客户端文件复制到 downloads 目录**：
    ```bash
-   cp client/Pivot-Setup.exe downloads/
+   cp artifacts/release/Pivot-Setup.exe downloads/
    ```
 
 2. **重新构建 Docker 镜像**：

@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
 const { getRunnableModelForUser } = require('../models');
-const { clampText, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
+const { clampText, compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
 const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
 const { createAgentQueue } = require('../agent-queue');
@@ -737,7 +737,7 @@ async function runAgent(runId, user) {
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {});
+            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg);
             const plannerStartedAt = Date.now();
             const plannerSpanId = startAgentTraceSpan(runId, {
                 type: 'model',
@@ -808,7 +808,7 @@ async function runAgent(runId, user) {
                 );
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
-                const compactOutput = clampText(output, 10000);
+                const compactOutput = compactToolOutputForModel(output, modelCfg);
                 observations.push({
                     step,
                     tool: plan.tool,

@@ -3,7 +3,7 @@ const { callModelStreamingWithTools, recordAgentModelUsage } = require('./agent-
 const { buildAgentToolSchemas } = require('./agent-tool-catalog');
 const { normalizeMaxSteps, normalizePositiveInt } = require('./agent-validators');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
-const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 
 // v0.0.49 开始支持 Agent 运行中的流式工具调用。
 function isStreamingToolsEnabled() {
@@ -156,7 +156,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, deps.agentToolTimeoutMs, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                         `执行工具：${call.name}`
                     );
-                    const compactOutput = clampText(output, 10000);
+                    const compactOutput = compactToolOutputForModel(output, modelCfg);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput });
                     deps.insertStep(runId, deps.listSteps(runId).length + 1, {
                         type: 'tool',

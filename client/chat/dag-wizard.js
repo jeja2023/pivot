@@ -67,7 +67,7 @@ function createDagWizardController(ctx) {
                     <div class="agent-workflow-create-actions pivot-dag-wizard-actions">
                         <button type="button" class="btn-secondary" data-pivot-dag-wizard-template="1">套用模板</button>
                         <button type="button" class="btn-secondary" data-pivot-dag-wizard-clear="1">清空</button>
-                        <button type="button" class="btn-primary" data-pivot-dag-wizard-apply="1">应用</button>
+                        <button type="button" class="btn-primary" data-pivot-dag-wizard-apply="1">应用到画布</button>
                     </div>
                 </div>
             `);
@@ -345,11 +345,29 @@ function createDagWizardController(ctx) {
                 ctx.recordHistory?.();
                 if (tool && toolValue(tool)) node.tool = toolValue(tool);
                 node.input = nextInput;
-                syncLlmOutputContract(node, nextInput);
-                render();
-                flushOut();
+                if (typeof syncLlmOutputContract === 'function') {
+                    syncLlmOutputContract(node, nextInput);
+                }
                 closeWizard();
-                window.showToast?.('节点参数已更新', 'success');
+                let renderError = null;
+                try {
+                    ctx.render?.();
+                } catch (error) {
+                    renderError = error;
+                    console.error('DAG 节点参数应用后刷新画布失败', error);
+                }
+                try {
+                    ctx.flushOut?.();
+                } catch (error) {
+                    renderError = renderError || error;
+                    console.error('DAG 节点参数应用后同步 JSON 失败', error);
+                }
+                window.showToast?.(
+                    renderError
+                        ? '节点参数已写入，但画布刷新失败，请点击顶部“保存”后重试'
+                        : '节点参数已应用到画布，请点击顶部“保存”完成保存',
+                    renderError ? 'warning' : 'success'
+                );
             };
 
             const resetWizard = (draftInput = {}) => {

@@ -845,6 +845,7 @@ function runMigrations() {
             frequency TEXT DEFAULT 'manual',
             time_of_day TEXT DEFAULT '09:00',
             day_of_week INTEGER DEFAULT 1,
+            interval_minutes INTEGER DEFAULT 0,
             status TEXT DEFAULT 'active',
             run_config TEXT,
             next_run_at DATETIME,
@@ -961,6 +962,7 @@ function runMigrations() {
     ensureColumn('agent_schedules', 'frequency', "TEXT DEFAULT 'manual'");
     ensureColumn('agent_schedules', 'time_of_day', "TEXT DEFAULT '09:00'");
     ensureColumn('agent_schedules', 'day_of_week', 'INTEGER DEFAULT 1');
+    ensureColumn('agent_schedules', 'interval_minutes', 'INTEGER DEFAULT 0');
     ensureColumn('agent_schedules', 'status', "TEXT DEFAULT 'active'");
     ensureColumn('agent_schedules', 'run_config', 'TEXT');
     ensureColumn('agent_schedules', 'next_run_at', 'DATETIME');

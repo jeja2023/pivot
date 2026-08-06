@@ -88,6 +88,21 @@ const NODE_PRESET_GROUPS = [
                 outputSchema: { type: 'string' }
             },
             {
+                base: 'content_review', title: '富文本内容校对', svgIcon: 'file-check', theme: 'llm',
+                desc: '清洗数据库富文本，按模型上下文逐条校对并生成报告', toolName: 'agent.content_review',
+                getInput: ({ selectedNode }) => ({
+                    records: selectedNode ? `{{nodes.${selectedNode.id}.output.structuredContent}}` : [],
+                    model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
+                    idField: 'id', titleField: 'title', contentField: 'content', instructions: '',
+                    maxRecords: 50, chunkTokens: 3000, overlapTokens: 80, maxTokens: 1800, concurrency: 2,
+                    maxSummaryChars: 30000, reportTitle: '新闻内容校对报告'
+                }),
+                outputSchema: {
+                    type: 'object', required: ['type', 'status', 'reviewComplete', 'stats', 'records', 'text'],
+                    properties: { type: { type: 'string' }, status: { type: 'string' }, reviewComplete: { type: 'boolean' }, stats: { type: 'object' }, records: { type: 'array' }, text: { type: 'string' }, markdown: { type: 'string' } }
+                }
+            },
+            {
                 base: 'delegate', title: '委派智能体', svgIcon: 'users', theme: 'delegate',
                 desc: '调用独立专家并返回结果与结构化交接', toolName: 'agent.delegate',
                 getInput: ({ selectedNode }) => ({

@@ -17,11 +17,16 @@ function automationScheduleConfig(schedule) {
 }
 
 function automationFrequencyText(schedule) {
+    if (schedule?.frequency === 'interval') {
+        const minutes = Math.max(5, Number(schedule.interval_minutes) || 60);
+        return minutes % 60 === 0 ? `每隔 ${minutes / 60} 小时` : `每隔 ${minutes} 分钟`;
+    }
     if (schedule?.frequency === 'weekly') {
         const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
         return `每周${weekdays[Number(schedule.day_of_week || 0)] || '周一'} ${schedule.time_of_day || '09:00'}`;
     }
     if (schedule?.frequency === 'daily') return `每天 ${schedule.time_of_day || '09:00'}`;
+    if (schedule?.frequency === 'cron') return `Cron · ${schedule.cron_expression || '-'}`;
     return '手动运行';
 }
 
@@ -142,7 +147,7 @@ function renderAutomationAssetCenter() {
     }).join('')}</tbody>
             </table>
         </div>
-    ` : '<div class="automation-empty-state"><strong>暂无匹配的计划任务</strong><span>可为自主任务或已发布工作流创建手动、每天或每周执行的计划。</span></div>');
+    ` : '<div class="automation-empty-state"><strong>暂无匹配的计划任务</strong><span>可为自主任务或已发布工作流创建手动、按间隔、每天或每周执行的计划。</span></div>');
 
     workflowList.querySelectorAll('[data-automation-workflow-edit], [data-automation-workflow-view], [data-automation-workflow-run], [data-automation-workflow-versions], [data-automation-workflow-schedule], [data-automation-workflow-share]').forEach(button => {
         button.addEventListener('click', async () => {

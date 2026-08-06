@@ -47,6 +47,7 @@ const agentToolDisplayMap = {
     plan: { title: '任务规划', description: '根据当前任务安排后续执行步骤。' },
     flow_rule: { title: '流程规则', description: '按照工作流规则推进任务。' },
     'agent.llm': { title: '大模型节点', description: '在工作流中调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。' },
+    'agent.content_review': { title: '富文本内容校对', description: '清洗富文本记录，按上下文预算逐条校对并生成完整报告。' },
     'rag.search': { title: '知识库检索', description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。' },
     'sessions.search': { title: '会话检索', description: '按关键词检索当前用户的历史会话内容。' },
     'sessions.recent': { title: '最近会话', description: '列出当前用户最近的未删除会话。' },

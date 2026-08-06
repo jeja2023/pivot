@@ -86,6 +86,48 @@ function nextArtifactVersion(artifactId) {
     return Number(row?.version || 1);
 }
 
+function createOrUpdateRunArtifact({ runId, user, type = 'summary', title, content, note = '' } = {}) {
+    const safeRunId = String(runId || '').trim();
+    const safeType = String(type || 'summary').trim().slice(0, 40) || 'summary';
+    const safeTitle = String(title || '智能体结果').trim().slice(0, 120) || '智能体结果';
+    const safeContent = String(content || '').trim();
+    const safeNote = String(note || '').trim().slice(0, 500);
+    if (!safeRunId || !user?.id || !safeContent) {
+        throw new Error('创建运行产物需要有效的任务、用户和内容。');
+    }
+    const run = db.prepare('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
+        .get(safeRunId, user.id);
+    if (!run) throw new Error('任务不存在或无权创建产物。');
+    const existing = db.prepare(`
+        SELECT id FROM agent_artifacts
+        WHERE run_id = ? AND user_id = ? AND type = ?
+        ORDER BY id DESC
+        LIMIT 1
+    `).get(safeRunId, user.id, safeType);
+    if (existing) {
+        return createAgentArtifactVersion(existing.id, user, {
+            content: safeContent,
+            note: safeNote || '运行结果更新'
+        });
+    }
+    const now = getBeijingTimestamp();
+    let artifactId = 0;
+    db.transaction(() => {
+        const info = db.prepare(`
+            INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(safeRunId, user.id, safeType, safeTitle, safeContent, safeNote, now, now);
+        artifactId = info.lastInsertRowid;
+        const version = db.prepare(`
+            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
+            VALUES (?, 1, ?, ?, ?, ?)
+        `).run(artifactId, safeContent, safeNote || '初始版本', user.id, now);
+        db.prepare('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?')
+            .run(version.lastInsertRowid, artifactId);
+    })();
+    return getAgentArtifactForUser(artifactId, user);
+}
+
 function createAgentArtifactVersion(artifactId, user, body = {}) {
     const artifact = getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
@@ -261,6 +303,7 @@ function exportAgentRun(runId, user, format = 'json') {
 
 module.exports = {
     configureAgentArtifacts,
+    createOrUpdateRunArtifact,
     diffAgentArtifactVersions,
     exportAgentRun,
     getAgentArtifactForUser,

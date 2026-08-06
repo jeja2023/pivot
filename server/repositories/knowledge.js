@@ -51,6 +51,13 @@ function findCollectionByName(userId, name) {
     `).get(userId, name) || null;
 }
 
+function upsertTags(userId, tags, now) {
+    if (!Array.isArray(tags) || tags.length === 0) return [];
+    const statement = sql('INSERT INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(user_id, tag) DO UPDATE SET deleted_at = NULL, updated_at = excluded.updated_at');
+    tags.forEach(tag => statement.run(userId, tag, now, now));
+    return tags;
+}
+
 function getDocumentForUser(docId, user, { includeDeleted = false } = {}) {
     const access = buildDocumentAccessFilter(user, 'd', 'c');
     return sql(`
@@ -145,6 +152,7 @@ module.exports = {
     getCollectionForUser,
     listCollections,
     findCollectionByName,
+    upsertTags,
     getDocumentForUser,
     listDocumentTags,
     listDocumentChunks,

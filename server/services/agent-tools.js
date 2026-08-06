@@ -10,6 +10,8 @@ const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
 const { safeJsonRequest } = require('./safe-http-client');
 const { resolveCredentialSecret } = require('./workflow-credentials');
+const { executeContentReview } = require('./agent-content-review');
+const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
 const {
     normalizeJsonSchema,
     schemaHasRules,
@@ -24,6 +26,16 @@ function clampText(value, max = MAX_TEXT) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (!text) return '';
     return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
+}
+
+function resolveWorkflowMaxTokens(input, modelCfg, fallback = 1200, hardMax = 32768) {
+    const requested = parsePositiveInt(input?.maxTokens ?? input?.max_tokens, fallback, 1, hardMax);
+    const configured = parsePositiveInt(modelCfg?.max_tokens, 0, { min: 1, max: hardMax });
+    const requestedWithModelCap = configured > 0 ? Math.min(requested, configured) : requested;
+    const budget = getModelContextBudget(modelCfg, { maxOutputTokens: requestedWithModelCap });
+    return budget.unbounded
+        ? requestedWithModelCap
+        : Math.max(1, Math.min(requestedWithModelCap, budget.reservedOutputTokens));
 }
 
 function assertAdmin(user) {
@@ -56,9 +68,29 @@ function getBuiltInToolDefinitions(user) {
                 model: { type: 'string', description: '必填模型 ID 或 model_name；工作流运行会从 LLM 节点读取模型。' },
                 maxSteps: { type: 'integer', minimum: 1, maximum: 80, default: 20, description: '本工作流运行允许的最大步骤数。' },
                 temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.2 },
-                maxTokens: { type: 'integer', minimum: 1, maximum: 8000, default: 1200 },
+                maxTokens: { type: 'integer', minimum: 1, maximum: 32768, default: 1200 },
                 responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' }
             }, ['prompt', 'model'])
+        },
+        {
+            name: 'agent.content_review',
+            title: '富文本内容校对',
+            description: '清洗数据库富文本记录，按模型上下文预算逐条分块校对，并生成结构化结果和完整任务产物。',
+            input_schema: asJsonSchema({
+                records: { description: '待校对记录数组，建议引用数据库节点的 structuredContent.rows。' },
+                model: { type: 'string', description: '必填模型 ID 或 model_name。' },
+                idField: { type: 'string', default: 'id' },
+                titleField: { type: 'string', default: 'title' },
+                contentField: { type: 'string', default: 'content' },
+                instructions: { type: 'string', description: '原任务审核要求和补充校对规则。' },
+                maxRecords: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+                chunkTokens: { type: 'integer', minimum: 512, maximum: 12000, default: 3000 },
+                overlapTokens: { type: 'integer', minimum: 0, maximum: 256, default: 80 },
+                maxTokens: { type: 'integer', minimum: 512, maximum: 8000, default: 1800 },
+                concurrency: { type: 'integer', minimum: 1, maximum: 6, default: 2 },
+                maxSummaryChars: { type: 'integer', minimum: 4000, maximum: 120000, default: 30000 },
+                reportTitle: { type: 'string', default: '新闻内容校对报告' }
+            }, ['records', 'model'])
         },
         {
             name: 'agent.delegate',
@@ -72,7 +104,7 @@ function getBuiltInToolDefinitions(user) {
                 instructions: { type: 'string', description: '角色边界、判断标准和禁止事项。' },
                 model: { type: 'string', description: '模型 ID 或 model_name。' },
                 temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.2 },
-                maxTokens: { type: 'integer', minimum: 1, maximum: 8000, default: 1200 },
+                maxTokens: { type: 'integer', minimum: 1, maximum: 32768, default: 1200 },
                 responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' }
             }, ['task', 'agentName', 'role', 'model'])
         },
@@ -435,7 +467,9 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
         { role: 'user', content: prompt }
     ];
     const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
-    const maxTokens = parsePositiveInt(input.maxTokens ?? input.max_tokens, 1200, 8000);
+    const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
+    const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
+    const modelMessages = fitted.messages;
     const outputSchema = outputSchemaForNode(context);
     let content = '';
     let nativeStructured = false;
@@ -443,7 +477,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
         try {
             const result = await requestStructuredOutput({
                 modelCfg,
-                messages,
+                messages: modelMessages,
                 user,
                 temperature,
                 maxTokens,
@@ -454,9 +488,9 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             nativeStructured = result.native;
         } catch (error) {
             if (!isNativeStructuredOutputUnsupported(error)) throw error;
-            content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
+            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens });
         }
-        recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
         let validation = validateStructuredOutput(content, outputSchema);
         if (validation.issues.length) {
             const repairMessages = [
@@ -481,8 +515,8 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             }
         }
     } else {
-        content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
-        recordAgentModelUsage(user, modelCfg, messages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens });
+        recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
     }
     return {
         content,
@@ -495,7 +529,8 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
         responseFormat,
         structuredOutput: responseFormat === 'json' ? { native: nativeStructured, schema: outputSchema } : undefined,
         temperature,
-        maxTokens
+        maxTokens,
+        contextBudget: fitted.metadata
     };
 }
 
@@ -546,9 +581,10 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
         }
     ];
     const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
-    const maxTokens = parsePositiveInt(input.maxTokens ?? input.max_tokens, 1200, 8000);
-    const content = await callModelText(modelCfg, messages, { user, temperature, maxTokens });
-    recordAgentModelUsage(user, modelCfg, messages, content, 'agent_delegate', context.run?.id || context.runId || '');
+    const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
+    const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
+    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens });
+    recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '');
     return {
         content,
         text: content,
@@ -560,7 +596,8 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
             status: 'ready',
             createdAt: new Date().toISOString()
         },
-        responseFormat
+        responseFormat,
+        contextBudget: fitted.metadata
     };
 }
 
@@ -900,6 +937,9 @@ function executeReportCompose(input = {}) {
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
+    }
+    if (name === 'agent.content_review') {
+        return executeContentReview(input, user, context);
     }
     if (name === 'agent.delegate') {
         return executeAgentDelegate(input, user, context);

@@ -554,6 +554,24 @@ body.dark-mode .agent-workflow-share-unit:has(input:checked),
     font-size: 0.78rem;
 }
 
+.agent-schedule-interval-control {
+    display: grid;
+    grid-template-columns: minmax(76px, 1fr) minmax(76px, 0.8fr);
+    gap: 6px;
+    align-items: center;
+}
+
+.agent-schedule-interval-control .form-input {
+    min-width: 0;
+}
+
+.agent-schedule-editor-form .modal-form-field > small {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 500;
+}
+
 .agent-workflow-schedule-form-meta {
     grid-column: 1 / -2;
     display: flex;

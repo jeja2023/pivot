@@ -47,6 +47,10 @@ const DAG_ICON_SHAPES = {
     'file-text': [
         ['path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8M8 9h2' }]
     ],
+    'file-check': [
+        ['path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6' }],
+        ['path', { d: 'm8 15 2 2 5-5' }]
+    ],
     plug: [
         ['path', { d: 'M12 22v-5M9 8V2M15 8V2M6 8h12v3a6 6 0 0 1-12 0z' }]
     ],
@@ -105,6 +109,7 @@ function createDagIcon(name, className = '') {
 // 每种 tool 的视觉元数据：图标、颜色主题、标签。
 const DAG_NODE_VISUAL = {
     'agent.llm':      { svgIcon: 'bot',       theme: 'llm',      label: '大模型' },
+    'agent.content_review': { svgIcon: 'file-check', theme: 'llm', label: '内容校对' },
     'agent.delegate': { svgIcon: 'users',     theme: 'delegate', label: '委派智能体' },
     'agent.handoff':  { svgIcon: 'shuffle',   theme: 'handoff',  label: '智能体交接' },
     'agent.code':     { svgIcon: 'code',      theme: 'code',     label: '代码执行' },

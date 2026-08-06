@@ -852,6 +852,7 @@ function initSchema() {
             frequency TEXT DEFAULT 'manual',
             time_of_day TEXT DEFAULT '09:00',
             day_of_week INTEGER DEFAULT 1,
+            interval_minutes INTEGER DEFAULT 0,
             cron_expression TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
             run_config TEXT,

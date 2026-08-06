@@ -2,10 +2,21 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-06 Architecture Baseline
+
+- Root-level `README.md`, `CHANGELOG.md`, `使用帮助.md`, and `开发规范.md` remain stable project entry points.
+- Design documents, reports, packaging notes, and Windows wrappers are organized under `docs/design/`, `docs/reports/`, `docs/standards/`, and `scripts/bat/`.
+- Legacy desktop installers are kept outside `client/`; source-tree files over 50 MiB are blocked by `npm run check:large-files`.
+- Express assembly, process/background bootstrap, and HTTP lifecycle now live in `server/app.js`, `server/bootstrap.js`, and `server/server.js`; `server/index.js` remains a thin startup entry.
+- Knowledge-tag persistence is the first incremental Repository migration. Existing SQLite transaction and parameter-binding behavior is retained.
+- `npm run check:architecture` protects the new directory and server lifecycle boundaries.
+- Vite, CSS purging, chat virtualization, and database-driver package splitting remain measurement-gated. Current frontend assets are small enough that preserving direct deployment and incremental `Pivot.modules` migration has higher value than a forced bundler rewrite.
+
 ## Release Snapshot
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.0.255 (2026-08-06) 完成计划任务、工作流配置和新闻内容校对闭环：计划只能运行已发布工作流，按间隔调度支持 5 至 1440 分钟；节点应用操作提供即时反馈，保存后重新打开仍恢复手动配置；自由任务转工作流会生成数据库查询、富文本逐条校对和输出节点，清理 HTML 后按记录/分块校对并保留原文证据；结构化结果保留行边界，查询截断、分块失败和未处理记录会显式标记，完整报告沉淀为可下载产物。全量 Node 回归 437/437，项目检查和相关 ESLint 检查通过。
 - v0.0.249 (2026-08-06) 完成知识库与工具库的单位共享权限升级：知识库专题库支持共享范围和单位白名单，文档列表、标签、摘要、详情、FTS/LIKE、检索缓存与 Graph-RAG 查询统一做可见性隔离；工具库数据库 MCP 连接支持单位共享，接收者仅可使用治理后的只读数据库工具，刷新、诊断和写管理操作均被阻断；前端补齐分享弹窗、只读状态、写操作过滤与可写专题库选择；新增旧库迁移字段和索引，MCP 33/33、RAG 75/75、Agent 48/48 专项回归通过。
 - v0.0.248 (2026-08-06) 完成工作流共享权限前后端闭环：资产中心提供所有者共享弹窗和范围标识，管理员可选择全部有效单位、普通用户受限于自身单位；新增共享选项与共享设置更新 API，服务端保留所有者写权限并记录审计；共享工作流发布前不对接收者展示，接收者只读取发布版 DAG 并以只读画布运行，不能编辑、发布、回滚、删除、管理版本或创建计划。补充共享发布边界、只读交互和安全静态断言回归。
 - v0.0.247 (2026-08-05) 完成阶段一至五的自动化闭环与数据访问底座：工作流单位可见性、发布版本降级、Webhook/文件/数据库触发器、Cron 解析、加密凭据、审批/延迟节点、IM 一次性签名回调和 `awaiting_approval` 队列挂起机制全部落地；新增 SQL 语句缓存、数据库方言辅助、raw SQL 基线以及 runs/workflows/sessions/knowledge 领域仓储。阶段五明确保持 SQLite 事务边界，不做 ORM 引入或一次性全量 SQL 迁移；全量 Node 回归 419/419，项目检查、ESLint、数据库启动迁移和 raw SQL 门禁通过。

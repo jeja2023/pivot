@@ -274,6 +274,18 @@ const migrations = [
             }
         }
     },
+    {
+        id: '202608060002_schedule_interval_minutes',
+        description: 'Add first class minute intervals to agent schedules.',
+        up(db) {
+            const columns = db.pragma('table_info(agent_schedules)');
+            if (!columns.length) return;
+            if (!columns.some(column => column.name === 'interval_minutes')) {
+                db.exec('ALTER TABLE agent_schedules ADD COLUMN interval_minutes INTEGER DEFAULT 0');
+            }
+            db.exec('UPDATE agent_schedules SET interval_minutes = 0 WHERE interval_minutes IS NULL');
+        }
+    },
     ...regulationsMigrations
 ];
 

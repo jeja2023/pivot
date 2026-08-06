@@ -54,7 +54,7 @@ function checkRequiredDocuments() {
         '注释、命名、提示与日志',
         '提交前检查清单'
     ]);
-    assertDocumentIncludes('DESIGN.md', [
+    assertDocumentIncludes('docs/design/DESIGN.md', [
         '产品定位',
         '信息架构',
         '交互原则',

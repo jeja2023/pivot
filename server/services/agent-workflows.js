@@ -72,8 +72,8 @@ function validateLlmNodePlacement(dagSpec) {
 
 function assertWorkflowLlmNodesConfigured(dagSpec) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const llmNodes = nodes.filter(node => String(node?.tool || '').trim() === 'agent.llm');
-    const unconfiguredNode = llmNodes.find(node => !String(
+    const modelNodes = nodes.filter(node => ['agent.llm', 'agent.content_review'].includes(String(node?.tool || '').trim()));
+    const unconfiguredNode = modelNodes.find(node => !String(
         node?.input?.model || node?.input?.modelId || node?.input?.model_id || ''
     ).trim());
     if (unconfiguredNode) {

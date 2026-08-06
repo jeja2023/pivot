@@ -19,11 +19,17 @@ function agentWorkflowScheduleMatches(schedule, workflowId) {
 }
 
 function agentWorkflowScheduleFrequencyText(schedule) {
+    if (schedule?.frequency === 'interval') {
+        const minutes = Math.max(5, Number(schedule.interval_minutes) || 60);
+        return minutes % 60 === 0 ? `每隔 ${minutes / 60} 小时` : `每隔 ${minutes} 分钟`;
+    }
     if (schedule?.frequency === 'weekly') {
         const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
         return `每周${weekdays[Number(schedule.day_of_week || 0)] || '周一'} ${schedule.time_of_day || '09:00'}`;
     }
-    return `每天 ${schedule?.time_of_day || '09:00'}`;
+    if (schedule?.frequency === 'daily') return `每天 ${schedule?.time_of_day || '09:00'}`;
+    if (schedule?.frequency === 'cron') return `Cron · ${schedule.cron_expression || '-'}`;
+    return '手动运行';
 }
 
 function ensureAgentWorkflowScheduleModal() {
@@ -51,9 +57,21 @@ function ensureAgentWorkflowScheduleModal() {
                     <label class="agent-workflow-create-field">
                         <span>执行周期</span>
                         <select id="agent-workflow-schedule-frequency" class="form-input">
+                            <option value="interval">按间隔</option>
                             <option value="daily">每天</option>
                             <option value="weekly">每周</option>
+                            <option value="cron">Cron（高级）</option>
                         </select>
+                    </label>
+                    <label id="agent-workflow-schedule-interval-field" class="agent-workflow-create-field hidden">
+                        <span>执行间隔</span>
+                        <span class="agent-schedule-interval-control">
+                            <input id="agent-workflow-schedule-interval-value" class="form-input" type="number" min="1" max="1440" value="1">
+                            <select id="agent-workflow-schedule-interval-unit" class="form-input">
+                                <option value="1">分钟</option>
+                                <option value="60" selected>小时</option>
+                            </select>
+                        </span>
                     </label>
                     <label class="agent-workflow-create-field">
                         <span>执行时间</span>
@@ -70,6 +88,10 @@ function ensureAgentWorkflowScheduleModal() {
                             <option value="6">周六</option>
                             <option value="0">周日</option>
                         </select>
+                    </label>
+                    <label id="agent-workflow-schedule-cron-field" class="agent-workflow-create-field hidden">
+                        <span>Cron 表达式</span>
+                        <input id="agent-workflow-schedule-cron" class="form-input" maxlength="120" placeholder="例如 */30 * * * *">
                     </label>
                     <div class="agent-workflow-schedule-form-meta">
                         <span id="agent-workflow-schedule-input-summary">使用发布版运行</span>
@@ -103,6 +125,9 @@ function ensureAgentWorkflowScheduleModal() {
 function syncAgentWorkflowScheduleFrequencyUi() {
     const frequency = document.getElementById('agent-workflow-schedule-frequency')?.value || 'daily';
     document.getElementById('agent-workflow-schedule-weekday-field')?.classList.toggle('hidden', frequency !== 'weekly');
+    document.getElementById('agent-workflow-schedule-time')?.closest('label')?.classList.toggle('hidden', !['daily', 'weekly'].includes(frequency));
+    document.getElementById('agent-workflow-schedule-interval-field')?.classList.toggle('hidden', frequency !== 'interval');
+    document.getElementById('agent-workflow-schedule-cron-field')?.classList.toggle('hidden', frequency !== 'cron');
 }
 
 function setAgentWorkflowScheduleFormStatus(message = '', state = '') {
@@ -176,6 +201,11 @@ async function openAgentWorkflowSchedules() {
     const inputs = collectAgentDagInputs();
     if (subtitle) subtitle.textContent = `${workflow.name || '未命名工作流'} · 已发布版本 ${workflow.published_version}`;
     if (name) name.value = `${workflow.name || '工作流'}计划`.slice(0, 100);
+    setAgentScheduleIntervalControls('agent-workflow-schedule', 60);
+    const frequency = document.getElementById('agent-workflow-schedule-frequency');
+    if (frequency) frequency.value = 'daily';
+    const cron = document.getElementById('agent-workflow-schedule-cron');
+    if (cron) cron.value = '';
     if (inputSummary) inputSummary.textContent = Object.keys(inputs).length
         ? `将当前填写的 ${Object.keys(inputs).length} 个输入变量固定到计划中`
         : '使用发布版运行，无额外输入变量';
@@ -193,6 +223,11 @@ async function createAgentWorkflowSchedule() {
     if (payload._invalid) return;
     const name = document.getElementById('agent-workflow-schedule-name')?.value.trim() || '';
     if (!name) return setAgentWorkflowScheduleFormStatus('请填写计划名称', 'error');
+    const frequency = document.getElementById('agent-workflow-schedule-frequency')?.value || 'daily';
+    const intervalMinutes = agentScheduleIntervalMinutes('agent-workflow-schedule');
+    if (frequency === 'interval' && (intervalMinutes < 5 || intervalMinutes > 1440)) {
+        return setAgentWorkflowScheduleFormStatus('执行间隔必须在 5 分钟到 24 小时之间', 'error');
+    }
     const submit = document.getElementById('agent-workflow-schedule-create');
     submit?.setAttribute('disabled', 'disabled');
     setAgentWorkflowScheduleFormStatus('正在检查发布版...', 'running');
@@ -208,9 +243,11 @@ async function createAgentWorkflowSchedule() {
             body: JSON.stringify({
                 ...payload,
                 name,
-                frequency: document.getElementById('agent-workflow-schedule-frequency')?.value || 'daily',
+                frequency,
                 timeOfDay: document.getElementById('agent-workflow-schedule-time')?.value || '09:00',
                 dayOfWeek: document.getElementById('agent-workflow-schedule-weekday')?.value || 1,
+                intervalMinutes,
+                cronExpression: document.getElementById('agent-workflow-schedule-cron')?.value.trim() || '',
                 workflowVersion: 'published'
             })
         });
@@ -236,6 +273,8 @@ function agentWorkflowScheduleUpdatePayload(schedule, status) {
         frequency: schedule.frequency,
         timeOfDay: schedule.time_of_day,
         dayOfWeek: schedule.day_of_week,
+        intervalMinutes: schedule.interval_minutes,
+        cronExpression: schedule.cron_expression,
         status,
         ...config,
         workflowVersion: 'published'

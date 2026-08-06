@@ -38,14 +38,31 @@ function replaceAgentScheduleOptions(select, items, placeholder) {
     select.replaceChildren(...options);
 }
 
+function agentScheduleIntervalMinutes(prefix) {
+    const amount = Number(document.getElementById(`${prefix}-interval-value`)?.value || 0);
+    const unit = Number(document.getElementById(`${prefix}-interval-unit`)?.value || 1);
+    return Number.isFinite(amount) ? Math.round(amount * unit) : 0;
+}
+
+function setAgentScheduleIntervalControls(prefix, value = 60) {
+    const minutes = Math.max(5, Number(value) || 60);
+    const useHours = minutes % 60 === 0;
+    const amount = document.getElementById(`${prefix}-interval-value`);
+    const unit = document.getElementById(`${prefix}-interval-unit`);
+    if (amount) amount.value = String(useHours ? minutes / 60 : minutes);
+    if (unit) unit.value = useHours ? '60' : '1';
+}
+
 function syncAgentScheduleEditorUi() {
     const source = document.getElementById('agent-schedule-editor-source')?.value || 'free';
     const frequency = document.getElementById('agent-schedule-editor-frequency')?.value || 'daily';
     document.getElementById('agent-schedule-editor-goal-field')?.classList.toggle('hidden', source !== 'free');
     document.getElementById('agent-schedule-editor-model-field')?.classList.toggle('hidden', source !== 'free');
     document.getElementById('agent-schedule-editor-workflow-field')?.classList.toggle('hidden', source !== 'workflow');
-    document.getElementById('agent-schedule-editor-time-field')?.classList.toggle('hidden', frequency === 'manual');
+    document.getElementById('agent-schedule-editor-time-field')?.classList.toggle('hidden', !['daily', 'weekly'].includes(frequency));
     document.getElementById('agent-schedule-editor-weekday-field')?.classList.toggle('hidden', frequency !== 'weekly');
+    document.getElementById('agent-schedule-editor-interval-field')?.classList.toggle('hidden', frequency !== 'interval');
+    document.getElementById('agent-schedule-editor-cron-field')?.classList.toggle('hidden', frequency !== 'cron');
     const hint = document.getElementById('agent-schedule-editor-source-hint');
     if (hint) hint.textContent = source === 'workflow' ? '按工作流发布版运行' : '由 AI 根据目标自主规划执行';
 }
@@ -95,9 +112,22 @@ function ensureAgentScheduleEditorModal() {
                         <span>执行周期</span>
                         <select id="agent-schedule-editor-frequency" class="form-input">
                             <option value="manual">手动</option>
+                            <option value="interval">按间隔</option>
                             <option value="daily">每天</option>
                             <option value="weekly">每周</option>
+                            <option value="cron">Cron（高级）</option>
                         </select>
+                    </label>
+                    <label id="agent-schedule-editor-interval-field" class="modal-form-field hidden">
+                        <span>执行间隔</span>
+                        <span class="agent-schedule-interval-control">
+                            <input id="agent-schedule-editor-interval-value" class="form-input" type="number" min="1" max="1440" value="1">
+                            <select id="agent-schedule-editor-interval-unit" class="form-input">
+                                <option value="1">分钟</option>
+                                <option value="60" selected>小时</option>
+                            </select>
+                        </span>
+                        <small>最短 5 分钟，最长 24 小时</small>
                     </label>
                     <label id="agent-schedule-editor-time-field" class="modal-form-field">
                         <span>执行时间</span>
@@ -109,6 +139,11 @@ function ensureAgentScheduleEditorModal() {
                             <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
                             <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="0">周日</option>
                         </select>
+                    </label>
+                    <label id="agent-schedule-editor-cron-field" class="modal-form-field modal-form-field--wide hidden">
+                        <span>Cron 表达式</span>
+                        <input id="agent-schedule-editor-cron" class="form-input" maxlength="120" placeholder="例如 */30 * * * *">
+                        <small>依次填写分钟、小时、日期、月份、星期</small>
                     </label>
                     <label class="modal-form-check modal-form-field--wide">
                         <input id="agent-schedule-editor-active" type="checkbox" checked>
@@ -177,6 +212,8 @@ function openAgentScheduleEditor(scheduleId = '', options = {}) {
     document.getElementById('agent-schedule-editor-frequency').value = schedule?.frequency || options.frequency || 'daily';
     document.getElementById('agent-schedule-editor-time').value = schedule?.time_of_day || options.timeOfDay || '09:00';
     document.getElementById('agent-schedule-editor-weekday').value = String(schedule?.day_of_week ?? options.dayOfWeek ?? 1);
+    setAgentScheduleIntervalControls('agent-schedule-editor', schedule?.interval_minutes ?? options.intervalMinutes ?? 60);
+    document.getElementById('agent-schedule-editor-cron').value = schedule?.cron_expression || options.cronExpression || '';
     document.getElementById('agent-schedule-editor-active').checked = schedule?.status !== 'paused';
     setAgentScheduleEditorStatus();
     syncAgentScheduleEditorUi();
@@ -199,6 +236,8 @@ function agentScheduleEditorPayload() {
         frequency: document.getElementById('agent-schedule-editor-frequency')?.value || 'daily',
         timeOfDay: document.getElementById('agent-schedule-editor-time')?.value || '09:00',
         dayOfWeek: document.getElementById('agent-schedule-editor-weekday')?.value || 1,
+        intervalMinutes: agentScheduleIntervalMinutes('agent-schedule-editor'),
+        cronExpression: document.getElementById('agent-schedule-editor-cron')?.value.trim() || '',
         status: document.getElementById('agent-schedule-editor-active')?.checked === false ? 'paused' : 'active',
         maxSteps: base.maxSteps || base.max_steps || (source === 'workflow' ? 20 : 10),
         runMode: source === 'workflow' ? 'dag' : (['standard', 'deep', 'audit'].includes(base.runMode) ? base.runMode : 'standard'),
@@ -221,6 +260,9 @@ async function saveAgentScheduleEditor() {
     if (source === 'free' && payload.goal.length < 4) return setAgentScheduleEditorStatus('请填写明确的任务目标', 'error');
     if (source === 'free' && !payload.modelId) return setAgentScheduleEditorStatus('请选择模型', 'error');
     if (source === 'workflow' && !workflow) return setAgentScheduleEditorStatus('请选择已发布工作流', 'error');
+    if (payload.frequency === 'interval' && (payload.intervalMinutes < 5 || payload.intervalMinutes > 1440)) {
+        return setAgentScheduleEditorStatus('执行间隔必须在 5 分钟到 24 小时之间', 'error');
+    }
     const submit = document.getElementById('agent-schedule-editor-submit');
     submit?.setAttribute('disabled', 'disabled');
     setAgentScheduleEditorStatus('正在校验...', 'running');
@@ -302,6 +344,8 @@ async function toggleAgentSchedule(scheduleId) {
             frequency: schedule.frequency,
             timeOfDay: schedule.time_of_day,
             dayOfWeek: schedule.day_of_week,
+            intervalMinutes: schedule.interval_minutes,
+            cronExpression: schedule.cron_expression,
             status
         })
     });

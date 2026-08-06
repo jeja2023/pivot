@@ -23,6 +23,8 @@ const {
 const MAX_AGENT_SCHEDULES_PER_USER = 100;
 const SCHEDULE_CLAIM_LEASE_MS = 5 * 60 * 1000;
 const MAX_DISPATCH_FAILURES = 5;
+const MIN_SCHEDULE_INTERVAL_MINUTES = 5;
+const MAX_SCHEDULE_INTERVAL_MINUTES = 24 * 60;
 
 let createAgentRunCallback = null;
 let createAgentNotificationCallback = () => null;
@@ -48,10 +50,26 @@ function toBeijingTimestamp(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function computeNextScheduleRun(frequency, timeOfDay = '09:00', dayOfWeek = 1, from = getBeijingTimestamp(), cronExpression = '') {
+function computeNextScheduleRun(
+    frequency,
+    timeOfDay = '09:00',
+    dayOfWeek = 1,
+    from = getBeijingTimestamp(),
+    cronExpression = '',
+    intervalMinutes = 0
+) {
     const normalized = String(frequency || 'manual').trim();
     if (normalized === 'manual') return null;
     const base = parseBeijingDate(from);
+    if (normalized === 'interval') {
+        const minutes = normalizePositiveInt(
+            intervalMinutes,
+            MIN_SCHEDULE_INTERVAL_MINUTES,
+            MIN_SCHEDULE_INTERVAL_MINUTES,
+            MAX_SCHEDULE_INTERVAL_MINUTES
+        );
+        return toBeijingTimestamp(new Date(base.getTime() + minutes * 60 * 1000));
+    }
     // cron 计划走独立求值路径，支持分钟级和多时段
     if (normalized === 'cron') {
         const next = computeNextCronDate(cronExpression, base);
@@ -86,7 +104,19 @@ function normalizeSchedulePayload(body = {}) {
     if (!name || goal.length < 4) throw invalid('请填写计划名称和明确的任务目标。');
 
     const frequency = String(body.frequency ?? 'manual').trim();
-    if (!SCHEDULE_FREQUENCIES.has(frequency)) throw invalid('计划周期无效，只支持手动、每日、每周或 cron 表达式。');
+    if (!SCHEDULE_FREQUENCIES.has(frequency)) throw invalid('计划周期无效，只支持手动、按间隔、每日、每周或 cron 表达式。');
+
+    const rawIntervalMinutes = body.intervalMinutes ?? body.interval_minutes ?? 60;
+    const intervalMinutes = frequency === 'interval'
+        ? Number(rawIntervalMinutes)
+        : 0;
+    if (frequency === 'interval' && (
+        !Number.isInteger(intervalMinutes)
+        || intervalMinutes < MIN_SCHEDULE_INTERVAL_MINUTES
+        || intervalMinutes > MAX_SCHEDULE_INTERVAL_MINUTES
+    )) {
+        throw invalid(`执行间隔必须是 ${MIN_SCHEDULE_INTERVAL_MINUTES} 到 ${MAX_SCHEDULE_INTERVAL_MINUTES} 分钟之间的整数。`);
+    }
 
     const cronExpression = String(body.cronExpression ?? body.cron_expression ?? '').trim();
     if (frequency === 'cron') {
@@ -122,6 +152,7 @@ function normalizeSchedulePayload(body = {}) {
         frequency,
         timeOfDay,
         dayOfWeek,
+        intervalMinutes,
         cronExpression: frequency === 'cron' ? cronExpression : '',
         status,
         runConfig: {
@@ -173,13 +204,13 @@ function createAgentSchedule(user, body = {}) {
     const info = db.prepare(`
         INSERT INTO agent_schedules (
             user_id, template_id, model_id, name, goal, frequency, time_of_day, day_of_week,
-            cron_expression, status, run_config, next_run_at, dispatch_failures, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            interval_minutes, cron_expression, status, run_config, next_run_at, dispatch_failures, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(
         user.id, data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency,
-        data.timeOfDay, data.dayOfWeek, data.cronExpression, data.status, JSON.stringify(data.runConfig),
+        data.timeOfDay, data.dayOfWeek, data.intervalMinutes, data.cronExpression, data.status, JSON.stringify(data.runConfig),
         data.status === 'active'
-            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression)
+            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression, data.intervalMinutes)
             : null,
         now, now
     );
@@ -201,15 +232,15 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     db.prepare(`
         UPDATE agent_schedules
         SET template_id = ?, model_id = ?, name = ?, goal = ?, frequency = ?, time_of_day = ?,
-            day_of_week = ?, cron_expression = ?, status = ?, run_config = ?, next_run_at = ?,
+            day_of_week = ?, interval_minutes = ?, cron_expression = ?, status = ?, run_config = ?, next_run_at = ?,
             dispatch_retry_at = NULL, dispatch_failures = 0, last_error = NULL,
             claim_token = NULL, claim_expires_at = NULL, updated_at = ?
         WHERE id = ?
     `).run(
         data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency, data.timeOfDay,
-        data.dayOfWeek, data.cronExpression, data.status, JSON.stringify(data.runConfig),
+        data.dayOfWeek, data.intervalMinutes, data.cronExpression, data.status, JSON.stringify(data.runConfig),
         data.status === 'active'
-            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression)
+            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression, data.intervalMinutes)
             : null,
         now, scheduleId
     );
@@ -314,7 +345,8 @@ function runDueAgentSchedules(limit = 20) {
                 schedule.time_of_day,
                 schedule.day_of_week,
                 getBeijingTimestamp(),
-                schedule.cron_expression
+                schedule.cron_expression,
+                schedule.interval_minutes
             );
             db.prepare(`
                 UPDATE agent_schedules

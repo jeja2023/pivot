@@ -64,13 +64,19 @@ function normalizeWorkflowDraftInput(input) {
 
 function buildWorkflowDraftLlmPrompt(run, toolNodes) {
     const referencedOutputs = toolNodes
-        .map(node => `- ${node.title}：{{nodes.${node.id}.output}}`)
+        .map(node => {
+            const reference = isDatabaseRecordQueryTool(node.tool)
+                ? `{{nodes.${node.id}.output.structuredContent}}`
+                : `{{nodes.${node.id}.output}}`;
+            return `- ${node.title}：${reference}`;
+        })
         .join('\n');
-    const upstreamText = referencedOutputs || '- 没有可复用工具节点，请直接围绕 {{goal}} 形成结果。';
+    const upstreamText = referencedOutputs || '- 没有可复用工具节点，请直接围绕原始任务目标形成结果。';
+    const originalGoal = String(run?.goal || '').trim().slice(0, 12000);
     return [
         '请基于自由任务目标和上游节点输出，整理为可交付的中文结果。',
         '',
-        '任务目标：{{goal}}',
+        '原始任务目标：' + (originalGoal || '未提供'),
         '',
         '上游节点输出：',
         upstreamText,
@@ -80,6 +86,31 @@ function buildWorkflowDraftLlmPrompt(run, toolNodes) {
         '2. 明确说明哪些内容来自工具结果，哪些是你的分析。',
         '3. 如果上游结果不足，请指出需要补充的资料或能力。'
     ].join('\n');
+}
+
+function isContentReviewGoal(goal) {
+    return /(校对|纠错|错别字|病句|文字检查|内容审核|新闻审核|标题审核)/i.test(String(goal || ''));
+}
+
+function isDatabaseRecordQueryTool(name) {
+    return /(?:^|\.)db\.(?:run_readonly_query|sample_collection|aggregate)$/i.test(String(name || ''));
+}
+
+function contentReviewOutputSchema() {
+    return {
+        type: 'object',
+        required: ['type', 'status', 'reviewComplete', 'stats', 'records', 'text'],
+        properties: {
+            type: { type: 'string' },
+            status: { type: 'string', enum: ['completed', 'incomplete'] },
+            reviewComplete: { type: 'boolean' },
+            stats: { type: 'object' },
+            records: { type: 'array', items: { type: 'object' } },
+            artifact: { type: ['object', 'null'] },
+            text: { type: 'string' },
+            markdown: { type: 'string' }
+        }
+    };
 }
 
 function buildWorkflowDraftFromRun(run, steps = []) {
@@ -101,8 +132,79 @@ function buildWorkflowDraftFromRun(run, steps = []) {
             onError: 'skip_dependents'
         };
     });
-    const llmId = uniqueWorkflowNodeId(used, 'llm_summary', 'llm_summary');
     const modelId = String(run.model_id || '').trim();
+    const recordQueryNode = toolNodes.slice().reverse().find(node => isDatabaseRecordQueryTool(node.tool));
+    const buildOutputNode = (sourceNode, valuePath = 'output.text') => ({
+        id: uniqueWorkflowNodeId(used, 'workflow_output', 'workflow_output'),
+        title: '输出最终结果',
+        tool: 'workflow.output',
+        input: {
+            name: 'result',
+            value: '{{nodes.' + sourceNode.id + '.' + valuePath + '}}',
+            format: 'markdown',
+            presentation: 'default'
+        },
+        dependsOn: [sourceNode.id],
+        condition: 'success',
+        retryLimit: 0,
+        timeoutMs: 0,
+        onError: 'stop'
+    });
+
+    if (recordQueryNode && isContentReviewGoal(run.goal)) {
+        const reviewId = uniqueWorkflowNodeId(used, 'content_review', 'content_review');
+        const reviewNode = {
+            id: reviewId,
+            title: '清洗并校对新闻内容',
+            tool: 'agent.content_review',
+            input: {
+                records: '{{nodes.' + recordQueryNode.id + '.output.structuredContent}}',
+                model: modelId,
+                idField: 'id',
+                titleField: 'title',
+                contentField: 'content',
+                instructions: String(run.goal || '').trim().slice(0, 6000),
+                maxRecords: 50,
+                chunkTokens: 3000,
+                overlapTokens: 80,
+                maxTokens: 1800,
+                concurrency: 2,
+                maxSummaryChars: 30000,
+                reportTitle: '新闻内容校对报告'
+            },
+            outputSchema: contentReviewOutputSchema(),
+            dependsOn: [recordQueryNode.id],
+            condition: 'success',
+            retryLimit: 1,
+            timeoutMs: 0,
+            onError: 'stop'
+        };
+        const outputNode = buildOutputNode(reviewNode);
+        const nodes = [...toolNodes, reviewNode, outputNode];
+        const sourceTitle = String(run.title || run.goal || '').trim();
+        return {
+            name: ('由自由任务生成：' + (sourceTitle || run.id)).slice(0, 100),
+            description: ('从自由任务 ' + run.id + ' 生成的富文本内容校对工作流，已保留原任务审核规则。').slice(0, 300),
+            dagSpec: { nodes },
+            sourceRun: {
+                id: run.id,
+                title: run.title || '',
+                goal: run.goal || '',
+                run_mode: run.run_mode || '',
+                status: run.status || '',
+                model_id: run.model_id || null,
+                model_name: run.model_name || ''
+            },
+            summary: {
+                toolNodeCount: toolNodes.length,
+                nodeCount: nodes.length,
+                contentReviewOptimized: true,
+                generatedAt: new Date().toISOString()
+            }
+        };
+    }
+
+    const llmId = uniqueWorkflowNodeId(used, 'llm_summary', 'llm_summary');
     const llmNode = {
         id: llmId,
         title: '汇总自由任务结果',
@@ -110,7 +212,10 @@ function buildWorkflowDraftFromRun(run, steps = []) {
         input: {
             prompt: buildWorkflowDraftLlmPrompt(run, toolNodes),
             model: modelId,
-            maxSteps: Number(run.max_steps || 20) || 20
+            maxSteps: Number(run.max_steps || 20) || 20,
+            temperature: 0.2,
+            maxTokens: 2400,
+            responseFormat: 'markdown'
         },
         dependsOn: toolNodes.length ? [toolNodes[toolNodes.length - 1].id] : [],
         condition: 'success',
@@ -118,11 +223,12 @@ function buildWorkflowDraftFromRun(run, steps = []) {
         timeoutMs: 0,
         onError: 'skip_dependents'
     };
+    const outputNode = buildOutputNode(llmNode);
     const sourceTitle = String(run.title || run.goal || '').trim();
     return {
         name: `由自由任务生成：${sourceTitle || run.id}`.slice(0, 100),
         description: `从自由任务 ${run.id} 生成的工作流草稿。请在编排页检查节点、参数和发布策略后再用于生产任务。`.slice(0, 300),
-        dagSpec: { nodes: [...toolNodes, llmNode] },
+        dagSpec: { nodes: [...toolNodes, llmNode, outputNode] },
         sourceRun: {
             id: run.id,
             title: run.title || '',
@@ -134,7 +240,7 @@ function buildWorkflowDraftFromRun(run, steps = []) {
         },
         summary: {
             toolNodeCount: toolNodes.length,
-            nodeCount: toolNodes.length + 1,
+            nodeCount: toolNodes.length + 2,
             generatedAt: new Date().toISOString()
         }
     };

@@ -224,6 +224,8 @@ test('database boot migrates legacy automation columns before creating dependent
         assert.ok(scheduleColumns.includes('claim_token'));
         assert.ok(scheduleColumns.includes('dispatch_retry_at'));
         assert.ok(scheduleColumns.includes('last_error'));
+        assert.ok(scheduleColumns.includes('interval_minutes'));
+        assert.ok(scheduleColumns.includes('cron_expression'));
         assert.ok(runIndexes.includes('idx_agent_runs_user_dedupe'));
         assert.ok(scheduleIndexes.includes('idx_agent_schedules_dispatch'));
         booted.db.close();

@@ -76,15 +76,7 @@ function parseKnowledgeTags(value) {
 function upsertKnowledgeTags(userId, tags, now = getBeijingTimestamp()) {
     const safeTags = parseKnowledgeTags(tags);
     if (!safeTags.length) return [];
-    const upsert = db.prepare(`
-        INSERT INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, NULL)
-        ON CONFLICT(user_id, tag) DO UPDATE SET
-            deleted_at = NULL,
-            updated_at = excluded.updated_at
-    `);
-    safeTags.forEach(tag => upsert.run(userId, tag, now, now));
-    return safeTags;
+    return knowledgeRepository.upsertTags(userId, safeTags, now);
 }
 
 function normalizeKnowledgeCollectionId(value) {

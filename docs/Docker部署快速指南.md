@@ -22,7 +22,7 @@ docker-compose up -d
 mkdir -p downloads
 
 # 2. 复制客户端到下载目录
-cp client/Pivot-Setup.exe downloads/
+cp artifacts/release/Pivot-Setup.exe downloads/
 
 # 3. 启动服务（docker-compose.yml 已配置挂载）
 docker-compose up -d
@@ -41,7 +41,7 @@ cp new-version/Pivot-Setup.exe downloads/
 
 ```bash
 # 1. 复制客户端到 downloads 目录
-cp client/Pivot-Setup.exe downloads/
+cp artifacts/release/Pivot-Setup.exe downloads/
 
 # 2. 重新构建镜像
 docker build -t pivot:latest .

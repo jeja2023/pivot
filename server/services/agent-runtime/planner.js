@@ -1,7 +1,15 @@
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
+const { fitMessagesToContextBudget } = require('../context-budget');
 
-function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}) {
+function observationMessages(observations = []) {
+    return observations.map((observation, index) => ({
+        role: 'assistant',
+        content: `PIVOT_MCP_TOOL_RESULT_BEGIN\n执行观察 ${index + 1}：\n${JSON.stringify(observation, null, 2)}\nPIVOT_MCP_TOOL_RESULT_END`
+    }));
+}
+
+function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
     if (context.mode === 'recent') contextLines.push('使用最近的对话上下文。');
@@ -9,7 +17,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     if (context.mode === 'none') contextLines.push('不包含额外的会话上下文。');
     if (context.notes) contextLines.push(`附加说明：${context.notes}`);
     const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
-    return [
+    const messages = [
         {
             role: 'system',
             content: [
@@ -25,15 +33,16 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
                 JSON.stringify(toolList, null, 2)
             ].join('\n')
         },
+        ...observationMessages(observations),
         {
             role: 'user',
             content: [
                 `目标：${goal}`,
-                '观察记录：',
-                observations.length ? JSON.stringify(observations, null, 2) : '[]'
+                observations.length ? `已有 ${observations.length} 条执行观察，请基于上述观察决定下一步。` : '当前还没有执行观察。'
             ].join('\n\n')
         }
     ];
+    return modelCfg ? fitMessagesToContextBudget(messages, modelCfg).messages : messages;
 }
 
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '') {
@@ -42,13 +51,15 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             role: 'system',
             content: '你是 Pivot Agent。请将 Agent 的观察记录总结为清晰的最终答案。如适用，请说明局限性和有用的后续步骤。输出请使用中文。'
         },
+        ...observationMessages(observations),
         {
             role: 'user',
-            content: `任务目标：${goal}\n\n执行观察：${JSON.stringify(observations, null, 2)}`
+            content: `任务目标：${goal}\n\n请基于上述 ${observations.length} 条执行观察生成最终答案。`
         }
     ];
-    const content = await callModelText(modelCfg, messages, { user });
-    if (user) recordAgentModelUsage(user, modelCfg, messages, content, 'agent_summary', runId);
+    const fitted = fitMessagesToContextBudget(messages, modelCfg);
+    const content = await callModelText(modelCfg, fitted.messages, { user });
+    if (user) recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId);
     return content || '未能生成最终答案。';
 }
 
@@ -61,6 +72,7 @@ function isMissingFinalAnswer(value) {
 
 module.exports = {
     buildPlannerMessages,
+    observationMessages,
     synthesizeFinalAnswer,
     isMissingFinalAnswer
 };

@@ -19,7 +19,7 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
         return { valid: false, error: e };
     }
     const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
-    const llmNodes = nodes.filter(node => String(node?.tool || '').trim() === 'agent.llm');
+    const llmNodes = nodes.filter(node => ['agent.llm', 'agent.content_review'].includes(String(node?.tool || '').trim()));
     return {
         valid: true,
         llmNodes,
