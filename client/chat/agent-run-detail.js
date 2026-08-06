@@ -200,8 +200,23 @@ function agentRunActionMarkup(run = {}, options = {}) {
     }
     if (canCreateWorkflowDraft) secondary.push(`<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
     if (!isPreview && !isActive) secondary.push(`<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
-    return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary>更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
+    return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary class="btn-secondary">更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
 }
+
+document.addEventListener('click', (event) => {
+    const activeMoreActions = event.target.closest('.agent-run-more-actions');
+    if (activeMoreActions) {
+        if (event.target.closest('.agent-run-more-actions > div')) {
+            document.querySelectorAll('.agent-run-more-actions').forEach(menu => menu.removeAttribute('open'));
+        } else {
+            document.querySelectorAll('.agent-run-more-actions').forEach(menu => {
+                if (menu !== activeMoreActions) menu.removeAttribute('open');
+            });
+        }
+    } else {
+        document.querySelectorAll('.agent-run-more-actions').forEach(menu => menu.removeAttribute('open'));
+    }
+});
 
 function closeAgentRunDetailModal() {
     const modal = document.getElementById('agent-run-detail-modal');
