@@ -37,11 +37,19 @@
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    align-items: flex-start;
-    margin-bottom: 8px;
+    align-items: center;
+    margin-bottom: 0;
 }
 
 .agent-dag-node-title {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.agent-dag-node-title > div {
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -50,15 +58,14 @@
 
 .agent-dag-node-title strong {
     color: #0f172a;
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     line-height: 1.25;
     overflow-wrap: anywhere;
 }
 
 .agent-dag-node-title span {
     color: var(--text-muted);
-    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 0.64rem;
+    font-size: 0.68rem;
 }
 
 .agent-dag-node-badges {

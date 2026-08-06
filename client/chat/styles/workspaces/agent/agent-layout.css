@@ -401,12 +401,27 @@
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     background: #fff;
+    text-align: left;
+}
+
+.agent-config-modal-head > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    min-width: 0;
 }
 
 .agent-config-modal-head h3 {
     margin: 0;
     font-size: 0.98rem;
     color: var(--text-main);
+    text-align: left;
+}
+
+.agent-config-modal-head span,
+.agent-config-modal-head p {
+    text-align: left;
 }
 
 .agent-config-modal-head .btn-secondary {

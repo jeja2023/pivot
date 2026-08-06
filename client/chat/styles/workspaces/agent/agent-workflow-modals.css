@@ -506,6 +506,11 @@ body.dark-mode .agent-workflow-share-unit:has(input:checked),
 
 .agent-workflow-schedule-modal .agent-config-modal-head > div {
     min-width: 0;
+    text-align: left;
+}
+
+.agent-workflow-schedule-modal .agent-config-modal-head h3 {
+    text-align: left;
 }
 
 .agent-workflow-schedule-modal .agent-config-modal-head span {
@@ -518,6 +523,7 @@ body.dark-mode .agent-workflow-share-unit:has(input:checked),
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
 }
 
 .agent-workflow-schedule-body {

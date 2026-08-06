@@ -216,8 +216,8 @@ function agentDagNodeMarkup(node, index = null) {
 
 function renderAgentDagRunGraph(dagNodes) {
     if (!dagNodes.length) return '';
-    const NODE_W = 112, NODE_H = 34, GAP_X = 44, GAP_Y = 24, PAD = 18;
-    const MIN_VIEW_W = 880, MIN_VIEW_H = 150;
+    const NODE_W = 116, NODE_H = 36, GAP_X = 46, GAP_Y = 26, PAD = 20;
+    const MIN_VIEW_W = 860, MIN_VIEW_H = 135;
     // 状态 -> 颜色映射
     const statusColor = (status) => {
         const s = String(status || 'pending').toLowerCase();
@@ -246,21 +246,26 @@ function renderAgentDagRunGraph(dagNodes) {
         layer.forEach(n => placed.add(n.node_key));
         layers.push(layer);
     }
-    // 计算坐标
+    // 自动居中坐标计算
+    const totalW = layers.length * (NODE_W + GAP_X) - GAP_X;
+    const maxNodesInLayer = Math.max(...layers.map(l => l.length), 1);
+    const totalH = maxNodesInLayer * (NODE_H + GAP_Y) - GAP_Y;
+
+    const viewW = Math.max(totalW + PAD * 2, MIN_VIEW_W);
+    const viewH = Math.max(totalH + PAD * 2, MIN_VIEW_H);
+
+    const offsetX = Math.max(PAD, (viewW - totalW) / 2);
+    const offsetY = Math.max(PAD, (viewH - totalH) / 2);
+
     const positions = new Map();
     layers.forEach((layer, li) => {
         layer.forEach((node, si) => {
             positions.set(node.node_key, {
-                x: PAD + li * (NODE_W + GAP_X),
-                y: PAD + si * (NODE_H + GAP_Y)
+                x: offsetX + li * (NODE_W + GAP_X),
+                y: offsetY + si * (NODE_H + GAP_Y)
             });
         });
     });
-    const totalW = PAD + layers.length * (NODE_W + GAP_X) - GAP_X + PAD;
-    const lastLayerHeight = Math.max(...layers.map(l => l.length), 1) * (NODE_H + GAP_Y) - GAP_Y;
-    const totalH = PAD + lastLayerHeight + PAD;
-    const viewW = Math.max(totalW, MIN_VIEW_W);
-    const viewH = Math.max(totalH, MIN_VIEW_H);
     // 渲染边
     const edges = [];
     dagNodes.forEach(n => {
@@ -279,13 +284,13 @@ function renderAgentDagRunGraph(dagNodes) {
     const nodes = dagNodes.map(n => {
         const pos = positions.get(n.node_key);
         const c = statusColor(n.status);
-        const label = agentDagNodeDisplayTitle(n).slice(0, 12);
+        const label = agentDagNodeDisplayTitle(n).slice(0, 14);
         const statusLabel = ({ completed: '已完成', running: '运行中', error: '失败', skipped: '跳过', pending: '待执行' })[String(n.status || '').toLowerCase()] || '待执行';
         return `
             <g transform="translate(${pos.x},${pos.y})">
-                <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5" opacity="0.9"/>
-                <text x="${NODE_W/2}" y="${NODE_H/2 + 3}" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${agentEscape(label)}</text>
-                <text x="${NODE_W/2}" y="${NODE_H - 5}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">${agentEscape(statusLabel)}</text>
+                <rect width="${NODE_W}" height="${NODE_H}" rx="7" ry="7" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5" opacity="0.95"/>
+                <text x="${NODE_W/2}" y="${NODE_H/2 - 2}" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">${agentEscape(label)}</text>
+                <text x="${NODE_W/2}" y="${NODE_H/2 + 10}" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="8.5" font-weight="600">${agentEscape(statusLabel)}</text>
             </g>
         `;
     });

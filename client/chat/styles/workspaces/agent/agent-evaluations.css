@@ -18,24 +18,44 @@
 #agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal-body {
     display: flex;
     flex: 1;
+    flex-direction: column;
     min-height: 0;
     max-height: none;
     overflow: hidden;
-    padding: 12px;
+    padding: 14px;
+}
+
+#agent-config-modal[data-agent-config-section="evaluations"] .agent-collapse-evaluations {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 100%;
+    width: 100%;
+    min-height: 0;
+    margin: 0;
 }
 
 #agent-config-modal[data-agent-config-section="evaluations"] .agent-collapse-evaluations[open] {
     display: flex;
+    flex-direction: column;
     flex: 1;
+    width: 100%;
     min-height: 0;
     overflow: hidden;
 }
 
 #agent-config-modal[data-agent-config-section="evaluations"] .agent-collapse-evaluations[open] .agent-collapse-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     min-height: 0;
     width: 100%;
-    padding: 16px;
+    padding: 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    background: #ffffff;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.03);
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 .agent-eval-toolbar,
@@ -58,23 +78,29 @@
 
 .agent-eval-toolbar > div:first-child,
 .agent-eval-detail-head > div:first-child {
-    display: grid;
-    gap: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
     min-width: 0;
+    text-align: left;
 }
 
 .agent-eval-toolbar strong,
 .agent-eval-detail-head strong {
-    color: var(--text-primary);
-    font-size: 15px;
+    color: #0f172a;
+    font-size: 1.02rem;
+    font-weight: 800;
+    text-align: left;
 }
 
 .agent-eval-toolbar span,
 .agent-eval-detail-head span,
 .agent-eval-description {
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.55;
+    color: #64748b;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    text-align: left;
 }
 
 .agent-eval-toolbar-actions,
@@ -88,64 +114,77 @@
 .agent-eval-overview {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 1px;
+    gap: 10px;
     margin: 16px 0;
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: var(--border-color);
+    width: 100%;
+    background: transparent;
+    border: none;
 }
 
 .agent-eval-overview > div {
-    display: grid;
-    min-height: 68px;
-    align-content: center;
-    gap: 5px;
-    padding: 10px 12px;
-    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 64px;
+    gap: 4px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 10px;
+    text-align: left;
 }
 
 .agent-eval-overview span,
 .agent-eval-batch-summary span {
-    color: var(--text-secondary);
-    font-size: 11px;
+    color: #64748b;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-align: left;
 }
 
 .agent-eval-overview strong,
 .agent-eval-batch-summary strong {
-    color: var(--text-primary);
-    font-size: 20px;
-    line-height: 1;
+    color: #0f172a;
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.1;
+    text-align: left;
 }
 
 .agent-eval-layout {
-    display: grid;
+    display: flex;
     flex: 1;
-    grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid rgba(226, 232, 240, 0.9);
 }
 
 .agent-eval-layout.is-empty {
-    display: block;
-    flex: 0 0 auto;
-    min-height: 250px;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 260px;
+    width: 100%;
+    border-top: 1px solid rgba(226, 232, 240, 0.9);
 }
 
 .agent-eval-suite-list {
+    flex: 0 0 280px;
+    width: 280px;
     min-width: 0;
     padding: 12px 12px 12px 0;
-    overflow: auto;
-    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    border-right: 1px solid rgba(226, 232, 240, 0.9);
 }
 
 .agent-eval-layout.is-empty .agent-eval-suite-list {
-    display: grid;
-    height: auto;
-    min-height: 250px;
-    place-items: center;
-    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 36px 20px;
     overflow: hidden;
     border-right: 0;
 }
@@ -155,38 +194,43 @@
 }
 
 .agent-eval-empty {
-    display: grid;
-    width: min(360px, 100%);
-    justify-items: center;
-    gap: 8px;
-    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
+    gap: 8px;
+    max-width: 420px;
+    margin: 0 auto;
 }
 
 .agent-eval-empty-icon {
-    display: grid;
-    width: 42px;
-    height: 42px;
-    margin-bottom: 4px;
-    place-items: center;
-    border: 1px solid rgba(15, 118, 110, 0.18);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    margin-bottom: 6px;
     border-radius: 50%;
-    color: #0f766e;
-    background: rgba(15, 118, 110, 0.07);
+    border: 1px solid rgba(16, 185, 129, 0.28);
+    color: #047857;
+    background: #ecfdf5;
 }
 
 .agent-eval-empty-icon svg {
-    width: 21px;
-    height: 21px;
+    width: 24px;
+    height: 24px;
 }
 
 .agent-eval-empty strong {
-    color: var(--text-primary);
-    font-size: 14px;
+    color: #0f172a;
+    font-size: 1.08rem;
+    font-weight: 800;
 }
 
 .agent-eval-empty > span:not(.agent-eval-empty-icon) {
-    font-size: 12px;
+    color: #64748b;
+    font-size: 0.8rem;
     line-height: 1.55;
 }
 
