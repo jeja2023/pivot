@@ -37,7 +37,7 @@ const {
 } = window.Pivot?.ragGraphLayout || {};
 
 const {
-    cancelGraphNodeTooltipHide: cancelGraphNodeTooltipHideUi = () => {},
+    cancelGraphNodeTooltipHide: cancelGraphNodeTooltipHideUi = () => { },
     ensureGraphMapView: ensureGraphMapViewState = (graphState) => {
         if (!graphState.mapView) {
             graphState.mapView = {
@@ -56,16 +56,16 @@ const {
         }
         return graphState.mapView;
     },
-    hideGraphNodeTooltip: hideGraphNodeTooltipUi = () => {},
+    hideGraphNodeTooltip: hideGraphNodeTooltipUi = () => { },
     moveGraphMapPan: moveGraphMapPanUi = () => false,
-    positionGraphNodeTooltip: positionGraphNodeTooltipUi = () => {},
-    resetGraphMapView: resetGraphMapViewUi = () => {},
-    scheduleGraphNodeTooltipHide: scheduleGraphNodeTooltipHideUi = () => {},
-    showGraphNodeTooltip: showGraphNodeTooltipUi = () => {},
+    positionGraphNodeTooltip: positionGraphNodeTooltipUi = () => { },
+    resetGraphMapView: resetGraphMapViewUi = () => { },
+    scheduleGraphNodeTooltipHide: scheduleGraphNodeTooltipHideUi = () => { },
+    showGraphNodeTooltip: showGraphNodeTooltipUi = () => { },
     startGraphMapPan: startGraphMapPanUi = () => false,
     stopGraphMapPan: stopGraphMapPanUi = () => false,
-    zoomGraphMap: zoomGraphMapUi = () => {},
-    zoomGraphMapByAction: zoomGraphMapByActionUi = () => {}
+    zoomGraphMap: zoomGraphMapUi = () => { },
+    zoomGraphMapByAction: zoomGraphMapByActionUi = () => { }
 } = window.Pivot?.ragGraphUi || {};
 
 const getRagStatusLabel = (status) => {
@@ -134,6 +134,25 @@ const ragConfirm = (title, message) => new Promise((resolve) => {
 });
 
 document.addEventListener('click', async (event) => {
+    const activeActionMenu = event.target.closest('.knowledge-action-menu');
+    if (activeActionMenu) {
+        if (event.target.closest('.knowledge-action-menu-panel')) {
+            document.querySelectorAll('.knowledge-action-menu').forEach(menu => {
+                menu.removeAttribute('open');
+            });
+        } else {
+            document.querySelectorAll('.knowledge-action-menu').forEach(menu => {
+                if (menu !== activeActionMenu) {
+                    menu.removeAttribute('open');
+                }
+            });
+        }
+    } else {
+        document.querySelectorAll('.knowledge-action-menu').forEach(menu => {
+            menu.removeAttribute('open');
+        });
+    }
+
     const reindexBtn = event.target.closest('.rag-reindex-btn');
     if (reindexBtn) {
         window.reindexKnowledgeDoc(reindexBtn.dataset.ragId);

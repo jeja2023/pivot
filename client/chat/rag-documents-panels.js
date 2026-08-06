@@ -178,14 +178,19 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const hasGraphSummary = graphSummary && !graphSummary.error;
     const graphEntities = hasGraphSummary ? graphSummary.entities : signals.graphEntities;
     const graphRelations = hasGraphSummary ? graphSummary.relations : signals.graphRelations;
-    const items = [
+    const metric = ([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`;
+    const docItems = [
         ['文档', summary.total || 0],
         ['就绪', summary.ready || 0],
         ['处理中', summary.processing || 0],
-        ['失败', summary.error || 0],
+        ['失败', summary.error || 0]
+    ];
+    const indexItems = [
         ['分块', summary.chunks || 0],
         ['源文件', formatRagSize(summary.sourceSize || 0)],
-        ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`],
+        ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`]
+    ];
+    const diagnosticItems = [
         ...(hasQuality ? [
             ['评分', Number(signals.score || 0)],
             ['反馈', signals.helpfulRate === null || signals.helpfulRate === undefined ? '暂无' : `${Number(signals.helpfulRate || 0)}%`]
@@ -198,7 +203,19 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
         : '';
     PivotSafeHtml.setHtml(el, `
         <div class="rag-summary-items">
-            ${items.map(([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`).join('')}
+            <div class="knowledge-summary-primary">
+                <div class="knowledge-summary-group" aria-label="资料状态">
+                    <span class="knowledge-summary-group-label">资料</span>${docItems.map(metric).join('')}
+                </div>
+                <div class="knowledge-summary-group" aria-label="索引状态">
+                    <span class="knowledge-summary-group-label">索引</span>${indexItems.map(metric).join('')}
+                </div>
+                ${diagnosticItems.length ? `
+                    <div class="knowledge-summary-group" aria-label="诊断统计">
+                        <span class="knowledge-summary-group-label">诊断</span>${diagnosticItems.map(metric).join('')}
+                    </div>
+                ` : ''}
+            </div>
         </div>
         ${lastError}
     `);
@@ -265,19 +282,19 @@ const renderRagDebugHistory = (items = []) => {
         </div>
         <div class="rag-debug-history-list">
             ${rows.map(item => {
-                const top = (Array.isArray(item.scores) ? item.scores : [])
-                    .reduce((acc, score) => Math.max(acc, Number(score.score || 0)), 0);
-                const queue = item.queue || {};
-                const queueLabel = queue.maxConcurrent !== undefined
-                    ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)}`
-                    : '-';
-                return `
+        const top = (Array.isArray(item.scores) ? item.scores : [])
+            .reduce((acc, score) => Math.max(acc, Number(score.score || 0)), 0);
+        const queue = item.queue || {};
+        const queueLabel = queue.maxConcurrent !== undefined
+            ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)}`
+            : '-';
+        return `
                     <button type="button" class="rag-debug-history-item" data-rag-debug-sample="${escapeRagAttr(item.query || '')}">
                         <span class="rag-debug-history-query">${escapeRagHtml(item.query || '-')}</span>
                         <span class="rag-debug-history-meta">命中 ${Number(item.matchedCount || 0)} / 候选 ${Number(item.candidateCount || 0)} / 最高 ${top.toFixed(3)} / 队列 ${escapeRagHtml(queueLabel)} / ${Number(item.elapsedMs || 0)} ms</span>
                     </button>
                 `;
-            }).join('')}
+    }).join('')}
         </div>
     `);
 };
@@ -390,20 +407,20 @@ const renderRagDebugResults = (data) => {
         ` : ''}
         <div class="rag-debug-list">
             ${matches.map((m, index) => {
-                const score = Number(m.score || 0);
-                const fusedScore = Number(m.fusedScore ?? m.scores?.fused ?? score);
-                const denseRank = m.scores?.denseRank || null;
-                const ftsRank = m.scores?.ftsRank || null;
-                const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
-                const scoreDetails = [
-                    `rank #${Number(m.rank || index + 1)}`,
-                    `dense ${score.toFixed(3)}`,
-                    `fused ${fusedScore.toFixed(3)}`,
-                    denseRank ? `dense-rank #${denseRank}` : '',
-                    ftsRank ? `fts #${ftsRank}` : '',
-                    m.selected ? 'MMR selected' : ''
-                ].filter(Boolean).join(' | ');
-                return `
+        const score = Number(m.score || 0);
+        const fusedScore = Number(m.fusedScore ?? m.scores?.fused ?? score);
+        const denseRank = m.scores?.denseRank || null;
+        const ftsRank = m.scores?.ftsRank || null;
+        const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
+        const scoreDetails = [
+            `rank #${Number(m.rank || index + 1)}`,
+            `dense ${score.toFixed(3)}`,
+            `fused ${fusedScore.toFixed(3)}`,
+            denseRank ? `dense-rank #${denseRank}` : '',
+            ftsRank ? `fts #${ftsRank}` : '',
+            m.selected ? 'MMR selected' : ''
+        ].filter(Boolean).join(' | ');
+        return `
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
                         <strong>#${index + 1} ${escapeRagHtml(m.source || '-')}</strong>
@@ -420,7 +437,7 @@ const renderRagDebugResults = (data) => {
                     </div>
                 </div>
                 `;
-            }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
+    }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
         </div>
     `);
 };

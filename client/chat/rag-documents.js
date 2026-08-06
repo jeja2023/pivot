@@ -224,7 +224,7 @@ function updateRagTagControls() {
     refreshRagTagCheckboxControls();
 }
 
-window.getRagScopeSelection = function(source = 'chat') {
+window.getRagScopeSelection = function (source = 'chat') {
     const idMap = {
         chat: 'chat-rag-collection-scope',
         debug: 'rag-debug-collection',
@@ -244,7 +244,7 @@ window.getRagScopeSelection = function(source = 'chat') {
     };
 };
 
-window.applyRagDebugScopeToChat = async function() {
+window.applyRagDebugScopeToChat = async function () {
     const debugValue = normalizeRagCollectionId(document.getElementById('rag-debug-collection')?.value);
     const debugTag = normalizeRagTag(document.getElementById('rag-debug-tag')?.value);
     const chatSelect = document.getElementById('chat-rag-collection-scope');
@@ -258,7 +258,7 @@ window.applyRagDebugScopeToChat = async function() {
     window.updateChatToolReadiness?.({ silent: true });
 };
 
-window.loadKnowledgeCollections = async function() {
+window.loadKnowledgeCollections = async function () {
     if (!hasRagAuthContext()) return ragCollections;
     try {
         const res = await apiFetch(`${API_BASE}/rag/collections`, { headers: authHeaders() });
@@ -287,7 +287,7 @@ function getRagTagCollectionIdsInUse() {
     ].map(getRagTagCacheKey))];
 }
 
-window.loadKnowledgeTags = async function(collectionId = '', { updateControls = true, force = false } = {}) {
+window.loadKnowledgeTags = async function (collectionId = '', { updateControls = true, force = false } = {}) {
     const key = getRagTagCacheKey(collectionId);
     if (!hasRagAuthContext()) return getRagTagsForCollection(key);
     if (!force && ragTagsByCollection.has(key)) {
@@ -310,14 +310,14 @@ window.loadKnowledgeTags = async function(collectionId = '', { updateControls = 
     }
 };
 
-window.refreshRagTagControlsForSelectedCollections = async function({ force = false } = {}) {
+window.refreshRagTagControlsForSelectedCollections = async function ({ force = false } = {}) {
     const ids = getRagTagCollectionIdsInUse();
     await Promise.all(ids.map(id => window.loadKnowledgeTags(id, { updateControls: false, force })));
     updateRagTagControls();
     window.updateChatToolReadiness?.({ silent: true });
 };
 
-window.handleRagCollectionScopeChange = async function(source = '') {
+window.handleRagCollectionScopeChange = async function (source = '') {
     await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
     if (source === 'docs') {
         window.loadKnowledgeDocs(1);
@@ -326,7 +326,7 @@ window.handleRagCollectionScopeChange = async function(source = '') {
     }
 };
 
-window.createKnowledgeCollectionFromPrompt = async function() {
+window.createKnowledgeCollectionFromPrompt = async function () {
     const name = await window.showInputPrompt?.({
         title: '新建专题库',
         message: '专题库用于把知识库文档按业务、项目或制度范围归类。',
@@ -353,7 +353,7 @@ window.createKnowledgeCollectionFromPrompt = async function() {
     }
 };
 
-window.createKnowledgeTagFromPrompt = async function() {
+window.createKnowledgeTagFromPrompt = async function () {
     const tag = await window.showInputPrompt?.({
         title: '新建标签',
         message: '标签用于在专题库之外补充细粒度检索范围。',
@@ -452,9 +452,9 @@ async function openKnowledgeCollectionShareModal() {
                     </div>
                     <div class="agent-workflow-share-units-list">
                         ${units.map(unit => {
-                            const checked = isShared && (isAll || allowed.has(unit));
-                            const isCurrent = unit === currentUnit;
-                            return `
+        const checked = isShared && (isAll || allowed.has(unit));
+        const isCurrent = unit === currentUnit;
+        return `
                                 <label class="agent-workflow-share-unit">
                                     <input type="checkbox" name="knowledge-share-unit" value="${escapeRagAttr(unit)}" ${checked ? 'checked' : ''}>
                                     <span>
@@ -463,7 +463,7 @@ async function openKnowledgeCollectionShareModal() {
                                     </span>
                                 </label>
                             `;
-                        }).join('') || '<span class="agent-workflow-share-empty">暂无可用单位信息</span>'}
+    }).join('') || '<span class="agent-workflow-share-empty">暂无可用单位信息</span>'}
                     </div>
                 </section>
                 <div id="knowledge-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
@@ -616,7 +616,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
         renderRagSummary(summary, quality, graphSummary);
         renderRagQualityReport(quality);
         updateRagDebugSamples(docs);
-        
+
         const body = document.getElementById('rag-docs-body');
         PivotSafeHtml.setHtml(body, docs.map((d, index) => `
             <tr>
@@ -651,7 +651,7 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     }
 };
 
-window.openKnowledgeWorkbench = async function() {
+window.openKnowledgeWorkbench = async function () {
     await window.ensureWorkspaceScripts?.('knowledge');
     window.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
@@ -662,9 +662,12 @@ window.openKnowledgeWorkbench = async function() {
         button.id = 'rag-share-collection-btn';
         button.className = 'btn-secondary';
         button.type = 'button';
+        button.setAttribute('role', 'menuitem');
         button.textContent = '分享专题库';
         button.addEventListener('click', () => openKnowledgeCollectionShareModal());
-        toolbar.insertBefore(button, toolbar.querySelector('#rag-create-tag-btn'));
+        const contentMenu = toolbar.querySelector('.knowledge-action-menu:first-of-type .knowledge-action-menu-panel');
+        if (contentMenu) contentMenu.appendChild(button);
+        else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
     try {
         await window.ensureAdminSettingsScript?.();
@@ -689,7 +692,7 @@ window.openKnowledgeWorkbench = async function() {
     }
 };
 
-window.closeKnowledgeWorkbench = function() {
+window.closeKnowledgeWorkbench = function () {
     closeKnowledgeGraphModal();
     window.showMainWorkspace?.('chat');
 };
@@ -748,7 +751,7 @@ function ensureKnowledgeUploadModal() {
     return modal;
 }
 
-window.openKnowledgeUploadModal = async function() {
+window.openKnowledgeUploadModal = async function () {
     const modal = ensureKnowledgeUploadModal();
     const collectionId = getLinkedRagCollectionId('upload');
     await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
@@ -757,7 +760,7 @@ window.openKnowledgeUploadModal = async function() {
     modal.classList.remove('hidden');
 };
 
-window.closeKnowledgeUploadModal = function() {
+window.closeKnowledgeUploadModal = function () {
     const modal = document.getElementById('knowledge-upload-modal');
     modal?.classList.add('hidden');
     // 关闭即清空待上传队列，避免下次打开残留。
@@ -812,7 +815,7 @@ function ensureKnowledgeDocMetaModal() {
     return modal;
 }
 
-window.openKnowledgeDocMetaModal = async function(id) {
+window.openKnowledgeDocMetaModal = async function (id) {
     const doc = getCachedKnowledgeDoc(id);
     if (!doc) return showToast('未找到文档，请刷新后重试', 'error');
     const modal = ensureKnowledgeDocMetaModal();
@@ -832,11 +835,11 @@ window.openKnowledgeDocMetaModal = async function(id) {
     modal.classList.remove('hidden');
 };
 
-window.closeKnowledgeDocMetaModal = function() {
+window.closeKnowledgeDocMetaModal = function () {
     document.getElementById('knowledge-doc-meta-modal')?.classList.add('hidden');
 };
 
-window.saveKnowledgeDocMeta = async function() {
+window.saveKnowledgeDocMeta = async function () {
     const docId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-id')?.value);
     if (!docId) return showToast('未找到文档，请刷新后重试', 'error');
     const collectionId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-collection')?.value);
@@ -1414,7 +1417,7 @@ window.reindexKnowledgeDoc = async (id) => {
 window.deleteKnowledgeDoc = async (id) => {
     const confirmed = await ragConfirm('删除知识库文档', '确定要从知识库中移除该文档吗？大模型将不再参考此文档。');
     if (!confirmed) return;
-    
+
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/${id}`, {
             method: 'DELETE',
