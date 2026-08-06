@@ -35,7 +35,7 @@ const caf = typeof globalThis.cancelAnimationFrame === 'function'
     ? handle => globalThis.cancelAnimationFrame(handle)
     : handle => clearTimeout(handle);
 
-function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange }) {
+function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange, readOnly = false }) {
         if (!canvas) return null;
 
         // 幂等：如果已有实例先销毁
@@ -104,6 +104,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             xmlns: SVG_NS,
             preserveAspectRatio: 'xMinYMin meet'
         });
+        canvas.classList.toggle('is-readonly', Boolean(readOnly));
         const defs = makeSvgEl('defs');
         const marker = makeSvgEl('marker', {
             id: 'pivot-dag-arrow',
@@ -321,6 +322,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const { renderInspector } = createDagInspectorController({
             inspector,
             onNodeSelectionChange,
+            readOnly,
             currentTools,
             get spec() { return spec; },
             set spec(value) { spec = value; },
@@ -611,6 +613,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             inspector,
             toolbar,
             viewState,
+            readOnly,
             onNodeSelectionChange,
             get spec() { return spec; },
             get selectedId() { return selectedId; },
@@ -657,6 +660,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         // —— 工具栏 ——
         toolbarStatus = renderDagToolbar({
             toolbar,
+            readOnly,
             addNode,
             addPresetNode,
             addAgentTeamTemplate,
@@ -708,7 +712,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             canvas.appendChild(libraryExpandBtn);
             canvas.classList.add('has-node-library');
         };
-        mountNodeLibrary();
+        if (!readOnly) mountNodeLibrary();
 
         // —— textarea 外部改动同步回画布 ——
         const onTextareaInput = () => {

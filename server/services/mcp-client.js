@@ -32,10 +32,35 @@ const {
     listBridgeLocalDeviceMcpTools
 } = require('./local-device-bridge');
 const { isSuperAdmin } = require('../permissions');
+const {
+    canAccessSharedResource,
+    normalizeShareSettings
+} = require('./unit-visibility');
 const { enqueueMcpCallLog } = require('./sqlite-write-queue');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
+const SHARED_READONLY_DATABASE_TOOLS = new Set([
+    'db.list_tables',
+    'db.count_tables',
+    'db.describe_table',
+    'db.run_readonly_query',
+    'db.group_count',
+    'db.list_collections',
+    'db.count_collections',
+    'db.sample_collection',
+    'db.aggregate'
+]);
+
+function isUnitSharedMcpServer(server) {
+    return Boolean(server && server.user_id !== null && server.user_id !== undefined && String(server.scope || '').toLowerCase() === 'shared');
+}
+
+function isSharedMcpToolAllowed(server, toolName) {
+    if (!isUnitSharedMcpServer(server)) return true;
+    if (!String(server.base_url || '').startsWith('pivot-db://')) return false;
+    return SHARED_READONLY_DATABASE_TOOLS.has(String(toolName || ''));
+}
 
 function previewValue(value, limit = PREVIEW_LIMIT) {
     // 先脱敏再序列化，避免 api_key / Bearer Token 等敏感字段落入审计日志
@@ -124,6 +149,9 @@ function normalizeServerRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         has_api_key: Boolean(row.api_key),
+        scope: row.scope || (row.user_id === null ? 'shared' : 'personal'),
+        allowed_units: row.allowed_units || '',
+        read_only: isUnitSharedMcpServer(row),
         owner: formatMcpOwner(row),
         config,
         server_type: databaseConnection ? 'database' : (builtinType || 'external'),
@@ -136,8 +164,19 @@ function getAccessibleMcpServer(serverId, user) {
     const row = db.prepare(`
         SELECT * FROM mcp_servers
         WHERE id = ? AND status != 'deleted'
-          AND (user_id IS NULL OR user_id = ? OR ? = 1)
-    `).get(serverId, user.id, isSuperAdmin(user) ? 1 : 0);
+          AND (
+              user_id IS NULL
+              OR user_id = ?
+              OR ? = 1
+              OR (
+                  scope = 'shared'
+                  AND (
+                      TRIM(COALESCE(allowed_units, '')) = ''
+                      OR instr(',' || replace(COALESCE(allowed_units, ''), ' ', '') || ',', ',' || ? || ',') > 0
+                  )
+              )
+          )
+    `).get(serverId, user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim());
     if (row?.api_key) row.api_key = decryptSecret(row.api_key);
     return row || null;
 }
@@ -149,10 +188,69 @@ function listMcpServers(user) {
         FROM mcp_servers s
         LEFT JOIN users u ON u.id = s.user_id
         WHERE s.status != 'deleted'
-          AND (s.user_id IS NULL OR s.user_id = ? OR ? = 1)
+          AND (
+              s.user_id IS NULL
+              OR s.user_id = ?
+              OR ? = 1
+              OR (
+                  s.scope = 'shared'
+                  AND (
+                      TRIM(COALESCE(s.allowed_units, '')) = ''
+                      OR instr(',' || replace(COALESCE(s.allowed_units, ''), ' ', '') || ',', ',' || ? || ',') > 0
+                  )
+              )
+          )
         ORDER BY s.user_id IS NOT NULL, s.name ASC
-    `).all(user.id, isSuperAdmin(user) ? 1 : 0);
-    return rows.map(normalizeServerRow);
+    `).all(user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim());
+    return rows.map(row => ({
+        ...normalizeServerRow(row),
+        can_edit: Number(row.user_id) === Number(user?.id) || (row.user_id === null && isSuperAdmin(user)),
+        read_only: isUnitSharedMcpServer(row) && Number(row.user_id) !== Number(user?.id)
+    }));
+}
+
+function getMcpServerShareOptions(serverId, user) {
+    const row = db.prepare(`
+        SELECT s.*, u.unit AS owner_unit
+        FROM mcp_servers s
+        LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.id = ? AND s.status != 'deleted'
+    `).get(serverId);
+    if (!row || (Number(row.user_id) !== Number(user?.id) && !isSuperAdmin(user))) return null;
+    const units = db.prepare(`
+        SELECT DISTINCT TRIM(unit) AS unit
+        FROM users
+        WHERE unit IS NOT NULL AND TRIM(unit) != '' AND deleted_at IS NULL
+        ORDER BY unit COLLATE NOCASE ASC
+    `).all().map(item => item.unit).filter(Boolean);
+    return {
+        server: normalizeServerRow(row),
+        units,
+        currentUnit: String(user?.unit || '').trim(),
+        supportsSharing: String(row.base_url || '').startsWith('pivot-db://')
+    };
+}
+
+function updateMcpServerSharing(serverId, user, body = {}) {
+    const row = db.prepare("SELECT * FROM mcp_servers WHERE id = ? AND status != 'deleted'").get(serverId);
+    if (!row || (Number(row.user_id) !== Number(user?.id) && !isSuperAdmin(user))) return null;
+    if (row.user_id === null) {
+        const err = new Error('全局服务不需要单位共享设置。');
+        err.status = 400;
+        throw err;
+    }
+    const settings = normalizeShareSettings(body, user, row);
+    if (settings.scope === 'shared' && row.user_id !== null && !String(row.base_url || '').startsWith('pivot-db://')) {
+        const err = new Error('当前阶段仅支持共享只读数据库能力，外部服务和通知服务不能共享。');
+        err.status = 400;
+        throw err;
+    }
+    db.prepare(`
+        UPDATE mcp_servers
+        SET scope = ?, allowed_units = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND status != 'deleted'
+    `).run(settings.scope, settings.allowedUnits, getBeijingTimestamp(), serverId, row.user_id);
+    return getAccessibleMcpServer(serverId, user);
 }
 
 async function callMcpJsonRpc(server, method, params = {}, user = null) {
@@ -283,7 +381,7 @@ async function refreshMcpTools(server, user = null) {
         upsertToolCache(server.id, normalizedTools);
         db.prepare('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
           .run('', getBeijingTimestamp(), getBeijingTimestamp(), server.id);
-        return listCachedMcpTools(server.id);
+        return listCachedMcpTools(server.id, user);
     } catch (e) {
         db.prepare('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
           .run(e.message, getBeijingTimestamp(), getBeijingTimestamp(), server.id);
@@ -299,18 +397,20 @@ function listCachedMcpTools(serverId = null, user = null) {
     if (serverId) {
         return db.prepare(`
             SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+                   s.scope, s.allowed_units,
                    COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                    u.unit AS owner_unit, u.role AS owner_role, c.database_type
             FROM mcp_tool_cache t
             JOIN mcp_servers s ON s.id = t.server_id
             LEFT JOIN users u ON u.id = s.user_id
             LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
-            WHERE t.server_id = ?
+            WHERE t.server_id = ? AND s.status != 'deleted'
             ORDER BY t.name ASC
-        `).all(serverId).map(formatMcpTool);
+        `).all(serverId).filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user)).filter(row => isSharedMcpToolAllowed(row, row.name)).map(formatMcpTool);
     }
     const rows = db.prepare(`
         SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+               s.scope, s.allowed_units,
                COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                u.unit AS owner_unit, u.role AS owner_role, c.database_type
         FROM mcp_tool_cache t
@@ -318,15 +418,17 @@ function listCachedMcpTools(serverId = null, user = null) {
         LEFT JOIN users u ON u.id = s.user_id
         LEFT JOIN mcp_database_connections c ON c.mcp_server_id = s.id AND c.status != 'deleted'
         WHERE s.status = 'active'
-          AND (? IS NULL OR s.user_id IS NULL OR s.user_id = ? OR ? = 1)
         ORDER BY s.name ASC, t.name ASC
-    `).all(user?.id || null, user?.id || null, isSuperAdmin(user) ? 1 : 0);
+    `).all();
     const directLocalTools = listLocalDeviceMcpTools(user);
     const bridgeLocalTools = directLocalTools.length ? [] : listBridgeLocalDeviceMcpTools(user);
     return [
         ...directLocalTools,
         ...bridgeLocalTools,
-        ...rows.map(formatMcpTool)
+        ...rows
+            .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
+            .filter(row => isSharedMcpToolAllowed(row, row.name))
+            .map(formatMcpTool)
     ];
 }
 
@@ -411,6 +513,11 @@ async function executeMcpTool(fullName, input, user, options = {}) {
     }
     const server = getAccessibleMcpServer(Number(match[1]), user);
     if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
+    if (!isSharedMcpToolAllowed(server, match[2])) {
+        const err = new Error('共享工具仅允许执行只读数据库能力。');
+        err.status = 403;
+        throw err;
+    }
     const serverType = String(server.base_url || '').startsWith('pivot-db://')
         ? 'database_connection'
         : 'mcp_server';
@@ -460,6 +567,8 @@ module.exports = {
     getAccessibleMcpServer,
     listCachedMcpTools,
     listMcpServers,
+    getMcpServerShareOptions,
+    updateMcpServerSharing,
     normalizeServerRow,
     recordMcpCallLog,
     refreshMcpTools

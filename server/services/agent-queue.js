@@ -1,3 +1,6 @@
+const { createStatementCache } = require('../db/statements');
+const { nowExpr } = require('../db/dialect');
+
 const DEFAULT_LOCK_MS = 24 * 60 * 60 * 1000;
 
 function createAgentQueue({
@@ -22,6 +25,82 @@ function createAgentQueue({
     const safeMaxConcurrentPerUser = Math.max(Number.parseInt(maxConcurrentPerUser, 10) || 2, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
     const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
+    const statementCache = createStatementCache(db);
+    const sql = statementCache.sql;
+    const currentTimeExpr = nowExpr();
+    const statements = {
+        claimCandidates: sql(`
+            SELECT id, user_id
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+              AND (
+                  locked_by IS NULL
+                  OR lock_expires_at IS NULL
+                  OR lock_expires_at <= ${currentTimeExpr}
+              )
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 50
+        `),
+        claimRun: sql(`
+            UPDATE agent_runs
+            SET status = 'running',
+                locked_by = ?,
+                lock_expires_at = ?,
+                started_at = COALESCE(started_at, ?),
+                last_heartbeat_at = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND status = 'queued'
+              AND deleted_at IS NULL
+              AND (
+                  locked_by IS NULL
+                  OR lock_expires_at IS NULL
+                  OR lock_expires_at <= ${currentTimeExpr}
+              )
+        `),
+        renewRunLock: sql(`
+            UPDATE agent_runs
+            SET lock_expires_at = ?,
+                last_heartbeat_at = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND locked_by = ?
+              AND status = 'running'
+              AND deleted_at IS NULL
+        `),
+        releaseRun: sql(`
+            UPDATE agent_runs
+            SET locked_by = NULL,
+                lock_expires_at = NULL
+            WHERE id = ? AND locked_by = ?
+        `),
+        getRunStatus: sql('SELECT status FROM agent_runs WHERE id = ?'),
+        recoverQueued: sql(`
+            SELECT id
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+            ORDER BY priority DESC, created_at ASC
+            LIMIT ?
+        `),
+        queuedCount: sql(`
+            SELECT COUNT(*) AS count
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+        `),
+        oldestQueued: sql(`
+            SELECT
+                id,
+                created_at
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+        `)
+    };
 
     const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
 
@@ -35,40 +114,12 @@ function createAgentQueue({
     }
 
     function claimNextRun() {
-        const rows = db.prepare(`
-            SELECT id, user_id
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-              AND (
-                  locked_by IS NULL
-                  OR lock_expires_at IS NULL
-                  OR lock_expires_at <= datetime('now', '+8 hours')
-              )
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 50
-        `).all();
+        const rows = statements.claimCandidates.all();
 
         for (const row of rows) {
             if ((activeUserCounts.get(row.user_id) || 0) >= safeMaxConcurrentPerUser) continue;
             const now = getTimestamp();
-            const result = db.prepare(`
-                UPDATE agent_runs
-                SET status = 'running',
-                    locked_by = ?,
-                    lock_expires_at = ?,
-                    started_at = COALESCE(started_at, ?),
-                    last_heartbeat_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-                  AND status = 'queued'
-                  AND deleted_at IS NULL
-                  AND (
-                      locked_by IS NULL
-                      OR lock_expires_at IS NULL
-                      OR lock_expires_at <= datetime('now', '+8 hours')
-                  )
-            `).run(instanceId, lockExpiresAt(), now, now, now, row.id);
+            const result = statements.claimRun.run(instanceId, lockExpiresAt(), now, now, now, row.id);
 
             if (result.changes === 1) return row;
         }
@@ -78,16 +129,7 @@ function createAgentQueue({
 
     function renewRunLock(runId) {
         const now = getTimestamp();
-        const result = db.prepare(`
-            UPDATE agent_runs
-            SET lock_expires_at = ?,
-                last_heartbeat_at = ?,
-                updated_at = ?
-            WHERE id = ?
-              AND locked_by = ?
-              AND status = 'running'
-              AND deleted_at IS NULL
-        `).run(lockExpiresAt(), now, now, runId, instanceId);
+        const result = statements.renewRunLock.run(lockExpiresAt(), now, now, runId, instanceId);
         if (result.changes === 0) {
             logger.warn({ runId, instanceId }, 'Agent run lock renewal skipped; lock owner or status changed');
         }
@@ -113,12 +155,7 @@ function createAgentQueue({
         lockRenewTimers.set(runId, timer);
     }
     function releaseRun(runId) {
-        db.prepare(`
-            UPDATE agent_runs
-            SET locked_by = NULL,
-                lock_expires_at = NULL
-            WHERE id = ? AND locked_by = ?
-        `).run(runId, instanceId);
+        statements.releaseRun.run(runId, instanceId);
     }
 
     function processQueue() {
@@ -128,7 +165,7 @@ function createAgentQueue({
             const runId = claimed.id;
             const user = getRunUser(runId);
             if (!user) {
-                const status = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status;
+                const status = statements.getRunStatus.get(runId)?.status;
                 if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors'].includes(status)) {
                     markRunError(runId, 'Agent run user no longer exists.');
                 }
@@ -163,38 +200,17 @@ function createAgentQueue({
     }
 
     function recoverQueued(limit = 100) {
-        const queued = db.prepare(`
-            SELECT id
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-            ORDER BY priority DESC, created_at ASC
-            LIMIT ?
-        `).all(limit);
+        const queued = statements.recoverQueued.all(limit);
         queued.forEach(run => queuedHints.add(run.id));
         scheduleProcessQueue();
         return queued.length;
     }
 
     function getStatus() {
-        const queued = db.prepare(`
-            SELECT COUNT(*) AS count
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-        `).get().count;
-        const oldestQueued = db.prepare(`
-            SELECT
-                id,
-                created_at,
-                CAST((julianday(datetime('now', '+8 hours')) - julianday(created_at)) * 86400000 AS INTEGER) AS age_ms
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 1
-        `).get() || null;
+        const queued = statements.queuedCount.get().count;
+        const oldestQueued = statements.oldestQueued.get() || null;
         const now = Date.now();
+        const oldestQueuedAt = oldestQueued?.created_at ? new Date(String(oldestQueued.created_at).replace(' ', 'T')).getTime() : NaN;
         const activeRuns = Array.from(activeRunIds).map(runId => ({
             runId,
             activeMs: Math.max(0, now - (activeStartedAt.get(runId) || now)),
@@ -209,7 +225,7 @@ function createAgentQueue({
             maxConcurrent: safeMaxConcurrent,
             maxConcurrentPerUser: safeMaxConcurrentPerUser,
             oldestQueuedRunId: oldestQueued?.id || null,
-            oldestQueuedAgeMs: Math.max(0, Number(oldestQueued?.age_ms || 0))
+            oldestQueuedAgeMs: Number.isFinite(oldestQueuedAt) ? Math.max(0, now - oldestQueuedAt) : 0
         };
     }
 

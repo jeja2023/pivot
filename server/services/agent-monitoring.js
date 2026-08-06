@@ -40,7 +40,7 @@ function getAgentMetrics(user, days = 7) {
             SUM(CASE WHEN status = 'completed_with_errors' THEN 1 ELSE 0 END) AS completedWithErrors,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
             SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
-            SUM(CASE WHEN status IN ('queued','running','approval_required') THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status IN ('queued','running','approval_required','awaiting_approval') THEN 1 ELSE 0 END) AS active,
             COALESCE(SUM(total_tokens), 0) AS totalTokens
         FROM agent_runs
         WHERE deleted_at IS NULL AND ${baseWhere}

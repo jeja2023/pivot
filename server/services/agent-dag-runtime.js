@@ -2,7 +2,7 @@ const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
-const { listSteps } = require('./agent-runs');
+const { listDagNodes, listSteps } = require('./agent-runs');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { inspectDagTopology, normalizeDagSpec, parseJsonObject } = require('./agent-validators');
 const {
@@ -274,7 +274,25 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
             if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
             const resolvedInput = resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap });
             const approvalKey = `${node.tool}:subworkflow:${childStack.join('.')}:${node.id}`;
-            if (deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
+            let workflowApprovalResult = null;
+            let workflowDelayResult = null;
+            if (node.tool === 'workflow.approval') {
+                workflowApprovalResult = await deps.waitForWorkflowApproval({
+                    run,
+                    user,
+                    node,
+                    input: resolvedInput,
+                    key: approvalKey
+                });
+            } else if (node.tool === 'workflow.delay') {
+                workflowDelayResult = await deps.waitForWorkflowDelay({
+                    run,
+                    node,
+                    input: resolvedInput,
+                    key: approvalKey
+                });
+            }
+            if (node.tool !== 'workflow.approval' && deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
                 const error = new Error('子工作流节点需要工具审批。');
                 error.code = 'AGENT_APPROVAL_REQUIRED';
                 throw error;
@@ -282,6 +300,8 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
             const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs);
             const executionContext = {
                 dagInputs,
+                workflowApprovalResult,
+                workflowDelayResult,
                 executeSubworkflow: childInput => executeSubworkflowDag({
                     input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack
                 })
@@ -336,9 +356,27 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (topology.blockers.length) throw new Error(`DAG 拒绝执行：${topology.blockers[0]}`);
     assertWorkflowLlmNodesConfigured(dagSpec);
 
-    dagSpec.nodes.forEach(node => upsertDagNode(run.id, node, { status: 'pending' }));
+    const persistedDagNodes = new Map(listDagNodes(run.id).map(node => [node.node_key, node]));
+    dagSpec.nodes.forEach(node => {
+        const existing = persistedDagNodes.get(node.id);
+        if (existing && ['completed', 'continued_error', 'skipped', 'waiting_approval'].includes(existing.status)) return;
+        upsertDagNode(run.id, node, { status: 'pending' });
+    });
     const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
-    const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
+    const states = new Map(dagSpec.nodes.map(node => {
+        const existing = persistedDagNodes.get(node.id);
+        if (existing && ['completed', 'continued_error', 'skipped'].includes(existing.status)) {
+            return [node.id, {
+                status: existing.status,
+                input: existing.input || {},
+                output: existing.output,
+                compactOutput: clampText(existing.output, 12000),
+                attemptCount: existing.attempt_count || 0,
+                reused: false
+            }];
+        }
+        return [node.id, { status: 'pending' }];
+    }));
     Object.entries(reusedDagNodes).forEach(([nodeId, state]) => {
         states.set(nodeId, {
             status: state?.status || 'completed',
@@ -485,13 +523,33 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     throw contractError;
                 }
                 if (!selectedTool) throw new Error(`节点工具不可用或无权访问：${node.tool || '-'}`);
-                if (deps.maybePauseForApproval(run, selectedTool, resolvedInput, `${node.tool}:${node.id}`)) {
+                let workflowApprovalResult = null;
+                let workflowDelayResult = null;
+                if (node.tool === 'workflow.approval') {
+                    workflowApprovalResult = await deps.waitForWorkflowApproval({
+                        run,
+                        user,
+                        node,
+                        input: resolvedInput,
+                        key: `${node.tool}:${node.id}`
+                    });
+                } else if (node.tool === 'workflow.delay') {
+                    workflowDelayResult = await deps.waitForWorkflowDelay({
+                        run,
+                        node,
+                        input: resolvedInput,
+                        key: `${node.tool}:${node.id}`
+                    });
+                }
+                if (node.tool !== 'workflow.approval' && deps.maybePauseForApproval(run, selectedTool, resolvedInput, `${node.tool}:${node.id}`)) {
                     const approvalError = new Error('DAG 节点需要工具审批。');
                     approvalError.code = 'AGENT_APPROVAL_REQUIRED';
                     throw approvalError;
                 }
                 const executionContext = {
                     dagInputs,
+                    workflowApprovalResult,
+                    workflowDelayResult,
                     executeSubworkflow: childInput => executeSubworkflowDag({
                         input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: subworkflowStack
                     })

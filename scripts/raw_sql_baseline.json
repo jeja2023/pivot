@@ -1,0 +1,427 @@
+{
+  "version": 1,
+  "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
+  "total": 1524,
+  "entries": [
+    {
+      "file": "scripts/check_external_links.js",
+      "count": 2
+    },
+    {
+      "file": "scripts/check_no_new_raw_sql.js",
+      "count": 4
+    },
+    {
+      "file": "server/auth.js",
+      "count": 6
+    },
+    {
+      "file": "server/db/migrations/index.js",
+      "count": 20
+    },
+    {
+      "file": "server/db/migrations/legacy.js",
+      "count": 36
+    },
+    {
+      "file": "server/db/migrations/regulations.js",
+      "count": 9
+    },
+    {
+      "file": "server/db/migrations/runner.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/schema/legacy-preflight.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/seed.js",
+      "count": 6
+    },
+    {
+      "file": "server/llm.js",
+      "count": 5
+    },
+    {
+      "file": "server/metrics.js",
+      "count": 2
+    },
+    {
+      "file": "server/rag.js",
+      "count": 3
+    },
+    {
+      "file": "server/routes/admin-stats.js",
+      "count": 27
+    },
+    {
+      "file": "server/routes/admin-users.js",
+      "count": 28
+    },
+    {
+      "file": "server/routes/announcements.js",
+      "count": 12
+    },
+    {
+      "file": "server/routes/attachments.js",
+      "count": 10
+    },
+    {
+      "file": "server/routes/auth.js",
+      "count": 3
+    },
+    {
+      "file": "server/routes/mcp/helpers.js",
+      "count": 1
+    },
+    {
+      "file": "server/routes/mcp/index.js",
+      "count": 40
+    },
+    {
+      "file": "server/routes/models.js",
+      "count": 13
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "count": 1
+    },
+    {
+      "file": "server/routes/prompts.js",
+      "count": 6
+    },
+    {
+      "file": "server/routes/sessions.js",
+      "count": 24
+    },
+    {
+      "file": "server/routes/settings.js",
+      "count": 8
+    },
+    {
+      "file": "server/services/agent-approval-requests.js",
+      "count": 26
+    },
+    {
+      "file": "server/services/agent-artifacts.js",
+      "count": 17
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/agent-dag-runtime.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/agent-evaluations.js",
+      "count": 28
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/agent-monitoring.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/agent-preflight.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/agent-runs.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/agent-runtime/dag-run-config.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/agent-runtime/index.js",
+      "count": 18
+    },
+    {
+      "file": "server/services/agent-runtime/notifications.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/agent-schedules.js",
+      "count": 18
+    },
+    {
+      "file": "server/services/agent-templates.js",
+      "count": 8
+    },
+    {
+      "file": "server/services/agent-tools.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/agent-traces.js",
+      "count": 9
+    },
+    {
+      "file": "server/services/agent-triggers.js",
+      "count": 20
+    },
+    {
+      "file": "server/services/agent-workflows.js",
+      "count": 13
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "count": 6
+    },
+    {
+      "file": "server/services/capability-market.js",
+      "count": 18
+    },
+    {
+      "file": "server/services/chat-vision.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/compliance-package.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/data-analysis/datasets.js",
+      "count": 8
+    },
+    {
+      "file": "server/services/data-analysis/shared.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/document-processing/cleanup.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/document-processing/exporters/index.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/document-processing/files.js",
+      "count": 5
+    },
+    {
+      "file": "server/services/document-processing/jobs.js",
+      "count": 39
+    },
+    {
+      "file": "server/services/enterprise-access.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/knowledge-graph.js",
+      "count": 44
+    },
+    {
+      "file": "server/services/long-term-memory/index.js",
+      "count": 45
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/mcp-client.js",
+      "count": 12
+    },
+    {
+      "file": "server/services/model-runtime.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/models.js",
+      "count": 13
+    },
+    {
+      "file": "server/services/observability.js",
+      "count": 6
+    },
+    {
+      "file": "server/services/rag-config.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/rag-debug-history.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/rag-documents.js",
+      "count": 33
+    },
+    {
+      "file": "server/services/rag-index/index.js",
+      "count": 7
+    },
+    {
+      "file": "server/services/regulations/analysis.js",
+      "count": 9
+    },
+    {
+      "file": "server/services/regulations/catalog.js",
+      "count": 9
+    },
+    {
+      "file": "server/services/regulations/collaboration.js",
+      "count": 11
+    },
+    {
+      "file": "server/services/regulations/links.js",
+      "count": 6
+    },
+    {
+      "file": "server/services/regulations/mutations.js",
+      "count": 14
+    },
+    {
+      "file": "server/services/regulations/search.js",
+      "count": 12
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/runtime-settings.js",
+      "count": 5
+    },
+    {
+      "file": "server/services/sqlite-write-queue.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/storage-gc.js",
+      "count": 7
+    },
+    {
+      "file": "server/services/system-health.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/user-identity.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/workflow-credentials.js",
+      "count": 16
+    },
+    {
+      "file": "tests/agent-runtime-lifecycle.test.js",
+      "count": 7
+    },
+    {
+      "file": "tests/agent-trace-contracts.test.js",
+      "count": 11
+    },
+    {
+      "file": "tests/approval-requests.test.js",
+      "count": 20
+    },
+    {
+      "file": "tests/data-analysis.test.js",
+      "count": 4
+    },
+    {
+      "file": "tests/db-migration-snapshots.test.js",
+      "count": 22
+    },
+    {
+      "file": "tests/document-processing.test.js",
+      "count": 30
+    },
+    {
+      "file": "tests/enterprise-deployment.test.js",
+      "count": 1
+    },
+    {
+      "file": "tests/security-agent.test.js",
+      "count": 29
+    },
+    {
+      "file": "tests/security-agent/preflight-governance.js",
+      "count": 6
+    },
+    {
+      "file": "tests/security-auth.test.js",
+      "count": 89
+    },
+    {
+      "file": "tests/security-chat/cache-secrets.js",
+      "count": 12
+    },
+    {
+      "file": "tests/security-chat/chat-route-harness.js",
+      "count": 9
+    },
+    {
+      "file": "tests/security-chat/context-settings.js",
+      "count": 16
+    },
+    {
+      "file": "tests/security-chat/context-thought.js",
+      "count": 7
+    },
+    {
+      "file": "tests/security-chat/ops-models.js",
+      "count": 49
+    },
+    {
+      "file": "tests/security-chat/route-orchestration.js",
+      "count": 2
+    },
+    {
+      "file": "tests/security-chat/sessions-routes.js",
+      "count": 49
+    },
+    {
+      "file": "tests/security-mcp/access-database.js",
+      "count": 16
+    },
+    {
+      "file": "tests/security-mcp/chat-context.js",
+      "count": 14
+    },
+    {
+      "file": "tests/security-mcp/im-database-config.js",
+      "count": 5
+    },
+    {
+      "file": "tests/security-mcp/services.js",
+      "count": 72
+    },
+    {
+      "file": "tests/security-rag-debug-history.test.js",
+      "count": 1
+    },
+    {
+      "file": "tests/security-rag/core.js",
+      "count": 32
+    },
+    {
+      "file": "tests/security-rag/documents.js",
+      "count": 114
+    },
+    {
+      "file": "tests/security-rag/embedding-config.js",
+      "count": 46
+    },
+    {
+      "file": "tests/security-rag/memories.js",
+      "count": 14
+    },
+    {
+      "file": "tests/security-rag/regulations.js",
+      "count": 4
+    },
+    {
+      "file": "tests/security-rag/retrieval-usage.js",
+      "count": 35
+    }
+  ]
+}

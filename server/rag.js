@@ -30,6 +30,11 @@ const {
     setKnowledgeDocumentTags,
     setKnowledgeDocumentEnabled
 } = require('./services/rag-documents');
+const { buildDocumentAccessFilter, canReadKnowledgeResource } = require('./services/knowledge-access');
+const {
+    getKnowledgeCollectionShareOptions,
+    updateKnowledgeCollectionSharing
+} = require('./services/rag-documents');
 const {
     retrieveContext,
     cosineSimilarity,
@@ -81,8 +86,9 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
     const offset = (page - 1) * limit;
     const collectionId = Number.parseInt(req.query.collectionId, 10);
     const tag = String(req.query.tag || '').trim().replace(/^#+/, '').slice(0, 40);
-    const filters = ['d.user_id = ?', 'd.deleted_at IS NULL'];
-    const params = [req.user.id];
+    const access = buildDocumentAccessFilter(req.user, 'd', 'c');
+    const filters = [access.sql, 'd.deleted_at IS NULL'];
+    const params = [...access.params];
     if (Number.isSafeInteger(collectionId) && collectionId > 0) {
         filters.push('d.collection_id = ?');
         params.push(collectionId);
@@ -92,32 +98,64 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
         params.push(tag);
     }
     const whereSql = filters.join(' AND ');
-    const total = db.prepare(`SELECT COUNT(*) AS total FROM knowledge_docs d WHERE ${whereSql}`)
-        .get(...params)?.total || 0;
+    const total = db.prepare(`
+        SELECT COUNT(*) AS total
+        FROM knowledge_docs d
+        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+        WHERE ${whereSql}
+    `).get(...params)?.total || 0;
     const docs = db.prepare(`
         SELECT
             d.*,
             c.name AS collection_name,
+            c.scope AS collection_scope,
+            c.allowed_units AS collection_allowed_units,
             COALESCE((
                 SELECT GROUP_CONCAT(t.tag, ',')
                 FROM knowledge_doc_tags t
                 WHERE t.doc_id = d.id AND t.user_id = d.user_id
             ), '') AS tags
         FROM knowledge_docs d
-        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.user_id = d.user_id AND c.deleted_at IS NULL
+        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
         WHERE ${whereSql}
         ORDER BY d.created_at DESC
         LIMIT ? OFFSET ?
-    `).all(...params, limit, offset);
+    `).all(...params, limit, offset).map(doc => ({
+        ...doc,
+        can_edit: Number(doc.user_id) === Number(req.user.id),
+        read_only: Number(doc.user_id) !== Number(req.user.id),
+        shared_readable: canReadKnowledgeResource({
+            user_id: doc.user_id,
+            scope: doc.collection_scope,
+            allowed_units: doc.collection_allowed_units
+        }, req.user)
+    }));
     res.json({ data: docs, total, page, limit });
 });
 
 ragRouter.get('/collections', authMiddleware, (req, res) => {
-    res.json({ data: listKnowledgeCollections(req.user.id) });
+    res.json({ data: listKnowledgeCollections(req.user) });
 });
 
 ragRouter.get('/tags', authMiddleware, (req, res) => {
-    res.json({ data: listKnowledgeTags(req.user.id, { collectionId: req.query.collectionId }) });
+    res.json({ data: listKnowledgeTags(req.user, { collectionId: req.query.collectionId }) });
+});
+
+ragRouter.get('/collections/share-options', authMiddleware, (req, res) => {
+    const options = getKnowledgeCollectionShareOptions({ collectionId: req.query.collectionId, user: req.user });
+    if (!options) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
+    return res.json({ data: options });
+});
+
+ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
+    try {
+        const collection = updateKnowledgeCollectionSharing({ collectionId: req.params.id, user: req.user, body: req.body || {} });
+        if (!collection) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
+        auditRagAction(req, '知识库集合共享设置更新', { collectionId: collection.id, scope: collection.scope, allowedUnits: collection.allowed_units });
+        return res.json({ success: true, collection });
+    } catch (error) {
+        return res.status(error.status || 400).json({ error: error.message });
+    }
 });
 
 ragRouter.post('/collections', authMiddleware, asyncHandler(async (req, res) => {
@@ -153,7 +191,7 @@ ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
 });
 
 ragRouter.get('/summary', authMiddleware, (req, res) => {
-    const summary = getKnowledgeDocumentSummaryForUser(req.user.id, {
+    const summary = getKnowledgeDocumentSummaryForUser(req.user, {
         collectionId: req.query.collectionId,
         tag: req.query.tag || req.query.tagName,
         tagNames: req.query.tagNames
@@ -163,16 +201,17 @@ ragRouter.get('/summary', authMiddleware, (req, res) => {
 });
 
 ragRouter.get('/quality-report', authMiddleware, (req, res) => {
-    res.json(getKnowledgeQualityReport(req.user.id));
+    res.json(getKnowledgeQualityReport(req.user));
 });
 
 ragRouter.get('/graph/summary', authMiddleware, (req, res) => {
-    res.json(getGraphSummary(req.user.id));
+    res.json(getGraphSummary(req.user));
 });
 
 ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
     res.json(listEntities({
         userId: req.user.id,
+        user: req.user,
         query: req.query.query,
         type: req.query.type,
         quality: req.query.quality,
@@ -184,6 +223,7 @@ ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
 ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
     res.json(listRelations({
         userId: req.user.id,
+        user: req.user,
         entityId: req.query.entityId,
         relationType: req.query.relationType,
         status: req.query.status,
@@ -197,6 +237,7 @@ ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
 ragRouter.get('/graph/query', authMiddleware, (req, res) => {
     res.json(queryKnowledgeGraph({
         userId: req.user.id,
+        user: req.user,
         query: req.query.query,
         entityLimit: req.query.entityLimit,
         relationLimit: req.query.relationLimit
@@ -206,6 +247,7 @@ ragRouter.get('/graph/query', authMiddleware, (req, res) => {
 ragRouter.get('/graph/entities/:id', authMiddleware, (req, res) => {
     const graph = getEntityGraph({
         userId: req.user.id,
+        user: req.user,
         entityId: req.params.id,
         depth: req.query.depth,
         status: req.query.status,
@@ -274,6 +316,7 @@ ragRouter.get('/docs/:id', authMiddleware, (req, res) => {
     const detail = getKnowledgeDocumentDetail({
         docId: req.params.id,
         userId: req.user.id,
+        user: req.user,
         limit: req.query.limit,
         offset: req.query.offset
     });

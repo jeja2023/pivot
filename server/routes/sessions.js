@@ -9,6 +9,7 @@ const { buildContextMeta, compactSessionMemory } = require('../llm');
 const { getAccessibleModel } = require('../services/models');
 const { TimeoutError } = require('../services/concurrency');
 const { encodeAttachmentUrl } = require('../security');
+const sessionsRepository = require('../repositories/sessions');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -75,13 +76,7 @@ function decodeSessionCursor(value) {
 }
 
 function appendAttachmentTokens(messages, userId, sessionId) {
-    const rows = db.prepare(`
-        SELECT file_path, access_token
-        FROM attachments
-        WHERE user_id = ? AND session_id = ? AND access_token IS NOT NULL AND access_token != ''
-          AND deleted_at IS NULL
-          AND (expires_at IS NULL OR expires_at > ?)
-    `).all(userId, sessionId, getBeijingTimestamp());
+    const rows = sessionsRepository.listAttachmentTokens(userId, sessionId, getBeijingTimestamp());
     if (rows.length === 0) return messages;
 
     const tokenEntries = rows.flatMap(row => {
@@ -203,14 +198,18 @@ function createSessionsRouter({
     router.post('/sessions', authMiddleware, asyncHandler(async (req, res) => {
         const id = uuidv4();
         const title = req.body.title || '新对话';
-        db.prepare('INSERT INTO sessions (id, user_id, title, created_at) VALUES (?, ?, ?, ?)')
-          .run(id, req.user.id, title, getBeijingTimestamp());
+        sessionsRepository.createSession({
+            id,
+            userId: req.user.id,
+            title,
+            createdAt: getBeijingTimestamp()
+        });
         logAction(req, '创建对话', `创建对话: ${title}`);
         res.json({ id, title });
     }));
 
     router.get('/sessions/tags/list', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = db.prepare("SELECT tags FROM sessions WHERE user_id = ? AND deleted_at IS NULL AND tags IS NOT NULL AND tags != ''").all(req.user.id);
+        const rows = sessionsRepository.listSessionTagValues(req.user.id);
         const tags = [...new Set(rows.flatMap(row => String(row.tags).split(',').map(tag => tag.trim()).filter(Boolean)))].sort();
         res.json(tags);
     }));
@@ -280,17 +279,17 @@ function createSessionsRouter({
     }));
 
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        const session = sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const rawMessages = stmts.getMessages.all(req.params.id, req.user.id);
+        const rawMessages = sessionsRepository.listMessages(req.params.id, req.user.id);
         const messages = appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
         res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
     }));
 
     router.get('/sessions/:id/context', authMiddleware, asyncHandler(async (req, res) => {
-        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        const session = sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const rawMessages = stmts.getMessages.all(req.params.id, req.user.id);
+        const rawMessages = sessionsRepository.listMessages(req.params.id, req.user.id);
         res.json({ contextMeta: buildContextMeta(rawMessages) });
     }));
 

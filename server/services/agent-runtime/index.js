@@ -1,9 +1,10 @@
 const { db } = require('../../db');
+const crypto = require('crypto');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
 const { getRunnableModelForUser } = require('../models');
 const { clampText, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
-const { runAgentDag } = require('../agent-dag-runtime');
+const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
 const { createAgentQueue } = require('../agent-queue');
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
@@ -22,6 +23,15 @@ const {
     updateAgentSchedule
 } = require('../agent-schedules');
 const {
+    configureAgentTriggers,
+    createWorkflowTrigger,
+    deleteWorkflowTrigger,
+    listWorkflowTriggers,
+    rotateWorkflowTriggerToken,
+    runDuePollingTriggers,
+    updateWorkflowTrigger
+} = require('../agent-triggers');
+const {
     createAgentTemplate,
     deleteAgentTemplate,
     listAgentTemplates,
@@ -36,12 +46,14 @@ const {
     assertWorkflowLlmNodesConfigured,
     listAgentWorkflowVersions,
     listAgentWorkflows,
+    listAgentWorkflowShareOptions,
     normalizeDagInputsPayload,
     publishAgentWorkflowVersion,
     restoreAgentWorkflow,
     resolveAgentWorkflowVersion,
     restoreAgentWorkflowVersion,
-    updateAgentWorkflow
+    updateAgentWorkflow,
+    updateAgentWorkflowSharing
 } = require('../agent-workflows');
 const {
     getRunDetailForUser: getRunDetailForUserHelper,
@@ -105,6 +117,12 @@ const {
     syncAgentTraceFromRun
 } = require('../agent-traces');
 const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
+const {
+    configureAgentApprovalRequests,
+    runApprovalTimeouts,
+    waitForWorkflowApproval,
+    waitForWorkflowDelay
+} = require('../agent-approval-requests');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { inferDagRunGoal } = require('./dag-run-config');
@@ -237,6 +255,14 @@ function setRunMetadata(runId, patch = {}) {
     const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
     const current = parseJsonObject(row.metadata) || {};
     updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
+}
+
+function stableWorkflowDelayKey(toolName, _step, input = {}) {
+    const hash = crypto.createHash('sha256')
+        .update(JSON.stringify(input || {}))
+        .digest('hex')
+        .slice(0, 16);
+    return `${toolName}:standard:${hash}`;
 }
 
 function appendRunMetadataList(runId, key, item, limit = 20) {
@@ -582,6 +608,8 @@ function getAgentRuntimeDeps() {
         maybePauseForApproval,
         parseJsonObject,
         publishUserEvent,
+        waitForWorkflowApproval,
+        waitForWorkflowDelay,
         synthesizeFinalAnswer,
         finishAgentTraceSpan,
         startAgentTraceSpan,
@@ -765,8 +793,16 @@ async function runAgent(runId, user) {
                 updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = findAgentToolByName(plan.tool, toolList);
                 if (maybePauseForApproval(run, selectedTool, plan.input || {})) return;
+                const toolContext = {
+                    run,
+                    modelCfg,
+                    waitForWorkflowDelay,
+                    delayKey: plan.tool === 'workflow.delay'
+                        ? stableWorkflowDelayKey(plan.tool, step, plan.input || {})
+                        : ''
+                };
                 const output = await withTimeout(
-                    executeToolByName(plan.tool, plan.input || {}, user, toolList, { run, modelCfg }),
+                    executeToolByName(plan.tool, plan.input || {}, user, toolList, toolContext),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                     `执行工具：${plan.tool}`
                 );
@@ -788,6 +824,7 @@ async function runAgent(runId, user) {
                     durationMs: Date.now() - startedAt
                 });
             } catch (toolErr) {
+                if (toolErr.code === 'AGENT_APPROVAL_REQUIRED') throw toolErr;
                 observations.push({
                     step,
                     tool: plan.tool,
@@ -934,12 +971,13 @@ function enqueueAgentRun(runId, _user) {
 
 function recoverAgentRuns() {
     const now = getBeijingTimestamp();
+    const cutoff = getBeijingTimestamp(new Date(Date.now() - (AGENT_STALE_RUNNING_MINUTES * 60 * 1000)));
     const staleRunning = db.prepare(`
         SELECT id FROM agent_runs
         WHERE status = 'running'
           AND deleted_at IS NULL
-          AND (last_heartbeat_at IS NULL OR last_heartbeat_at < datetime('now', '+8 hours', ?))
-    `).all(`-${AGENT_STALE_RUNNING_MINUTES} minutes`);
+          AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
+    `).all(cutoff);
     staleRunning.forEach(run => {
         updateRun(run.id, {
             status: 'error',
@@ -1023,6 +1061,34 @@ function syncAgentRuntimeConcurrency() {
 }
 
 configureAgentSchedules({
+    createAgentRun,
+    createAgentNotification,
+    // 数据变更触发需要执行只读查询，按触发器所属账号解析可用工具后走统一执行入口，
+    // 继续保留工具治理、只读校验和连接归属检查
+    runPollingTriggers: () => runDuePollingTriggers({
+        executeTool: (toolName, input, triggerUser) => executeToolByName(
+            toolName,
+            input,
+            triggerUser,
+            formatToolList(triggerUser, { toolPolicy: 'all' }),
+            { source: 'trigger' }
+        )
+    }),
+    runApprovalTimeouts
+});
+
+configureAgentApprovalRequests({
+    updateRun,
+    insertStep,
+    listSteps,
+    setRunMetadata,
+    upsertDagNode,
+    createAgentNotification,
+    enqueueAgentRun,
+    getAgentRunTitle
+});
+
+configureAgentTriggers({
     createAgentRun,
     createAgentNotification
 });
@@ -1206,6 +1272,7 @@ module.exports = {
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
+    listAgentWorkflowShareOptions,
     listAgentWorkflowVersions,
     listAgentWorkflows,
     getAgentMetrics,
@@ -1228,6 +1295,12 @@ module.exports = {
     recordRunRetryReason,
     runAgentScheduleNow,
     runDueAgentSchedules,
+    runDuePollingTriggers,
+    createWorkflowTrigger,
+    deleteWorkflowTrigger,
+    listWorkflowTriggers,
+    rotateWorkflowTriggerToken,
+    updateWorkflowTrigger,
     runAgent,
     rollbackAgentArtifactVersion,
     saveAgentRunArtifact,
@@ -1238,5 +1311,6 @@ module.exports = {
     startAgentScheduleRunner,
     updateAgentSchedule,
     updateAgentTemplate,
-    updateAgentWorkflow
+    updateAgentWorkflow,
+    updateAgentWorkflowSharing
 };

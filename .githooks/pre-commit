@@ -3,4 +3,5 @@ set -eu
 
 echo "运行 Pivot 开发规范提交门禁..."
 node scripts/check_development_standards.js --staged
+node scripts/check_no_new_raw_sql.js
 npm run check:text

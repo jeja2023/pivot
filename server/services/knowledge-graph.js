@@ -3,6 +3,8 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { buildRagSearchTerms, normalizeSearchText } = require('./rag-tokenizer');
 const { detectDocType } = require('./rag-chunker');
+const knowledgeRepository = require('../repositories/knowledge');
+const { buildDocumentAccessFilter } = require('./knowledge-access');
 
 const MAX_ENTITIES_PER_CHUNK = 12;
 const MAX_RELATIONS_PER_CHUNK = 16;
@@ -12,6 +14,37 @@ const LOW_CONFIDENCE_THRESHOLD = 0.6;
 const GRAPH_DUPLICATE_PREFIX_MIN = 3;
 const GRAPH_EXTRACTION_MODE = 'rule_heuristic';
 const GRAPH_QUALITY_NOTICE = '知识图谱由规则和启发式抽取生成，适合作为 Graph-RAG 辅助线索；生产问答前建议确认低可信关系、合并重复实体，并结合来源文档校验。';
+
+function buildGraphEntityAccessFilter(userOrId, alias = 'e') {
+    const access = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
+    const ownId = access.params[0];
+    return {
+        sql: `(${alias}.user_id = ? OR EXISTS (
+            SELECT 1
+            FROM knowledge_entity_mentions m_access
+            JOIN knowledge_docs d_access ON d_access.id = m_access.doc_id
+            LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
+            WHERE m_access.entity_id = ${alias}.id
+              AND ${access.sql}
+        ))`,
+        params: [ownId, ...access.params]
+    };
+}
+
+function buildGraphRelationAccessFilter(userOrId, alias = 'r') {
+    const access = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
+    const ownId = access.params[0];
+    return {
+        sql: `(${alias}.user_id = ? OR EXISTS (
+            SELECT 1
+            FROM knowledge_docs d_access
+            LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
+            WHERE d_access.id = ${alias}.source_doc_id
+              AND ${access.sql}
+        ))`,
+        params: [ownId, ...access.params]
+    };
+}
 
 function normalizeGraphScopeIds(value, max = 50) {
     const values = Array.isArray(value) ? value : [value];
@@ -380,7 +413,7 @@ function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
     let entityCount = 0;
     let relationCount = 0;
     // 按文档类型选择关系抽取规则集（法规文档叠加法规领域关系）。
-    const docRow = db.prepare('SELECT name FROM knowledge_docs WHERE id = ?').get(docId) || {};
+    const docRow = knowledgeRepository.getDocumentName(docId);
     const sampleText = chunks.slice(0, 24).map(item => item.content).join('\n');
     const docType = detectDocType(docRow.name || '', sampleText);
     const indexTransaction = db.transaction(() => {
@@ -430,40 +463,43 @@ function clearKnowledgeGraphForDocument(docId) {
     db.prepare(`DELETE FROM knowledge_entity_mentions WHERE chunk_id IN (${placeholders})`).run(...chunkIds);
 }
 
-function getGraphSummary(userId) {
-    const entityCount = db.prepare('SELECT COUNT(*) AS count FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL').get(userId).count;
-    const relationCount = db.prepare("SELECT COUNT(*) AS count FROM knowledge_relations WHERE user_id = ? AND status = 'active'").get(userId).count;
-    const pendingRelationCount = db.prepare("SELECT COUNT(*) AS count FROM knowledge_relations WHERE user_id = ? AND status = 'pending'").get(userId).count;
-    const mentionCount = db.prepare('SELECT COUNT(*) AS count FROM knowledge_entity_mentions WHERE user_id = ?').get(userId).count;
+function getGraphSummary(userOrId) {
+    const entityAccess = buildGraphEntityAccessFilter(userOrId, 'e');
+    const relationAccess = buildGraphRelationAccessFilter(userOrId, 'r');
+    const userId = entityAccess.params[0];
+    const entityCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL`).get(...entityAccess.params).count;
+    const relationCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'active'`).get(...relationAccess.params).count;
+    const pendingRelationCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'pending'`).get(...relationAccess.params).count;
+    const mentionCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entity_mentions m WHERE m.user_id = ? OR EXISTS (SELECT 1 FROM knowledge_docs d_access LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL WHERE d_access.id = m.doc_id AND ${buildDocumentAccessFilter(userOrId, 'd_access', 'c_access').sql})`).get(userId, ...buildDocumentAccessFilter(userOrId, 'd_access', 'c_access').params).count;
     const orphanEntities = db.prepare(`
         SELECT COUNT(*) AS count
         FROM knowledge_entities e
-        WHERE e.user_id = ? AND e.deleted_at IS NULL
+        WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM knowledge_relations r
-              WHERE r.user_id = e.user_id
+              WHERE ${relationAccess.sql.replace(/\br\./g, 'r.')}
                 AND r.status IN ('active', 'pending')
                 AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
           )
-    `).get(userId).count;
+    `).get(...entityAccess.params, ...relationAccess.params).count;
     const lowConfidenceRelations = db.prepare(`
         SELECT COUNT(*) AS count
-        FROM knowledge_relations
-        WHERE user_id = ? AND status IN ('active', 'pending') AND confidence < ?
-    `).get(userId, LOW_CONFIDENCE_THRESHOLD).count;
+        FROM knowledge_relations r
+        WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND confidence < ?
+    `).get(...relationAccess.params, LOW_CONFIDENCE_THRESHOLD).count;
     const sourceLessRelations = db.prepare(`
         SELECT COUNT(*) AS count
-        FROM knowledge_relations
-        WHERE user_id = ? AND status IN ('active', 'pending') AND source_doc_id IS NULL
-    `).get(userId).count;
+        FROM knowledge_relations r
+        WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND source_doc_id IS NULL
+    `).get(...relationAccess.params).count;
     const topTypes = db.prepare(`
         SELECT type, COUNT(*) AS count
-        FROM knowledge_entities
-        WHERE user_id = ? AND deleted_at IS NULL
+        FROM knowledge_entities e
+        WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
         GROUP BY type
         ORDER BY count DESC, type ASC
         LIMIT 12
-    `).all(userId);
+    `).all(...entityAccess.params);
     const duplicateSuggestions = suggestDuplicateEntities(userId, 5);
     const quality = buildGraphQualitySignals({
         entityCount,
@@ -489,11 +525,12 @@ function getGraphSummary(userId) {
     };
 }
 
-function listEntities({ userId, query = '', type = '', quality = '', limit = 50, offset = 0 }) {
+function listEntities({ userId, user = null, query = '', type = '', quality = '', limit = 50, offset = 0 }) {
+    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const where = ['e.user_id = ?', 'e.deleted_at IS NULL'];
-    const params = [userId];
+    const where = [entityAccess.sql, 'e.deleted_at IS NULL'];
+    const params = [...entityAccess.params];
     const normalizedQuery = normalizeEntityName(query);
     if (normalizedQuery) {
         where.push('(e.normalized_name LIKE ? OR e.name LIKE ?)');
@@ -516,6 +553,8 @@ function listEntities({ userId, query = '', type = '', quality = '', limit = 50,
         params.push(0.62);
     }
     const whereSql = where.join(' AND ');
+    const relationAccess1 = buildGraphRelationAccessFilter(user || userId, 'r1');
+    const relationAccess2 = buildGraphRelationAccessFilter(user || userId, 'r2');
     const data = db.prepare(`
         SELECT e.*,
             COUNT(DISTINCT m.id) AS mention_count,
@@ -523,24 +562,28 @@ function listEntities({ userId, query = '', type = '', quality = '', limit = 50,
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
         LEFT JOIN knowledge_relations r1 ON r1.source_entity_id = e.id AND r1.status = 'active'
+            AND (${buildGraphRelationAccessFilter(user || userId, 'r1').sql})
         LEFT JOIN knowledge_relations r2 ON r2.target_entity_id = e.id AND r2.status = 'active'
+            AND (${buildGraphRelationAccessFilter(user || userId, 'r2').sql})
         WHERE ${whereSql}
         GROUP BY e.id
         ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC
         LIMIT ? OFFSET ?
-    `).all(...params, safeLimit, safeOffset);
+    `).all(...relationAccess1.params, ...relationAccess2.params, ...params, safeLimit, safeOffset);
     const total = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${whereSql}`).get(...params).count;
     return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
-function getEntityGraph({ userId, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
-    const entity = db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(entityId, userId);
+function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
+    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
+    const entity = db.prepare(`SELECT * FROM knowledge_entities e WHERE e.id = ? AND ${entityAccess.sql} AND e.deleted_at IS NULL`).get(entityId, ...entityAccess.params);
     if (!entity) return null;
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 80, 10), 300);
     const statusList = normalizeRelationStatusFilter(status);
     const statusPlaceholders = statusList.map(() => '?').join(',');
-    const relationWhere = ['r.user_id = ?', `r.status IN (${statusPlaceholders})`, '(r.source_entity_id = ? OR r.target_entity_id = ?)'];
-    const params = [userId, ...statusList, entity.id, entity.id];
+    const relationAccess = buildGraphRelationAccessFilter(user || userId, 'r');
+    const relationWhere = [relationAccess.sql, `r.status IN (${statusPlaceholders})`, '(r.source_entity_id = ? OR r.target_entity_id = ?)'];
+    const params = [...relationAccess.params, ...statusList, entity.id, entity.id];
     if (relationType) {
         relationWhere.push('r.relation_type = ?');
         params.push(String(relationType).trim());
@@ -578,12 +621,13 @@ function normalizeRelationStatusFilter(status = 'active') {
     return ['active'];
 }
 
-function listRelations({ userId, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
+function listRelations({ userId, user = null, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const statusList = normalizeRelationStatusFilter(status);
-    const where = ['r.user_id = ?', `r.status IN (${statusList.map(() => '?').join(',')})`];
-    const params = [userId, ...statusList];
+    const relationAccess = buildGraphRelationAccessFilter(user || userId, 'r');
+    const where = [relationAccess.sql, `r.status IN (${statusList.map(() => '?').join(',')})`];
+    const params = [...relationAccess.params, ...statusList];
     const safeEntityId = Number.parseInt(entityId, 10);
     if (Number.isSafeInteger(safeEntityId) && safeEntityId > 0) {
         where.push('(r.source_entity_id = ? OR r.target_entity_id = ?)');
@@ -714,6 +758,16 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, op
     // 没有可用的查询词元：保持原有的空结果（不做全表扫描）。
     if (terms.length === 0) return [];
     const scopeFilter = buildGraphEntityScopeSql(options.scope);
+    const access = options.user ? buildDocumentAccessFilter(options.user, 'd_access', 'c_access') : null;
+    const accessSql = access
+        ? `AND (e.user_id = ? OR EXISTS (
+                SELECT 1
+                FROM knowledge_entity_mentions m_access
+                JOIN knowledge_docs d_access ON d_access.id = m_access.doc_id
+                LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
+                WHERE m_access.entity_id = e.id AND ${access.sql}
+            ))`
+        : 'AND e.user_id = ?';
     // 在 SQL 层预筛候选，避免每次 RAG 查询都拉取该用户的全部实体。每个词元都必须
     // 以子串形式出现在参与打分的某一列中，与下方 JS 打分逻辑一致，从而保持排序不变。
     const tokenClauses = [];
@@ -727,12 +781,18 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, op
         SELECT e.*, COUNT(m.id) AS mention_count
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
-        WHERE e.user_id = ? AND e.deleted_at IS NULL
+        WHERE e.deleted_at IS NULL
           AND (${tokenClauses.join(' OR ')})
         ${scopeFilter.sql}
+        ${accessSql}
         GROUP BY e.id
         LIMIT ?
-    `).all(userId, ...tokenParams, ...scopeFilter.params, QUERY_ENTITY_CANDIDATE_LIMIT);
+    `).all(
+        ...tokenParams,
+        ...scopeFilter.params,
+        ...(options.user ? [userId, ...access.params] : [userId]),
+        QUERY_ENTITY_CANDIDATE_LIMIT
+    );
     return rows
         .map(row => {
             const haystack = `${row.name} ${row.normalized_name} ${row.aliases || ''}`.toLowerCase();
@@ -750,19 +810,34 @@ function getGraphContextForQuery(userId, query, options = {}) {
     const entityIds = entities.map(entity => entity.id);
     const placeholders = entityIds.map(() => '?').join(',');
     const relationScope = buildGraphRelationScopeSql(options.scope, 'd');
+    const access = options.user ? buildDocumentAccessFilter(options.user, 'd_access', 'c_access') : null;
+    const accessSql = access
+        ? `AND (r.user_id = ? OR EXISTS (
+                SELECT 1
+                FROM knowledge_docs d_access
+                LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
+                WHERE d_access.id = r.source_doc_id AND ${access.sql}
+            ))`
+        : 'AND r.user_id = ?';
     const relations = db.prepare(`
         SELECT r.*, s.name AS source_name, t.name AS target_name, d.name AS doc_name
         FROM knowledge_relations r
         JOIN knowledge_entities s ON s.id = r.source_entity_id
         JOIN knowledge_entities t ON t.id = r.target_entity_id
         LEFT JOIN knowledge_docs d ON d.id = r.source_doc_id
-        WHERE r.user_id = ?
-          AND r.status = 'active'
+        WHERE r.status = 'active'
           AND (r.source_entity_id IN (${placeholders}) OR r.target_entity_id IN (${placeholders}))
           ${relationScope.sql}
+          ${accessSql}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ?
-    `).all(userId, ...entityIds, ...entityIds, ...relationScope.params, options.relationLimit || GRAPH_CONTEXT_RELATION_LIMIT);
+    `).all(
+        ...entityIds,
+        ...entityIds,
+        ...relationScope.params,
+        ...(options.user ? [userId, ...access.params] : [userId]),
+        options.relationLimit || GRAPH_CONTEXT_RELATION_LIMIT
+    );
     const chunkIds = [...new Set(relations.map(row => row.source_chunk_id).filter(Boolean))];
     return {
         entities,
@@ -772,9 +847,9 @@ function getGraphContextForQuery(userId, query, options = {}) {
     };
 }
 
-function queryKnowledgeGraph({ userId, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT, scope = {} }) {
-    const entities = findQueryEntities(userId, query, entityLimit, { scope });
-    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit, scope });
+function queryKnowledgeGraph({ userId, user = null, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT, scope = {} }) {
+    const entities = findQueryEntities(userId, query, entityLimit, { scope, user });
+    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit, scope, user });
     const paths = graphContext.relations.map(row => ({
         relationId: row.id,
         source: row.source_name,
@@ -897,7 +972,7 @@ function confirmRelation({ userId, relationId }) {
 function rebuildGraphForDocument({ userId, docId }) {
     const doc = db.prepare("SELECT * FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(docId, userId);
     if (!doc) return null;
-    const chunks = db.prepare('SELECT id AS chunkId, content FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC').all(docId);
+    const chunks = knowledgeRepository.listAllDocumentChunks(docId);
     clearKnowledgeGraphForDocument(docId);
     const result = indexKnowledgeGraphForChunks({ userId, docId, chunks });
     return { docId, ...result };

@@ -147,7 +147,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 try {
                     const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
                     const output = await deps.withTimeout(
-                        executeToolByName(call.name, args, user, toolList, { run, modelCfg }),
+                        executeToolByName(call.name, args, user, toolList, {
+                            run,
+                            modelCfg,
+                            waitForWorkflowDelay: deps.waitForWorkflowDelay,
+                            delayKey: call.name === 'workflow.delay' ? `${call.name}:stream:${step}:${call.id || 'call'}` : ''
+                        }),
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, deps.agentToolTimeoutMs, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                         `执行工具：${call.name}`
                     );
@@ -167,6 +172,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                 } catch (toolErr) {
+                    if (toolErr.code === 'AGENT_APPROVAL_REQUIRED') throw toolErr;
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
                     deps.insertStep(runId, deps.listSteps(runId).length + 1, {
                         type: 'tool',

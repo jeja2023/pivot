@@ -46,6 +46,16 @@ function splitList(value) {
         .filter(Boolean);
 }
 
+function parseBoolean(value, fallback = false) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return fallback;
+    if (['1', 'true', 'yes', 'on'].includes(text)) return true;
+    if (['0', 'false', 'no', 'off'].includes(text)) return false;
+    return fallback;
+}
+
 function normalizeServiceType(value) {
     const type = String(value || '').trim().toLowerCase();
     if (['reports', 'files', 'data_files'].includes(type)) return 'reports';
@@ -83,8 +93,9 @@ function normalizeImConfig(input = {}) {
         authHeader: String(input.authHeader || input.auth_header || 'Authorization').trim() || 'Authorization',
         allowedTargets: Array.from(new Set(splitList(input.allowedTargets || input.allowed_targets))),
         defaultTarget: String(input.defaultTarget || input.default_target || '').trim(),
-        allowAtAll: Boolean(input.allowAtAll || input.allow_at_all),
-        maxMessageLength: Math.min(Math.max(Number(input.maxMessageLength || input.max_message_length || DEFAULT_MAX_MESSAGE_LENGTH), 100), 10000)
+        allowAtAll: parseBoolean(input.allowAtAll ?? input.allow_at_all, false),
+        maxMessageLength: Math.min(Math.max(Number(input.maxMessageLength || input.max_message_length || DEFAULT_MAX_MESSAGE_LENGTH), 100), 10000),
+        payloadTemplate: String(input.payloadTemplate || input.payload_template || '').trim()
     };
 }
 

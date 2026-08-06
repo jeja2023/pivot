@@ -5,6 +5,7 @@ const { getBeijingTimestamp } = require('../time');
 const { getRunnableModelForUser } = require('./models');
 const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./agent-workflows');
 const { assertTemplateAccess } = require('./agent-templates');
+const { computeNextCronDate, isValidCronExpression } = require('./cron-expression');
 const {
     MAX_GOAL_LENGTH,
     parseJsonObject,
@@ -25,10 +26,15 @@ const MAX_DISPATCH_FAILURES = 5;
 
 let createAgentRunCallback = null;
 let createAgentNotificationCallback = () => null;
+// 触发器轮询入口由运行时注入，避免计划服务和触发器服务互相引用
+let pollingTriggerRunner = null;
+let approvalTimeoutRunner = null;
 
-function configureAgentSchedules({ createAgentRun, createAgentNotification } = {}) {
+function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts } = {}) {
     if (typeof createAgentRun === 'function') createAgentRunCallback = createAgentRun;
     if (typeof createAgentNotification === 'function') createAgentNotificationCallback = createAgentNotification;
+    if (typeof runPollingTriggers === 'function') pollingTriggerRunner = runPollingTriggers;
+    if (typeof runApprovalTimeouts === 'function') approvalTimeoutRunner = runApprovalTimeouts;
 }
 
 function parseBeijingDate(value) {
@@ -42,13 +48,18 @@ function toBeijingTimestamp(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function computeNextScheduleRun(frequency, timeOfDay = '09:00', dayOfWeek = 1, from = getBeijingTimestamp()) {
+function computeNextScheduleRun(frequency, timeOfDay = '09:00', dayOfWeek = 1, from = getBeijingTimestamp(), cronExpression = '') {
     const normalized = String(frequency || 'manual').trim();
     if (normalized === 'manual') return null;
+    const base = parseBeijingDate(from);
+    // cron 计划走独立求值路径，支持分钟级和多时段
+    if (normalized === 'cron') {
+        const next = computeNextCronDate(cronExpression, base);
+        return next ? toBeijingTimestamp(next) : null;
+    }
     const match = String(timeOfDay || '09:00').match(/^(\d{1,2}):(\d{2})$/);
     const hour = Math.min(Number(match?.[1] || 9), 23);
     const minute = Math.min(Number(match?.[2] || 0), 59);
-    const base = parseBeijingDate(from);
     const candidate = new Date(base);
     candidate.setHours(hour, minute, 0, 0);
     if (normalized === 'daily') {
@@ -75,7 +86,15 @@ function normalizeSchedulePayload(body = {}) {
     if (!name || goal.length < 4) throw invalid('请填写计划名称和明确的任务目标。');
 
     const frequency = String(body.frequency ?? 'manual').trim();
-    if (!SCHEDULE_FREQUENCIES.has(frequency)) throw invalid('计划周期无效，只支持手动、每日或每周。');
+    if (!SCHEDULE_FREQUENCIES.has(frequency)) throw invalid('计划周期无效，只支持手动、每日、每周或 cron 表达式。');
+
+    const cronExpression = String(body.cronExpression ?? body.cron_expression ?? '').trim();
+    if (frequency === 'cron') {
+        if (!cronExpression) throw invalid('选择 cron 周期时必须填写 cron 表达式。');
+        if (!isValidCronExpression(cronExpression)) {
+            throw invalid('cron 表达式无效，需要 5 个字段，顺序为：分 时 日 月 周。例如每 30 分钟为 */30 * * * *。');
+        }
+    }
 
     const timeOfDay = String(body.timeOfDay ?? body.time_of_day ?? '09:00').trim();
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeOfDay)) throw invalid('执行时间必须是 HH:MM 格式。');
@@ -103,6 +122,7 @@ function normalizeSchedulePayload(body = {}) {
         frequency,
         timeOfDay,
         dayOfWeek,
+        cronExpression: frequency === 'cron' ? cronExpression : '',
         status,
         runConfig: {
             maxSteps: normalizeMaxSteps(body.maxSteps ?? body.max_steps),
@@ -153,12 +173,14 @@ function createAgentSchedule(user, body = {}) {
     const info = db.prepare(`
         INSERT INTO agent_schedules (
             user_id, template_id, model_id, name, goal, frequency, time_of_day, day_of_week,
-            status, run_config, next_run_at, dispatch_failures, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            cron_expression, status, run_config, next_run_at, dispatch_failures, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(
         user.id, data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency,
-        data.timeOfDay, data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
-        data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
+        data.timeOfDay, data.dayOfWeek, data.cronExpression, data.status, JSON.stringify(data.runConfig),
+        data.status === 'active'
+            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression)
+            : null,
         now, now
     );
     return db.prepare('SELECT * FROM agent_schedules WHERE id = ?').get(info.lastInsertRowid);
@@ -179,14 +201,16 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     db.prepare(`
         UPDATE agent_schedules
         SET template_id = ?, model_id = ?, name = ?, goal = ?, frequency = ?, time_of_day = ?,
-            day_of_week = ?, status = ?, run_config = ?, next_run_at = ?, dispatch_retry_at = NULL,
-            dispatch_failures = 0, last_error = NULL, claim_token = NULL, claim_expires_at = NULL,
-            updated_at = ?
+            day_of_week = ?, cron_expression = ?, status = ?, run_config = ?, next_run_at = ?,
+            dispatch_retry_at = NULL, dispatch_failures = 0, last_error = NULL,
+            claim_token = NULL, claim_expires_at = NULL, updated_at = ?
         WHERE id = ?
     `).run(
         data.templateId, modelCfg?.id || null, data.name, data.goal, data.frequency, data.timeOfDay,
-        data.dayOfWeek, data.status, JSON.stringify(data.runConfig),
-        data.status === 'active' ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now) : null,
+        data.dayOfWeek, data.cronExpression, data.status, JSON.stringify(data.runConfig),
+        data.status === 'active'
+            ? computeNextScheduleRun(data.frequency, data.timeOfDay, data.dayOfWeek, now, data.cronExpression)
+            : null,
         now, scheduleId
     );
     return db.prepare('SELECT * FROM agent_schedules WHERE id = ?').get(scheduleId);
@@ -285,7 +309,13 @@ function runDueAgentSchedules(limit = 20) {
             if (claimed.changes === 0) return;
             const run = runAgentScheduleNow(schedule.id, user, { scheduledFor: schedule.next_run_at });
             if (!run) throw new Error('计划所属账号已被禁用或删除。');
-            const nextRunAt = computeNextScheduleRun(schedule.frequency, schedule.time_of_day, schedule.day_of_week, getBeijingTimestamp());
+            const nextRunAt = computeNextScheduleRun(
+                schedule.frequency,
+                schedule.time_of_day,
+                schedule.day_of_week,
+                getBeijingTimestamp(),
+                schedule.cron_expression
+            );
             db.prepare(`
                 UPDATE agent_schedules
                 SET next_run_at = ?, last_run_id = ?, last_run_at = ?, dispatch_retry_at = NULL,
@@ -334,6 +364,13 @@ function startAgentScheduleRunner() {
         } catch (e) {
             logger.error({ err: e.message }, '智能体计划调度器执行失败');
         }
+        // 文件落地和数据变更触发器共用同一个 tick，失败不影响计划调度
+        Promise.resolve()
+            .then(() => pollingTriggerRunner?.())
+            .catch(e => logger.error({ err: e.message }, '触发器轮询执行失败'));
+        Promise.resolve()
+            .then(() => approvalTimeoutRunner?.())
+            .catch(e => logger.error({ err: e.message }, '审批超时处理执行失败'));
     };
     const initial = setTimeout(tick, 5000);
     initial.unref?.();

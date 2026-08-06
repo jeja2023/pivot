@@ -30,6 +30,25 @@ function createDagInteractionController(ctx) {
     };
 
     const onPointerDown = event => {
+        if (ctx.readOnly) {
+            const nodeGroup = event.target.closest?.('[data-pivot-dag-id]');
+            if (nodeGroup) {
+                ctx.selectNode(nodeGroup.dataset.pivotDagId, event.shiftKey || event.ctrlKey || event.metaKey);
+                ctx.render();
+            } else {
+                const rect = ctx.root.getBoundingClientRect();
+                ctx.root.setPointerCapture?.(event.pointerId);
+                panning = {
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    originX: ctx.viewState.x,
+                    originY: ctx.viewState.y,
+                    rect
+                };
+                ctx.root.classList.add('is-panning');
+            }
+            return;
+        }
         const target = event.target;
         if (target.dataset.pivotDagPort === 'out') {
             event.preventDefault();
@@ -194,6 +213,13 @@ function createDagInteractionController(ctx) {
 
     const onDoubleClick = event => {
         const nodeGroup = event.target.closest?.('[data-pivot-dag-id]');
+        if (ctx.readOnly) {
+            if (nodeGroup) {
+                ctx.selectNode(nodeGroup.dataset.pivotDagId, false);
+                ctx.render();
+            }
+            return;
+        }
         if (!nodeGroup) {
             ctx.addNodeAt?.(pointFromEvent(event));
             return;
@@ -206,6 +232,15 @@ function createDagInteractionController(ctx) {
     const onKeyDown = event => {
         const tag = (document.activeElement?.tagName || '').toLowerCase();
         if (['input', 'textarea', 'select'].includes(tag)) return;
+        if (ctx.readOnly) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                ctx.clearSelection();
+                ctx.render();
+                ctx.onNodeSelectionChange?.(null);
+            }
+            return;
+        }
         const modifier = event.ctrlKey || event.metaKey;
         if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); return event.shiftKey ? ctx.redo() : ctx.undo(); }
         if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); return ctx.redo(); }

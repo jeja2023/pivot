@@ -9,11 +9,11 @@
 
 const MAX_STEPS = 50;
 const DEFAULT_STEPS = 10;
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required']);
+const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required', 'awaiting_approval']);
 const MAX_GOAL_LENGTH = 2000;
 const MAX_DAG_NODES = 100;
 const MAX_DAG_DEPENDENCIES = 50;
-const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly']);
+const SCHEDULE_FREQUENCIES = new Set(['manual', 'daily', 'weekly', 'cron']);
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
 const RUN_MODES = new Set(['standard', 'deep', 'audit', 'dag']);
 const APPROVAL_POLICIES = new Set(['safe_mcp_auto', 'approve_all_mcp']);

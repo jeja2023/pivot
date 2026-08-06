@@ -1,4 +1,3 @@
-const { db } = require('../db');
 const { getAccessibleModel, getModelDailyUsage } = require('./models');
 const {
     ContextLengthExceededError,
@@ -6,6 +5,7 @@ const {
     fitMessagesToContextBudget
 } = require('./context-budget');
 const { normalizeRegenerateFlag } = require('./chat-route-helpers');
+const sessionsRepository = require('../repositories/sessions');
 
 function buildChatRequestState(req) {
     const body = req.body || {};
@@ -29,7 +29,7 @@ function buildChatRequestState(req) {
 
 function validateChatPreflight({ state, user, req, logAction }) {
     const { sessionId, userId, modelId, modelContent } = state;
-    const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
+    const session = sessionsRepository.getSessionIdForUser(sessionId, userId);
     if (!session) {
         return { error: { error: '无权访问或会话不存在', code: 'FORBIDDEN' } };
     }

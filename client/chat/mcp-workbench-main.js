@@ -28,6 +28,7 @@ function renderMcpInstanceCard(server) {
     const showOwner = mcpShouldShowOwner(server);
     const serverTools = mcpToolsForServer(server.id, mcpFallbackToolsForServer(server));
     const isPaused = server.status === 'paused';
+    const isShared = String(server.scope || '').toLowerCase() === 'shared' && server.user_id !== null;
     const toolCount = serverTools.length;
     return `
         <div class="mcp-system-card mcp-connector-card mcp-instance-card${isPaused ? ' is-paused' : ''}">
@@ -36,6 +37,7 @@ function renderMcpInstanceCard(server) {
                     <strong>${mcpEscape(mcpCleanServiceName(server.name))}</strong>
                     <span>
                         <em>${mcpEscape(typeLabel)}</em>
+                        ${isShared ? '<em class="mcp-owner-badge">单位共享 · 只读</em>' : ''}
                         ${showOwner && ownerLabel ? `<em class="mcp-owner-badge" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</em>` : ''}
                     </span>
                 </div>
@@ -90,6 +92,7 @@ function mcpServerBelongsToCurrentUser(server = {}) {
 }
 
 function mcpShouldShowAsWorkbenchServer(server = {}) {
+    if (server.read_only === true || String(server.scope || '').toLowerCase() === 'shared') return true;
     if (mcpServerOwnerId(server) === null) return true;
     if (mcpServerBelongsToCurrentUser(server)) return true;
     return false;
@@ -299,6 +302,26 @@ async function loadMcpServers() {
     }
 
     const container = document.querySelector('.mcp-list-wrap') || list || document;
+    container.querySelectorAll('[data-mcp-tools]').forEach(btn => {
+        const server = mcpServersCache.find(item => String(item.id) === String(btn.dataset.mcpTools));
+        if (!server) return;
+        const owner = mcpServerBelongsToCurrentUser(server) || (server.user_id === null && isSuperAdminUser());
+        const readOnly = server.read_only === true || String(server.scope || '').toLowerCase() === 'shared' && !owner;
+        if (readOnly) {
+            const card = btn.closest('.mcp-instance-card');
+            card?.querySelectorAll('[data-mcp-edit], [data-mcp-delete], [data-mcp-toggle]').forEach(action => {
+                action.disabled = true;
+                action.hidden = true;
+            });
+        } else if (server.server_type === 'database' && owner && !btn.closest('.mcp-instance-actions')?.querySelector('[data-mcp-share]')) {
+            const share = document.createElement('button');
+            share.type = 'button';
+            share.className = 'btn-secondary';
+            share.dataset.mcpShare = String(server.id);
+            share.textContent = '分享';
+            btn.parentElement?.insertBefore(share, btn);
+        }
+    });
     container.querySelectorAll('[data-mcp-open-data-analysis]').forEach(btn => {
         btn.addEventListener('click', () => openMcpDataAnalysisImport({
             datasetId: btn.dataset.mcpOpenDataAnalysisDataset || '',
@@ -318,6 +341,7 @@ async function loadMcpServers() {
         window.openMcpEditModal(btn.dataset.mcpEdit);
     }));
     container.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools)));
+    container.querySelectorAll('[data-mcp-share]').forEach(btn => btn.addEventListener('click', () => openMcpShareModal(btn.dataset.mcpShare)));
     container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus)));
     container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete)));
     container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
@@ -802,6 +826,139 @@ window.deleteMcpServer = function (id) {
         await window.loadMcpWorkbench();
     });
 };
+
+function setMcpShareError(message = '') {
+    const errorEl = document.getElementById('mcp-share-error');
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.hidden = !message;
+}
+
+function bindMcpShareModal() {
+    const modal = document.getElementById('mcp-share-modal');
+    if (!modal || modal.dataset.bound === 'true') return;
+    modal.dataset.bound = 'true';
+    const close = () => modal.classList.add('hidden');
+    document.getElementById('mcp-share-close-btn')?.addEventListener('click', close);
+    document.getElementById('mcp-share-cancel-btn')?.addEventListener('click', close);
+    modal.addEventListener('click', event => {
+        if (event.target === modal) close();
+    });
+
+    modal.querySelectorAll('input[name="mcp-share-scope"]').forEach(input => {
+        input.addEventListener('change', () => {
+            const isShared = modal.querySelector('input[name="mcp-share-scope"]:checked')?.value === 'shared';
+            const unitsSection = document.getElementById('mcp-share-units-section');
+            if (unitsSection) unitsSection.classList.toggle('hidden', !isShared);
+            setMcpShareError('');
+        });
+    });
+
+    document.getElementById('mcp-share-all')?.addEventListener('change', (e) => {
+        const checked = e.target.checked;
+        modal.querySelectorAll('input[name="mcp-share-unit"]').forEach(chk => chk.checked = checked);
+    });
+
+    document.getElementById('mcp-share-save-btn')?.addEventListener('click', async () => {
+        const id = document.getElementById('mcp-share-id')?.value;
+        const scope = modal.querySelector('input[name="mcp-share-scope"]:checked')?.value || 'personal';
+        const isShared = scope === 'shared';
+        const allChecked = document.getElementById('mcp-share-all')?.checked === true;
+        const allowedUnits = isShared && !allChecked
+            ? [...modal.querySelectorAll('input[name="mcp-share-unit"]:checked')].map(input => input.value).filter(Boolean)
+            : [];
+
+        if (isShared && !allChecked && !allowedUnits.length) {
+            setMcpShareError('共享时至少选择一个单位，或选择全部单位。');
+            return;
+        }
+
+        setMcpShareError('');
+        const saveBtn = document.getElementById('mcp-share-save-btn');
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/sharing`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope, allowedUnits })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '共享设置保存失败');
+            close();
+            showToast('共享设置已更新', 'success');
+            await window.loadMcpWorkbench();
+        } catch (err) {
+            setMcpShareError(err.message || '共享设置保存失败');
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    });
+}
+
+async function openMcpShareModal(serverId) {
+    bindMcpShareModal();
+    const modal = document.getElementById('mcp-share-modal');
+    if (!modal) return;
+    setMcpShareError('');
+    const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(serverId)}/share-options`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '无法读取共享设置', 'error');
+    if (data.data?.supportsSharing === false) return showToast('当前服务不支持共享', 'error');
+
+    const server = data.data?.server || {};
+    const units = Array.isArray(data.data?.units) ? data.data.units.filter(Boolean) : [];
+    const allowed = new Set(String(server.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean));
+    const isShared = String(server.scope || '') === 'shared';
+    const isAll = isShared && allowed.size === 0;
+
+    document.getElementById('mcp-share-id').value = String(serverId);
+
+    const summaryEl = document.getElementById('mcp-share-summary');
+    if (summaryEl) {
+        PivotSafeHtml.setHtml(summaryEl, `
+            <strong>${mcpEscape(server.name || '数据库只读服务')}</strong>
+            <span>共享后，接收方只能执行只读 SQL 工具，连接密码和编辑权限不会被共享。</span>
+        `);
+    }
+
+    const scopeRadio = modal.querySelector(`input[name="mcp-share-scope"][value="${isShared ? 'shared' : 'personal'}"]`);
+    if (scopeRadio) scopeRadio.checked = true;
+
+    const unitsSection = document.getElementById('mcp-share-units-section');
+    if (unitsSection) unitsSection.classList.toggle('hidden', !isShared);
+
+    const allCheckbox = document.getElementById('mcp-share-all');
+    if (allCheckbox) allCheckbox.checked = isAll;
+
+    const currentUnit = String(data.data?.currentUnit || '').trim();
+    const unitListContainer = document.getElementById('mcp-share-unit-options');
+    if (unitListContainer) {
+        if (!units.length) {
+            PivotSafeHtml.setHtml(unitListContainer, '<div class="agent-workflow-share-empty">暂无可用单位信息</div>');
+        } else {
+            PivotSafeHtml.setHtml(unitListContainer, units.map(unit => {
+                const checked = isShared && (isAll || allowed.has(unit));
+                const isCurrent = unit === currentUnit;
+                return `
+                    <label class="agent-workflow-share-unit">
+                        <input type="checkbox" name="mcp-share-unit" value="${mcpEscape(unit)}" ${checked ? 'checked' : ''}>
+                        <span>
+                            <strong>${mcpEscape(unit)}</strong>
+                            ${isCurrent ? '<small>本单位</small>' : '<small>单位成员</small>'}
+                        </span>
+                    </label>
+                `;
+            }).join(''));
+        }
+    }
+
+    modal.classList.remove('hidden');
+};
+
+window.Pivot?.exposeModule?.('mcp.workbench', {
+    openMcpShareModal
+});
 
 window.loadMcpWorkbench = async function () {
     try {

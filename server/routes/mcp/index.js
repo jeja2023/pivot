@@ -15,8 +15,10 @@ const {
     getAccessibleMcpServer,
     listCachedMcpTools,
     listMcpServers,
+    getMcpServerShareOptions,
     normalizeServerRow,
-    refreshMcpTools
+    refreshMcpTools,
+    updateMcpServerSharing
 } = require('../../services/mcp-client');
 const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../../services/agent-tools');
 const {
@@ -137,6 +139,23 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listMcpServers(req.user) });
+    }));
+
+    router.get('/mcp/servers/:id/share-options', authMiddleware, asyncHandler(async (req, res) => {
+        const options = getMcpServerShareOptions(req.params.id, req.user);
+        if (!options) return res.status(404).json({ error: '工具服务不存在或无权管理共享设置' });
+        return res.json({ data: options });
+    }));
+
+    router.patch('/mcp/servers/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const server = updateMcpServerSharing(req.params.id, req.user, req.body || {});
+            if (!server) return res.status(404).json({ error: '工具服务不存在或无权管理共享设置' });
+            logAction(req, '更新工具服务共享设置', `${server.name}: ${server.scope}`);
+            return res.json({ success: true, server: normalizeServerRow(server) });
+        } catch (error) {
+            return res.status(error.status || 400).json({ error: error.message });
+        }
     }));
 
     router.get('/mcp/governance', authMiddleware, asyncHandler(async (req, res) => {
@@ -630,6 +649,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.post('/mcp/servers/:id/refresh', authMiddleware, asyncHandler(async (req, res) => {
+        const refreshTarget = String(req.params.id) === '0' ? null : getAccessibleMcpServer(req.params.id, req.user);
+        if (refreshTarget?.user_id !== null && refreshTarget && Number(refreshTarget.user_id) !== Number(req.user.id)) {
+            return res.status(403).json({ error: '共享工具仅允许使用，不允许刷新工具缓存。' });
+        }
         if (String(req.params.id) === '0') {
             const tools = filterMcpToolsByCapability(listCachedMcpTools(0, req.user), req.user);
             logAction(req, '刷新本机虚拟工具', `mcp.0: ${tools.length}`);
@@ -643,6 +666,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.post('/mcp/servers/:id/diagnose', authMiddleware, asyncHandler(async (req, res) => {
+        const diagnoseTarget = getAccessibleMcpServer(req.params.id, req.user);
+        if (diagnoseTarget?.user_id !== null && diagnoseTarget && Number(diagnoseTarget.user_id) !== Number(req.user.id)) {
+            return res.status(403).json({ error: '共享工具仅允许使用，不允许执行配置诊断。' });
+        }
         const server = getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const baseUrl = String(server.base_url || '');

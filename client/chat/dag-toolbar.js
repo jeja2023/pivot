@@ -89,6 +89,13 @@ function makeToolbarGroup(items, className = '') {
 function renderDagToolbar(ctx) {
         if (!ctx.toolbar) return null;
             ctx.toolbar.replaceChildren();
+            if (ctx.readOnly) {
+                const readOnlyStatus = document.createElement('div');
+                readOnlyStatus.className = 'pivot-dag-toolbar-status is-readonly';
+                readOnlyStatus.textContent = '共享工作流 · 只读发布版';
+                ctx.toolbar.appendChild(readOnlyStatus);
+                return readOnlyStatus;
+            }
             const tools = typeof ctx.currentTools === 'function' ? ctx.currentTools() : [];
             const registry = window.Pivot.moduleApi('agent.dagNodePresets');
             const presetButtons = (registry?.groups || []).flatMap(group => group.items.map(preset => {

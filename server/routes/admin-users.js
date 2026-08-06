@@ -40,7 +40,7 @@ function revokeUserAutomation(userId, now, reason = '账号已被禁用或删除
         SET status = 'cancelled', error_message = ?, cancelled_at = ?, completed_at = ?,
             locked_by = NULL, lock_expires_at = NULL, updated_at = ?
         WHERE user_id = ? AND deleted_at IS NULL
-          AND status IN ('queued', 'running', 'approval_required')
+          AND status IN ('queued', 'running', 'approval_required', 'awaiting_approval')
     `).run(reason, now, now, now, userId);
 }
 

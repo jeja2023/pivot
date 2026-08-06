@@ -18,6 +18,7 @@ function mountAgentDagEditor() {
         toolbar,
         inspector,
         getTools: () => agentToolsCache || [],
+        readOnly: agentWorkflowReadOnly,
         onOpenJson: openAgentDagJsonModal,
         onNodeSelectionChange: updateAgentDagNodeDrawer,
         onChange: (result) => {

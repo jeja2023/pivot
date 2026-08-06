@@ -26,4 +26,4 @@ execFileSync('git', ['config', 'core.hooksPath', '.githooks'], {
 });
 
 console.log('Git hooks 已启用：core.hooksPath = .githooks');
-console.log('提交前会运行：node scripts/check_development_standards.js --staged 与 npm run check:text');
+console.log('提交前会运行：node scripts/check_development_standards.js --staged、node scripts/check_no_new_raw_sql.js 与 npm run check:text');

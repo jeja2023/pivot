@@ -73,6 +73,9 @@ function checkPackageScripts() {
     if (!String(scripts['check:standards'] || '').includes('check_development_standards.js')) {
         addFailure('package.json 缺少 check:standards，或未接入 scripts/check_development_standards.js。');
     }
+    if (!String(scripts['check:no-new-raw-sql'] || '').includes('check_no_new_raw_sql.js')) {
+        addFailure('package.json 缺少 check:no-new-raw-sql，或未接入 scripts/check_no_new_raw_sql.js。');
+    }
     if (!String(scripts.check || '').includes('check:standards')) {
         addFailure('package.json 的 check 脚本必须包含 npm run check:standards。');
     }
@@ -93,6 +96,9 @@ function checkGitHookFiles() {
     }
     if (!hook.includes('check:text')) {
         addFailure('.githooks/pre-commit 必须运行文本完整性检查 npm run check:text。');
+    }
+    if (!hook.includes('check_no_new_raw_sql.js')) {
+        addFailure('.githooks/pre-commit 必须运行新增 raw SQL 检查 scripts/check_no_new_raw_sql.js。');
     }
 }
 

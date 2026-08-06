@@ -122,6 +122,7 @@ function createDagInspectorController(ctx) {
     };
     const notifySelectionChange = (node) => {
         if (typeof onNodeSelectionChange !== 'function') return;
+        if (ctx.readOnly) return onNodeSelectionChange(null);
         onNodeSelectionChange(node ? {
             id: node.id,
             title: node.title,
@@ -649,6 +650,7 @@ function createDagInspectorController(ctx) {
 
     const renderInspector = () => {
         if (!inspector) return;
+        inspector.classList.toggle('is-readonly', ctx.readOnly === true);
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
         const active = document.activeElement;
         const focusSnapshot = active && inspector.contains(active) ? {
@@ -771,6 +773,13 @@ function createDagInspectorController(ctx) {
                 <pre class="pivot-dag-test-result" data-pivot-dag-test-result hidden></pre>
             </div>
         `);
+        if (ctx.readOnly) {
+            inspector.querySelectorAll('input, select, textarea, button').forEach(control => {
+                if (control.tagName === 'TEXTAREA') control.readOnly = true;
+                else control.disabled = true;
+            });
+            return;
+        }
         inspector.querySelector('[data-pivot-dag-open-wizard]')?.addEventListener('click', () => openNodeInputWizard(node.id));
         inspector.querySelector('[data-pivot-dag-open-json]')?.addEventListener('click', () => openNodeJsonEditor(node.id));
         inspector.querySelectorAll('[data-pivot-dag-edit-contract], [data-pivot-dag-edit-contract-short]').forEach(button => {

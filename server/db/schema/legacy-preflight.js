@@ -27,6 +27,8 @@ const PRE_SCHEMA_COLUMNS = [
     ['attachments', 'created_at', 'DATETIME'],
     ['knowledge_docs', 'user_id', 'INTEGER'],
     ['knowledge_docs', 'collection_id', 'INTEGER'],
+    ['knowledge_collections', 'scope', "TEXT DEFAULT 'personal'"],
+    ['knowledge_collections', 'allowed_units', "TEXT DEFAULT ''"],
     ['knowledge_docs', 'status', "TEXT DEFAULT 'processing'"],
     ['knowledge_docs', 'created_at', 'DATETIME'],
     ['knowledge_chunks', 'doc_id', 'INTEGER'],
@@ -41,7 +43,12 @@ const PRE_SCHEMA_COLUMNS = [
     ['model_usage_events', 'created_at', 'DATETIME'],
     ['api_call_logs', 'user_id', 'INTEGER'],
     ['api_call_logs', 'api_key_id', 'INTEGER'],
-    ['api_call_logs', 'created_at', 'DATETIME']
+    ['api_call_logs', 'created_at', 'DATETIME'],
+    ['agent_workflows', 'scope', "TEXT DEFAULT 'personal'"],
+    ['agent_workflows', 'allowed_units', "TEXT DEFAULT ''"],
+    ['agent_schedules', 'cron_expression', "TEXT DEFAULT ''"],
+    ['mcp_servers', 'scope', "TEXT DEFAULT 'personal'"],
+    ['mcp_servers', 'allowed_units', "TEXT DEFAULT ''"]
 ];
 
 function applyLegacySchemaPreflight() {

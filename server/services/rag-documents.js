@@ -11,6 +11,15 @@ const { getRagConfig } = require('./rag-config');
 const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge-graph');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
+const knowledgeRepository = require('../repositories/knowledge');
+const {
+    buildDocumentAccessFilter,
+    normalizeKnowledgeUser
+} = require('./knowledge-access');
+const {
+    normalizeShareSettings
+} = require('./unit-visibility');
+const { isAdmin } = require('../permissions');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -82,62 +91,38 @@ function normalizeKnowledgeCollectionId(value) {
     return normalizeKnowledgeDocId(value);
 }
 
-function getKnowledgeCollectionForUser(collectionId, userId) {
+function getKnowledgeCollectionForUser(collectionId, user) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (!normalizedId) return null;
-    return db.prepare(`
-        SELECT *
-        FROM knowledge_collections
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).get(normalizedId, userId) || null;
+    return knowledgeRepository.getCollectionForUser(normalizedId, user);
 }
 
-function resolveKnowledgeCollectionId({ userId, collectionId = null } = {}) {
+function resolveKnowledgeCollectionId({ userId, user = null, collectionId = null } = {}) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (normalizedId) {
-        const collection = getKnowledgeCollectionForUser(normalizedId, userId);
+        const collection = getKnowledgeCollectionForUser(normalizedId, user || userId);
         return collection ? collection.id : null;
     }
     return null;
 }
 
-function listKnowledgeCollections(userId) {
-    return db.prepare(`
-        SELECT
-            c.id,
-            c.name,
-            c.description,
-            c.created_at,
-            c.updated_at,
-            COUNT(d.id) AS doc_count,
-            COALESCE(SUM(CASE WHEN d.status = 'ready' THEN 1 ELSE 0 END), 0) AS ready_count,
-            COALESCE(SUM(CASE WHEN d.status = 'ready' AND COALESCE(d.is_enabled, 1) = 1 THEN d.chunk_count ELSE 0 END), 0) AS chunk_count
-        FROM knowledge_collections c
-        LEFT JOIN knowledge_docs d
-          ON d.collection_id = c.id
-         AND d.user_id = c.user_id
-         AND d.deleted_at IS NULL
-        WHERE c.user_id = ? AND c.deleted_at IS NULL
-        GROUP BY c.id
-        ORDER BY c.updated_at DESC, c.created_at DESC, c.id DESC
-    `).all(userId).map(row => ({
+function listKnowledgeCollections(user) {
+    const normalizedUser = normalizeKnowledgeUser(user);
+    return knowledgeRepository.listCollections(normalizedUser).map(row => ({
         ...row,
         doc_count: Number(row.doc_count || 0),
         ready_count: Number(row.ready_count || 0),
-        chunk_count: Number(row.chunk_count || 0)
+        chunk_count: Number(row.chunk_count || 0),
+        is_owner: Number(row.user_id) === normalizedUser.id,
+        can_edit: Number(row.user_id) === normalizedUser.id,
+        read_only: Number(row.user_id) !== normalizedUser.id
     }));
 }
 
 function createKnowledgeCollection({ userId, name, description = '' }) {
     const normalizedName = normalizeKnowledgeCollectionName(name);
     if (!normalizedName) return null;
-    const existing = db.prepare(`
-        SELECT *
-        FROM knowledge_collections
-        WHERE user_id = ? AND deleted_at IS NULL AND lower(name) = lower(?)
-        ORDER BY updated_at DESC, id DESC
-        LIMIT 1
-    `).get(userId, normalizedName);
+    const existing = knowledgeRepository.findCollectionByName(userId, normalizedName);
     if (existing) return existing;
 
     const now = getBeijingTimestamp();
@@ -146,6 +131,47 @@ function createKnowledgeCollection({ userId, name, description = '' }) {
         VALUES (?, ?, ?, ?, ?)
     `).run(userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now);
     return getKnowledgeCollectionForUser(info.lastInsertRowid, userId);
+}
+
+function getKnowledgeCollectionShareOptions({ collectionId, user }) {
+    const collection = getKnowledgeCollectionForUser(collectionId, user);
+    if (!collection) return null;
+    const normalizedUser = normalizeKnowledgeUser(user);
+    if (Number(collection.user_id) !== normalizedUser.id && !isAdmin(user)) return null;
+    const units = db.prepare(`
+        SELECT DISTINCT TRIM(unit) AS unit
+        FROM users
+        WHERE unit IS NOT NULL AND TRIM(unit) != '' AND deleted_at IS NULL
+        ORDER BY unit COLLATE NOCASE ASC
+    `).all().map(row => row.unit).filter(Boolean);
+    return {
+        collection: {
+            id: collection.id,
+            name: collection.name,
+            scope: collection.scope || 'personal',
+            allowed_units: collection.allowed_units || ''
+        },
+        units,
+        currentUnit: normalizedUser.unit
+    };
+}
+
+function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
+    const normalizedId = normalizeKnowledgeCollectionId(collectionId);
+    if (!normalizedId) return null;
+    const current = db.prepare(`
+        SELECT * FROM knowledge_collections
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).get(normalizedId, normalizeKnowledgeUser(user).id);
+    if (!current) return null;
+    const settings = normalizeShareSettings(body, user, current);
+    db.prepare(`
+        UPDATE knowledge_collections
+        SET scope = ?, allowed_units = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(settings.scope, settings.allowedUnits, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id);
+    clearRagCacheForUser(normalizeKnowledgeUser(user).id);
+    return getKnowledgeCollectionForUser(normalizedId, user);
 }
 
 function createKnowledgeTag({ userId, tag }) {
@@ -193,12 +219,7 @@ function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
 function getKnowledgeDocumentTags({ docId, userId }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return [];
-    return db.prepare(`
-        SELECT tag
-        FROM knowledge_doc_tags
-        WHERE doc_id = ? AND user_id = ?
-        ORDER BY tag COLLATE NOCASE ASC
-    `).all(normalizedDocId, userId).map(row => row.tag);
+    return knowledgeRepository.listDocumentTags(normalizedDocId, userId);
 }
 
 function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_docs') {
@@ -227,26 +248,29 @@ function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_doc
     };
 }
 
-function listKnowledgeTags(userId, { collectionId = null } = {}) {
+function listKnowledgeTags(user, { collectionId = null } = {}) {
+    const normalizedUser = normalizeKnowledgeUser(user);
     const normalizedCollectionId = normalizeKnowledgeCollectionId(collectionId);
     if (normalizedCollectionId) {
-        const collection = getKnowledgeCollectionForUser(normalizedCollectionId, userId);
+        const collection = getKnowledgeCollectionForUser(normalizedCollectionId, normalizedUser);
         if (!collection) return [];
+        const access = buildDocumentAccessFilter(normalizedUser, 'd', 'c');
         return db.prepare(`
             SELECT t.tag, COUNT(DISTINCT t.doc_id) AS doc_count
             FROM knowledge_doc_tags t
             JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
-            WHERE t.user_id = ?
-              AND d.deleted_at IS NULL
+            LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+            WHERE d.deleted_at IS NULL AND ${access.sql}
               AND d.collection_id = ?
             GROUP BY t.tag
             ORDER BY doc_count DESC, t.tag COLLATE NOCASE ASC
-        `).all(userId, normalizedCollectionId).map(row => ({
+        `).all(...access.params, normalizedCollectionId).map(row => ({
             tag: row.tag,
             doc_count: Number(row.doc_count || 0)
         }));
     }
 
+    const access = buildDocumentAccessFilter(normalizedUser, 'd', 'c');
     return db.prepare(`
         WITH tag_names AS (
             SELECT tag
@@ -256,20 +280,22 @@ function listKnowledgeTags(userId, { collectionId = null } = {}) {
             SELECT t.tag
             FROM knowledge_doc_tags t
             JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
-            WHERE t.user_id = ? AND d.deleted_at IS NULL
+            LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+            WHERE d.deleted_at IS NULL AND ${access.sql}
         ),
         tag_counts AS (
             SELECT t.tag, COUNT(DISTINCT t.doc_id) AS doc_count
             FROM knowledge_doc_tags t
             JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
-            WHERE t.user_id = ? AND d.deleted_at IS NULL
+            LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+            WHERE d.deleted_at IS NULL AND ${access.sql}
             GROUP BY t.tag
         )
         SELECT tag_names.tag, COALESCE(tag_counts.doc_count, 0) AS doc_count
         FROM tag_names
         LEFT JOIN tag_counts ON tag_counts.tag = tag_names.tag
         ORDER BY doc_count DESC, tag_names.tag COLLATE NOCASE ASC
-    `).all(userId, userId, userId).map(row => ({
+    `).all(normalizedUser.id, ...access.params, ...access.params).map(row => ({
         tag: row.tag,
         doc_count: Number(row.doc_count || 0)
     }));
@@ -343,9 +369,8 @@ function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, 
     }
 }
 
-function getKnowledgeDocumentForUser(docId, userId, { includeDeleted = false } = {}) {
-    const deletedFilter = includeDeleted ? '' : ' AND deleted_at IS NULL';
-    return db.prepare(`SELECT * FROM knowledge_docs WHERE id = ? AND user_id = ?${deletedFilter}`).get(docId, userId);
+function getKnowledgeDocumentForUser(docId, user, { includeDeleted = false } = {}) {
+    return knowledgeRepository.getDocumentForUser(docId, user, { includeDeleted });
 }
 
 function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive = false } = {}) {
@@ -456,23 +481,17 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     }
 }
 
-function getKnowledgeDocumentDetail({ docId, userId, limit = 20, offset = 0 }) {
+function getKnowledgeDocumentDetail({ docId, userId, user = null, limit = 20, offset = 0 }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
-    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    const accessUser = user || userId;
+    const doc = getKnowledgeDocumentForUser(normalizedDocId, accessUser);
     if (!doc) return null;
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const chunks = db.prepare(`
-        SELECT id, content, LENGTH(content) AS length
-        FROM knowledge_chunks
-        WHERE doc_id = ?
-        ORDER BY id ASC
-        LIMIT ? OFFSET ?
-    `).all(normalizedDocId, safeLimit, safeOffset);
-    const totalChunks = db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?')
-        .get(normalizedDocId).count;
-    return { doc: { ...doc, tags: getKnowledgeDocumentTags({ docId: normalizedDocId, userId }) }, chunks, totalChunks, limit: safeLimit, offset: safeOffset };
+    const chunks = knowledgeRepository.listDocumentChunks(normalizedDocId, safeLimit, safeOffset);
+    const totalChunks = knowledgeRepository.countDocumentChunks(normalizedDocId);
+    return { doc: { ...doc, tags: getKnowledgeDocumentTags({ docId: normalizedDocId, userId: accessUser }) }, chunks, totalChunks, limit: safeLimit, offset: safeOffset };
 }
 
 function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
@@ -629,45 +648,10 @@ function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
 }
 
 function getKnowledgeQualityReport(userId) {
-    const overview = db.prepare(`
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS readyEnabled,
-            SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
-            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
-            SUM(CASE WHEN COALESCE(is_enabled, 1) = 0 THEN 1 ELSE 0 END) AS disabled,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS emptyReady,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(updated_at, processed_at, created_at) < datetime('now', '+8 hours', '-180 days') THEN 1 ELSE 0 END) AS staleReady,
-            COALESCE(SUM(chunk_count), 0) AS chunks,
-            COALESCE(SUM(source_size), 0) AS sourceSize
-        FROM knowledge_docs
-        WHERE user_id = ? AND deleted_at IS NULL
-    `).get(userId);
-    const problemDocs = db.prepare(`
-        SELECT d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
-               d.progress, d.error_message, d.updated_at,
-               COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0) AS unhelpful,
-               COALESCE(SUM(CASE WHEN f.helpful = 1 THEN 1 ELSE 0 END), 0) AS helpful
-        FROM knowledge_docs d
-        LEFT JOIN rag_feedback f ON f.user_id = d.user_id AND f.doc_name = d.name
-        WHERE d.user_id = ? AND d.deleted_at IS NULL
-        GROUP BY d.id
-        HAVING d.status = 'error'
-            OR COALESCE(d.is_enabled, 1) = 0
-            OR (d.status = 'ready' AND COALESCE(d.chunk_count, 0) = 0)
-            OR unhelpful > helpful
-        ORDER BY
-            CASE
-                WHEN d.status = 'error' THEN 0
-                WHEN COALESCE(d.is_enabled, 1) = 0 THEN 1
-                WHEN COALESCE(d.chunk_count, 0) = 0 THEN 2
-                ELSE 3
-            END,
-            COALESCE(d.updated_at, d.created_at) DESC
-        LIMIT 12
-    `).all(userId);
-    const feedback = getRagFeedbackSummary(userId);
+    const normalized = normalizeKnowledgeUser(userId);
+    const overview = knowledgeRepository.getDocumentQualityOverview(normalized.id);
+    const problemDocs = knowledgeRepository.listProblemDocuments(normalized.id);
+    const feedback = getRagFeedbackSummary(normalized.id);
     const graph = getGraphSummary(userId);
     const signals = buildKnowledgeQualitySignals({ overview, feedback, graph });
     const recommendations = [];
@@ -772,50 +756,50 @@ function getKnowledgeIndexQueueStatus(userId = null) {
 }
 
 function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
-    const scopeFilter = buildKnowledgeDocumentScopeFilter(scope, 'knowledge_docs');
+    const normalized = normalizeKnowledgeUser(userId);
+    const scopeFilter = buildKnowledgeDocumentScopeFilter(scope, 'd');
+    const access = buildDocumentAccessFilter(normalized, 'd', 'c');
+    const fromSql = 'FROM knowledge_docs d LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL';
+    const wherePrefix = `${access.sql} AND d.deleted_at IS NULL`;
     const rows = db.prepare(`
         SELECT
-            status,
+            d.status,
             COUNT(*) AS count,
-            COALESCE(SUM(chunk_count), 0) AS chunks,
-            COALESCE(SUM(source_size), 0) AS source_size
-        FROM knowledge_docs
-        WHERE user_id = ?
-          AND deleted_at IS NULL
+            COALESCE(SUM(d.chunk_count), 0) AS chunks,
+            COALESCE(SUM(d.source_size), 0) AS source_size
+        ${fromSql}
+        WHERE ${wherePrefix}
           ${scopeFilter.sql}
-        GROUP BY status
-    `).all(userId, ...scopeFilter.params);
+        GROUP BY d.status
+    `).all(...access.params, ...scopeFilter.params);
     const retryableErrors = db.prepare(`
         SELECT COUNT(*) AS count
-        FROM knowledge_docs
-        WHERE user_id = ?
-          AND deleted_at IS NULL
-          AND status = 'error'
-          AND source_path IS NOT NULL
-          AND source_path != ''
+        ${fromSql}
+        WHERE ${wherePrefix}
+          AND d.status = 'error'
+          AND d.source_path IS NOT NULL
+          AND d.source_path != ''
           ${scopeFilter.sql}
-    `).get(userId, ...scopeFilter.params).count;
+    `).get(...access.params, ...scopeFilter.params).count;
     const readyEnabled = db.prepare(`
         SELECT COUNT(*) AS count
-        FROM knowledge_docs
-        WHERE user_id = ?
-          AND deleted_at IS NULL
-          AND status = 'ready'
-          AND COALESCE(is_enabled, 1) = 1
+        ${fromSql}
+        WHERE ${wherePrefix}
+          AND d.status = 'ready'
+          AND COALESCE(d.is_enabled, 1) = 1
           ${scopeFilter.sql}
-    `).get(userId, ...scopeFilter.params).count;
+    `).get(...access.params, ...scopeFilter.params).count;
     const lastError = db.prepare(`
-        SELECT id, name, error_message, updated_at
-        FROM knowledge_docs
-        WHERE user_id = ?
-          AND deleted_at IS NULL
-          AND status = 'error'
-          AND error_message IS NOT NULL
-          AND error_message != ''
+        SELECT d.id, d.name, d.error_message, d.updated_at
+        ${fromSql}
+        WHERE ${wherePrefix}
+          AND d.status = 'error'
+          AND d.error_message IS NOT NULL
+          AND d.error_message != ''
           ${scopeFilter.sql}
-        ORDER BY COALESCE(updated_at, processed_at, created_at) DESC
+        ORDER BY COALESCE(d.updated_at, d.processed_at, d.created_at) DESC
         LIMIT 1
-    `).get(userId, ...scopeFilter.params) || null;
+    `).get(...access.params, ...scopeFilter.params) || null;
 
     const summary = {
         total: 0,
@@ -827,7 +811,7 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         sourceSize: 0,
         retryableErrors,
         lastError,
-        config: getRagConfig({}, userId),
+        config: getRagConfig({}, normalized.id),
         queue: {
             running: runningIndexCount,
             pending: pendingIndexes.size,
@@ -926,6 +910,8 @@ function deleteKnowledgeDocument({ docId, userId }) {
 }
 module.exports = {
     createKnowledgeCollection,
+    getKnowledgeCollectionShareOptions,
+    updateKnowledgeCollectionSharing,
     createKnowledgeTag,
     createKnowledgeDocumentFromUpload,
     deleteKnowledgeDocument,

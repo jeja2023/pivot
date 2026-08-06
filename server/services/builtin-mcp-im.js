@@ -13,6 +13,70 @@ const {
 } = require('../security');
 const { safeJsonRequest } = require('./safe-http-client');
 
+function getPathValue(value, path = []) {
+    let current = value;
+    for (const part of path) {
+        if (current === null || current === undefined) return undefined;
+        if (Array.isArray(current) && /^\d+$/.test(part)) {
+            current = current[Number(part)];
+        } else if (typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, part)) {
+            current = current[part];
+        } else {
+            return undefined;
+        }
+    }
+    return current;
+}
+
+function tryParseJson(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return null;
+    try {
+        return JSON.parse(trimmed);
+    } catch (_err) {
+        return null;
+    }
+}
+
+function resolveTemplateReference(expression, context) {
+    const expr = String(expression || '').trim();
+    if (!expr) return undefined;
+    const parts = expr.split('.').map(part => part.trim()).filter(Boolean);
+    if (!parts.length) return undefined;
+    const [head, ...tail] = parts;
+    if (head === 'payload' || head === 'input') return getPathValue(context.payload || context.input || {}, tail);
+    if (head === 'user') return getPathValue(context.user || {}, tail);
+    if (head === 'approval') return getPathValue(context.approval || {}, tail);
+    if (head === 'config') return getPathValue(context.config || {}, tail);
+    if (head === 'context') return getPathValue(context.context || {}, tail);
+    return getPathValue(context, parts);
+}
+
+function renderTemplateValue(value, context) {
+    if (typeof value === 'string') {
+        const exact = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
+        if (exact) {
+            const resolved = resolveTemplateReference(exact[1], context);
+            return resolved === undefined ? value : resolved;
+        }
+        return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
+            const resolved = resolveTemplateReference(expression, context);
+            if (resolved === undefined || resolved === null) return match;
+            if (typeof resolved === 'string') return resolved;
+            try {
+                return JSON.stringify(resolved);
+            } catch (_err) {
+                return String(resolved);
+            }
+        });
+    }
+    if (Array.isArray(value)) return value.map(item => renderTemplateValue(item, context));
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplateValue(item, context)]));
+    }
+    return value;
+}
+
 function listImTools() {
     return [
         {
@@ -87,6 +151,31 @@ function validateImTarget(config, target, targetType) {
     return value;
 }
 
+function buildImPayload(config, payload, user = null, extra = {}) {
+    const basePayload = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? { ...payload }
+        : { message: String(payload || '') };
+    const template = String(config?.payloadTemplate || '').trim();
+    if (!template) return basePayload;
+    const context = {
+        payload: basePayload,
+        input: basePayload,
+        user: user && typeof user === 'object' ? user : {},
+        approval: extra.approval && typeof extra.approval === 'object' ? extra.approval : {},
+        context: extra
+    };
+    const rendered = renderTemplateValue(template, context);
+    if (rendered && typeof rendered === 'object' && !Array.isArray(rendered)) {
+        return rendered;
+    }
+    if (typeof rendered === 'string') {
+        const parsed = tryParseJson(rendered);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        return { ...basePayload, message: rendered };
+    }
+    return basePayload;
+}
+
 async function sendIm(config, secret, payload, user = null) {
     const headers = {
         'Content-Type': 'application/json',
@@ -141,7 +230,7 @@ async function executeImTool(server, name, input = {}, user = null) {
     if (!['im.send_user_message', 'im.send_group_message', 'im.send_markdown'].includes(name)) {
         throw new Error(`Unsupported IM MCP tool: ${name}`);
     }
-    return sendIm(config, secret, {
+    const renderedPayload = buildImPayload(config, {
         source: 'pivot-mcp',
         target,
         targetType,
@@ -150,10 +239,14 @@ async function executeImTool(server, name, input = {}, user = null) {
         format: name === 'im.send_markdown' ? 'markdown' : 'text',
         timestamp: new Date().toISOString()
     }, user);
+    return sendIm(config, secret, renderedPayload, user);
 }
 
 module.exports = {
+    buildImPayload,
+    renderTemplateValue,
     listImTools,
     sendIm,
-    executeImTool
+    executeImTool,
+    validateImTarget
 };

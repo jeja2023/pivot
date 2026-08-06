@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { createRequire } = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -12,7 +13,7 @@ function loadAgentQueueModule(setImmediateMock) {
     vm.runInNewContext(source, {
         module,
         exports: module.exports,
-        require,
+        require: createRequire(filename),
         console,
         process,
         Buffer,

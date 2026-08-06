@@ -26,6 +26,7 @@ const {
     recoverStaleKnowledgeDocumentIndexes,
     removeTestPath,
     retrieveContext,
+    runExpressHandlers,
     scheduleFailedKnowledgeDocumentsForUser,
     setKnowledgeDocumentCollection,
     setKnowledgeDocumentTags,
@@ -739,5 +740,53 @@ test('RAG 检索会合并兜底候选，并在没有候选时跳过嵌入调用'
         db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(ftsOnly.lastInsertRowid, recentFallback.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
+    }
+});
+
+test('GET /docs 接口能正确连表查询总数并返回文档列表', async () => {
+    const { ragRouter } = require('../../server/rag');
+    const route = ragRouter.stack.find(layer => layer.route && layer.route.path === '/docs' && layer.route.methods.get);
+    assert.ok(route);
+
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`rag_get_docs_${suffix}`, 'hash', 'RAG Get Docs Test', '研发部', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const { sql } = require('../../server/db/statements');
+    const user = sql('SELECT * FROM users WHERE id = ?').get(userId);
+
+    const collection = createKnowledgeCollection({ userId, name: `Docs Collection ${suffix}` });
+    const docInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 0, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(userId, collection.id, `doc_${suffix}.txt`);
+
+    let responseData = null;
+    let statusCode = 200;
+    const req = {
+        headers: {},
+        query: { page: '1', limit: '15' },
+        user
+    };
+    const res = {
+        status(code) { statusCode = code; return this; },
+        json(data) { responseData = data; return this; }
+    };
+
+    try {
+        const handlers = route.route.stack.filter(l => l.name !== 'authMiddleware').map(l => l.handle);
+        await runExpressHandlers(handlers, req, res);
+        assert.equal(statusCode, 200);
+        assert.ok(responseData);
+        assert.equal(responseData.total, 1);
+        assert.equal(responseData.data.length, 1);
+        assert.equal(responseData.data[0].id, docInfo.lastInsertRowid);
+        assert.equal(responseData.data[0].collection_name, `Docs Collection ${suffix}`);
+    } finally {
+        db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
+        db.prepare('DELETE FROM knowledge_collections WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });

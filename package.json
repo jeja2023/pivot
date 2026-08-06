@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.0.246",
+  "version": "0.0.250",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -11,8 +11,9 @@
     "dev": "chcp 65001 >nul && nodemon --ignore client server/index.js",
     "lint": "eslint . --ext .js",
     "check:text": "node scripts/check_text_integrity.js",
-    "check:standards": "node scripts/check_development_standards.js",
+    "check:standards": "node scripts/check_development_standards.js && node scripts/check_no_new_raw_sql.js",
     "check:external": "node scripts/check_external_links.js",
+    "check:no-new-raw-sql": "node scripts/check_no_new_raw_sql.js",
     "audit:policy": "node scripts/check_audit_policy.js",
     "check:safe-html": "node scripts/check_safe_html_usage.js",
     "hooks:install": "node scripts/install_git_hooks.js",

@@ -148,6 +148,57 @@
         </div>
     </div>
 
+    <div id="mcp-share-modal" class="modal-overlay hidden agent-workflow-share-modal-overlay" style="z-index: 1915;">
+        <div class="modal agent-workflow-share-modal mcp-share-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-share-title">
+            <div class="agent-workflow-share-head">
+                <div>
+                    <h3 id="mcp-share-title">分享只读数据库能力</h3>
+                    <p id="mcp-share-subtitle">设置哪些单位成员可以使用该只读数据库能力。</p>
+                </div>
+                <button id="mcp-share-close-btn" class="btn-danger-outline" type="button" aria-label="关闭" title="关闭">关闭</button>
+            </div>
+            <input type="hidden" id="mcp-share-id">
+            <div class="agent-workflow-share-body">
+                <div class="agent-workflow-share-summary" id="mcp-share-summary"></div>
+                <fieldset class="agent-workflow-share-scope-fieldset">
+                    <legend>可见范围</legend>
+                    <label class="agent-workflow-share-choice">
+                        <input type="radio" name="mcp-share-scope" value="personal">
+                        <span>
+                            <strong>仅自己</strong>
+                            <small>未启用共享时，该数据库能力仅对自己可见和使用。</small>
+                        </span>
+                    </label>
+                    <label class="agent-workflow-share-choice">
+                        <input type="radio" name="mcp-share-scope" value="shared">
+                        <span>
+                            <strong>共享给单位成员</strong>
+                            <small>接收方只能执行只读数据库工具，连接密码和编辑权限不会被共享。</small>
+                        </span>
+                    </label>
+                </fieldset>
+                <section id="mcp-share-units-section" class="agent-workflow-share-units-section hidden">
+                    <div class="agent-workflow-share-units-head">
+                        <div>
+                            <strong>共享给哪些单位</strong>
+                            <span id="mcp-share-units-hint">选择后仅这些单位的成员可以使用该只读工具。</span>
+                        </div>
+                        <label id="mcp-share-all-label" class="agent-workflow-share-all">
+                            <input id="mcp-share-all" type="checkbox">
+                            <span>全部单位</span>
+                        </label>
+                    </div>
+                    <div id="mcp-share-unit-options" class="agent-workflow-share-units-list"></div>
+                </section>
+                <div id="mcp-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
+            </div>
+            <div class="agent-workflow-share-footer">
+                <button id="mcp-share-cancel-btn" class="btn-secondary" type="button">取消</button>
+                <button id="mcp-share-save-btn" class="btn-primary" type="button">保存共享设置</button>
+            </div>
+        </div>
+    </div>
+
     <div id="mcp-tools-modal" class="modal-overlay hidden" style="z-index: 1910;">
         <div class="modal mcp-tools-modal">
             <div class="mcp-edit-header">

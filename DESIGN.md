@@ -3,11 +3,12 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-08-03
-- Release baseline: v0.0.240
+- Last refreshed: 2026-08-06
+- Release baseline: v0.0.249
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。
+  - `client/chat/partials/workspaces/agent-dag.html`、`client/chat/agent-workflow-library.js`：工作流共享入口、范围配置和只读接收体验。
   - `使用帮助.md`：普通用户在会话、应用、任务、自动化、知识库、工具库和个人设置中的实际使用路径。
   - `开发规范.md`：工程落地规则、UI 复用硬约束、测试和门禁。
   - `docs/公文写作设计方案.md`：公文写作模块设计。
@@ -15,6 +16,12 @@
   - `文档处理底座与OCR_PDF工具应用分阶段开发方案.md`：文档处理、OCR 和 PDF 能力建设方案。
 
 `DESIGN.md` 是项目级产品与体验设计源头，回答“为什么这样组织、用户如何理解、界面应呈现什么心智模型”。`开发规范.md` 是工程执行源头，回答“代码如何写、样式如何复用、接口如何校验、交付如何验收”。两者不互相复制；涉及 UI 实现时，先按本文件确定体验方向，再按 `开发规范.md` 落地。
+
+## Shared resource boundaries
+
+- Knowledge collections and database MCP connections may be shared with an explicit unit allowlist; all other assets remain personal by default.
+- Recipients have read-only access to shared knowledge and governed database read tools. Ownership, mutation, refresh, diagnosis and secret management stay with the owner or administrator.
+- Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
 
 ## Brand
 

@@ -9,6 +9,7 @@ const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
 const { safeJsonRequest } = require('./safe-http-client');
+const { resolveCredentialSecret } = require('./workflow-credentials');
 const {
     normalizeJsonSchema,
     schemaHasRules,
@@ -107,7 +108,7 @@ function getBuiltInToolDefinitions(user) {
                 url: { type: 'string', description: '请求地址，支持模板变量。' },
                 method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], default: 'GET' },
                 headers: { type: 'object', description: '请求头键值对，例如鉴权 Token。' },
-                credentialSecret: { type: 'string', description: '凭据环境变量后缀，例如 CRM_API；运行时读取 PIVOT_WORKFLOW_SECRET_CRM_API。' },
+                credentialSecret: { type: 'string', description: '凭据引用名，例如 CRM_API；优先读取凭据库，未配置时回退环境变量 PIVOT_WORKFLOW_SECRET_CRM_API。' },
                 credentialHeader: { type: 'string', default: 'Authorization', description: '注入凭据的请求头名称。' },
                 credentialPrefix: { type: 'string', default: 'Bearer ', description: '凭据值前缀。' },
                 body: { type: 'object', description: 'POST/PUT/PATCH 的 JSON 请求体。' },
@@ -162,12 +163,25 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.approval',
             title: '人工审批',
-            description: '暂停工作流等待用户确认，同一个审批节点通过后才会继续。',
+            description: '暂停工作流等待指定用户或部门审批，支持多级串签、超时策略和 IM 回调。',
             alwaysRequiresApproval: true,
             input_schema: asJsonSchema({
                 title: { type: 'string', default: '请审批本节点' },
                 summary: { description: '需要审批的内容摘要。' },
-                instructions: { type: 'string' }
+                instructions: { type: 'string' },
+                approvers: { type: 'array', items: { type: 'string' }, description: '审批人用户名或用户 ID 列表。' },
+                approverUserIds: { type: 'array', items: { type: 'integer' } },
+                approverUnits: { type: 'array', items: { type: 'string' } },
+                mode: { type: 'string', enum: ['any', 'all'], default: 'any' },
+                approvalLevels: { type: 'array', items: { type: 'object' } },
+                timeoutMs: { type: 'integer', minimum: 0, maximum: 2592000000, default: 0 },
+                timeoutHours: { type: 'number', minimum: 0, maximum: 720, default: 0 },
+                timeoutAction: { type: 'string', enum: ['reject', 'approve', 'cancel'], default: 'reject' },
+                imServerId: { type: 'integer' },
+                imTargetType: { type: 'string', enum: ['user', 'group'], default: 'user' },
+                imTarget: { type: 'string' },
+                callbackBaseUrl: { type: 'string' },
+                callbackCredential: { type: 'string' }
             }, ['title'])
         },
         {
@@ -196,9 +210,9 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.delay',
             title: '延时',
-            description: '等待指定毫秒数后继续，最长 10 分钟。',
+            description: '挂起工作流到指定时间后继续，最长 30 天，不占用运行槽。',
             input_schema: asJsonSchema({
-                durationMs: { type: 'integer', minimum: 0, maximum: 600000, default: 1000 },
+                durationMs: { type: 'integer', minimum: 0, maximum: 2592000000, default: 1000 },
                 reason: { type: 'string' }
             })
         },
@@ -638,8 +652,13 @@ async function executeAgentHttp(input = {}, user) {
         if (!/^[A-Za-z0-9_]+$/.test(credentialSecret)) {
             throw new Error('HTTP 凭据引用只能包含字母、数字和下划线。');
         }
-        const secret = process.env[`PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`];
-        if (!secret) throw new Error(`未配置 HTTP 凭据环境变量：PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`);
+        // 优先读取凭据库（支持免重启轮换和按部门授权），未命中时回退到历史环境变量方式
+        const envName = `PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`;
+        const stored = resolveCredentialSecret(credentialSecret, user);
+        const secret = stored?.value || process.env[envName];
+        if (!secret) {
+            throw new Error(`未找到 HTTP 凭据「${credentialSecret}」，请在凭据库创建，或配置环境变量 ${envName}。`);
+        }
         const header = String(input.credentialHeader || input.credential_header || 'Authorization').trim();
         if (!header || /[\r\n:]/.test(header)) throw new Error('HTTP 凭据请求头名称无效。');
         headers[header] = `${String(input.credentialPrefix ?? input.credential_prefix ?? 'Bearer ')}${secret}`;
@@ -847,7 +866,20 @@ async function executeWorkflowForeach(input = {}) {
     return { items: output, count: output.length, errors, concurrency, text: renderWorkflowValue(output) };
 }
 
-async function executeWorkflowDelay(input = {}) {
+async function executeWorkflowDelay(input = {}, context = {}) {
+    if (typeof context.waitForWorkflowDelay === 'function' && context.run) {
+        const node = context.node || {
+            id: context.delayKey || 'workflow.delay',
+            title: 'Workflow delay',
+            tool: 'workflow.delay'
+        };
+        return context.waitForWorkflowDelay({
+            run: context.run,
+            node,
+            input,
+            key: context.delayKey || ''
+        });
+    }
     const durationMs = Math.max(0, Math.min(Number.parseInt(input.durationMs ?? input.duration_ms, 10) || 0, 600000));
     if (durationMs) await new Promise(resolve => setTimeout(resolve, durationMs));
     return { durationMs, reason: String(input.reason || ''), completedAt: new Date().toISOString() };
@@ -878,13 +910,19 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'workflow.input') return executeWorkflowInput(input, context);
     if (name === 'workflow.output') return executeWorkflowOutput(input);
     if (name === 'workflow.condition') return executeWorkflowCondition(input);
-    if (name === 'workflow.approval') return { approved: true, summary: input.summary ?? '', text: renderWorkflowValue(input.summary) };
+    if (name === 'workflow.approval') {
+        if (context.workflowApprovalResult) return context.workflowApprovalResult;
+        return { approved: true, summary: input.summary ?? '', text: renderWorkflowValue(input.summary) };
+    }
     if (name === 'workflow.foreach') return executeWorkflowForeach(input);
     if (name === 'workflow.subworkflow') {
         if (typeof context.executeSubworkflow !== 'function') throw new Error('当前运行环境不支持子工作流。');
         return context.executeSubworkflow(input);
     }
-    if (name === 'workflow.delay') return executeWorkflowDelay(input);
+    if (name === 'workflow.delay') {
+        if (context.workflowDelayResult) return context.workflowDelayResult;
+        return executeWorkflowDelay(input, context);
+    }
     if (name === 'report.compose') return executeReportCompose(input);
 
     if (name === 'rag.search') {

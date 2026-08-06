@@ -1,14 +1,19 @@
-const { db } = require('../db');
 const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
+const sessionsRepository = require('../repositories/sessions');
 
 function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, createdAt }) {
     const finalTokenCount = Number.isFinite(Number(tokenCount)) ? Number(tokenCount) : estimateTokens(content);
     const finalCreatedAt = createdAt || getBeijingTimestamp();
-    return db.prepare(`
-        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(sessionId, userId, role, content, finalTokenCount, modelId || null, finalCreatedAt);
+    return sessionsRepository.insertMessage({
+        sessionId,
+        userId,
+        role,
+        content,
+        tokenCount: finalTokenCount,
+        modelId,
+        createdAt: finalCreatedAt
+    });
 }
 
 function saveUserMessage({ sessionId, userId, content, modelId }) {
@@ -33,28 +38,19 @@ function saveAssistantMessage({ sessionId, userId, content, modelId, tokenCount 
 }
 
 function touchSession(sessionId, timestamp = getBeijingTimestamp()) {
-    return db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(timestamp, sessionId);
+    return sessionsRepository.touchSession(sessionId, timestamp);
 }
 
 function updateLastAssistantStats({ sessionId, userId, costTime, tps }) {
-    const lastMsg = db.prepare(`
-        SELECT id FROM messages
-        WHERE session_id = ? AND user_id = ? AND role = 'assistant' AND deleted_at IS NULL
-        ORDER BY id DESC LIMIT 1
-    `).get(sessionId, userId);
+    const lastMsg = sessionsRepository.getLastAssistantMessage(sessionId, userId);
 
     if (!lastMsg) return false;
-    db.prepare('UPDATE messages SET cost_time = ?, tokens_per_sec = ? WHERE id = ?')
-      .run(costTime, tps, lastMsg.id);
+    sessionsRepository.updateMessageStats(lastMsg.id, costTime, tps);
     return true;
 }
 
 function countVisibleConversationMessages(sessionId, userId) {
-    return db.prepare(`
-        SELECT COUNT(*) as count
-        FROM messages
-        WHERE session_id = ? AND user_id = ? AND role IN ('user', 'assistant') AND deleted_at IS NULL
-    `).get(sessionId, userId).count;
+    return sessionsRepository.countVisibleConversationMessages(sessionId, userId);
 }
 
 module.exports = {

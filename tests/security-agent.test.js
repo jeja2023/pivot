@@ -775,6 +775,9 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(dagPartial, /id="automation-assets-view"/);
     assert.match(dagPartial, /id="automation-workflow-assets-list"/);
     assert.match(dagPartial, /id="automation-schedule-assets-list"/);
+    assert.match(dagPartial, /id="agent-workflow-share-modal"/);
+    assert.match(dagPartial, /name="agent-workflow-share-scope"/);
+    assert.match(dagPartial, /id="agent-workflow-readonly-run-btn"/);
     assert.match(dagPartial, /class="agent-dag-header-actions"[\s\S]*?id="automation-new-workflow-btn"[\s\S]*?id="automation-new-schedule-btn"[\s\S]*?id="automation-refresh-btn"/);
     assert.doesNotMatch(dagPartial, /class="automation-assets-actions"[\s\S]*?id="automation-new-schedule-btn"/);
     assert.match(dagPartial, /id="automation-editor-view" class="automation-editor-view hidden"/);
@@ -790,6 +793,9 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(source, /自主任务已转为工作流草稿/);
     assert.match(source, /function showAutomationAssetCenter/);
     assert.match(source, /function showAutomationWorkflowEditor/);
+    assert.match(source, /openAgentWorkflowShare/);
+    assert.match(source, /readOnly/);
+    assert.match(source, /data-automation-workflow-share/);
     assert.match(source, /saveCurrentAgentTaskAsSchedule/);
     assert.match(source, /function openAgentScheduleEditor/);
     assert.doesNotMatch(source, /id="agent-schedule-editor-time-field" class="modal-form-field">\s*<span>计划来源<\/span>/);

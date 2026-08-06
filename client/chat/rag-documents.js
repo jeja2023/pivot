@@ -206,6 +206,17 @@ function updateRagCollectionControls() {
     );
 }
 
+function filterWritableRagCollectionSelects() {
+    const writableIds = new Set(ragCollections.filter(collection => collection.can_edit === true).map(collection => String(collection.id)));
+    ['knowledge-upload-collection', 'knowledge-doc-meta-collection'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        [...select.options].forEach(option => {
+            if (option.value && !writableIds.has(option.value)) option.remove();
+        });
+    });
+}
+
 function updateRagTagControls() {
     updateRagTagSelect('rag-tag-filter', getLinkedRagCollectionId('docs'));
     updateRagTagSelect('rag-debug-tag', getLinkedRagCollectionId('debug'));
@@ -256,6 +267,7 @@ window.loadKnowledgeCollections = async function() {
         if (!res.ok || data.error) throw new Error(data.error || '专题库加载失败');
         ragCollections = Array.isArray(data.data) ? data.data : [];
         updateRagCollectionControls();
+        filterWritableRagCollectionSelects();
         window.updateChatToolReadiness?.({ silent: true });
         return ragCollections;
     } catch (e) {
@@ -369,6 +381,173 @@ window.createKnowledgeTagFromPrompt = async function() {
     }
 };
 
+async function openKnowledgeCollectionShareModal() {
+    const collectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
+    if (!collectionId) return showToast('请先在专题库筛选中选择一个自己的专题库', 'error');
+    const collection = ragCollections.find(item => String(item.id) === collectionId);
+    if (!collection?.can_edit) return showToast('共享专题库需要所有者权限', 'error');
+
+    const res = await apiFetch(`${API_BASE}/rag/collections/share-options?collectionId=${encodeURIComponent(collectionId)}`, { headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || '无法读取专题库共享设置', 'error');
+
+    let modal = document.getElementById('knowledge-share-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'knowledge-share-modal';
+        modal.className = 'modal-overlay knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+        document.body.appendChild(modal);
+    } else {
+        modal.className = 'modal-overlay knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+    }
+
+    const current = data.data?.collection || collection;
+    const units = Array.isArray(data.data?.units) ? data.data.units.filter(Boolean) : [];
+    const allowed = new Set(String(current.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean));
+    const isShared = current.scope === 'shared';
+    const isAll = isShared && allowed.size === 0;
+    const currentUnit = String(data.data?.currentUnit || '').trim();
+
+    PivotSafeHtml.setHtml(modal, `
+        <div class="modal agent-workflow-share-modal knowledge-share-modal" role="dialog" aria-modal="true" aria-labelledby="knowledge-share-title">
+            <div class="agent-workflow-share-head">
+                <div>
+                    <h3 id="knowledge-share-title">分享专题库</h3>
+                    <p id="knowledge-share-subtitle">设置哪些单位成员可以只读检索与问答该专题库。</p>
+                </div>
+                <button type="button" class="btn-danger-outline" data-knowledge-share-close>关闭</button>
+            </div>
+            <div class="agent-workflow-share-body">
+                <div class="agent-workflow-share-summary">
+                    <strong>${escapeRagHtml(current.name || '专题库')}</strong>
+                    <span>共享后，接收方只能检索、查看详情和知识图谱，无法上传、编辑、重建或删除文档。</span>
+                </div>
+                <fieldset class="agent-workflow-share-scope-fieldset">
+                    <legend>可见范围</legend>
+                    <label class="agent-workflow-share-choice">
+                        <input type="radio" name="knowledge-share-scope" value="personal" ${!isShared ? 'checked' : ''}>
+                        <span>
+                            <strong>仅自己</strong>
+                            <small>未启用共享时，该专题库仅对自己可见和检索。</small>
+                        </span>
+                    </label>
+                    <label class="agent-workflow-share-choice">
+                        <input type="radio" name="knowledge-share-scope" value="shared" ${isShared ? 'checked' : ''}>
+                        <span>
+                            <strong>共享给单位成员</strong>
+                            <small>选定单位成员可以以只读方式检索、查看详情和知识图谱。</small>
+                        </span>
+                    </label>
+                </fieldset>
+                <section id="knowledge-share-units-section" class="agent-workflow-share-units-section ${isShared ? '' : 'hidden'}">
+                    <div class="agent-workflow-share-units-head">
+                        <div>
+                            <strong>共享给哪些单位</strong>
+                            <span>选择后仅这些单位的成员可以使用该专题库。</span>
+                        </div>
+                        <label class="agent-workflow-share-all">
+                            <input id="knowledge-share-all" type="checkbox" ${isAll ? 'checked' : ''}>
+                            <span>全部单位</span>
+                        </label>
+                    </div>
+                    <div class="agent-workflow-share-units-list">
+                        ${units.map(unit => {
+                            const checked = isShared && (isAll || allowed.has(unit));
+                            const isCurrent = unit === currentUnit;
+                            return `
+                                <label class="agent-workflow-share-unit">
+                                    <input type="checkbox" name="knowledge-share-unit" value="${escapeRagAttr(unit)}" ${checked ? 'checked' : ''}>
+                                    <span>
+                                        <strong>${escapeRagHtml(unit)}</strong>
+                                        ${isCurrent ? '<small>本单位</small>' : '<small>单位成员</small>'}
+                                    </span>
+                                </label>
+                            `;
+                        }).join('') || '<span class="agent-workflow-share-empty">暂无可用单位信息</span>'}
+                    </div>
+                </section>
+                <div id="knowledge-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
+            </div>
+            <div class="agent-workflow-share-footer">
+                <button type="button" class="btn-secondary" data-knowledge-share-close>取消</button>
+                <button type="button" class="btn-primary" data-knowledge-share-save>保存共享设置</button>
+            </div>
+        </div>
+    `);
+
+    const closeButtons = modal.querySelectorAll('[data-knowledge-share-close]');
+    closeButtons.forEach(btn => btn.addEventListener('click', () => modal.classList.add('hidden')));
+    modal.addEventListener('click', e => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+
+    const setKnowledgeError = (msg = '') => {
+        const errEl = modal.querySelector('#knowledge-share-error');
+        if (!errEl) return;
+        errEl.textContent = msg;
+        errEl.hidden = !msg;
+    };
+
+    const scopeRadios = modal.querySelectorAll('input[name="knowledge-share-scope"]');
+    scopeRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value;
+            const sec = modal.querySelector('#knowledge-share-units-section');
+            if (sec) sec.classList.toggle('hidden', scopeVal !== 'shared');
+            setKnowledgeError('');
+        });
+    });
+
+    const allChk = modal.querySelector('#knowledge-share-all');
+    if (allChk) {
+        allChk.addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            modal.querySelectorAll('input[name="knowledge-share-unit"]').forEach(chk => chk.checked = checked);
+        });
+    }
+
+    const saveBtn = modal.querySelector('[data-knowledge-share-save]');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value || 'personal';
+            const enabled = scopeVal === 'shared';
+            const allChecked = modal.querySelector('#knowledge-share-all')?.checked === true;
+            const allowedUnits = enabled && !allChecked
+                ? [...modal.querySelectorAll('input[name="knowledge-share-unit"]:checked')].map(input => input.value).filter(Boolean)
+                : [];
+
+            if (enabled && !allChecked && !allowedUnits.length) {
+                setKnowledgeError('共享时至少选择一个单位，或选择全部单位。');
+                return;
+            }
+
+            setKnowledgeError('');
+            saveBtn.disabled = true;
+
+            try {
+                const saveRes = await apiFetch(`${API_BASE}/rag/collections/${encodeURIComponent(collectionId)}/sharing`, {
+                    method: 'PATCH',
+                    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope: enabled ? 'shared' : 'personal', allowedUnits })
+                });
+                const saveData = await saveRes.json().catch(() => ({}));
+                if (!saveRes.ok) throw new Error(saveData.error || '共享设置保存失败');
+
+                modal.classList.add('hidden');
+                showToast('专题库共享设置已更新', 'success');
+                await window.loadKnowledgeCollections?.();
+                window.loadKnowledgeDocs(1);
+            } catch (err) {
+                setKnowledgeError(err.message || '共享设置保存失败');
+            } finally {
+                saveBtn.disabled = false;
+            }
+        });
+    }
+
+    modal.classList.remove('hidden');
+};
+
 function renderRagDocsPagination(total, page, limit) {
     window.renderWorkspacePagination?.('pagination-ragDocs', {
         total,
@@ -461,6 +640,10 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
                 </td>
             </tr>
         `).join('') || '<tr><td colspan="12" class="text-center">暂无知识库文档</td></tr>');
+        body?.querySelectorAll('.rag-enable-toggle').forEach(toggle => {
+            const doc = getCachedKnowledgeDoc(toggle.dataset.ragId);
+            if (doc?.read_only === true || doc?.can_edit === false) toggle.disabled = true;
+        });
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
     } catch (e) {
@@ -473,6 +656,16 @@ window.openKnowledgeWorkbench = async function() {
     window.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
+    const toolbar = panel.querySelector('.knowledge-toolbar');
+    if (toolbar && !toolbar.querySelector('#rag-share-collection-btn')) {
+        const button = document.createElement('button');
+        button.id = 'rag-share-collection-btn';
+        button.className = 'btn-secondary';
+        button.type = 'button';
+        button.textContent = '分享专题库';
+        button.addEventListener('click', () => openKnowledgeCollectionShareModal());
+        toolbar.insertBefore(button, toolbar.querySelector('#rag-create-tag-btn'));
+    }
     try {
         await window.ensureAdminSettingsScript?.();
     } catch (e) {
@@ -823,7 +1016,8 @@ async function loadRagDebugHistory() {
 }
 
 window.Pivot.exposeModule('rag.debug', {
-    loadRagDebugHistory
+    loadRagDebugHistory,
+    openKnowledgeCollectionShareModal
 }, {
     loadRagDebugHistory: 'loadRagDebugHistory'
 });

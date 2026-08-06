@@ -173,6 +173,8 @@ function initSchema() {
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             description TEXT DEFAULT '',
+            scope TEXT DEFAULT 'personal',
+            allowed_units TEXT DEFAULT '',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,
@@ -850,6 +852,7 @@ function initSchema() {
             frequency TEXT DEFAULT 'manual',
             time_of_day TEXT DEFAULT '09:00',
             day_of_week INTEGER DEFAULT 1,
+            cron_expression TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
             run_config TEXT,
             next_run_at DATETIME,
@@ -873,6 +876,8 @@ function initSchema() {
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             description TEXT,
+            scope TEXT DEFAULT 'personal',
+            allowed_units TEXT DEFAULT '',
             current_version_id INTEGER,
             published_version_id INTEGER,
             published_at DATETIME,
@@ -893,6 +898,48 @@ function initSchema() {
             UNIQUE(workflow_id, version),
             FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
             FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflow_triggers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workflow_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            trigger_type TEXT DEFAULT 'webhook',
+            token_hash TEXT,
+            token_hint TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            config_json TEXT DEFAULT '{}',
+            watermark TEXT DEFAULT '',
+            last_triggered_at DATETIME,
+            last_run_id TEXT,
+            trigger_count INTEGER DEFAULT 0,
+            last_error TEXT,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            secret_value TEXT NOT NULL,
+            scope TEXT DEFAULT 'personal',
+            allowed_units TEXT DEFAULT '',
+            version INTEGER DEFAULT 1,
+            previous_value TEXT,
+            previous_expires_at DATETIME,
+            last_used_at DATETIME,
+            use_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS agent_artifacts (
@@ -948,6 +995,38 @@ function initSchema() {
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS agent_approval_requests (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            request_type TEXT DEFAULT 'approval',
+            node_key TEXT DEFAULT '',
+            approval_key TEXT DEFAULT '',
+            title TEXT DEFAULT '',
+            summary TEXT DEFAULT '',
+            instructions TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            current_level INTEGER DEFAULT 1,
+            required_levels INTEGER DEFAULT 1,
+            levels_json TEXT DEFAULT '[]',
+            decisions_json TEXT DEFAULT '[]',
+            input_json TEXT DEFAULT '{}',
+            callback_token_hash TEXT,
+            callback_token_hint TEXT DEFAULT '',
+            callback_nonce TEXT DEFAULT '',
+            callback_credential_slug TEXT DEFAULT '',
+            callback_signature_required INTEGER DEFAULT 0,
+            timeout_action TEXT DEFAULT 'reject',
+            expires_at DATETIME,
+            decided_at DATETIME,
+            decided_by INTEGER,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS agent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -1001,6 +1080,8 @@ function initSchema() {
             api_key TEXT,
             description TEXT,
             config TEXT,
+            scope TEXT DEFAULT 'personal',
+            allowed_units TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
             last_error TEXT,
             last_checked_at DATETIME,
@@ -1168,10 +1249,22 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_user_status ON agent_schedules(user_id, status, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules(status, next_run_at, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflows_scope ON agent_workflows(scope, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_user ON agent_workflow_triggers(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_workflow ON agent_workflow_triggers(workflow_id, deleted_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workflow_triggers_token ON agent_workflow_triggers(token_hash) WHERE token_hash IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_poll ON agent_workflow_triggers(trigger_type, status, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_workflow_credentials_user ON workflow_credentials(user_id, deleted_at, updated_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_credentials_slug ON workflow_credentials(user_id, slug) WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_workflow_credentials_scope ON workflow_credentials(scope, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_user ON agent_artifacts(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_run ON agent_approval_requests(run_id, request_type, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_user ON agent_approval_requests(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_expires ON agent_approval_requests(status, expires_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_requests_callback_token ON agent_approval_requests(callback_token_hash) WHERE callback_token_hash IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_announcements_status_window ON announcements(status, starts_at, ends_at, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_announcements_target ON announcements(target_type, target_value);
@@ -1181,6 +1274,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_observability_events_type_created ON observability_events(type, created_at);
         CREATE INDEX IF NOT EXISTS idx_observability_events_status_created ON observability_events(status, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mcp_servers_scope ON mcp_servers(scope, status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_tool_cache_server ON mcp_tool_cache(server_id);
         CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_server_created ON mcp_call_logs(server_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_mcp_call_logs_user_created ON mcp_call_logs(user_id, created_at);
@@ -1206,6 +1300,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_document_outputs_user_job ON document_outputs(user_id, job_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_document_reviews_page ON document_reviews(page_id, updated_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_collections_scope ON knowledge_collections(scope, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_user_tag ON knowledge_doc_tags(user_id, tag);

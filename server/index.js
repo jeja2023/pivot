@@ -89,6 +89,7 @@ const { createSettingsRouter } = require('./routes/settings');
 const { createOpenAIRouter } = require('./routes/openai');
 const { createAppsRouter } = require('./routes/apps');
 const { createAgentsRouter } = require('./routes/agents');
+const { createTriggersRouter } = require('./routes/triggers');
 const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
@@ -256,12 +257,21 @@ const embeddingLimiter = rateLimit({
     message: { error: '向量模型调用过于频繁，请稍后再试' }
 });
 
+// 入站触发按来源 IP 限流：未登录场景下只能依据来源地址识别调用方
+const triggerLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: (req) => getClientIp(req),
+    message: { error: '触发请求过于频繁，请稍后再试' }
+});
+
 app.locals.loginLimiter = loginLimiter;
 app.locals.registerLimiter = registerLimiter;
 app.locals.chatLimiter = chatLimiter;
 app.locals.probeLimiter = probeLimiter;
 app.locals.embeddingLimiter = embeddingLimiter;
 app.locals.automationLimiter = automationLimiter;
+app.locals.triggerLimiter = triggerLimiter;
 
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
 if (corsOrigins.length > 0) {
@@ -569,6 +579,12 @@ app.use('/api', createAgentsRouter({
     authMiddleware,
     logAction,
     automationLimiter: app.locals.automationLimiter
+}));
+
+// 入站触发挂在 /hooks 下：令牌即凭证，不参与浏览器会话鉴权和 CSRF 校验
+app.use('/hooks', createTriggersRouter({
+    triggerLimiter: app.locals.triggerLimiter,
+    logAction
 }));
 
 app.use('/api', createEventsRouter({

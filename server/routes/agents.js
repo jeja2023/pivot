@@ -23,6 +23,18 @@ const {
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
 const {
+    createWorkflowCredential,
+    deleteWorkflowCredential,
+    listWorkflowCredentials,
+    revertWorkflowCredentialRotation,
+    rotateWorkflowCredential,
+    updateWorkflowCredential
+} = require('../services/workflow-credentials');
+const {
+    decideWorkflowApprovalRequest,
+    listWorkflowApprovalRequests
+} = require('../services/agent-approval-requests');
+const {
     cancelAgentRun,
     approveAgentTool,
     createAgentArtifactVersion,
@@ -30,9 +42,11 @@ const {
     createAgentTemplate,
     createAgentRun,
     createAgentWorkflow,
+    createWorkflowTrigger,
     deleteAgentSchedule,
     deleteAgentTemplate,
     deleteAgentWorkflow,
+    deleteWorkflowTrigger,
     diffAgentArtifactVersions,
     diffAgentWorkflowVersions,
     exportAgentRun,
@@ -41,8 +55,10 @@ const {
     listAgentNotifications,
     listAgentSchedules,
     listAgentTemplates,
+    listAgentWorkflowShareOptions,
     listAgentWorkflowVersions,
     listAgentWorkflows,
+    listWorkflowTriggers,
     getAgentMetrics,
     getAgentRuntimeStatus,
     markAgentNotificationRead,
@@ -53,13 +69,16 @@ const {
     restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     rollbackAgentArtifactVersion,
+    rotateWorkflowTriggerToken,
     runAgentScheduleNow,
     saveAgentRunArtifact,
     softDeleteAgentRun
     ,
     updateAgentSchedule,
     updateAgentTemplate,
-    updateAgentWorkflow
+    updateAgentWorkflow,
+    updateAgentWorkflowSharing,
+    updateWorkflowTrigger
 } = require('../services/agent-runtime');
 
 function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
@@ -76,8 +95,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const tools = formatToolList(req.user);
         const tool = findAgentToolByName(toolName, tools);
         if (!tool) return res.status(403).json({ error: '工具不可用或无权访问。' });
-        if (['workflow.approval', 'workflow.subworkflow'].includes(toolName)) {
-            return res.status(400).json({ error: '人工审批和子工作流节点需要在完整工作流中测试。' });
+        if (['workflow.approval', 'workflow.delay', 'workflow.subworkflow'].includes(toolName)) {
+            return res.status(400).json({ error: '人工审批、延时和子工作流节点需要在完整工作流中测试。' });
         }
         const startedAt = Date.now();
         const output = await executeToolByName(toolName, input, req.user, tools, {
@@ -175,6 +194,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         res.json({ data: listAgentWorkflows(req.user) });
     }));
 
+    router.get('/agents/workflows/share-options', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(listAgentWorkflowShareOptions(req.user));
+    }));
+
     router.post('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
         const workflow = createAgentWorkflow(req.user, req.body || {});
         logAction(req, '保存智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
@@ -185,6 +208,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const workflow = updateAgentWorkflow(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改。' });
         logAction(req, '更新智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
+        res.json({ success: true, workflow });
+    }));
+
+    router.patch('/agents/workflows/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
+        const workflow = updateAgentWorkflowSharing(req.params.id, req.user, req.body || {});
+        if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改共享设置。' });
+        logAction(req, '更新智能体工作流共享设置', `工作流ID: ${workflow.id}，范围: ${workflow.scope}，单位: ${(workflow.allowed_units || []).join(',') || '全部'}`);
         res.json({ success: true, workflow });
     }));
 
@@ -229,6 +259,78 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         res.json({ success: true, workflow });
     }));
 
+    // 工作流触发器：入站 Webhook、文件落地和数据变更三类触发方式的管理入口
+    router.get('/agents/triggers', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listWorkflowTriggers(req.user) });
+    }));
+
+    router.post('/agents/triggers', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const { trigger, token } = createWorkflowTrigger(req.user, req.body || {});
+        logAction(req, '创建工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}，方式: ${trigger.trigger_type}`);
+        // 明文令牌只在创建时返回一次，之后无法再次查看
+        res.status(201).json({ success: true, trigger, token });
+    }));
+
+    router.put('/agents/triggers/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const trigger = updateWorkflowTrigger(req.params.id, req.user, req.body || {});
+        if (!trigger) return res.status(404).json({ error: '触发器不存在或无权修改。' });
+        logAction(req, '更新工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}`);
+        res.json({ success: true, trigger });
+    }));
+
+    router.post('/agents/triggers/:id/rotate-token', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = rotateWorkflowTriggerToken(req.params.id, req.user);
+        if (!result) return res.status(404).json({ error: '触发器不存在或无权操作。' });
+        logAction(req, '轮换工作流触发器令牌', `触发器ID: ${result.trigger.id}，名称: ${result.trigger.name}`);
+        res.json({ success: true, trigger: result.trigger, token: result.token });
+    }));
+
+    router.delete('/agents/triggers/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const trigger = deleteWorkflowTrigger(req.params.id, req.user);
+        if (!trigger) return res.status(404).json({ error: '触发器不存在或无权删除。' });
+        logAction(req, '删除工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}`);
+        res.json({ success: true, trigger: { id: trigger.id, name: trigger.name } });
+    }));
+
+    // 工作流凭据库：加密落库，明文只在运行时注入，接口只返回元数据
+    router.get('/agents/credentials', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listWorkflowCredentials(req.user) });
+    }));
+
+    router.post('/agents/credentials', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const credential = createWorkflowCredential(req.user, req.body || {});
+        logAction(req, '创建工作流凭据', `凭据ID: ${credential.id}，引用名: ${credential.slug}`);
+        res.status(201).json({ success: true, credential });
+    }));
+
+    router.put('/agents/credentials/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const credential = updateWorkflowCredential(req.params.id, req.user, req.body || {});
+        if (!credential) return res.status(404).json({ error: '凭据不存在或无权修改。' });
+        logAction(req, '更新工作流凭据', `凭据ID: ${credential.id}，引用名: ${credential.slug}`);
+        res.json({ success: true, credential });
+    }));
+
+    router.post('/agents/credentials/:id/rotate', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const credential = rotateWorkflowCredential(req.params.id, req.user, req.body || {});
+        if (!credential) return res.status(404).json({ error: '凭据不存在或无权操作。' });
+        logAction(req, '轮换工作流凭据', `凭据ID: ${credential.id}，引用名: ${credential.slug}，版本: ${credential.version}`);
+        res.json({ success: true, credential });
+    }));
+
+    router.post('/agents/credentials/:id/revert', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const credential = revertWorkflowCredentialRotation(req.params.id, req.user);
+        if (!credential) return res.status(404).json({ error: '凭据不存在或无权操作。' });
+        logAction(req, '撤销工作流凭据轮换', `凭据ID: ${credential.id}，引用名: ${credential.slug}，版本: ${credential.version}`);
+        res.json({ success: true, credential });
+    }));
+
+    router.delete('/agents/credentials/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const credential = deleteWorkflowCredential(req.params.id, req.user);
+        if (!credential) return res.status(404).json({ error: '凭据不存在或无权删除。' });
+        logAction(req, '删除工作流凭据', `凭据ID: ${credential.id}，引用名: ${credential.slug}`);
+        res.json({ success: true, credential: { id: credential.id, slug: credential.slug } });
+    }));
+
     router.get('/agents/schedules', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: listAgentSchedules(req.user) });
     }));
@@ -268,6 +370,29 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const notification = markAgentNotificationRead(req.params.id, req.user);
         if (!notification) return res.status(404).json({ error: '通知不存在。' });
         res.json({ success: true, notification });
+    }));
+
+    router.get('/agents/approval-requests', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: listWorkflowApprovalRequests(req.user, { status: req.query.status }) });
+    }));
+
+    router.get('/agents/runs/:id/approval-requests', authMiddleware, asyncHandler(async (req, res) => {
+        const requests = listWorkflowApprovalRequests(req.user, { status: req.query.status })
+            .filter(item => String(item.run_id || '') === String(req.params.id || ''));
+        res.json({ data: requests });
+    }));
+
+    router.post('/agents/approval-requests/:id/decision', authMiddleware, asyncHandler(async (req, res) => {
+        const request = await decideWorkflowApprovalRequest(req.params.id, req.user, req.body || {});
+        if (!request) return res.status(404).json({ error: '审批请求不存在或已处理。' });
+        logAction(
+            req,
+            req.body?.approve === false || String(req.body?.decision || '').toLowerCase() === 'reject'
+                ? '拒绝工作流审批'
+                : '批准工作流审批',
+            `请求ID: ${request.id}，状态: ${request.status}`
+        );
+        res.json({ success: true, request });
     }));
 
     router.get('/agents/artifacts', authMiddleware, asyncHandler(async (req, res) => {

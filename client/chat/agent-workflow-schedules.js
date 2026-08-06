@@ -167,6 +167,7 @@ async function loadAgentWorkflowSchedules() {
 async function openAgentWorkflowSchedules() {
     const workflow = selectedAgentWorkflow();
     if (!workflow) return showToast('请先保存并选择一个工作流', 'warning');
+    if (!workflow.can_edit) return showToast('共享工作流不能由接收方管理计划任务', 'warning');
     if (!workflow.published_version) return showToast('请先发布工作流，再创建生产计划', 'warning');
     const modal = ensureAgentWorkflowScheduleModal();
     const subtitle = document.getElementById('agent-workflow-schedule-subtitle');
@@ -186,6 +187,7 @@ async function openAgentWorkflowSchedules() {
 
 async function createAgentWorkflowSchedule() {
     const workflow = selectedAgentWorkflow();
+    if (!workflow?.can_edit) return showToast('共享工作流不能由接收方管理计划任务', 'warning');
     if (!workflow?.published_version) return showToast('请先发布工作流，再创建生产计划', 'warning');
     const payload = buildAgentWorkflowWorkbenchRunPayload('published', workflow);
     if (payload._invalid) return;

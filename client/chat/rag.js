@@ -77,6 +77,7 @@ const getRagStatusLabel = (status) => {
 
 const renderRagActions = (doc) => {
     const buttons = [];
+    const canEdit = doc.can_edit !== false && doc.read_only !== true;
     buttons.push(`<button class="btn-secondary rag-detail-btn" data-rag-id="${doc.id}">详情</button>`);
     buttons.push(`<button class="btn-secondary rag-doc-meta-btn" data-rag-id="${doc.id}">整理</button>`);
     if (Number(doc.chunk_count || 0) > 0) {
@@ -86,7 +87,7 @@ const renderRagActions = (doc) => {
         buttons.push(`<button class="btn-secondary rag-reindex-btn" data-rag-id="${doc.id}">重试</button>`);
     }
     buttons.push(`<button class="btn-danger rag-delete-btn" data-rag-id="${doc.id}">删除</button>`);
-    return buttons.join('');
+    return (canEdit ? buttons : buttons.filter(button => !/rag-doc-meta-btn|rag-reindex-btn|rag-delete-btn/.test(button))).join('');
 };
 
 let ragStatusRefreshTimer = null;

@@ -17,6 +17,8 @@ const {
     getGraphContextForQuery,
     safeIndexKnowledgeGraphForChunks
 } = require('../knowledge-graph');
+const knowledgeRepository = require('../../repositories/knowledge');
+const { buildDocumentAccessFilter } = require('../knowledge-access');
 const {
     getEmbeddingConfig,
     getRagConfig,
@@ -153,7 +155,7 @@ function normalizeRetrievalScope(scope = {}) {
     };
 }
 
-function buildRetrievalScopeSql(scope, docAlias = 'd') {
+function buildRetrievalScopeSql(scope, docAlias = 'd', user = null) {
     const normalized = normalizeRetrievalScope(scope);
     const clauses = [];
     const params = [];
@@ -171,18 +173,23 @@ function buildRetrievalScopeSql(scope, docAlias = 'd') {
         )`);
         params.push(...normalized.tagNames);
     }
+    const access = user ? buildDocumentAccessFilter(user, docAlias, 'c_access') : null;
     return {
         sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '',
         params,
-        normalized
+        normalized,
+        accessSql: access ? ` AND ${access.sql}` : '',
+        accessParams: access ? access.params : [],
+        accessJoin: user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = d.collection_id AND c_access.deleted_at IS NULL' : ''
     };
 }
 
-function selectFtsCandidates(userId, keywords, limit, scope = {}) {
+function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
     const ftsQuery = buildFtsOrQuery(keywords);
     if (!ftsQuery) return [];
-    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
+    const ownerFilter = user ? '' : 'AND d.user_id = ?';
 
     try {
         return db.prepare(`
@@ -190,90 +197,99 @@ function selectFtsCandidates(userId, keywords, limit, scope = {}) {
             FROM knowledge_chunks_fts
             JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.rowid
             JOIN knowledge_docs d ON c.doc_id = d.id
+            ${scopeFilter.accessJoin}
             WHERE knowledge_chunks_fts MATCH ?
-              AND d.user_id = ?
+              ${ownerFilter}
               AND d.status = 'ready'
               AND d.deleted_at IS NULL
               AND COALESCE(d.is_enabled, 1) = 1
               ${scopeFilter.sql}
+              ${scopeFilter.accessSql}
             ORDER BY bm25(knowledge_chunks_fts)
             LIMIT ?
-        `).all(ftsQuery, userId, ...scopeFilter.params, limit);
+        `).all(ftsQuery, ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
     } catch (e) {
         logger.warn({ err: e.message }, 'RAG FTS 候选召回失败，已回退到 LIKE 扫描');
         return [];
     }
 }
 
-function selectLikeCandidates(userId, keywords, limit, scope = {}) {
+function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
     const keywordWhere = keywords.map(() => 'LOWER(c.content) LIKE ?').join(' OR ');
-    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
+    const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql} AND (${keywordWhere})
+        ${scopeFilter.accessJoin}
+        WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
         ORDER BY c.id DESC
         LIMIT ?
-    `).all(userId, ...scopeFilter.params, ...keywords.map(k => `%${k}%`), limit);
+    `).all(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), ...keywords.map(k => `%${k}%`), limit);
 }
 
-function selectRecentCandidates(userId, limit, scope = {}) {
-    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
+function selectRecentCandidates(userId, limit, scope = {}, user = null) {
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
+    const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
-        WHERE d.user_id = ? AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}
+        ${scopeFilter.accessJoin}
+        WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql}
         ORDER BY c.id DESC
         LIMIT ?
-    `).all(userId, ...scopeFilter.params, limit);
+    `).all(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
 }
 
-function selectRetrievalCandidates(userId, query, topK, candidateLimit, scope = {}) {
+function selectRetrievalCandidates(userId, query, topK, candidateLimit, scope = {}, user = null) {
     const keywords = buildKeywordCandidates(query);
-    const ftsChunks = selectFtsCandidates(userId, keywords, candidateLimit, scope);
+    const ftsChunks = selectFtsCandidates(userId, keywords, candidateLimit, scope, user);
     // 记录 FTS(BM25) 名次，供后续 RRF 融合与精确匹配软门控使用。
     ftsChunks.forEach((chunk, idx) => { chunk.__ftsRank = idx; });
     let chunks = ftsChunks;
     if (chunks.length < topK) {
         const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope)
+        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope, user)
             .filter(chunk => !existingIds.has(chunk.id));
         chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
     }
     if (chunks.length < topK) {
         const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const recentChunks = selectRecentCandidates(userId, candidateLimit, scope)
+        const recentChunks = selectRecentCandidates(userId, candidateLimit, scope, user)
             .filter(chunk => !existingIds.has(chunk.id));
         chunks = chunks.concat(recentChunks).slice(0, candidateLimit);
     }
     return chunks;
 }
 
-function selectChunksByIds(userId, chunkIds, limit, scope = {}) {
+function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
     const ids = [...new Set((chunkIds || []).map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0))];
     if (ids.length === 0) return [];
     const placeholders = ids.slice(0, limit).map(() => '?').join(',');
-    const scopeFilter = buildRetrievalScopeSql(scope, 'd');
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
+    const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return db.prepare(`
         SELECT c.id, c.content, c.embedding, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
+        ${scopeFilter.accessJoin}
         WHERE c.id IN (${placeholders})
-          AND d.user_id = ?
+          ${ownerFilter}
           AND d.status = 'ready'
           AND d.deleted_at IS NULL
           AND COALESCE(d.is_enabled, 1) = 1
           ${scopeFilter.sql}
+          ${scopeFilter.accessSql}
         LIMIT ?
-    `).all(...ids.slice(0, limit), userId, ...scopeFilter.params, limit);
+    `).all(...ids.slice(0, limit), ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
 }
 
-function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit, scope = {}) {
+function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit, scope = {}, user = null) {
     const existingIds = new Set(candidates.map(chunk => chunk.id));
-    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit, scope)
+    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit, scope, user)
         .filter(chunk => !existingIds.has(chunk.id));
     return candidates.concat(graphChunks).slice(0, candidateLimit);
 }
@@ -406,20 +422,25 @@ function formatInjectedContext(topChunks) {
     return injectedContext;
 }
 
-function buildRagCacheScope(userId, config = {}, scope = {}) {
-    const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs');
+function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
+    const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs', user);
+    const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
+    const accessFilter = user ? scopeFilter.accessSql : '';
+    const accessJoin = user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = knowledge_docs.collection_id AND c_access.deleted_at IS NULL' : '';
     const docs = db.prepare(`
         SELECT
             COUNT(*) AS doc_count,
-            COALESCE(SUM(chunk_count), 0) AS chunk_count,
-            COALESCE(MAX(COALESCE(updated_at, processed_at, created_at)), '') AS doc_version
+            COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
+            COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at)), '') AS doc_version
         FROM knowledge_docs
-        WHERE user_id = ?
-          AND deleted_at IS NULL
-          AND status = 'ready'
-          AND COALESCE(is_enabled, 1) = 1
+        ${accessJoin}
+        WHERE 1 = 1 ${ownerFilter}
+          AND knowledge_docs.deleted_at IS NULL
+          AND knowledge_docs.status = 'ready'
+          AND COALESCE(knowledge_docs.is_enabled, 1) = 1
           ${scopeFilter.sql}
-    `).get(userId, ...scopeFilter.params) || {};
+          ${accessFilter}
+    `).get(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params])) || {};
     const graph = db.prepare(`
         SELECT
             COALESCE((SELECT MAX(updated_at) FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL), '') AS entity_version,
@@ -430,7 +451,7 @@ function buildRagCacheScope(userId, config = {}, scope = {}) {
         `k=${Number(config.topK || 0)}`,
         `c=${Number(config.candidateLimit || 0)}`,
         `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
-        `scope=${scopeFilter.normalized.cacheKey}`,
+        `scope=${scopeFilter.normalized.cacheKey}|unit=${String(user?.unit || '')}|shared=${user ? '1' : '0'}`,
         `d=${Number(docs.doc_count || 0)}`,
         `h=${Number(docs.chunk_count || 0)}`,
         `dv=${docs.doc_version || ''}`,
@@ -494,13 +515,14 @@ async function debugRetrieveContext(userId, query, {
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope });
+    const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user });
     const candidates = mergeRetrievalCandidates(
-        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit, normalizedScope).slice(0, safeCandidateLimit),
+        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit, normalizedScope, user).slice(0, safeCandidateLimit),
         graphContext.chunkIds,
         userId,
         safeCandidateLimit,
-        normalizedScope
+        normalizedScope,
+        user
     );
     if (candidates.length === 0) {
         return {
@@ -575,7 +597,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     if (!normalizedQuery) return '';
     const config = getRagConfig({ topK }, userId);
     const retrievalScope = normalizeRetrievalScope(options.scope || {});
-    const cacheScope = buildRagCacheScope(userId, config, retrievalScope);
+    const cacheScope = buildRagCacheScope(userId, config, retrievalScope, options.user || null);
     const recordRetrieval = (payload) => {
         recordRagRetrieval(payload);
         recordSlowRagRetrieval({
@@ -599,13 +621,14 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     }
 
     try {
-        const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope });
+        const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null });
         const chunks = mergeRetrievalCandidates(
-            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit, retrievalScope),
+            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit, retrievalScope, options.user || null),
             graphContext.chunkIds,
             userId,
             config.candidateLimit,
-            retrievalScope
+            retrievalScope,
+            options.user || null
         );
 
         if (chunks.length === 0 && !graphContext.context) {
@@ -686,7 +709,7 @@ function buildEnrichedChunkText(content, headingPath) {
 async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
-    const docRow = db.prepare('SELECT name FROM knowledge_docs WHERE id = ?').get(docId) || {};
+    const docRow = knowledgeRepository.getDocumentName(docId);
     const docName = docRow.name || '';
     const docType = detectDocType(docName, text);
     const typedChunkSize = getChunkSizeForDocType(docType, ragConfig.chunkSize, userId);

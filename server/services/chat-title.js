@@ -1,4 +1,3 @@
-const { db } = require('../db');
 const { logger } = require('../logger');
 const {
     buildChatCompletionsUrl,
@@ -6,6 +5,7 @@ const {
 } = require('./model-adapter');
 const { countVisibleConversationMessages } = require('./chat-messages');
 const { forwardChatCompletion } = require('./model-forwarder');
+const sessionsRepository = require('../repositories/sessions');
 
 function normalizeTitleText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -107,7 +107,7 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
         logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');
     }
 
-    const session = db.prepare('SELECT title FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
+    const session = sessionsRepository.getSessionTitle(sessionId, userId);
     if (!session) return;
 
     if (!shouldReplaceAutoTitle(session.title, userMsg)) {
@@ -115,7 +115,7 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
         return;
     }
 
-    db.prepare('UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?').run(newTitle, sessionId, userId);
+    sessionsRepository.updateSessionTitle(sessionId, userId, newTitle);
     logger.info({ sessionId, newTitle }, '会话标题已更新');
 }
 

@@ -249,7 +249,7 @@
 
 .automation-assets-table th:last-child,
 .automation-assets-table td:last-child {
-    width: 250px;
+    width: 320px;
 }
 
 .automation-schedules-table th:last-child,
@@ -296,6 +296,21 @@
 .automation-status.paused {
     background: #fff7ed;
     color: #c2410c;
+}
+
+.automation-scope {
+    display: inline-block;
+    max-width: 180px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.automation-scope.is-shared {
+    color: #047857;
+    font-weight: 750;
 }
 
 .automation-row-actions {
@@ -353,6 +368,19 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+.automation-editor-view.is-readonly .agent-dag-node-drawer {
+    display: none !important;
+}
+
+.automation-editor-view.is-readonly .pivot-dag-editor-toolbar {
+    min-height: 34px;
+}
+
+.pivot-dag-toolbar-status.is-readonly {
+    color: #0369a1;
+    background: #f0f9ff;
 }
 
 .agent-dag-library-bar {
