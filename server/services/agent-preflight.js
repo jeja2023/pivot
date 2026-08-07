@@ -8,7 +8,8 @@ const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
     inspectDagTopology,
-    normalizeMaxSteps,
+    normalizeOptionalMaxSteps,
+    resolveMaxSteps,
     normalizePositiveInt,
     normalizeRunMode,
     normalizeToolAllowlist,
@@ -45,7 +46,8 @@ function preflightAgentRun(user, body = {}) {
     const toolAllowlist = normalizeToolAllowlist(body.toolAllowlist || body.tool_allowlist);
     const runMode = normalizeRunMode(body.runMode || body.run_mode);
     const approvalPolicy = normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy);
-    const maxSteps = normalizeMaxSteps(body.maxSteps || body.max_steps);
+    const requestedMaxSteps = normalizeOptionalMaxSteps(body.maxSteps ?? body.max_steps);
+    const maxSteps = resolveMaxSteps(requestedMaxSteps, runMode);
     const maxTokenBudget = normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000);
     const toolList = formatToolList(user, { toolPolicy, toolAllowlist });
     const mcpTools = toolList.filter(tool => tool.source === 'mcp');
@@ -104,7 +106,7 @@ function preflightAgentRun(user, body = {}) {
             warnings.push(...contractReport.warnings);
         }
     }
-    if (maxSteps < 3 && runMode !== 'dag') warnings.push('步骤数较少，复杂任务可能来不及完成检索、分析和总结。');
+    if (maxSteps < 3 && runMode !== 'dag') warnings.push('执行轮次较少，复杂任务可能来不及完成检索、分析和总结。');
     if (maxTokenBudget > 0 && maxTokenBudget < 2000) warnings.push('模型用量上限偏低，可能导致任务提前停止。');
     if (maxTokenBudget > 0 && estimatedInputTokens > maxTokenBudget) warnings.push('预估输入用量已超过上限，建议提高上限或缩小任务范围。');
     const status = blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'ready');
@@ -124,6 +126,7 @@ function preflightAgentRun(user, body = {}) {
             runMode,
             approvalPolicy,
             maxSteps,
+            maxStepsAutomatic: requestedMaxSteps === 0,
             maxTokenBudget,
             toolCount: toolList.length,
             mcpToolCount: mcpTools.length,

@@ -132,11 +132,11 @@ function renderAgentWorkflowPicker() {
             return text.includes(query);
         })
         : agentWorkflowsCache;
-    const currentTitle = selected?.name || String(agentWorkflowDraftName || '').trim() || '新建工作流';
+    const currentTitle = String(agentWorkflowDraftName || '').trim() || selected?.name || '新建工作流';
     picker.classList.toggle('is-empty', !agentWorkflowsCache.length);
     title.textContent = currentTitle;
-    trigger.title = selected?.name
-        ? `${selected.name} · ${agentWorkflowPickerTriggerMetaText(selected)}`
+    trigger.title = selected
+        ? `${currentTitle} · ${agentWorkflowPickerTriggerMetaText(selected)}`
         : `${currentTitle} · 点击切换已保存工作流`;
     meta.textContent = selected
         ? agentWorkflowPickerTriggerMetaText(selected)
@@ -174,14 +174,15 @@ function renderAgentWorkflowLibrary() {
     activeAgentWorkflowId = nextValue;
     const selected = agentWorkflowsCache.find(item => String(item.id) === String(nextValue));
     if (selected) {
-        agentWorkflowDraftName = selected.name || agentWorkflowDraftName;
-        agentWorkflowDraftDescription = selected.description || agentWorkflowDraftDescription;
+        agentWorkflowDraftName = agentWorkflowDraftName || selected.name || '';
+        agentWorkflowDraftDescription = agentWorkflowDraftDescription || selected.description || '';
     }
     // 管理操作按工作流状态开放，避免用户进入后才看到前置条件提示。
     const deleteBtn = document.getElementById('agent-workflow-delete-btn');
     const versionsBtn = document.getElementById('agent-workflow-versions-btn');
     const scheduleBtn = document.getElementById('agent-workflow-schedule-btn');
     const shareBtn = document.getElementById('agent-workflow-share-btn');
+    const renameBtn = document.getElementById('agent-workflow-rename-btn');
     if (deleteBtn) deleteBtn.disabled = !selected?.can_edit;
     if (versionsBtn) versionsBtn.disabled = !selected?.can_edit;
     if (scheduleBtn) {
@@ -191,6 +192,7 @@ function renderAgentWorkflowLibrary() {
             : (selected?.published_version ? '' : '发布工作流后可创建计划任务');
     }
     if (shareBtn) shareBtn.disabled = !selected?.can_edit;
+    if (renameBtn) renameBtn.disabled = agentWorkflowReadOnly || Boolean(selected && !selected.can_edit);
     renderAgentWorkflowPicker();
     renderAgentWorkflowLifecycle();
     updateAgentWorkflowRunUi();
@@ -406,7 +408,7 @@ function newAgentWorkflow(options = {}) {
 
 function currentAgentWorkflowName() {
     const selected = selectedAgentWorkflow();
-    return String(selected?.name || agentWorkflowDraftName || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
+    return String(agentWorkflowDraftName || selected?.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
 }
 
 window.setAgentWorkflowDraftName = function(name, options = {}) {
@@ -417,8 +419,34 @@ window.setAgentWorkflowDraftName = function(name, options = {}) {
     renderAgentWorkflowLibrary();
 };
 
+async function renameAgentWorkflow() {
+    const selected = selectedAgentWorkflow();
+    if (agentWorkflowReadOnly || (selected && !selected.can_edit)) {
+        showToast('共享工作流为只读，不能修改名称', 'warning');
+        return;
+    }
+    const currentName = String(agentWorkflowDraftName || selected?.name || '').trim().slice(0, 100);
+    const promptFn = window['showInputPrompt'];
+    const value = typeof promptFn === 'function'
+        ? await promptFn({
+        title: selected ? '重命名工作流' : '设置工作流名称',
+        message: selected ? '修改后点击右上角“保存”以应用新名称。' : '填写名称后继续编排，保存时会创建工作流。',
+        value: currentName,
+        placeholder: '例如：日报汇总、客户回访分析',
+        requiredMessage: '请填写工作流名称'
+        })
+        : window.prompt('工作流名称', currentName || '未命名工作流');
+    if (value === null || value === undefined) return;
+    const nextName = String(value || '').trim().slice(0, 100);
+    if (!nextName) return showToast('请填写工作流名称', 'error');
+    agentWorkflowDraftName = nextName;
+    renderAgentWorkflowPicker();
+    renderAgentWorkflowLifecycle();
+    showToast(selected ? '工作流名称已修改，点击“保存”后生效' : '工作流名称已设置', 'success');
+};
+
 async function ensureAgentWorkflowNameForSave() {
-    const existing = String(selectedAgentWorkflow()?.name || agentWorkflowDraftName || '').trim().slice(0, 100);
+    const existing = String(agentWorkflowDraftName || selectedAgentWorkflow()?.name || '').trim().slice(0, 100);
     if (existing) return existing;
     const suggested = '未命名工作流';
     const value = await window.showInputPrompt?.({
@@ -441,7 +469,7 @@ async function ensureAgentWorkflowNameForSave() {
 
 function inferAgentWorkflowRunGoal() {
     const selected = selectedAgentWorkflow();
-    const workflowName = String(selected?.name || agentWorkflowDraftName || '').trim();
+    const workflowName = String(agentWorkflowDraftName || selected?.name || '').trim();
     if (workflowName) return `执行工作流：${workflowName}`.slice(0, 2000);
     const summary = summarizeAgentDagSpec();
     if (summary.valid && summary.executableNodeCount > 0) return `执行当前工作流（${summary.executableNodeCount} 个节点）`;
@@ -456,7 +484,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     const showSuccess = options.showToast !== false;
     let parsed;
     try {
-        parsed = parseAgentWorkflowText();
+        parsed = parseAgentWorkflowText(dagEditorInstance?.getValue?.() || getAgentWorkflowText());
     } catch (e) {
         showToast('工作流配置格式不正确', 'error');
         return null;

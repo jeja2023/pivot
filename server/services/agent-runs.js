@@ -303,15 +303,19 @@ function getRunProgress(run, steps = []) {
     const errorCount = steps.filter(step => step.status === 'error').length;
     const totalDurationMs = steps.reduce((sum, step) => sum + (Number(step.duration_ms) || 0), 0);
     const active = run && ACTIVE_STATUSES.has(run.status);
+    const isDag = String(run?.run_mode || '') === 'dag';
+    const roundCount = isDag ? 0 : (planCount || Math.min(toolCount, maxSteps));
+    const progressCount = isDag ? Math.max(planCount, toolCount) : roundCount;
     return {
         maxSteps,
         planCount,
+        roundCount,
         toolCount,
         errorCount,
         stepCount: steps.length,
         totalDurationMs,
-        isLimitReached: active && Math.max(planCount, toolCount) >= maxSteps,
-        percent: active ? Math.min(Math.round((Math.max(planCount, toolCount) / maxSteps) * 100), 95) : (['completed', 'completed_with_errors'].includes(run?.status) ? 100 : 0)
+        isLimitReached: !isDag && progressCount >= maxSteps,
+        percent: active ? Math.min(Math.round((progressCount / maxSteps) * 100), 95) : (['completed', 'completed_with_errors'].includes(run?.status) ? 100 : 0)
     };
 }
 

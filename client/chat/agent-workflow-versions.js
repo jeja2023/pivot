@@ -37,7 +37,10 @@ function selectedAgentWorkflow() {
 function currentWorkflowMatchesSelected(workflow) {
     if (!workflow) return false;
     try {
-        return JSON.stringify(parseAgentWorkflowText()) === JSON.stringify(workflow.dag_spec || { nodes: [] });
+        const draftName = String(agentWorkflowDraftName || workflow.name || '').trim().slice(0, 100);
+        const draftSpec = dagEditorInstance?.getValue?.() || parseAgentWorkflowText();
+        return draftName === String(workflow.name || '').trim().slice(0, 100)
+            && JSON.stringify(draftSpec) === JSON.stringify(workflow.dag_spec || { nodes: [] });
     } catch (e) {
         return false;
     }

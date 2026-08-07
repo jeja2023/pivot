@@ -168,15 +168,20 @@ function agentRunDurationLabel(value) {
 
 function agentRunFriendlySummary(run = {}, progress = {}) {
     const status = String(run.status || '').toLowerCase();
-    const steps = Number(progress.stepCount || 0);
+    const records = Number(progress.stepCount || 0);
+    const rounds = Number(progress.roundCount || 0);
     const maxSteps = Number(progress.maxSteps || run.max_steps || 0);
+    const isDag = String(run.run_mode || '') === 'dag';
+    const limitMessage = String(run.error_message || '').trim();
     if (status === 'queued') return '任务已进入队列，稍后将自动开始。';
     if (status === 'running') {
-        return maxSteps > 0 ? `正在执行第 ${Math.min(steps + 1, maxSteps)} 步，共 ${maxSteps} 步。` : `正在执行第 ${steps + 1} 步。`;
+        if (isDag) return `工作流正在运行，当前已有 ${records} 条执行记录。`;
+        return maxSteps > 0 ? `正在执行第 ${Math.min(rounds + 1, maxSteps)} 轮，上限 ${maxSteps} 轮。` : `正在执行第 ${rounds + 1} 轮。`;
     }
     if (status === 'approval_required') return '任务需要确认工具权限，确认后才会继续。';
-    if (status === 'completed') return `${steps || 0} 个步骤已完成，结果已生成。`;
-    if (status === 'completed_with_errors') return `${steps || 0} 个步骤已完成，但有部分步骤需要留意。`;
+    if (status === 'completed') return `${records} 条执行记录已完成，结果已生成。`;
+    if (status === 'completed_with_errors' && /最大执行轮次/.test(limitMessage)) return limitMessage;
+    if (status === 'completed_with_errors') return `${records} 条执行记录已完成，但有部分结果需要留意。`;
     if (status === 'error') return '任务未能完成，请查看失败步骤并重试。';
     if (status === 'cancelled') return '任务已停止，当前没有新的结果。';
     return agentStatusLabel(status) || '任务状态已更新。';
@@ -296,6 +301,7 @@ window.openAgentRun = async function(runId, options = {}) {
     const technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
         `<div><dt>工具权限</dt><dd>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</dd></div>`,
+        `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)} 条</dd></div>`,
         `<div><dt>工具调用</dt><dd>${Number(progress.toolCount || 0)} 次</dd></div>`,
         `<div><dt>检查点</dt><dd>${Number(checkpoints.total || 0)} 个</dd></div>`,
         friendlyTokenUsage ? `<div><dt>模型用量</dt><dd>${agentEscape(friendlyTokenUsage)}</dd></div>` : ''
@@ -316,7 +322,9 @@ window.openAgentRun = async function(runId, options = {}) {
             <div class="agent-run-goal"><span>任务目标</span><strong>${agentEscape(agentDisplayTitle(run))}</strong></div>
             <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
             <dl class="agent-run-key-metrics">
-                <div><dt>执行步骤</dt><dd>${Number(progress.stepCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>
+                ${String(run.run_mode || '') === 'dag'
+                    ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
+                    : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
                 <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
                 <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
             </dl>
@@ -439,7 +447,7 @@ function renderAgentAuditRows(items = []) {
     return items.map((item, index) => {
         const userName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
         const deletedBy = item.deleted_by_nickname || item.deleted_by_username || `用户 ${item.deleted_by_user || '-'}`;
-        const stats = `步骤 ${Number(item.step_count || 0)} / 工具 ${Number(item.tool_count || 0)} / 错误 ${Number(item.error_count || 0)}`;
+        const stats = `记录 ${Number(item.step_count || 0)} / 工具 ${Number(item.tool_count || 0)} / 错误 ${Number(item.error_count || 0)}`;
         return `
             <tr>
                 <td class="text-center">${index + 1}</td>

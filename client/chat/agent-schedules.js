@@ -239,7 +239,7 @@ function agentScheduleEditorPayload() {
         intervalMinutes: agentScheduleIntervalMinutes('agent-schedule-editor'),
         cronExpression: document.getElementById('agent-schedule-editor-cron')?.value.trim() || '',
         status: document.getElementById('agent-schedule-editor-active')?.checked === false ? 'paused' : 'active',
-        maxSteps: base.maxSteps || base.max_steps || (source === 'workflow' ? 20 : 10),
+        maxSteps: base.maxSteps ?? base.max_steps ?? (source === 'workflow' ? 20 : 0),
         runMode: source === 'workflow' ? 'dag' : (['standard', 'deep', 'audit'].includes(base.runMode) ? base.runMode : 'standard'),
         toolPolicy: base.toolPolicy || base.tool_policy || 'all',
         toolAllowlist: base.toolAllowlist || base.tool_allowlist || [],

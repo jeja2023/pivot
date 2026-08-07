@@ -165,6 +165,8 @@ window.openAgentWorkbench = async function(options = {}) {
     });
     window.setTaskComposerOpen(Boolean(options.create));
     await window.loadAgentWorkbench();
+    // 智能体工作区脚本按需加载，主程序初始化时可能还找不到快速目标按钮。
+    window.bindAgentGoalTemplates?.();
     window.bindAgentFilters?.();
     window.bindAgentEnterpriseControls?.();
     window.bindAgentConfigModal?.();

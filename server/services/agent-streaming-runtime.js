@@ -13,6 +13,7 @@ function isStreamingToolsEnabled() {
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
 async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }, deps) {
+    let roundsUsed = 0;
     try {
         const tools = buildAgentToolSchemas(toolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
@@ -86,6 +87,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 completed: true
             });
             recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
+            roundsUsed += 1;
             deps.insertStep(runId, step, {
                 type: 'plan',
                 title: result?.hasToolCalls ? `流式工具计划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '工具'}` : '流式最终答案',
@@ -107,8 +109,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-        deps.createAgentNotification(user.id, runId, 'completed', '任务运行已完成', deps.getAgentRunTitle(run));
-                return { completed: true };
+                deps.createAgentNotification(user.id, runId, 'completed', '任务运行已完成', deps.getAgentRunTitle(run));
+                return { completed: true, roundsUsed };
             }
 
             // 先保存助手发起工具调用的消息，再追加工具结果。
@@ -135,7 +137,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 }
                 if (deps.maybePauseForApproval(run, selectedTool, call.arguments || {})) {
                     // 保持运行处于待审批状态；审批通过后由恢复流程继续。
-                    return { completed: true };
+                    return { completed: true, roundsUsed };
                 }
                 const callStart = Date.now();
                 const toolSpanId = deps.startAgentTraceSpan?.(runId, {
@@ -194,7 +196,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             }
         }
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
-        return { completed: false };
+        return { completed: false, roundsUsed };
     } catch (streamErr) {
         // 流式调用异常时记录控制步骤，并继续使用 JSON 规划。
         deps.logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，已回退到 JSON 规划器');
@@ -203,7 +205,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             title: '流式工具调用兜底',
             output: { error: streamErr.message }
         });
-        return { completed: false };
+        return { completed: false, roundsUsed };
     }
 }
 

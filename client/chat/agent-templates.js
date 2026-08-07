@@ -15,7 +15,8 @@ function applyAgentTemplate(template) {
     const router = document.getElementById('agent-model-router');
     if (router) router.value = template.model_router || 'fixed';
     const steps = document.getElementById('agent-max-steps');
-    if (steps) steps.value = template.max_steps || 10;
+    const templateMaxSteps = Number(template.max_steps || 0);
+    if (steps) steps.value = templateMaxSteps > 0 ? String(templateMaxSteps) : '';
     const budget = document.getElementById('agent-token-budget');
     if (budget) budget.value = template.max_token_budget || '';
     const retry = document.getElementById('agent-retry-limit');
@@ -61,22 +62,38 @@ async function saveCurrentAgentTemplate() {
     const payload = getAgentRunPayload();
     if (!payload.goal) return showToast('请先填写自主任务目标', 'error');
     if (payload._invalid) return;
-    const name = window.prompt('模板名称', payload.goal.slice(0, 24));
-    if (!name) return;
-    const res = await apiFetch(`${API_BASE}/agents/templates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            name,
-            goalTemplate: payload.goal,
-            description: '从自主任务创建器保存，用于复用目标、参数和上下文设置。',
-            ...payload
-        })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '保存模板失败', 'error');
-    showToast('自主任务模板已保存', 'success');
-    await loadAgentTemplates();
+    try {
+        const suggestedName = payload.goal.slice(0, 24);
+        const promptFn = window['showInputPrompt'];
+        const value = typeof promptFn === 'function'
+            ? await promptFn({
+                title: '保存为模板',
+                message: '填写模板名称，当前任务目标和执行设置会一并保存。',
+                value: suggestedName,
+                placeholder: '例如：项目风险总结',
+                requiredMessage: '请填写模板名称'
+            })
+            : window.prompt('模板名称', suggestedName);
+        if (value === null || value === undefined) return;
+        const name = String(value || '').trim().slice(0, 80);
+        if (!name) return showToast('请填写模板名称', 'error');
+        const res = await apiFetch(`${API_BASE}/agents/templates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                goalTemplate: payload.goal,
+                description: '从自主任务创建器保存，用于复用目标、参数和上下文设置。',
+                ...payload
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '保存模板失败');
+        showToast('自主任务模板已保存', 'success');
+        await loadAgentTemplates();
+    } catch (error) {
+        showToast(error.message || '保存模板失败', 'error');
+    }
 }
 
 function deleteAgentTemplate(templateId) {

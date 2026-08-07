@@ -106,12 +106,14 @@ function buildAgentToolStatsMarkup(steps) {
 
 function agentProgressLabel(run = {}, progress = {}) {
     const stepCount = Number(progress.stepCount || 0);
+    const roundCount = Number(progress.roundCount || 0);
     const maxSteps = Number(progress.maxSteps || run.max_steps || 0);
+    if (String(run.run_mode || '') === 'dag') return `已生成 ${stepCount} 条执行记录`;
     if (isAgentRunActive(run.status)) {
-        if (progress.isLimitReached && maxSteps > 0) return `已执行 ${stepCount} 步（已达上限 ${maxSteps} 步）`;
-        return maxSteps > 0 ? `已执行 ${stepCount} 步（上限 ${maxSteps} 步）` : `已执行 ${stepCount} 步`;
+        if (progress.isLimitReached && maxSteps > 0) return `已执行 ${roundCount} 轮（已达上限 ${maxSteps} 轮）`;
+        return maxSteps > 0 ? `已执行 ${roundCount} 轮（上限 ${maxSteps} 轮）` : `已执行 ${roundCount} 轮`;
     }
-    return `已执行 ${stepCount} 步`;
+    return `已执行 ${roundCount} 轮，共 ${stepCount} 条记录`;
 }
 
 function agentDagNodeReadableText(node) {

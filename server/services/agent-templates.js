@@ -4,7 +4,7 @@ const { normalizeStrategy: normalizeRouterStrategy } = require('./model-router')
 const { normalizeDagInputsPayload } = require('./agent-workflows');
 const {
     MAX_GOAL_LENGTH,
-    normalizeMaxSteps,
+    normalizeOptionalMaxSteps,
     normalizeRunMode,
     normalizeToolPolicy,
     normalizeApprovalPolicy,
@@ -45,7 +45,7 @@ function normalizeTemplatePayload(body = {}, user = {}) {
         toolPolicy: normalizeToolPolicy(body.toolPolicy || body.tool_policy),
         toolAllowlist: serializeToolAllowlist(body.toolAllowlist || body.tool_allowlist),
         approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy || body.approval_policy),
-        maxSteps: normalizeMaxSteps(body.maxSteps || body.max_steps),
+        maxSteps: normalizeOptionalMaxSteps(body.maxSteps ?? body.max_steps),
         maxTokenBudget: normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000),
         retryLimit: normalizePositiveInt(body.retryLimit || body.retry_limit, 1, 0, 5),
         contextConfig: serializeContextConfig(body.contextConfig || body.context_config),

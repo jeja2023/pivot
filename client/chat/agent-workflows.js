@@ -223,6 +223,7 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     document.getElementById('agent-workflow-readonly-run-btn')?.classList.toggle('hidden', !agentWorkflowReadOnly);
     document.getElementById('agent-dag-back-btn')?.classList.remove('hidden');
     document.getElementById('agent-workflow-management-menu')?.classList.toggle('hidden', agentWorkflowReadOnly);
+    document.getElementById('agent-workflow-rename-btn')?.classList.toggle('hidden', agentWorkflowReadOnly);
     document.getElementById('automation-editor-view')?.classList.toggle('is-readonly', agentWorkflowReadOnly);
     document.getElementById('automation-editor-view')?.setAttribute('aria-readonly', agentWorkflowReadOnly ? 'true' : 'false');
     const title = document.getElementById('automation-workspace-title');
@@ -295,6 +296,11 @@ window.bindAgentDagWorkbench = function() {
     if (saveBtn && saveBtn.dataset.boundAgentDagSave !== '1') {
         saveBtn.dataset.boundAgentDagSave = '1';
         saveBtn.addEventListener('click', () => window.saveAgentWorkflow?.());
+    }
+    const renameBtn = document.getElementById('agent-workflow-rename-btn');
+    if (renameBtn && renameBtn.dataset.boundAgentWorkflowRename !== '1') {
+        renameBtn.dataset.boundAgentWorkflowRename = '1';
+        renameBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.automation').renameWorkflow?.());
     }
     const readonlyRunBtn = document.getElementById('agent-workflow-readonly-run-btn');
     if (readonlyRunBtn && readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun !== '1') {
@@ -499,6 +505,7 @@ window.Pivot.exposeModule('agent.automation', {
     renderAssetCenter: renderAutomationAssetCenter,
     showAssetCenter: showAutomationAssetCenter,
     showWorkflowEditor: showAutomationWorkflowEditor,
+    renameWorkflow: renameAgentWorkflow,
     openWorkflowShare: openAgentWorkflowShare,
     listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),
     currentWorkflowId: () => String(activeAgentWorkflowId || '')

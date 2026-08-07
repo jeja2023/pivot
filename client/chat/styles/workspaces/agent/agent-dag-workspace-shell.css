@@ -385,8 +385,8 @@
 
 .agent-dag-library-bar {
     display: grid;
-    grid-template-columns: auto minmax(280px, 560px) minmax(220px, 1fr) auto;
-    grid-template-areas: "new picker lifecycle management";
+    grid-template-columns: auto minmax(280px, 560px) auto minmax(220px, 1fr) auto;
+    grid-template-areas: "new picker rename lifecycle management";
     gap: 8px;
     align-items: center;
     min-height: 54px;
@@ -420,6 +420,23 @@
 .agent-dag-new-btn.btn-secondary:hover {
     border-color: rgba(16, 185, 129, 0.55);
     background: #ecfdf5;
+}
+
+.agent-workflow-rename-btn.btn-secondary {
+    grid-area: rename;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 7px;
+}
+
+.agent-workflow-rename-btn svg {
+    width: 15px;
+    height: 15px;
 }
 
 .agent-workflow-picker {
@@ -893,10 +910,10 @@ body.dark-mode .agent-workflow-picker-option-side em,
     }
 
     .agent-dag-library-bar {
-        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
         grid-template-areas:
-            "new picker management"
-            "lifecycle lifecycle lifecycle";
+            "new picker rename management"
+            "lifecycle lifecycle lifecycle lifecycle";
     }
 
     .agent-workflow-lifecycle {
@@ -925,11 +942,11 @@ body.dark-mode .agent-workflow-picker-option-side em,
     }
 
     .agent-dag-library-bar {
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         grid-template-areas:
-            "new management"
-            "picker picker"
-            "lifecycle lifecycle";
+            "new rename management"
+            "picker picker picker"
+            "lifecycle lifecycle lifecycle";
     }
 
     .agent-workflow-picker-option {

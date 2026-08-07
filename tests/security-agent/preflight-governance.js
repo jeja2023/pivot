@@ -38,6 +38,16 @@ test('agent preflight exposes readiness and capability health signals', () => {
         assert.equal(result.summary.estimatedInputTokens > 1000, true);
         assert.ok(Number.isInteger(result.summary.readinessScore));
         assert.equal(result.status, 'warning');
+
+        const automaticAudit = preflightAgentRun(user, {
+            goal: '审查项目资料并输出完整风险清单',
+            modelId,
+            runMode: 'audit',
+            toolPolicy: 'builtin_only',
+            maxSteps: 0
+        });
+        assert.equal(automaticAudit.summary.maxSteps, 50);
+        assert.equal(automaticAudit.summary.maxStepsAutomatic, true);
     } finally {
         db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverInfo.lastInsertRowid);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelId);

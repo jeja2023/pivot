@@ -164,7 +164,7 @@ function buildAgentRunTaskTooltip(run, title, mode, counts = {}) {
         `完成时间：${formatAgentAuditDate(run?.completed_at)}`,
         `模型：${run?.model_name || '-'}`,
         `模式：${mode || '-'}`,
-        `步骤数：${stepCount}`,
+        `执行记录：${stepCount}`,
         `工具数：${toolCount}`,
         `错误数：${errorCount}`
     ];

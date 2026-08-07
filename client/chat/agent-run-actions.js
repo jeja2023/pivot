@@ -24,7 +24,7 @@ function getAgentRunPayload(goalOverride = '') {
     const payload = {
         goal: typedGoal,
         modelId: document.getElementById('agent-model-select')?.value,
-        maxSteps: document.getElementById('agent-max-steps')?.value || 10,
+        maxSteps: document.getElementById('agent-max-steps')?.value || 0,
         runMode,
         toolPolicy: allowMcp ? 'all' : 'builtin_only',
         approvalPolicy: document.getElementById('agent-approval-policy')?.value || 'safe_mcp_auto',

@@ -49,7 +49,13 @@ const {
     test,
     assertWorkflowLlmNodesConfigured
 } = require('./security-helpers');
-const { MAX_DAG_NODES, inspectDagTopology, normalizeDagSpec } = require('../server/services/agent-validators');
+const {
+    MAX_DAG_NODES,
+    inspectDagTopology,
+    normalizeDagSpec,
+    normalizeOptionalMaxSteps,
+    resolveMaxSteps
+} = require('../server/services/agent-validators');
 const { dagConditionSatisfied } = require('../server/services/agent-dag-utils');
 const { runDueAgentSchedules } = require('../server/services/agent-schedules');
 const {
@@ -170,6 +176,26 @@ test('workflow topology validation rejects invalid graphs without truncating nod
     ] }));
     assert.equal(report.blockers.some(message => message.includes('循环依赖')), true);
     assert.equal(report.blockers.some(message => message.includes('未选择工具')), true);
+});
+
+test('agent execution rounds support automatic mode defaults and a shared runtime cap', () => {
+    assert.equal(normalizeOptionalMaxSteps(''), 0);
+    assert.equal(normalizeOptionalMaxSteps(0), 0);
+    assert.equal(resolveMaxSteps(0, 'standard'), 20);
+    assert.equal(resolveMaxSteps('', 'deep'), 50);
+    assert.equal(resolveMaxSteps(null, 'audit'), 50);
+    assert.equal(resolveMaxSteps(12, 'audit'), 12);
+    assert.equal(resolveMaxSteps(80, 'standard'), 50);
+
+    const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
+    const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
+    const taskEditor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
+    assert.match(streamingSource, /roundsUsed \+= 1/);
+    assert.match(runtimeSource, /for \(let step = roundsUsed \+ 1; step <= maxSteps; step \+= 1\)/);
+    assert.match(runtimeSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
+    assert.match(taskEditor, /最大执行轮次/);
+    assert.match(taskEditor, /id="agent-max-steps"[^>]*placeholder="自动"/);
+    assert.doesNotMatch(taskEditor, /id="agent-max-steps"[^>]*value="10"/);
 });
 
 test('continued DAG errors remain visible to success and failure branches', () => {
@@ -1353,6 +1379,15 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     cancelAgentRun(rerun.id, user);
     assert.equal(getRunForUser(rerun.id, user).status, 'cancelled');
     assert.equal(getRunProgress({ status: 'completed', max_steps: 3 }, []).percent, 100);
+    const multiRecordProgress = getRunProgress({ status: 'running', run_mode: 'standard', max_steps: 3 }, [
+        { type: 'plan', status: 'completed' },
+        { type: 'tool', status: 'completed' },
+        { type: 'tool', status: 'completed' },
+        { type: 'control', status: 'completed' }
+    ]);
+    assert.equal(multiRecordProgress.stepCount, 4);
+    assert.equal(multiRecordProgress.roundCount, 1);
+    assert.equal(multiRecordProgress.isLimitReached, false);
 
     const deleted = softDeleteAgentRun(run.id, user, '用户清理任务列表');
     assert.equal(Boolean(deleted.deleted_at), true);
@@ -1445,11 +1480,13 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
         contextConfig: { mode: 'knowledge' }
     });
     assert.equal(Boolean(schedule.next_run_at), true);
+    assert.equal(JSON.parse(schedule.run_config).maxSteps, 0);
     assert.equal(listAgentSchedules(user).some(item => item.id === schedule.id), true);
 
     const run = runAgentScheduleNow(schedule.id, user);
     assert.equal(run.schedule_id, schedule.id);
     assert.equal(run.template_id, template.id);
+    assert.equal(run.max_steps, 50);
     assert.equal(JSON.parse(run.context_config).mode, 'knowledge');
     cancelAgentRun(run.id, user);
     const scheduledRuns = listRuns(user, { limit: 30, runType: 'scheduled' }).data;

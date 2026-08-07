@@ -49,10 +49,6 @@
                                     <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
                                 </div>
                             </label>
-                            <label class="modal-form-field agent-steps-field">
-                                <span>最大步骤</span>
-                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="50" value="10" title="最大步骤">
-                            </label>
                         </div>
                     <div class="agent-inline-settings" aria-label="高级设置">
                         <div class="agent-inline-settings-head">
@@ -93,13 +89,14 @@
                                 </select>
                             </label>
                             <label>
-                                <span>模型用量上限</span>
-                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="不限">
+                                <span>最大执行轮次</span>
+                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="50" placeholder="自动" aria-describedby="agent-max-steps-help">
                             </label>
                             <label>
                                 <span>失败重试</span>
                                 <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
                             </label>
+                            <p id="agent-max-steps-help" class="agent-max-steps-help">留空时自动设置：标准模式 20 轮，深度和审查模式 50 轮；达到上限后将基于已有结果生成总结。</p>
                         </div>
                         <div class="agent-context-controls">
                             <label>
@@ -112,6 +109,11 @@
                                     <option value="none">不扩展</option>
                                 </select>
                             </label>
+                            <label class="agent-token-budget-field">
+                                <span>单次任务 Token 上限</span>
+                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="留空表示不限" aria-describedby="agent-token-budget-help">
+                            </label>
+                            <p id="agent-token-budget-help" class="agent-token-budget-help">累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
                             <label class="agent-context-notes-field">
                                 <span>补充说明</span>
                                 <textarea id="agent-context-notes" class="form-input" rows="2" placeholder="可选，限定范围、部门或资料来源"></textarea>

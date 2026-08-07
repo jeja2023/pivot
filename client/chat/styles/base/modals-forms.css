@@ -980,6 +980,7 @@ body.auth-active {
     .auth-panel-note { display: none; }
 }
 #confirm-container { z-index: 7000 !important; }
+#input-prompt-container { z-index: 7100 !important; }
 #confirm-container .modal {
     width: 340px !important;
     padding: 22px;

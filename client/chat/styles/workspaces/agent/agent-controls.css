@@ -51,6 +51,19 @@
     min-width: 0;
 }
 
+.agent-token-budget-help,
+.agent-max-steps-help {
+    grid-column: 1 / -1;
+}
+
+.agent-token-budget-help,
+.agent-max-steps-help {
+    margin: -2px 0 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
 .agent-context-controls label,
 .agent-schedule-controls label {
     display: flex;

@@ -236,6 +236,7 @@ function renderAgentPreflight(data) {
     const deploymentTip = summary.runMode === 'dag'
         ? '工作流适合发布版本、计划运行和审计复用，可作为企业生产任务入口。'
         : '自主任务适合分析、排查和临时处理；稳定流程建议生成工作流草稿后发布运行。';
+    const maxStepsLabel = summary.maxStepsAutomatic ? `自动 ${Number(summary.maxSteps || 0)}` : Number(summary.maxSteps || 0);
     const messages = [...(data.blockers || []), ...(data.warnings || []), ...(data.recommendations || []), deploymentTip].slice(0, 5);
     target.className = `workspace-governance-panel agent-preflight-panel ${agentEscape(data.status || 'ready')}`;
     PivotSafeHtml.setHtml(target, `
@@ -244,6 +245,7 @@ function renderAgentPreflight(data) {
             <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
         </div>
         <div class="governance-metrics">
+            ${summary.runMode === 'dag' ? '' : `<span><b>${agentEscape(maxStepsLabel)}</b>最大执行轮次</span>`}
             <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入用量</span>
             <span><b>${Number(summary.highRiskToolCount || 0)}</b>高风险工具</span>
             <span><b>${Number(summary.mcpErrorServers || 0)}</b>异常能力</span>
@@ -340,7 +342,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                         <th>类型</th>
                         <th>模型</th>
                         <th>模式</th>
-                        <th>步骤</th>
+                        <th>记录</th>
                         <th>工具</th>
                         <th>错误</th>
                         <th>输入用量</th>

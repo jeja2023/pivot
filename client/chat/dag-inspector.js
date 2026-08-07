@@ -824,6 +824,16 @@ function createDagInspectorController(ctx) {
         });
 
         inspector.querySelectorAll('[data-pivot-dag-field]').forEach(input => {
+            if (input.dataset.pivotDagField === 'title') {
+                input.addEventListener('input', (e) => handleInspectorEdit(e.target, { deferCommit: true }));
+                input.addEventListener('blur', (e) => handleInspectorEdit(e.target));
+                input.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    e.target.blur();
+                });
+                return;
+            }
             input.addEventListener('input', (e) => handleInspectorEdit(e.target));
             input.addEventListener('change', (e) => handleInspectorEdit(e.target));
         });
@@ -859,14 +869,19 @@ function createDagInspectorController(ctx) {
         window.showToast?.('已套用工具参数模板', 'success');
     };
 
-    const handleInspectorEdit = (input) => {
+    const handleInspectorEdit = (input, options = {}) => {
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
         if (!node) return;
         const field = input.dataset.pivotDagField;
-        ctx.recordHistory?.();
         if (field === 'title') {
+            if (input.dataset.pivotDagHistoryRecorded !== '1') {
+                ctx.recordHistory?.();
+                input.dataset.pivotDagHistoryRecorded = '1';
+            }
             node.title = String(input.value || '').slice(0, 120);
+            if (options.deferCommit) return;
         } else if (field === 'tool') {
+            ctx.recordHistory?.();
             const nextTool = String(input.value || '');
             node.tool = nextTool;
             node.inputSchema = {};
@@ -878,16 +893,21 @@ function createDagInspectorController(ctx) {
                 node.input = { ...buildToolInputTemplate(resolveToolForNode(currentTools(), nextTool)) };
             }
         } else if (field === 'condition') {
+            ctx.recordHistory?.();
             node.condition = ['always', 'success', 'failure'].includes(input.value) ? input.value : 'success';
         } else if (field === 'onError') {
+            ctx.recordHistory?.();
             node.onError = ['skip_dependents', 'continue', 'stop'].includes(input.value) ? input.value : 'skip_dependents';
         } else if (field === 'retryLimit') {
+            ctx.recordHistory?.();
             node.retryLimit = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 5));
         } else if (field === 'timeoutMs') {
+            ctx.recordHistory?.();
             node.timeoutMs = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 600000));
         } else if (field === 'input') {
             try {
                 const parsed = JSON.parse(input.value || '{}');
+                ctx.recordHistory?.();
                 node.input = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
                 input.classList.remove('is-invalid');
             } catch (e) {

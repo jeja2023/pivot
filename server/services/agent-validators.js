@@ -8,7 +8,13 @@
  */
 
 const MAX_STEPS = 50;
-const DEFAULT_STEPS = 10;
+const DEFAULT_STEPS = 20;
+const AUTO_STEPS_BY_RUN_MODE = Object.freeze({
+    standard: 20,
+    deep: 50,
+    audit: 50,
+    dag: 20
+});
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required', 'awaiting_approval']);
 const MAX_GOAL_LENGTH = 2000;
 const MAX_DAG_NODES = 100;
@@ -45,6 +51,21 @@ function normalizeMaxSteps(value) {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_STEPS;
     return Math.min(parsed, MAX_STEPS);
+}
+
+function normalizeOptionalMaxSteps(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return 0;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.min(parsed, MAX_STEPS);
+}
+
+function defaultMaxStepsForRunMode(value) {
+    return AUTO_STEPS_BY_RUN_MODE[normalizeRunMode(value)] || DEFAULT_STEPS;
+}
+
+function resolveMaxSteps(value, runMode = 'standard') {
+    return normalizeOptionalMaxSteps(value) || defaultMaxStepsForRunMode(runMode);
 }
 
 function normalizePriority(value) {
@@ -322,6 +343,7 @@ function normalizeAgentTitle(title, goal) {
 module.exports = {
     MAX_STEPS,
     DEFAULT_STEPS,
+    AUTO_STEPS_BY_RUN_MODE,
     ACTIVE_STATUSES,
     MAX_GOAL_LENGTH,
     MAX_DAG_NODES,
@@ -332,6 +354,9 @@ module.exports = {
     APPROVAL_POLICIES,
     parseJsonObject,
     normalizeMaxSteps,
+    normalizeOptionalMaxSteps,
+    defaultMaxStepsForRunMode,
+    resolveMaxSteps,
     normalizePriority,
     normalizeRunMode,
     normalizeToolPolicy,

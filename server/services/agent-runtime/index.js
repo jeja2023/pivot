@@ -80,10 +80,10 @@ const {
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('../agent-monitoring');
 const {
-    DEFAULT_STEPS,
     ACTIVE_STATUSES,
     parseJsonObject,
     normalizeMaxSteps,
+    resolveMaxSteps,
     normalizePriority,
     normalizeRunMode,
     normalizeToolPolicy,
@@ -725,15 +725,18 @@ async function runAgent(runId, user) {
 
         // 启用时优先使用流式函数调用，让模型可直接发出 tool_calls。
         // 如果流式调用未完成，下方 JSON 规划器会基于已收集的观察继续执行。
+        const maxSteps = normalizeMaxSteps(run.max_steps);
+        let roundsUsed = 0;
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
             }, getAgentRuntimeDeps());
             if (streamingResult?.completed) return;
+            roundsUsed = Math.min(Math.max(Number(streamingResult?.roundsUsed || 0), 0), maxSteps);
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
-        for (let step = 1; step <= normalizeMaxSteps(run.max_steps); step += 1) {
+        for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
@@ -846,6 +849,14 @@ async function runAgent(runId, user) {
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
+        const limitMessage = `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
+        insertStep(runId, listSteps(runId).length + 1, {
+            type: 'control',
+            title: '已达到最大执行轮次',
+            output: { maxSteps, message: limitMessage },
+            errorMessage: limitMessage,
+            status: 'error'
+        });
         const summaryStartedAt = Date.now();
         const summarySpanId = startAgentTraceSpan(runId, {
             type: 'model',
@@ -896,14 +907,16 @@ async function runAgent(runId, user) {
             }
         }
         assertRunNotCancelled(runId);
+        answer = `注意：${limitMessage}\n\n${answer}`;
         updateRun(runId, {
-            status: 'completed',
+            status: 'completed_with_errors',
             final_answer: answer,
+            error_message: limitMessage,
             completed_at: getBeijingTimestamp(),
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
+        createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
     } catch (e) {
         if (e.code === 'AGENT_RUN_CANCELLED') {
             updateRun(runId, { updated_at: getBeijingTimestamp() });
@@ -1105,7 +1118,7 @@ function createAgentRun({
     modelId,
     sessionId = null,
     title = '',
-    maxSteps = DEFAULT_STEPS,
+    maxSteps = 0,
     parentRunId = null,
     priority = 0,
     runMode = 'standard',
@@ -1173,7 +1186,7 @@ function createAgentRun({
         runMetadata.dagInputs = normalizedDagInputs;
     }
     let effectiveModelId = modelId;
-    let effectiveMaxSteps = maxSteps;
+    const effectiveMaxSteps = resolveMaxSteps(maxSteps, normalizedRunMode);
     if (normalizedRunMode === 'dag') {
         const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
         const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;

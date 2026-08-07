@@ -9,7 +9,7 @@ const { computeNextCronDate, isValidCronExpression } = require('./cron-expressio
 const {
     MAX_GOAL_LENGTH,
     parseJsonObject,
-    normalizeMaxSteps,
+    normalizeOptionalMaxSteps,
     normalizeRunMode,
     normalizeToolPolicy,
     normalizeApprovalPolicy,
@@ -156,7 +156,7 @@ function normalizeSchedulePayload(body = {}) {
         cronExpression: frequency === 'cron' ? cronExpression : '',
         status,
         runConfig: {
-            maxSteps: normalizeMaxSteps(body.maxSteps ?? body.max_steps),
+            maxSteps: normalizeOptionalMaxSteps(body.maxSteps ?? body.max_steps),
             runMode: normalizeRunMode(body.runMode ?? body.run_mode),
             toolPolicy: normalizeToolPolicy(body.toolPolicy ?? body.tool_policy),
             toolAllowlist: normalizeToolAllowlist(body.toolAllowlist ?? body.tool_allowlist),
