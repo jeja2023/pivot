@@ -20,7 +20,7 @@ const admin = { id: 1, role: 'admin', unit: '管理部' };
 test('普通用户只能把知识资源共享给本单位', () => {
     assert.deepEqual(
         normalizeShareSettings({ scope: 'shared', allowedUnits: ['研发部'] }, owner),
-        { scope: 'shared', allowedUnits: '研发部' }
+        { scope: 'shared', allowedUnits: '研发部', allowedUserIds: '' }
     );
     assert.throws(
         () => normalizeShareSettings({ scope: 'shared', allowedUnits: ['市场部'] }, owner),
@@ -28,7 +28,7 @@ test('普通用户只能把知识资源共享给本单位', () => {
     );
     assert.deepEqual(
         normalizeShareSettings({ scope: 'shared', allowedUnits: ['研发部', '市场部'] }, admin),
-        { scope: 'shared', allowedUnits: '研发部,市场部' }
+        { scope: 'shared', allowedUnits: '研发部,市场部', allowedUserIds: '' }
     );
 });
 
@@ -39,6 +39,14 @@ test('共享资源按单位提供只读访问，写操作只允许所有者', ()
     assert.equal(canAccessSharedResource(shared, sameUnit, true), false);
     assert.equal(canAccessSharedResource(shared, otherUnit), false);
     assert.equal(canAccessSharedResource({ ...shared, scope: 'personal' }, sameUnit), false);
+});
+
+test('共享资源可以只授权给指定个人', () => {
+    const shared = { user_id: owner.id, scope: 'shared', allowed_units: '', allowed_user_ids: String(otherUnit.id) };
+    assert.equal(canAccessSharedResource(shared, otherUnit), true);
+    assert.equal(canAccessSharedResource(shared, sameUnit), false);
+    assert.equal(canReadKnowledgeResource(shared, otherUnit), true);
+    assert.equal(canReadKnowledgeResource(shared, sameUnit), false);
 });
 
 test('全局工具资源允许读取但不允许写入', () => {
@@ -55,12 +63,13 @@ test('知识库资源判定与 SQL 过滤器绑定用户和单位范围', () => 
     const collectionFilter = buildCollectionAccessFilter(sameUnit, 'c');
     assert.match(collectionFilter.sql, /c\.user_id = \?/);
     assert.match(collectionFilter.sql, /c\.scope = 'shared'/);
-    assert.deepEqual(collectionFilter.params, [sameUnit.id, sameUnit.unit]);
+    assert.match(collectionFilter.sql, /c\.allowed_user_ids/);
+    assert.deepEqual(collectionFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id]);
 
     const documentFilter = buildDocumentAccessFilter(sameUnit, 'd', 'c');
     assert.match(documentFilter.sql, /d\.collection_id IS NOT NULL/);
     assert.match(documentFilter.sql, /c\.scope = 'shared'/);
-    assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit]);
+    assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id]);
 });
 
 test('Graph-RAG 汇总接受完整用户上下文以应用共享单位范围', () => {

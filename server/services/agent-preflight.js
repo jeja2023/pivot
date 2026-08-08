@@ -5,6 +5,10 @@ const { assertWorkflowLlmNodesConfigured, resolveAgentWorkflowVersion } = requir
 const { isSuperAdmin } = require('../permissions');
 const { inspectDagContracts } = require('./agent-dag-contracts');
 const {
+    inspectAgentWorkflowDependencies,
+    resolveAgentWorkflowDependencyBindings
+} = require('./agent-workflow-dependencies');
+const {
     normalizeApprovalPolicy,
     normalizeDagSpec,
     inspectDagTopology,
@@ -67,13 +71,21 @@ function preflightAgentRun(user, body = {}) {
     const blockers = [];
     let dag = null;
     let contractReport = null;
+    let dependencyReport = null;
+    let dependencyBinding = null;
     if (mcpTools.length > 0 && Number(mcpHealth.error || 0) > 0) warnings.push('工具库存在异常服务，本次任务可能遇到工具调用失败。');
     if (mcpTools.length > 0 && Number(mcpHealth.unchecked || 0) > 0) warnings.push('工具库存在未刷新工具列表的服务，建议先刷新工具缓存。');
     if (runMode === 'dag') {
         const workflowId = body.workflowId || body.workflow_id;
         if (workflowId) {
             try {
-                dag = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current')?.dagSpec;
+                const resolved = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current');
+                if (resolved) {
+                    const bound = resolveAgentWorkflowDependencyBindings(resolved, user, { enforce: false });
+                    dag = bound.dagSpec;
+                    dependencyBinding = bound.dependency_binding;
+                    blockers.push(...(dependencyBinding?.blockers || []));
+                }
             } catch (e) {
                 blockers.push(e.message || '工作流版本不可用。');
             }
@@ -104,6 +116,9 @@ function preflightAgentRun(user, body = {}) {
             contractReport = inspectDagContracts(dag, toolList);
             blockers.push(...contractReport.blockers);
             warnings.push(...contractReport.warnings);
+            dependencyReport = inspectAgentWorkflowDependencies(dag, user);
+            if (dependencyBinding) dependencyReport.binding = dependencyBinding;
+            blockers.push(...dependencyReport.blockers);
         }
     }
     if (maxSteps < 3 && runMode !== 'dag') warnings.push('执行轮次较少，复杂任务可能来不及完成检索、分析和总结。');
@@ -143,6 +158,7 @@ function preflightAgentRun(user, body = {}) {
             knowledgeErrors: Number(knowledge.error || 0)
         },
         contracts: contractReport,
+        dependencies: dependencyReport,
         recommendations: blockers.length
             ? ['修复阻断项后再创建任务。']
             : warnings.length

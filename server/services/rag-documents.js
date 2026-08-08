@@ -20,6 +20,7 @@ const {
     normalizeShareSettings
 } = require('./unit-visibility');
 const { isAdmin } = require('../permissions');
+const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -130,21 +131,15 @@ function getKnowledgeCollectionShareOptions({ collectionId, user }) {
     if (!collection) return null;
     const normalizedUser = normalizeKnowledgeUser(user);
     if (Number(collection.user_id) !== normalizedUser.id && !isAdmin(user)) return null;
-    const units = db.prepare(`
-        SELECT DISTINCT TRIM(unit) AS unit
-        FROM users
-        WHERE unit IS NOT NULL AND TRIM(unit) != '' AND deleted_at IS NULL
-        ORDER BY unit COLLATE NOCASE ASC
-    `).all().map(row => row.unit).filter(Boolean);
     return {
         collection: {
             id: collection.id,
             name: collection.name,
             scope: collection.scope || 'personal',
-            allowed_units: collection.allowed_units || ''
+            allowed_units: collection.allowed_units || '',
+            allowed_user_ids: collection.allowed_user_ids || ''
         },
-        units,
-        currentUnit: normalizedUser.unit
+        ...listShareTargets(user, { excludeUserId: collection.user_id })
     };
 }
 
@@ -157,11 +152,12 @@ function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
     `).get(normalizedId, normalizeKnowledgeUser(user).id);
     if (!current) return null;
     const settings = normalizeShareSettings(body, user, current);
+    settings.allowedUserIds = filterExistingShareUserIds(settings.allowedUserIds, { excludeUserId: current.user_id });
     db.prepare(`
         UPDATE knowledge_collections
-        SET scope = ?, allowed_units = ?, updated_at = ?
+        SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(settings.scope, settings.allowedUnits, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id);
+    `).run(settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id);
     clearRagCacheForUser(normalizeKnowledgeUser(user).id);
     return getKnowledgeCollectionForUser(normalizedId, user);
 }

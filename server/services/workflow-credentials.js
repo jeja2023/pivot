@@ -1,6 +1,7 @@
 /* 工作流凭据库：加密落库、按部门授权、支持免重启轮换。
    凭据明文只在运行时解密注入，不写入工作流定义、运行参数和日志。 */
 const { db } = require('../db');
+const { sql } = require('../db/statements');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { encryptSecret, decryptSecret } = require('../security');
@@ -195,7 +196,12 @@ function deleteWorkflowCredential(credentialId, user) {
  * 运行时按引用名解析凭据明文。
  * 解析范围包含本人凭据和共享给本人所属部门的凭据，命中后记录使用痕迹。
  */
-function resolveCredentialSecret(slug, user) {
+function findAccessibleCredentialRow(slug, user) {
+    const boundMatch = String(slug || '').trim().match(/^PIVOT_BOUND_CREDENTIAL_(\d+)$/i);
+    if (boundMatch) {
+        const row = sql('SELECT * FROM workflow_credentials WHERE id = ? AND deleted_at IS NULL').get(boundMatch[1]);
+        return row && canAccessSharedResource(row, user, false) ? row : null;
+    }
     let normalizedSlug = '';
     try {
         normalizedSlug = normalizeSlug(slug);
@@ -208,7 +214,15 @@ function resolveCredentialSecret(slug, user) {
         ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, updated_at DESC
     `).all(normalizedSlug, user.id, user.id);
     // 本人凭据优先，其次才是部门共享凭据，避免同名共享凭据覆盖个人配置
-    const row = rows.find(item => canAccessSharedResource(item, user, false));
+    return rows.find(item => canAccessSharedResource(item, user, false)) || null;
+}
+
+function hasWorkflowCredentialAccess(slug, user) {
+    return Boolean(findAccessibleCredentialRow(slug, user));
+}
+
+function resolveCredentialSecret(slug, user) {
+    const row = findAccessibleCredentialRow(slug, user);
     if (!row) return null;
 
     const now = getBeijingTimestamp();
@@ -227,6 +241,7 @@ module.exports = {
     ROTATION_GRACE_MS,
     createWorkflowCredential,
     deleteWorkflowCredential,
+    hasWorkflowCredentialAccess,
     formatCredential,
     listWorkflowCredentials,
     normalizeSlug,

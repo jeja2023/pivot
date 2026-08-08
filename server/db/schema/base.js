@@ -175,6 +175,7 @@ function initSchema() {
             description TEXT DEFAULT '',
             scope TEXT DEFAULT 'personal',
             allowed_units TEXT DEFAULT '',
+            allowed_user_ids TEXT DEFAULT '',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,
@@ -879,6 +880,7 @@ function initSchema() {
             description TEXT,
             scope TEXT DEFAULT 'personal',
             allowed_units TEXT DEFAULT '',
+            allowed_user_ids TEXT DEFAULT '',
             current_version_id INTEGER,
             published_version_id INTEGER,
             published_at DATETIME,
@@ -899,6 +901,20 @@ function initSchema() {
             UNIQUE(workflow_id, version),
             FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
             FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflow_dependency_bindings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            published_version_id INTEGER NOT NULL,
+            bindings_json TEXT DEFAULT '{}',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            UNIQUE(workflow_id, user_id),
+            FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (published_version_id) REFERENCES agent_workflow_versions(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS agent_workflow_triggers (
@@ -1083,6 +1099,7 @@ function initSchema() {
             config TEXT,
             scope TEXT DEFAULT 'personal',
             allowed_units TEXT DEFAULT '',
+            allowed_user_ids TEXT DEFAULT '',
             status TEXT DEFAULT 'active',
             last_error TEXT,
             last_checked_at DATETIME,
@@ -1252,6 +1269,7 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_agent_workflows_user ON agent_workflows(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflows_scope ON agent_workflows(scope, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_versions_workflow ON agent_workflow_versions(workflow_id, version);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_dependency_bindings_user ON agent_workflow_dependency_bindings(user_id, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_user ON agent_workflow_triggers(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_workflow ON agent_workflow_triggers(workflow_id, deleted_at);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workflow_triggers_token ON agent_workflow_triggers(token_hash) WHERE token_hash IS NOT NULL;

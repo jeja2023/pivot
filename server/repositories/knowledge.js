@@ -25,6 +25,7 @@ function listCollections(user) {
             c.description,
             c.scope,
             c.allowed_units,
+            c.allowed_user_ids,
             c.created_at,
             c.updated_at,
             COUNT(d.id) AS doc_count,
@@ -62,7 +63,8 @@ function getDocumentForUser(docId, user, { includeDeleted = false } = {}) {
     const access = buildDocumentAccessFilter(user, 'd', 'c');
     return sql(`
         SELECT d.*, c.name AS collection_name, c.scope AS collection_scope,
-               c.allowed_units AS collection_allowed_units
+               c.allowed_units AS collection_allowed_units,
+               c.allowed_user_ids AS collection_allowed_user_ids
         FROM knowledge_docs d
         LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
         WHERE d.id = ? ${includeDeleted ? '' : 'AND d.deleted_at IS NULL'}

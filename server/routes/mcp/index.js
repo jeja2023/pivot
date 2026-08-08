@@ -585,6 +585,8 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = getAccessibleMcpServer(req.params.id, req.user);
+        if (existing && existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
+        if (existing && existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '服务器可访问数据库请使用对应表单编辑。' });
         if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统工具预设请使用对应的系统服务表单编辑。' });

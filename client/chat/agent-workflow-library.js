@@ -224,46 +224,71 @@ function setAgentWorkflowShareError(message = '') {
 
 function setAgentWorkflowShareUnitsEnabled(enabled) {
     const all = document.getElementById('agent-workflow-share-all');
-    const allChecked = Boolean(all?.checked);
+    const allChecked = all?.checked === true && all?.disabled !== true;
     document.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit]').forEach(input => {
-        input.disabled = !enabled || allChecked || input.dataset.agentShareUnitLocked === 'true';
+        input.disabled = !enabled || allChecked;
+    });
+    document.querySelectorAll('#agent-workflow-share-users-list input[data-agent-share-user]').forEach(input => {
+        input.disabled = !enabled || allChecked;
+    });
+    document.querySelectorAll('[data-agent-share-select], [data-agent-share-clear]').forEach(button => {
+        button.disabled = !enabled || allChecked;
     });
 }
 
 function renderAgentWorkflowShareUnits(workflow, options) {
     const section = document.getElementById('agent-workflow-share-units-section');
     const list = document.getElementById('agent-workflow-share-units-list');
+    const userList = document.getElementById('agent-workflow-share-users-list');
     const allLabel = document.getElementById('agent-workflow-share-all-label');
     const all = document.getElementById('agent-workflow-share-all');
     const hint = document.getElementById('agent-workflow-share-units-hint');
-    if (!section || !list || !allLabel || !all || !hint) return;
+    if (!section || !list || !userList || !allLabel || !all || !hint) return;
     const selectedScope = document.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value;
     const isShared = (selectedScope || workflow?.scope) === 'shared';
     const availableUnits = Array.isArray(options?.units) ? options.units.filter(Boolean) : [];
     const allowedUnits = Array.isArray(workflow?.allowed_units) ? workflow.allowed_units.filter(Boolean) : [];
+    const availableUsers = Array.isArray(options?.users) ? options.users.filter(item => Number(item?.id) > 0) : [];
+    const allowedUserIds = new Set((Array.isArray(workflow?.allowed_user_ids)
+        ? workflow.allowed_user_ids
+        : String(workflow?.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
     const units = [...new Set([...availableUnits, ...allowedUnits])];
     const canShareAll = options?.canShareAll === true;
-    const isAll = isShared && canShareAll && allowedUnits.length === 0;
+    const existingShared = String(workflow?.scope || '') === 'shared';
+    const isAll = isShared && existingShared && canShareAll && allowedUnits.length === 0 && allowedUserIds.size === 0;
     section.classList.toggle('hidden', !isShared);
     allLabel.classList.toggle('hidden', !canShareAll);
     all.checked = isAll;
     all.disabled = !canShareAll;
     hint.textContent = canShareAll
-        ? '选择全部单位，或仅勾选指定部门。'
-        : (options?.currentUnit ? `普通用户只能共享给本部门：${options.currentUnit}` : '当前账号未设置所属部门，暂时不能共享。');
+        ? '可选择一个或多个单位，也可以不选单位而只共享给个人。'
+        : (options?.currentUnit ? `单位范围仅限本部门：${options.currentUnit}；也可以只共享给个人。` : '当前账号未设置所属部门，但仍可共享给指定个人。');
     if (!units.length) {
         PivotSafeHtml.setHtml(list, '<div class="agent-workflow-share-empty">暂无可用部门范围，请先补充账号所属部门。</div>');
-        return;
+    } else {
+        PivotSafeHtml.setHtml(list, units.map(unit => {
+            const checked = isShared && !isAll && allowedUnits.includes(unit);
+            return `
+                <label class="agent-workflow-share-unit">
+                    <input type="checkbox" data-agent-share-unit="${agentEscapeAttr(unit)}" ${checked ? 'checked' : ''}>
+                    <span><strong>${agentEscape(unit)}</strong>${unit === options.currentUnit ? '<small>本部门</small>' : '<small>单位成员</small>'}</span>
+                </label>`;
+        }).join(''));
     }
-    PivotSafeHtml.setHtml(list, units.map(unit => {
-        const checked = isShared && (isAll || allowedUnits.includes(unit));
-        const locked = !canShareAll && unit === options.currentUnit;
-        return `
-            <label class="agent-workflow-share-unit">
-                <input type="checkbox" data-agent-share-unit="${agentEscapeAttr(unit)}" data-agent-share-unit-locked="${locked ? 'true' : 'false'}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}>
-                <span><strong>${agentEscape(unit)}</strong>${locked ? '<small>本部门</small>' : ''}</span>
-            </label>`;
-    }).join(''));
+    if (!availableUsers.length) {
+        PivotSafeHtml.setHtml(userList, '<div class="agent-workflow-share-empty">暂无可共享的个人账号。</div>');
+    } else {
+        PivotSafeHtml.setHtml(userList, availableUsers.map(target => {
+            const id = Number(target.id);
+            const displayName = target.nickname || target.username || `用户 ${id}`;
+            const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
+            return `
+                <label class="agent-workflow-share-unit">
+                    <input type="checkbox" data-agent-share-user="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
+                    <span><strong>${agentEscape(displayName)}</strong><small>${agentEscape(detail)}</small></span>
+                </label>`;
+        }).join(''));
+    }
     setAgentWorkflowShareUnitsEnabled(isShared);
 }
 
@@ -287,6 +312,19 @@ function bindAgentWorkflowShareModal() {
     document.getElementById('agent-workflow-share-all')?.addEventListener('change', () => {
         const scope = modal.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value;
         setAgentWorkflowShareUnitsEnabled(scope === 'shared');
+    });
+    modal.querySelectorAll('[data-agent-share-select], [data-agent-share-clear]').forEach(button => {
+        button.addEventListener('click', () => {
+            const group = button.dataset.agentShareSelect || button.dataset.agentShareClear;
+            const checked = Boolean(button.dataset.agentShareSelect);
+            const selector = group === 'users'
+                ? '#agent-workflow-share-users-list input[data-agent-share-user]'
+                : '#agent-workflow-share-units-list input[data-agent-share-unit]';
+            modal.querySelectorAll(selector).forEach(input => {
+                if (!input.disabled) input.checked = checked;
+            });
+            setAgentWorkflowShareError('');
+        });
     });
     document.getElementById('agent-workflow-share-save-btn')?.addEventListener('click', saveAgentWorkflowSharing);
 }
@@ -336,13 +374,19 @@ async function saveAgentWorkflowSharing() {
     if (!modal || !save || !workflow) return;
     const scope = modal.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value || 'personal';
     const all = document.getElementById('agent-workflow-share-all');
-    const allowedUnits = scope === 'shared' && !all?.checked
+    const allChecked = all?.checked === true && all?.disabled !== true;
+    const allowedUnits = scope === 'shared' && !allChecked
         ? [...modal.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit]:checked')]
             .map(input => input.dataset.agentShareUnit)
             .filter(Boolean)
         : [];
-    if (scope === 'shared' && !all?.checked && !allowedUnits.length) {
-        setAgentWorkflowShareError('共享时至少选择一个部门，或由管理员选择全部单位。');
+    const allowedUserIds = scope === 'shared' && !allChecked
+        ? [...modal.querySelectorAll('#agent-workflow-share-users-list input[data-agent-share-user]:checked')]
+            .map(input => Number(input.dataset.agentShareUser))
+            .filter(Number.isSafeInteger)
+        : [];
+    if (scope === 'shared' && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
+        setAgentWorkflowShareError('共享时至少选择一个单位或一个个人，也可以由管理员共享给全体成员。');
         return;
     }
     setAgentWorkflowShareError('');
@@ -351,7 +395,7 @@ async function saveAgentWorkflowSharing() {
         const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/sharing`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope, allowedUnits })
+            body: JSON.stringify({ scope, allowedUnits, allowedUserIds })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '共享设置保存失败');
@@ -363,6 +407,176 @@ async function saveAgentWorkflowSharing() {
         showToast(scope === 'shared' ? '工作流共享设置已保存' : '已取消工作流共享', 'success');
     } catch (error) {
         setAgentWorkflowShareError(error.message || '共享设置保存失败');
+    } finally {
+        save.disabled = false;
+    }
+}
+
+let agentWorkflowDependencyState = { workflowId: '', configuration: null };
+
+function setAgentWorkflowDependencyError(message = '') {
+    const error = document.getElementById('agent-workflow-dependency-error');
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = !message;
+}
+
+function dependencyCandidateLabel(kind, item) {
+    if (kind === 'models') {
+        const detail = [item.model_name, item.provider].filter(Boolean).join(' · ');
+        return `${item.name || item.model_name || item.id}${detail ? `（${detail}）` : ''}`;
+    }
+    if (kind === 'tools') {
+        const detail = [item.server_name, item.source === 'mcp' ? '工具库' : '内置'].filter(Boolean).join(' · ');
+        return `${item.title || item.name}${detail ? `（${detail}）` : ''}`;
+    }
+    if (item.managed) return `${item.name}（仅在平台内执行，不下发）`;
+    const owner = item.is_owner ? '我的凭据' : (item.owner_name ? `由 ${item.owner_name} 受控共享` : '受控共享');
+    return `${item.name || item.slug} · ${item.slug}（${owner}）`;
+}
+
+function dependencyCandidateValue(kind, item) {
+    if (kind === 'tools') return String(item.binding_value || item.name || '');
+    return String(item.id || '');
+}
+
+function dependencyGroupMarkup(kind, title, items, candidates, bindings) {
+    if (!items.length) return '';
+    return `
+        <section class="agent-workflow-dependency-group">
+            <div class="agent-workflow-dependency-group-head"><strong>${agentEscape(title)}</strong><span>${items.length} 项</span></div>
+            ${items.map(item => {
+        const selected = String(bindings?.[kind]?.[item.source] || '');
+        const nodeNames = (item.nodes || []).map(node => node.title).filter(Boolean).join('、');
+        return `
+                <label class="agent-workflow-dependency-row">
+                    <span class="agent-workflow-dependency-source">
+                        <strong>${agentEscape(item.source)}</strong>
+                        <small>${agentEscape(nodeNames || '工作流依赖')}</small>
+                    </span>
+                    <select class="form-input" data-agent-dependency-kind="${agentEscapeAttr(kind)}" data-agent-dependency-source="${agentEscapeAttr(item.source)}">
+                        <option value="">请选择当前账号可用的等价资源</option>
+                        ${candidates.map(candidate => {
+            const value = dependencyCandidateValue(kind, candidate);
+            return `<option value="${agentEscapeAttr(value)}" ${value === selected ? 'selected' : ''}>${agentEscape(dependencyCandidateLabel(kind, candidate))}</option>`;
+        }).join('')}
+                    </select>
+                </label>`;
+    }).join('')}
+        </section>`;
+}
+
+function renderAgentWorkflowDependencies(configuration) {
+    const summary = document.getElementById('agent-workflow-dependency-summary');
+    const list = document.getElementById('agent-workflow-dependency-list');
+    const save = document.getElementById('agent-workflow-dependency-save-btn');
+    if (!summary || !list || !save) return;
+    const manifest = configuration?.manifest || { models: [], tools: [], credentials: [], summary: {} };
+    const candidates = configuration?.candidates || { models: [], tools: [], credentials: [] };
+    const bindings = configuration?.bindings || { models: {}, tools: {}, credentials: {} };
+    const total = Number(manifest.summary?.totalCount || 0);
+    const statusText = configuration?.stale
+        ? '发布版本已更新，需要重新确认'
+        : (configuration?.status === 'ready' ? '依赖映射已就绪' : '完成以下映射后才能运行');
+    PivotSafeHtml.setHtml(summary, `
+        <strong>${agentEscape(configuration?.workflow?.name || '共享工作流')} · 发布版本 ${Number(configuration?.workflow?.version || 0)}</strong>
+        <span>${agentEscape(statusText)}。凭据仅保存授权引用，密钥内容不会下发到当前账号。</span>
+    `);
+    if (!total) {
+        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-dependency-empty">该工作流没有需要接收者映射的模型、外部工具或凭据。</div>');
+        save.textContent = '完成';
+        return;
+    }
+    save.textContent = '确认依赖映射';
+    PivotSafeHtml.setHtml(list, [
+        dependencyGroupMarkup('models', '模型映射', manifest.models || [], candidates.models || [], bindings),
+        dependencyGroupMarkup('tools', '工具映射', manifest.tools || [], candidates.tools || [], bindings),
+        dependencyGroupMarkup('credentials', '凭据授权', manifest.credentials || [], candidates.credentials || [], bindings)
+    ].join(''));
+}
+
+function bindAgentWorkflowDependencyModal() {
+    const modal = document.getElementById('agent-workflow-dependency-modal');
+    if (!modal || modal.dataset.boundAgentWorkflowDependencyModal === '1') return;
+    modal.dataset.boundAgentWorkflowDependencyModal = '1';
+    const close = () => modal.classList.add('hidden');
+    document.getElementById('agent-workflow-dependency-close-btn')?.addEventListener('click', close);
+    document.getElementById('agent-workflow-dependency-cancel-btn')?.addEventListener('click', close);
+    modal.addEventListener('click', event => {
+        if (event.target === modal) close();
+    });
+    modal.addEventListener('change', event => {
+        if (event.target?.matches?.('[data-agent-dependency-kind]')) setAgentWorkflowDependencyError('');
+    });
+    document.getElementById('agent-workflow-dependency-save-btn')?.addEventListener('click', saveAgentWorkflowDependencies);
+}
+
+async function openAgentWorkflowDependencies(workflowId = '') {
+    bindAgentWorkflowDependencyModal();
+    const id = String(workflowId || activeAgentWorkflowId || selectedAgentWorkflow()?.id || '');
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === id);
+    const modal = document.getElementById('agent-workflow-dependency-modal');
+    const list = document.getElementById('agent-workflow-dependency-list');
+    const save = document.getElementById('agent-workflow-dependency-save-btn');
+    if (!id || !workflow || workflow.can_edit || !modal || !list || !save) {
+        showToast('请选择共享给你的已发布工作流', 'warning');
+        return null;
+    }
+    agentWorkflowDependencyState = { workflowId: id, configuration: null };
+    setAgentWorkflowDependencyError('');
+    PivotSafeHtml.setHtml(list, '<div class="agent-workflow-dependency-empty">正在加载可用依赖...</div>');
+    save.disabled = true;
+    modal.classList.remove('hidden');
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(id)}/dependencies`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '依赖配置加载失败');
+        agentWorkflowDependencyState.configuration = data;
+        renderAgentWorkflowDependencies(data);
+        save.disabled = false;
+        return data;
+    } catch (error) {
+        setAgentWorkflowDependencyError(error.message || '依赖配置加载失败');
+        return null;
+    }
+}
+
+async function saveAgentWorkflowDependencies() {
+    const modal = document.getElementById('agent-workflow-dependency-modal');
+    const save = document.getElementById('agent-workflow-dependency-save-btn');
+    const id = agentWorkflowDependencyState.workflowId;
+    const configuration = agentWorkflowDependencyState.configuration;
+    if (!modal || !save || !id || !configuration) return;
+    const bindings = { models: {}, tools: {}, credentials: {} };
+    modal.querySelectorAll('[data-agent-dependency-kind][data-agent-dependency-source]').forEach(select => {
+        const kind = select.dataset.agentDependencyKind;
+        const source = select.dataset.agentDependencySource;
+        if (bindings[kind] && source) bindings[kind][source] = select.value;
+    });
+    const missing = [...modal.querySelectorAll('[data-agent-dependency-kind]')].find(select => !select.value);
+    if (missing) {
+        setAgentWorkflowDependencyError('请为每一项依赖选择当前账号可用的等价资源。');
+        missing.focus();
+        return;
+    }
+    setAgentWorkflowDependencyError('');
+    save.disabled = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(id)}/dependencies`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bindings })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '依赖映射保存失败');
+        agentWorkflowDependencyState.configuration = data;
+        renderAgentWorkflowDependencies(data);
+        modal.classList.add('hidden');
+        showToast('工作流依赖映射已确认', 'success');
+        return data;
+    } catch (error) {
+        setAgentWorkflowDependencyError(error.message || '依赖映射保存失败');
+        return null;
     } finally {
         save.disabled = false;
     }

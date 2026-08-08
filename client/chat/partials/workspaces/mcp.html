@@ -153,7 +153,7 @@
             <div class="agent-workflow-share-head">
                 <div>
                     <h3 id="mcp-share-title">分享只读数据库能力</h3>
-                    <p id="mcp-share-subtitle">设置哪些单位成员可以使用该只读数据库能力。</p>
+                    <p id="mcp-share-subtitle">设置哪些单位或个人可以使用该只读数据库能力。</p>
                 </div>
                 <button id="mcp-share-close-btn" class="btn-danger-outline" type="button" aria-label="关闭" title="关闭">关闭</button>
             </div>
@@ -172,23 +172,38 @@
                     <label class="agent-workflow-share-choice">
                         <input type="radio" name="mcp-share-scope" value="shared">
                         <span>
-                            <strong>共享给单位成员</strong>
+                            <strong>共享给单位或个人</strong>
                             <small>接收方只能执行只读数据库工具，连接密码和编辑权限不会被共享。</small>
                         </span>
                     </label>
                 </fieldset>
                 <section id="mcp-share-units-section" class="agent-workflow-share-units-section hidden">
+                    <label id="mcp-share-all-label" class="agent-workflow-share-all hidden">
+                        <input id="mcp-share-all" type="checkbox">
+                        <span>共享给全体成员</span>
+                    </label>
                     <div class="agent-workflow-share-units-head">
                         <div>
                             <strong>共享给哪些单位</strong>
                             <span id="mcp-share-units-hint">选择后仅这些单位的成员可以使用该只读工具。</span>
                         </div>
-                        <label id="mcp-share-all-label" class="agent-workflow-share-all">
-                            <input id="mcp-share-all" type="checkbox">
-                            <span>全部单位</span>
-                        </label>
+                        <div class="agent-workflow-share-target-actions">
+                            <button type="button" class="btn-secondary" data-mcp-share-select="units">全选</button>
+                            <button type="button" class="btn-secondary" data-mcp-share-clear="units">全不选</button>
+                        </div>
                     </div>
                     <div id="mcp-share-unit-options" class="agent-workflow-share-units-list"></div>
+                    <div class="agent-workflow-share-units-head">
+                        <div>
+                            <strong>共享给哪些个人</strong>
+                            <span>可按账号精确授权只读使用权限。</span>
+                        </div>
+                        <div class="agent-workflow-share-target-actions">
+                            <button type="button" class="btn-secondary" data-mcp-share-select="users">全选</button>
+                            <button type="button" class="btn-secondary" data-mcp-share-clear="users">全不选</button>
+                        </div>
+                    </div>
+                    <div id="mcp-share-user-options" class="agent-workflow-share-units-list agent-workflow-share-users-list"></div>
                 </section>
                 <div id="mcp-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
             </div>

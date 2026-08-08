@@ -36,6 +36,7 @@ const {
     canAccessSharedResource,
     normalizeShareSettings
 } = require('./unit-visibility');
+const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { enqueueMcpCallLog } = require('./sqlite-write-queue');
 
 const MCP_TIMEOUT_MS = 20000;
@@ -58,7 +59,8 @@ function isUnitSharedMcpServer(server) {
 
 function isSharedMcpToolAllowed(server, toolName) {
     if (!isUnitSharedMcpServer(server)) return true;
-    if (!String(server.base_url || '').startsWith('pivot-db://')) return false;
+    const baseUrl = server.base_url || server.server_base_url || '';
+    if (!String(baseUrl).startsWith('pivot-db://')) return false;
     return SHARED_READONLY_DATABASE_TOOLS.has(String(toolName || ''));
 }
 
@@ -151,6 +153,7 @@ function normalizeServerRow(row) {
         has_api_key: Boolean(row.api_key),
         scope: row.scope || (row.user_id === null ? 'shared' : 'personal'),
         allowed_units: row.allowed_units || '',
+        allowed_user_ids: row.allowed_user_ids || '',
         read_only: isUnitSharedMcpServer(row),
         owner: formatMcpOwner(row),
         config,
@@ -171,12 +174,16 @@ function getAccessibleMcpServer(serverId, user) {
               OR (
                   scope = 'shared'
                   AND (
-                      TRIM(COALESCE(allowed_units, '')) = ''
+                      (
+                          TRIM(COALESCE(allowed_units, '')) = ''
+                          AND TRIM(COALESCE(allowed_user_ids, '')) = ''
+                      )
                       OR instr(',' || replace(COALESCE(allowed_units, ''), ' ', '') || ',', ',' || ? || ',') > 0
+                      OR instr(',' || replace(COALESCE(allowed_user_ids, ''), ' ', '') || ',', ',' || ? || ',') > 0
                   )
               )
           )
-    `).get(serverId, user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim());
+    `).get(serverId, user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim(), user.id);
     if (row?.api_key) row.api_key = decryptSecret(row.api_key);
     return row || null;
 }
@@ -195,13 +202,17 @@ function listMcpServers(user) {
               OR (
                   s.scope = 'shared'
                   AND (
-                      TRIM(COALESCE(s.allowed_units, '')) = ''
+                      (
+                          TRIM(COALESCE(s.allowed_units, '')) = ''
+                          AND TRIM(COALESCE(s.allowed_user_ids, '')) = ''
+                      )
                       OR instr(',' || replace(COALESCE(s.allowed_units, ''), ' ', '') || ',', ',' || ? || ',') > 0
+                      OR instr(',' || replace(COALESCE(s.allowed_user_ids, ''), ' ', '') || ',', ',' || ? || ',') > 0
                   )
               )
           )
         ORDER BY s.user_id IS NOT NULL, s.name ASC
-    `).all(user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim());
+    `).all(user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim(), user.id);
     return rows.map(row => ({
         ...normalizeServerRow(row),
         can_edit: Number(row.user_id) === Number(user?.id) || (row.user_id === null && isSuperAdmin(user)),
@@ -217,16 +228,9 @@ function getMcpServerShareOptions(serverId, user) {
         WHERE s.id = ? AND s.status != 'deleted'
     `).get(serverId);
     if (!row || (Number(row.user_id) !== Number(user?.id) && !isSuperAdmin(user))) return null;
-    const units = db.prepare(`
-        SELECT DISTINCT TRIM(unit) AS unit
-        FROM users
-        WHERE unit IS NOT NULL AND TRIM(unit) != '' AND deleted_at IS NULL
-        ORDER BY unit COLLATE NOCASE ASC
-    `).all().map(item => item.unit).filter(Boolean);
     return {
         server: normalizeServerRow(row),
-        units,
-        currentUnit: String(user?.unit || '').trim(),
+        ...listShareTargets(user, { excludeUserId: row.user_id }),
         supportsSharing: String(row.base_url || '').startsWith('pivot-db://')
     };
 }
@@ -240,6 +244,7 @@ function updateMcpServerSharing(serverId, user, body = {}) {
         throw err;
     }
     const settings = normalizeShareSettings(body, user, row);
+    settings.allowedUserIds = filterExistingShareUserIds(settings.allowedUserIds, { excludeUserId: row.user_id });
     if (settings.scope === 'shared' && row.user_id !== null && !String(row.base_url || '').startsWith('pivot-db://')) {
         const err = new Error('当前阶段仅支持共享只读数据库能力，外部服务和通知服务不能共享。');
         err.status = 400;
@@ -247,9 +252,9 @@ function updateMcpServerSharing(serverId, user, body = {}) {
     }
     db.prepare(`
         UPDATE mcp_servers
-        SET scope = ?, allowed_units = ?, updated_at = ?
+        SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND status != 'deleted'
-    `).run(settings.scope, settings.allowedUnits, getBeijingTimestamp(), serverId, row.user_id);
+    `).run(settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), serverId, row.user_id);
     return getAccessibleMcpServer(serverId, user);
 }
 

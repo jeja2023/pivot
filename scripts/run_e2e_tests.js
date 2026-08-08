@@ -13,7 +13,7 @@ const env = {
     PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),
     LOG_DIR: path.join(testRoot, 'logs'),
     PIVOT_E2E_OUTPUT_DIR: path.join(testRoot, 'results'),
-    DEFAULT_ADMIN_PASSWORD: '',
+    DEFAULT_ADMIN_PASSWORD: 'E2eAdmin123',
     JWT_SECRET: 'pivot-e2e-tests-jwt-secret-012345678901234567890123',
     DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123'
 };

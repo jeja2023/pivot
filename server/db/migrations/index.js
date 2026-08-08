@@ -275,6 +275,43 @@ const migrations = [
         }
     },
     {
+        id: '202608070001_resource_user_visibility',
+        description: 'Add individual user targets to workflow, knowledge collection, and MCP sharing.',
+        up(db) {
+            ['agent_workflows', 'knowledge_collections', 'mcp_servers'].forEach(table => {
+                const columns = db.pragma(`table_info(${table})`);
+                if (!columns.length) return;
+                if (!columns.some(column => column.name === 'allowed_user_ids')) {
+                    db.exec(`ALTER TABLE ${table} ADD COLUMN allowed_user_ids TEXT DEFAULT ''`);
+                }
+                db.exec(`UPDATE ${table} SET allowed_user_ids = '' WHERE allowed_user_ids IS NULL`);
+            });
+        }
+    },
+    {
+        id: '202608070002_workflow_dependency_bindings',
+        description: 'Create per-recipient workflow dependency bindings pinned to a published version.',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS agent_workflow_dependency_bindings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workflow_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    published_version_id INTEGER NOT NULL,
+                    bindings_json TEXT DEFAULT '{}',
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    UNIQUE(workflow_id, user_id),
+                    FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (published_version_id) REFERENCES agent_workflow_versions(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_workflow_dependency_bindings_user
+                    ON agent_workflow_dependency_bindings(user_id, updated_at);
+            `);
+        }
+    },
+    {
         id: '202608060002_schedule_interval_minutes',
         description: 'Add first class minute intervals to agent schedules.',
         up(db) {

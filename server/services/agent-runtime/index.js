@@ -76,6 +76,10 @@ const {
 } = require('../agent-artifacts');
 const { formatToolList } = require('../agent-tool-catalog');
 const {
+    assertAgentWorkflowDependencies,
+    resolveAgentWorkflowDependencyBindings
+} = require('../agent-workflow-dependencies');
+const {
     getAgentMetrics,
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('../agent-monitoring');
@@ -1191,22 +1195,29 @@ function createAgentRun({
         const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
         const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
         if (requestedWorkflowId && requestedWorkflowVersion) {
-            const resolvedWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
-            if (!resolvedWorkflow) {
+            const sourceWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
+            if (!sourceWorkflow) {
                 const err = new Error('工作流版本不可用。');
                 err.status = 404;
                 throw err;
             }
+            const resolvedWorkflow = resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
             runMetadata.dagSpec = resolvedWorkflow.dagSpec;
             runMetadata.workflowId = resolvedWorkflow.workflow.id;
             runMetadata.workflowName = resolvedWorkflow.workflow.name;
             runMetadata.workflowVersion = resolvedWorkflow.version;
             runMetadata.workflowVersionMode = resolvedWorkflow.mode;
             runMetadata.workflowVersionId = resolvedWorkflow.version_id;
+            runMetadata.workflowDependencyBinding = {
+                required: Boolean(resolvedWorkflow.dependency_binding?.required),
+                versionId: resolvedWorkflow.dependency_binding?.bound_version_id || null,
+                updatedAt: resolvedWorkflow.dependency_binding?.updated_at || ''
+            };
         } else {
             runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
         }
         assertWorkflowLlmNodesConfigured(runMetadata.dagSpec);
+        assertAgentWorkflowDependencies(runMetadata.dagSpec, user);
     }
     const modelCfg = getRunnableModelForUser(effectiveModelId, user);
     if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');

@@ -37,7 +37,7 @@ function renderMcpInstanceCard(server) {
                     <strong>${mcpEscape(mcpCleanServiceName(server.name))}</strong>
                     <span>
                         <em>${mcpEscape(typeLabel)}</em>
-                        ${isShared ? '<em class="mcp-owner-badge">单位共享 · 只读</em>' : ''}
+                        ${isShared ? '<em class="mcp-owner-badge">共享 · 只读</em>' : ''}
                         ${showOwner && ownerLabel ? `<em class="mcp-owner-badge" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</em>` : ''}
                     </span>
                 </div>
@@ -834,6 +834,16 @@ function setMcpShareError(message = '') {
     errorEl.hidden = !message;
 }
 
+function setMcpShareTargetsEnabled() {
+    const modal = document.getElementById('mcp-share-modal');
+    if (!modal) return;
+    const enabled = modal.querySelector('input[name="mcp-share-scope"]:checked')?.value === 'shared';
+    const all = document.getElementById('mcp-share-all');
+    const allChecked = all?.checked === true && all?.disabled !== true;
+    modal.querySelectorAll('input[name="mcp-share-unit"], input[name="mcp-share-user"], [data-mcp-share-select], [data-mcp-share-clear]')
+        .forEach(control => control.disabled = !enabled || allChecked);
+}
+
 function bindMcpShareModal() {
     const modal = document.getElementById('mcp-share-modal');
     if (!modal || modal.dataset.bound === 'true') return;
@@ -850,26 +860,40 @@ function bindMcpShareModal() {
             const isShared = modal.querySelector('input[name="mcp-share-scope"]:checked')?.value === 'shared';
             const unitsSection = document.getElementById('mcp-share-units-section');
             if (unitsSection) unitsSection.classList.toggle('hidden', !isShared);
+            setMcpShareTargetsEnabled();
             setMcpShareError('');
         });
     });
 
-    document.getElementById('mcp-share-all')?.addEventListener('change', (e) => {
-        const checked = e.target.checked;
-        modal.querySelectorAll('input[name="mcp-share-unit"]').forEach(chk => chk.checked = checked);
+    document.getElementById('mcp-share-all')?.addEventListener('change', () => {
+        setMcpShareTargetsEnabled();
+        setMcpShareError('');
+    });
+    modal.querySelectorAll('[data-mcp-share-select], [data-mcp-share-clear]').forEach(button => {
+        button.addEventListener('click', () => {
+            const group = button.dataset.mcpShareSelect || button.dataset.mcpShareClear;
+            const checked = Boolean(button.dataset.mcpShareSelect);
+            const name = group === 'users' ? 'mcp-share-user' : 'mcp-share-unit';
+            modal.querySelectorAll(`input[name="${name}"]`).forEach(input => input.checked = checked);
+            setMcpShareError('');
+        });
     });
 
     document.getElementById('mcp-share-save-btn')?.addEventListener('click', async () => {
         const id = document.getElementById('mcp-share-id')?.value;
         const scope = modal.querySelector('input[name="mcp-share-scope"]:checked')?.value || 'personal';
         const isShared = scope === 'shared';
-        const allChecked = document.getElementById('mcp-share-all')?.checked === true;
+        const all = document.getElementById('mcp-share-all');
+        const allChecked = all?.checked === true && all?.disabled !== true;
         const allowedUnits = isShared && !allChecked
             ? [...modal.querySelectorAll('input[name="mcp-share-unit"]:checked')].map(input => input.value).filter(Boolean)
             : [];
+        const allowedUserIds = isShared && !allChecked
+            ? [...modal.querySelectorAll('input[name="mcp-share-user"]:checked')].map(input => Number(input.value)).filter(Number.isSafeInteger)
+            : [];
 
-        if (isShared && !allChecked && !allowedUnits.length) {
-            setMcpShareError('共享时至少选择一个单位，或选择全部单位。');
+        if (isShared && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
+            setMcpShareError('共享时至少选择一个单位或一个个人，也可以由管理员共享给全体成员。');
             return;
         }
 
@@ -881,7 +905,7 @@ function bindMcpShareModal() {
             const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/sharing`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scope, allowedUnits })
+                body: JSON.stringify({ scope, allowedUnits, allowedUserIds })
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || '共享设置保存失败');
@@ -908,9 +932,14 @@ async function openMcpShareModal(serverId) {
 
     const server = data.data?.server || {};
     const units = Array.isArray(data.data?.units) ? data.data.units.filter(Boolean) : [];
+    const users = Array.isArray(data.data?.users) ? data.data.users.filter(item => Number(item?.id) > 0) : [];
     const allowed = new Set(String(server.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean));
+    const allowedUserIds = new Set((Array.isArray(server.allowed_user_ids)
+        ? server.allowed_user_ids
+        : String(server.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
     const isShared = String(server.scope || '') === 'shared';
-    const isAll = isShared && allowed.size === 0;
+    const canShareAll = data.data?.canShareAll === true;
+    const isAll = isShared && canShareAll && allowed.size === 0 && allowedUserIds.size === 0;
 
     document.getElementById('mcp-share-id').value = String(serverId);
 
@@ -929,7 +958,12 @@ async function openMcpShareModal(serverId) {
     if (unitsSection) unitsSection.classList.toggle('hidden', !isShared);
 
     const allCheckbox = document.getElementById('mcp-share-all');
-    if (allCheckbox) allCheckbox.checked = isAll;
+    if (allCheckbox) {
+        allCheckbox.checked = isAll;
+        allCheckbox.disabled = !canShareAll;
+    }
+    const allLabel = document.getElementById('mcp-share-all-label');
+    if (allLabel) allLabel.classList.toggle('hidden', !canShareAll);
 
     const currentUnit = String(data.data?.currentUnit || '').trim();
     const unitListContainer = document.getElementById('mcp-share-unit-options');
@@ -938,7 +972,7 @@ async function openMcpShareModal(serverId) {
             PivotSafeHtml.setHtml(unitListContainer, '<div class="agent-workflow-share-empty">暂无可用单位信息</div>');
         } else {
             PivotSafeHtml.setHtml(unitListContainer, units.map(unit => {
-                const checked = isShared && (isAll || allowed.has(unit));
+                const checked = isShared && !isAll && allowed.has(unit);
                 const isCurrent = unit === currentUnit;
                 return `
                     <label class="agent-workflow-share-unit">
@@ -952,6 +986,30 @@ async function openMcpShareModal(serverId) {
             }).join(''));
         }
     }
+
+    const userListContainer = document.getElementById('mcp-share-user-options');
+    if (userListContainer) {
+        if (!users.length) {
+            PivotSafeHtml.setHtml(userListContainer, '<div class="agent-workflow-share-empty">暂无可共享的个人账号</div>');
+        } else {
+            PivotSafeHtml.setHtml(userListContainer, users.map(target => {
+                const id = Number(target.id);
+                const displayName = target.nickname || target.username || `用户 ${id}`;
+                const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
+                return `
+                    <label class="agent-workflow-share-unit">
+                        <input type="checkbox" name="mcp-share-user" value="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
+                        <span>
+                            <strong>${mcpEscape(displayName)}</strong>
+                            <small>${mcpEscape(detail)}</small>
+                        </span>
+                    </label>
+                `;
+            }).join(''));
+        }
+    }
+
+    setMcpShareTargetsEnabled();
 
     modal.classList.remove('hidden');
 };

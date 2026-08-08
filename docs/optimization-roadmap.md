@@ -2,7 +2,7 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
-## 2026-08-06 Architecture Baseline
+## 2026-08-07 Architecture Baseline
 
 - Root-level `README.md`, `CHANGELOG.md`, `使用帮助.md`, and `开发规范.md` remain stable project entry points.
 - Design documents, reports, packaging notes, and Windows wrappers are organized under `docs/design/`, `docs/reports/`, `docs/standards/`, and `scripts/bat/`.
@@ -16,6 +16,7 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.0.257 (2026-08-07) 完成共享资源的个人授权和工作流接收者依赖闭环：工作流、知识库专题库与数据库 MCP 连接支持单位/个人白名单，统一列表、详情、检索、缓存和工具目录的可见性过滤；接收者可为共享工作流选择本账号可用的模型、工具和受控凭据，绑定固定到发布版本，重新发布后自动标记 stale 并阻断运行。直接 HTTP 敏感值在共享响应中脱敏，且禁止共享/发布；知识库写操作、MCP 服务器编辑和非只读工具调用在路由层拒绝。新增迁移、依赖配置面板、分享个人选择与隔离 HTTP/Playwright 回归；Node 446/446、HTTP 2/2、E2E 3/3 通过。
 - v0.0.256 (2026-08-07) 完成自主任务执行治理和工作流编辑体验升级：保留最大执行轮次作为高级安全边界，但取消固定 10 轮默认值，改为标准模式自动 20 轮、深度/审查模式自动 50 轮，模板与计划任务用 `0` 持久化“自动”语义；流式工具调用与 JSON 回退共享总轮次，达到上限后保留已有结果、生成总结并明确标记可能不完整。修复快捷目标和保存模板无响应，补齐工作流直接重命名及节点名称失焦问题；Token 上限与上下文来源完成响应式并排布局。全量 Node 回归 438/438、项目检查、ESLint 和 E2E 2/2 通过。
 - v0.0.255 (2026-08-06) 完成计划任务、工作流配置和新闻内容校对闭环：计划只能运行已发布工作流，按间隔调度支持 5 至 1440 分钟；节点应用操作提供即时反馈，保存后重新打开仍恢复手动配置；自由任务转工作流会生成数据库查询、富文本逐条校对和输出节点，清理 HTML 后按记录/分块校对并保留原文证据；结构化结果保留行边界，查询截断、分块失败和未处理记录会显式标记，完整报告沉淀为可下载产物。全量 Node 回归 437/437，项目检查和相关 ESLint 检查通过。
 - v0.0.249 (2026-08-06) 完成知识库与工具库的单位共享权限升级：知识库专题库支持共享范围和单位白名单，文档列表、标签、摘要、详情、FTS/LIKE、检索缓存与 Graph-RAG 查询统一做可见性隔离；工具库数据库 MCP 连接支持单位共享，接收者仅可使用治理后的只读数据库工具，刷新、诊断和写管理操作均被阻断；前端补齐分享弹窗、只读状态、写操作过滤与可写专题库选择；新增旧库迁移字段和索引，MCP 33/33、RAG 75/75、Agent 48/48 专项回归通过。

@@ -9,6 +9,11 @@ const {
     listSteps
 } = require('../services/agent-runs');
 const { preflightAgentRun } = require('../services/agent-preflight');
+const { resolveAgentWorkflowVersion } = require('../services/agent-workflows');
+const {
+    getAgentWorkflowDependencyConfiguration,
+    saveAgentWorkflowDependencyConfiguration
+} = require('../services/agent-workflow-dependencies');
 const { getAgentTraceForUser } = require('../services/agent-traces');
 const { listAgentCheckpointsForUser } = require('../services/agent-checkpoints');
 const {
@@ -198,6 +203,20 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         res.json(listAgentWorkflowShareOptions(req.user));
     }));
 
+    router.get('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
+        const resolved = resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
+        if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
+        res.json(getAgentWorkflowDependencyConfiguration(resolved, req.user));
+    }));
+
+    router.put('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
+        const resolved = resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
+        if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
+        const configuration = saveAgentWorkflowDependencyConfiguration(resolved, req.user, req.body || {});
+        logAction(req, '确认共享工作流依赖映射', `工作流ID: ${resolved.workflow.id}，发布版本: ${resolved.version}`);
+        res.json({ success: true, ...configuration });
+    }));
+
     router.post('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
         const workflow = createAgentWorkflow(req.user, req.body || {});
         logAction(req, '保存智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
@@ -214,7 +233,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     router.patch('/agents/workflows/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
         const workflow = updateAgentWorkflowSharing(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改共享设置。' });
-        logAction(req, '更新智能体工作流共享设置', `工作流ID: ${workflow.id}，范围: ${workflow.scope}，单位: ${(workflow.allowed_units || []).join(',') || '全部'}`);
+        logAction(req, '更新智能体工作流共享设置', `工作流ID: ${workflow.id}，范围: ${workflow.scope}，单位: ${(workflow.allowed_units || []).join(',') || '-'}，个人: ${(workflow.allowed_user_ids || []).join(',') || '-'}`);
         res.json({ success: true, workflow });
     }));
 

@@ -1,6 +1,7 @@
 // 自动化增强回归测试：cron 调度、部门可见性和工作流触发器
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { sql } = require('../server/db/statements');
 
 const {
     computeNextCronDate,
@@ -17,6 +18,14 @@ const {
     serializeAllowedUnits
 } = require('../server/services/unit-visibility');
 const { assertWorkflowAccess, formatAgentWorkflow } = require('../server/services/agent-workflows');
+const {
+    applyAgentWorkflowDependencyBindings,
+    buildAgentWorkflowDependencyManifest,
+    getAgentWorkflowDependencyConfiguration,
+    inspectAgentWorkflowDependencies,
+    resolveAgentWorkflowDependencyBindings,
+    saveAgentWorkflowDependencyConfiguration
+} = require('../server/services/agent-workflow-dependencies');
 const { normalizeSlug } = require('../server/services/workflow-credentials');
 
 function at(text) {
@@ -125,6 +134,7 @@ test('普通用户只能共享给本部门，跨部门和全单位需要管理�
     const ownUnit = normalizeShareSettings({ scope: 'shared', allowedUnits: '财务处' }, user);
     assert.equal(ownUnit.scope, 'shared');
     assert.equal(ownUnit.allowedUnits, '财务处');
+    assert.equal(ownUnit.allowedUserIds, '');
 
     assert.throws(
         () => normalizeShareSettings({ scope: 'shared', allowedUnits: '' }, user),
@@ -151,11 +161,18 @@ test('未设置部门的账号不能共享', () => {
     assert.throws(() => normalizeShareSettings({ scope: 'shared', allowedUnits: '财务处' }, user), /未设置所属部门/);
 });
 
+test('未设置部门的账号仍可共享给指定个人', () => {
+    const user = { id: 3, role: 'user', username: 'lisi', unit: '' };
+    const result = normalizeShareSettings({ scope: 'shared', allowedUserIds: [8, 9, 8] }, user);
+    assert.deepEqual(result, { scope: 'shared', allowedUnits: '', allowedUserIds: '8,9' });
+});
+
 test('仅自己可见时清空部门范围', () => {
     const user = { id: 2, role: 'user', username: 'zhangsan', unit: '财务处' };
     const result = normalizeShareSettings({ scope: 'personal', allowedUnits: '财务处' }, user);
     assert.equal(result.scope, 'personal');
     assert.equal(result.allowedUnits, '');
+    assert.equal(result.allowedUserIds, '');
 });
 
 test('共享资源访问判定：所有者可写，共享者只读', () => {
@@ -212,6 +229,164 @@ test('共享工作流响应不泄露所有者当前草稿', () => {
     assert.equal(response.current_version, 3);
     assert.equal(response.current_version_id, 9);
     assert.deepEqual(response.dag_spec.nodes.map(node => node.id), ['published']);
+});
+
+test('共享工作流响应会遮蔽 HTTP 节点里的直接敏感值', () => {
+    const response = formatAgentWorkflow({
+        id: 8,
+        user_id: 10,
+        name: '敏感接口调用',
+        scope: 'shared',
+        allowed_units: '财务处',
+        published_version_id: 10,
+        published_version: 1,
+        published_dag_spec: JSON.stringify({
+            nodes: [{
+                id: 'http',
+                tool: 'agent.http',
+                input: {
+                    url: 'https://example.com/callback?token=url-secret',
+                    headers: { Authorization: 'Bearer owner-secret', Accept: 'application/json' },
+                    body: { profile: { password: 'body-secret' }, value: 'visible' }
+                }
+            }]
+        })
+    }, { id: 11, unit: '财务处' });
+
+    const serialized = JSON.stringify(response.dag_spec);
+    assert.equal(serialized.includes('owner-secret'), false);
+    assert.equal(serialized.includes('url-secret'), false);
+    assert.equal(serialized.includes('body-secret'), false);
+    assert.equal(response.dag_spec.nodes[0].input.headers.Accept, 'application/json');
+    assert.equal(response.dag_spec.nodes[0].input.body.value, 'visible');
+});
+
+test('共享工作流预检会阻止接收者缺失的模型和凭据', () => {
+    const report = inspectAgentWorkflowDependencies({
+        nodes: [
+            { id: 'llm', title: '生成结果', tool: 'agent.llm', input: { model: '999999999' } },
+            { id: 'http', title: '调用接口', tool: 'agent.http', input: { credentialSecret: 'MISSING_SHARED_CREDENTIAL' } }
+        ]
+    }, { id: 987654321, role: 'user', unit: '测试部' });
+    assert.equal(report.status, 'blocked');
+    assert.equal(report.summary.unavailableModelCount, 1);
+    assert.equal(report.summary.unavailableCredentialCount, 1);
+    assert.equal(report.blockers.length, 2);
+});
+
+test('依赖清单去重并将模型、工具和凭据替换为接收者映射', () => {
+    const dagSpec = {
+        nodes: [
+            { id: 'llm-a', title: '生成', tool: 'agent.llm', input: { model: 'OWNER_MODEL' } },
+            { id: 'llm-b', title: '复核', tool: 'agent.content_review', input: { modelId: 'OWNER_MODEL' } },
+            { id: 'tool', title: '查询', tool: 'mcp.99.owner.lookup', input: { keyword: 'x' } },
+            { id: 'db', title: '查库', tool: 'mcp.77.db.query', input: { connectionId: '77', sql: 'SELECT 1' } },
+            { id: 'http', title: '推送', tool: 'agent.http', input: { credentialSecret: 'OWNER_SECRET' } }
+        ]
+    };
+    const manifest = buildAgentWorkflowDependencyManifest(dagSpec);
+    assert.equal(manifest.summary.modelCount, 1);
+    assert.equal(manifest.models[0].nodes.length, 2);
+    assert.equal(manifest.summary.toolCount, 2);
+    assert.equal(manifest.tools.some(item => item.source === 'db.query#77'), true);
+    assert.equal(manifest.summary.credentialCount, 1);
+
+    const mapped = applyAgentWorkflowDependencyBindings(dagSpec, {
+        models: { OWNER_MODEL: '42' },
+        tools: { 'mcp.99.owner.lookup': 'sessions.recent' },
+        credentials: { OWNER_SECRET: '88' }
+    }, new Map([['88', { id: '88', slug: 'RECEIVER_SECRET' }]]));
+    assert.equal(mapped.nodes[0].input.model, '42');
+    assert.equal(mapped.nodes[1].input.modelId, '42');
+    assert.equal(mapped.nodes[2].tool, 'sessions.recent');
+    assert.equal(mapped.nodes[4].input.credentialSecret, 'PIVOT_BOUND_CREDENTIAL_88');
+    assert.equal(dagSpec.nodes[0].input.model, 'OWNER_MODEL');
+});
+
+test('接收者依赖映射固定到发布版本且凭据接口不返回明文', () => {
+    const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const ownerInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, 'hash', 'Binding Owner', 'QA', 'user', 'active')
+    `).run(`binding_owner_${suffix}`);
+    const receiverInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, 'hash', 'Binding Receiver', 'QA', 'user', 'active')
+    `).run(`binding_receiver_${suffix}`);
+    const owner = { id: Number(ownerInfo.lastInsertRowid), username: `binding_owner_${suffix}`, role: 'user', unit: 'QA' };
+    const receiver = { id: Number(receiverInfo.lastInsertRowid), username: `binding_receiver_${suffix}`, role: 'user', unit: 'QA' };
+    const modelInfo = sql(`
+        INSERT INTO models (user_id, name, url, model_name, status)
+        VALUES (?, 'Receiver Model', 'https://model.example/v1/chat/completions', ?, 'active')
+    `).run(receiver.id, `receiver-model-${suffix}`);
+    const credentialInfo = sql(`
+        INSERT INTO workflow_credentials (user_id, name, slug, secret_value, scope, allowed_units)
+        VALUES (?, 'Receiver Credential', ?, 'DO_NOT_RETURN_THIS_SECRET', 'personal', '')
+    `).run(receiver.id, `RECEIVER_${suffix.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`);
+    const dagSpec = {
+        nodes: [
+            { id: 'llm', title: '生成', tool: 'agent.llm', input: { model: `owner-model-${suffix}` } },
+            { id: 'http', title: '推送', tool: 'agent.http', input: { credentialSecret: 'OWNER_SECRET' } }
+        ]
+    };
+    const workflowInfo = sql(`
+        INSERT INTO agent_workflows (user_id, name, scope, allowed_units)
+        VALUES (?, 'Shared Binding Workflow', 'shared', 'QA')
+    `).run(owner.id);
+    const workflowId = Number(workflowInfo.lastInsertRowid);
+    const versionOneInfo = sql(`
+        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, created_by)
+        VALUES (?, 1, ?, ?)
+    `).run(workflowId, JSON.stringify(dagSpec), owner.id);
+    const versionOneId = Number(versionOneInfo.lastInsertRowid);
+    sql('UPDATE agent_workflows SET current_version_id = ?, published_version_id = ? WHERE id = ?')
+        .run(versionOneId, versionOneId, workflowId);
+    const resolved = {
+        workflow: { id: workflowId, user_id: owner.id, name: 'Shared Binding Workflow', is_owner: false },
+        version: 1,
+        version_id: versionOneId,
+        mode: 'published',
+        dagSpec
+    };
+
+    try {
+        const initial = getAgentWorkflowDependencyConfiguration(resolved, receiver);
+        assert.equal(initial.status, 'blocked');
+        assert.match(initial.blockers[0], /配置并确认/);
+        assert.throws(() => resolveAgentWorkflowDependencyBindings(resolved, receiver), /配置并确认/);
+
+        const saved = saveAgentWorkflowDependencyConfiguration(resolved, receiver, {
+            bindings: {
+                models: { [`owner-model-${suffix}`]: String(modelInfo.lastInsertRowid) },
+                credentials: { OWNER_SECRET: String(credentialInfo.lastInsertRowid) },
+                tools: {}
+            }
+        });
+        assert.equal(saved.status, 'ready');
+        assert.equal(JSON.stringify(saved).includes('DO_NOT_RETURN_THIS_SECRET'), false);
+
+        const bound = resolveAgentWorkflowDependencyBindings(resolved, receiver);
+        assert.equal(bound.dagSpec.nodes[0].input.model, String(modelInfo.lastInsertRowid));
+        assert.equal(bound.dagSpec.nodes[1].input.credentialSecret, `PIVOT_BOUND_CREDENTIAL_${credentialInfo.lastInsertRowid}`);
+
+        const versionTwoInfo = sql(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, created_by)
+            VALUES (?, 2, ?, ?)
+        `).run(workflowId, JSON.stringify(dagSpec), owner.id);
+        const stale = getAgentWorkflowDependencyConfiguration({
+            ...resolved,
+            version: 2,
+            version_id: Number(versionTwoInfo.lastInsertRowid)
+        }, receiver);
+        assert.equal(stale.stale, true);
+        assert.equal(stale.status, 'blocked');
+        assert.match(stale.blockers[0], /重新确认/);
+    } finally {
+        sql('DELETE FROM agent_workflows WHERE id = ?').run(workflowId);
+        sql('DELETE FROM workflow_credentials WHERE id = ?').run(credentialInfo.lastInsertRowid);
+        sql('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
+        sql('DELETE FROM users WHERE id IN (?, ?)').run(owner.id, receiver.id);
+    }
 });
 
 test('已删除资源对任何人都不可见', () => {

@@ -11,6 +11,7 @@
                     <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
                     <button id="automation-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-dag-save-btn" class="btn-primary hidden" type="button">保存</button>
+                    <button id="agent-workflow-dependency-btn" class="btn-secondary hidden" type="button">配置依赖</button>
                     <button id="agent-workflow-readonly-run-btn" class="btn-primary hidden" type="button">运行发布版</button>
                     <button id="agent-dag-back-btn" class="btn-secondary hidden" type="button">返回资产中心</button>
                     <button id="automation-close-btn" class="btn-secondary agent-modal-close" type="button">关闭</button>
@@ -171,23 +172,58 @@
                             </label>
                         </fieldset>
                         <section id="agent-workflow-share-units-section" class="agent-workflow-share-units-section hidden" aria-labelledby="agent-workflow-share-units-title">
+                            <label id="agent-workflow-share-all-label" class="agent-workflow-share-all hidden">
+                                <input id="agent-workflow-share-all" type="checkbox">
+                                <span>共享给全体成员</span>
+                            </label>
                             <div class="agent-workflow-share-units-head">
                                 <div>
                                     <strong id="agent-workflow-share-units-title">共享给哪些部门</strong>
                                     <span id="agent-workflow-share-units-hint">选择后仅这些部门的用户可见。</span>
                                 </div>
-                                <label id="agent-workflow-share-all-label" class="agent-workflow-share-all hidden">
-                                    <input id="agent-workflow-share-all" type="checkbox">
-                                    <span>全部单位</span>
-                                </label>
+                                <div class="agent-workflow-share-target-actions">
+                                    <button type="button" class="btn-secondary" data-agent-share-select="units">全选</button>
+                                    <button type="button" class="btn-secondary" data-agent-share-clear="units">全不选</button>
+                                </div>
                             </div>
                             <div id="agent-workflow-share-units-list" class="agent-workflow-share-units-list"></div>
+                            <div class="agent-workflow-share-units-head">
+                                <div>
+                                    <strong>共享给哪些个人</strong>
+                                    <span>可按账号精确共享，不受所在单位限制。</span>
+                                </div>
+                                <div class="agent-workflow-share-target-actions">
+                                    <button type="button" class="btn-secondary" data-agent-share-select="users">全选</button>
+                                    <button type="button" class="btn-secondary" data-agent-share-clear="users">全不选</button>
+                                </div>
+                            </div>
+                            <div id="agent-workflow-share-users-list" class="agent-workflow-share-units-list agent-workflow-share-users-list"></div>
                         </section>
                         <div id="agent-workflow-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
                     </div>
                     <div class="agent-workflow-share-footer">
                         <button id="agent-workflow-share-cancel-btn" class="btn-secondary" type="button">取消</button>
                         <button id="agent-workflow-share-save-btn" class="btn-primary" type="button">保存共享设置</button>
+                    </div>
+                </div>
+            </div>
+            <div id="agent-workflow-dependency-modal" class="modal-overlay hidden agent-workflow-dependency-modal-overlay" style="z-index: 1950;">
+                <div class="modal agent-workflow-dependency-modal" role="dialog" aria-modal="true" aria-labelledby="agent-workflow-dependency-title">
+                    <div class="agent-workflow-share-head">
+                        <div>
+                            <h3 id="agent-workflow-dependency-title">配置运行依赖</h3>
+                            <p id="agent-workflow-dependency-subtitle">为当前账号选择可用的等价模型、工具和受控凭据。</p>
+                        </div>
+                        <button id="agent-workflow-dependency-close-btn" class="btn-danger-outline" type="button" aria-label="关闭依赖配置" title="关闭依赖配置">关闭</button>
+                    </div>
+                    <div class="agent-workflow-dependency-body">
+                        <div id="agent-workflow-dependency-summary" class="agent-workflow-dependency-summary"></div>
+                        <div id="agent-workflow-dependency-list" class="agent-workflow-dependency-list"></div>
+                        <div id="agent-workflow-dependency-error" class="agent-workflow-share-error" role="alert" hidden></div>
+                    </div>
+                    <div class="agent-workflow-share-footer">
+                        <button id="agent-workflow-dependency-cancel-btn" class="btn-secondary" type="button">取消</button>
+                        <button id="agent-workflow-dependency-save-btn" class="btn-primary" type="button">确认依赖映射</button>
                     </div>
                 </div>
             </div>

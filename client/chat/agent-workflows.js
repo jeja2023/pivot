@@ -36,7 +36,14 @@ function automationWorkflowScopeText(workflow) {
     const units = Array.isArray(workflow.allowed_units)
         ? workflow.allowed_units.filter(Boolean)
         : [];
-    return units.length ? `共享 · ${units.join('、')}` : '共享 · 全单位';
+    const userIds = Array.isArray(workflow.allowed_user_ids)
+        ? workflow.allowed_user_ids.filter(Boolean)
+        : [];
+    if (!units.length && !userIds.length) return '共享 · 全体成员';
+    const targets = [];
+    if (units.length) targets.push(units.join('、'));
+    if (userIds.length) targets.push(`${userIds.length} 名个人`);
+    return `共享 · ${targets.join(' + ')}`;
 }
 
 function selectAutomationWorkflow(workflowId) {
@@ -103,6 +110,7 @@ function renderAutomationAssetCenter() {
                         <td>${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</td>
                         <td><div class="automation-row-actions">
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">编辑</button>` : `<button class="btn-secondary" type="button" data-automation-workflow-view="${agentEscapeAttr(workflow.id)}">查看</button>`}
+                            ${!workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-dependencies="${agentEscapeAttr(workflow.id)}">配置依赖</button>` : ''}
                             ${publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}">版本</button>` : ''}
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}" ${publishedVersion ? '' : 'disabled title="发布后可创建计划"'}>计划</button>` : ''}
@@ -149,11 +157,12 @@ function renderAutomationAssetCenter() {
         </div>
     ` : '<div class="automation-empty-state"><strong>暂无匹配的计划任务</strong><span>可为自主任务或已发布工作流创建手动、按间隔、每天或每周执行的计划。</span></div>');
 
-    workflowList.querySelectorAll('[data-automation-workflow-edit], [data-automation-workflow-view], [data-automation-workflow-run], [data-automation-workflow-versions], [data-automation-workflow-schedule], [data-automation-workflow-share]').forEach(button => {
+    workflowList.querySelectorAll('[data-automation-workflow-edit], [data-automation-workflow-view], [data-automation-workflow-run], [data-automation-workflow-dependencies], [data-automation-workflow-versions], [data-automation-workflow-schedule], [data-automation-workflow-share]').forEach(button => {
         button.addEventListener('click', async () => {
             const workflowId = button.dataset.automationWorkflowEdit
                 || button.dataset.automationWorkflowView
                 || button.dataset.automationWorkflowRun
+                || button.dataset.automationWorkflowDependencies
                 || button.dataset.automationWorkflowVersions
                 || button.dataset.automationWorkflowSchedule
                 || button.dataset.automationWorkflowShare;
@@ -161,6 +170,7 @@ function renderAutomationAssetCenter() {
             if (!workflow) return;
             if (button.dataset.automationWorkflowEdit) return showAutomationWorkflowEditor(workflowId);
             if (button.dataset.automationWorkflowView) return showAutomationWorkflowEditor(workflowId, { readOnly: true });
+            if (button.dataset.automationWorkflowDependencies) return window.Pivot.moduleApi('agent.automation').openWorkflowDependencies?.(workflowId);
             if (button.dataset.automationWorkflowRun) return window.runAgentWorkflowPublished?.();
             if (button.dataset.automationWorkflowVersions) return openAgentWorkflowVersions();
             if (button.dataset.automationWorkflowSchedule) return openAgentWorkflowSchedules();
@@ -200,6 +210,7 @@ function showAutomationAssetCenter(options = {}) {
     document.getElementById('automation-new-workflow-btn')?.classList.remove('hidden');
     document.getElementById('automation-refresh-btn')?.classList.remove('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.add('hidden');
+    document.getElementById('agent-workflow-dependency-btn')?.classList.add('hidden');
     document.getElementById('agent-workflow-readonly-run-btn')?.classList.add('hidden');
     document.getElementById('agent-dag-back-btn')?.classList.add('hidden');
     document.getElementById('agent-workflow-management-menu')?.classList.remove('hidden');
@@ -220,6 +231,7 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     document.getElementById('automation-new-schedule-btn')?.classList.add('hidden');
     document.getElementById('automation-refresh-btn')?.classList.add('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.toggle('hidden', agentWorkflowReadOnly);
+    document.getElementById('agent-workflow-dependency-btn')?.classList.toggle('hidden', !agentWorkflowReadOnly);
     document.getElementById('agent-workflow-readonly-run-btn')?.classList.toggle('hidden', !agentWorkflowReadOnly);
     document.getElementById('agent-dag-back-btn')?.classList.remove('hidden');
     document.getElementById('agent-workflow-management-menu')?.classList.toggle('hidden', agentWorkflowReadOnly);
@@ -306,6 +318,11 @@ window.bindAgentDagWorkbench = function() {
     if (readonlyRunBtn && readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun !== '1') {
         readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun = '1';
         readonlyRunBtn.addEventListener('click', () => window.runAgentWorkflowPublished?.());
+    }
+    const dependencyBtn = document.getElementById('agent-workflow-dependency-btn');
+    if (dependencyBtn && dependencyBtn.dataset.boundAgentWorkflowDependency !== '1') {
+        dependencyBtn.dataset.boundAgentWorkflowDependency = '1';
+        dependencyBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.automation').openWorkflowDependencies?.());
     }
     const backBtn = document.getElementById('agent-dag-back-btn');
     if (backBtn && backBtn.dataset.boundAgentDagBack !== '1') {
@@ -507,6 +524,7 @@ window.Pivot.exposeModule('agent.automation', {
     showWorkflowEditor: showAutomationWorkflowEditor,
     renameWorkflow: renameAgentWorkflow,
     openWorkflowShare: openAgentWorkflowShare,
+    openWorkflowDependencies: openAgentWorkflowDependencies,
     listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),
     currentWorkflowId: () => String(activeAgentWorkflowId || '')
 });

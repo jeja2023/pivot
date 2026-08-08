@@ -1,7 +1,6 @@
 const { db } = require('../db');
 const { sql } = require('../db/statements');
 const { getBeijingTimestamp } = require('../time');
-const { isAdmin } = require('../permissions');
 const {
     parseJsonObject,
     normalizeDagSpec,
@@ -14,8 +13,11 @@ const {
     canAccessSharedResource,
     normalizeShareScope,
     normalizeShareSettings,
-    parseAllowedUnits
+    parseAllowedUnits,
+    parseAllowedUserIds
 } = require('./unit-visibility');
+const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
+const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
 
 /**
  * 工作流访问判定：所有者可读写，共享工作流按部门范围只读可运行。
@@ -107,12 +109,17 @@ function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
     assertWorkflowLlmNodesConfigured(dagSpec);
     // 未显式传共享设置时沿用原值，保证旧客户端保存不会意外改变可见性
     const share = normalizeShareSettings(body, user, fallback);
+    const hasExplicitUserTargets = Object.prototype.hasOwnProperty.call(body, 'allowedUserIds')
+        || Object.prototype.hasOwnProperty.call(body, 'allowed_user_ids');
     return {
         name,
         description: String(body.description || fallback.description || '').trim().slice(0, 300),
         note: String(body.note || '').trim().slice(0, 300),
         scope: share.scope,
         allowedUnits: share.allowedUnits,
+        allowedUserIds: hasExplicitUserTargets
+            ? filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id })
+            : share.allowedUserIds,
         dagSpec
     };
 }
@@ -132,7 +139,7 @@ function formatAgentWorkflow(row, user = null) {
     const scope = normalizeShareScope(row.scope);
     const isOwner = user ? Number(row.user_id) === Number(user.id) : true;
     const publishedDagSpec = parseJsonObject(row.published_dag_spec || '') || { nodes: [] };
-    const visibleDagSpec = isOwner ? dagSpec : publishedDagSpec;
+    const visibleDagSpec = isOwner ? dagSpec : sanitizeSharedDagSpec(publishedDagSpec);
     const visibleVersion = isOwner
         ? Number(row.current_version || row.version || 0)
         : Number(row.published_version || 0);
@@ -143,6 +150,7 @@ function formatAgentWorkflow(row, user = null) {
         description: row.description || '',
         scope,
         allowed_units: parseAllowedUnits(row.allowed_units),
+        allowed_user_ids: parseAllowedUserIds(row.allowed_user_ids),
         is_owner: isOwner,
         // 共享给本人的工作流只能查看和运行，编辑入口由前端按此标志隐藏
         can_edit: isOwner,
@@ -162,6 +170,36 @@ function formatAgentWorkflow(row, user = null) {
     };
 }
 
+function sanitizeSharedDagSpec(dagSpec = {}) {
+    const next = parseJsonObject(JSON.stringify(dagSpec)) || { nodes: [] };
+    if (!Array.isArray(next.nodes)) return next;
+    next.nodes.forEach(node => {
+        if (String(node?.tool || '').trim() !== 'agent.http') return;
+        const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input) ? node.input : {};
+        if (input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)) {
+            input.headers = Object.fromEntries(Object.entries(input.headers).map(([key, value]) => {
+                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|private[-_]?key)/i.test(String(key));
+                return [key, sensitive && String(value ?? '').trim() ? '[需要配置受控凭据]' : value];
+            }));
+        }
+        const redactObject = value => {
+            if (!value || typeof value !== 'object') return value;
+            return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|private[-_]?key)/i.test(String(key));
+                if (sensitive && String(item ?? '').trim()) return [key, '[需要配置受控凭据]'];
+                return [key, item && typeof item === 'object' ? redactObject(item) : item];
+            }));
+        };
+        if (input.body && typeof input.body === 'object') input.body = redactObject(input.body);
+        if (input.data && typeof input.data === 'object') input.data = redactObject(input.data);
+        if (typeof input.url === 'string') {
+            input.url = input.url.replace(/([?&](?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|private[-_]?key)=)[^&]+/gi, '$1[需要配置受控凭据]');
+        }
+        node.input = input;
+    });
+    return next;
+}
+
 function getAgentWorkflowForUser(workflowId, user) {
     const row = workflowRepository.getWorkflowForUser(workflowId);
     if (!assertWorkflowAccess(row, user, false)) return null;
@@ -176,22 +214,7 @@ function listAgentWorkflows(user) {
 }
 
 function listAgentWorkflowShareOptions(user) {
-    const currentUnit = String(user?.unit || '').trim();
-    const admin = isAdmin(user);
-    const units = admin
-        ? sql(`
-            SELECT DISTINCT TRIM(unit) AS unit
-            FROM users
-            WHERE deleted_at IS NULL AND COALESCE(status, 'active') = 'active' AND TRIM(COALESCE(unit, '')) <> ''
-            ORDER BY TRIM(unit) COLLATE NOCASE ASC
-        `).all().map(row => String(row.unit || '').trim()).filter(Boolean)
-        : (currentUnit ? [currentUnit] : []);
-    return {
-        currentUnit,
-        units: [...new Set(units)],
-        canShareAll: admin,
-        canShareAcrossUnits: admin
-    };
+    return listShareTargets(user);
 }
 
 function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
@@ -239,6 +262,8 @@ function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
     return {
         workflow: {
             id: workflow.id,
+            user_id: workflow.user_id,
+            is_owner: isOwner,
             name: workflow.name,
             current_version: Number(workflow.current_version || 0),
             published_version: Number(workflow.published_version || 0),
@@ -256,9 +281,9 @@ function createAgentWorkflow(user, body = {}) {
     const now = getBeijingTimestamp();
     const create = db.transaction(() => {
         const workflowInfo = db.prepare(`
-            INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(user.id, data.name, data.description, data.scope, data.allowedUnits, now, now);
+            INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(user.id, data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, now);
         const workflowId = workflowInfo.lastInsertRowid;
         const versionInfo = db.prepare(`
             INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
@@ -277,7 +302,8 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
     const data = normalizeWorkflowPayload(body, current, user);
     const currentVersion = workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
     const shareUnchanged = normalizeShareScope(current.scope) === data.scope
-        && String(current.allowed_units || '') === data.allowedUnits;
+        && String(current.allowed_units || '') === data.allowedUnits
+        && String(current.allowed_user_ids || '') === data.allowedUserIds;
     const unchanged = currentVersion
         && shareUnchanged
         && String(current.name || '') === data.name
@@ -293,9 +319,9 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
         `).run(current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now);
         db.prepare(`
             UPDATE agent_workflows
-            SET name = ?, description = ?, scope = ?, allowed_units = ?, current_version_id = ?, updated_at = ?
+            SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, current_version_id = ?, updated_at = ?
             WHERE id = ?
-        `).run(data.name, data.description, data.scope, data.allowedUnits, versionInfo.lastInsertRowid, now, current.id);
+        `).run(data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.lastInsertRowid, now, current.id);
         return current.id;
     });
     return getAgentWorkflowForUser(update(), user);
@@ -305,15 +331,28 @@ function updateAgentWorkflowSharing(workflowId, user, body = {}) {
     const current = findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
     const share = normalizeShareSettings(body, user, current);
+    if (share.scope === 'shared' && current.published_version_id) {
+        const published = workflowRepository.getWorkflowVersionById(current.id, current.published_version_id);
+        const dagSpec = normalizeDagSpec(parseJsonObject(published?.dag_spec) || {});
+        const manifest = buildAgentWorkflowDependencyManifest(dagSpec);
+        if (manifest.sensitiveLiterals?.length) {
+            const err = new Error('该工作流包含直接写入 HTTP 请求的敏感凭据，请改用凭据引用或平台托管执行后再共享。');
+            err.status = 400;
+            err.details = { dependencies: { sensitiveLiterals: manifest.sensitiveLiterals } };
+            throw err;
+        }
+    }
+    share.allowedUserIds = filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
     const unchanged = normalizeShareScope(current.scope) === share.scope
-        && String(current.allowed_units || '') === share.allowedUnits;
+        && String(current.allowed_units || '') === share.allowedUnits
+        && String(current.allowed_user_ids || '') === share.allowedUserIds;
     if (unchanged) return getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
     const update = db.transaction(() => sql(`
         UPDATE agent_workflows
-        SET scope = ?, allowed_units = ?, updated_at = ?
+        SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(share.scope, share.allowedUnits, now, current.id, user.id));
+    `).run(share.scope, share.allowedUnits, share.allowedUserIds, now, current.id, user.id));
     if (update().changes === 0) return null;
     return getAgentWorkflowForUser(current.id, user);
 }
@@ -336,6 +375,15 @@ function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
         err.status = 400;
         err.details = { contracts: contractReport };
         throw err;
+    }
+    if (normalizeShareScope(findWorkflowRow(workflowId)?.scope) === 'shared') {
+        const manifest = buildAgentWorkflowDependencyManifest(resolved.dagSpec);
+        if (manifest.sensitiveLiterals?.length) {
+            const err = new Error('共享工作流不能发布直接写入 HTTP 请求的敏感凭据，请改用凭据引用或平台托管执行。');
+            err.status = 400;
+            err.details = { dependencies: { sensitiveLiterals: manifest.sensitiveLiterals } };
+            throw err;
+        }
     }
     const now = getBeijingTimestamp();
     db.prepare(`

@@ -4,6 +4,7 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { getRunnableModelForUser } = require('./models');
 const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./agent-workflows');
+const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { assertTemplateAccess } = require('./agent-templates');
 const { computeNextCronDate, isValidCronExpression } = require('./cron-expression');
 const {
@@ -199,6 +200,7 @@ function createAgentSchedule(user, body = {}) {
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
         const resolved = resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
         if (!resolved) throw invalid('请选择当前账号可用且已发布的工作流。', 404);
+        resolveAgentWorkflowDependencyBindings(resolved, user);
     }
     const now = getBeijingTimestamp();
     const info = db.prepare(`
@@ -227,6 +229,7 @@ function updateAgentSchedule(scheduleId, user, body = {}) {
     if (data.runConfig.runMode === 'dag' && data.runConfig.workflowId) {
         const resolved = resolveAgentWorkflowVersion(data.runConfig.workflowId, user, data.runConfig.workflowVersion || 'current');
         if (!resolved) throw invalid('请选择当前账号可用且已发布的工作流。', 404);
+        resolveAgentWorkflowDependencyBindings(resolved, user);
     }
     const now = getBeijingTimestamp();
     db.prepare(`

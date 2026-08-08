@@ -4,11 +4,13 @@
 
 - Status: Active
 - Last refreshed: 2026-08-07
-- Release baseline: v0.0.256
+- Release baseline: v0.0.257
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。
   - `client/chat/partials/workspaces/agent-dag.html`、`client/chat/agent-workflow-library.js`：工作流共享入口、范围配置和只读接收体验。
+  - `server/services/unit-visibility.js`、`server/services/share-targets.js`、`server/services/agent-workflow-dependencies.js`：单位/个人共享判定、候选目标和接收者依赖绑定规则。
+  - `tests/recipient-permissions-http.test.js`、`tests/e2e/workflow-version.spec.js`：接收者 HTTP 权限和发布版本失效回归证据。
   - `使用帮助.md`：普通用户在会话、应用、任务、自动化、知识库、工具库和个人设置中的实际使用路径。
   - `开发规范.md`：工程落地规则、UI 复用硬约束、测试和门禁。
   - `docs/公文写作设计方案.md`：公文写作模块设计。
@@ -19,8 +21,10 @@
 
 ## Shared resource boundaries
 
-- Knowledge collections and database MCP connections may be shared with an explicit unit allowlist; all other assets remain personal by default.
-- Recipients have read-only access to shared knowledge and governed database read tools. Ownership, mutation, refresh, diagnosis and secret management stay with the owner or administrator.
+- Knowledge collections, database MCP connections and published agent workflows may be shared with an explicit unit or individual-user allowlist; all other assets remain personal by default.
+- Recipients have read-only access to shared knowledge, governed database read tools and published workflow definitions. Ownership, mutation, refresh, diagnosis, version management and secret management stay with the owner or administrator.
+- Shared workflow execution resolves models, tools and credentials against the recipient account. Bindings are pinned to a published version, become stale after republishing, and must be reconfirmed before execution; credential secrets never enter the recipient payload.
+- Every shared workflow response must redact direct HTTP credentials, and publishing or sharing a workflow containing sensitive HTTP literals is rejected.
 - Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
 
 ## Brand

@@ -403,9 +403,14 @@ async function openKnowledgeCollectionShareModal() {
 
     const current = data.data?.collection || collection;
     const units = Array.isArray(data.data?.units) ? data.data.units.filter(Boolean) : [];
+    const users = Array.isArray(data.data?.users) ? data.data.users.filter(item => Number(item?.id) > 0) : [];
     const allowed = new Set(String(current.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean));
+    const allowedUserIds = new Set((Array.isArray(current.allowed_user_ids)
+        ? current.allowed_user_ids
+        : String(current.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
     const isShared = current.scope === 'shared';
-    const isAll = isShared && allowed.size === 0;
+    const canShareAll = data.data?.canShareAll === true;
+    const isAll = isShared && canShareAll && allowed.size === 0 && allowedUserIds.size === 0;
     const currentUnit = String(data.data?.currentUnit || '').trim();
 
     PivotSafeHtml.setHtml(modal, `
@@ -413,7 +418,7 @@ async function openKnowledgeCollectionShareModal() {
             <div class="agent-workflow-share-head">
                 <div>
                     <h3 id="knowledge-share-title">分享专题库</h3>
-                    <p id="knowledge-share-subtitle">设置哪些单位成员可以只读检索与问答该专题库。</p>
+                    <p id="knowledge-share-subtitle">设置哪些单位或个人可以只读检索与问答该专题库。</p>
                 </div>
                 <button type="button" class="btn-danger-outline" data-knowledge-share-close>关闭</button>
             </div>
@@ -434,25 +439,29 @@ async function openKnowledgeCollectionShareModal() {
                     <label class="agent-workflow-share-choice">
                         <input type="radio" name="knowledge-share-scope" value="shared" ${isShared ? 'checked' : ''}>
                         <span>
-                            <strong>共享给单位成员</strong>
-                            <small>选定单位成员可以以只读方式检索、查看详情和知识图谱。</small>
+                            <strong>共享给单位或个人</strong>
+                            <small>选定成员可以以只读方式检索、查看详情和知识图谱。</small>
                         </span>
                     </label>
                 </fieldset>
                 <section id="knowledge-share-units-section" class="agent-workflow-share-units-section ${isShared ? '' : 'hidden'}">
+                    <label id="knowledge-share-all-label" class="agent-workflow-share-all ${canShareAll ? '' : 'hidden'}">
+                        <input id="knowledge-share-all" type="checkbox" ${isAll ? 'checked' : ''} ${canShareAll ? '' : 'disabled'}>
+                        <span>共享给全体成员</span>
+                    </label>
                     <div class="agent-workflow-share-units-head">
                         <div>
                             <strong>共享给哪些单位</strong>
                             <span>选择后仅这些单位的成员可以使用该专题库。</span>
                         </div>
-                        <label class="agent-workflow-share-all">
-                            <input id="knowledge-share-all" type="checkbox" ${isAll ? 'checked' : ''}>
-                            <span>全部单位</span>
-                        </label>
+                        <div class="agent-workflow-share-target-actions">
+                            <button type="button" class="btn-secondary" data-knowledge-share-select="units">全选</button>
+                            <button type="button" class="btn-secondary" data-knowledge-share-clear="units">全不选</button>
+                        </div>
                     </div>
                     <div class="agent-workflow-share-units-list">
                         ${units.map(unit => {
-        const checked = isShared && (isAll || allowed.has(unit));
+        const checked = isShared && !isAll && allowed.has(unit);
         const isCurrent = unit === currentUnit;
         return `
                                 <label class="agent-workflow-share-unit">
@@ -464,6 +473,32 @@ async function openKnowledgeCollectionShareModal() {
                                 </label>
                             `;
     }).join('') || '<span class="agent-workflow-share-empty">暂无可用单位信息</span>'}
+                    </div>
+                    <div class="agent-workflow-share-units-head">
+                        <div>
+                            <strong>共享给哪些个人</strong>
+                            <span>可按账号精确共享，不受所在单位限制。</span>
+                        </div>
+                        <div class="agent-workflow-share-target-actions">
+                            <button type="button" class="btn-secondary" data-knowledge-share-select="users">全选</button>
+                            <button type="button" class="btn-secondary" data-knowledge-share-clear="users">全不选</button>
+                        </div>
+                    </div>
+                    <div class="agent-workflow-share-units-list agent-workflow-share-users-list">
+                        ${users.map(target => {
+        const id = Number(target.id);
+        const displayName = target.nickname || target.username || `用户 ${id}`;
+        const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
+        return `
+                                <label class="agent-workflow-share-unit">
+                                    <input type="checkbox" name="knowledge-share-user" value="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
+                                    <span>
+                                        <strong>${escapeRagHtml(displayName)}</strong>
+                                        <small>${escapeRagHtml(detail)}</small>
+                                    </span>
+                                </label>
+                            `;
+    }).join('') || '<span class="agent-workflow-share-empty">暂无可共享的个人账号</span>'}
                     </div>
                 </section>
                 <div id="knowledge-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
@@ -494,30 +529,50 @@ async function openKnowledgeCollectionShareModal() {
             const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value;
             const sec = modal.querySelector('#knowledge-share-units-section');
             if (sec) sec.classList.toggle('hidden', scopeVal !== 'shared');
+            setKnowledgeTargetsEnabled();
             setKnowledgeError('');
         });
     });
 
     const allChk = modal.querySelector('#knowledge-share-all');
-    if (allChk) {
-        allChk.addEventListener('change', (e) => {
-            const checked = e.target.checked;
-            modal.querySelectorAll('input[name="knowledge-share-unit"]').forEach(chk => chk.checked = checked);
+    const setKnowledgeTargetsEnabled = () => {
+        const enabled = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value === 'shared';
+        const allChecked = allChk?.checked === true && allChk?.disabled !== true;
+        const disabled = !enabled || allChecked;
+        modal.querySelectorAll('input[name="knowledge-share-unit"], input[name="knowledge-share-user"], [data-knowledge-share-select], [data-knowledge-share-clear]')
+            .forEach(control => control.disabled = disabled);
+    };
+    allChk?.addEventListener('change', () => {
+        setKnowledgeTargetsEnabled();
+        setKnowledgeError('');
+    });
+    modal.querySelectorAll('[data-knowledge-share-select], [data-knowledge-share-clear]').forEach(button => {
+        button.addEventListener('click', () => {
+            const group = button.dataset.knowledgeShareSelect || button.dataset.knowledgeShareClear;
+            const checked = Boolean(button.dataset.knowledgeShareSelect);
+            const name = group === 'users' ? 'knowledge-share-user' : 'knowledge-share-unit';
+            modal.querySelectorAll(`input[name="${name}"]`).forEach(input => input.checked = checked);
+            setKnowledgeError('');
         });
-    }
+    });
+    setKnowledgeTargetsEnabled();
 
     const saveBtn = modal.querySelector('[data-knowledge-share-save]');
     if (saveBtn) {
         saveBtn.addEventListener('click', async () => {
             const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value || 'personal';
             const enabled = scopeVal === 'shared';
-            const allChecked = modal.querySelector('#knowledge-share-all')?.checked === true;
+            const allCheckbox = modal.querySelector('#knowledge-share-all');
+            const allChecked = allCheckbox?.checked === true && allCheckbox?.disabled !== true;
             const allowedUnits = enabled && !allChecked
                 ? [...modal.querySelectorAll('input[name="knowledge-share-unit"]:checked')].map(input => input.value).filter(Boolean)
                 : [];
+            const allowedUserIds = enabled && !allChecked
+                ? [...modal.querySelectorAll('input[name="knowledge-share-user"]:checked')].map(input => Number(input.value)).filter(Number.isSafeInteger)
+                : [];
 
-            if (enabled && !allChecked && !allowedUnits.length) {
-                setKnowledgeError('共享时至少选择一个单位，或选择全部单位。');
+            if (enabled && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
+                setKnowledgeError('共享时至少选择一个单位或一个个人，也可以由管理员共享给全体成员。');
                 return;
             }
 
@@ -528,7 +583,7 @@ async function openKnowledgeCollectionShareModal() {
                 const saveRes = await apiFetch(`${API_BASE}/rag/collections/${encodeURIComponent(collectionId)}/sharing`, {
                     method: 'PATCH',
                     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ scope: enabled ? 'shared' : 'personal', allowedUnits })
+                    body: JSON.stringify({ scope: enabled ? 'shared' : 'personal', allowedUnits, allowedUserIds })
                 });
                 const saveData = await saveRes.json().catch(() => ({}));
                 if (!saveRes.ok) throw new Error(saveData.error || '共享设置保存失败');

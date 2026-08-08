@@ -7,6 +7,7 @@ const { db } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./agent-workflows');
+const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { getBuiltinConfigForServer, isPathInside } = require('./builtin-mcp-common');
 
 const TRIGGER_TYPES = new Set(['webhook', 'file', 'database']);
@@ -177,7 +178,7 @@ function listWorkflowTriggers(user) {
 function assertTriggerWorkflowAccess(workflowId, user) {
     const resolved = resolveAgentWorkflowVersion(workflowId, user, 'published');
     if (!resolved) throw invalid('工作流不存在、无权访问或尚未发布。', 404);
-    return resolved;
+    return resolveAgentWorkflowDependencyBindings(resolved, user);
 }
 
 function createWorkflowTrigger(user, body = {}) {

@@ -182,6 +182,26 @@
     cursor: pointer;
 }
 
+.agent-workflow-share-target-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-workflow-share-target-actions .btn-secondary {
+    min-width: 52px;
+    height: 28px;
+    padding: 0 9px;
+    border-radius: 7px;
+    font-size: 0.68rem;
+}
+
+.agent-workflow-share-target-actions .btn-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
 .agent-workflow-share-units-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -189,6 +209,10 @@
     max-height: 190px;
     overflow: auto;
     padding: 2px;
+}
+
+.agent-workflow-share-users-list {
+    max-height: 230px;
 }
 
 .agent-workflow-share-unit {
@@ -257,6 +281,141 @@ body.dark-mode .agent-workflow-share-unit:has(input:checked),
     background: rgba(6, 78, 59, 0.3);
 }
 
+.agent-workflow-dependency-modal-overlay {
+    align-items: center;
+    justify-content: center;
+}
+
+.agent-workflow-dependency-modal {
+    display: flex;
+    width: min(760px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 40px));
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+    text-align: left;
+}
+
+.agent-workflow-dependency-body {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 14px;
+    overflow: auto;
+    padding: 16px;
+}
+
+.agent-workflow-dependency-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 11px 12px;
+    border: 1px solid rgba(5, 150, 105, 0.24);
+    border-radius: 8px;
+    background: #ecfdf5;
+}
+
+.agent-workflow-dependency-summary strong {
+    color: #065f46;
+    font-size: 0.82rem;
+}
+
+.agent-workflow-dependency-summary span {
+    color: #047857;
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.agent-workflow-dependency-list,
+.agent-workflow-dependency-group {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.agent-workflow-dependency-group + .agent-workflow-dependency-group {
+    padding-top: 13px;
+    border-top: 1px solid var(--border);
+}
+
+.agent-workflow-dependency-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.agent-workflow-dependency-group-head strong {
+    color: var(--text-main);
+    font-size: 0.78rem;
+}
+
+.agent-workflow-dependency-group-head span {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.agent-workflow-dependency-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.7fr) minmax(260px, 1.3fr);
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.agent-workflow-dependency-source {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.agent-workflow-dependency-source strong,
+.agent-workflow-dependency-source small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-dependency-source strong {
+    color: var(--text-main);
+    font-size: 0.74rem;
+}
+
+.agent-workflow-dependency-source small,
+.agent-workflow-dependency-empty {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.agent-workflow-dependency-row .form-input {
+    width: 100%;
+    min-width: 0;
+}
+
+.agent-workflow-dependency-empty {
+    padding: 18px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    text-align: center;
+}
+
+body.dark-mode .agent-workflow-dependency-summary,
+.dark-mode .agent-workflow-dependency-summary {
+    border-color: rgba(52, 211, 153, 0.25);
+    background: rgba(6, 78, 59, 0.26);
+}
+
+body.dark-mode .agent-workflow-dependency-summary strong,
+.dark-mode .agent-workflow-dependency-summary strong,
+body.dark-mode .agent-workflow-dependency-summary span,
+.dark-mode .agent-workflow-dependency-summary span {
+    color: #a7f3d0;
+}
+
 @media (max-width: 560px) {
     .agent-workflow-share-modal {
         width: calc(100vw - 20px);
@@ -274,6 +433,24 @@ body.dark-mode .agent-workflow-share-unit:has(input:checked),
 
     .agent-workflow-share-footer {
         padding: 12px;
+    }
+
+    .agent-workflow-dependency-modal {
+        width: calc(100vw - 20px);
+        max-height: calc(100vh - 20px);
+    }
+
+    .agent-workflow-dependency-body {
+        padding: 12px;
+    }
+
+    .agent-workflow-dependency-row {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-workflow-dependency-source strong,
+    .agent-workflow-dependency-source small {
+        white-space: normal;
     }
 }
 

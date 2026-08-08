@@ -1,6 +1,7 @@
 const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
 const { listDagNodes, listSteps } = require('./agent-runs');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
@@ -313,8 +314,9 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
     if (!workflowId) throw new Error('子工作流节点需要选择有效的工作流。');
     if (stack.includes(workflowId)) throw new Error(`检测到子工作流循环调用：${[...stack, workflowId].join(' -> ')}`);
     if (stack.length >= 3) throw new Error('子工作流最多允许嵌套 3 层。');
-    const resolved = resolveAgentWorkflowVersion(workflowId, user, input.version || 'published');
-    if (!resolved) throw new Error(`子工作流不存在或无权访问：${workflowId}`);
+    const sourceWorkflow = resolveAgentWorkflowVersion(workflowId, user, input.version || 'published');
+    if (!sourceWorkflow) throw new Error(`子工作流不存在或无权访问：${workflowId}`);
+    const resolved = resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
     const dagSpec = normalizeDagSpec(resolved.dagSpec);
     const topology = inspectDagTopology(dagSpec);
     if (topology.blockers.length) throw new Error(`子工作流结构无效：${topology.blockers[0]}`);

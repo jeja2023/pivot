@@ -110,6 +110,7 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
             c.name AS collection_name,
             c.scope AS collection_scope,
             c.allowed_units AS collection_allowed_units,
+            c.allowed_user_ids AS collection_allowed_user_ids,
             COALESCE((
                 SELECT GROUP_CONCAT(t.tag, ',')
                 FROM knowledge_doc_tags t
@@ -127,7 +128,8 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
         shared_readable: canReadKnowledgeResource({
             user_id: doc.user_id,
             scope: doc.collection_scope,
-            allowed_units: doc.collection_allowed_units
+            allowed_units: doc.collection_allowed_units,
+            allowed_user_ids: doc.collection_allowed_user_ids
         }, req.user)
     }));
     res.json({ data: docs, total, page, limit });
@@ -151,7 +153,12 @@ ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
     try {
         const collection = updateKnowledgeCollectionSharing({ collectionId: req.params.id, user: req.user, body: req.body || {} });
         if (!collection) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
-        auditRagAction(req, '知识库集合共享设置更新', { collectionId: collection.id, scope: collection.scope, allowedUnits: collection.allowed_units });
+        auditRagAction(req, '知识库集合共享设置更新', {
+            collectionId: collection.id,
+            scope: collection.scope,
+            allowedUnits: collection.allowed_units,
+            allowedUserIds: collection.allowed_user_ids
+        });
         return res.json({ success: true, collection });
     } catch (error) {
         return res.status(error.status || 400).json({ error: error.message });
@@ -358,6 +365,7 @@ ragRouter.put('/docs/:id/tags', authMiddleware, asyncHandler(async (req, res) =>
 
 ragRouter.delete('/docs/:id', authMiddleware, (req, res) => {
     const deleted = deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
+    if (!deleted) return res.status(404).json({ error: 'Knowledge document not found or not owned' });
     auditRagAction(req, '知识库文档删除', { docId: req.params.id, deleted });
     req.log?.info({ docId: req.params.id, deleted }, 'RAG 文档删除');
     res.json({ success: true });

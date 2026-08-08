@@ -138,6 +138,10 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
         const preflight = await preflightAgentPayload(payload);
         if (preflight.status === 'blocked') {
             setAgentWorkflowRunConsoleStatus('预检未通过，请先处理阻断项。', 'error');
+            if (payload.workflowId && preflight.dependencies?.binding?.status === 'blocked') {
+                await window.Pivot.moduleApi('agent.automation').openWorkflowDependencies?.(payload.workflowId);
+                return null;
+            }
             showToast('工作流预检未通过，请先处理阻断项', 'error');
             return null;
         }
