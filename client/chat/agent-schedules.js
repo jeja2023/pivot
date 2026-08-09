@@ -163,7 +163,7 @@ function ensureAgentScheduleEditorModal() {
     document.body.appendChild(modal);
     const close = () => modal.classList.add('hidden');
     modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('#agent-schedule-editor-close, #agent-schedule-editor-cancel')) close();
+        if (event.target.closest('#agent-schedule-editor-close, #agent-schedule-editor-cancel')) close();
     });
     modal.querySelector('#agent-schedule-editor-source')?.addEventListener('change', syncAgentScheduleEditorUi);
     modal.querySelector('#agent-schedule-editor-frequency')?.addEventListener('change', syncAgentScheduleEditorUi);

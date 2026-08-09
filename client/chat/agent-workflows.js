@@ -505,9 +505,6 @@ window.bindAgentDagWorkbench = function() {
     const jsonModal = document.getElementById('agent-dag-json-modal');
     if (jsonModal && jsonModal.dataset.boundAgentDagJsonOverlay !== '1') {
         jsonModal.dataset.boundAgentDagJsonOverlay = '1';
-        jsonModal.addEventListener('click', event => {
-            if (event.target === jsonModal) closeAgentDagJsonModal();
-        });
     }
     // 运行时输入面板刷新按钮
     const inputsRefreshBtn = document.getElementById('agent-dag-inputs-refresh-btn');

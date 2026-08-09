@@ -357,7 +357,7 @@ function ensureAgentEvalEditorModal() {
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('[data-agent-eval-editor-close]')) modal.classList.add('hidden');
+        if (event.target.closest('[data-agent-eval-editor-close]')) modal.classList.add('hidden');
     });
     modal.querySelector('#agent-eval-add-case').addEventListener('click', () => {
         collectAgentEvalEditorCases(false);

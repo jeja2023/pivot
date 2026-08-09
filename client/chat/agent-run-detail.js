@@ -228,7 +228,7 @@ document.addEventListener('click', async (event) => {
         if (runId) openAgentTaskEditModal(runId);
         return;
     }
-    if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn') || event.target.matches('#agent-task-edit-modal')) {
+    if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn')) {
         closeAgentTaskEditModal();
         return;
     }
@@ -530,7 +530,7 @@ function ensureAgentAuditModal() {
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
-        if (event.target === modal || event.target.closest('#agent-audit-close-btn')) {
+        if (event.target.closest('#agent-audit-close-btn')) {
             modal.classList.add('hidden');
         }
     });

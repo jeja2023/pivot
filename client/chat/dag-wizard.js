@@ -380,6 +380,7 @@ function createDagWizardController(ctx) {
                 );
             };
 
+
             const resetWizard = (draftInput = {}) => {
                 syncFormWithDraft(draftInput);
                 queryBuilder?.hydrate(draftInput);
@@ -400,16 +401,11 @@ function createDagWizardController(ctx) {
                 syncAssistConnection();
                 queryBuilder?.onConnectionChange();
             });
-            modal.querySelector('[data-pivot-dag-assist-schema]')?.addEventListener('input', event => syncAssistValue('schema', event.target.value));
-            modal.querySelector('[data-pivot-dag-assist-table]')?.addEventListener('input', event => syncAssistValue('table', event.target.value));
             modal.querySelector('[data-pivot-dag-assist-column]')?.addEventListener('input', event => syncAssistValue('groupBy', event.target.value));
             modal.querySelector('[data-pivot-dag-wizard-close]')?.addEventListener('click', closeWizard);
             modal.querySelector('[data-pivot-dag-wizard-apply]')?.addEventListener('click', applyWizard);
             modal.querySelector('[data-pivot-dag-wizard-clear]')?.addEventListener('click', () => resetWizard({}));
             modal.querySelector('[data-pivot-dag-wizard-template]')?.addEventListener('click', () => resetWizard(templateInput));
-            modal.addEventListener('click', event => {
-                if (event.target === modal) closeWizard();
-            }, { once: true });
 
             syncFormWithDraft(initialInput);
             modal.classList.remove('hidden');
@@ -417,11 +413,9 @@ function createDagWizardController(ctx) {
 
         const { openStatsChartWizard } = createDagWizardStatsController(ctx);
 
-
         return {
             renderInputSummary,
             openNodeInputWizard,
             openStatsChartWizard
         };
     }
-

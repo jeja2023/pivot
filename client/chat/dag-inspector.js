@@ -235,9 +235,6 @@ function createDagInspectorController(ctx) {
         modal.querySelectorAll('[data-pivot-dag-json-token]').forEach(btn => {
             btn.addEventListener('click', () => insertToken(btn.dataset.pivotDagJsonToken || ''));
         });
-        modal.addEventListener('click', event => {
-            if (event.target === modal) closeJson();
-        }, { once: true });
         modal.classList.remove('hidden');
         requestAnimationFrame(() => textareaEl?.focus?.({ preventScroll: true }));
     };
@@ -533,7 +530,6 @@ function createDagInspectorController(ctx) {
             close();
             window.showToast?.('节点契约已更新', 'success');
         });
-        modal.addEventListener('click', event => { if (event.target === modal) close(); }, { once: true });
         modal.classList.remove('hidden');
         requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
     };

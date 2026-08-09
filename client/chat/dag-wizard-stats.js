@@ -234,9 +234,6 @@ function createDagWizardStatsController(ctx) {
         modal.querySelector('[data-stats-close]')?.addEventListener('click', () => modal.classList.add('hidden'));
         if (modal.dataset.boundStatsWizardOverlay !== '1') {
             modal.dataset.boundStatsWizardOverlay = '1';
-            modal.addEventListener('click', event => {
-                if (event.target === modal) modal.classList.add('hidden');
-            });
         }
         modal.querySelector('[data-stats-field="database"]')?.addEventListener('change', loadTables);
         modal.querySelector('[data-stats-field="table"]')?.addEventListener('change', loadColumns);

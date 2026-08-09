@@ -13,6 +13,7 @@ async function loadAgentArtifacts() {
             <strong>${agentEscape(item.title)}</strong>
             <span>版本 ${Number(item.current_version || 1)} · 共 ${Number(item.version_count || 1)} 版 · ${agentEscape(formatDateToCN(item.updated_at || item.created_at))}</span>
         </button>
+        </button>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无沉淀结果</div>');
     list.querySelectorAll('[data-agent-artifact-id]').forEach(btn => {
         btn.addEventListener('click', () => window.openAgentArtifactVersions(btn.dataset.agentArtifactId));
@@ -51,7 +52,7 @@ function ensureAgentArtifactModal() {
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('#agent-artifact-close-btn')) {
+        if (event.target.closest('#agent-artifact-close-btn')) {
             modal.classList.add('hidden');
         }
     });

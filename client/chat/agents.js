@@ -111,9 +111,6 @@ window.setTaskComposerOpen = function(isOpen = true) {
     if (!modal) return;
     if (modal.dataset.boundTaskEditorOverlay !== '1') {
         modal.dataset.boundTaskEditorOverlay = '1';
-        modal.addEventListener('click', event => {
-            if (event.target === modal) window.setTaskComposerOpen(false);
-        });
     }
     const wasOpen = !modal.classList.contains('hidden');
     modal.classList.toggle('hidden', !isOpen);
@@ -313,9 +310,6 @@ window.bindAgentConfigModal = function() {
     const modal = document.getElementById('agent-config-modal');
     if (modal && modal.dataset.boundAgentConfigOverlay !== '1') {
         modal.dataset.boundAgentConfigOverlay = '1';
-        modal.addEventListener('click', event => {
-            if (event.target === modal) closeAgentConfigModal();
-        });
     }
     const runDetailClose = document.getElementById('agent-run-detail-close');
     if (runDetailClose && runDetailClose.dataset.boundAgentRunDetailClose !== '1') {
@@ -325,8 +319,5 @@ window.bindAgentConfigModal = function() {
     const runDetailModal = document.getElementById('agent-run-detail-modal');
     if (runDetailModal && runDetailModal.dataset.boundAgentRunDetailOverlay !== '1') {
         runDetailModal.dataset.boundAgentRunDetailOverlay = '1';
-        runDetailModal.addEventListener('click', event => {
-            if (event.target === runDetailModal) closeAgentRunDetailModal();
-        });
     }
 };

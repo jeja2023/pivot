@@ -109,7 +109,7 @@ function ensureAgentWorkflowScheduleModal() {
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('#agent-workflow-schedule-close')) {
+        if (event.target.closest('#agent-workflow-schedule-close')) {
             modal.classList.add('hidden');
         }
     });

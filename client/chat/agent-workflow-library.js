@@ -227,9 +227,6 @@ function bindAgentWorkflowMetadataModal() {
     document.getElementById('agent-workflow-metadata-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-metadata-cancel-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-metadata-save-btn')?.addEventListener('click', saveAgentWorkflowMetadata);
-    modal.addEventListener('click', event => {
-        if (event.target === modal) close();
-    });
     modal.addEventListener('input', () => setAgentWorkflowMetadataError(''));
 }
 
@@ -401,9 +398,6 @@ function bindAgentWorkflowShareModal() {
     const close = () => modal.classList.add('hidden');
     document.getElementById('agent-workflow-share-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-share-cancel-btn')?.addEventListener('click', close);
-    modal.addEventListener('click', event => {
-        if (event.target === modal) close();
-    });
     modal.querySelectorAll('input[name="agent-workflow-share-scope"]').forEach(input => {
         input.addEventListener('change', () => {
             const workflow = agentWorkflowsCache.find(item => String(item.id) === String(agentWorkflowShareState.workflowId));
@@ -605,9 +599,6 @@ function bindAgentWorkflowDependencyModal() {
     const close = () => modal.classList.add('hidden');
     document.getElementById('agent-workflow-dependency-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-dependency-cancel-btn')?.addEventListener('click', close);
-    modal.addEventListener('click', event => {
-        if (event.target === modal) close();
-    });
     modal.addEventListener('change', event => {
         if (event.target?.matches?.('[data-agent-dependency-kind]')) setAgentWorkflowDependencyError('');
     });

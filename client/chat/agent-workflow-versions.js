@@ -22,7 +22,7 @@ function ensureAgentWorkflowVersionsModal() {
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('#agent-workflow-versions-close-btn')) {
+        if (event.target.closest('#agent-workflow-versions-close-btn')) {
             modal.classList.add('hidden');
         }
     });
