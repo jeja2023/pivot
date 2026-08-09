@@ -21,7 +21,9 @@ function getAgentRunPayload(goalOverride = '') {
     const rawRunMode = document.getElementById('agent-run-mode')?.value || 'standard';
     const runMode = ['standard', 'deep', 'audit'].includes(rawRunMode) ? rawRunMode : 'standard';
     const typedGoal = goalOverride || document.getElementById('agent-goal-input')?.value.trim();
+    const typedTitle = document.getElementById('agent-title-input')?.value.trim() || '';
     const payload = {
+        title: typedTitle,
         goal: typedGoal,
         modelId: document.getElementById('agent-model-select')?.value,
         maxSteps: document.getElementById('agent-max-steps')?.value || 0,
@@ -54,6 +56,8 @@ window.createAgentRun = async function() {
     if (!res.ok) return showToast(data.error || '任务创建失败', 'error');
     showToast('自主任务已入队', 'success');
     document.getElementById('agent-goal-input').value = '';
+    const titleInput = document.getElementById('agent-title-input');
+    if (titleInput) titleInput.value = '';
     await Promise.all([loadAgentRuns(1), loadAgentNotifications()]);
     window.setTaskComposerOpen?.(false);
     await window.openAgentRun(data.run.id);

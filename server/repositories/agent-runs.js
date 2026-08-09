@@ -180,9 +180,24 @@ function listDagNodes(runId) {
     }));
 }
 
+function updateAgentRunTitleAndGoal(runId, userId, { title, goal } = {}) {
+    const run = getRunForUser(runId, userId);
+    if (!run) return null;
+    const now = new Date().toISOString();
+    const newTitle = title !== undefined ? String(title || '').trim().slice(0, 200) : run.title;
+    const newGoal = goal !== undefined ? String(goal || '').trim().slice(0, 12000) : run.goal;
+    sql(`
+        UPDATE agent_runs
+        SET title = ?, goal = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(newTitle, newGoal, now, runId, userId);
+    return getRunForUser(runId, userId);
+}
+
 module.exports = {
     getRunById,
     getRunForUser,
+    updateAgentRunTitleAndGoal,
     listRuns,
     listDeletedRunsForAdmin,
     listSteps,

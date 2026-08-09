@@ -152,24 +152,7 @@ const formatAgentAuditDate = (dateStr) => {
 };
 
 function buildAgentRunTaskTooltip(run, title, mode, counts = {}) {
-    const stepCount = Number(counts.stepCount || 0);
-    const toolCount = Number(counts.toolCount || 0);
-    const errorCount = Number(counts.errorCount || 0);
-    const goal = String(run?.goal || '').trim();
-    const lines = [
-        `任务：${title || '-'}`,
-        `状态：${agentStatusLabel(run?.status)}`,
-        `创建时间：${formatAgentAuditDate(run?.created_at)}`,
-        `开始时间：${formatAgentAuditDate(run?.started_at)}`,
-        `完成时间：${formatAgentAuditDate(run?.completed_at)}`,
-        `模型：${run?.model_name || '-'}`,
-        `模式：${mode || '-'}`,
-        `执行记录：${stepCount}`,
-        `工具数：${toolCount}`,
-        `错误数：${errorCount}`
-    ];
-    if (goal) lines.push(`目标：${goal}`);
-    return lines.join('\n');
+    return String(title || '').trim() || '-';
 }
 
 function agentShortText(value, max = 260) {

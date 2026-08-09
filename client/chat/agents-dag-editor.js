@@ -192,17 +192,38 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             });
         };
 
+        const nodeBounds = () => {
+            if (!spec.nodes || !spec.nodes.length) {
+                return { minX: 0, minY: 0, maxX: MIN_CONTENT_WIDTH, maxY: MIN_CONTENT_HEIGHT, width: MIN_CONTENT_WIDTH, height: MIN_CONTENT_HEIGHT };
+            }
+            const minX = Math.min(...spec.nodes.map(n => Number.isFinite(n._x) ? n._x : 0));
+            const minY = Math.min(...spec.nodes.map(n => Number.isFinite(n._y) ? n._y : 0));
+            const maxX = Math.max(...spec.nodes.map(n => (Number.isFinite(n._x) ? n._x : 0) + NODE_WIDTH));
+            const maxY = Math.max(...spec.nodes.map(n => (Number.isFinite(n._y) ? n._y : 0) + NODE_HEIGHT));
+            return {
+                minX,
+                minY,
+                maxX,
+                maxY,
+                width: Math.max(NODE_WIDTH, maxX - minX),
+                height: Math.max(NODE_HEIGHT, maxY - minY)
+            };
+        };
+
         // 计算内容包围盒；保证空 DAG 也有合理底盘
         const contentBounds = () => {
-            const w = Math.max(MIN_CONTENT_WIDTH, ...spec.nodes.map(n => n._x + NODE_WIDTH)) + PADDING;
-            const h = Math.max(MIN_CONTENT_HEIGHT, ...spec.nodes.map(n => n._y + NODE_HEIGHT)) + PADDING;
+            const bounds = nodeBounds();
+            const w = Math.max(MIN_CONTENT_WIDTH, bounds.maxX + PADDING);
+            const h = Math.max(MIN_CONTENT_HEIGHT, bounds.maxY + PADDING);
             return { width: w, height: h };
         };
 
         const updateViewBox = () => {
-            const { width, height } = contentBounds();
-            const vbWidth = width / viewState.scale;
-            const vbHeight = height / viewState.scale;
+            const rect = canvas.getBoundingClientRect();
+            const containerW = rect.width > 50 ? rect.width : MIN_CONTENT_WIDTH;
+            const containerH = rect.height > 50 ? rect.height : MIN_CONTENT_HEIGHT;
+            const vbWidth = containerW / viewState.scale;
+            const vbHeight = containerH / viewState.scale;
             root.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${vbWidth} ${vbHeight}`);
             root.setAttribute('width', '100%');
             root.setAttribute('height', '100%');
@@ -212,9 +233,37 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
 
         // 重置缩放/平移到完整内容可见
         const fitToContent = () => {
-            viewState.x = 0;
-            viewState.y = 0;
-            viewState.scale = DEFAULT_VIEW_SCALE;
+            if (!spec.nodes || !spec.nodes.length) {
+                viewState.x = 0;
+                viewState.y = 0;
+                viewState.scale = DEFAULT_VIEW_SCALE;
+                updateViewBox();
+                return;
+            }
+            const rect = canvas.getBoundingClientRect();
+            const containerW = rect.width > 50 ? rect.width : 960;
+            const containerH = rect.height > 50 ? rect.height : 540;
+
+            const bounds = nodeBounds();
+            const pad = 40;
+            const targetW = bounds.width + pad * 2;
+            const targetH = bounds.height + pad * 2;
+
+            const scaleX = containerW / targetW;
+            const scaleY = containerH / targetH;
+            const fitScale = Math.min(1.0, Math.max(SCALE_MIN, Math.min(scaleX, scaleY)));
+
+            viewState.scale = fitScale;
+
+            const vbW = containerW / fitScale;
+            const vbH = containerH / fitScale;
+
+            const extraW = vbW - targetW;
+            const extraH = vbH - targetH;
+
+            viewState.x = bounds.minX - pad - (extraW > 0 ? extraW / 2 : 0);
+            viewState.y = bounds.minY - pad - (extraH > 0 ? extraH / 2 : 0);
+
             updateViewBox();
         };
 
@@ -726,6 +775,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         if (textarea) textarea.addEventListener('input', onTextareaInput);
 
         render();
+        fitToContent();
         if (shouldFlushInitialDefaults && spec.nodes.length) flushOut();
 
         const destroy = () => {
@@ -764,6 +814,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 spec = ensureDefaults(value || { nodes: [] });
                 clearSelection();
                 render();
+                fitToContent();
                 flushOut();
             },
             clearSelection: () => {
@@ -783,10 +834,15 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 spec = ensureDefaults(parsed);
                 clearSelection();
                 render();
+                fitToContent();
                 flushOut();
                 return true;
             },
-            refresh: () => render(),
+            refresh: () => {
+                render();
+                fitToContent();
+            },
+            fitToContent: () => fitToContent(),
             // 暴露校验方法用于保存/发布前门禁
             validate: () => validateWorkflow()
         };

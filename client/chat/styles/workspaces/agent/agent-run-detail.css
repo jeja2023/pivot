@@ -724,33 +724,75 @@
     box-shadow: none;
 }
 
-.agent-run-goal {
+.agent-run-goal-box {
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
     gap: 10px;
-    min-width: 0;
-    margin: 18px 0 14px;
-    padding-top: 14px;
-    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    margin: 16px 0 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.9);
 }
 
-.agent-run-goal span {
+.agent-run-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.agent-run-meta-item.agent-run-goal-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.agent-run-meta-label {
     flex: 0 0 auto;
-    color: #94a3b8;
+    color: #64748b;
     font-size: 0.72rem;
     font-weight: 700;
 }
 
-.agent-run-goal strong {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
+.agent-run-title-val {
+    color: #0f172a;
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.agent-run-goal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.agent-run-goal-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-run-goal-actions .btn-xs {
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    height: 24px;
+    line-height: 1.2;
+}
+
+.agent-run-goal-body {
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     color: #334155;
-    font-size: 0.82rem;
-    font-weight: 700;
-    line-height: 1.5;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
 }
 
 .agent-run-overview .agent-progress-bar {

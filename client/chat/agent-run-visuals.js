@@ -253,8 +253,10 @@ function renderAgentDagRunGraph(dagNodes) {
     const maxNodesInLayer = Math.max(...layers.map(l => l.length), 1);
     const totalH = maxNodesInLayer * (NODE_H + GAP_Y) - GAP_Y;
 
-    const viewW = Math.max(totalW + PAD * 2, MIN_VIEW_W);
-    const viewH = Math.max(totalH + PAD * 2, MIN_VIEW_H);
+    const tightW = totalW + PAD * 2;
+    const tightH = totalH + PAD * 2;
+    const viewW = Math.max(tightW, Math.min(MIN_VIEW_W, Math.round(tightW * 1.25)));
+    const viewH = Math.max(tightH, Math.min(MIN_VIEW_H, Math.round(tightH * 1.25)));
 
     const offsetX = Math.max(PAD, (viewW - totalW) / 2);
     const offsetY = Math.max(PAD, (viewH - totalH) / 2);

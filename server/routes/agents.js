@@ -6,7 +6,8 @@ const {
     getRunDetailForUser,
     listDeletedRunsForAdmin,
     listRuns,
-    listSteps
+    listSteps,
+    updateAgentRunTitleAndGoalForUser
 } = require('../services/agent-runs');
 const { preflightAgentRun } = require('../services/agent-preflight');
 const { resolveAgentWorkflowVersion } = require('../services/agent-workflows');
@@ -574,6 +575,16 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         if (!artifact) return res.status(404).json({ error: '智能体任务不存在。' });
         logAction(req, '沉淀智能体结果', `结果ID: ${artifact.id}，任务ID: ${req.params.id}`);
         res.status(201).json({ success: true, artifact });
+    }));
+
+    router.patch('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const run = updateAgentRunTitleAndGoalForUser(req.params.id, req.user, {
+            title: req.body?.title,
+            goal: req.body?.goal
+        });
+        if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
+        logAction(req, '修改智能体任务目标与标题', `任务ID: ${run.id}，标题: ${String(run.title || '').slice(0, 60)}，目标: ${String(run.goal || '').slice(0, 100)}`);
+        res.json({ success: true, run });
     }));
 
     router.delete('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {

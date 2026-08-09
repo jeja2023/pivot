@@ -31,9 +31,13 @@ function mountAgentDagEditor() {
             }
         }
     });
+    dagEditorInstance?.fitToContent?.();
 }
 
-window.refreshAgentDagEditor = () => dagEditorInstance?.refresh();
+window.refreshAgentDagEditor = () => {
+    dagEditorInstance?.refresh();
+    dagEditorInstance?.fitToContent?.();
+};
 
 function refreshAgentDagInputsPanel() {
     const workflowWorkbench = document.getElementById('agent-dag-workbench-modal');

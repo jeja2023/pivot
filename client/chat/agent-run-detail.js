@@ -208,7 +208,34 @@ function agentRunActionMarkup(run = {}, options = {}) {
     return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary class="btn-secondary">更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
 }
 
-document.addEventListener('click', (event) => {
+document.addEventListener('click', async (event) => {
+    const copyGoalBtn = event.target.closest('[data-agent-copy-goal]');
+    if (copyGoalBtn) {
+        const text = copyGoalBtn.dataset.agentCopyGoal || '';
+        if (text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                if (typeof showToast === 'function') showToast('已成功复制任务目标到剪贴板', 'success');
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('复制失败，请手动选择文本复制', 'error');
+            }
+        }
+        return;
+    }
+    const editBtn = event.target.closest('[data-agent-run-edit], [data-agent-edit-run]');
+    if (editBtn) {
+        const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun;
+        if (runId) openAgentTaskEditModal(runId);
+        return;
+    }
+    if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn') || event.target.matches('#agent-task-edit-modal')) {
+        closeAgentTaskEditModal();
+        return;
+    }
+    if (event.target.closest('#agent-task-edit-save-btn')) {
+        saveAgentTaskEdit();
+        return;
+    }
     const activeMoreActions = event.target.closest('.agent-run-more-actions');
     if (activeMoreActions) {
         if (event.target.closest('.agent-run-more-actions > div')) {
@@ -222,6 +249,58 @@ document.addEventListener('click', (event) => {
         document.querySelectorAll('.agent-run-more-actions').forEach(menu => menu.removeAttribute('open'));
     }
 });
+
+function openAgentTaskEditModal(runId) {
+    const run = (typeof agentRunsCache !== 'undefined' && Array.isArray(agentRunsCache) ? agentRunsCache.find(r => r.id === runId) : null) || (currentRunDetailRecord?.id === runId ? currentRunDetailRecord : null);
+    if (!run) return;
+    const modal = document.getElementById('agent-task-edit-modal');
+    if (!modal) return;
+    const displayTitle = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '';
+    document.getElementById('agent-task-edit-run-id').value = run.id;
+    document.getElementById('agent-task-edit-title-input').value = displayTitle;
+    document.getElementById('agent-task-edit-goal-input').value = run.goal || '';
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => document.getElementById('agent-task-edit-goal-input')?.focus(), 0);
+}
+
+function closeAgentTaskEditModal() {
+    const modal = document.getElementById('agent-task-edit-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+async function saveAgentTaskEdit() {
+    const runId = document.getElementById('agent-task-edit-run-id')?.value;
+    const titleInput = document.getElementById('agent-task-edit-title-input')?.value || '';
+    const goalInput = document.getElementById('agent-task-edit-goal-input')?.value || '';
+    if (!runId) return;
+    if (!goalInput.trim()) {
+        if (typeof showToast === 'function') showToast('任务目标不能为空', 'error');
+        return;
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: titleInput.trim(), goal: goalInput.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (typeof showToast === 'function') showToast(data.error || '修改任务记录失败', 'error');
+            return;
+        }
+        if (typeof showToast === 'function') showToast('任务目标与标题已成功修改', 'success');
+        closeAgentTaskEditModal();
+        if (typeof loadAgentRuns === 'function') loadAgentRuns(agentRunsPage);
+        if (activeAgentRunId === runId && isAgentRunDetailModalOpen()) {
+            openAgentRun(runId, { silent: true });
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast(`修改失败: ${e.message}`, 'error');
+    }
+}
 
 function closeAgentRunDetailModal() {
     const modal = document.getElementById('agent-run-detail-modal');
@@ -257,6 +336,7 @@ window.openAgentRun = async function(runId, options = {}) {
         return null;
     }
     const run = data.run;
+    currentRunDetailRecord = run;
     const isPreview = isAgentWorkflowPreviewRun(run, options);
     const steps = data.steps || [];
     const dagNodes = agentSortDagNodesForDisplay(data.dagNodes || []);
@@ -274,12 +354,14 @@ window.openAgentRun = async function(runId, options = {}) {
         run.title = agentPreviewDisplayTitle(agentDisplayTitle(run));
         run.final_answer = stripAgentWorkflowReportHeading(run.final_answer);
     }
+    const displayTitle = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '自主任务';
+    const goalText = String(run.goal || '').trim();
     const showDagNodeDetails = dagNodes.length > 0;
     const visualOutputs = renderAgentRunVisualOutputs(dagNodes, steps, run.final_answer, run.status);
     const title = document.getElementById('agent-run-detail-title');
     if (title) {
         title.textContent = isPreview ? '工作流预览结果' : '任务执行结果';
-        title.setAttribute('title', agentDisplayTitle(run));
+        title.setAttribute('title', displayTitle);
     }
     const runStatus = String(run.status || '').toLowerCase();
     const statusLabel = agentStatusLabel(runStatus);
@@ -319,7 +401,22 @@ window.openAgentRun = async function(runId, options = {}) {
                 </div>
                 <div class="agent-run-actions">${actionMarkup}</div>
             </div>
-            <div class="agent-run-goal"><span>任务目标</span><strong>${agentEscape(agentDisplayTitle(run))}</strong></div>
+            <div class="agent-run-goal-box">
+                <div class="agent-run-meta-item">
+                    <span class="agent-run-meta-label">任务标题</span>
+                    <strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong>
+                </div>
+                <div class="agent-run-meta-item agent-run-goal-item">
+                    <div class="agent-run-goal-head">
+                        <span class="agent-run-meta-label">任务目标</span>
+                        <div class="agent-run-goal-actions">
+                            ${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}
+                            <button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button>
+                        </div>
+                    </div>
+                    <div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div>
+                </div>
+            </div>
             <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
             <dl class="agent-run-key-metrics">
                 ${String(run.run_mode || '') === 'dag'

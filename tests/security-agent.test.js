@@ -182,11 +182,11 @@ test('agent execution rounds support automatic mode defaults and mode-specific c
     assert.equal(normalizeOptionalMaxSteps(''), 0);
     assert.equal(normalizeOptionalMaxSteps(0), 0);
     assert.equal(resolveMaxSteps(0, 'standard'), 30);
-    assert.equal(resolveMaxSteps('', 'deep'), 60);
-    assert.equal(resolveMaxSteps(null, 'audit'), 50);
+    assert.equal(resolveMaxSteps('', 'deep'), 50);
+    assert.equal(resolveMaxSteps(null, 'audit'), 60);
     assert.equal(resolveMaxSteps(12, 'audit'), 12);
     assert.equal(resolveMaxSteps(80, 'standard'), 30);
-    assert.equal(resolveMaxSteps(80, 'deep'), 60);
+    assert.equal(resolveMaxSteps(80, 'deep'), 50);
 
     const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
     const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
@@ -1505,7 +1505,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     const run = runAgentScheduleNow(schedule.id, user);
     assert.equal(run.schedule_id, schedule.id);
     assert.equal(run.template_id, template.id);
-    assert.equal(run.max_steps, 50);
+    assert.equal(run.max_steps, 60);
     assert.equal(JSON.parse(run.context_config).mode, 'knowledge');
     cancelAgentRun(run.id, user);
     const scheduledRuns = listRuns(user, { limit: 30, runType: 'scheduled' }).data;

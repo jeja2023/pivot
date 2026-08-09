@@ -46,7 +46,7 @@ test('agent preflight exposes readiness and capability health signals', () => {
             toolPolicy: 'builtin_only',
             maxSteps: 0
         });
-        assert.equal(automaticAudit.summary.maxSteps, 50);
+        assert.equal(automaticAudit.summary.maxSteps, 60);
         assert.equal(automaticAudit.summary.maxStepsAutomatic, true);
     } finally {
         db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverInfo.lastInsertRowid);

@@ -28,6 +28,10 @@
                             <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
                         </div>
                         <div class="agent-task-editor-body">
+                            <label class="modal-form-field agent-task-title-field">
+                                <span>任务标题</span>
+                                <input type="text" id="agent-title-input" class="form-input agent-title-input" placeholder="输入简短任务标题（可选，留空将自动根据目标词句生成）">
+                            </label>
                             <label class="modal-form-field agent-task-goal-field">
                                 <span>任务目标</span>
                                 <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
@@ -38,7 +42,7 @@
                                 <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
                             </div>
                             <div class="modal-form-grid modal-form-grid--3 agent-task-primary-fields">
-                            <label class="modal-form-field modal-form-field--span-2">
+                            <label class="modal-form-field modal-form-field--span-3">
                                 <span>模型</span>
                                 <select id="agent-model-select" class="form-input hidden"></select>
                                 <div id="agent-model-picker" class="agent-model-picker">
@@ -54,7 +58,7 @@
                         <div class="agent-inline-settings-head">
                             <strong>高级设置</strong>
                         </div>
-                        <div class="agent-policy-controls">
+                        <div class="agent-inline-settings-grid">
                             <label class="agent-toggle-field" title="开启后，自主任务可以调用已接入的工具库工具。关闭时仅使用系统只读工具。">
                                 <input id="agent-allow-mcp" type="checkbox" checked>
                                 <span>允许工具库工具</span>
@@ -68,8 +72,6 @@
                                     <option value="audit">审查</option>
                                 </select>
                             </label>
-                        </div>
-                        <div class="agent-enterprise-controls">
                             <label>
                                 <span>工具审批</span>
                                 <select id="agent-approval-policy" class="form-input">
@@ -90,15 +92,12 @@
                             </label>
                             <label>
                                 <span>最大执行轮次</span>
-                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="60" placeholder="自动" aria-describedby="agent-max-steps-help">
+                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="60" placeholder="自动" aria-describedby="agent-max-steps-help" title="留空时自动设置：标准模式 30 轮，深度模式 50 轮，审查模式 60 轮；达到上限后将基于已有结果生成总结。">
                             </label>
                             <label>
                                 <span>失败重试</span>
                                 <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
                             </label>
-                            <p id="agent-max-steps-help" class="agent-max-steps-help">留空时自动设置：标准模式 30 轮，深度模式 60 轮，审查模式 50 轮；达到上限后将基于已有结果生成总结。</p>
-                        </div>
-                        <div class="agent-context-controls">
                             <label>
                                 <span>上下文来源</span>
                                 <select id="agent-context-mode" class="form-input">
@@ -111,9 +110,9 @@
                             </label>
                             <label class="agent-token-budget-field">
                                 <span>单次任务 Token 上限</span>
-                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="留空表示不限" aria-describedby="agent-token-budget-help">
+                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="留空表示不限" aria-describedby="agent-token-budget-help" title="累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。">
                             </label>
-                            <p id="agent-token-budget-help" class="agent-token-budget-help">累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
+                            <p id="agent-token-budget-help" class="agent-token-budget-help hidden">累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
                             <label class="agent-context-notes-field">
                                 <span>补充说明</span>
                                 <textarea id="agent-context-notes" class="form-input" rows="2" placeholder="可选，限定范围、部门或资料来源"></textarea>
@@ -241,6 +240,31 @@
                     </div>
                     <div id="agent-runs-list" class="agent-runs-list"></div>
                     <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
+                </div>
+            </div>
+        </div>
+        <div id="agent-task-edit-modal" class="modal-overlay hidden" style="z-index: 1890;" role="dialog" aria-modal="true" aria-labelledby="agent-task-edit-modal-title" aria-hidden="true">
+            <div class="modal agent-task-editor-modal">
+                <div class="agent-config-modal-head">
+                    <div>
+                        <h3 id="agent-task-edit-modal-title">修改任务</h3>
+                        <span>修改智能体任务标题与任务目标</span>
+                    </div>
+                </div>
+                <div class="agent-task-editor-body">
+                    <input type="hidden" id="agent-task-edit-run-id">
+                    <label class="modal-form-field">
+                        <span>任务标题</span>
+                        <input type="text" id="agent-task-edit-title-input" class="form-input" placeholder="输入简短任务标题">
+                    </label>
+                    <label class="modal-form-field agent-task-goal-field">
+                        <span>任务目标</span>
+                        <textarea id="agent-task-edit-goal-input" class="form-input agent-goal-input" rows="4" placeholder="输入完整的任务描述与目标"></textarea>
+                    </label>
+                    <div class="agent-task-editor-foot">
+                        <button id="agent-task-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+                        <button id="agent-task-edit-save-btn" class="btn-primary" type="button">保存修改</button>
+                    </div>
                 </div>
             </div>
         </div>

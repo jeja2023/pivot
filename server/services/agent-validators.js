@@ -11,14 +11,14 @@ const MAX_STEPS = 60;
 const DEFAULT_STEPS = 30;
 const AUTO_STEPS_BY_RUN_MODE = Object.freeze({
     standard: 30,
-    deep: 60,
-    audit: 50,
+    deep: 50,
+    audit: 60,
     dag: 20
 });
 const MAX_STEPS_BY_RUN_MODE = Object.freeze({
     standard: 30,
-    deep: 60,
-    audit: 50,
+    deep: 50,
+    audit: 60,
     dag: 60
 });
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required', 'awaiting_approval']);

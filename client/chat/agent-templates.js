@@ -5,6 +5,8 @@ function applyAgentTemplate(template) {
     if (!template) return;
     const goalInput = document.getElementById('agent-goal-input');
     if (goalInput) goalInput.value = template.goal_template || '';
+    const titleInput = document.getElementById('agent-title-input');
+    if (titleInput) titleInput.value = template.name || '';
     const runMode = document.getElementById('agent-run-mode');
     const templateRunMode = ['standard', 'deep', 'audit'].includes(template.run_mode) ? template.run_mode : 'standard';
     if (runMode) runMode.value = templateRunMode;

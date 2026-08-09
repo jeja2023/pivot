@@ -364,6 +364,12 @@ function getRunDetailForUser(runId, user) {
     };
 }
 
+function updateAgentRunTitleAndGoalForUser(runId, user, payload = {}) {
+    const userId = Number(user?.id);
+    if (!userId) return null;
+    return runRepository.updateAgentRunTitleAndGoal(runId, userId, payload);
+}
+
 module.exports = {
     createWorkflowDraftFromRun,
     getRunDetailForUser,
@@ -373,5 +379,6 @@ module.exports = {
     listDeletedRunsForAdmin,
     listRuns,
     sortDagNodesByDependencies,
-    listSteps
+    listSteps,
+    updateAgentRunTitleAndGoalForUser
 };

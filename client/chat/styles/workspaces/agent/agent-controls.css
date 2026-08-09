@@ -51,13 +51,14 @@
     min-width: 0;
 }
 
-.agent-token-budget-help,
-.agent-max-steps-help {
-    grid-column: 1 / -1;
+.agent-token-budget-help.hidden,
+.agent-max-steps-help.hidden {
+    display: none;
 }
 
 .agent-token-budget-help,
 .agent-max-steps-help {
+    grid-column: 1 / -1;
     margin: -2px 0 0;
     color: var(--text-muted);
     font-size: 0.7rem;
@@ -88,7 +89,8 @@
     border-radius: 8px;
 }
 
-.agent-context-controls .agent-context-notes-field {
+.agent-context-controls .agent-context-notes-field,
+.agent-inline-settings-grid .agent-context-notes-field {
     grid-column: 1 / -1;
 }
 

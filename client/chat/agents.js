@@ -119,7 +119,7 @@ window.setTaskComposerOpen = function(isOpen = true) {
     modal.classList.toggle('hidden', !isOpen);
     modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     openButton?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    if (isOpen) setTimeout(() => document.getElementById('agent-goal-input')?.focus(), 0);
+    if (isOpen) setTimeout(() => (document.getElementById('agent-title-input') || document.getElementById('agent-goal-input'))?.focus(), 0);
     else if (wasOpen && modal.contains(document.activeElement)) openButton?.focus();
 };
 
@@ -187,8 +187,10 @@ window.bindAgentGoalTemplates = function() {
         btn.dataset.boundAgentTemplate = '1';
         btn.addEventListener('click', () => {
             const input = document.getElementById('agent-goal-input');
+            const titleInput = document.getElementById('agent-title-input');
             if (!input) return;
             input.value = btn.dataset.agentGoalTemplate || '';
+            if (titleInput) titleInput.value = btn.dataset.agentTitleTemplate || btn.textContent.trim() || '';
             if (btn.dataset.agentRunMode) {
                 const mode = document.getElementById('agent-run-mode');
                 if (mode) mode.value = btn.dataset.agentRunMode;
@@ -221,7 +223,7 @@ window.bindAgentFilters = function() {
 window.syncAgentRunModeStepLimit = function() {
     const mode = document.getElementById('agent-run-mode')?.value || 'standard';
     const input = document.getElementById('agent-max-steps');
-    const limits = { standard: 30, deep: 60, audit: 50 };
+    const limits = { standard: 30, deep: 50, audit: 60 };
     const limit = limits[mode] || limits.standard;
     if (!input) return;
     input.max = String(limit);

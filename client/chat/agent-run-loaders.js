@@ -338,7 +338,8 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <thead>
                     <tr>
                         <th class="text-center">序号</th>
-                        <th>任务</th>
+                        <th>任务标题</th>
+                        <th>任务目标</th>
                         <th>类型</th>
                         <th>模型</th>
                         <th>模式</th>
@@ -355,7 +356,8 @@ async function loadAgentRuns(page = agentRunsPage) {
                 </thead>
                 <tbody>
                     ${displayRuns.map((run, index) => {
-        const title = agentDisplayTitle(run);
+        const title = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '自主任务';
+        const goalText = String(run.goal || '').trim();
         const mode = agentRunModeLabel(run.run_mode);
         const isScheduled = Boolean(run.schedule_id);
         const runTypeLabel = isScheduled ? '计划执行' : (run.run_mode === 'dag' ? '工作流任务' : '自主任务');
@@ -373,6 +375,9 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <td class="text-center">${(agentRunsPage - 1) * pageSize + index + 1}</td>
                 <td class="agent-runs-title-cell">
                     <strong tabindex="0" aria-label="${agentEscapeAttr(taskTooltip)}" data-agent-run-title-full="${agentEscapeAttr(taskTooltip)}">${agentEscape(title)}</strong>
+                </td>
+                <td class="agent-runs-goal-cell">
+                    <span class="agent-runs-goal-text" tabindex="0" aria-label="${agentEscapeAttr(goalText || '-')}" data-agent-run-title-full="${agentEscapeAttr(goalText || '-')}">${agentEscape(goalText || '-')}</span>
                 </td>
                 <td><span class="agent-run-type ${runTypeClass}">${agentEscape(runTypeLabel)}</span></td>
                 <td>
@@ -392,6 +397,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <td>
                     <div class="agent-run-table-actions">
                         <button class="btn-secondary agent-run-detail-btn" type="button" data-agent-run-detail="${agentEscape(run.id)}">详情</button>
+                        <button class="btn-secondary agent-run-edit-btn" type="button" data-agent-run-edit="${agentEscape(run.id)}">编辑</button>
                         ${canDelete ? `<button class="btn-danger-outline agent-run-delete-btn" type="button" data-agent-run-delete="${agentEscape(run.id)}">删除</button>` : ''}
                     </div>
                 </td>
