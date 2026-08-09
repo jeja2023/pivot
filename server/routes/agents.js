@@ -82,6 +82,7 @@ const {
     updateAgentSchedule,
     updateAgentTemplate,
     updateAgentWorkflow,
+    updateAgentWorkflowMetadata,
     updateAgentWorkflowSharing,
     updateWorkflowTrigger
 } = require('../services/agent-runtime');
@@ -227,6 +228,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const workflow = updateAgentWorkflow(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改。' });
         logAction(req, '更新智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
+        res.json({ success: true, workflow });
+    }));
+
+    router.patch('/agents/workflows/:id/metadata', authMiddleware, asyncHandler(async (req, res) => {
+        const workflow = updateAgentWorkflowMetadata(req.params.id, req.user, req.body || {});
+        if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改。' });
+        logAction(req, '更新智能体工作流信息', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
         res.json({ success: true, workflow });
     }));
 

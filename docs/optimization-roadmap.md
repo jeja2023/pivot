@@ -2,6 +2,19 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-09 Architecture Baseline
+
+- Rich-text review nodes now use the same selectable-model policy as ordinary LLM and delegate nodes: current-user visibility is enforced, embedding models are excluded, duplicate caches are merged, and empty or stale selections remain explicit in the wizard.
+- `agent.content_review` input editing preserves upstream template references and parses structured records safely; its field metadata, numeric bounds, runtime model aliases and detailed output contract are aligned across the client wizard, built-in tool definition and run persistence.
+- Full report titles now flow consistently through the summary, Markdown artifact and output metadata. Regression evidence covers model selection, structured input, bounds, aliases and report delivery in `tests/agent-content-review-node.test.js` and `tests/security-agent.test.js`.
+
+## 2026-08-08 Architecture Baseline
+
+- Shared workflow, tool-library and knowledge-library permission dialogs now use the same unit-to-user target-tree interaction; unit selection propagates to its users and full-select controls remain horizontal and non-wrapping.
+- `client/chat/share-target-tree.js` is the shared client helper for target rendering, safe escaping, unit/user propagation and bulk selection; workflow-specific ownership and recipient boundaries remain enforced by the existing workflow module.
+- Workflow metadata updates use a dedicated owner-only endpoint and do not create a new DAG version. Run-mode step limits are explicit: standard 30, deep 60 and audit 50, with client and server validation using the same limits.
+- Regression evidence includes `tests/agent-workflow-metadata.test.js`, security-agent CSS/share-tree assertions and the full `npm test` suite.
+
 ## 2026-08-07 Architecture Baseline
 
 - Root-level `README.md`, `CHANGELOG.md`, `使用帮助.md`, and `开发规范.md` remain stable project entry points.
@@ -16,6 +29,8 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.0.259 (2026-08-09) 完善富文本校对节点的模型选择和输入输出契约：向导统一展示当前账号可用模型，明确处理无模型和失效模型状态；`records` 支持上游结构化结果、JSON 和模板变量，字段说明与数值边界完整；运行时兼容 `model`/`modelId`/`model_id`，报告标题贯通摘要与产物，输出 Schema 覆盖统计、逐条问题、产物和警告。全量 Node 452/452、`npm run check` 与 `npm run lint` 通过。
+- v0.0.258 (2026-08-08) 完成自动化工作流编辑、执行轮次和共享权限界面收口：资产中心可独立编辑工作流名称与简介，标准/深度/审查模式自动轮次统一为 30/60/50 并由前后端共同限制；工作流、工具库和知识库分享统一使用单位展开个人的目标树，单位联动个人、全选/全不选横向排列且保存时去除重复个人授权。新增共享目标树公共脚本、元数据测试和 CSS 优先级回归断言；全量 Node 447/447、安全智能体 52/52、Chat asset check 与 ESLint 通过。
 - v0.0.257 (2026-08-07) 完成共享资源的个人授权和工作流接收者依赖闭环：工作流、知识库专题库与数据库 MCP 连接支持单位/个人白名单，统一列表、详情、检索、缓存和工具目录的可见性过滤；接收者可为共享工作流选择本账号可用的模型、工具和受控凭据，绑定固定到发布版本，重新发布后自动标记 stale 并阻断运行。直接 HTTP 敏感值在共享响应中脱敏，且禁止共享/发布；知识库写操作、MCP 服务器编辑和非只读工具调用在路由层拒绝。新增迁移、依赖配置面板、分享个人选择与隔离 HTTP/Playwright 回归；Node 446/446、HTTP 2/2、E2E 3/3 通过。
 - v0.0.256 (2026-08-07) 完成自主任务执行治理和工作流编辑体验升级：保留最大执行轮次作为高级安全边界，但取消固定 10 轮默认值，改为标准模式自动 20 轮、深度/审查模式自动 50 轮，模板与计划任务用 `0` 持久化“自动”语义；流式工具调用与 JSON 回退共享总轮次，达到上限后保留已有结果、生成总结并明确标记可能不完整。修复快捷目标和保存模板无响应，补齐工作流直接重命名及节点名称失焦问题；Token 上限与上下文来源完成响应式并排布局。全量 Node 回归 438/438、项目检查、ESLint 和 E2E 2/2 通过。
 - v0.0.255 (2026-08-06) 完成计划任务、工作流配置和新闻内容校对闭环：计划只能运行已发布工作流，按间隔调度支持 5 至 1440 分钟；节点应用操作提供即时反馈，保存后重新打开仍恢复手动配置；自由任务转工作流会生成数据库查询、富文本逐条校对和输出节点，清理 HTML 后按记录/分块校对并保留原文证据；结构化结果保留行边界，查询截断、分块失败和未处理记录会显式标记，完整报告沉淀为可下载产物。全量 Node 回归 437/437，项目检查和相关 ESLint 检查通过。

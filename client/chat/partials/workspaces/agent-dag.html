@@ -77,9 +77,6 @@
                         <option value="">选择已保存工作流</option>
                     </select>
                 </div>
-                <button id="agent-workflow-rename-btn" class="btn-secondary agent-workflow-rename-btn" type="button" aria-label="修改工作流名称" title="修改工作流名称">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                </button>
                 <div id="agent-workflow-lifecycle" class="agent-workflow-lifecycle" aria-live="polite"></div>
                 <details id="agent-workflow-management-menu" class="agent-workflow-management-menu">
                     <summary class="btn-secondary agent-workflow-management-trigger" aria-label="更多工作流操作" title="更多工作流操作">
@@ -149,6 +146,33 @@
                     <textarea id="agent-dag-spec" class="form-input agent-dag-spec" placeholder='{"nodes":[{"id":"search","title":"检索资料","tool":"rag.search","input":{"query":"..."}},{"id":"summary","title":"整理结果","tool":"sessions.recent","dependsOn":["search"]}]}'></textarea>
                 </div>
             </div>
+            <div id="agent-workflow-metadata-modal" class="modal-overlay hidden agent-workflow-share-modal-overlay" style="z-index: 1935;">
+                <div class="modal agent-workflow-create-modal agent-workflow-metadata-modal" role="dialog" aria-modal="true" aria-labelledby="agent-workflow-metadata-title">
+                    <div class="agent-workflow-share-head">
+                        <div>
+                            <h3 id="agent-workflow-metadata-title">编辑工作流</h3>
+                            <p>修改工作流的基本信息，不会生成新的编排版本。</p>
+                        </div>
+                        <button id="agent-workflow-metadata-close-btn" class="btn-danger-outline" type="button" aria-label="关闭工作流编辑" title="关闭工作流编辑">关闭</button>
+                    </div>
+                    <div class="agent-workflow-create-form">
+                        <label class="agent-workflow-create-field" for="agent-workflow-metadata-name">
+                            <span>工作流名称</span>
+                            <input id="agent-workflow-metadata-name" class="form-input" type="text" maxlength="100" autocomplete="off" placeholder="请输入工作流名称">
+                        </label>
+                        <label class="agent-workflow-create-field" for="agent-workflow-metadata-description">
+                            <span>工作流简介</span>
+                            <textarea id="agent-workflow-metadata-description" class="form-input" rows="4" maxlength="300" placeholder="简要说明用途、适用范围或产出"></textarea>
+                            <small>最多 300 个字符</small>
+                        </label>
+                        <div id="agent-workflow-metadata-error" class="agent-workflow-create-status" role="alert"></div>
+                    </div>
+                    <div class="agent-workflow-share-footer">
+                        <button id="agent-workflow-metadata-cancel-btn" class="btn-secondary" type="button">取消</button>
+                        <button id="agent-workflow-metadata-save-btn" class="btn-primary" type="button">保存</button>
+                    </div>
+                </div>
+            </div>
             <div id="agent-workflow-share-modal" class="modal-overlay hidden agent-workflow-share-modal-overlay" style="z-index: 1940;">
                 <div class="modal agent-workflow-share-modal" role="dialog" aria-modal="true" aria-labelledby="agent-workflow-share-title">
                     <div class="agent-workflow-share-head">
@@ -178,26 +202,15 @@
                             </label>
                             <div class="agent-workflow-share-units-head">
                                 <div>
-                                    <strong id="agent-workflow-share-units-title">共享给哪些部门</strong>
-                                    <span id="agent-workflow-share-units-hint">选择后仅这些部门的用户可见。</span>
+                                    <strong id="agent-workflow-share-units-title">共享对象</strong>
+                                    <span id="agent-workflow-share-units-hint">按单位展开并选择整个单位或其中的用户。</span>
                                 </div>
                                 <div class="agent-workflow-share-target-actions">
-                                    <button type="button" class="btn-secondary" data-agent-share-select="units">全选</button>
-                                    <button type="button" class="btn-secondary" data-agent-share-clear="units">全不选</button>
+                                    <button type="button" class="btn-secondary" data-agent-share-select="tree">全选</button>
+                                    <button type="button" class="btn-secondary" data-agent-share-clear="tree">全不选</button>
                                 </div>
                             </div>
-                            <div id="agent-workflow-share-units-list" class="agent-workflow-share-units-list"></div>
-                            <div class="agent-workflow-share-units-head">
-                                <div>
-                                    <strong>共享给哪些个人</strong>
-                                    <span>可按账号精确共享，不受所在单位限制。</span>
-                                </div>
-                                <div class="agent-workflow-share-target-actions">
-                                    <button type="button" class="btn-secondary" data-agent-share-select="users">全选</button>
-                                    <button type="button" class="btn-secondary" data-agent-share-clear="users">全不选</button>
-                                </div>
-                            </div>
-                            <div id="agent-workflow-share-users-list" class="agent-workflow-share-units-list agent-workflow-share-users-list"></div>
+                            <div id="agent-workflow-share-units-list" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户"></div>
                         </section>
                         <div id="agent-workflow-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
                     </div>

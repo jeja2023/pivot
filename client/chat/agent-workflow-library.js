@@ -182,7 +182,6 @@ function renderAgentWorkflowLibrary() {
     const versionsBtn = document.getElementById('agent-workflow-versions-btn');
     const scheduleBtn = document.getElementById('agent-workflow-schedule-btn');
     const shareBtn = document.getElementById('agent-workflow-share-btn');
-    const renameBtn = document.getElementById('agent-workflow-rename-btn');
     if (deleteBtn) deleteBtn.disabled = !selected?.can_edit;
     if (versionsBtn) versionsBtn.disabled = !selected?.can_edit;
     if (scheduleBtn) {
@@ -192,7 +191,6 @@ function renderAgentWorkflowLibrary() {
             : (selected?.published_version ? '' : '发布工作流后可创建计划任务');
     }
     if (shareBtn) shareBtn.disabled = !selected?.can_edit;
-    if (renameBtn) renameBtn.disabled = agentWorkflowReadOnly || Boolean(selected && !selected.can_edit);
     renderAgentWorkflowPicker();
     renderAgentWorkflowLifecycle();
     updateAgentWorkflowRunUi();
@@ -213,6 +211,89 @@ async function loadAgentWorkflows() {
     }
 }
 
+let agentWorkflowMetadataState = { workflowId: '' };
+
+function setAgentWorkflowMetadataError(message = '') {
+    const target = document.getElementById('agent-workflow-metadata-error');
+    if (!target) return;
+    target.textContent = message;
+}
+
+function bindAgentWorkflowMetadataModal() {
+    const modal = document.getElementById('agent-workflow-metadata-modal');
+    if (!modal || modal.dataset.boundAgentWorkflowMetadataModal === '1') return;
+    modal.dataset.boundAgentWorkflowMetadataModal = '1';
+    const close = () => modal.classList.add('hidden');
+    document.getElementById('agent-workflow-metadata-close-btn')?.addEventListener('click', close);
+    document.getElementById('agent-workflow-metadata-cancel-btn')?.addEventListener('click', close);
+    document.getElementById('agent-workflow-metadata-save-btn')?.addEventListener('click', saveAgentWorkflowMetadata);
+    modal.addEventListener('click', event => {
+        if (event.target === modal) close();
+    });
+    modal.addEventListener('input', () => setAgentWorkflowMetadataError(''));
+}
+
+function openAgentWorkflowMetadata(workflowId) {
+    bindAgentWorkflowMetadataModal();
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId));
+    const modal = document.getElementById('agent-workflow-metadata-modal');
+    const name = document.getElementById('agent-workflow-metadata-name');
+    const description = document.getElementById('agent-workflow-metadata-description');
+    if (!workflow || !workflow.can_edit || !modal || !name || !description) {
+        showToast('只有工作流所有者可以编辑基本信息', 'warning');
+        return;
+    }
+    agentWorkflowMetadataState = { workflowId: String(workflow.id) };
+    name.value = workflow.name || '';
+    description.value = workflow.description || '';
+    setAgentWorkflowMetadataError('');
+    modal.classList.remove('hidden');
+    requestAnimationFrame(() => {
+        name.focus();
+        name.select();
+    });
+}
+
+async function saveAgentWorkflowMetadata() {
+    const modal = document.getElementById('agent-workflow-metadata-modal');
+    const save = document.getElementById('agent-workflow-metadata-save-btn');
+    const nameInput = document.getElementById('agent-workflow-metadata-name');
+    const descriptionInput = document.getElementById('agent-workflow-metadata-description');
+    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(agentWorkflowMetadataState.workflowId));
+    if (!modal || !save || !nameInput || !descriptionInput || !workflow) return;
+    const name = String(nameInput.value || '').trim().slice(0, 100);
+    const description = String(descriptionInput.value || '').trim().slice(0, 300);
+    if (!name) {
+        setAgentWorkflowMetadataError('请填写工作流名称');
+        nameInput.focus();
+        return;
+    }
+    save.disabled = true;
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/metadata`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '工作流信息保存失败');
+        const index = agentWorkflowsCache.findIndex(item => String(item.id) === String(workflow.id));
+        if (index >= 0 && data.workflow) agentWorkflowsCache[index] = data.workflow;
+        if (String(activeAgentWorkflowId || '') === String(workflow.id)) {
+            agentWorkflowDraftName = data.workflow?.name || name;
+            agentWorkflowDraftDescription = data.workflow?.description || description;
+        }
+        modal.classList.add('hidden');
+        renderAgentWorkflowLibrary();
+        renderAutomationAssetCenter();
+        showToast('工作流信息已保存', 'success');
+    } catch (error) {
+        setAgentWorkflowMetadataError(error.message || '工作流信息保存失败');
+    } finally {
+        save.disabled = false;
+    }
+}
+
 let agentWorkflowShareState = { workflowId: '', options: null };
 
 function setAgentWorkflowShareError(message = '') {
@@ -225,10 +306,7 @@ function setAgentWorkflowShareError(message = '') {
 function setAgentWorkflowShareUnitsEnabled(enabled) {
     const all = document.getElementById('agent-workflow-share-all');
     const allChecked = all?.checked === true && all?.disabled !== true;
-    document.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit]').forEach(input => {
-        input.disabled = !enabled || allChecked;
-    });
-    document.querySelectorAll('#agent-workflow-share-users-list input[data-agent-share-user]').forEach(input => {
+    document.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit], #agent-workflow-share-units-list input[data-agent-share-user]').forEach(input => {
         input.disabled = !enabled || allChecked;
     });
     document.querySelectorAll('[data-agent-share-select], [data-agent-share-clear]').forEach(button => {
@@ -239,11 +317,10 @@ function setAgentWorkflowShareUnitsEnabled(enabled) {
 function renderAgentWorkflowShareUnits(workflow, options) {
     const section = document.getElementById('agent-workflow-share-units-section');
     const list = document.getElementById('agent-workflow-share-units-list');
-    const userList = document.getElementById('agent-workflow-share-users-list');
     const allLabel = document.getElementById('agent-workflow-share-all-label');
     const all = document.getElementById('agent-workflow-share-all');
     const hint = document.getElementById('agent-workflow-share-units-hint');
-    if (!section || !list || !userList || !allLabel || !all || !hint) return;
+    if (!section || !list || !allLabel || !all || !hint) return;
     const selectedScope = document.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value;
     const isShared = (selectedScope || workflow?.scope) === 'shared';
     const availableUnits = Array.isArray(options?.units) ? options.units.filter(Boolean) : [];
@@ -252,7 +329,20 @@ function renderAgentWorkflowShareUnits(workflow, options) {
     const allowedUserIds = new Set((Array.isArray(workflow?.allowed_user_ids)
         ? workflow.allowed_user_ids
         : String(workflow?.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
-    const units = [...new Set([...availableUnits, ...allowedUnits])];
+    const selectableUnits = new Set([...availableUnits, ...allowedUnits]);
+    const unassignedUnit = '未设置单位';
+    const usersByUnit = new Map();
+    availableUsers.forEach(target => {
+        const unit = String(target.unit || '').trim() || unassignedUnit;
+        if (!usersByUnit.has(unit)) usersByUnit.set(unit, []);
+        usersByUnit.get(unit).push(target);
+    });
+    const units = [...new Set([...availableUnits, ...allowedUnits, ...usersByUnit.keys()])]
+        .sort((left, right) => {
+            if (left === unassignedUnit) return 1;
+            if (right === unassignedUnit) return -1;
+            return left.localeCompare(right, 'zh-CN');
+        });
     const canShareAll = options?.canShareAll === true;
     const existingShared = String(workflow?.scope || '') === 'shared';
     const isAll = isShared && existingShared && canShareAll && allowedUnits.length === 0 && allowedUserIds.size === 0;
@@ -261,34 +351,46 @@ function renderAgentWorkflowShareUnits(workflow, options) {
     all.checked = isAll;
     all.disabled = !canShareAll;
     hint.textContent = canShareAll
-        ? '可选择一个或多个单位，也可以不选单位而只共享给个人。'
-        : (options?.currentUnit ? `单位范围仅限本部门：${options.currentUnit}；也可以只共享给个人。` : '当前账号未设置所属部门，但仍可共享给指定个人。');
+        ? '勾选单位可共享给该单位全体成员，也可展开到单位下精确选择用户。'
+        : (options?.currentUnit ? `可共享给本单位 ${options.currentUnit}，其他单位只能精确选择用户。` : '当前账号未设置所属单位，只能精确选择用户。');
     if (!units.length) {
-        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-share-empty">暂无可用部门范围，请先补充账号所属部门。</div>');
+        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>');
     } else {
         PivotSafeHtml.setHtml(list, units.map(unit => {
-            const checked = isShared && !isAll && allowedUnits.includes(unit);
+            const unitUsers = usersByUnit.get(unit) || [];
+            const selectable = unit !== unassignedUnit && selectableUnits.has(unit);
+            const checked = selectable && isShared && !isAll && allowedUnits.includes(unit);
+            const meta = [
+                unit === options.currentUnit ? '本单位' : '',
+                unitUsers.length ? `${unitUsers.length} 名用户` : '暂无用户',
+                selectable ? '' : '仅可选择个人'
+            ].filter(Boolean).join(' · ');
             return `
-                <label class="agent-workflow-share-unit">
-                    <input type="checkbox" data-agent-share-unit="${agentEscapeAttr(unit)}" ${checked ? 'checked' : ''}>
-                    <span><strong>${agentEscape(unit)}</strong>${unit === options.currentUnit ? '<small>本部门</small>' : '<small>单位成员</small>'}</span>
-                </label>`;
+                <section class="agent-workflow-share-tree-unit" role="treeitem" aria-expanded="true">
+                    <div class="agent-workflow-share-tree-unit-head">
+                        ${selectable ? `<label class="agent-workflow-share-tree-unit-label"><input type="checkbox" data-agent-share-unit="${agentEscapeAttr(unit)}" ${checked ? 'checked' : ''}><span><strong>${agentEscape(unit)}</strong><small>${agentEscape(meta)}</small></span></label>` : `<span class="agent-workflow-share-tree-unit-label"><span><strong>${agentEscape(unit)}</strong><small>${agentEscape(meta)}</small></span></span>`}
+                    </div>
+                    <div class="agent-workflow-share-tree-users" role="group">
+                        ${unitUsers.length ? unitUsers.map(target => {
+        const id = Number(target.id);
+        const displayName = target.nickname || target.username || `用户 ${id}`;
+        const detail = target.nickname && target.username ? target.username : `用户 ${id}`;
+        const userChecked = isShared && !isAll && (checked || allowedUserIds.has(id));
+        return `<label class="agent-workflow-share-tree-user" role="treeitem"><input type="checkbox" data-agent-share-user="${id}" data-agent-share-user-unit="${agentEscapeAttr(unit === unassignedUnit ? '' : unit)}" ${userChecked ? 'checked' : ''}><span><strong>${agentEscape(displayName)}</strong><small>${agentEscape(detail)}</small></span></label>`;
+    }).join('') : '<span class="agent-workflow-share-tree-empty">该单位暂无其他可共享用户</span>'}
+                    </div>
+                </section>`;
         }).join(''));
     }
-    if (!availableUsers.length) {
-        PivotSafeHtml.setHtml(userList, '<div class="agent-workflow-share-empty">暂无可共享的个人账号。</div>');
-    } else {
-        PivotSafeHtml.setHtml(userList, availableUsers.map(target => {
-            const id = Number(target.id);
-            const displayName = target.nickname || target.username || `用户 ${id}`;
-            const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
-            return `
-                <label class="agent-workflow-share-unit">
-                    <input type="checkbox" data-agent-share-user="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
-                    <span><strong>${agentEscape(displayName)}</strong><small>${agentEscape(detail)}</small></span>
-                </label>`;
-        }).join(''));
-    }
+    list.querySelectorAll('input[data-agent-share-unit]').forEach(input => {
+        input.addEventListener('change', () => {
+            const unit = input.dataset.agentShareUnit;
+            list.querySelectorAll('input[data-agent-share-user]').forEach(userInput => {
+                if (userInput.dataset.agentShareUserUnit === unit && !userInput.disabled) userInput.checked = input.checked;
+            });
+            setAgentWorkflowShareError('');
+        });
+    });
     setAgentWorkflowShareUnitsEnabled(isShared);
 }
 
@@ -317,8 +419,8 @@ function bindAgentWorkflowShareModal() {
         button.addEventListener('click', () => {
             const group = button.dataset.agentShareSelect || button.dataset.agentShareClear;
             const checked = Boolean(button.dataset.agentShareSelect);
-            const selector = group === 'users'
-                ? '#agent-workflow-share-users-list input[data-agent-share-user]'
+            const selector = group === 'tree'
+                ? '#agent-workflow-share-units-list input[data-agent-share-unit], #agent-workflow-share-units-list input[data-agent-share-user]'
                 : '#agent-workflow-share-units-list input[data-agent-share-unit]';
             modal.querySelectorAll(selector).forEach(input => {
                 if (!input.disabled) input.checked = checked;
@@ -381,7 +483,8 @@ async function saveAgentWorkflowSharing() {
             .filter(Boolean)
         : [];
     const allowedUserIds = scope === 'shared' && !allChecked
-        ? [...modal.querySelectorAll('#agent-workflow-share-users-list input[data-agent-share-user]:checked')]
+        ? [...modal.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-user]:checked')]
+            .filter(input => !allowedUnits.includes(input.dataset.agentShareUserUnit || ''))
             .map(input => Number(input.dataset.agentShareUser))
             .filter(Number.isSafeInteger)
         : [];
@@ -631,32 +734,6 @@ window.setAgentWorkflowDraftName = function(name, options = {}) {
     if (options.ifEmpty && (selectedAgentWorkflow()?.name || agentWorkflowDraftName)) return;
     agentWorkflowDraftName = nextName;
     renderAgentWorkflowLibrary();
-};
-
-async function renameAgentWorkflow() {
-    const selected = selectedAgentWorkflow();
-    if (agentWorkflowReadOnly || (selected && !selected.can_edit)) {
-        showToast('共享工作流为只读，不能修改名称', 'warning');
-        return;
-    }
-    const currentName = String(agentWorkflowDraftName || selected?.name || '').trim().slice(0, 100);
-    const promptFn = window['showInputPrompt'];
-    const value = typeof promptFn === 'function'
-        ? await promptFn({
-        title: selected ? '重命名工作流' : '设置工作流名称',
-        message: selected ? '修改后点击右上角“保存”以应用新名称。' : '填写名称后继续编排，保存时会创建工作流。',
-        value: currentName,
-        placeholder: '例如：日报汇总、客户回访分析',
-        requiredMessage: '请填写工作流名称'
-        })
-        : window.prompt('工作流名称', currentName || '未命名工作流');
-    if (value === null || value === undefined) return;
-    const nextName = String(value || '').trim().slice(0, 100);
-    if (!nextName) return showToast('请填写工作流名称', 'error');
-    agentWorkflowDraftName = nextName;
-    renderAgentWorkflowPicker();
-    renderAgentWorkflowLifecycle();
-    showToast(selected ? '工作流名称已修改，点击“保存”后生效' : '工作流名称已设置', 'success');
 };
 
 async function ensureAgentWorkflowNameForSave() {

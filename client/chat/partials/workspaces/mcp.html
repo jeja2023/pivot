@@ -184,26 +184,15 @@
                     </label>
                     <div class="agent-workflow-share-units-head">
                         <div>
-                            <strong>共享给哪些单位</strong>
-                            <span id="mcp-share-units-hint">选择后仅这些单位的成员可以使用该只读工具。</span>
+                            <strong>共享对象</strong>
+                            <span id="mcp-share-units-hint">按单位展开并选择整个单位或其中的用户。</span>
                         </div>
                         <div class="agent-workflow-share-target-actions">
-                            <button type="button" class="btn-secondary" data-mcp-share-select="units">全选</button>
-                            <button type="button" class="btn-secondary" data-mcp-share-clear="units">全不选</button>
+                            <button type="button" class="btn-secondary" data-mcp-share-select="tree">全选</button>
+                            <button type="button" class="btn-secondary" data-mcp-share-clear="tree">全不选</button>
                         </div>
                     </div>
-                    <div id="mcp-share-unit-options" class="agent-workflow-share-units-list"></div>
-                    <div class="agent-workflow-share-units-head">
-                        <div>
-                            <strong>共享给哪些个人</strong>
-                            <span>可按账号精确授权只读使用权限。</span>
-                        </div>
-                        <div class="agent-workflow-share-target-actions">
-                            <button type="button" class="btn-secondary" data-mcp-share-select="users">全选</button>
-                            <button type="button" class="btn-secondary" data-mcp-share-clear="users">全不选</button>
-                        </div>
-                    </div>
-                    <div id="mcp-share-user-options" class="agent-workflow-share-units-list agent-workflow-share-users-list"></div>
+                    <div id="mcp-share-target-tree" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户"></div>
                 </section>
                 <div id="mcp-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
             </div>

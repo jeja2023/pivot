@@ -13,15 +13,18 @@
             const fieldName = String(name || '');
             const isDatabaseConnection = isDatabaseConnectionField(name, tool);
             const isSubworkflowSelector = toolValue(tool) === 'workflow.subworkflow' && normalizeFieldKey(name) === 'workflowid';
+            const isContentReviewRecords = toolValue(tool) === 'agent.content_review' && normalizeFieldKey(name) === 'records';
             const codeTextArea = type === 'array'
                 || type === 'object'
+                || isContentReviewRecords
                 || /rows|sections|sql|json/i.test(fieldName);
             const wideRichTextArea = /content|instructions|markdown|message|prompt/i.test(fieldName);
             const proseTextArea = /query|summary|text/i.test(fieldName);
             const useTextArea = codeTextArea || wideRichTextArea || proseTextArea;
             const fieldValue = formatWizardFieldValue(schema, value);
             const suggestions = isDatabaseConnection ? [] : buildWizardFieldSuggestions(name, schema, dependencyNodes);
-            const isLlmModelField = toolValue(tool) === 'agent.llm' && normalizeFieldKey(name) === 'model';
+            const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].includes(toolValue(tool)) && normalizeFieldKey(name) === 'model';
+            const modelOptions = isLlmModelField ? workflowModelOptions() : [];
             const isSelect = isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
             const fieldClasses = [
@@ -68,14 +71,23 @@
                         <span>${dagEscapeHtml(required ? '必填' : '可选')}</span>
                     </span>
                 `;
-            } else if (isLlmModelField && workflowModelOptions().length) {
-                const modelOptions = workflowModelOptions();
-                const selectedModelId = String(fieldValue || defaultWorkflowModelId() || '').trim();
+            } else if (isLlmModelField) {
+                const configuredModel = String(fieldValue || '').trim();
+                const selectedModel = modelOptions.find(model => (
+                    String(model.id || '') === configuredModel
+                    || String(model.model_name || '') === configuredModel
+                ));
+                const selectedModelId = String(selectedModel?.id || configuredModel || defaultWorkflowModelId() || '').trim();
+                const hasConfiguredOption = modelOptions.some(model => String(model.id || '') === selectedModelId);
                 controlHtml = `
-                    <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}">
+                    <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-model-select="1" ${modelOptions.length || selectedModelId ? '' : 'disabled aria-disabled="true"'}>
+                        ${!modelOptions.length && !selectedModelId ? '<option value="">暂无可用模型</option>' : ''}
+                        ${selectedModelId && !hasConfiguredOption ? `<option value="${dagEscapeAttr(selectedModelId)}" selected>${dagEscapeHtml(`当前配置（不可用）：${selectedModelId}`)}</option>` : ''}
                         ${modelOptions.map(model => {
                             const valueId = String(model.id || '').trim();
-                            const labelText = `${model.name || model.model_name || valueId}${model.user_id ? '（个人）' : ''}`;
+                            const contextTokens = Number(model.context_window_tokens || 0);
+                            const contextLabel = contextTokens > 0 ? ` · 上下文 ${Math.round(contextTokens / 1024)}K` : '';
+                            const labelText = `${model.name || model.model_name || valueId}${model.user_id ? '（个人）' : ''}${contextLabel}`;
                             return `<option value="${dagEscapeAttr(valueId)}" ${String(valueId) === selectedModelId ? 'selected' : ''}>${dagEscapeHtml(labelText)}</option>`;
                         }).join('')}
                     </select>
@@ -90,7 +102,9 @@
                 `;
             } else if (type === 'integer' || type === 'number') {
                 const step = type === 'integer' ? '1' : 'any';
-                controlHtml = `<input class="form-input" type="number" step="${step}" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" value="${dagEscapeAttr(fieldValue)}" placeholder="${dagEscapeAttr(placeholder)}">`;
+                const minimum = Number.isFinite(Number(schema.minimum)) ? ` min="${dagEscapeAttr(schema.minimum)}"` : '';
+                const maximum = Number.isFinite(Number(schema.maximum)) ? ` max="${dagEscapeAttr(schema.maximum)}"` : '';
+                controlHtml = `<input class="form-input" type="number" step="${step}"${minimum}${maximum} data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" value="${dagEscapeAttr(fieldValue)}" placeholder="${dagEscapeAttr(placeholder)}">`;
             } else if (useTextArea) {
                 const rows = codeTextArea ? 9 : (wideRichTextArea ? 7 : 5);
                 const spellcheck = codeTextArea ? ' spellcheck="false"' : '';

@@ -873,8 +873,8 @@ function bindMcpShareModal() {
         button.addEventListener('click', () => {
             const group = button.dataset.mcpShareSelect || button.dataset.mcpShareClear;
             const checked = Boolean(button.dataset.mcpShareSelect);
-            const name = group === 'users' ? 'mcp-share-user' : 'mcp-share-unit';
-            modal.querySelectorAll(`input[name="${name}"]`).forEach(input => input.checked = checked);
+            const tree = document.getElementById('mcp-share-target-tree');
+            if (group === 'tree') window.PivotShareTargetTree?.setChecked(tree, checked);
             setMcpShareError('');
         });
     });
@@ -889,7 +889,10 @@ function bindMcpShareModal() {
             ? [...modal.querySelectorAll('input[name="mcp-share-unit"]:checked')].map(input => input.value).filter(Boolean)
             : [];
         const allowedUserIds = isShared && !allChecked
-            ? [...modal.querySelectorAll('input[name="mcp-share-user"]:checked')].map(input => Number(input.value)).filter(Number.isSafeInteger)
+            ? [...modal.querySelectorAll('input[name="mcp-share-user"]:checked')]
+                .filter(input => !allowedUnits.includes(input.dataset.shareTreeUserUnit || ''))
+                .map(input => Number(input.value))
+                .filter(Number.isSafeInteger)
             : [];
 
         if (isShared && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
@@ -966,47 +969,26 @@ async function openMcpShareModal(serverId) {
     if (allLabel) allLabel.classList.toggle('hidden', !canShareAll);
 
     const currentUnit = String(data.data?.currentUnit || '').trim();
-    const unitListContainer = document.getElementById('mcp-share-unit-options');
-    if (unitListContainer) {
-        if (!units.length) {
-            PivotSafeHtml.setHtml(unitListContainer, '<div class="agent-workflow-share-empty">暂无可用单位信息</div>');
-        } else {
-            PivotSafeHtml.setHtml(unitListContainer, units.map(unit => {
-                const checked = isShared && !isAll && allowed.has(unit);
-                const isCurrent = unit === currentUnit;
-                return `
-                    <label class="agent-workflow-share-unit">
-                        <input type="checkbox" name="mcp-share-unit" value="${mcpEscape(unit)}" ${checked ? 'checked' : ''}>
-                        <span>
-                            <strong>${mcpEscape(unit)}</strong>
-                            ${isCurrent ? '<small>本单位</small>' : '<small>单位成员</small>'}
-                        </span>
-                    </label>
-                `;
-            }).join(''));
-        }
-    }
-
-    const userListContainer = document.getElementById('mcp-share-user-options');
-    if (userListContainer) {
-        if (!users.length) {
-            PivotSafeHtml.setHtml(userListContainer, '<div class="agent-workflow-share-empty">暂无可共享的个人账号</div>');
-        } else {
-            PivotSafeHtml.setHtml(userListContainer, users.map(target => {
-                const id = Number(target.id);
-                const displayName = target.nickname || target.username || `用户 ${id}`;
-                const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
-                return `
-                    <label class="agent-workflow-share-unit">
-                        <input type="checkbox" name="mcp-share-user" value="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
-                        <span>
-                            <strong>${mcpEscape(displayName)}</strong>
-                            <small>${mcpEscape(detail)}</small>
-                        </span>
-                    </label>
-                `;
-            }).join(''));
-        }
+    const targetTree = document.getElementById('mcp-share-target-tree');
+    if (targetTree) {
+        PivotSafeHtml.setHtml(targetTree, window.PivotShareTargetTree?.render({
+            units,
+            users,
+            allowedUnits: [...allowed],
+            allowedUserIds: [...allowedUserIds],
+            currentUnit,
+            isShared,
+            isAll,
+            unitInputName: 'mcp-share-unit',
+            userInputName: 'mcp-share-user',
+            escapeText: mcpEscape,
+            escapeAttr: mcpEscape
+        }) || '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>');
+        window.PivotShareTargetTree?.bind(targetTree, {
+            unitSelector: 'input[name="mcp-share-unit"]',
+            userSelector: 'input[name="mcp-share-user"]',
+            onChange: () => setMcpShareError('')
+        });
     }
 
     setMcpShareTargetsEnabled();

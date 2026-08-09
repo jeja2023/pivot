@@ -4,6 +4,20 @@
     width: min(560px, calc(100vw - 32px));
 }
 
+.agent-workflow-metadata-modal {
+    display: flex;
+    max-height: min(680px, calc(100vh - 40px));
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+    text-align: left;
+}
+
+.agent-workflow-metadata-modal .agent-workflow-create-form {
+    overflow: auto;
+    padding: 16px;
+}
+
 .agent-workflow-share-modal-overlay {
     align-items: center;
     justify-content: center;
@@ -182,10 +196,13 @@
     cursor: pointer;
 }
 
-.agent-workflow-share-target-actions {
+.agent-workflow-share-units-head > div.agent-workflow-share-target-actions {
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    min-width: max-content;
     gap: 6px;
 }
 
@@ -213,6 +230,92 @@
 
 .agent-workflow-share-users-list {
     max-height: 230px;
+}
+
+.agent-workflow-share-tree {
+    max-height: 330px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.agent-workflow-share-tree-unit + .agent-workflow-share-tree-unit {
+    border-top: 1px solid var(--border);
+}
+
+.agent-workflow-share-tree-unit-head {
+    min-height: 44px;
+    padding: 9px 11px;
+    background: rgba(148, 163, 184, 0.08);
+}
+
+.agent-workflow-share-tree-unit-label,
+.agent-workflow-share-tree-user {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+label.agent-workflow-share-tree-unit-label,
+.agent-workflow-share-tree-user {
+    cursor: pointer;
+}
+
+.agent-workflow-share-tree-unit-label input,
+.agent-workflow-share-tree-user input {
+    flex: 0 0 auto;
+    margin-top: 2px;
+}
+
+.agent-workflow-share-tree-unit-label span,
+.agent-workflow-share-tree-user span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.agent-workflow-share-tree-unit-label strong,
+.agent-workflow-share-tree-user strong {
+    overflow: hidden;
+    color: var(--text-main);
+    font-size: 0.74rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-workflow-share-tree-unit-label small,
+.agent-workflow-share-tree-user small,
+.agent-workflow-share-tree-empty {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    line-height: 1.35;
+}
+
+.agent-workflow-share-tree-users {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 10px;
+    margin: 0 11px 9px 20px;
+    padding: 7px 0 0 13px;
+    border-left: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.agent-workflow-share-tree-user {
+    min-height: 34px;
+    padding: 5px 7px;
+    border-radius: 6px;
+}
+
+.agent-workflow-share-tree-user:has(input:checked) {
+    background: #f0fdfa;
+}
+
+.agent-workflow-share-tree-empty {
+    grid-column: 1 / -1;
+    padding: 3px 0 6px;
 }
 
 .agent-workflow-share-unit {
@@ -277,8 +380,15 @@ body.dark-mode .agent-workflow-share-summary strong,
 body.dark-mode .agent-workflow-share-choice:has(input:checked),
 .dark-mode .agent-workflow-share-choice:has(input:checked),
 body.dark-mode .agent-workflow-share-unit:has(input:checked),
-.dark-mode .agent-workflow-share-unit:has(input:checked) {
+.dark-mode .agent-workflow-share-unit:has(input:checked),
+body.dark-mode .agent-workflow-share-tree-user:has(input:checked),
+.dark-mode .agent-workflow-share-tree-user:has(input:checked) {
     background: rgba(6, 78, 59, 0.3);
+}
+
+body.dark-mode .agent-workflow-share-tree-unit-head,
+.dark-mode .agent-workflow-share-tree-unit-head {
+    background: rgba(148, 163, 184, 0.1);
 }
 
 .agent-workflow-dependency-modal-overlay {
@@ -429,6 +539,10 @@ body.dark-mode .agent-workflow-dependency-summary span,
     .agent-workflow-share-units-list {
         grid-template-columns: 1fr;
         max-height: 230px;
+    }
+
+    .agent-workflow-share-tree-users {
+        grid-template-columns: 1fr;
     }
 
     .agent-workflow-share-footer {

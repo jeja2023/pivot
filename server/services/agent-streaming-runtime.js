@@ -27,7 +27,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             { role: 'user', content: run.goal || '' }
         ];
         let lastStep = deps.listSteps(runId).length;
-        const maxSteps = normalizeMaxSteps(run.max_steps);
+        const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         for (let step = lastStep + 1; step <= lastStep + maxSteps; step += 1) {
             assertRunWithinBudget();
             assertRunNotCancelled(runId);

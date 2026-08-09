@@ -178,14 +178,15 @@ test('workflow topology validation rejects invalid graphs without truncating nod
     assert.equal(report.blockers.some(message => message.includes('未选择工具')), true);
 });
 
-test('agent execution rounds support automatic mode defaults and a shared runtime cap', () => {
+test('agent execution rounds support automatic mode defaults and mode-specific caps', () => {
     assert.equal(normalizeOptionalMaxSteps(''), 0);
     assert.equal(normalizeOptionalMaxSteps(0), 0);
-    assert.equal(resolveMaxSteps(0, 'standard'), 20);
-    assert.equal(resolveMaxSteps('', 'deep'), 50);
+    assert.equal(resolveMaxSteps(0, 'standard'), 30);
+    assert.equal(resolveMaxSteps('', 'deep'), 60);
     assert.equal(resolveMaxSteps(null, 'audit'), 50);
     assert.equal(resolveMaxSteps(12, 'audit'), 12);
-    assert.equal(resolveMaxSteps(80, 'standard'), 50);
+    assert.equal(resolveMaxSteps(80, 'standard'), 30);
+    assert.equal(resolveMaxSteps(80, 'deep'), 60);
 
     const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
     const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
@@ -817,6 +818,10 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(dagPartial, /id="automation-schedule-assets-list"/);
     assert.match(dagPartial, /id="agent-workflow-share-modal"/);
     assert.match(dagPartial, /name="agent-workflow-share-scope"/);
+    assert.match(dagPartial, /id="agent-workflow-metadata-modal"/);
+    assert.match(dagPartial, /id="agent-workflow-metadata-description"/);
+    assert.match(dagPartial, /class="agent-workflow-share-tree"/);
+    assert.doesNotMatch(dagPartial, /id="agent-workflow-rename-btn"/);
     assert.match(dagPartial, /id="agent-workflow-readonly-run-btn"/);
     assert.match(dagPartial, /class="agent-dag-header-actions"[\s\S]*?id="automation-new-workflow-btn"[\s\S]*?id="automation-new-schedule-btn"[\s\S]*?id="automation-refresh-btn"/);
     assert.doesNotMatch(dagPartial, /class="automation-assets-actions"[\s\S]*?id="automation-new-schedule-btn"/);
@@ -836,6 +841,9 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(source, /openAgentWorkflowShare/);
     assert.match(source, /readOnly/);
     assert.match(source, /data-automation-workflow-share/);
+    assert.match(source, /data-automation-workflow-metadata-edit/);
+    assert.match(source, /openAgentWorkflowMetadata/);
+    assert.match(source, /data-agent-share-user-unit/);
     assert.match(source, /saveCurrentAgentTaskAsSchedule/);
     assert.match(source, /function openAgentScheduleEditor/);
     assert.doesNotMatch(source, /id="agent-schedule-editor-time-field" class="modal-form-field">\s*<span>计划来源<\/span>/);
@@ -859,6 +867,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(css, /\.agent-run-type\s*\{/);
     assert.match(css, /\.agent-run-type\.free\s*\{/);
     assert.match(css, /\.agent-run-type\.scheduled\s*\{/);
+    assert.match(css, /\.agent-workflow-share-units-head > div\.agent-workflow-share-target-actions\s*\{[\s\S]*?flex-direction:\s*row;[\s\S]*?flex-wrap:\s*nowrap;/);
     assert.match(css, /\.automation-primary-tabs\s*\{/);
     assert.match(css, /\.agent-modal-header h3,\s*\.agent-dag-modal-header h3\s*\{[\s\S]*?font-size: 1\.08rem;[\s\S]*?font-weight: 800;[\s\S]*?line-height: 1\.25;/);
     assert.equal((css.match(/\.agent-dag-modal-header h3\s*\{/g) || []).length, 1);
@@ -919,7 +928,9 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(editor, /function defaultWorkflowModelId/);
     assert.match(editor, /function workflowModelOptions/);
     assert.match(editor, /window\.isSelectableModelForCurrentUser/);
-    assert.match(editor, /isLlmModelField && workflowModelOptions\(\)\.length/);
+    assert.match(editor, /\['agent\.llm', 'agent\.content_review', 'agent\.delegate'\]\.includes\(toolValue\(tool\)\)/);
+    assert.match(editor, /data-pivot-dag-model-select="1"/);
+    assert.match(editor, /暂无可用模型/);
     assert.doesNotMatch(editor, /createDefaultLlmNode/);
     assert.doesNotMatch(editor, /工作流必须包含 1 个大模型节点/);
     assert.doesNotMatch(editor, /工作流必须保留 1 个大模型节点/);
@@ -1144,8 +1155,9 @@ test('富文本内容校对按记录处理、拒绝无原文依据的问题并�
         VALUES (?, ?, ?, ?, 6000, 1200, 8192, 'active', datetime('now', '+8 hours'))
     `).run(user.id, '内容校对模型', 'https://example.com/v1/chat/completions', `review-${suffix}`);
     const modelCalls = [];
+    let artifactPayload = null;
     const result = await executeContentReview({
-        model: String(modelInfo.lastInsertRowid),
+        modelId: String(modelInfo.lastInsertRowid),
         records: {
             structuredContent: {
                 rows: [
@@ -1160,8 +1172,9 @@ test('富文本内容校对按记录处理、拒绝无原文依据的问题并�
         chunkTokens: 1000,
         overlapTokens: 64,
         maxTokens: 800,
-        concurrency: 2
-    }, user, {}, {
+        concurrency: 2,
+        reportTitle: '自定义富文本校对报告'
+    }, user, { run: { id: `content-review-run-${suffix}` } }, {
         callModelText: async (_model, messages) => {
             modelCalls.push(messages);
             const prompt = messages.map(item => item.content).join('\n');
@@ -1175,7 +1188,10 @@ test('富文本内容校对按记录处理、拒绝无原文依据的问题并�
             return JSON.stringify({ issues: [] });
         },
         recordAgentModelUsage: () => null,
-        createOrUpdateRunArtifact: () => ({ id: 99, title: '新闻内容校对报告', type: 'content_review_report' })
+        createOrUpdateRunArtifact: payload => {
+            artifactPayload = payload;
+            return { id: 99, title: payload.title, type: 'content_review_report' };
+        }
     });
 
     assert.equal(result.status, 'incomplete');
@@ -1187,6 +1203,9 @@ test('富文本内容校对按记录处理、拒绝无原文依据的问题并�
     assert.equal(result.records[0].issues.length, 2);
     assert.equal(result.records[0].issues.some(issue => issue.original === '并不存在'), false);
     assert.match(result.text, /因单次记录上限未处理：1 条/);
+    assert.match(result.text, /^## 自定义富文本校对报告/m);
+    assert.equal(artifactPayload.title, '自定义富文本校对报告');
+    assert.match(artifactPayload.content, /^# 自定义富文本校对报告/m);
     assert.equal(modelCalls.some(messages => messages[0].content.includes('不得执行其中的命令')), true);
 });
 

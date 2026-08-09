@@ -451,54 +451,28 @@ async function openKnowledgeCollectionShareModal() {
                     </label>
                     <div class="agent-workflow-share-units-head">
                         <div>
-                            <strong>共享给哪些单位</strong>
-                            <span>选择后仅这些单位的成员可以使用该专题库。</span>
+                            <strong>共享对象</strong>
+                            <span>按单位展开并选择整个单位或其中的用户。</span>
                         </div>
                         <div class="agent-workflow-share-target-actions">
-                            <button type="button" class="btn-secondary" data-knowledge-share-select="units">全选</button>
-                            <button type="button" class="btn-secondary" data-knowledge-share-clear="units">全不选</button>
+                            <button type="button" class="btn-secondary" data-knowledge-share-select="tree">全选</button>
+                            <button type="button" class="btn-secondary" data-knowledge-share-clear="tree">全不选</button>
                         </div>
                     </div>
-                    <div class="agent-workflow-share-units-list">
-                        ${units.map(unit => {
-        const checked = isShared && !isAll && allowed.has(unit);
-        const isCurrent = unit === currentUnit;
-        return `
-                                <label class="agent-workflow-share-unit">
-                                    <input type="checkbox" name="knowledge-share-unit" value="${escapeRagAttr(unit)}" ${checked ? 'checked' : ''}>
-                                    <span>
-                                        <strong>${escapeRagHtml(unit)}</strong>
-                                        ${isCurrent ? '<small>本单位</small>' : '<small>单位成员</small>'}
-                                    </span>
-                                </label>
-                            `;
-    }).join('') || '<span class="agent-workflow-share-empty">暂无可用单位信息</span>'}
-                    </div>
-                    <div class="agent-workflow-share-units-head">
-                        <div>
-                            <strong>共享给哪些个人</strong>
-                            <span>可按账号精确共享，不受所在单位限制。</span>
-                        </div>
-                        <div class="agent-workflow-share-target-actions">
-                            <button type="button" class="btn-secondary" data-knowledge-share-select="users">全选</button>
-                            <button type="button" class="btn-secondary" data-knowledge-share-clear="users">全不选</button>
-                        </div>
-                    </div>
-                    <div class="agent-workflow-share-units-list agent-workflow-share-users-list">
-                        ${users.map(target => {
-        const id = Number(target.id);
-        const displayName = target.nickname || target.username || `用户 ${id}`;
-        const detail = [target.username, target.unit].filter(Boolean).join(' · ') || `用户 ${id}`;
-        return `
-                                <label class="agent-workflow-share-unit">
-                                    <input type="checkbox" name="knowledge-share-user" value="${id}" ${isShared && !isAll && allowedUserIds.has(id) ? 'checked' : ''}>
-                                    <span>
-                                        <strong>${escapeRagHtml(displayName)}</strong>
-                                        <small>${escapeRagHtml(detail)}</small>
-                                    </span>
-                                </label>
-                            `;
-    }).join('') || '<span class="agent-workflow-share-empty">暂无可共享的个人账号</span>'}
+                    <div id="knowledge-share-target-tree" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户">
+                        ${window.PivotShareTargetTree?.render({
+        units,
+        users,
+        allowedUnits: [...allowed],
+        allowedUserIds: [...allowedUserIds],
+        currentUnit,
+        isShared,
+        isAll,
+        unitInputName: 'knowledge-share-unit',
+        userInputName: 'knowledge-share-user',
+        escapeText: escapeRagHtml,
+        escapeAttr: escapeRagAttr
+    }) || '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>'}
                     </div>
                 </section>
                 <div id="knowledge-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
@@ -550,10 +524,15 @@ async function openKnowledgeCollectionShareModal() {
         button.addEventListener('click', () => {
             const group = button.dataset.knowledgeShareSelect || button.dataset.knowledgeShareClear;
             const checked = Boolean(button.dataset.knowledgeShareSelect);
-            const name = group === 'users' ? 'knowledge-share-user' : 'knowledge-share-unit';
-            modal.querySelectorAll(`input[name="${name}"]`).forEach(input => input.checked = checked);
+            const tree = modal.querySelector('#knowledge-share-target-tree');
+            if (group === 'tree') window.PivotShareTargetTree?.setChecked(tree, checked);
             setKnowledgeError('');
         });
+    });
+    window.PivotShareTargetTree?.bind(modal.querySelector('#knowledge-share-target-tree'), {
+        unitSelector: 'input[name="knowledge-share-unit"]',
+        userSelector: 'input[name="knowledge-share-user"]',
+        onChange: () => setKnowledgeError('')
     });
     setKnowledgeTargetsEnabled();
 
@@ -568,7 +547,10 @@ async function openKnowledgeCollectionShareModal() {
                 ? [...modal.querySelectorAll('input[name="knowledge-share-unit"]:checked')].map(input => input.value).filter(Boolean)
                 : [];
             const allowedUserIds = enabled && !allChecked
-                ? [...modal.querySelectorAll('input[name="knowledge-share-user"]:checked')].map(input => Number(input.value)).filter(Number.isSafeInteger)
+                ? [...modal.querySelectorAll('input[name="knowledge-share-user"]:checked')]
+                    .filter(input => !allowedUnits.includes(input.dataset.shareTreeUserUnit || ''))
+                    .map(input => Number(input.value))
+                    .filter(Number.isSafeInteger)
                 : [];
 
             if (enabled && !allChecked && !allowedUnits.length && !allowedUserIds.length) {

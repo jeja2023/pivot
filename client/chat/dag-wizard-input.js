@@ -17,22 +17,22 @@ const cloneDagInput = (value) => {
             return type === 'string'
                 || type === 'array'
                 || type === 'object'
-                || /query|keyword|prompt|text|title|name|rows|sections|content|message|markdown|sql|json/i.test(String(name || ''));
+                || /query|keyword|prompt|text|title|name|records|rows|sections|content|message|markdown|sql|json/i.test(String(name || ''));
         };
 
         const formatWizardFieldValue = (schema = {}, value) => {
             if (value === undefined || value === null) return '';
             if (typeof value === 'string') return value;
-            const type = normalizeSchemaType(schema);
-            if (type === 'boolean') return Boolean(value);
-            if (type === 'integer' || type === 'number') return String(value);
-            if (type === 'array' || type === 'object') {
+            if (typeof value === 'object') {
                 try {
                     return JSON.stringify(value, null, 2);
                 } catch (e) {
                     return String(value);
                 }
             }
+            const type = normalizeSchemaType(schema);
+            if (type === 'boolean') return Boolean(value);
+            if (type === 'integer' || type === 'number') return String(value);
             return String(value);
         };
 
@@ -45,6 +45,9 @@ const cloneDagInput = (value) => {
                 ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'
                 : '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
             if (key === 'query' || key === 'prompt') return '可直接输入，也可以插入任务目标或上游节点输出作为上下文。';
+            if (toolValue(tool) === 'agent.content_review' && key === 'records') return '请选择上游查询节点的结构化结果或记录行；支持 structuredContent、rows、data 和数组。';
+            if (toolValue(tool) === 'agent.content_review' && ['id_field', 'title_field', 'content_field'].includes(key)) return '填写上游记录里的实际字段名；字段不存在时会尝试常见别名。';
+            if (toolValue(tool) === 'agent.content_review' && ['chunk_tokens', 'overlap_tokens', 'max_tokens', 'concurrency'].includes(key)) return '这是高级处理参数；默认值已兼顾上下文完整性、速度和模型输出稳定性。';
             if (key === 'rows' || key === 'columns' || key === 'filters') return '适合引用上游结构化结果；手动填写时请保持结构化格式。';
             if (key === 'model' || key === 'temperature' || key === 'max_tokens') return '属于模型调用控制参数，不确定时保持默认或留空。';
             const type = normalizeSchemaType(schema);
@@ -66,6 +69,13 @@ const cloneDagInput = (value) => {
             }
             const previewValue = (key, value) => {
                 if (isDatabaseConnectionField(key, tool)) return databaseConnectionLabel(tool, value, wizardTools);
+                if (normalizeFieldKey(key) === 'model') {
+                    const model = workflowModelOptions().find(item => (
+                        String(item.id || '') === String(value || '')
+                        || String(item.model_name || '') === String(value || '')
+                    ));
+                    if (model) return model.name || model.model_name || String(value || '');
+                }
                 if (value === undefined || value === null || value === '') return '空';
                 if (typeof value === 'string') {
                     const normalized = value.replace(/\s+/g, ' ').trim();

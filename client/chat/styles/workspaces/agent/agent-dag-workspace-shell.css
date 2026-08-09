@@ -214,6 +214,10 @@
     min-width: 1120px;
 }
 
+.automation-workflows-table {
+    min-width: 1400px;
+}
+
 .automation-assets-table {
     width: 100%;
     border-collapse: collapse;
@@ -250,6 +254,29 @@
 .automation-assets-table th:last-child,
 .automation-assets-table td:last-child {
     width: 320px;
+}
+
+.automation-workflows-table th:first-child,
+.automation-workflows-table td:first-child {
+    width: 54px;
+}
+
+.automation-workflows-table th:nth-child(2),
+.automation-workflows-table td:nth-child(2) {
+    width: 180px;
+}
+
+.automation-workflows-table th:nth-child(3),
+.automation-workflows-table td:nth-child(3) {
+    width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.automation-workflows-table th:last-child,
+.automation-workflows-table td:last-child {
+    width: 390px;
 }
 
 .automation-schedules-table th:last-child,

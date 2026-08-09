@@ -227,8 +227,8 @@ async function callReviewModel(params) {
     return { content, contextBudget: fitted.metadata };
 }
 
-function reportMarkdown(records, stats) {
-    const blocks = ['# 新闻内容校对报告', '', '- 查询记录：' + stats.sourceRowCount + ' 条', '- 完成校对：' + stats.completedRecords + ' 条', '- 未发现问题：' + stats.passedRecords + ' 条', '- 发现问题：' + stats.issueRecords + ' 条', '- 校对不完整：' + stats.incompleteRecords + ' 条', '- 模型调用：' + stats.modelCallCount + ' 次', '- 富文本字符：' + stats.originalChars + '，清洗后：' + stats.cleanChars, ''];
+function reportMarkdown(records, stats, reportTitle) {
+    const blocks = ['# ' + reportTitle, '', '- 查询记录：' + stats.sourceRowCount + ' 条', '- 完成校对：' + stats.completedRecords + ' 条', '- 未发现问题：' + stats.passedRecords + ' 条', '- 发现问题：' + stats.issueRecords + ' 条', '- 校对不完整：' + stats.incompleteRecords + ' 条', '- 模型调用：' + stats.modelCallCount + ' 次', '- 富文本字符：' + stats.originalChars + '，清洗后：' + stats.cleanChars, ''];
     const cell = value => String(value || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
     records.forEach(record => {
         blocks.push('## ' + (record.title || '记录 ' + record.recordId), '- 记录 ID：' + record.recordId, '- 状态：' + record.status);
@@ -244,8 +244,8 @@ function reportMarkdown(records, stats) {
     return blocks.join('\n');
 }
 
-function reportSummary(records, stats, artifact, maxChars) {
-    const blocks = ['## 新闻校对结果', '', '- 待审核新闻：' + stats.sourceRowCount + ' 条', '- 校对完成：' + stats.completedRecords + ' 条', '- 未发现问题：' + stats.passedRecords + ' 条', '- 发现问题：' + stats.issueRecords + ' 条', '- 校对不完整：' + stats.incompleteRecords + ' 条', stats.skippedRecords ? '- 因单次记录上限未处理：' + stats.skippedRecords + ' 条' : '', '- 共发现标题问题 ' + stats.titleIssues + ' 处、正文问题 ' + stats.contentIssues + ' 处', artifact?.id ? '- 完整报告：已保存到任务产物 #' + artifact.id : '', ''].filter(Boolean);
+function reportSummary(records, stats, artifact, maxChars, reportTitle) {
+    const blocks = ['## ' + reportTitle, '', '- 待审核记录：' + stats.sourceRowCount + ' 条', '- 校对完成：' + stats.completedRecords + ' 条', '- 未发现问题：' + stats.passedRecords + ' 条', '- 发现问题：' + stats.issueRecords + ' 条', '- 校对不完整：' + stats.incompleteRecords + ' 条', stats.skippedRecords ? '- 因单次记录上限未处理：' + stats.skippedRecords + ' 条' : '', '- 共发现标题问题 ' + stats.titleIssues + ' 处、正文问题 ' + stats.contentIssues + ' 处', artifact?.id ? '- 完整报告：已保存到任务产物 #' + artifact.id : '', ''].filter(Boolean);
     for (const record of records) {
         const lines = ['### ' + (record.title || '记录 ' + record.recordId) + '（' + record.status + '）'];
         if (record.issues.length) record.issues.forEach(issue => lines.push('- [' + issue.field + '/' + issue.category + '] “' + issue.original + '” → “' + issue.suggestion + '”' + (issue.reason ? '：' + issue.reason : '')));
@@ -259,7 +259,7 @@ function reportSummary(records, stats, artifact, maxChars) {
 
 async function executeContentReview(input = {}, user, context = {}, injectedDeps = {}) {
     const deps = { callModelText, recordAgentModelUsage, createOrUpdateRunArtifact, ...injectedDeps };
-    const modelId = String(input.model || context.modelCfg?.id || context.run?.model_id || '').trim();
+    const modelId = String(input.model ?? input.modelId ?? input.model_id ?? context.modelCfg?.id ?? context.run?.model_id ?? '').trim();
     const modelCfg = getRunnableModelForUser(modelId, user);
     if (!modelCfg) throw new Error('内容校对节点需要选择当前用户可用的模型。');
     const rawRecords = input.records ?? input.rows ?? input.data;
@@ -283,6 +283,7 @@ async function executeContentReview(input = {}, user, context = {}, injectedDeps
     const chunkTokens = Math.min(requestedChunkTokens, Math.max(512, Math.floor(safeInputBudget * 0.72)));
     const overlapTokens = Math.max(0, Math.min(Number.parseInt(input.overlapTokens, 10) || 80, 256));
     const concurrency = Math.max(1, Math.min(Number.parseInt(input.concurrency, 10) || 2, 6));
+    const reportTitle = String(input.reportTitle || '新闻内容校对报告').trim().slice(0, 120) || '新闻内容校对报告';
     const records = new Array(sources.length);
     let modelCallCount = 0;
     const reviewRecord = async record => {
@@ -321,12 +322,12 @@ async function executeContentReview(input = {}, user, context = {}, injectedDeps
     let artifactWarning = '';
     if (context.run?.id) {
         try {
-            artifact = deps.createOrUpdateRunArtifact({ runId: context.run.id, user, type: 'content_review_report', title: String(input.reportTitle || '新闻内容校对报告').slice(0, 120), content: reportMarkdown(records, stats), note: '校对 ' + records.length + ' 条记录，发现 ' + (stats.titleIssues + stats.contentIssues) + ' 个问题' });
+            artifact = deps.createOrUpdateRunArtifact({ runId: context.run.id, user, type: 'content_review_report', title: reportTitle, content: reportMarkdown(records, stats, reportTitle), note: '校对 ' + records.length + ' 条记录，发现 ' + (stats.titleIssues + stats.contentIssues) + ' 个问题' });
         } catch (error) {
             artifactWarning = '完整报告保存失败：' + error.message;
         }
     }
-    const text = reportSummary(records, stats, artifact, Math.max(4000, Math.min(Number.parseInt(input.maxSummaryChars, 10) || 30000, 120000)));
+    const text = reportSummary(records, stats, artifact, Math.max(4000, Math.min(Number.parseInt(input.maxSummaryChars, 10) || 30000, 120000)), reportTitle);
     const finalText = [text, artifactWarning ? '> 警告：' + artifactWarning : ''].filter(Boolean).join('\n\n');
     return { type: 'content_review_report', status: stats.incompleteRecords ? 'incomplete' : 'completed', reviewComplete: stats.incompleteRecords === 0, stats, records, artifact: artifact ? { id: artifact.id, title: artifact.title, type: artifact.type } : null, warnings: artifactWarning ? [artifactWarning] : [], text: finalText, markdown: finalText };
 }

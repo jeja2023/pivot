@@ -99,7 +99,47 @@ const NODE_PRESET_GROUPS = [
                 }),
                 outputSchema: {
                     type: 'object', required: ['type', 'status', 'reviewComplete', 'stats', 'records', 'text'],
-                    properties: { type: { type: 'string' }, status: { type: 'string' }, reviewComplete: { type: 'boolean' }, stats: { type: 'object' }, records: { type: 'array' }, text: { type: 'string' }, markdown: { type: 'string' } }
+                    properties: {
+                        type: { type: 'string' },
+                        status: { type: 'string', enum: ['completed', 'incomplete'] },
+                        reviewComplete: { type: 'boolean' },
+                        stats: {
+                            type: 'object',
+                            properties: {
+                                sourceRowCount: { type: 'integer' }, processedRecords: { type: 'integer' }, skippedRecords: { type: 'integer' },
+                                completedRecords: { type: 'integer' }, passedRecords: { type: 'integer' }, issueRecords: { type: 'integer' },
+                                incompleteRecords: { type: 'integer' }, titleIssues: { type: 'integer' }, contentIssues: { type: 'integer' },
+                                originalChars: { type: 'integer' }, cleanChars: { type: 'integer' }, modelCallCount: { type: 'integer' },
+                                chunkTokens: { type: 'integer' }, overlapTokens: { type: 'integer' }, upstreamPartial: { type: 'boolean' },
+                                oversizedRowCount: { type: 'integer' }, inputTruncated: { type: 'boolean' }
+                            }
+                        },
+                        records: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    recordId: {}, title: { type: 'string' }, status: { type: 'string', enum: ['passed', 'issues_found', 'incomplete'] },
+                                    reviewComplete: { type: 'boolean' }, titleIssueCount: { type: 'integer' }, contentIssueCount: { type: 'integer' },
+                                    chunkCount: { type: 'integer' }, originalChars: { type: 'integer' }, cleanChars: { type: 'integer' },
+                                    removedChars: { type: 'integer' }, error: { type: 'string' }, contextAdjusted: { type: 'boolean' },
+                                    issues: {
+                                        type: 'array', items: {
+                                            type: 'object', properties: {
+                                                field: { type: 'string' }, category: { type: 'string' }, original: { type: 'string' },
+                                                suggestion: { type: 'string' }, context: { type: 'string' }, reason: { type: 'string' },
+                                                confidence: { type: 'string' }, chunkIndex: { type: 'integer' }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        artifact: { type: ['object', 'null'], properties: { id: {}, title: { type: 'string' }, type: { type: 'string' } } },
+                        warnings: { type: 'array', items: { type: 'string' } },
+                        text: { type: 'string' },
+                        markdown: { type: 'string' }
+                    }
                 }
             },
             {

@@ -77,19 +77,19 @@ function getBuiltInToolDefinitions(user) {
             title: '富文本内容校对',
             description: '清洗数据库富文本记录，按模型上下文预算逐条分块校对，并生成结构化结果和完整任务产物。',
             input_schema: asJsonSchema({
-                records: { description: '待校对记录数组，建议引用数据库节点的 structuredContent.rows。' },
-                model: { type: 'string', description: '必填模型 ID 或 model_name。' },
-                idField: { type: 'string', default: 'id' },
-                titleField: { type: 'string', default: 'title' },
-                contentField: { type: 'string', default: 'content' },
-                instructions: { type: 'string', description: '原任务审核要求和补充校对规则。' },
-                maxRecords: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
-                chunkTokens: { type: 'integer', minimum: 512, maximum: 12000, default: 3000 },
-                overlapTokens: { type: 'integer', minimum: 0, maximum: 256, default: 80 },
-                maxTokens: { type: 'integer', minimum: 512, maximum: 8000, default: 1800 },
-                concurrency: { type: 'integer', minimum: 1, maximum: 6, default: 2 },
-                maxSummaryChars: { type: 'integer', minimum: 4000, maximum: 120000, default: 30000 },
-                reportTitle: { type: 'string', default: '新闻内容校对报告' }
+                records: { description: '待校对记录，支持记录数组、structuredContent、rows、data 或对应的上游变量引用。' },
+                model: { type: 'string', description: '必填模型 ID 或 model_name；只能选择当前账号可用模型。' },
+                idField: { type: 'string', default: 'id', maxLength: 128, description: '记录唯一标识字段。' },
+                titleField: { type: 'string', default: 'title', maxLength: 128, description: '记录标题字段。' },
+                contentField: { type: 'string', default: 'content', maxLength: 128, description: '包含 HTML、富文本或普通正文的字段。' },
+                instructions: { type: 'string', maxLength: 6000, description: '业务术语、禁用表达和补充校对规则。' },
+                maxRecords: { type: 'integer', minimum: 1, maximum: 200, default: 50, description: '单次最多处理的记录数。' },
+                chunkTokens: { type: 'integer', minimum: 512, maximum: 12000, default: 3000, description: '长正文分块的目标输入 Token 数。' },
+                overlapTokens: { type: 'integer', minimum: 0, maximum: 256, default: 80, description: '相邻正文分块保留的上下文 Token 数。' },
+                maxTokens: { type: 'integer', minimum: 512, maximum: 8000, default: 1800, description: '每次模型调用的最大输出 Token 数。' },
+                concurrency: { type: 'integer', minimum: 1, maximum: 6, default: 2, description: '同时校对的记录数。' },
+                maxSummaryChars: { type: 'integer', minimum: 4000, maximum: 120000, default: 30000, description: '节点直接返回的结果摘要字符上限。' },
+                reportTitle: { type: 'string', default: '新闻内容校对报告', maxLength: 120, description: '完整报告和任务产物标题。' }
             }, ['records', 'model'])
         },
         {

@@ -327,6 +327,23 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
     return getAgentWorkflowForUser(update(), user);
 }
 
+function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
+    const current = findOwnedWorkflowRow(workflowId, user);
+    if (!current) return null;
+    const name = String(body.name ?? current.name ?? '').trim().slice(0, 100) || '未命名工作流';
+    const description = String(body.description ?? current.description ?? '').trim().slice(0, 300);
+    if (String(current.name || '') === name && String(current.description || '') === description) {
+        return getAgentWorkflowForUser(current.id, user);
+    }
+    const now = getBeijingTimestamp();
+    sql(`
+        UPDATE agent_workflows
+        SET name = ?, description = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(name, description, now, current.id, user.id);
+    return getAgentWorkflowForUser(current.id, user);
+}
+
 function updateAgentWorkflowSharing(workflowId, user, body = {}) {
     const current = findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
@@ -539,5 +556,6 @@ module.exports = {
     restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     updateAgentWorkflow,
+    updateAgentWorkflowMetadata,
     updateAgentWorkflowSharing
 };

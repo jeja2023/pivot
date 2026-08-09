@@ -53,6 +53,7 @@ const {
     resolveAgentWorkflowVersion,
     restoreAgentWorkflowVersion,
     updateAgentWorkflow,
+    updateAgentWorkflowMetadata,
     updateAgentWorkflowSharing
 } = require('../agent-workflows');
 const {
@@ -729,7 +730,7 @@ async function runAgent(runId, user) {
 
         // 启用时优先使用流式函数调用，让模型可直接发出 tool_calls。
         // 如果流式调用未完成，下方 JSON 规划器会基于已收集的观察继续执行。
-        const maxSteps = normalizeMaxSteps(run.max_steps);
+        const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         let roundsUsed = 0;
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
@@ -1239,7 +1240,7 @@ function createAgentRun({
         normalizeAgentTitle(title, cleanGoal),
         cleanGoal,
         'queued',
-        normalizeMaxSteps(effectiveMaxSteps),
+        normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
         parentRunId || null,
         normalizePriority(priority),
         normalizedRunMode,
@@ -1336,5 +1337,6 @@ module.exports = {
     updateAgentSchedule,
     updateAgentTemplate,
     updateAgentWorkflow,
+    updateAgentWorkflowMetadata,
     updateAgentWorkflowSharing
 };

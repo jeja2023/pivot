@@ -185,8 +185,17 @@ function workflowModelOptions() {
         const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
             ? window.isSelectableModelForCurrentUser
             : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
-        return (Array.isArray(window._cachedAgentModels) ? window._cachedAgentModels : [])
-            .filter(model => model.type !== 'embedding' && canSelectModel(model));
+        const candidates = [
+            ...(Array.isArray(window._cachedAgentModels) ? window._cachedAgentModels : []),
+            ...(Array.isArray(window._cachedModels) ? window._cachedModels : [])
+        ];
+        const seen = new Set();
+        return candidates.filter(model => {
+            const id = String(model?.id || '').trim();
+            if (!id || seen.has(id) || model?.type === 'embedding' || !canSelectModel(model)) return false;
+            seen.add(id);
+            return true;
+        });
     }
 
 function defaultWorkflowModelId() {

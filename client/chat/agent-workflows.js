@@ -96,20 +96,22 @@ function renderAutomationAssetCenter() {
     ].filter(Boolean).join(' ').toLowerCase().includes(query));
     PivotSafeHtml.setHtml(workflowList, workflows.length ? `
         <div class="automation-table-wrap">
-            <table class="data-table automation-assets-table">
-                <thead><tr><th>工作流</th><th>状态</th><th>可见范围</th><th>版本</th><th>节点</th><th>更新时间</th><th>操作</th></tr></thead>
-                <tbody>${workflows.map(workflow => {
+            <table class="data-table automation-assets-table automation-workflows-table">
+                <thead><tr><th class="text-center">序号</th><th>工作流</th><th>简介</th><th>状态</th><th>可见范围</th><th>版本</th><th>节点</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>${workflows.map((workflow, index) => {
         const publishedVersion = Number(workflow.published_version || 0);
         return `
                     <tr>
-                        <td><strong>${agentEscape(workflow.name || '未命名工作流')}</strong><small>${agentEscape(workflow.description || '暂无说明')}</small></td>
+                        <td class="text-center">${index + 1}</td>
+                        <td><strong>${agentEscape(workflow.name || '未命名工作流')}</strong></td>
+                        <td>${agentEscape(workflow.description || '暂无说明')}</td>
                         <td><span class="automation-status ${publishedVersion ? 'published' : 'draft'}">${publishedVersion ? '已发布' : '草稿'}</span></td>
                         <td><span class="automation-scope ${workflow.is_owner && workflow.scope === 'shared' ? 'is-shared' : ''}">${agentEscape(automationWorkflowScopeText(workflow))}</span></td>
                         <td>版本 ${Number(workflow.current_version || 1)}${publishedVersion ? ` / 已发布版本 ${publishedVersion}` : ''}</td>
                         <td>${agentWorkflowNodeCount(workflow)}</td>
                         <td>${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</td>
                         <td><div class="automation-row-actions">
-                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">编辑</button>` : `<button class="btn-secondary" type="button" data-automation-workflow-view="${agentEscapeAttr(workflow.id)}">查看</button>`}
+                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">详情</button><button class="btn-secondary" type="button" data-automation-workflow-metadata-edit="${agentEscapeAttr(workflow.id)}">编辑</button>` : `<button class="btn-secondary" type="button" data-automation-workflow-view="${agentEscapeAttr(workflow.id)}">详情</button>`}
                             ${!workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-dependencies="${agentEscapeAttr(workflow.id)}">配置依赖</button>` : ''}
                             ${publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}">版本</button>` : ''}
@@ -177,6 +179,9 @@ function renderAutomationAssetCenter() {
             if (button.dataset.automationWorkflowShare) return window.Pivot.moduleApi('agent.automation').openWorkflowShare?.(workflowId);
         });
     });
+    workflowList.querySelectorAll('[data-automation-workflow-metadata-edit]').forEach(button => {
+        button.addEventListener('click', () => window.Pivot.moduleApi('agent.automation').openWorkflowMetadata?.(button.dataset.automationWorkflowMetadataEdit));
+    });
     scheduleList.querySelectorAll('[data-automation-workflow-edit]').forEach(button => {
         button.addEventListener('click', () => {
             const workflow = agentWorkflowsCache.find(item => String(item.id) === String(button.dataset.automationWorkflowEdit));
@@ -235,12 +240,11 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     document.getElementById('agent-workflow-readonly-run-btn')?.classList.toggle('hidden', !agentWorkflowReadOnly);
     document.getElementById('agent-dag-back-btn')?.classList.remove('hidden');
     document.getElementById('agent-workflow-management-menu')?.classList.toggle('hidden', agentWorkflowReadOnly);
-    document.getElementById('agent-workflow-rename-btn')?.classList.toggle('hidden', agentWorkflowReadOnly);
     document.getElementById('automation-editor-view')?.classList.toggle('is-readonly', agentWorkflowReadOnly);
     document.getElementById('automation-editor-view')?.setAttribute('aria-readonly', agentWorkflowReadOnly ? 'true' : 'false');
     const title = document.getElementById('automation-workspace-title');
     const description = document.getElementById('automation-workspace-description');
-    if (title) title.textContent = agentWorkflowReadOnly ? '查看共享工作流' : (workflowId ? '编辑工作流' : '新建工作流');
+    if (title) title.textContent = agentWorkflowReadOnly ? '查看共享工作流' : (workflowId ? '工作流详情' : '新建工作流');
     if (description) description.textContent = agentWorkflowReadOnly
         ? '当前为只读视图，可查看并运行已发布版本。'
         : '编排节点、校验流程并管理发布版本。';
@@ -308,11 +312,6 @@ window.bindAgentDagWorkbench = function() {
     if (saveBtn && saveBtn.dataset.boundAgentDagSave !== '1') {
         saveBtn.dataset.boundAgentDagSave = '1';
         saveBtn.addEventListener('click', () => window.saveAgentWorkflow?.());
-    }
-    const renameBtn = document.getElementById('agent-workflow-rename-btn');
-    if (renameBtn && renameBtn.dataset.boundAgentWorkflowRename !== '1') {
-        renameBtn.dataset.boundAgentWorkflowRename = '1';
-        renameBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.automation').renameWorkflow?.());
     }
     const readonlyRunBtn = document.getElementById('agent-workflow-readonly-run-btn');
     if (readonlyRunBtn && readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun !== '1') {
@@ -522,7 +521,7 @@ window.Pivot.exposeModule('agent.automation', {
     renderAssetCenter: renderAutomationAssetCenter,
     showAssetCenter: showAutomationAssetCenter,
     showWorkflowEditor: showAutomationWorkflowEditor,
-    renameWorkflow: renameAgentWorkflow,
+    openWorkflowMetadata: openAgentWorkflowMetadata,
     openWorkflowShare: openAgentWorkflowShare,
     openWorkflowDependencies: openAgentWorkflowDependencies,
     listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),

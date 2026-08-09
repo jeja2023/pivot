@@ -118,6 +118,21 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             responseFormat: '输出格式',
             response_format: '输出格式'
         },
+        'agent.content_review': {
+            records: '待校对记录',
+            model: '校对模型',
+            idField: '记录 ID 字段',
+            titleField: '标题字段',
+            contentField: '富文本正文字段',
+            instructions: '补充校对规则',
+            maxRecords: '单次最多记录数',
+            chunkTokens: '正文分块长度',
+            overlapTokens: '分块重叠长度',
+            maxTokens: '单次模型输出上限',
+            concurrency: '并发校对数',
+            maxSummaryChars: '结果摘要字符上限',
+            reportTitle: '完整报告标题'
+        },
         'workflow.output': {
             name: '输出名称',
             value: '输出值',
@@ -303,6 +318,21 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             max_steps: '本工作流运行允许的最大步骤数，作为运行任务的上限。',
             responseFormat: '选择格式化内容、纯文本或结构化数据；结构化模式会校验返回格式。'
         },
+        'agent.content_review': {
+            records: '必填。引用上游数据库查询的 structuredContent、rows 或记录数组；节点会逐条清洗富文本后校对。',
+            model: '必填。选择当前账号可用的文本模型；长上下文模型更适合处理较长正文。',
+            idField: '记录唯一标识字段，用于在报告中定位原始数据。',
+            titleField: '记录标题字段；标题会与正文一起检查。',
+            contentField: '包含 HTML、富文本或普通正文的字段；脚本和样式会在送入模型前移除。',
+            instructions: '补充业务术语、禁用表达和审核口径，最多使用前 6000 个字符。',
+            maxRecords: '限制单次处理记录数；超过上限的记录会明确标记为未处理。',
+            chunkTokens: '长正文按此输入 Token 目标分块，运行时会根据所选模型上下文自动下调。',
+            overlapTokens: '相邻正文分块保留的上下文长度，用于减少断句边界造成的漏检。',
+            maxTokens: '每次分块校对允许模型返回的最大 Token 数，不能低于 512。',
+            concurrency: '同时校对的记录数；提高并发会增加模型端点瞬时压力。',
+            maxSummaryChars: '节点直接返回的摘要字符上限；完整报告仍保存为任务产物。',
+            reportTitle: '任务产物和报告正文使用的标题，最多 120 个字符。'
+        },
         'workflow.output': {
             format: '选择调用方接收最终结果的形式。',
             presentation: '默认结果保留原始值；表格模式整理行列；文件产物模式保留文件引用。',
@@ -402,6 +432,21 @@ const TOOL_FIELD_PLACEHOLDER_OVERRIDES = {
             maxTokens: '例如 1200',
             max_tokens: '例如 1200',
             responseFormat: '格式化文本 / 纯文本 / 结构化数据'
+        },
+        'agent.content_review': {
+            records: '例如 {{nodes.query.output.structuredContent}}',
+            model: '选择当前账号可用模型',
+            idField: '例如 id',
+            titleField: '例如 title',
+            contentField: '例如 content',
+            instructions: '例如：检查错别字、病句和标点，不改变事实原意',
+            maxRecords: '1-200，默认 50',
+            chunkTokens: '512-12000，默认 3000',
+            overlapTokens: '0-256，默认 80',
+            maxTokens: '512-8000，默认 1800',
+            concurrency: '1-6，默认 2',
+            maxSummaryChars: '4000-120000，默认 30000',
+            reportTitle: '例如：新闻内容校对报告'
         },
         'sessions.search': {
             query: '输入会话关键词'

@@ -7,13 +7,19 @@
  * 重要：本文件不引入业务依赖（db、http、模型调用等），保持纯逻辑。
  */
 
-const MAX_STEPS = 50;
-const DEFAULT_STEPS = 20;
+const MAX_STEPS = 60;
+const DEFAULT_STEPS = 30;
 const AUTO_STEPS_BY_RUN_MODE = Object.freeze({
-    standard: 20,
-    deep: 50,
+    standard: 30,
+    deep: 60,
     audit: 50,
     dag: 20
+});
+const MAX_STEPS_BY_RUN_MODE = Object.freeze({
+    standard: 30,
+    deep: 60,
+    audit: 50,
+    dag: 60
 });
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required', 'awaiting_approval']);
 const MAX_GOAL_LENGTH = 2000;
@@ -47,17 +53,22 @@ function parseJsonObject(text) {
     }
 }
 
-function normalizeMaxSteps(value) {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_STEPS;
-    return Math.min(parsed, MAX_STEPS);
+function maxStepsLimitForRunMode(runMode = '') {
+    if (!String(runMode || '').trim()) return MAX_STEPS;
+    return MAX_STEPS_BY_RUN_MODE[normalizeRunMode(runMode)] || MAX_STEPS;
 }
 
-function normalizeOptionalMaxSteps(value) {
+function normalizeMaxSteps(value, runMode = '') {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return runMode ? defaultMaxStepsForRunMode(runMode) : DEFAULT_STEPS;
+    return Math.min(parsed, maxStepsLimitForRunMode(runMode));
+}
+
+function normalizeOptionalMaxSteps(value, runMode = '') {
     if (value === null || value === undefined || String(value).trim() === '') return 0;
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-    return Math.min(parsed, MAX_STEPS);
+    return Math.min(parsed, maxStepsLimitForRunMode(runMode));
 }
 
 function defaultMaxStepsForRunMode(value) {
@@ -65,7 +76,7 @@ function defaultMaxStepsForRunMode(value) {
 }
 
 function resolveMaxSteps(value, runMode = 'standard') {
-    return normalizeOptionalMaxSteps(value) || defaultMaxStepsForRunMode(runMode);
+    return normalizeOptionalMaxSteps(value, runMode) || defaultMaxStepsForRunMode(runMode);
 }
 
 function normalizePriority(value) {
@@ -344,6 +355,7 @@ module.exports = {
     MAX_STEPS,
     DEFAULT_STEPS,
     AUTO_STEPS_BY_RUN_MODE,
+    MAX_STEPS_BY_RUN_MODE,
     ACTIVE_STATUSES,
     MAX_GOAL_LENGTH,
     MAX_DAG_NODES,
@@ -356,6 +368,7 @@ module.exports = {
     normalizeMaxSteps,
     normalizeOptionalMaxSteps,
     defaultMaxStepsForRunMode,
+    maxStepsLimitForRunMode,
     resolveMaxSteps,
     normalizePriority,
     normalizeRunMode,

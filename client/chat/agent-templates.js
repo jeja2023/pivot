@@ -17,6 +17,7 @@ function applyAgentTemplate(template) {
     const steps = document.getElementById('agent-max-steps');
     const templateMaxSteps = Number(template.max_steps || 0);
     if (steps) steps.value = templateMaxSteps > 0 ? String(templateMaxSteps) : '';
+    window.syncAgentRunModeStepLimit?.();
     const budget = document.getElementById('agent-token-budget');
     if (budget) budget.value = template.max_token_budget || '';
     const retry = document.getElementById('agent-retry-limit');

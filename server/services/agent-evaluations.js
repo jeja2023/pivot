@@ -51,7 +51,7 @@ function normalizeRunConfig(value = {}) {
     const source = parseJson(value, {}) || {};
     return {
         passThreshold: clampInt(source.passThreshold || source.pass_threshold, 80, 1, 100),
-        maxSteps: clampInt(source.maxSteps || source.max_steps, 10, 1, 50),
+        maxSteps: clampInt(source.maxSteps || source.max_steps, 10, 1, 60),
         runMode: String(source.runMode || source.run_mode || 'standard').trim().slice(0, 30),
         toolPolicy: String(source.toolPolicy || source.tool_policy || 'all').trim().slice(0, 30),
         approvalPolicy: String(source.approvalPolicy || source.approval_policy || 'safe_mcp_auto').trim().slice(0, 40),

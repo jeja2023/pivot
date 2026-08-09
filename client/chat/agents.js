@@ -192,6 +192,7 @@ window.bindAgentGoalTemplates = function() {
             if (btn.dataset.agentRunMode) {
                 const mode = document.getElementById('agent-run-mode');
                 if (mode) mode.value = btn.dataset.agentRunMode;
+                window.syncAgentRunModeStepLimit?.();
             }
             if (btn.dataset.agentMcp) {
                 const allowMcp = document.getElementById('agent-allow-mcp');
@@ -217,6 +218,17 @@ window.bindAgentFilters = function() {
     });
 };
 
+window.syncAgentRunModeStepLimit = function() {
+    const mode = document.getElementById('agent-run-mode')?.value || 'standard';
+    const input = document.getElementById('agent-max-steps');
+    const limits = { standard: 30, deep: 60, audit: 50 };
+    const limit = limits[mode] || limits.standard;
+    if (!input) return;
+    input.max = String(limit);
+    const value = Number(input.value || 0);
+    if (value > limit) input.value = String(limit);
+};
+
 window.bindAgentEnterpriseControls = function() {
     document.querySelectorAll('[data-agent-save-template]').forEach(saveTemplateBtn => {
         if (saveTemplateBtn.dataset.boundAgentTemplateSave === '1') return;
@@ -228,6 +240,12 @@ window.bindAgentEnterpriseControls = function() {
         savePlanButton.dataset.boundAgentPlanSave = '1';
         savePlanButton.addEventListener('click', saveCurrentAgentTaskAsSchedule);
     }
+    const runMode = document.getElementById('agent-run-mode');
+    if (runMode && runMode.dataset.boundAgentStepLimit !== '1') {
+        runMode.dataset.boundAgentStepLimit = '1';
+        runMode.addEventListener('change', window.syncAgentRunModeStepLimit);
+    }
+    window.syncAgentRunModeStepLimit();
 };
 
 const agentConfigSectionTitles = {

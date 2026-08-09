@@ -125,11 +125,21 @@ function createDagWizardController(ctx) {
                 });
             };
 
-            const getFieldValue = (control, fieldSchema) => {
+            const getFieldValue = (control, fieldSchema, fieldName = '') => {
                 const type = normalizeSchemaType(fieldSchema);
                 if (control.type === 'checkbox' || type === 'boolean') return Boolean(control.checked);
                 const raw = String(control.value ?? '').trim();
                 if (!raw) return undefined;
+                if (toolValue(tool) === 'agent.content_review' && normalizeFieldKey(fieldName) === 'records') {
+                    if (/^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/.test(raw)) return raw;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && typeof parsed === 'object') return parsed;
+                    } catch (e) {
+                        return raw;
+                    }
+                    return raw;
+                }
                 if (type === 'integer') {
                     const value = Number.parseInt(raw, 10);
                     return Number.isFinite(value) ? value : undefined;
@@ -277,7 +287,7 @@ function createDagWizardController(ctx) {
                 fields.forEach(([name, fieldSchema]) => {
                     const control = fieldsByName.get(name);
                     if (!control) return;
-                    const value = getFieldValue(control, fieldSchema);
+                    const value = getFieldValue(control, fieldSchema, name);
                     if (value === undefined) {
                         if (required.has(name)) missing.push(name);
                         else delete nextInput[name];
