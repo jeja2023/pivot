@@ -52,13 +52,49 @@ function cleanBuildOutputs() {
 function normalizeBuilderArgs(rawArgs) {
     const extraArgs = [`-c.extraMetadata.version=${projectVersion}`];
     if (!rawArgs.length) return ['--win', 'nsis', ...extraArgs];
+    const isLinuxTarget = rawArgs.some(arg => arg === 'deb' || arg === '--linux' || arg.startsWith('-c.linux') || arg === '--loong64' || arg === '--arm64');
+    if (isLinuxTarget) {
+        if (!rawArgs.includes('--linux')) {
+            return ['--linux', ...rawArgs, ...extraArgs];
+        }
+        return [...rawArgs, ...extraArgs];
+    }
     if (rawArgs.includes('--dir')) return ['--win', '--dir', ...extraArgs];
+    if (rawArgs.includes('nsis') || rawArgs.includes('--win')) return ['--win', ...rawArgs, ...extraArgs];
     return ['--win', ...rawArgs, ...extraArgs];
 }
 
 function copyReleaseArtifactsToDownloads(rawArgs) {
     if (rawArgs.includes('--dir')) {
         console.log('> skip downloads release artifacts for unpacked build');
+        return;
+    }
+
+    const isLinuxTarget = rawArgs.some(arg => arg === 'deb' || arg === '--linux' || arg === '--loong64' || arg === '--arm64');
+    if (isLinuxTarget) {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+        const files = fs.readdirSync(electronOutputDir);
+        const linuxArtifacts = files.filter(f => f.endsWith('.deb') || f.endsWith('.AppImage') || f.endsWith('.yml'));
+        const copied = [];
+        for (const fileName of linuxArtifacts) {
+            const source = path.join(electronOutputDir, fileName);
+            const target = path.join(downloadsDir, fileName);
+            fs.copyFileSync(source, target);
+            copied.push(path.relative(root, target));
+        }
+        if (copied.length > 0) {
+            const checksumLines = linuxArtifacts.map((fileName) => {
+                const content = fs.readFileSync(path.join(downloadsDir, fileName));
+                const digest = crypto.createHash('sha256').update(content).digest('hex');
+                return `${digest}  ${fileName}`;
+            });
+            const checksumTarget = path.join(downloadsDir, 'SHA256SUMS.txt');
+            fs.writeFileSync(checksumTarget, `${checksumLines.join('\n')}\n`, 'utf8');
+            copied.push(path.relative(root, checksumTarget));
+            console.log(`> copied linux desktop release artifacts to downloads: ${copied.join(', ')}`);
+        } else {
+            console.log('> no linux release artifacts found to copy to downloads');
+        }
         return;
     }
 
