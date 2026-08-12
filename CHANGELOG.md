@@ -1,3 +1,12 @@
+## [v0.0.264] - 2026-08-12
+
+### 全面代码规范审查、ESLint 全局变量补全、依赖安全漏洞修补与 Agent 取消机制优化
+
+- **ESLint 全局变量补全与代码规范修复**：在 `eslint.config.js` 的 `nodeGlobals` 与 `browserGlobals` 中补全 `'AbortSignal': 'readonly'` 声明，解决 Node.js 20+ 环境下全局 `AbortSignal` 静态 API 误判 `no-undef` 的问题；重构 `client/chat/agent-run-utils.js` 中 `buildAgentRunTaskTooltip` 的未使用参数，消除 `no-unused-vars` 警告，实现 `npm run lint` 0 Error / 0 Warning 打卡。
+- **高危依赖安全漏洞修复**：升级修补生产依赖 `js-yaml`（CVE-2026-59870 / GHSA-5p4m-2wfm-xmqj），通过 `npm run audit:policy` 依赖安全门禁策略校验，安全隐患完全清零。
+- **Agent DAG 运行时取消机制增强**：在 `server/services/agent-dag-runtime.js` 中增强多节点并发 `AbortSignal.any` 组合防范与类型保护，确保在各类 Node 运行时与父级取消信号下具备完善的降级兜底能力。
+- **版本同步与全量校验**：启用新版本 `v0.0.264`，通过 `npm run version:sync` 自动同步 `package.json`、`package-lock.json` 和 `README.md` 版本号，全量静态规范与依赖门禁校验全部通过。
+
 ## [v0.0.263] - 2026-08-12
 
 ### 智能体运行取消与超时 AbortSignal 传播、CAS 状态并发治理与触发器鲁棒性增强

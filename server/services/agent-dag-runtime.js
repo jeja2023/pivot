@@ -543,7 +543,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
 
         const batchController = new AbortController();
-        const batchSignal = deps.signal
+        const batchSignal = (deps.signal && typeof AbortSignal.any === 'function')
             ? AbortSignal.any([deps.signal, batchController.signal])
             : batchController.signal;
         const batchResults = await Promise.allSettled(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {

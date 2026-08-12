@@ -1,5 +1,6 @@
 const nodeGlobals = {
     AbortController: 'readonly',
+    AbortSignal: 'readonly',
     Buffer: 'readonly',
     URL: 'readonly',
     URLSearchParams: 'readonly',
@@ -25,6 +26,7 @@ const browserGlobals = {
     FormData: 'readonly',
     Headers: 'readonly',
     AbortController: 'readonly',
+    AbortSignal: 'readonly',
     File: 'readonly',
     Image: 'readonly',
     Intl: 'readonly',

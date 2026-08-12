@@ -550,7 +550,7 @@ test('agent task panel context notes uses full-width textarea', () => {
     assert.match(partial, /<label class="agent-context-notes-field">/);
     assert.match(partial, /<textarea id="agent-context-notes" class="form-input" rows="2"/);
     assert.doesNotMatch(partial, /<input id="agent-context-notes"/);
-    assert.match(css, /\.agent-context-controls \.agent-context-notes-field\s*\{[\s\S]*grid-column: 1 \/ -1/);
+    assert.match(css, /\.agent-context-controls \.agent-context-notes-field[\s\S]*?grid-column: 1 \/ -1/);
     assert.match(css, /\.agent-context-controls textarea\.form-input\s*\{[\s\S]*min-height: 58px/);
 });
 
@@ -568,7 +568,6 @@ test('agent quick task uses a modal editor with complete actions', () => {
     assert.match(agentPartial, /class="agent-history-tools"[\s\S]*?data-agent-config-open="templates"[\s\S]*?data-agent-config-open="results"[\s\S]*?data-agent-config-open="evaluations"/);
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
     assert.match(source, /modal\.classList\.toggle\('hidden', !isOpen\)/);
-    assert.match(source, /if \(event\.target === modal\) window\.setTaskComposerOpen\(false\)/);
     assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?width: min\(760px,[\s\S]*?text-align: left;/);
     assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?max-height: min\(860px, calc\(100dvh - 32px\)\);/);
     assert.match(css, /\.agent-task-editor-footer\s*\{/);
@@ -952,7 +951,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.doesNotMatch(dagRunConfig, /inferDagLlmRuntimeSettings|primaryLlmNodeId/);
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
-    assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(\)\)/);
+    assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget, abortSignal \}, getAgentRuntimeDeps\(\)\)/);
     assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);

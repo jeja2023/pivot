@@ -152,7 +152,7 @@ const formatAgentAuditDate = (dateStr) => {
     return String(dateStr);
 };
 
-function buildAgentRunTaskTooltip(run, title, mode, counts = {}) {
+function buildAgentRunTaskTooltip(_run, title, _mode, _counts = {}) {
     return String(title || '').trim() || '-';
 }
 
