@@ -66,7 +66,8 @@ async function callModelJson(modelCfg, messages, options = {}) {
             url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             data,
-            timeout: 180000
+            timeout: 180000,
+            signal: options.signal || null
         });
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     });
@@ -129,7 +130,8 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
             data: payload,
             stream: true,
-            timeout: 180000
+            timeout: 180000,
+            signal: options.signal || null
         });
         await new Promise((resolve, reject) => {
             response.data.on('data', chunk => {

@@ -258,11 +258,13 @@ function updateMcpServerSharing(serverId, user, body = {}) {
     return getAccessibleMcpServer(serverId, user);
 }
 
-async function callMcpJsonRpc(server, method, params = {}, user = null) {
+async function callMcpJsonRpc(server, method, params = {}, user = null, options = {}) {
+    options.signal?.throwIfAborted?.();
     if (String(server.base_url || '').startsWith('pivot-db://')) {
         if (method === 'tools/list') return { tools: listDatabaseMcpTools(server) };
         if (method === 'tools/call') {
             const result = await executeDatabaseMcpTool(server, params?.name, params?.arguments || {});
+            options.signal?.throwIfAborted?.();
             return {
                 content: [{
                     type: 'text',
@@ -276,7 +278,8 @@ async function callMcpJsonRpc(server, method, params = {}, user = null) {
     if (getBuiltinServiceTypeFromUrl(server.base_url)) {
         if (method === 'tools/list') return { tools: listBuiltinMcpTools(server) };
         if (method === 'tools/call') {
-            const result = await executeBuiltinMcpTool(server, params?.name, params?.arguments || {}, user);
+            const result = await executeBuiltinMcpTool(server, params?.name, params?.arguments || {}, user, options);
+            options.signal?.throwIfAborted?.();
             return {
                 content: [{
                     type: 'text',
@@ -324,7 +327,8 @@ async function callMcpJsonRpc(server, method, params = {}, user = null) {
             allowExplicitLoopbackForAdmin: true
         }),
         headers,
-        timeout: timeoutMs
+        timeout: timeoutMs,
+        signal: options.signal || null
     });
     if (response.data?.error) {
         throw new Error(response.data.error.message || JSON.stringify(response.data.error));
@@ -465,6 +469,7 @@ function formatMcpTool(row) {
 }
 
 async function executeMcpTool(fullName, input, user, options = {}) {
+    options.signal?.throwIfAborted?.();
     const match = String(fullName || '').match(/^mcp\.(\d+)\.(.+)$/);
     if (!match) throw new Error('Invalid MCP tool name.');
     if (isLocalDeviceMcpServerId(match[1])) {
@@ -485,6 +490,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
             const result = hasDirectLocalTool
                 ? await executeLocalDeviceMcpTool(toolName, input || {}, user)
                 : await executeBridgeLocalDeviceMcpTool(toolName, input || {}, user);
+            options.signal?.throwIfAborted?.();
             recordMcpCallLog({
                 user,
                 serverId: LOCAL_MCP_SERVER_ID,
@@ -540,7 +546,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         const result = await callMcpJsonRpc(server, 'tools/call', {
             name: match[2],
             arguments: input || {}
-        }, user);
+        }, user, options);
         recordMcpCallLog({
             user,
             serverId: server.id,

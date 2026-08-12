@@ -61,9 +61,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             let result;
             try {
                 result = await deps.withTimeout(
-                    callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, onDelta: emitDelta, user }),
+                    signal => callModelStreamingWithTools(modelCfg, conversation, tools, { temperature: 0.2, onDelta: emitDelta, user, signal }),
                     Math.min(180000, Math.max(deadline - Date.now(), 1000)),
-                    '流式工具规划'
+                    '流式工具规划',
+                    { signal: deps.signal || null }
                 );
                 deps.finishAgentTraceSpan?.(modelSpanId, {
                     output: { responseLength: String(result?.content || '').length, toolCallCount: result?.toolCalls?.length || 0, finishReason: result?.finishReason || '' },
@@ -149,14 +150,16 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 try {
                     const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
                     const output = await deps.withTimeout(
-                        executeToolByName(call.name, args, user, toolList, {
+                        signal => executeToolByName(call.name, args, user, toolList, {
                             run,
                             modelCfg,
+                            signal,
                             waitForWorkflowDelay: deps.waitForWorkflowDelay,
                             delayKey: call.name === 'workflow.delay' ? `${call.name}:stream:${step}:${call.id || 'call'}` : ''
                         }),
                         Math.min(normalizePositiveInt(run.tool_timeout_ms, deps.agentToolTimeoutMs, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                        `执行工具：${call.name}`
+                        `执行工具：${call.name}`,
+                        { signal: deps.signal || null }
                     );
                     const compactOutput = compactToolOutputForModel(output, modelCfg);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput });
@@ -174,7 +177,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                 } catch (toolErr) {
-                    if (toolErr.code === 'AGENT_APPROVAL_REQUIRED') throw toolErr;
+                    if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(toolErr.code)) throw toolErr;
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
                     deps.insertStep(runId, deps.listSteps(runId).length + 1, {
                         type: 'tool',
@@ -198,6 +201,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
         return { completed: false, roundsUsed };
     } catch (streamErr) {
+        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(streamErr.code)) throw streamErr;
         // 流式调用异常时记录控制步骤，并继续使用 JSON 规划。
         deps.logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，已回退到 JSON 规划器');
         deps.insertStep(runId, deps.listSteps(runId).length + 1, {

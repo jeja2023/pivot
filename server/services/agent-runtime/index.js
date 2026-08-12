@@ -136,6 +136,8 @@ const { createApprovalHelpers } = require('./approvals');
 
 
 let agentQueue = null;
+const activeRunControllers = new Map();
+let agentRecoveryTimer = null;
 const createAgentNotification = createAgentNotificationFactory({
     db,
     getTimestamp: getBeijingTimestamp,
@@ -165,14 +167,27 @@ function updateRun(runId, fields = {}) {
         'input_tokens', 'output_tokens', 'total_tokens'
     ];
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
-    if (entries.length === 0) return;
+    if (entries.length === 0) return 0;
     const statusEntry = entries.find(([key]) => key === 'status');
+    let currentStatus = '';
     if (statusEntry) {
-        const currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+        currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
         assertAgentRunStatusTransition(currentStatus, statusEntry[1], { runId });
     }
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
+    const where = statusEntry ? 'WHERE id = ? AND status = ?' : 'WHERE id = ?';
+    const params = [...entries.map(([, value]) => value), runId];
+    if (statusEntry) params.push(currentStatus);
+    const info = db.prepare(`UPDATE agent_runs SET ${set} ${where}`).run(...params);
+    if (statusEntry && info.changes === 0) {
+        const latestStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+        if (latestStatus !== statusEntry[1]) {
+            const error = new Error(`Agent run status changed concurrently: ${currentStatus || '<missing>'} -> ${latestStatus || '<missing>'}`);
+            error.code = 'AGENT_STATUS_CONFLICT';
+            error.runId = runId;
+            throw error;
+        }
+    }
     if (info.changes > 0 && entries.some(([key]) => [
         'status',
         'final_answer',
@@ -184,6 +199,34 @@ function updateRun(runId, fields = {}) {
     ].includes(key))) {
         publishAgentRunEvent(runId, 'updated');
     }
+    return info.changes;
+}
+
+function updateRunCas(runId, expectedStatuses = [], fields = {}) {
+    const allowedStatuses = [...new Set((Array.isArray(expectedStatuses) ? expectedStatuses : [expectedStatuses])
+        .map(value => String(value || '').trim())
+        .filter(Boolean))];
+    if (!allowedStatuses.length) return 0;
+    const currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+    if (!allowedStatuses.includes(currentStatus)) return 0;
+    if (fields.status) assertAgentRunStatusTransition(currentStatus, fields.status, { runId });
+    const allowed = [
+        'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
+        'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
+        'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
+        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
+        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
+        'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
+        'input_tokens', 'output_tokens', 'total_tokens'
+    ];
+    const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
+    if (!entries.length) return 0;
+    const placeholders = allowedStatuses.map(() => '?').join(', ');
+    const set = entries.map(([key]) => `${key} = ?`).join(', ');
+    const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`)
+        .run(...entries.map(([, value]) => value), runId, ...allowedStatuses);
+    if (info.changes) publishAgentRunEvent(runId, 'updated');
+    return info.changes;
 }
 
 function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
@@ -312,6 +355,9 @@ function cancelAgentRun(runId, user) {
         completed_at: now,
         updated_at: now
     });
+    const abortError = new Error('Run cancelled by user.');
+    abortError.code = 'AGENT_RUN_CANCELLED';
+    activeRunControllers.get(runId)?.abort(abortError);
     insertStep(runId, listSteps(runId).length + 1, {
         type: 'control',
         title: 'User cancelled run',
@@ -597,7 +643,7 @@ function insertStep(runId, stepIndex, data = {}) {
     }
 }
 
-function getAgentRuntimeDeps() {
+function getAgentRuntimeDeps(signal = null) {
     return {
         agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
@@ -619,11 +665,15 @@ function getAgentRuntimeDeps() {
         finishAgentTraceSpan,
         startAgentTraceSpan,
         updateRun,
-        withTimeout
+        withTimeout,
+        signal
     };
 }
 
 async function runAgent(runId, user) {
+    const runController = new AbortController();
+    activeRunControllers.set(runId, runController);
+    let deadlineTimer = null;
     try {
         assertRunUserActive(user);
         const run = getRunForUser(runId, user, { includeDeleted: true });
@@ -636,6 +686,12 @@ async function runAgent(runId, user) {
         });
         assertRunNotCancelled(runId);
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
+        deadlineTimer = setTimeout(() => {
+            const error = new Error('Agent run timed out.');
+            error.code = 'AGENT_TIMEOUT';
+            runController.abort(error);
+        }, Math.max(deadline - Date.now(), 1));
+        deadlineTimer.unref?.();
         const assertRunWithinBudget = () => {
             if (Date.now() > deadline) {
                 const err = new Error('任务执行超时。');
@@ -724,7 +780,7 @@ async function runAgent(runId, user) {
         });
 
         if (dagRun) {
-            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps());
+            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps(runController.signal));
             return;
         }
 
@@ -735,7 +791,7 @@ async function runAgent(runId, user) {
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
-            }, getAgentRuntimeDeps());
+            }, getAgentRuntimeDeps(runController.signal));
             if (streamingResult?.completed) return;
             roundsUsed = Math.min(Math.max(Number(streamingResult?.roundsUsed || 0), 0), maxSteps);
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
@@ -755,7 +811,7 @@ async function runAgent(runId, user) {
             });
             let plannedText;
             try {
-                plannedText = await withTimeout(callModelText(modelCfg, plannerMessages, { user }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划');
+                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
                 finishAgentTraceSpan(plannerSpanId, {
                     output: { responseLength: String(plannedText || '').length },
                     durationMs: Date.now() - plannerStartedAt
@@ -781,7 +837,7 @@ async function runAgent(runId, user) {
             });
 
             if (plan.action === 'final' || !plan.tool) {
-                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
+                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal: runController.signal });
                 updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
@@ -810,9 +866,10 @@ async function runAgent(runId, user) {
                         : ''
                 };
                 const output = await withTimeout(
-                    executeToolByName(plan.tool, plan.input || {}, user, toolList, toolContext),
+                    signal => executeToolByName(plan.tool, plan.input || {}, user, toolList, { ...toolContext, signal }),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
-                    `执行工具：${plan.tool}`
+                    `执行工具：${plan.tool}`,
+                    { signal: runController.signal }
                 );
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
@@ -871,7 +928,7 @@ async function runAgent(runId, user) {
         });
         let answer;
         try {
-            answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary');
+            answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
             finishAgentTraceSpan(summarySpanId, {
                 output: { responseLength: String(answer || '').length },
                 durationMs: Date.now() - summaryStartedAt
@@ -904,7 +961,7 @@ async function runAgent(runId, user) {
                         modelCfg = escalation;
                         db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
                             .run(modelCfg.id, getBeijingTimestamp(), runId);
-                        answer = await withTimeout(synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary');
+                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
                     }
                 } catch (escErr) {
                     logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
@@ -949,6 +1006,8 @@ async function runAgent(runId, user) {
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
+            const resumeContext = buildAgentResumeContext(runId);
+            setRunMetadata(runId, { resumeContext });
             recordRunRetryReason(runId, {
                 attempt: retryCount + 1,
                 limit: retryLimit,
@@ -959,6 +1018,7 @@ async function runAgent(runId, user) {
                 status: 'queued',
                 error_message: e.message,
                 retry_count: retryCount + 1,
+                resume_from_step: Number(resumeContext.latestStepIndex || 0),
                 updated_at: getBeijingTimestamp()
             });
             insertStep(runId, listSteps(runId).length + 1, {
@@ -979,6 +1039,8 @@ async function runAgent(runId, user) {
         });
         createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
     } finally {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
         syncAgentTraceFromRun(runId);
     }
 }
@@ -997,7 +1059,7 @@ function recoverAgentRuns() {
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
     `).all(cutoff);
     staleRunning.forEach(run => {
-        updateRun(run.id, {
+        const changed = updateRunCas(run.id, ['running'], {
             status: 'error',
             error_message: '服务已重启或心跳超时，任务已标记为失败。',
             completed_at: now,
@@ -1006,6 +1068,10 @@ function recoverAgentRuns() {
             locked_by: null,
             lock_expires_at: null
         });
+        if (!changed) return;
+        const abortError = new Error('Run recovered as stale.');
+        abortError.code = 'AGENT_RUN_CANCELLED';
+        activeRunControllers.get(run.id)?.abort(abortError);
         insertStep(run.id, listSteps(run.id).length + 1, {
             type: 'control',
             title: 'Runtime recovery marked stale run',
@@ -1015,6 +1081,27 @@ function recoverAgentRuns() {
 
     const recoveredQueued = getAgentQueue().recoverQueued(100);
     logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时恢复完成');
+}
+
+function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
+    if (agentRecoveryTimer) return agentRecoveryTimer;
+    const safeInterval = Math.max(Number.parseInt(intervalMs, 10) || 60000, 30000);
+    let running = false;
+    const tick = () => {
+        if (running) return;
+        running = true;
+        try {
+            recoverAgentRuns();
+        } catch (error) {
+            logger.warn({ err: error.message }, 'Periodic agent run recovery failed');
+        } finally {
+            running = false;
+        }
+    };
+    const timer = setInterval(tick, safeInterval);
+    timer.unref?.();
+    agentRecoveryTimer = timer;
+    return agentRecoveryTimer;
 }
 
 function approveAgentTool(runId, user, approve = true) {
@@ -1097,6 +1184,7 @@ configureAgentSchedules({
 
 configureAgentApprovalRequests({
     updateRun,
+    updateRunCas,
     insertStep,
     listSteps,
     setRunMetadata,
@@ -1317,6 +1405,7 @@ module.exports = {
     restoreAgentWorkflow,
     restoreAgentWorkflowVersion,
     recoverAgentRuns,
+    startAgentRecoveryRunner,
     recordRunRetryReason,
     runAgentScheduleNow,
     runDueAgentSchedules,

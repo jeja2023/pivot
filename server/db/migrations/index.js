@@ -312,6 +312,49 @@ const migrations = [
         }
     },
     {
+        id: '202608120001_agent_runtime_concurrency_guards',
+        description: 'Add polling leases and allow dedupe keys to be reused after soft deletion.',
+        up(db) {
+            const triggerColumns = db.pragma('table_info(agent_workflow_triggers)');
+            if (triggerColumns.length) {
+                if (!triggerColumns.some(column => column.name === 'claim_token')) {
+                    db.exec('ALTER TABLE agent_workflow_triggers ADD COLUMN claim_token TEXT');
+                }
+                if (!triggerColumns.some(column => column.name === 'claim_expires_at')) {
+                    db.exec('ALTER TABLE agent_workflow_triggers ADD COLUMN claim_expires_at DATETIME');
+                }
+                db.exec('CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_claim ON agent_workflow_triggers(status, trigger_type, claim_expires_at, deleted_at)');
+            }
+            const runColumns = db.pragma('table_info(agent_runs)');
+            if (runColumns.length) {
+                db.exec('DROP INDEX IF EXISTS idx_agent_runs_user_dedupe');
+                db.exec('CREATE UNIQUE INDEX idx_agent_runs_user_dedupe ON agent_runs(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND deleted_at IS NULL');
+            }
+        }
+    },
+    {
+        id: '202608120002_agent_approval_request_dedupe',
+        description: 'Prevent concurrent duplicate pending approval and delay requests.',
+        up(db) {
+            const columns = db.pragma('table_info(agent_approval_requests)');
+            if (!columns.length) return;
+            db.exec(`
+                UPDATE agent_approval_requests
+                SET status = 'cancelled', updated_at = datetime('now', '+8 hours')
+                WHERE status = 'pending'
+                  AND rowid NOT IN (
+                      SELECT MAX(rowid)
+                      FROM agent_approval_requests
+                      WHERE status = 'pending'
+                      GROUP BY run_id, request_type, approval_key
+                  );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_requests_pending_key
+                    ON agent_approval_requests(run_id, request_type, approval_key)
+                    WHERE status = 'pending';
+            `);
+        }
+    },
+    {
         id: '202608060002_schedule_interval_minutes',
         description: 'Add first class minute intervals to agent schedules.',
         up(db) {

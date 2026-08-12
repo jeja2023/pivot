@@ -200,6 +200,7 @@ function agentResultDisplayValue(key, value) {
     const normalizedKey = String(key || '').replace(/[\s_-]+/g, '').toLowerCase();
     if (normalizedKey === 'status') {
         const statusLabels = {
+            awaiting_approval: '等待审批',
             queued: '排队中',
             pending: '待执行',
             running: '运行中',

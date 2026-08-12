@@ -18,6 +18,7 @@ const MAX_WEBHOOK_PAYLOAD_BYTES = 256 * 1024;
 // 单轮轮询最多为一个触发器创建的任务数，防止历史文件一次性灌满队列
 const MAX_BATCH_PER_POLL = 20;
 const MAX_FILE_SCAN = 500;
+const POLL_LEASE_MS = Math.max(Number.parseInt(process.env.AGENT_TRIGGER_POLL_LEASE_MS || '120000', 10) || 120000, 30000);
 
 let createAgentRunCallback = null;
 let createAgentNotificationCallback = () => null;
@@ -436,7 +437,7 @@ function pollFileTrigger(trigger) {
         } catch (err) {
             recordTriggerError(trigger.id, err.message);
             logger.error({ err: err.message, triggerId: trigger.id, fileName: entry.name }, '文件落地触发工作流失败');
-            break;
+            continue;
         }
     }
     return created;
@@ -462,15 +463,26 @@ async function pollDatabaseTrigger(trigger, executeTool) {
         return [];
     }
 
-    const rows = Array.isArray(result?.rows) ? result.rows : Array.isArray(result) ? result : [];
+    // Built-in/MCP database tools expose rows under structuredContent. Accept
+    // both shapes so a valid query cannot be mistaken for an empty result.
+    const structured = result?.structuredContent && typeof result.structuredContent === 'object'
+        ? result.structuredContent
+        : null;
+    const rows = Array.isArray(structured?.rows)
+        ? structured.rows
+        : Array.isArray(result?.rows)
+            ? result.rows
+            : Array.isArray(result) ? result : [];
     if (!rows.length) return [];
 
     const watermarkField = config.watermarkField || 'updated_at';
-    const nextWatermark = rows
-        .map(row => String(row?.[watermarkField] ?? ''))
-        .filter(Boolean)
-        .sort()
-        .pop() || watermark;
+    const watermarkValues = rows
+        .map(row => row?.[watermarkField])
+        .filter(value => value !== undefined && value !== null && String(value).trim() !== '');
+    const numericValues = watermarkValues.map(value => Number(value)).filter(Number.isFinite);
+    const nextWatermark = (numericValues.length === watermarkValues.length && numericValues.length)
+        ? String(Math.max(...numericValues))
+        : watermarkValues.map(value => String(value)).sort((a, b) => a.localeCompare(b)).pop() || watermark;
 
     const dedupeKey = `trigger:${trigger.id}:${crypto.createHash('sha256').update(`${nextWatermark}:${rows.length}`).digest('hex').slice(0, 32)}`;
     try {
@@ -480,8 +492,11 @@ async function pollDatabaseTrigger(trigger, executeTool) {
             dedupeKey
         });
         // 水位线推进放在任务创建之后，任务创建失败时下轮会重新读取同一批数据
-        db.prepare('UPDATE agent_workflow_triggers SET watermark = ?, updated_at = ? WHERE id = ?')
-            .run(nextWatermark, getBeijingTimestamp(), trigger.id);
+        db.prepare(`
+            UPDATE agent_workflow_triggers
+            SET watermark = ?, updated_at = ?
+            WHERE id = ? AND (? IS NULL OR claim_token = ?)
+        `).run(nextWatermark, getBeijingTimestamp(), trigger.id, trigger.claim_token || null, trigger.claim_token || null);
         return [run];
     } catch (err) {
         recordTriggerError(trigger.id, err.message);
@@ -500,14 +515,35 @@ async function runDuePollingTriggers({ executeTool } = {}) {
     `).all();
     const created = [];
     for (const trigger of triggers) {
+        const claimToken = crypto.randomUUID();
+        const now = getBeijingTimestamp();
+        const claimExpiresAt = getBeijingTimestamp(new Date(Date.now() + POLL_LEASE_MS));
+        const claimed = db.prepare(`
+            UPDATE agent_workflow_triggers
+            SET claim_token = ?, claim_expires_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'active' AND deleted_at IS NULL
+              AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)
+        `).run(claimToken, claimExpiresAt, now, trigger.id, now);
+        if (!claimed.changes) continue;
+        trigger.claim_token = claimToken;
         try {
             if (trigger.trigger_type === 'file') {
                 created.push(...pollFileTrigger(trigger));
             } else {
                 created.push(...(await pollDatabaseTrigger(trigger, executeTool)));
             }
+            db.prepare(`
+                UPDATE agent_workflow_triggers
+                SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                WHERE id = ? AND claim_token = ?
+            `).run(getBeijingTimestamp(), trigger.id, claimToken);
         } catch (err) {
             recordTriggerError(trigger.id, err.message);
+            db.prepare(`
+                UPDATE agent_workflow_triggers
+                SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                WHERE id = ? AND claim_token = ?
+            `).run(getBeijingTimestamp(), trigger.id, claimToken);
             logger.error({ err: err.message, triggerId: trigger.id }, '触发器轮询失败');
         }
     }

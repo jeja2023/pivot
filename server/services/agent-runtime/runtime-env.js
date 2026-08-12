@@ -19,24 +19,45 @@ function createRunId() {
     return `run_${crypto.randomBytes(12).toString('hex')}`;
 }
 
-function withTimeout(promise, timeoutMs, label = 'operation') {
+function withTimeout(operation, timeoutMs, label = 'operation', options = {}) {
     const safeTimeout = Math.max(Number(timeoutMs) || 0, 1000);
     return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        const parentSignal = options?.signal || null;
+        let settled = false;
+        let abortReason = null;
+        const finish = callback => value => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            parentSignal?.removeEventListener?.('abort', onParentAbort);
+            callback(value);
+        };
+        const onParentAbort = () => {
+            const reason = parentSignal.reason instanceof Error ? parentSignal.reason : new Error('Operation aborted.');
+            if (!reason.code) reason.code = 'AGENT_RUN_CANCELLED';
+            abortReason = reason;
+            controller.abort(reason);
+            finish(reject)(reason);
+        };
         const timer = setTimeout(() => {
             const err = new Error(`${label}执行超时`);
             err.code = 'AGENT_TIMEOUT';
-            reject(err);
+            abortReason = err;
+            controller.abort(err);
+            finish(reject)(err);
         }, safeTimeout);
-        promise.then(
-            value => {
-                clearTimeout(timer);
-                resolve(value);
-            },
-            err => {
-                clearTimeout(timer);
-                reject(err);
-            }
-        );
+        if (parentSignal?.aborted) {
+            onParentAbort();
+            return;
+        }
+        parentSignal?.addEventListener?.('abort', onParentAbort, { once: true });
+        Promise.resolve()
+            .then(() => typeof operation === 'function' ? operation(controller.signal) : operation)
+            .then(
+                value => abortReason ? finish(reject)(abortReason) : finish(resolve)(value),
+                error => finish(reject)(abortReason || error)
+            );
     });
 }
 

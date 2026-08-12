@@ -1,7 +1,7 @@
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
-const { recoverAgentRuns, startAgentScheduleRunner } = require('./services/agent-runtime');
+const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
 
 function registerProcessErrorHandlers({ logger, flushAllSqliteWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -53,6 +53,7 @@ function startBackgroundServices({
         startModelEndpointMonitor,
         recoverStaleKnowledgeDocumentIndexes,
         recoverAgentRuns,
+        startAgentRecoveryRunner,
         startAgentScheduleRunner
     }
 }) {
@@ -68,6 +69,11 @@ function startBackgroundServices({
         }
         try { dependencies.recoverAgentRuns(); } catch (err) {
             logger.warn({ err: err && err.message ? err.message : err }, 'Agent run recovery failed');
+        }
+        if (typeof dependencies.startAgentRecoveryRunner === 'function') {
+            try { dependencies.startAgentRecoveryRunner(); } catch (err) {
+                logger.warn({ err: err && err.message ? err.message : err }, 'Agent periodic recovery failed to start');
+            }
         }
         try { dependencies.startAgentScheduleRunner(); } catch (err) {
             logger.warn({ err: err && err.message ? err.message : err }, 'Agent schedule runner startup failed');

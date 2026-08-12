@@ -427,7 +427,7 @@ function validateStructuredOutput(content, schema = {}) {
     return { value: parsed, issues };
 }
 
-async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName }) {
+async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName, signal }) {
     const responseFormat = schemaHasRules(schema)
         ? {
             type: 'json_schema',
@@ -442,6 +442,7 @@ async function requestStructuredOutput({ modelCfg, messages, user, temperature, 
         user,
         temperature,
         maxTokens,
+        signal,
         ...(responseFormat ? { responseFormat } : {})
     });
     return { content, native: Boolean(responseFormat) };
@@ -482,13 +483,14 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                 temperature,
                 maxTokens,
                 schema: outputSchema,
-                schemaName: context.node?.id || 'workflow_output'
+                schemaName: context.node?.id || 'workflow_output',
+                signal: context.signal || null
             });
             content = result.content;
             nativeStructured = result.native;
         } catch (error) {
             if (!isNativeStructuredOutputUnsupported(error)) throw error;
-            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens });
+            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
         }
         recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
         let validation = validateStructuredOutput(content, outputSchema);
@@ -503,7 +505,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                     content: `原始结果：\n${String(content || '').slice(0, 16000)}\n\n校验问题：\n${validation.issues.join('\n')}`
                 }
             ];
-            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens });
+            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null });
             recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '');
             content = repaired;
             validation = validateStructuredOutput(content, outputSchema);
@@ -515,7 +517,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             }
         }
     } else {
-        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens });
+        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
         recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
     }
     return {
@@ -583,7 +585,7 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
     const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
     const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
     const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
-    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens });
+    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null });
     recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '');
     return {
         content,
@@ -670,7 +672,7 @@ function executeAgentCode(input = {}) {
 // ——————————————————————————————————————————
 // agent.http：通过已有的安全 HTTP 客户端调用外部 REST API，支持 GET/POST/PUT/DELETE/PATCH。
 // ——————————————————————————————————————————
-async function executeAgentHttp(input = {}, user) {
+async function executeAgentHttp(input = {}, user, context = {}) {
     const url = String(input.url || '').trim();
     if (!url) throw new Error('HTTP 节点需要填写请求 URL。');
     const method = String(input.method || 'GET').trim().toLowerCase();
@@ -714,6 +716,7 @@ async function executeAgentHttp(input = {}, user) {
             headers,
             user,
             timeout: Math.min(parsePositiveInt(input.timeoutMs ?? input.timeout_ms, 10000, 30000), 30000),
+            signal: context.signal || null,
             validateStatus: () => true
         });
     } catch (e) {
@@ -1051,7 +1054,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     }
 
     if (name === 'agent.http') {
-        return executeAgentHttp(input, user);
+        return executeAgentHttp(input, user, context);
     }
 
     if (name === 'agent.merge') {

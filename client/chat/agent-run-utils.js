@@ -91,6 +91,7 @@ function agentNotificationBody(item) {
 
 function agentStatusLabel(status) {
     const map = {
+        awaiting_approval: '等待审批',
         queued: '排队中',
         running: '运行中',
         completed: '已完成',
@@ -103,7 +104,7 @@ function agentStatusLabel(status) {
 }
 
 function isAgentRunActive(status) {
-    return status === 'queued' || status === 'running' || status === 'approval_required';
+    return status === 'queued' || status === 'running' || status === 'approval_required' || status === 'awaiting_approval';
 }
 
 function agentRunModeLabel(mode) {

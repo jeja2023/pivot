@@ -45,7 +45,8 @@ function listBuiltinMcpTools(server) {
     throw new Error('Unsupported built-in MCP server.');
 }
 
-async function executeBuiltinMcpTool(server, name, input = {}, user = null) {
+async function executeBuiltinMcpTool(server, name, input = {}, user = null, options = {}) {
+    options.signal?.throwIfAborted?.();
     const type = getBuiltinServiceTypeFromUrl(server.base_url);
     if (type === 'reports') return executeReportTool(server, name, input);
     if (type === 'visualization') return executeVisualizationTool(server, name, input);
@@ -53,7 +54,7 @@ async function executeBuiltinMcpTool(server, name, input = {}, user = null) {
     if (type === 'documents') return executeDocumentTool(server, name, input);
     if (type === 'data') return executeDataProcessingTool(server, name, input);
     if (type === 'format') return executeFormatConversionTool(server, name, input);
-    if (type === 'im') return executeImTool(server, name, input, user);
+    if (type === 'im') return executeImTool(server, name, input, user, options);
     throw new Error('Unsupported built-in MCP server.');
 }
 

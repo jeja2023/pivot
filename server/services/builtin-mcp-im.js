@@ -176,7 +176,7 @@ function buildImPayload(config, payload, user = null, extra = {}) {
     return basePayload;
 }
 
-async function sendIm(config, secret, payload, user = null) {
+async function sendIm(config, secret, payload, user = null, options = {}) {
     const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -195,6 +195,7 @@ async function sendIm(config, secret, payload, user = null) {
         headers,
         data: payload,
         timeout: IM_TIMEOUT_MS,
+        signal: options.signal || null,
         validateStatus: status => status >= 200 && status < 300
     });
     return {
@@ -204,7 +205,7 @@ async function sendIm(config, secret, payload, user = null) {
     };
 }
 
-async function executeImTool(server, name, input = {}, user = null) {
+async function executeImTool(server, name, input = {}, user = null, options = {}) {
     const { config, secret } = getRequiredBuiltinConfig(server, 'im');
     if (name === 'im.list_allowed_targets') {
         return {
@@ -239,7 +240,7 @@ async function executeImTool(server, name, input = {}, user = null) {
         format: name === 'im.send_markdown' ? 'markdown' : 'text',
         timestamp: new Date().toISOString()
     }, user);
-    return sendIm(config, secret, renderedPayload, user);
+    return sendIm(config, secret, renderedPayload, user, options);
 }
 
 module.exports = {

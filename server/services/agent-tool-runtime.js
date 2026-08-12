@@ -113,7 +113,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         throw err;
     }
     if (safeName.startsWith('mcp.')) {
-        return executeMcpTool(safeName, input, user, { source: 'agent' });
+        return executeMcpTool(safeName, input, user, { source: context.source || 'agent', signal: context.signal || null });
     }
     if (tool.databaseTool && safeName.startsWith('db.')) {
         const rawConnectionId = input?.connectionId ?? input?.connection_id ?? input?.databaseConnectionId ?? input?.database_connection_id ?? input?.mcpServerId ?? input?.mcp_server_id;
@@ -136,7 +136,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         delete toolInput.database_connection_id;
         delete toolInput.mcpServerId;
         delete toolInput.mcp_server_id;
-        return executeMcpTool(connection.fullName, toolInput, user, { source: 'agent' });
+        return executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
     }
     return executeBuiltInTool(safeName, input, user, context);
 }

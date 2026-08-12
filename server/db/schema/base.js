@@ -932,6 +932,8 @@ function initSchema() {
             last_run_id TEXT,
             trigger_count INTEGER DEFAULT 0,
             last_error TEXT,
+            claim_token TEXT,
+            claim_expires_at DATETIME,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             deleted_at DATETIME,

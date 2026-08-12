@@ -163,7 +163,8 @@ function buildDagFallbackFinalAnswer(dagSpec, states) {
 }
 
 function upsertDagNode(runId, node, patch = {}) {
-    const existing = db.prepare('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?').get(runId, node.id);
+    const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
+    const existing = db.prepare('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?').get(runId, nodeKey);
     const now = getBeijingTimestamp();
     const row = {
         title: patch.title ?? node.title,
@@ -218,7 +219,7 @@ function upsertDagNode(runId, node, patch = {}) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         runId,
-        node.id,
+        nodeKey,
         row.title,
         row.toolName,
         JSON.stringify(row.input),
@@ -249,9 +250,10 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         deps.assertRunNotCancelled(run.id);
         try {
             const output = await deps.withTimeout(
-                executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext }),
+                signal => executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext, signal }),
                 Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
-                `执行 DAG 节点：${node.title || node.id}`
+                `执行 DAG 节点：${node.title || node.id}`,
+                { signal: executionContext.signal || deps.signal || null }
             );
             return {
                 ok: true,
@@ -262,7 +264,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 durationMs: Date.now() - startedAt
             };
         } catch (e) {
-            if (e.code === 'AGENT_APPROVAL_REQUIRED') throw e;
+            if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
             lastError = e;
             deps.insertStep(run.id, listSteps(run.id).length + 1, {
                 type: 'dag',
@@ -540,7 +542,12 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             runnable.push(node);
         });
 
-        await Promise.all(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {
+        const batchController = new AbortController();
+        const batchSignal = deps.signal
+            ? AbortSignal.any([deps.signal, batchController.signal])
+            : batchController.signal;
+        const batchResults = await Promise.allSettled(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {
+            batchSignal.throwIfAborted();
             const nodeStepIndex = stepIndex;
             stepIndex += 1;
             const selectedTool = findAgentToolByName(node.tool, toolList);
@@ -620,6 +627,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 }
                 const executionContext = {
                     dagInputs,
+                    signal: batchSignal,
                     workflowApprovalResult,
                     workflowDelayResult,
                     executeSubworkflow: childInput => executeSubworkflowDag({
@@ -674,6 +682,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 });
             } catch (e) {
                 if (e.code === 'AGENT_APPROVAL_REQUIRED') {
+                    if (!batchController.signal.aborted) batchController.abort(e);
                     deps.finishAgentTraceSpan?.(nodeSpanId, {
                         status: 'waiting',
                         details: { nodeId: node.id, toolName: node.tool, reason: 'approval_required' },
@@ -681,6 +690,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     });
                     throw e;
                 }
+                if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
                 const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
                 const durationMs = Number(e.dagDurationMs || 0);
                 const status = policy.onError === 'continue' ? 'continued_error' : 'error';
@@ -727,6 +737,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 deps.updateRun(run.id, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             }
         }));
+        const rejected = batchResults.find(result => result.status === 'rejected');
+        if (rejected) throw rejected.reason;
         if (stopErrors.length) throw stopErrors[0];
     }
 

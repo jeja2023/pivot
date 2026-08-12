@@ -45,7 +45,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     return modelCfg ? fitMessagesToContextBudget(messages, modelCfg).messages : messages;
 }
 
-async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '') {
+async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
     const messages = [
         {
             role: 'system',
@@ -58,7 +58,7 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         }
     ];
     const fitted = fitMessagesToContextBudget(messages, modelCfg);
-    const content = await callModelText(modelCfg, fitted.messages, { user });
+    const content = await callModelText(modelCfg, fitted.messages, { user, signal: options.signal || null });
     if (user) recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId);
     return content || '未能生成最终答案。';
 }

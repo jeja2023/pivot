@@ -146,6 +146,7 @@ async function loadSessionOnlySearchResults() {
 
 function globalSearchStatusLabel(status) {
     return {
+        awaiting_approval: '等待审批',
         queued: '排队中',
         running: '运行中',
         approval_required: '待审批',

@@ -173,7 +173,19 @@ function formatAgentWorkflow(row, user = null) {
 function sanitizeSharedDagSpec(dagSpec = {}) {
     const next = parseJsonObject(JSON.stringify(dagSpec)) || { nodes: [] };
     if (!Array.isArray(next.nodes)) return next;
+    const sensitiveKey = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|pwd|private[-_]?key|credential)/i;
+    const placeholder = '[configure controlled credential]';
+    const redactSharedValue = (value, key = '') => {
+        if (sensitiveKey.test(String(key)) && value !== null && value !== undefined && String(value).trim()) return placeholder;
+        if (typeof value === 'string') {
+            return value.replace(/([?&](?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|pwd|private[-_]?key|credential)=)[^&]+/gi, `$1${placeholder}`);
+        }
+        if (Array.isArray(value)) return value.map(item => redactSharedValue(item));
+        if (!value || typeof value !== 'object') return value;
+        return Object.fromEntries(Object.entries(value).map(([childKey, item]) => [childKey, redactSharedValue(item, childKey)]));
+    };
     next.nodes.forEach(node => {
+        if (node?.input && typeof node.input === 'object') node.input = redactSharedValue(node.input);
         if (String(node?.tool || '').trim() !== 'agent.http') return;
         const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input) ? node.input : {};
         if (input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)) {
