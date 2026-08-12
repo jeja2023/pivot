@@ -952,7 +952,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
     assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(runController\.signal\)\)/);
-    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext \}\)/);
+    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext, signal \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
 });
