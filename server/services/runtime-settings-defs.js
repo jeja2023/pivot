@@ -11,6 +11,7 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
     modelContextWindowTokens: 'model_context_window_tokens',
     contextReservedOutputTokens: 'context_reserved_output_tokens',
+    memoryThreshold: 'memory_threshold',
     samplingTemperature: 'sampling_temperature',
     samplingTopP: 'sampling_top_p',
     samplingPresencePenalty: 'sampling_presence_penalty',
@@ -150,6 +151,17 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         env: 'CONTEXT_RESERVED_OUTPUT_TOKENS',
         defaultValue: 2048,
         min: 512,
+        max: 10000000,
+        group: 'context',
+        unit: 'tokens'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.memoryThreshold,
+        prop: 'memoryThreshold',
+        label: '会话记忆压缩阈值',
+        env: 'MEMORY_THRESHOLD',
+        defaultValue: 12000,
+        min: 256,
         max: 10000000,
         group: 'context',
         unit: 'tokens'

@@ -456,6 +456,7 @@ function getRuntimeItemHint(item) {
         model_endpoint_queue_timeout_ms: '模型端点排队等待超时时间。',
         model_context_window_tokens: '没有单独配置上下文时使用的全局默认窗口。',
         context_reserved_output_tokens: '为输出预留的 token 数，避免把回答空间压得太小。',
+        memory_threshold: '会话活跃 token 超过此值时触发自动压缩提炼。',
         sampling_temperature: '温度越高越发散，越低越稳定。',
         sampling_top_p: '采样概率上限，常和温度配合调节。',
         sampling_presence_penalty: '减少反复提同一内容的倾向。',
@@ -484,6 +485,7 @@ function isRuntimeHumanIntKey(key) {
     return new Set([
         'model_context_window_tokens',
         'context_reserved_output_tokens',
+        'memory_threshold',
         'upload_attachment_max_bytes',
         'knowledge_upload_max_bytes',
         'image_upload_max_bytes',

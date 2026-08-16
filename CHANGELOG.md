@@ -1,3 +1,13 @@
+## [v0.0.265] - 2026-08-16
+
+### 全局参数增加「会话记忆压缩阈值」可视化配置与前后端运行时动态打通
+
+- **全局参数可视化配置接入**：在管理后台「全局参数」页面的【上下文预算】分组中增加「会话记忆压缩阈值 (Token)」（`memory_threshold`）输入框，支持 `12K`、`32K`、`16000` 等人机友好格式输入与回显，并在 `hintMap` 中完善字段说明与取值范围提示。
+- **上下文预算栅格布局优化**：调整 `.global-params-context-row` 为对称两列栅格，将「全局上下文窗口」与「会话记忆压缩阈值」、「预留输出」与「附件注入上限」分行成对排布，提升管理后台参数排版美观度与易用性。
+- **运行时配置服务集成**：在 `server/services/runtime-settings-defs.js` 中将 `memory_threshold` 注册进全局运行时配置系统（默认值 `12000`，范围 `256` ~ `10000000`，单位 `tokens`），并通过 `getGlobalContextRuntimeConfig` 统一导出。
+- **会话压缩触发动态生效**：重构 `server/llm.js` 中的 `getMemoryThreshold()`，优先从运行时上下文配置中实时读取 `memoryThreshold`，确保管理员在管理后台修改保存后即时生效，无需重启服务。
+- **测试用例与版本同步**：在 `tests/security-chat/context-settings.js` 中补充 `memory_threshold` 运行时保存、回读与预算计算单测；启用新版本 `v0.0.265`，全量执行 `npm run version:sync` 完成版本号同步与门禁校验。
+
 ## [v0.0.264] - 2026-08-12
 
 ### 全面代码规范审查、ESLint 全局变量补全、依赖安全漏洞修补与 Agent 取消机制优化

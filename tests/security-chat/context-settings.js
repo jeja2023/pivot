@@ -94,17 +94,20 @@ test('validateModelTokenSettings 关系校验：输入/输出上限须小于上�
 test('运行时上下文默认值可从设置页保存并影响上下文预算', () => {
     const keys = [
         RUNTIME_SETTING_KEYS.modelContextWindowTokens,
-        RUNTIME_SETTING_KEYS.contextReservedOutputTokens
+        RUNTIME_SETTING_KEYS.contextReservedOutputTokens,
+        RUNTIME_SETTING_KEYS.memoryThreshold
     ];
     const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
     try {
         const saved = saveRuntimeConfig({
             model_context_window_tokens: '64K',
-            context_reserved_output_tokens: '4K'
+            context_reserved_output_tokens: '4K',
+            memory_threshold: '32K'
         }, null);
         assert.equal(saved.error, undefined);
         assert.equal(getGlobalContextRuntimeConfig().modelContextWindowTokens, 64000);
         assert.equal(getGlobalContextRuntimeConfig().contextReservedOutputTokens, 4000);
+        assert.equal(getGlobalContextRuntimeConfig().memoryThreshold, 32000);
 
         const budget = getModelContextBudget({});
         assert.equal(budget.unbounded, false);

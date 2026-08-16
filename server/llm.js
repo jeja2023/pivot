@@ -14,7 +14,7 @@ const {
     MEMORY_CONFIG_KEYS,
     normalizeMemoryThreshold
 } = require('./services/memory-config');
-const { getBackgroundRuntimeConfig } = require('./services/runtime-settings');
+const { getBackgroundRuntimeConfig, getGlobalContextRuntimeConfig } = require('./services/runtime-settings');
 const { forwardChatCompletion } = require('./services/model-forwarder');
 const { getAppSettingValue } = require('./services/app-settings');
 const { getAttachmentContextLimit } = require('./services/resource-limits');
@@ -365,6 +365,8 @@ function getStoredMessageContextTokens(message = {}) {
 
 function getMemoryThreshold() {
     try {
+        const runtimeThreshold = getGlobalContextRuntimeConfig().memoryThreshold;
+        if (runtimeThreshold > 0) return runtimeThreshold;
         return normalizeMemoryThreshold(getAppSettingValue(MEMORY_CONFIG_KEYS.threshold), DEFAULT_MEMORY_THRESHOLD);
     } catch (_err) {
         return DEFAULT_MEMORY_THRESHOLD;

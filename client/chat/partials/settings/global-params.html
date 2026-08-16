@@ -64,6 +64,13 @@
                                             <input type="text" class="form-input" placeholder="0 不设默认，可填 128K" data-runtime-key="model_context_window_tokens">
                                         </div>
                                         <div class="form-item">
+                                            <label>会话记忆压缩阈值 (Token)</label>
+                                            <small class="runtime-key-note">memory_threshold</small>
+                                            <input type="text" class="form-input" placeholder="默认 12K，如 32K" data-runtime-key="memory_threshold">
+                                        </div>
+                                    </div>
+                                    <div class="model-form-row global-params-row global-params-context-row">
+                                        <div class="form-item">
                                             <label>预留输出 (Token)</label>
                                             <small class="runtime-key-note">context_reserved_output_tokens</small>
                                             <input type="text" class="form-input" placeholder="如 4K / 8K" data-runtime-key="context_reserved_output_tokens">

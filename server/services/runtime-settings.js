@@ -210,7 +210,8 @@ function getBackgroundRuntimeConfig() {
 function getGlobalContextRuntimeConfig() {
     return {
         modelContextWindowTokens: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.modelContextWindowTokens),
-        contextReservedOutputTokens: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.contextReservedOutputTokens)
+        contextReservedOutputTokens: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.contextReservedOutputTokens),
+        memoryThreshold: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.memoryThreshold)
     };
 }
 
