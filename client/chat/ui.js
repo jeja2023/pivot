@@ -79,7 +79,8 @@ function updateContextUsage(meta = null) {
     if (!meta) {
         ring.style.setProperty('--progress', '0');
         pill.dataset.tooltip = '上下文用量: -';
-        pill.title = '当前会话上下文用量，点击手动压缩';
+        pill.removeAttribute('title');
+        pill.setAttribute('aria-label', '当前会话上下文用量，点击手动压缩');
         return;
     }
 
@@ -96,8 +97,10 @@ function updateContextUsage(meta = null) {
         tooltipParts.push(`归档: ${archived}, 摘要: ${summaryCount}`);
     }
     tooltipParts.push('点击手动压缩');
-    pill.dataset.tooltip = tooltipParts.join(' | ');
-    pill.title = pill.dataset.tooltip;
+    const tooltipText = tooltipParts.join(' | ');
+    pill.dataset.tooltip = tooltipText;
+    pill.removeAttribute('title');
+    pill.setAttribute('aria-label', tooltipText);
 
     if (meta.status === 'critical') pill.classList.add('is-critical');
     else if (meta.status === 'warn') pill.classList.add('is-warn');
