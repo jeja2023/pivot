@@ -20,6 +20,7 @@ const {
     recordModelFailure
 } = require('../../services/model-runtime');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
+const { createSseResponseWriter } = require('../../services/sse-response');
 const {
     buildChatCompletionsUrl,
     buildModelHeaders
@@ -154,13 +155,11 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         });
 
         if (stream) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
+            const sse = createSseResponseWriter(res);
             const accumulator = createStreamAccumulator();
             const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
             response.data.on('data', chunk => {
-                res.write(chunk);
+                sse.writeRaw(chunk);
                 parser.write(chunk);
             });
             response.data.on('end', () => {
@@ -679,14 +678,12 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             });
 
             if (wantStream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
+                const sse = createSseResponseWriter(res);
 
                 const accumulator = createStreamAccumulator();
                 const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
                 response.data.on('data', chunk => {
-                    res.write(chunk);
+                    sse.writeRaw(chunk);
                     parser.write(chunk);
                 });
                 response.data.on('end', () => {

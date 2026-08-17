@@ -144,7 +144,7 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
         </div>
     `);
     target.appendChild(div);
-    attachMessageImageLoadPinning(div);
+    if (!mountOptions?.disableImagePinning) attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
     if (!deferRender) {
         if (role === 'assistant') renderPivotCharts(div);

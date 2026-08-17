@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
 const Sqlite = require('better-sqlite3');
+const { sql } = require('../../server/db/statements');
 
 const {
     ContextLengthExceededError,
@@ -18,6 +19,7 @@ const {
     chunkDocument,
     detectDocType,
     applyMMR,
+    debugRetrieveContext,
     confirmRelation,
     cosineSimilarity,
     db,
@@ -209,6 +211,56 @@ test('MMR 去重会在相关性与多样性间平衡，剔除近重复片段', (
     assert.equal(ids[0], 1);
     assert.equal(ids.includes(3), true); // 多样片段优先于近重复
     assert.equal(ids.includes(2), false);
+});
+
+test('RRF 会融合独立向量召回，不受已占满的关键词候选池限制', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(`rag_dual_${suffix}`, 'hash', 'RAG Dual Recall', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const now = getBeijingTimestamp();
+    const docInfo = sql(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, 'ready', 1, 26, 26, 100, ?, ?)
+    `).run(userId, `dual-${suffix}.txt`, now, now);
+    const docId = Number(docInfo.lastInsertRowid);
+    const insertChunk = sql(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `);
+    let semanticChunkId = 0;
+
+    try {
+        for (let index = 0; index < 25; index += 1) {
+            const content = `lexicalneedle keyword candidate ${index}`;
+            insertChunk.run(docId, content, buildRagSearchContent(content), JSON.stringify([1, 0]));
+        }
+        semanticChunkId = Number(insertChunk.run(
+            docId,
+            'conceptual target available only through its embedding',
+            buildRagSearchContent('conceptual target available only through its embedding'),
+            JSON.stringify([0, 1])
+        ).lastInsertRowid);
+
+        const result = await debugRetrieveContext(userId, 'lexicalneedle', {
+            topK: 2,
+            candidateLimit: 20,
+            scoreThreshold: 0.2,
+            queryVector: [0, 1]
+        });
+        const semanticMatch = result.matches.find(match => match.chunkId === semanticChunkId);
+        assert.ok(semanticMatch);
+        assert.equal(semanticMatch.scores.denseRank, 1);
+        assert.equal(semanticMatch.scores.ftsRank, null);
+        assert.equal(semanticMatch.selected, true);
+        assert.equal(result.ranking.mode, 'hybrid_dual_rrf_mmr');
+    } finally {
+        sql('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
+        sql('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
+        sql('DELETE FROM users WHERE id = ?').run(userId);
+    }
 });
 
 test('知识图谱会索引并丰富检索上下文，同时支持整理操作', () => {

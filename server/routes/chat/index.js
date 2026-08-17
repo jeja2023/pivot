@@ -17,6 +17,7 @@ const {
     recordModelFailure
 } = require('../../services/model-runtime');
 const { createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../../streaming');
+const { createSseResponseWriter } = require('../../services/sse-response');
 const { openChatModelStream } = require('../../services/model-stream-service');
 const {
     extractModelTextFromRawResponse,
@@ -157,19 +158,10 @@ function createChatRouter({
         req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
         // --- 立即建立 SSE 连接 ---
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        res.setHeader('Content-Encoding', 'identity');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.socket?.setNoDelay?.(true);
-        res.socket?.setKeepAlive?.(true);
-        res.flushHeaders?.();
+        const sse = createSseResponseWriter(res);
 
         const chartSseCapture = createChartSseCapture((payload) => {
-            res.write(`data: ${payload}\n\n`);
-            res.flush?.();
+            sse.writeData(payload);
         });
         const streamedChartSpecs = chartSseCapture.streamedChartSpecs;
         const writeSse = (payload) => {
@@ -196,8 +188,7 @@ function createChatRouter({
             }));
         };
 
-        res.write(': stream-ready\n\n');
-        res.flush?.();
+        sse.writeComment('stream-ready');
 
         // --- 业务逻辑检查 ---
         const preflight = validateChatPreflight({

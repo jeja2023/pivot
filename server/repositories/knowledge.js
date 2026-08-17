@@ -102,6 +102,28 @@ function listAllDocumentChunks(docId) {
     return sql('SELECT id AS chunkId, content FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC').all(docId);
 }
 
+function iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
+    const ownerFilter = user ? '' : 'AND d.user_id = ?';
+    const statement = sql(`
+        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+        FROM knowledge_chunks c
+        JOIN knowledge_docs d ON c.doc_id = d.id
+        ${scopeFilter.accessJoin}
+        WHERE c.embedding IS NOT NULL
+          AND c.embedding != ''
+          ${ownerFilter}
+          AND d.status = 'ready'
+          AND d.deleted_at IS NULL
+          AND COALESCE(d.is_enabled, 1) = 1
+          ${scopeFilter.sql}
+          ${scopeFilter.accessSql}
+    `);
+    const params = user
+        ? [...scopeFilter.params, ...scopeFilter.accessParams]
+        : [userId, ...scopeFilter.params];
+    return statement.iterate(...params);
+}
+
 function getDocumentName(docId) {
     return sql('SELECT name FROM knowledge_docs WHERE id = ?').get(docId) || {};
 }
@@ -160,6 +182,7 @@ module.exports = {
     listDocumentChunks,
     countDocumentChunks,
     listAllDocumentChunks,
+    iterateAccessibleChunkEmbeddings,
     getDocumentName,
     getDocumentQualityOverview,
     listProblemDocuments

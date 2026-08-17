@@ -22,6 +22,7 @@ const {
     buildCapabilityFallbackMessage
 } = require('../../capabilities');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
+const { createSseResponseWriter } = require('../../services/sse-response');
 const {
     buildChatCompletionsUrl,
     buildModelHeaders
@@ -679,9 +680,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             });
 
             if (stream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
+                const sse = createSseResponseWriter(res);
                 
                 const accumulator = createStreamAccumulator();
                 let streamFailed = false;
@@ -697,7 +696,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     }
                 });
                 response.data.on('data', chunk => {
-                    res.write(chunk);
+                    sse.writeRaw(chunk);
                     parser.write(chunk);
                 });
 

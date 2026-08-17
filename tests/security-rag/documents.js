@@ -697,7 +697,7 @@ test('RAG tag scope limits debug retrieval candidates', async () => {
     }
 });
 
-test('RAG 检索会合并兜底候选，并在没有候选时跳过嵌入调用', async () => {
+test('RAG 检索会合并独立向量候选，并在没有语料时跳过嵌入调用', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -721,7 +721,7 @@ test('RAG 检索会合并兜底候选，并在没有候选时跳过嵌入调用'
         docInfo.lastInsertRowid,
         '完全无关键词但语义相关',
         buildRagSearchContent('完全无关键词但语义相关'),
-        JSON.stringify([0, 1])
+        JSON.stringify([0.2, 1])
     );
 
     try {

@@ -19,21 +19,30 @@ const DAG_PERSISTED_OUTPUT_MAX_CHARS = Math.max(
     Math.min(Number.parseInt(process.env.AGENT_DAG_OUTPUT_MAX_CHARS || '8000000', 10) || 8000000, 20000000)
 );
 
-function persistedDagOutput(value) {
+function preparePersistedDagOutput(value) {
     let text = '';
-    try { text = typeof value === 'string' ? value : JSON.stringify(value); } catch (error) { return clampText(value, DAG_PERSISTED_OUTPUT_MAX_CHARS); }
-    if (text.length <= DAG_PERSISTED_OUTPUT_MAX_CHARS) return value;
+    let serialized = '';
+    try {
+        serialized = JSON.stringify(value);
+        if (serialized === undefined) serialized = 'null';
+        text = typeof value === 'string' ? value : serialized;
+    } catch (error) {
+        const fallback = clampText(value, DAG_PERSISTED_OUTPUT_MAX_CHARS);
+        return { value: fallback, serialized: JSON.stringify(fallback) };
+    }
+    if (text.length <= DAG_PERSISTED_OUTPUT_MAX_CHARS) return { value, serialized };
     const payload = value?.structuredContent && typeof value.structuredContent === 'object'
         ? value.structuredContent
         : value;
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     if (!rows.length) {
-        return {
+        const truncated = {
             __partial: true,
             originalChars: text.length,
-            text: clampText(value, DAG_PERSISTED_OUTPUT_MAX_CHARS),
+            text: `${text.slice(0, DAG_PERSISTED_OUTPUT_MAX_CHARS)}\n...[truncated]`,
             warning: '节点完整输出超过持久化上限，恢复运行时只能使用截断预览。'
         };
+        return { value: truncated, serialized: JSON.stringify(truncated) };
     }
     const keptRows = [];
     let used = 0;
@@ -48,7 +57,7 @@ function persistedDagOutput(value) {
         keptRows.push(row);
         used += rowText.length;
     }
-    return {
+    const truncated = {
         structuredContent: {
             ...payload,
             rows: keptRows,
@@ -60,6 +69,17 @@ function persistedDagOutput(value) {
         text: '节点输出过大，已按完整记录保留前 ' + keptRows.length + '/' + rows.length + ' 条。',
         warning: '恢复运行时只能使用已持久化的完整记录。'
     };
+    return { value: truncated, serialized: JSON.stringify(truncated) };
+}
+
+function persistedDagOutput(value) {
+    return preparePersistedDagOutput(value).value;
+}
+
+function compactPreparedDagOutput(value, serialized, max = 12000) {
+    const text = typeof value === 'string' ? value : String(serialized || '');
+    if (!text) return '';
+    return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
 }
 
 function parseMaybeJsonPayload(value) {
@@ -176,6 +196,7 @@ function upsertDagNode(runId, node, patch = {}) {
         condition: patch.condition ?? node.condition ?? 'success',
         status: patch.status ?? 'pending',
         output: patch.output ?? null,
+        outputSerialized: patch.outputSerialized,
         errorMessage: patch.errorMessage ?? '',
         contractStatus: patch.contractStatus ?? 'unchecked',
         contractIssues: patch.contractIssues ?? [],
@@ -200,7 +221,7 @@ function upsertDagNode(runId, node, patch = {}) {
             JSON.stringify(row.dependsOn),
             row.condition,
             row.status,
-            row.output === null ? null : JSON.stringify(row.output),
+            row.output === null ? null : (row.outputSerialized ?? JSON.stringify(row.output)),
             row.errorMessage,
             row.contractStatus,
             JSON.stringify(row.contractIssues),
@@ -228,7 +249,7 @@ function upsertDagNode(runId, node, patch = {}) {
         JSON.stringify(row.dependsOn),
         row.condition,
         row.status,
-        row.output === null ? null : JSON.stringify(row.output),
+        row.output === null ? null : (row.outputSerialized ?? JSON.stringify(row.output)),
         row.errorMessage,
         row.contractStatus,
         JSON.stringify(row.contractIssues),
@@ -245,15 +266,22 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     const startedAt = Date.now();
     const startedAtText = getBeijingTimestamp();
     let lastError = null;
+    let attempted = 0;
     const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        attempted = attempt;
         deps.assertRunNotCancelled(run.id);
         try {
+            const remainingRunMs = Math.max(deadline - Date.now(), 1);
+            const nodeOwnsDeadline = policy.timeoutMs < remainingRunMs;
             const output = await deps.withTimeout(
                 signal => executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext, signal }),
-                Math.min(policy.timeoutMs, Math.max(deadline - Date.now(), 1000)),
+                Math.min(policy.timeoutMs, Math.max(remainingRunMs, 1000)),
                 `执行 DAG 节点：${node.title || node.id}`,
-                { signal: executionContext.signal || deps.signal || null }
+                {
+                    signal: executionContext.signal || deps.signal || null,
+                    timeoutCode: nodeOwnsDeadline ? 'AGENT_NODE_TIMEOUT' : 'AGENT_TIMEOUT'
+                }
             );
             return {
                 ok: true,
@@ -266,6 +294,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         } catch (e) {
             if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
             lastError = e;
+            if (e.code === 'AGENT_NODE_TIMEOUT') break;
             deps.insertStep(run.id, listSteps(run.id).length + 1, {
                 type: 'dag',
                 title: `DAG 节点重试：${node.title || node.id}（${attempt}/${attempts}）`,
@@ -282,7 +311,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     return {
         ok: false,
         error: lastError || new Error('DAG 节点执行失败，但没有返回错误信息。'),
-        attempt: attempts,
+        attempt: attempted || 1,
         startedAt,
         startedAtText,
         durationMs: Date.now() - startedAt
@@ -653,12 +682,14 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     contractError.dagDurationMs = result.durationMs;
                     throw contractError;
                 }
-                const compactOutput = clampText(output, 12000);
+                const preparedOutput = preparePersistedDagOutput(output);
+                const compactOutput = compactPreparedDagOutput(output, preparedOutput.serialized, 12000);
                 states.set(node.id, { status: 'completed', input: resolvedInput, output, compactOutput, attemptCount: result.attempt });
                 upsertDagNode(run.id, node, {
                     status: 'completed',
                     input: resolvedInput,
-                    output: persistedDagOutput(output),
+                    output: preparedOutput.value,
+                    outputSerialized: preparedOutput.serialized,
                     contractStatus: 'valid',
                     contractIssues: [],
                     attemptCount: result.attempt,
@@ -693,42 +724,52 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
                 const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
                 const durationMs = Number(e.dagDurationMs || 0);
+                const timedOut = e.code === 'AGENT_NODE_TIMEOUT';
                 const status = policy.onError === 'continue' ? 'continued_error' : 'error';
+                const failureOutput = {
+                    error: e.message,
+                    code: e.code || 'AGENT_DAG_NODE_ERROR',
+                    timedOut,
+                    onError: policy.onError,
+                    ...(policy.onError === 'continue' ? { continued: true } : {})
+                };
                 states.set(node.id, {
                     status,
                     input: resolvedInput,
                     error: e.message,
-                    output: policy.onError === 'continue' ? { error: e.message, continued: true } : undefined,
+                    output: policy.onError === 'continue' ? failureOutput : undefined,
                     attemptCount,
                     onError: policy.onError
                 });
                 upsertDagNode(run.id, node, {
                     status,
                     input: resolvedInput,
-                    output: { error: e.message, onError: policy.onError },
+                    output: failureOutput,
                     errorMessage: e.message,
-                    contractStatus: e.contractIssues?.length ? 'invalid' : 'error',
+                    contractStatus: timedOut ? 'timeout' : (e.contractIssues?.length ? 'invalid' : 'error'),
                     contractIssues: e.contractIssues || [],
                     attemptCount,
                     durationMs,
                     completedAt: getBeijingTimestamp()
                 });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, onError: policy.onError, attempts: attemptCount });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, code: e.code || '', timedOut, onError: policy.onError, attempts: attemptCount });
                 deps.insertStep(run.id, nodeStepIndex, {
                     type: 'dag',
                     nodeId: node.id,
-                    title: policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`,
+                    title: timedOut
+                        ? `DAG 节点执行超时：${node.title || node.id}`
+                        : (policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`),
                     toolName: node.tool,
                     input: resolvedInput,
-                    output: { error: e.message, onError: policy.onError },
+                    output: failureOutput,
                     errorMessage: e.message,
                     status: 'error',
                     durationMs
                 });
                 deps.finishAgentTraceSpan?.(nodeSpanId, {
                     status: 'error',
-                    output: { nodeId: node.id, onError: policy.onError },
-                    details: { nodeId: node.id, toolName: node.tool, contractIssues: e.contractIssues || [] },
+                    output: { nodeId: node.id, code: e.code || '', timedOut, onError: policy.onError },
+                    details: { nodeId: node.id, toolName: node.tool, timedOut, contractIssues: e.contractIssues || [] },
                     errorMessage: e.message,
                     durationMs
                 });

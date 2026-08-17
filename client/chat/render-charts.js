@@ -563,7 +563,7 @@ function renderPivotCharts(root = document) {
             if (echartMount) echartMount.hidden = true;
             drawPivotChart(canvas, spec);
             ensureEchartsLazyLoaded().then((ready) => {
-                if (!ready || block.dataset.renderedEcharts === '1') return;
+                if (!ready || !block.isConnected || block.dataset.renderedEcharts === '1') return;
                 const upgraded = renderEcharts(block, spec);
                 if (!upgraded) return;
                 canvas.hidden = true;

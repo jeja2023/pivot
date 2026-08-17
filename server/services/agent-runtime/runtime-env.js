@@ -21,6 +21,7 @@ function createRunId() {
 
 function withTimeout(operation, timeoutMs, label = 'operation', options = {}) {
     const safeTimeout = Math.max(Number(timeoutMs) || 0, 1000);
+    const timeoutCode = String(options?.timeoutCode || 'AGENT_TIMEOUT');
     return new Promise((resolve, reject) => {
         const controller = new AbortController();
         const parentSignal = options?.signal || null;
@@ -42,7 +43,7 @@ function withTimeout(operation, timeoutMs, label = 'operation', options = {}) {
         };
         const timer = setTimeout(() => {
             const err = new Error(`${label}执行超时`);
-            err.code = 'AGENT_TIMEOUT';
+            err.code = timeoutCode;
             abortReason = err;
             controller.abort(err);
             finish(reject)(err);

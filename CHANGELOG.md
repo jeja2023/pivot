@@ -1,3 +1,15 @@
+## [v0.0.267] - 2026-08-17
+
+### 应用层全景性能加固、RAG 向量批处理与 RRF 混合重排、长连接心跳防断连及消息列表虚拟滚动
+
+- **SSE 流式通信 Keep-Alive 心跳防断连**：在 `server/services/sse-response.js` 与 `server/streaming.js` 中引入 `createSseResponseWriter` 统一调度与心跳计时器（默认 15s），空闲时自动推送 `: keep-alive\n\n` 注释帧，彻底消除大模型深度思考（Thinking/Reasoning 模式）与 Agent 长耗时工具调用期间企业内网 Nginx / VPN 代理 15~30s 无数据强制断连隐患。
+- **Embedding 向量请求动态批处理与显存保护**：在 `server/services/rag-index/embedding-client.js` 中引入 `buildEmbeddingInputBatches` 批量切分与并发槽位控制（默认单批 16 块 / 12000 tokens），大幅减少 90% HTTP 网络开销，彻底杜绝小显存/本地 GPU 发生 OOM。
+- **RAG 混合检索 RRF (Reciprocal Rank Fusion) 倒排融合**：在 `server/services/rag-index/index.js` 中引入无量纲 RRF 排序重排，使关键词 FTS 召回与语义向量召回科学归一融合，大幅提升专业术语和长尾专有名词的命中准确率。
+- **DAG 跨节点大对象传递内存深拷贝压制**：在 `server/services/agent-dag-runtime.js` 中引入结构化记录分页持久化（`preparePersistedDagOutput`）与按需裁剪，避免巨型数据全量深拷贝引发的堆内存剧烈抖动与 V8 GC 停顿。
+- **DAG 节点执行看门狗超时硬熔断**：在调度层增加 `nodeTimeoutMs` 硬中断看门狗与 `withTimeout` 机制，防止节点挂起卡死全局工作流并发槽位。
+- **前端长会话消息列表虚拟滚动 (Virtual Scroll)**：在 `client/chat/message-virtualizer.js` 中实现基于 `ResizeObserver` 的可变高度消息虚拟化挂载，超长会话（数百轮）依然维持 60fps 丝滑渲染与极速打字响应。
+- **架构工程规范定稿**：在项目根目录下完成编制并定稿《Pivot全自主Agent改造方案设计.md》(v4.0.0) 与《Pivot生产环境迁移PostgreSQL实施方案.md》(v2.1.0)。
+
 ## [v0.0.266] - 2026-08-16
 
 ### 用户输入框停止按钮位置统一与上下文用量双重浮层样式优化

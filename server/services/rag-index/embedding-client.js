@@ -9,6 +9,117 @@ const DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS = 120000;
 const MAX_EMBEDDING_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const KEYWORD_FALLBACK_MIN_SCORE = 0.12;
+const DEFAULT_EMBEDDING_BATCH_MAX_INPUTS = 16;
+const DEFAULT_EMBEDDING_BATCH_MAX_TOKENS = 12000;
+const DEFAULT_EMBEDDING_BATCH_MAX_BYTES = 512 * 1024;
+
+let activeEmbeddingRequests = 0;
+const embeddingRequestWaiters = [];
+
+function clampInteger(value, fallback, min, max) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+
+function getEmbeddingMaxConcurrency() {
+    return clampInteger(process.env.RAG_EMBEDDING_MAX_CONCURRENCY, 2, 1, 16);
+}
+
+function drainEmbeddingRequestWaiters() {
+    const maxConcurrent = getEmbeddingMaxConcurrency();
+    while (activeEmbeddingRequests < maxConcurrent && embeddingRequestWaiters.length) {
+        activeEmbeddingRequests += 1;
+        const resolve = embeddingRequestWaiters.shift();
+        resolve();
+    }
+}
+
+async function acquireEmbeddingRequestSlot() {
+    if (activeEmbeddingRequests >= getEmbeddingMaxConcurrency()) {
+        await new Promise(resolve => embeddingRequestWaiters.push(resolve));
+    } else {
+        activeEmbeddingRequests += 1;
+    }
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        activeEmbeddingRequests = Math.max(0, activeEmbeddingRequests - 1);
+        drainEmbeddingRequestWaiters();
+    };
+}
+
+async function withEmbeddingRequestSlot(operation) {
+    const release = await acquireEmbeddingRequestSlot();
+    try {
+        return await operation();
+    } finally {
+        release();
+    }
+}
+
+function getEmbeddingBatchConfig(overrides = {}) {
+    return {
+        maxInputs: clampInteger(
+            overrides.maxInputs ?? process.env.RAG_EMBEDDING_BATCH_MAX_INPUTS,
+            DEFAULT_EMBEDDING_BATCH_MAX_INPUTS,
+            1,
+            128
+        ),
+        maxTokens: clampInteger(
+            overrides.maxTokens ?? process.env.RAG_EMBEDDING_BATCH_MAX_TOKENS,
+            DEFAULT_EMBEDDING_BATCH_MAX_TOKENS,
+            256,
+            1000000
+        ),
+        maxBytes: clampInteger(
+            overrides.maxBytes ?? process.env.RAG_EMBEDDING_BATCH_MAX_BYTES,
+            DEFAULT_EMBEDDING_BATCH_MAX_BYTES,
+            4096,
+            16 * 1024 * 1024
+        )
+    };
+}
+
+function buildEmbeddingInputBatches(inputs, overrides = {}) {
+    const safeInputs = (Array.isArray(inputs) ? inputs : [inputs]).map(input => String(input ?? ''));
+    const config = getEmbeddingBatchConfig(overrides);
+    const batches = [];
+    let current = [];
+    let currentTokens = 0;
+    let currentBytes = 0;
+
+    for (const input of safeInputs) {
+        const tokens = Math.max(1, estimateTokens(input));
+        const bytes = Buffer.byteLength(input, 'utf8');
+        const exceedsBudget = current.length > 0 && (
+            current.length >= config.maxInputs
+            || currentTokens + tokens > config.maxTokens
+            || currentBytes + bytes > config.maxBytes
+        );
+        if (exceedsBudget) {
+            batches.push(current);
+            current = [];
+            currentTokens = 0;
+            currentBytes = 0;
+        }
+        current.push(input);
+        currentTokens += tokens;
+        currentBytes += bytes;
+    }
+    if (current.length) batches.push(current);
+    return batches;
+}
+
+function isEmbeddingCapacityError(error) {
+    const status = Number(error?.response?.status || error?.cause?.response?.status || 0);
+    const code = String(error?.code || error?.cause?.code || '');
+    const message = String(error?.message || error?.cause?.message || '');
+    return [413, 422, 429, 500, 503].includes(status)
+        || code === 'EMBEDDING_TIMEOUT'
+        || /out of memory|\boom\b|cuda|batch|payload|too large|context length|向量数量不匹配/i.test(message);
+}
 
 function normalizeTimeoutMs(value, fallback, min = 1000, max = MAX_EMBEDDING_REQUEST_TIMEOUT_MS) {
     const parsed = Number.parseInt(value, 10);
@@ -141,14 +252,14 @@ async function requestEmbedding(text, httpConfig, options = {}) {
     const targetUrl = resolveEmbeddingUrl(url);
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     try {
-        const res = await safeJsonPost(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
             user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
             timeout: timeoutMs
-        });
+        }));
         return normalizeEmbeddingVector(res.data);
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);
@@ -167,14 +278,14 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     const requestOne = async (input) => {
         try {
-            const res = await safeJsonPost(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
                 user: options.user || {},
                 headers: {
                     Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                     'Content-Type': 'application/json'
                 },
                 timeout: timeoutMs
-            });
+            }));
             return normalizeEmbeddingVector(res.data);
         } catch (e) {
             throw wrapEmbeddingRequestError(e, timeoutMs);
@@ -191,14 +302,14 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
 
     let res;
     try {
-        res = await safeJsonPost(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
             user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
                 'Content-Type': 'application/json'
             },
             timeout: timeoutMs
-        });
+        }));
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);
     }
@@ -272,6 +383,36 @@ async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, u
 
     throw new Error(`不支持的 Embedding 模式: ${targetMode}`);
 }
+
+async function generateEmbeddingsAdaptive(inputs, mode = null, embeddingConfig = null, userId = null, options = {}) {
+    const safeInputs = (Array.isArray(inputs) ? inputs : [inputs]).map(input => String(input ?? ''));
+    const configuredBatches = buildEmbeddingInputBatches(safeInputs, options.batch || {});
+    const results = [];
+
+    const generateBatch = async batch => {
+        try {
+            return await generateEmbeddings(batch, mode, embeddingConfig, userId, options);
+        } catch (error) {
+            if (batch.length <= 1 || !isEmbeddingCapacityError(error)) {
+                if (batch.length === 1 && options.allowPartial === true && isEmbeddingCapacityError(error)) {
+                    logger.warn({ err: error.message }, '单个向量输入仍超出服务容量，已降级为关键词索引');
+                    return [null];
+                }
+                throw error;
+            }
+            const middle = Math.ceil(batch.length / 2);
+            logger.warn({ err: error.message, batchSize: batch.length }, 'Embedding 批次超出服务容量，正在自动拆分重试');
+            const left = await generateBatch(batch.slice(0, middle));
+            const right = await generateBatch(batch.slice(middle));
+            return left.concat(right);
+        }
+    };
+
+    for (const batch of configuredBatches) {
+        results.push(...await generateBatch(batch));
+    }
+    return results;
+}
 function cosineSimilarity(vecA, vecB) {
     if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length !== vecB.length) return 0;
     let dotProduct = 0;
@@ -309,6 +450,11 @@ module.exports = {
     requestEmbeddings,
     generateEmbedding,
     generateEmbeddings,
+    generateEmbeddingsAdaptive,
+    buildEmbeddingInputBatches,
+    getEmbeddingBatchConfig,
+    getEmbeddingMaxConcurrency,
+    isEmbeddingCapacityError,
     cosineSimilarity,
     recordEmbeddingUsage
 };

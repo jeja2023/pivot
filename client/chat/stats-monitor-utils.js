@@ -194,6 +194,7 @@ const ROUTE_NAME_MAP = {
     '/chat/render.js': '消息渲染逻辑脚本',
     '/chat/render-charts.js': '图表渲染脚本',
     '/chat/render-messages.js': '消息内容渲染脚本',
+    '/chat/message-virtualizer.js': '长会话消息虚拟滚动脚本',
     '/chat/engine.js': '对话引擎逻辑脚本',
     '/chat/engine-streaming.js': '对话流式处理脚本',
     '/chat/engine-attachments.js': '对话附件处理脚本',

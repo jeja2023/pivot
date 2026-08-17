@@ -7,6 +7,7 @@ test.describe('Pivot browser smoke', () => {
         await page.waitForFunction('() => Boolean(window.Pivot && window.Pivot.modules && window.Pivot.html)');
         await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.ui"])');
         await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.attachments"])');
+        await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.messageVirtualizer"])');
     });
 
     test('knowledge workspace exposes RAG debug controls', async ({ page }) => {

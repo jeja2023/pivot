@@ -273,6 +273,8 @@ async function runSendMessage(shouldRegenerate) {
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
     const assistantModelName = model?.name || model?.model_name || '';
 
+    window.Pivot?.modules?.['chat.messageVirtualizer']?.prepareForLiveAppend?.();
+
     let userMsgEl = null;
     if (!shouldRegenerate) {
         userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date(), attachments: sentAttachments });

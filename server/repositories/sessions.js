@@ -18,6 +18,34 @@ function listMessages(sessionId, userId) {
     `).all(sessionId, userId);
 }
 
+function listMessagePage(sessionId, userId, { beforeId = null, limit = 60 } = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 60, 1), 100);
+    const normalizedBeforeId = Number.parseInt(beforeId, 10);
+    const hasBeforeId = Number.isSafeInteger(normalizedBeforeId) && normalizedBeforeId > 0;
+    const rows = sql(`
+        SELECT m.*, COALESCE(md.name, md.model_name, '') AS model_name, md.model_name AS model_api_name
+        FROM messages m
+        LEFT JOIN models md ON md.id = m.model_id
+        WHERE m.session_id = ?
+          AND m.user_id = ?
+          AND m.deleted_at IS NULL
+          AND m.role IN ('user', 'assistant')
+          ${hasBeforeId ? 'AND m.id < ?' : ''}
+        ORDER BY m.id DESC
+        LIMIT ?
+    `).all(sessionId, userId, ...(hasBeforeId ? [normalizedBeforeId] : []), safeLimit + 1);
+    const hasMore = rows.length > safeLimit;
+    const messages = rows.slice(0, safeLimit).reverse();
+    return {
+        messages,
+        page: {
+            hasMore,
+            beforeId: messages.length ? Number(messages[0].id) : null,
+            limit: safeLimit
+        }
+    };
+}
+
 function listAttachmentTokens(userId, sessionId, now) {
     return sql(`
         SELECT file_path, access_token
@@ -88,6 +116,7 @@ function countVisibleConversationMessages(sessionId, userId) {
 module.exports = {
     getSessionById,
     listMessages,
+    listMessagePage,
     listAttachmentTokens,
     createSession,
     getSessionIdForUser,

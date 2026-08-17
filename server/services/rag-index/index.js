@@ -42,16 +42,21 @@ const {
     requestEmbeddings,
     generateEmbedding,
     generateEmbeddings,
+    generateEmbeddingsAdaptive,
+    buildEmbeddingInputBatches,
     cosineSimilarity
 } = require('./embedding-client');
 
 // 为聊天热路径中的已解析 chunk embedding 设置有界缓存：反复解析
 // 同一批 TEXT-JSON 向量并重新计算 L2 范数成本较高。
-// 缓存键为 knowledge_chunks.id -> { vec: Float64Array, norm }。chunk id 来自
+// 缓存键为 knowledge_chunks.id -> { vec: Float32Array, norm }。chunk id 来自
 // 自增主键且不会复用，embedding 也不会原地 UPDATE；
 // 重建索引会 DELETE 后用新 id 重新 INSERT，因此缓存 id 不会映射到
 // 另一个 embedding。重建索引时仍会防御性地清空缓存。
-const CHUNK_EMBEDDING_CACHE_MAX = 2000;
+const CHUNK_EMBEDDING_CACHE_MAX = Math.min(Math.max(
+    Number.parseInt(process.env.RAG_EMBEDDING_CACHE_MAX, 10) || 5000,
+    100
+), 50000);
 const chunkEmbeddingCache = new Map();
 
 // 解析并计算 chunk embedding 的范数，同时缓存结果；当
@@ -71,7 +76,7 @@ function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
         return null;
     }
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const vec = new Float64Array(parsed.length);
+    const vec = new Float32Array(parsed.length);
     let norm = 0;
     for (let i = 0; i < parsed.length; i += 1) {
         const value = Number(parsed[i]);
@@ -220,7 +225,7 @@ function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) 
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return db.prepare(`
-        SELECT c.id, c.content, c.embedding, d.name
+        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
@@ -230,39 +235,80 @@ function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) 
     `).all(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), ...keywords.map(k => `%${k}%`), limit);
 }
 
-function selectRecentCandidates(userId, limit, scope = {}, user = null) {
+function selectLexicalCandidates(userId, query, candidateLimit, scope = {}, user = null) {
+    const keywords = buildKeywordCandidates(query);
+    const ftsChunks = selectFtsCandidates(userId, keywords, candidateLimit, scope, user);
+    let chunks = ftsChunks.slice();
+    if (chunks.length < candidateLimit) {
+        const existingIds = new Set(chunks.map(chunk => Number(chunk.id)));
+        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope, user)
+            .filter(chunk => !existingIds.has(Number(chunk.id)));
+        chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
+    }
+    chunks.forEach((chunk, idx) => { chunk.__ftsRank = idx; });
+    return chunks;
+}
+
+function hasAccessibleChunks(userId, scope = {}, user = null) {
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    return db.prepare(`
-        SELECT c.id, c.content, c.embedding, d.name
+    const row = db.prepare(`
+        SELECT 1 AS found
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
-        WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql}
-        ORDER BY c.id DESC
-        LIMIT ?
-    `).all(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
+        WHERE 1 = 1 ${ownerFilter}
+          AND d.status = 'ready'
+          AND d.deleted_at IS NULL
+          AND COALESCE(d.is_enabled, 1) = 1
+          ${scopeFilter.sql}
+          ${scopeFilter.accessSql}
+        LIMIT 1
+    `).get(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]));
+    return Boolean(row?.found);
 }
 
-function selectRetrievalCandidates(userId, query, topK, candidateLimit, scope = {}, user = null) {
-    const keywords = buildKeywordCandidates(query);
-    const ftsChunks = selectFtsCandidates(userId, keywords, candidateLimit, scope, user);
-    // 记录 FTS(BM25) 名次，供后续 RRF 融合与精确匹配软门控使用。
-    ftsChunks.forEach((chunk, idx) => { chunk.__ftsRank = idx; });
-    let chunks = ftsChunks;
-    if (chunks.length < topK) {
-        const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope, user)
-            .filter(chunk => !existingIds.has(chunk.id));
-        chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
+function insertDenseCandidate(top, candidate, limit) {
+    let low = 0;
+    let high = top.length;
+    while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (top[middle].__denseScore >= candidate.__denseScore) low = middle + 1;
+        else high = middle;
     }
-    if (chunks.length < topK) {
-        const existingIds = new Set(chunks.map(chunk => chunk.id));
-        const recentChunks = selectRecentCandidates(userId, candidateLimit, scope, user)
-            .filter(chunk => !existingIds.has(chunk.id));
-        chunks = chunks.concat(recentChunks).slice(0, candidateLimit);
+    top.splice(low, 0, candidate);
+    if (top.length > limit) top.pop();
+}
+
+function selectDenseCandidates(userId, queryVector, limit, scope = {}, user = null) {
+    if (!Array.isArray(queryVector) || !queryVector.length || limit <= 0) return [];
+    const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
+    const queryNorm = computeVectorNorm(queryVector);
+    const top = [];
+    const chunks = knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user });
+    for (const chunk of chunks) {
+        const entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
+        if (!entry) continue;
+        const denseScore = cosineSimilarityCached(queryVector, queryNorm, entry);
+        if (!Number.isFinite(denseScore) || denseScore <= 0) continue;
+        insertDenseCandidate(top, { ...chunk, __denseScore: denseScore, __entry: entry }, limit);
     }
-    return chunks;
+    top.forEach((chunk, idx) => { chunk.__denseRank = idx; });
+    return top;
+}
+
+function mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates = []) {
+    const merged = new Map();
+    const add = chunk => {
+        if (!chunk?.id) return;
+        const id = Number(chunk.id);
+        const existing = merged.get(id) || {};
+        merged.set(id, { ...existing, ...chunk, id });
+    };
+    lexicalCandidates.forEach(add);
+    denseCandidates.forEach(add);
+    graphCandidates.forEach(add);
+    return [...merged.values()];
 }
 
 function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
@@ -272,7 +318,7 @@ function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return db.prepare(`
-        SELECT c.id, c.content, c.embedding, d.name
+        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
@@ -285,13 +331,6 @@ function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
           ${scopeFilter.accessSql}
         LIMIT ?
     `).all(...ids.slice(0, limit), ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
-}
-
-function mergeRetrievalCandidates(candidates, graphChunkIds, userId, candidateLimit, scope = {}, user = null) {
-    const existingIds = new Set(candidates.map(chunk => chunk.id));
-    const graphChunks = selectChunksByIds(userId, graphChunkIds, candidateLimit, scope, user)
-        .filter(chunk => !existingIds.has(chunk.id));
-    return candidates.concat(graphChunks).slice(0, candidateLimit);
 }
 
 // 两个已解析向量(含范数)之间的余弦相似度，用于 MMR 多样性度量。
@@ -310,11 +349,11 @@ function cosineEntries(a, b) {
 function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
     const queryNorm = computeVectorNorm(queryVector);
     const scored = chunks.map(chunk => {
-        let entry = null;
-        let denseScore = null;
+        let entry = chunk.__entry || null;
+        let denseScore = Number.isFinite(chunk.__denseScore) ? chunk.__denseScore : null;
         try {
-            entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
-            if (entry) denseScore = cosineSimilarityCached(queryVector, queryNorm, entry);
+            if (!entry) entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
+            if (denseScore == null && entry) denseScore = cosineSimilarityCached(queryVector, queryNorm, entry);
         } catch (e) {
             logger.warn({ chunkId: chunk.id, err: e.message }, 'RAG 向量解析失败，已跳过分片');
         }
@@ -324,22 +363,16 @@ function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
             source: chunk.name,
             headingPath: chunk.heading_path || '',
             denseScore,
+            denseRank: Number.isInteger(chunk.__denseRank) ? chunk.__denseRank : null,
             ftsRank: Number.isInteger(chunk.__ftsRank) ? chunk.__ftsRank : null,
             entry
         };
     });
 
-    // 稠密名次（按余弦降序），缺向量者不参与稠密通道。
-    const denseSorted = scored.filter(item => item.denseScore != null).sort((a, b) => b.denseScore - a.denseScore);
-    const denseRankById = new Map();
-    denseSorted.forEach((item, idx) => denseRankById.set(item.chunkId, idx));
-
     scored.forEach(item => {
-        const denseRank = denseRankById.has(item.chunkId) ? denseRankById.get(item.chunkId) : null;
         let fused = 0;
-        if (denseRank != null) fused += hybrid.wDense / (hybrid.rrfK + denseRank);
-        if (item.ftsRank != null) fused += hybrid.wFts / (hybrid.rrfK + item.ftsRank);
-        item.denseRank = denseRank;
+        if (item.denseRank != null) fused += hybrid.wDense / (hybrid.rrfK + item.denseRank + 1);
+        if (item.ftsRank != null) fused += hybrid.wFts / (hybrid.rrfK + item.ftsRank + 1);
         item.fused = fused;
     });
 
@@ -423,6 +456,7 @@ function formatInjectedContext(topChunks) {
 }
 
 function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
+    const hybrid = getHybridRetrievalConfig();
     const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs', user);
     const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
     const accessFilter = user ? scopeFilter.accessSql : '';
@@ -448,9 +482,12 @@ function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
     `).get(userId, userId) || {};
 
     return [
+        'algo=dual_rrf_v2',
         `k=${Number(config.topK || 0)}`,
         `c=${Number(config.candidateLimit || 0)}`,
         `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
+        `rrf=${hybrid.rrfK}:${hybrid.wDense}:${hybrid.wFts}`,
+        `mmr=${hybrid.mmrLambda}:${hybrid.ftsRankFloor}`,
         `scope=${scopeFilter.normalized.cacheKey}|unit=${String(user?.unit || '')}|shared=${user ? '1' : '0'}`,
         `d=${Number(docs.doc_count || 0)}`,
         `h=${Number(docs.chunk_count || 0)}`,
@@ -516,15 +553,8 @@ async function debugRetrieveContext(userId, query, {
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
     const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user });
-    const candidates = mergeRetrievalCandidates(
-        selectRetrievalCandidates(userId, normalizedQuery, safeTopK, safeCandidateLimit, normalizedScope, user).slice(0, safeCandidateLimit),
-        graphContext.chunkIds,
-        userId,
-        safeCandidateLimit,
-        normalizedScope,
-        user
-    );
-    if (candidates.length === 0) {
+    const lexicalCandidates = selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user);
+    if (!hasAccessibleChunks(userId, normalizedScope, user) && !graphContext.context) {
         return {
             query: normalizedQuery,
             keywords,
@@ -540,16 +570,22 @@ async function debugRetrieveContext(userId, query, {
         };
     }
     const hybrid = getHybridRetrievalConfig();
+    let candidates = lexicalCandidates;
     let scored = [];
     let gated = [];
     let usedKeywordFallback = false;
     try {
         const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
+        const denseCandidates = selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
+        const graphCandidates = selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
+        candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
         scored = scoreCandidatesHybrid(candidates, vector, hybrid);
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
     } catch (e) {
         usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
+        const graphCandidates = selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
+        candidates = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
         scored = scoreKeywordChunks(candidates, normalizedQuery)
             .sort((a, b) => b.score - a.score)
             .map(chunk => ({
@@ -583,7 +619,7 @@ async function debugRetrieveContext(userId, query, {
         scope: normalizedScope,
         hybrid,
         ranking: {
-            mode: usedKeywordFallback ? 'keyword_fallback' : 'hybrid_rrf_mmr',
+            mode: usedKeywordFallback ? 'keyword_fallback' : 'hybrid_dual_rrf_mmr',
             selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
             gatedCount: gated.length
         },
@@ -622,22 +658,22 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
 
     try {
         const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null });
-        const chunks = mergeRetrievalCandidates(
-            selectRetrievalCandidates(userId, normalizedQuery, config.topK, config.candidateLimit, retrievalScope, options.user || null),
-            graphContext.chunkIds,
+        const lexicalCandidates = selectLexicalCandidates(
             userId,
+            normalizedQuery,
             config.candidateLimit,
             retrievalScope,
             options.user || null
         );
+        const corpusAvailable = hasAccessibleChunks(userId, retrievalScope, options.user || null);
 
-        if (chunks.length === 0 && !graphContext.context) {
+        if (!corpusAvailable && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
             recordRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
         }
 
-        if (chunks.length === 0 && graphContext.context) {
+        if (!corpusAvailable && graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, graphContext.context, cacheScope);
             recordRetrieval({
                 status: 'graph_hit',
@@ -653,8 +689,24 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         let topChunks = [];
         let topScore = 0;
         let usedKeywordFallback = false;
+        let chunks = lexicalCandidates;
         try {
             const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
+            const denseCandidates = selectDenseCandidates(
+                userId,
+                queryVector,
+                config.candidateLimit,
+                retrievalScope,
+                options.user || null
+            );
+            const graphCandidates = selectChunksByIds(
+                userId,
+                graphContext.chunkIds,
+                config.candidateLimit,
+                retrievalScope,
+                options.user || null
+            );
+            chunks = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
             const scored = scoreCandidatesHybrid(chunks, queryVector, hybrid);
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);
             // 软门控筛选后做 MMR 去重，取最终 topK。
@@ -663,6 +715,14 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         } catch (e) {
             usedKeywordFallback = true;
             logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
+            const graphCandidates = selectChunksByIds(
+                userId,
+                graphContext.chunkIds,
+                config.candidateLimit,
+                retrievalScope,
+                options.user || null
+            );
+            chunks = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
             topChunks = scoreKeywordChunks(chunks, normalizedQuery)
                 .sort((a, b) => b.score - a.score)
                 .slice(0, config.topK);
@@ -721,7 +781,6 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         overlap: ragConfig.chunkOverlap
     });
     const indexEmbeddingTimeoutMs = getRagIndexEmbeddingTimeoutMs(embeddingTimeoutMs);
-    const batchSize = 5; // 限制并发数，防止 OOM 或 API 限流
     try {
         if (chunks.length === 0) {
             throw new Error('文档未解析出可索引文本，请检查文件内容后重新上传。');
@@ -730,16 +789,18 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         // （例如 rag-documents 删除路径）。清空 embedding 缓存，避免旧条目
         // 被继续使用；这里优先保证正确性，完整清空成本也很低。
         clearChunkEmbeddingCache();
-        for (let i = 0; i < chunks.length; i += batchSize) {
-            const batch = chunks.slice(i, i + batchSize);
-            // 向量化与 FTS 用富文本（面包屑+正文）；展示与图谱仍用原文。
-            const enrichedBatch = batch.map(item => buildEnrichedChunkText(item.content, item.headingPath));
+        const enrichedChunks = chunks.map(item => buildEnrichedChunkText(item.content, item.headingPath));
+        const inputBatches = buildEmbeddingInputBatches(enrichedChunks);
+        let indexed = 0;
+        for (const enrichedBatch of inputBatches) {
+            const batch = chunks.slice(indexed, indexed + enrichedBatch.length);
             let vectors = null;
             try {
-                vectors = await generateEmbeddings(enrichedBatch, null, null, userId, {
+                vectors = await generateEmbeddingsAdaptive(enrichedBatch, null, null, userId, {
                     timeoutMs: indexEmbeddingTimeoutMs,
                     source: 'rag_ingest_embedding',
-                    user
+                    user,
+                    allowPartial: true
                 });
             } catch (e) {
                 logger.warn({ err: e.message, docId }, 'RAG 分片向量生成失败，已按关键词索引继续');
@@ -768,9 +829,10 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             });
             transaction(results);
             safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
+            indexed += batch.length;
             if (typeof onProgress === 'function') {
                 onProgress({
-                    indexed: Math.min(i + batch.length, chunks.length),
+                    indexed: Math.min(indexed, chunks.length),
                     total: chunks.length
                 });
             }
@@ -815,6 +877,8 @@ module.exports = {
     getEmbeddingConfig,
     generateEmbedding,
     generateEmbeddings,
+    generateEmbeddingsAdaptive,
+    buildEmbeddingInputBatches,
     requestEmbedding,
     requestEmbeddings,
     getEmbeddingRuntimeGuardUser,

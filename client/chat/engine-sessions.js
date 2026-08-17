@@ -36,7 +36,7 @@ async function selectSession(id, title, options = {}) {
 
     let data = null;
     try {
-        const res = await apiFetch(API_BASE + `/sessions/${id}`);
+        const res = await apiFetch(API_BASE + `/sessions/${id}?messageLimit=60`);
         if (!res.ok) {
             if (options.restore) {
                 currentSessionId = null;
@@ -61,6 +61,13 @@ async function selectSession(id, title, options = {}) {
     if (window.updateContextUsage) window.updateContextUsage(data.contextMeta || null);
 
     if (session && session.title) document.getElementById('current-title').innerText = session.title;
+
+    const messageVirtualizer = window.Pivot?.modules?.['chat.messageVirtualizer'];
+    if (messageVirtualizer) {
+        messageVirtualizer.start({ sessionId: id, records: messages, page: data.page });
+        if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
+        return;
+    }
 
     const container = document.getElementById('message-container');
     PivotSafeHtml.setHtml(container, '');

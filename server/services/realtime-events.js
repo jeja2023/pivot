@@ -1,5 +1,6 @@
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
+const { createSseResponseWriter } = require('./sse-response');
 
 const clientsByUser = new Map();
 
@@ -36,37 +37,32 @@ function subscribeUserEvents(user, res, options = {}) {
         return () => {};
     }
 
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
+    const heartbeatMs = Number.isFinite(options.heartbeatMs) ? options.heartbeatMs : 25000;
+    const writer = createSseResponseWriter(res, {
+        heartbeatMs,
+        heartbeatFactory: () => encodeSse('heartbeat', {}),
+        onError: err => logger.debug({ err: err.message, userId }, '实时 SSE 客户端写入失败')
+    });
 
     const client = { res, createdAt: Date.now() };
     if (!clientsByUser.has(userId)) clientsByUser.set(userId, new Set());
     clientsByUser.get(userId).add(client);
 
-    const heartbeatMs = Number.isFinite(options.heartbeatMs) ? options.heartbeatMs : 25000;
     const write = (type, payload) => {
-        if (res.writableEnded || res.destroyed) {
+        if (!writer.isWritable()) {
             removeClient(userId, client);
             return;
         }
-        try {
-            res.write(encodeSse(type, payload));
-        } catch (err) {
-            logger.debug({ err: err.message, userId }, '实时 SSE 客户端写入失败');
+        if (!writer.writeRaw(encodeSse(type, payload))) {
             removeClient(userId, client);
         }
     };
     client.write = write;
 
     write('connected', { userId });
-    const timer = heartbeatMs > 0 ? setInterval(() => write('heartbeat', {}), heartbeatMs) : null;
-    timer?.unref?.();
 
     const unsubscribe = () => {
-        if (timer) clearInterval(timer);
+        writer.cleanup();
         removeClient(userId, client);
     };
     res.on?.('close', unsubscribe);
