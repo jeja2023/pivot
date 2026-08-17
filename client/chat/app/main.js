@@ -153,7 +153,22 @@ bind('upload-btn', () => {
     if (!model || Number(model.supports_vision || 0) !== 1) {
         return showToast('当前选中的模型不具备视觉或文档分析能力', 'error');
     }
-    document.getElementById('file-input').click();
+    const panel = document.getElementById('upload-choice-panel');
+    const button = document.getElementById('upload-btn');
+    if (!panel || !button) return document.getElementById('file-input')?.click();
+    const shouldOpen = panel.hidden;
+    document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel').forEach(subpanel => { subpanel.hidden = true; });
+    document.querySelectorAll('#chat-tools-menu-panel [aria-expanded="true"]').forEach(trigger => trigger.setAttribute('aria-expanded', 'false'));
+    panel.hidden = !shouldOpen;
+    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+});
+bind('upload-file-choice', () => {
+    window.Pivot.modules['chat.inputMenu']?.setOpen?.(false);
+    document.getElementById('file-input')?.click();
+});
+bind('upload-folder-choice', () => {
+    window.Pivot.modules['chat.inputMenu']?.setOpen?.(false);
+    document.getElementById('folder-input')?.click();
 });
 bind('context-usage-pill', () => window.compactCurrentSessionContext?.());
 bind('sidebar-toggle-btn', () => window.toggleSidebar());

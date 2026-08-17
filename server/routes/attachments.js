@@ -51,6 +51,25 @@ function removeTempUploadFile(file) {
     removeLocalFile(file.path, '临时上传文件删除失败');
 }
 
+function normalizeAttachmentRelativePath(value, fallbackName = '附件') {
+    const parts = String(value || '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .map(part => part.trim())
+        .filter(part => part && part !== '.' && part !== '..')
+        .slice(0, 24)
+        .map(part => part.replace(/[<>:"|?*\x00-\x1F]/g, '_').slice(0, 80));
+    if (parts.length < 2) return fallbackName;
+    const fileName = path.basename(fallbackName).slice(0, 160);
+    const directories = parts.slice(0, -1);
+    let normalized = [...directories, fileName].join('/');
+    while (normalized.length > 255 && directories.length > 1) {
+        directories.shift();
+        normalized = [...directories, fileName].join('/');
+    }
+    return normalized.slice(-255) || fallbackName;
+}
+
 function createAttachmentsRouter({
     authMiddleware,
     uploadLimiter,
@@ -123,7 +142,8 @@ function createAttachmentsRouter({
             return res.status(400).json({ error: '缺少会话 ID，请先创建或选择会话' });
         }
 
-        const originalName = normalizeUploadedOriginalName(req.file.originalname);
+        const uploadedName = normalizeUploadedOriginalName(req.file.originalname);
+        const originalName = normalizeAttachmentRelativePath(req.body?.relativePath, uploadedName);
         const mimeType = req.file.mimetype;
         const password = String(req.body?.password || '').trim() || undefined;
 
@@ -273,4 +293,4 @@ function createAttachmentsRouter({
     return router;
 }
 
-module.exports = { createAttachmentsRouter };
+module.exports = { createAttachmentsRouter, normalizeAttachmentRelativePath };

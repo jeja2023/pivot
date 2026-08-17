@@ -40,12 +40,14 @@ function revokeAttachmentPreview(item = {}) {
     } catch (e) {}
 }
 
-function createLocalAttachment(file, sessionId = currentSessionId || '') {
+function createLocalAttachment(file, sessionId = currentSessionId || '', sourceRelativePath = '') {
+    const relativePath = String(sourceRelativePath || file.webkitRelativePath || '').trim();
     return {
         id: `local-${Date.now()}-${++pendingAttachmentCounter}`,
         kind: 'local',
         status: 'local',
-        name: file.name,
+        name: relativePath || file.name,
+        relativePath,
         url: '',
         type: String(file.type || ''),
         size: file.size || 0,
@@ -93,10 +95,11 @@ function createUploadedVisionAttachmentRecord(item, sessionId, fallbackSessionId
     };
 }
 
-async function uploadChatFile(file, uploadSessionId, password = '', onProgress = null) {
+async function uploadChatFile(file, uploadSessionId, password = '', onProgress = null, relativePath = '') {
     const fd = new FormData();
     fd.append('file', file);
     if (password) fd.append('password', password);
+    if (relativePath) fd.append('relativePath', relativePath);
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE}/upload?sessionId=${encodeURIComponent(uploadSessionId)}`);
@@ -130,7 +133,7 @@ async function uploadPendingAttachmentItem(item, uploadSessionId) {
     const uploadOnce = async (password = '') => {
         const progress = createUploadProgress(item.name);
         try {
-            return await uploadChatFile(item.file, uploadSessionId, password, percent => progress.update(percent));
+            return await uploadChatFile(item.file, uploadSessionId, password, percent => progress.update(percent), item.relativePath || '');
         } finally {
             progress.close();
         }
@@ -286,35 +289,136 @@ function createUploadProgress(label) {
     };
 }
 
-document.getElementById('file-input').addEventListener('change', async (e) => {
+async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支持的文件' } = {}) {
     const modelId = document.getElementById('model-selector').value;
     const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
     if (!model || Number(model.supports_vision || 0) !== 1) {
         showToast('当前选中的模型不具备视觉或文档分析能力，无法上传附件', 'error');
-        e.target.value = '';
-        return;
+        return { acceptedCount: 0, rejected: true };
     }
 
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+    const selectedFiles = Array.from(inputFiles || []).map(item => {
+        if (item?.file) return { file: item.file, relativePath: String(item.relativePath || '') };
+        return { file: item, relativePath: String(item?.webkitRelativePath || '') };
+    }).filter(item => item.file);
+    if (selectedFiles.length === 0) return { acceptedCount: 0 };
+    const supportedExtension = /\.(png|jpe?g|gif|webp|bmp|pdf|txt|md|csv|docx?|xlsx?)$/i;
+    const files = selectedFiles.filter(item => supportedExtension.test(String(item.file.name || '')));
+    const unsupportedCount = selectedFiles.length - files.length;
+    const TOAST_WARN = 'warning';
+    const TOAST_INFO = 'info';
+    const TOAST_FAIL = 'error';
+    if (files.length === 0) {
+        showToast(emptyMessage, TOAST_WARN);
+        return { acceptedCount: 0, unsupportedCount };
+    }
     const maxAttachments = getMaxPendingAttachments();
     if (pendingAttachments.length >= maxAttachments) {
-        showToast(`最多只能添加 ${maxAttachments} 个附件`, 'error');
-        e.target.value = '';
-        return;
+        showToast(`最多只能添加 ${maxAttachments} 个附件`, TOAST_FAIL);
+        return { acceptedCount: 0, skippedCount: files.length };
     }
     const availableSlots = Math.max(0, maxAttachments - pendingAttachments.length);
     const acceptedFiles = files.slice(0, availableSlots);
     const skippedCount = files.length - acceptedFiles.length;
-    acceptedFiles.forEach(file => {
-        pendingAttachments.push(createLocalAttachment(file, currentSessionId || ''));
+    acceptedFiles.forEach(item => {
+        pendingAttachments.push(createLocalAttachment(item.file, currentSessionId || '', item.relativePath));
     });
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();
-    if (skippedCount > 0) {
-        showToast(`已添加 ${acceptedFiles.length} 个附件，跳过 ${skippedCount} 个`, 'info');
+    if (skippedCount > 0 || unsupportedCount > 0) {
+        const details = [
+            skippedCount ? '超出数量上限 ' + skippedCount + ' 个' : '',
+            unsupportedCount ? '不支持的类型 ' + unsupportedCount + ' 个' : ''
+        ].filter(Boolean).join('，');
+        showToast('已添加 ' + acceptedFiles.length + ' 个附件，跳过' + details, TOAST_INFO);
     }
+    return { acceptedCount: acceptedFiles.length, skippedCount, unsupportedCount };
+}
+
+async function handleChatAttachmentInput(e) {
+    await queueChatAttachmentFiles(e.target.files, { emptyMessage: '所选文件夹中没有支持的文件' });
     e.target.value = '';
+}
+
+function readDroppedDirectoryEntries(reader) {
+    return new Promise((resolve, reject) => {
+        const entries = [];
+        const readBatch = () => reader.readEntries(batch => {
+            if (!batch.length) return resolve(entries);
+            entries.push(...batch);
+            readBatch();
+        }, reject);
+        readBatch();
+    });
+}
+
+async function collectDroppedEntryFiles(entry, parentPath = '') {
+    if (!entry) return [];
+    const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+    if (entry.isFile) {
+        const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+        return [{ file, relativePath }];
+    }
+    if (!entry.isDirectory) return [];
+    const children = await readDroppedDirectoryEntries(entry.createReader());
+    const nested = await Promise.all(children.map(child => collectDroppedEntryFiles(child, relativePath)));
+    return nested.flat();
+}
+
+async function collectDroppedFiles(dataTransfer) {
+    const entries = Array.from(dataTransfer?.items || [])
+        .filter(item => item.kind === 'file')
+        .map(item => item.webkitGetAsEntry?.())
+        .filter(Boolean);
+    if (entries.length) {
+        const nested = await Promise.all(entries.map(entry => collectDroppedEntryFiles(entry)));
+        return nested.flat();
+    }
+    return Array.from(dataTransfer?.files || []);
+}
+
+document.getElementById('file-input')?.addEventListener('change', handleChatAttachmentInput);
+document.getElementById('folder-input')?.addEventListener('change', handleChatAttachmentInput);
+
+const chatInputWrapper = document.querySelector('.input-wrapper');
+let chatFileDragDepth = 0;
+function hasDraggedFiles(event) {
+    return Array.from(event.dataTransfer?.types || []).includes('Files');
+}
+chatInputWrapper?.addEventListener('dragenter', event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    chatFileDragDepth += 1;
+    chatInputWrapper.classList.add('is-file-dragover');
+});
+chatInputWrapper?.addEventListener('dragover', event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+});
+chatInputWrapper?.addEventListener('dragleave', event => {
+    if (!hasDraggedFiles(event)) return;
+    chatFileDragDepth = Math.max(0, chatFileDragDepth - 1);
+    if (chatFileDragDepth === 0) chatInputWrapper.classList.remove('is-file-dragover');
+});
+chatInputWrapper?.addEventListener('drop', async event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    chatFileDragDepth = 0;
+    chatInputWrapper.classList.remove('is-file-dragover');
+    try {
+        const files = await collectDroppedFiles(event.dataTransfer);
+        await queueChatAttachmentFiles(files, { emptyMessage: '拖入内容中没有支持的文件' });
+    } catch (error) {
+        const TOAST_FAIL = 'error';
+        showToast(error?.message || '读取拖入文件失败', TOAST_FAIL);
+    }
+});
+document.getElementById('user-input')?.addEventListener('paste', async event => {
+    const files = Array.from(event.clipboardData?.files || []);
+    if (!files.length) return;
+    event.preventDefault();
+    await queueChatAttachmentFiles(files, { emptyMessage: '剪贴板中没有支持的文件' });
 });
 
 function removeAttachment(index) {
@@ -331,6 +435,7 @@ window.Pivot.exposeModule('chat.attachments', {
     getMaxPendingAttachments,
     getPendingAttachments: () => pendingAttachments,
     isChatImageAttachment,
+    queueChatAttachmentFiles,
     preparePendingAttachmentsForSend,
     removeAttachment,
     setMaxPendingAttachments,
@@ -340,6 +445,7 @@ window.Pivot.exposeModule('chat.attachments', {
     clearPendingAttachments: 'clearPendingAttachments',
     getMaxPendingAttachments: 'getMaxPendingAttachments',
     isChatImageAttachment: 'isChatImageAttachment',
+    queueChatAttachmentFiles: 'queueChatAttachmentFiles',
     preparePendingAttachmentsForSend: 'preparePendingAttachmentsForSend',
     removeAttachment: 'removeAttachment',
     setMaxPendingAttachments: 'setMaxPendingAttachments',

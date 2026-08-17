@@ -12,11 +12,18 @@ function buildChatRequestState(req) {
     const content = body.content;
     const displayContent = body.displayContent;
     const modelContent = String(content || '').trim();
+    const mcpToolAllowlist = Array.isArray(body.mcpToolAllowlist)
+        ? [...new Set(body.mcpToolAllowlist
+            .map(value => String(value || '').trim())
+            .filter(value => value && value.length <= 240))]
+            .slice(0, 300)
+        : null;
     return {
         content,
         displayContent,
         regenerate: normalizeRegenerateFlag(body.regenerate),
         mcpEnabled: Boolean(body.mcpEnabled) && Boolean(body.mcpConfirmed),
+        mcpToolAllowlist,
         ragEnabled: body.ragEnabled !== false,
         ragScope: body.ragScope && typeof body.ragScope === 'object' ? body.ragScope : {},
         sessionId: String(body.sessionId || '').trim(),

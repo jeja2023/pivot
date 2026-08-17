@@ -8,6 +8,299 @@ function handleUnauthorized() {
 
 // --- 输入框自适应 ---
 const userInput = document.getElementById('user-input');
+const CHAT_MCP_TOOL_ALLOWLIST_KEY = 'pivot_chat_mcp_tool_allowlist';
+const CHAT_MCP_TOOL_MODE_KEY = 'pivot_chat_mcp_tool_mode';
+let chatMcpToolsCache = [];
+
+function setChatToolsMenuOpen(open) {
+    const trigger = document.getElementById('chat-tools-menu-btn');
+    const panel = document.getElementById('chat-tools-menu-panel');
+    if (!trigger || !panel) return;
+    panel.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.querySelector('.chat-tools-menu')?.classList.toggle('is-open', open);
+    if (!open) {
+        document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel').forEach(subpanel => { subpanel.hidden = true; });
+        document.querySelectorAll('#chat-tools-menu-panel [aria-expanded="true"]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    }
+}
+
+function readChatMcpToolAllowlist() {
+    try {
+        const stored = localStorage.getItem(CHAT_MCP_TOOL_ALLOWLIST_KEY);
+        if (stored === null) return null;
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? [...new Set(parsed.map(value => String(value || '').trim()).filter(Boolean))] : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function getChatMcpToolMode() {
+    const storedMode = localStorage.getItem(CHAT_MCP_TOOL_MODE_KEY);
+    if (storedMode === 'auto' || storedMode === 'manual') return storedMode;
+    return readChatMcpToolAllowlist() === null ? 'auto' : 'manual';
+}
+
+function getChatMcpToolAllowlist() {
+    if (getChatMcpToolMode() === 'auto') return null;
+    return readChatMcpToolAllowlist() || [];
+}
+
+function setChatMcpToolMode(mode) {
+    const normalizedMode = mode === 'manual' ? 'manual' : 'auto';
+    try {
+        localStorage.setItem(CHAT_MCP_TOOL_MODE_KEY, normalizedMode);
+        if (normalizedMode === 'manual' && readChatMcpToolAllowlist() === null) {
+            localStorage.setItem(CHAT_MCP_TOOL_ALLOWLIST_KEY, '[]');
+        }
+    } catch (e) {}
+    renderChatMcpToolFilter();
+}
+
+function setChatMcpToolAllowlist(allowlist) {
+    try {
+        if (allowlist === null) {
+            localStorage.removeItem(CHAT_MCP_TOOL_ALLOWLIST_KEY);
+            localStorage.setItem(CHAT_MCP_TOOL_MODE_KEY, 'auto');
+        } else {
+            localStorage.setItem(CHAT_MCP_TOOL_ALLOWLIST_KEY, JSON.stringify(allowlist));
+            localStorage.setItem(CHAT_MCP_TOOL_MODE_KEY, 'manual');
+        }
+    } catch (e) {}
+    renderChatMcpToolFilter();
+}
+
+function chatMcpToolFullName(tool = {}) {
+    return String(tool.fullName || tool.full_name || tool.name || '').trim();
+}
+
+function chatMcpToolLabel(tool = {}) {
+    const title = String(tool.title || '').trim();
+    if (title) return title;
+    const name = String(tool.name || chatMcpToolFullName(tool) || '工具');
+    return name.split('.').pop().replace(/[_-]+/g, ' ');
+}
+
+function updateChatMcpToolSummary() {
+    const summary = document.getElementById('chat-mcp-tool-summary');
+    const menuCopy = document.querySelector('#chat-mcp-enabled .chat-tool-menu-copy small');
+    const allowlist = getChatMcpToolAllowlist();
+    const total = chatMcpToolsCache.length;
+    const text = allowlist === null
+        ? (total ? `${total} 个工具可用，模型按需选择` : '模型将按需选择可用工具')
+        : (total ? `已选择 ${allowlist.length} / ${total} 个工具` : `已选择 ${allowlist.length} 个工具`);
+    if (summary) summary.textContent = text;
+    if (menuCopy) menuCopy.textContent = allowlist === null ? '模型自动按需选择' : `手动限制为 ${allowlist.length} 个工具`;
+}
+
+function renderChatMcpToolFilter() {
+    const list = document.getElementById('chat-mcp-tool-list');
+    const allToggle = document.getElementById('chat-mcp-all-tools');
+    if (!list || !allToggle) return;
+    const mode = getChatMcpToolMode();
+    const allowlist = getChatMcpToolAllowlist();
+    const selected = Array.isArray(allowlist) ? allowlist : [];
+    const query = String(document.getElementById('chat-mcp-tool-search')?.value || '').trim().toLowerCase();
+    const allNames = chatMcpToolsCache.map(chatMcpToolFullName).filter(Boolean);
+    allToggle.checked = allNames.length > 0 && allNames.every(name => selected.includes(name));
+    allToggle.indeterminate = selected.length > 0 && !allToggle.checked;
+    const autoOption = document.getElementById('chat-mcp-mode-auto');
+    const manualOption = document.getElementById('chat-mcp-mode-manual');
+    const manualControls = document.getElementById('chat-mcp-manual-controls');
+    if (autoOption) autoOption.checked = mode === 'auto';
+    if (manualOption) manualOption.checked = mode === 'manual';
+    if (manualControls) manualControls.hidden = mode !== 'manual';
+    PivotSafeHtml.setHtml(list, '');
+    const tools = chatMcpToolsCache.filter(tool => {
+        if (!query) return true;
+        return [chatMcpToolLabel(tool), tool.name, tool.serverName, tool.description]
+            .some(value => String(value || '').toLowerCase().includes(query));
+    });
+    if (!tools.length) {
+        const empty = document.createElement('div');
+        empty.className = 'chat-tool-subpanel-hint';
+        empty.textContent = chatMcpToolsCache.length ? '没有匹配的工具' : '暂无可用工具';
+        list.appendChild(empty);
+    }
+    tools.forEach(tool => {
+        const fullName = chatMcpToolFullName(tool);
+        const row = document.createElement('label');
+        row.className = 'chat-mcp-tool-row';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = fullName;
+        checkbox.checked = selected.includes(fullName);
+        const copy = document.createElement('span');
+        const title = document.createElement('strong');
+        title.textContent = chatMcpToolLabel(tool);
+        const meta = document.createElement('small');
+        meta.textContent = String(tool.serverName || tool.description || fullName);
+        copy.append(title, meta);
+        row.append(checkbox, copy);
+        list.appendChild(row);
+    });
+    updateChatMcpToolSummary();
+    positionChatToolSubpanel(document.getElementById('chat-mcp-subpanel'));
+}
+
+function filterChatRagCollectionOptions() {
+    const select = document.getElementById('chat-rag-collection-scope');
+    const query = String(document.getElementById('chat-rag-scope-search')?.value || '').trim().toLowerCase();
+    if (!select) return;
+    [...select.options].forEach(option => {
+        option.hidden = Boolean(query) && Boolean(option.value) && !String(option.textContent || '').toLowerCase().includes(query);
+    });
+}
+
+async function loadChatMcpToolFilter() {
+    const list = document.getElementById('chat-mcp-tool-list');
+    if (list) list.textContent = '正在加载工具...';
+    try {
+        const res = await apiFetch(API_BASE + '/mcp/tools');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '工具列表加载失败');
+        chatMcpToolsCache = Array.isArray(data.tools) ? data.tools : [];
+        renderChatMcpToolFilter();
+    } catch (error) {
+        if (list) list.textContent = error.message || '工具列表加载失败';
+    }
+}
+
+function positionChatToolSubpanel(target) {
+    if (!target || target.hidden) return;
+    target.style.removeProperty('top');
+    if (window.matchMedia?.('(max-width: 720px)').matches) return;
+    const entry = target.closest('.chat-tool-entry');
+    if (!entry) return;
+    const viewportHeight = Math.max(document.documentElement?.clientHeight || 0, window.innerHeight || 0);
+    if (!viewportHeight) return;
+    const viewportMargin = 12;
+    const entryRect = entry.getBoundingClientRect();
+    const panelRect = target.getBoundingClientRect();
+    const viewportTop = Math.max(viewportMargin, Math.min(entryRect.top, viewportHeight - viewportMargin - panelRect.height));
+    target.style.top = `${viewportTop - entryRect.top}px`;
+}
+
+async function openChatToolSubpanel(tool) {
+    const target = document.getElementById(tool === 'rag' ? 'chat-rag-subpanel' : 'chat-mcp-subpanel');
+    const trigger = document.querySelector('[data-chat-tool-config="' + tool + '"]');
+    if (!target || !trigger) return;
+    const shouldOpen = target.hidden;
+    document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel').forEach(panel => { panel.hidden = true; });
+    document.querySelectorAll('#chat-tools-menu-panel [aria-expanded="true"]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    target.hidden = !shouldOpen;
+    trigger.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    if (!shouldOpen) return;
+    positionChatToolSubpanel(target);
+    if (tool === 'mcp') await loadChatMcpToolFilter();
+    positionChatToolSubpanel(target);
+}
+function syncChatToolsMenuLabels() {
+    document.querySelectorAll('#chat-tools-menu-panel .chat-tool-menu-item').forEach(item => {
+        if (item.querySelector('.chat-tool-menu-copy')) return;
+        const icon = item.querySelector('.chat-tool-icon, svg');
+        if (icon && icon.tagName === 'svg') {
+            const wrapper = document.createElement('span');
+            wrapper.className = 'chat-tool-menu-icon';
+            icon.replaceWith(wrapper);
+            wrapper.appendChild(icon);
+        }
+        const copy = document.createElement('span');
+        copy.className = 'chat-tool-menu-copy';
+        const strong = document.createElement('strong');
+        strong.textContent = item.dataset.menuLabel || (item.id === 'upload-btn' ? '文件和文件夹' : item.id === 'chat-mcp-enabled' ? '工具' : '知识库');
+        const small = document.createElement('small');
+        small.textContent = item.dataset.menuDescription || item.dataset.tooltip || '';
+        copy.append(strong, small);
+        item.appendChild(copy);
+        if (item.dataset.chatToolToggle) {
+            const check = document.createElement('span');
+            check.className = 'chat-tool-menu-check';
+            check.setAttribute('aria-hidden', 'true');
+            item.appendChild(check);
+        }
+    });
+}
+function initChatToolsMenu() {
+    const trigger = document.getElementById('chat-tools-menu-btn');
+    if (!trigger || trigger.dataset.bound === 'true') return;
+    trigger.dataset.bound = 'true';
+    trigger.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setChatToolsMenuOpen(document.getElementById('chat-tools-menu-panel')?.hidden !== false);
+    });
+    document.addEventListener('click', event => {
+        if (!event.target.closest('#chat-tools-menu')) setChatToolsMenuOpen(false);
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') setChatToolsMenuOpen(false);
+    });
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel:not([hidden])')
+            .forEach(positionChatToolSubpanel);
+    });
+    document.querySelectorAll('[data-chat-tool-config]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openChatToolSubpanel(button.dataset.chatToolConfig);
+        });
+    });
+    document.getElementById('chat-mcp-tool-search')?.addEventListener('input', renderChatMcpToolFilter);
+    document.querySelectorAll('input[name="chat-mcp-mode"]').forEach(option => {
+        option.addEventListener('change', event => {
+            if (event.target.checked) setChatMcpToolMode(event.target.value);
+        });
+    });
+    document.getElementById('chat-mcp-all-tools')?.addEventListener('change', event => {
+        const allNames = chatMcpToolsCache.map(chatMcpToolFullName).filter(Boolean);
+        setChatMcpToolAllowlist(event.target.checked ? allNames : []);
+    });
+    document.getElementById('chat-mcp-tool-list')?.addEventListener('change', event => {
+        if (!event.target.matches('input[type="checkbox"]')) return;
+        const current = getChatMcpToolAllowlist();
+        const selected = new Set(Array.isArray(current) ? current : []);
+        if (event.target.checked) selected.add(event.target.value);
+        else selected.delete(event.target.value);
+        setChatMcpToolAllowlist([...selected]);
+    });
+    document.getElementById('chat-rag-scope-search')?.addEventListener('input', filterChatRagCollectionOptions);
+    document.querySelectorAll('[data-chat-tool-reset]').forEach(button => {
+        button.addEventListener('click', async event => {
+            event.preventDefault();
+            const tool = button.dataset.chatToolReset;
+            if (tool === 'mcp') {
+                setChatMcpToolAllowlist(null);
+                return;
+            }
+            const collection = document.getElementById('chat-rag-collection-scope');
+            const tag = document.getElementById('chat-rag-tag-scope');
+            const search = document.getElementById('chat-rag-scope-search');
+            if (collection) collection.value = '';
+            if (tag) tag.value = '';
+            if (search) search.value = '';
+            filterChatRagCollectionOptions();
+            await window.handleRagCollectionScopeChange?.('chat');
+            window.updateChatToolReadiness?.({ silent: true });
+        });
+    });
+    document.querySelectorAll('[data-chat-tool-done]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            openChatToolSubpanel(button.dataset.chatToolDone);
+        });
+    });
+    syncChatToolsMenuLabels();
+    updateChatMcpToolSummary();
+}
+initChatToolsMenu();
+document.addEventListener('DOMContentLoaded', initChatToolsMenu);
+window.Pivot.exposeModule('chat.inputMenu', {
+    getMcpToolAllowlist: getChatMcpToolAllowlist,
+    setOpen: setChatToolsMenuOpen
+});
 window.resizeUserInput = () => {
     if (!userInput) return;
     userInput.style.height = 'auto';
@@ -81,9 +374,9 @@ function syncChatRagScopeControls() {
     );
     document.body?.classList.toggle('chat-rag-scope-open', enabled);
     document.querySelectorAll('#chat-rag-collection-scope, #chat-rag-tag-scope').forEach(select => {
-        select.classList.toggle('hidden', !enabled);
-        select.disabled = !enabled;
-        select.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        select.classList.remove('hidden');
+        select.disabled = false;
+        select.setAttribute('aria-hidden', 'false');
     });
 }
 
@@ -144,11 +437,18 @@ function buildChatToolStatusItem({ tool, tone, text, action }) {
 function renderChatToolStatus(items = []) {
     const status = document.getElementById('chat-tool-status');
     if (!status) return;
+    const ragStatus = document.getElementById('chat-rag-readiness');
+    const ragItem = items.find(item => item.tool === 'rag');
+    if (ragStatus) {
+        ragStatus.className = `chat-tool-subpanel-status is-${ragItem?.tone || 'muted'}`;
+        ragStatus.textContent = ragItem?.text || '启用知识库后可查看可用资料';
+    }
+    const visibleItems = items.filter(item => !['rag', 'mcp'].includes(item.tool));
     PivotSafeHtml.setHtml(status, '');
-    status.classList.toggle('hidden', items.length === 0);
-    status.classList.toggle('has-warning', items.some(item => item.tone === 'warning'));
-    status.classList.toggle('has-error', items.some(item => item.tone === 'error'));
-    items.forEach(item => status.appendChild(buildChatToolStatusItem(item)));
+    status.classList.toggle('hidden', visibleItems.length === 0);
+    status.classList.toggle('has-warning', visibleItems.some(item => item.tone === 'warning'));
+    status.classList.toggle('has-error', visibleItems.some(item => item.tone === 'error'));
+    visibleItems.forEach(item => status.appendChild(buildChatToolStatusItem(item)));
 }
 
 function getSelectedOptionCleanLabel(select) {
@@ -201,7 +501,9 @@ async function fetchChatToolReadiness(tool) {
         const res = await apiFetch(`${API_BASE}/mcp/tools`);
         if (!res.ok) throw new Error('工具库状态获取失败');
         const data = await res.json();
-        const count = Array.isArray(data.tools) ? data.tools.length : 0;
+        chatMcpToolsCache = Array.isArray(data.tools) ? data.tools : [];
+        const count = chatMcpToolsCache.length;
+        renderChatMcpToolFilter();
         if (count > 0) return { tone: 'ready', text: `${count} 个工具可用` };
         return { tone: 'warning', text: CHAT_TOOL_STATUS_COPY.mcp.empty, action: true };
     }

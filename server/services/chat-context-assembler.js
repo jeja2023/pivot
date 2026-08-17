@@ -54,6 +54,13 @@ function appendMcpContextForFinalAnswer(history = [], mcpContext = '') {
         { role: 'user', content: buildMcpFollowupInstruction(mcpContext) }
     ];
 }
+
+function filterChatMcpToolsByAllowlist(tools = [], allowlist = null) {
+    if (!Array.isArray(allowlist)) return tools;
+    const allowed = new Set(allowlist.map(value => String(value || '').trim()).filter(Boolean));
+    return tools.filter(tool => allowed.has(String(tool?.fullName || '').trim()));
+}
+
 async function assembleChatContext({
     req,
     state,
@@ -66,7 +73,7 @@ async function assembleChatContext({
     writeChatErrorSse,
     persistOnError = false
 }) {
-    const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled } = state;
+    const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     let history = await getContext(sessionId, userId, modelCfg);
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
@@ -156,7 +163,8 @@ async function assembleChatContext({
     }
 
     if (mcpEnabled) {
-        const mcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user);
+        const accessibleMcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user);
+        const mcpTools = filterChatMcpToolsByAllowlist(accessibleMcpTools, mcpToolAllowlist);
         const mcpContext = await maybeBuildMcpChatContext({
             modelCfg,
             history: visionHistory,
@@ -235,5 +243,6 @@ async function assembleChatContext({
 module.exports = {
     appendMcpContextForFinalAnswer,
     assembleChatContext,
-    buildMcpFollowupInstruction
+    buildMcpFollowupInstruction,
+    filterChatMcpToolsByAllowlist
 };

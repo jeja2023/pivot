@@ -4,6 +4,7 @@
     const OVERSCAN_PX = 800;
     const MESSAGE_GAP_PX = 8;
     const INITIAL_TAIL_COUNT = 18;
+    const BOTTOM_PIN_SETTLE_MS = 120;
     let state = null;
 
     function recordKey(record) {
@@ -78,6 +79,24 @@
         state.offsets = offsets;
     }
 
+    function cancelBottomPinRelease(activeState = state) {
+        if (!activeState?.bottomPinTimer) return;
+        clearTimeout(activeState.bottomPinTimer);
+        activeState.bottomPinTimer = 0;
+    }
+
+    function pinToBottomUntilStable(activeState = state) {
+        if (state !== activeState || !activeState?.active || !activeState.pinBottom) return;
+        activeState.container.scrollTop = activeState.container.scrollHeight;
+        cancelBottomPinRelease(activeState);
+        activeState.bottomPinTimer = setTimeout(() => {
+            if (state !== activeState || !activeState.active || !activeState.pinBottom) return;
+            activeState.container.scrollTop = activeState.container.scrollHeight;
+            activeState.pinBottom = false;
+            activeState.bottomPinTimer = 0;
+        }, BOTTOM_PIN_SETTLE_MS);
+    }
+
     function observeMountedMessages() {
         state.resizeObserver?.disconnect();
         if (typeof ResizeObserver === 'undefined') return;
@@ -99,7 +118,8 @@
             });
             if (changed) {
                 updateSpacerHeights();
-                if (scrollAdjustment) activeState.container.scrollTop += scrollAdjustment;
+                if (activeState.pinBottom) pinToBottomUntilStable(activeState);
+                else if (scrollAdjustment) activeState.container.scrollTop += scrollAdjustment;
             }
         });
         state.container.querySelectorAll('.message[data-virtual-message-key]').forEach(message => state.resizeObserver.observe(message));
@@ -129,8 +149,10 @@
 
     function renderWindow(force = false) {
         if (!state?.active) return;
+        const activeState = state;
         const nextRange = computeRange();
         if (!force && nextRange.start === state.range.start && nextRange.end === state.range.end) return;
+        const previousScrollTop = state.container.scrollTop;
         captureMountedState();
         window.teardownPivotCharts?.(state.container);
         state.resizeObserver?.disconnect();
@@ -158,14 +180,23 @@
         state.container.appendChild(fragment);
         state.range = nextRange;
         state.offsets = offsets;
+        state.container.scrollTop = state.pinBottom
+            ? state.container.scrollHeight
+            : Math.min(previousScrollTop, Math.max(0, state.container.scrollHeight - state.container.clientHeight));
         state.container.querySelectorAll('.message.assistant .message-content').forEach(node => window.renderPivotCharts?.(node));
         observeMountedMessages();
 
         if (state.pinBottom) {
             requestAnimationFrame(() => {
-                if (!state?.active) return;
-                state.container.scrollTop = state.container.scrollHeight;
-                state.pinBottom = false;
+                if (state?.active) pinToBottomUntilStable(state);
+            });
+        } else {
+            requestAnimationFrame(() => {
+                if (state !== activeState || !activeState.active) return;
+                activeState.container.scrollTop = Math.min(
+                    previousScrollTop,
+                    Math.max(0, activeState.container.scrollHeight - activeState.container.clientHeight)
+                );
             });
         }
     }
@@ -219,6 +250,7 @@
         captureMountedState();
         state.active = false;
         if (state.renderFrame) window.cancelAnimationFrame(state.renderFrame);
+        cancelBottomPinRelease(state);
         state.resizeObserver?.disconnect();
         state.container.removeEventListener('scroll', handleScroll);
         state.container.classList.remove('is-virtualized');
@@ -242,6 +274,7 @@
             range: { start: -1, end: -1 },
             resizeObserver: null,
             renderFrame: 0,
+            bottomPinTimer: 0,
             loading: false,
             pinBottom: true
         };
@@ -256,6 +289,7 @@
         const recentRecords = state.records.slice(-60);
         captureMountedState();
         if (state.renderFrame) window.cancelAnimationFrame(state.renderFrame);
+        cancelBottomPinRelease(state);
         state.resizeObserver?.disconnect();
         container.removeEventListener('scroll', handleScroll);
         container.classList.remove('is-virtualized');

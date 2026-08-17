@@ -322,6 +322,7 @@ async function runSendMessage(shouldRegenerate) {
                 ragScope: window.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
                 mcpConfirmed,
+                mcpToolAllowlist: window.Pivot.modules['chat.inputMenu']?.getMcpToolAllowlist?.() ?? null,
                 localMcpBridge,
                 localMcpBridgeDebug
             }),

@@ -1,3 +1,15 @@
+## [v0.0.268] - 2026-08-17
+
+### 聊天输入区能力聚合优化、文件夹上传与工具白名单精细化过滤
+
+- **输入区「+」聚合菜单与操作降噪**：在 `client/chat/partials/workspaces/chat-shell.html` 与 `client/chat/styles/base/input.css` 中重构输入区左侧操作栏，将附件上传、知识库检索 (RAG) 与工具库调用 (MCP) 统一收口至 `+` 悬浮菜单（`#chat-tools-menu-btn` 与 `#chat-tools-menu-panel`），优化 ARIA 语义与无障碍键盘交互，消除操作按钮横向平铺造成的界面视觉干扰。
+- **文件与文件夹层级上传及安全路径清洗**：附件上传子面板支持「选择文件」与「选择文件夹」双选项，并在 `server/routes/attachments.js` 中新增 `normalizeAttachmentRelativePath`，保留最深 24 层有效相对目录层级并自动清除路径穿越段（`..`），使上传的附件能完整呈现文件夹结构与相对路径。
+- **输入框拖拽与剪贴板文件原生直传**：在 `client/chat/engine-attachments.js` 中接入输入框 Drag & Drop 与 Clipboard Paste 监听，支持递归解析拖入的文件夹目录树（`collectDroppedEntryFiles`）及剪贴板图片/文件，直接入队附件处理流程；同步移除输入区冗余的拖拽提示文案。
+- **知识库（RAG）筛选二级抽屉式面板**：知识库配置项支持展开独立的二级浮层面板，内置知识库服务实时就绪状态检测（`#chat-rag-readiness`）、专题库与标签筛选、关键词快速搜索及「重置/完成」快捷操作，并支持自适应视口安全定位（`positionChatToolSubpanel`），防止窄屏与边缘溢出。
+- **工具库（MCP）模式切换与精细化工具白名单**：工具库配置面板支持「模型自动选择」与「手动限制范围」双模式；手动模式支持工具搜索、全选/反选与精准勾选，前端实时计算并展示已选工具数（`#chat-mcp-tool-summary`）；在 `server/services/chat-preflight.js` 与 `server/services/chat-context-assembler.js` 中新增 `mcpToolAllowlist` 解析与白名单过滤，确保仅向模型提供用户明确授权的工具。
+- **长会话消息列表虚拟滚动双向浏览增强**：优化 `client/chat/message-virtualizer.js` 的初始渲染与滚动边界计算，确保超长会话加载后精准锚定最新消息，且向上/向下滚动平滑连贯。
+- **自动化测试与 E2E 验证覆盖**：新增 `tests/chat-input-menu.test.js` 覆盖文件夹路径清洗、MCP 工具白名单过滤、请求状态构建与前端 DOM 契约；更新 `tests/e2e/smoke.spec.js` 覆盖虚拟滚动和二级面板定位及交互计数，全量 467 项测试 100% 通过。
+
 ## [v0.0.267] - 2026-08-17
 
 ### 应用层全景性能加固、RAG 向量批处理与 RRF 混合重排、长连接心跳防断连及消息列表虚拟滚动
