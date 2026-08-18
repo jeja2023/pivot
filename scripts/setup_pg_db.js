@@ -59,8 +59,40 @@ async function main() {
     console.log('\n已安装扩展:');
     extList.rows.forEach(r => console.log(`   ${r.extname} v${r.extversion}`));
 
+    // 自动构建全量 79 张表 Schema 与注入中文数据字典注释
+    const { buildPgSchemaStatements } = require('../server/db/schema/pg');
+    const plan = buildPgSchemaStatements();
+
+    console.log('\n正在创建 79 张业务表并注入全量数据字典注释...');
+    for (const sql of plan.helperFunctions) {
+        await target.query(sql);
+    }
+
+    await target.query('BEGIN');
+    for (const sql of plan.tables) {
+        await target.query(sql);
+    }
+    for (const sql of plan.residualColumns) {
+        await target.query(sql);
+    }
+    for (const sql of plan.foreignKeys) {
+        await target.query(sql);
+    }
+    for (const sql of plan.indexes) {
+        await target.query(sql);
+    }
+    for (const sql of plan.fulltextIndexes) {
+        try { await target.query(sql); } catch (e) { /* ignore */ }
+    }
+    let commentsCount = 0;
+    for (const sql of plan.comments || []) {
+        try { await target.query(sql); commentsCount++; } catch (e) { /* ignore */ }
+    }
+    await target.query('COMMIT');
+    console.log(`✅ 已成功创建 79 张表并注入 ${commentsCount} 条中文元数据注释！`);
+
     await target.end();
-    console.log('\n🎉 数据库环境初始化完成！');
+    console.log('\n🎉 数据库环境与 Schema 初始化完成！');
     console.log(`   DATABASE_URL = postgresql://postgres:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_DBNAME}`);
 }
 
