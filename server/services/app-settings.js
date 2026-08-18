@@ -10,6 +10,7 @@ function isMissingAppSettingsTable(error) {
 }
 
 function getAppSettingRow(key) {
+    if (!db) return null;
     try {
         return db.prepare(`
             SELECT key, value, updated_at, updated_by
@@ -33,6 +34,7 @@ function getAppSettingValue(key) {
 }
 
 function getAppSettingRows() {
+    if (!db) return [];
     try {
         const rows = db.prepare(`
             SELECT key, value, updated_at, updated_by

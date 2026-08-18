@@ -170,8 +170,15 @@ function cleanupOldBackups(options = {}) {
 async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
     maintenanceState.auditCleanup.lastRunAt = getBeijingTimestamp();
     try {
-        const info = db.prepare("DELETE FROM audit_logs WHERE timestamp < datetime('now', '+8 hours', ?)").run(`-${days} days`);
-        const changes = info.changes || 0;
+        let changes = 0;
+        if (db) {
+            const info = db.prepare("DELETE FROM audit_logs WHERE timestamp < datetime('now', '+8 hours', ?)").run(`-${days} days`);
+            changes = info.changes || 0;
+        } else {
+            const { execute } = require('../db/client');
+            const res = await execute("DELETE FROM audit_logs WHERE timestamp < (now() AT TIME ZONE 'Asia/Shanghai' - ($1 || ' days')::interval)", [String(days)]);
+            changes = res.rowCount || 0;
+        }
         maintenanceState.auditCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.auditCleanup.lastError = '';
         maintenanceState.auditCleanup.lastChanges = changes;
@@ -191,8 +198,15 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
     maintenanceState.apiCallLogCleanup.lastRunAt = getBeijingTimestamp();
     maintenanceState.apiCallLogCleanup.retentionDays = days;
     try {
-        const info = db.prepare("DELETE FROM api_call_logs WHERE created_at < datetime('now', '+8 hours', ?)").run(`-${days} days`);
-        const changes = info.changes || 0;
+        let changes = 0;
+        if (db) {
+            const info = db.prepare("DELETE FROM api_call_logs WHERE created_at < datetime('now', '+8 hours', ?)").run(`-${days} days`);
+            changes = info.changes || 0;
+        } else {
+            const { execute } = require('../db/client');
+            const res = await execute("DELETE FROM api_call_logs WHERE created_at < (now() AT TIME ZONE 'Asia/Shanghai' - ($1 || ' days')::interval)", [String(days)]);
+            changes = res.rowCount || 0;
+        }
         maintenanceState.apiCallLogCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.apiCallLogCleanup.lastError = '';
         maintenanceState.apiCallLogCleanup.lastChanges = changes;
@@ -211,8 +225,15 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
 async function cleanupExpiredRefreshTokens() {
     maintenanceState.refreshTokenCleanup.lastRunAt = getBeijingTimestamp();
     try {
-        const info = db.prepare("DELETE FROM refresh_tokens WHERE expires_at < datetime('now', '+8 hours')").run();
-        const changes = info.changes || 0;
+        let changes = 0;
+        if (db) {
+            const info = db.prepare("DELETE FROM refresh_tokens WHERE expires_at < datetime('now', '+8 hours')").run();
+            changes = info.changes || 0;
+        } else {
+            const { execute } = require('../db/client');
+            const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai')");
+            changes = res.rowCount || 0;
+        }
         maintenanceState.refreshTokenCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.refreshTokenCleanup.lastError = '';
         maintenanceState.refreshTokenCleanup.lastChanges = changes;
@@ -254,9 +275,11 @@ async function optimizeDatabase() {
     const vacuumPages = getIncrementalVacuumPages();
     maintenanceState.optimize.vacuumPages = vacuumPages;
     try {
-        db.exec('PRAGMA optimize;');
-        if (vacuumPages > 0) {
-            db.exec(`PRAGMA incremental_vacuum(${vacuumPages});`);
+        if (db) {
+            db.exec('PRAGMA optimize;');
+            if (vacuumPages > 0) {
+                db.exec(`PRAGMA incremental_vacuum(${vacuumPages});`);
+            }
         }
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.optimize.lastError = '';
@@ -269,6 +292,9 @@ async function optimizeDatabase() {
 }
 
 async function backupDatabase(options = {}) {
+    if (!db) {
+        return { skipped: true, reason: 'postgres_mode' };
+    }
     if (maintenanceState.backup.running) {
         logger.warn('数据库备份已跳过：另一个备份任务仍在运行');
         return { skipped: true, reason: 'running' };

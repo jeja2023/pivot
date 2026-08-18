@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 
 const { db } = require('../../db');
 const { logger } = require('../../logger');
@@ -9,6 +9,7 @@ const { resolveStoredDocumentPath, safeUnlinkManaged } = require('./paths');
 function cleanupExpiredDocumentProcessingFiles(options = {}) {
     const configuredRetention = Number.parseInt(getAppSettingValue('document_processing_output_retention_days'), 10);
     const retentionDays = Math.max(1, Number.parseInt(options.retentionDays, 10) || configuredRetention || DEFAULT_DOCUMENT_PROCESSING_CONFIG.outputRetentionDays);
+    if (!db) return { outputs: 0, removedFiles: 0, retentionDays };
     const rows = db.prepare(`
         SELECT id, file_path
         FROM document_outputs

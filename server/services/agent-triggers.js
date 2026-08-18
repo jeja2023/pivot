@@ -507,6 +507,7 @@ async function pollDatabaseTrigger(trigger, executeTool) {
 
 // 轮询入口，由自动化调度 tick 统一驱动
 async function runDuePollingTriggers({ executeTool } = {}) {
+    if (!db) return [];
     const triggers = db.prepare(`
         SELECT * FROM agent_workflow_triggers
         WHERE status = 'active' AND deleted_at IS NULL AND trigger_type IN ('file', 'database')

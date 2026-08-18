@@ -1123,6 +1123,7 @@ async function expireApprovalRequest(row) {
 }
 
 async function runApprovalTimeouts(limit = 50) {
+    if (!db) return 0;
     const currentTimeExpr = nowExpr();
     const rows = db.prepare(`
         SELECT *

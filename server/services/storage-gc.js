@@ -77,6 +77,7 @@ function filterRowsWithRemovedFiles(rows, cleanupResults) {
 function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
     const safeRetentionDays = normalizeRetentionDays(retentionDays ?? process.env.STORAGE_GC_RETENTION_DAYS);
     const safeLimit = normalizeBatchSize(limit ?? process.env.STORAGE_GC_BATCH_SIZE);
+    if (!db) return { retentionDays: safeRetentionDays, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0 };
     const cutoffModifier = `-${safeRetentionDays} days`;
 
     const attachments = db.prepare(`

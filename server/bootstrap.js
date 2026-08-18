@@ -11,17 +11,17 @@ function registerProcessErrorHandlers({ logger, flushAllSqliteWrites, processRef
         try {
             flushAllSqliteWrites();
         } catch (flushErr) {
-            logger.warn({ err: flushErr }, 'Failed to flush SQLite write queue during fatal exit');
+            logger.warn({ err: flushErr }, '致命退出时刷新写队列失败');
         }
         if (fatalExitScheduled) return;
         fatalExitScheduled = true;
         setTimeoutFn(() => processRef.exit(1), 250).unref();
     };
 
-    processRef.on('uncaughtException', (err) => fatalExit('Uncaught exception', err));
+    processRef.on('uncaughtException', (err) => fatalExit('未捕获的全局异常', err));
     processRef.on('unhandledRejection', (reason) => {
         const err = reason instanceof Error ? reason : new Error(String(reason));
-        logger.error({ err }, 'Unhandled promise rejection');
+        logger.error({ err }, '未处理的 Promise 拒绝');
     });
 
     return { fatalExit };
@@ -33,14 +33,14 @@ function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, se
             try {
                 startMaintenanceTasks();
             } catch (err) {
-                logger.error({ err }, 'Background maintenance startup failed');
+                logger.error({ err }, '后台维护服务启动失败');
             }
         };
         if (delayMs <= 0) {
             start();
             return;
         }
-        logger.info({ delayMs }, 'Background maintenance will start after the server is ready');
+        logger.info({ delayMs }, '后台维护服务将在服务就绪后启动');
         setTimeoutFn(start, delayMs).unref();
     };
 }
@@ -58,25 +58,25 @@ function startBackgroundServices({
     }
 }) {
     dependencies.startGpuMonitor().catch(err => {
-        logger.warn({ err: err && err.message ? err.message : err }, 'GPU monitor startup failed');
+        logger.warn({ err: err && err.message ? err.message : err }, 'GPU 监控服务启动失败');
     });
     dependencies.startModelEndpointMonitor().catch(err => {
-        logger.warn({ err: err && err.message ? err.message : err }, 'Model endpoint monitor startup failed');
+        logger.warn({ err: err && err.message ? err.message : err }, '模型端点监控服务启动失败');
     });
     setImmediateFn(() => {
         try { dependencies.recoverStaleKnowledgeDocumentIndexes(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, 'Knowledge index recovery failed');
+            logger.warn({ err: err && err.message ? err.message : err }, '知识库索引恢复执行失败');
         }
         try { dependencies.recoverAgentRuns(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, 'Agent run recovery failed');
+            logger.warn({ err: err && err.message ? err.message : err }, '智能体任务恢复执行失败');
         }
         if (typeof dependencies.startAgentRecoveryRunner === 'function') {
             try { dependencies.startAgentRecoveryRunner(); } catch (err) {
-                logger.warn({ err: err && err.message ? err.message : err }, 'Agent periodic recovery failed to start');
+                logger.warn({ err: err && err.message ? err.message : err }, '智能体周期性恢复服务启动失败');
             }
         }
         try { dependencies.startAgentScheduleRunner(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, 'Agent schedule runner startup failed');
+            logger.warn({ err: err && err.message ? err.message : err }, '智能体计划调度器启动失败');
         }
     });
 }

@@ -308,6 +308,7 @@ function runAgentScheduleNow(scheduleId, user, options = {}) {
 }
 
 function runDueAgentSchedules(limit = 20) {
+    if (!db) return [];
     const due = db.prepare(`
         SELECT s.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username,
                u.nickname, u.unit, u.role
