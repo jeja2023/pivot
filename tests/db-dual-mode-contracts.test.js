@@ -69,7 +69,7 @@ test('dynamic PostgreSQL schema generator produces complete 79-table DDL matchin
     assert.ok(Array.isArray(plan.comments), 'comments must be an array');
     assert.ok(plan.comments.length >= 79, 'Must generate comments for all 79 tables');
     assert.ok(plan.comments.some(c => c.includes('COMMENT ON TABLE "users"')), 'Must generate users table comment');
-    assert.ok(plan.comments.some(c => c.includes('COMMENT ON COLUMN "messages"."thought"')), 'Must generate messages.thought column comment');
+    assert.ok(plan.comments.some(c => c.includes('COMMENT ON COLUMN "messages"."content"')), 'Must generate messages.content column comment');
 });
 
 test('db-write-queue exports correct dual-mode write queue methods', async () => {
