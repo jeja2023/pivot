@@ -1,5 +1,6 @@
 const express = require('express');
-const { db } = require('../db');
+const { isPostgres } = require('../db/dialect');
+const { query, queryOne, execute } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
@@ -98,35 +99,41 @@ const enforceAnnouncementAdminScope = (req, res, payload, current = null) => {
 
 const mapAnnouncementRow = (row = {}) => ({
     id: row.id,
-    title: row.title,
-    content: row.content,
+    title: row.title || '',
+    content: row.content || '',
     type: row.type || 'system',
     priority: row.priority || 'normal',
     targetType: row.target_type || 'all',
     targetValue: row.target_value || '',
-    requireAck: Number(row.require_ack || 0) === 1,
-    showOnLogin: Number(row.show_on_login || 0) === 1,
-    startsAt: row.starts_at || '',
-    endsAt: row.ends_at || '',
+    requireAck: Boolean(row.require_ack),
+    showOnLogin: Boolean(row.show_on_login),
+    startsAt: row.starts_at || null,
+    endsAt: row.ends_at || null,
     status: row.status || 'draft',
-    createdBy: row.created_by || null,
+    createdBy: row.created_by,
     createdByName: row.created_by_name || '',
-    createdAt: row.created_at || '',
-    updatedAt: row.updated_at || '',
-    deletedAt: row.deleted_at || '',
-    readAt: row.read_at || '',
-    acknowledgedAt: row.acknowledged_at || '',
-    dismissedAt: row.dismissed_at || ''
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    readAt: row.read_at || null,
+    acknowledgedAt: row.acknowledged_at || null,
+    dismissedAt: row.dismissed_at || null
 });
 
-const isTargetedToUser = (row, user) => {
+const isTargetedToUser = (row, user = {}) => {
     const targetType = row.target_type || 'all';
     if (targetType === 'all') return true;
-    const values = splitTargetValue(row.target_value).map(item => item.toLowerCase());
-    if (targetType === 'role') return values.includes(String(user.role || 'user').toLowerCase());
-    if (targetType === 'unit') return values.includes(String(user.unit || '').toLowerCase());
+    const targetValues = splitTargetValue(row.target_value);
+    if (targetType === 'unit') {
+        return Boolean(user.unit && targetValues.includes(user.unit));
+    }
+    if (targetType === 'role') {
+        const role = user.role || 'user';
+        return targetValues.includes(role);
+    }
     if (targetType === 'users') {
-        return values.includes(String(user.id)) || values.includes(String(user.username || '').toLowerCase());
+        const userId = String(user.id || '');
+        const username = String(user.username || '');
+        return targetValues.includes(userId) || (username && targetValues.includes(username));
     }
     return false;
 };
@@ -135,8 +142,9 @@ const isVisibleAfterUserDismiss = (row) => {
     return !row.dismissed_at || (Number(row.require_ack || 0) === 1 && !row.acknowledged_at);
 };
 
-const getActiveAnnouncementRows = () => {
-    return db.prepare(`
+const fetchActiveAnnouncementRows = async (userId) => {
+    const now = getBeijingTimestamp();
+    return query(`
         SELECT a.*, ar.read_at, ar.acknowledged_at, ar.dismissed_at
         FROM announcements a
         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
@@ -148,11 +156,12 @@ const getActiveAnnouncementRows = () => {
           CASE a.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
           a.created_at DESC,
           a.id DESC
-    `);
+    `, [userId, now, now]);
 };
 
-const getPublicAnnouncementRows = () => {
-    return db.prepare(`
+const fetchPublicAnnouncementRows = async () => {
+    const now = getBeijingTimestamp();
+    return query(`
         SELECT a.*
         FROM announcements a
         WHERE a.deleted_at IS NULL
@@ -166,7 +175,7 @@ const getPublicAnnouncementRows = () => {
           a.created_at DESC,
           a.id DESC
         LIMIT 5
-    `);
+    `, [now, now]);
 };
 
 function createAnnouncementsRouter({
@@ -179,13 +188,12 @@ function createAnnouncementsRouter({
     const router = express.Router();
 
     router.get('/announcements/public', asyncHandler(async (_req, res) => {
-        const now = getBeijingTimestamp();
-        const rows = getPublicAnnouncementRows().all(now, now).map(mapAnnouncementRow);
+        const rows = (await fetchPublicAnnouncementRows()).map(mapAnnouncementRow);
         res.json({ data: rows });
     }));
 
     router.get('/announcements/active', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = getActiveAnnouncementRows().all(req.user.id, getBeijingTimestamp(), getBeijingTimestamp())
+        const rows = (await fetchActiveAnnouncementRows(req.user.id))
             .filter(row => isTargetedToUser(row, req.user))
             .filter(isVisibleAfterUserDismiss)
             .map(mapAnnouncementRow);
@@ -198,25 +206,25 @@ function createAnnouncementsRouter({
 
     const markUserState = (field) => asyncHandler(async (req, res) => {
         const announcementId = parseInt(req.params.id, 10);
-        const row = db.prepare('SELECT * FROM announcements WHERE id = ? AND deleted_at IS NULL').get(announcementId);
+        const row = await queryOne('SELECT * FROM announcements WHERE id = ? AND deleted_at IS NULL', [announcementId]);
         if (!row) return res.status(404).json({ error: '公告不存在' });
         if (!isTargetedToUser(row, req.user)) return res.status(403).json({ error: '无权访问该公告' });
         const now = getBeijingTimestamp();
         if (field === 'read_at') {
-            db.prepare(`
+            await execute(`
                 INSERT INTO announcement_reads (announcement_id, user_id, read_at)
                 VALUES (?, ?, ?)
                 ON CONFLICT(announcement_id, user_id) DO UPDATE SET
                     read_at = COALESCE(announcement_reads.read_at, excluded.read_at)
-            `).run(announcementId, req.user.id, now);
+            `, [announcementId, req.user.id, now]);
         } else {
-            db.prepare(`
+            await execute(`
                 INSERT INTO announcement_reads (announcement_id, user_id, read_at, ${field})
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(announcement_id, user_id) DO UPDATE SET
                     read_at = COALESCE(announcement_reads.read_at, excluded.read_at),
                     ${field} = excluded.${field}
-            `).run(announcementId, req.user.id, now, now);
+            `, [announcementId, req.user.id, now, now]);
         }
         res.json({ success: true });
     });
@@ -246,7 +254,7 @@ function createAnnouncementsRouter({
             params.push(`%${search}%`, `%${search}%`);
         }
         const where = `WHERE ${conditions.join(' AND ')}`;
-        const data = db.prepare(`
+        const rows = await query(`
             SELECT a.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS created_by_name,
                    (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.read_at IS NOT NULL) AS read_count,
                    (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.acknowledged_at IS NOT NULL) AS ack_count
@@ -255,14 +263,17 @@ function createAnnouncementsRouter({
             ${where}
             ORDER BY a.updated_at DESC, a.id DESC
             LIMIT ? OFFSET ?
-        `).all(...params, limit, offset).map(row => ({
+        `, [...params, limit, offset]);
+
+        const data = rows.map(row => ({
             ...mapAnnouncementRow(row),
-            readCount: row.read_count || 0,
-            ackCount: row.ack_count || 0,
+            readCount: Number(row.read_count || 0),
+            ackCount: Number(row.ack_count || 0),
             canEdit: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id),
             canDelete: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id)
         }));
-        const total = db.prepare(`SELECT COUNT(*) AS count FROM announcements a ${where}`).get(...params).count;
+        const countRow = await queryOne(`SELECT COUNT(*) AS count FROM announcements a ${where}`, params);
+        const total = Number(countRow?.count || 0);
         res.json({ data, total, page, limit, permissions: getAnnouncementAdminPermissions(req.user) });
     }));
 
@@ -272,45 +283,73 @@ function createAnnouncementsRouter({
         if (payload.targetType !== 'all' && !payload.targetValue) return res.status(400).json({ error: '请填写公告投放范围' });
         if (!enforceAnnouncementAdminScope(req, res, payload)) return;
         const now = getBeijingTimestamp();
-        const info = db.prepare(`
-            INSERT INTO announcements
-                (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            payload.title,
-            payload.content,
-            payload.type,
-            payload.priority,
-            payload.targetType,
-            payload.targetValue,
-            payload.requireAck,
-            payload.showOnLogin,
-            payload.startsAt,
-            payload.endsAt,
-            payload.status,
-            req.user.id,
-            now,
-            now
-        );
-        logAction(req, '创建公告', `公告ID: ${info.lastInsertRowid}，标题: ${payload.title}，状态: ${payload.status}`);
-        res.json({ success: true, id: info.lastInsertRowid });
+        let insertedId;
+        if (isPostgres()) {
+            const resRow = await queryOne(`
+                INSERT INTO announcements
+                    (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+            `, [
+                payload.title,
+                payload.content,
+                payload.type,
+                payload.priority,
+                payload.targetType,
+                payload.targetValue,
+                payload.requireAck,
+                payload.showOnLogin,
+                payload.startsAt,
+                payload.endsAt,
+                payload.status,
+                req.user.id,
+                now,
+                now
+            ]);
+            insertedId = resRow?.id;
+        } else {
+            const { db } = require('../db');
+            const info = db.prepare(`
+                INSERT INTO announcements
+                    (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                payload.title,
+                payload.content,
+                payload.type,
+                payload.priority,
+                payload.targetType,
+                payload.targetValue,
+                payload.requireAck,
+                payload.showOnLogin,
+                payload.startsAt,
+                payload.endsAt,
+                payload.status,
+                req.user.id,
+                now,
+                now
+            );
+            insertedId = info.lastInsertRowid;
+        }
+        logAction(req, '创建公告', `公告ID: ${insertedId}，标题: ${payload.title}，状态: ${payload.status}`);
+        res.json({ success: true, id: insertedId });
     }));
 
     router.put('/admin/announcements/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const id = parseInt(req.params.id, 10);
-        const current = db.prepare('SELECT * FROM announcements WHERE id = ? AND deleted_at IS NULL').get(id);
+        const current = await queryOne('SELECT * FROM announcements WHERE id = ? AND deleted_at IS NULL', [id]);
         if (!current) return res.status(404).json({ error: '公告不存在' });
         const payload = normalizeAnnouncementPayload(req.body, current);
         if (!payload.title || !payload.content) return res.status(400).json({ error: '公告标题和内容不能为空' });
         if (payload.targetType !== 'all' && !payload.targetValue) return res.status(400).json({ error: '请填写公告投放范围' });
         if (!enforceAnnouncementAdminScope(req, res, payload, current)) return;
         const now = getBeijingTimestamp();
-        db.prepare(`
+        await execute(`
             UPDATE announcements
             SET title = ?, content = ?, type = ?, priority = ?, target_type = ?, target_value = ?,
                 require_ack = ?, show_on_login = ?, starts_at = ?, ends_at = ?, status = ?, updated_at = ?
             WHERE id = ? AND deleted_at IS NULL
-        `).run(
+        `, [
             payload.title,
             payload.content,
             payload.type,
@@ -324,21 +363,21 @@ function createAnnouncementsRouter({
             payload.status,
             now,
             id
-        );
+        ]);
         logAction(req, '修改公告', `公告ID: ${id}，标题: ${payload.title}，状态: ${payload.status}`);
         res.json({ success: true });
     }));
 
     router.delete('/admin/announcements/:id', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const id = parseInt(req.params.id, 10);
-        const row = db.prepare('SELECT title, created_by, target_type, target_value FROM announcements WHERE id = ? AND deleted_at IS NULL').get(id);
+        const row = await queryOne('SELECT title, created_by, target_type, target_value FROM announcements WHERE id = ? AND deleted_at IS NULL', [id]);
         if (!row) return res.status(404).json({ error: '公告不存在' });
         if (!enforceAnnouncementAdminScope(req, res, {
             targetType: row.target_type || 'all',
             targetValue: row.target_value || ''
         }, row)) return;
-        db.prepare('UPDATE announcements SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
-            .run(getBeijingTimestamp(), getBeijingTimestamp(), id);
+        const now = getBeijingTimestamp();
+        await execute('UPDATE announcements SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL', [now, now, id]);
         logAction(req, '删除公告', `公告ID: ${id}，标题: ${row.title}`);
         res.json({ success: true });
     }));
