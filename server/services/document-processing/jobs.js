@@ -949,7 +949,7 @@ async function shareJobResult({ user, jobId, target, options = {} }) {
     if (normalizedTarget === 'knowledge' || normalizedTarget === 'knowledge-base' || normalizedTarget === 'rag') {
         const upload = createTempTextUpload({ userId, originalName, text });
         const tags = Array.isArray(options.tags) ? options.tags : String(options.tags || 'ocr').split(/[;,\s]+/);
-        const created = createKnowledgeDocumentFromUpload({
+        const created = await createKnowledgeDocumentFromUpload({
             userId,
             file: upload,
             collectionId: options.collectionId,

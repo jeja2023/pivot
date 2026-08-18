@@ -148,7 +148,7 @@ async function assembleChatContext({
             visionHistory.push(...rescuedHistory);
         } else {
             releaseSemaphore?.();
-            writeChatErrorSse({
+            await writeChatErrorSse({
                 writeSse,
                 sessionId,
                 userId,
@@ -217,7 +217,7 @@ async function assembleChatContext({
                 contextBudget: e.metadata
             }, '聊天请求因上下文超限被拦截');
             const payload = buildContextLengthExceededPayload(e);
-            writeChatErrorSse({
+            await writeChatErrorSse({
                 writeSse,
                 sessionId,
                 userId,

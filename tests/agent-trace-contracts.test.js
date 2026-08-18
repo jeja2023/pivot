@@ -182,7 +182,7 @@ test('智能体规则评分同时覆盖内容、JSON 结构、耗时与 Token', 
     assert.equal(graded.rules.every(rule => rule.passed), true);
 });
 
-test('评测集按用户隔离，真实批次可回收评分且编辑不破坏历史结果', () => {
+test('评测集按用户隔离，真实批次可回收评分且编辑不破坏历史结果', async () => {
     const suffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -224,8 +224,8 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
         assert.equal(batch.run.summary.passRate, 100);
         assert.equal(batch.results[0].passed, true);
         assert.equal(getAgentEvalRun(batch.run.id, other), null);
-        assert.equal(listRuns(user).total, 0);
-        assert.equal(listRuns(user, { includePreview: true }).total, 1);
+        assert.equal((await listRuns(user)).total, 0);
+        assert.equal((await listRuns(user, { includePreview: true })).total, 1);
 
         const updated = updateAgentEvalSuite(evaluation.suite.id, user, {
             name: '发布质量回归',

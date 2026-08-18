@@ -191,7 +191,7 @@ function createChatRouter({
         sse.writeComment('stream-ready');
 
         // --- 业务逻辑检查 ---
-        const preflight = validateChatPreflight({
+        const preflight = await validateChatPreflight({
             state: chatState,
             user: req.user,
             req,
@@ -212,7 +212,7 @@ function createChatRouter({
         let userMessageId = null;
         if (!regenerate) {
             try {
-                const userMessageResult = saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
+                const userMessageResult = await saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
                 userMessagePersisted = true;
                 userMessageId = Number(userMessageResult.lastInsertRowid || 0) || null;
                 writeSse(JSON.stringify({
@@ -227,7 +227,7 @@ function createChatRouter({
             }
         }
 
-        touchSession(sessionId);
+        await touchSession(sessionId);
         logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
 
         chatTrace.addSpan('preflight', { modelId: modelCfg.id });
@@ -235,7 +235,7 @@ function createChatRouter({
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult } = persistAssistantTurn({
+            const { assistantMessageResult } = await persistAssistantTurn({
                 sessionId,
                 userId,
                 userMessageId,
@@ -309,7 +309,7 @@ function createChatRouter({
         } catch (e) {
             const message = e.message || '模型服务当前繁忙，请稍后重试。';
             logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
-            writeChatErrorSse({
+            await writeChatErrorSse({
                 writeSse,
                 sessionId,
                 userId,
@@ -339,7 +339,7 @@ function createChatRouter({
             releaseSemaphore();
             const message = e.message || '模型端点当前繁忙，请稍后重试。';
             logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
-            writeChatErrorSse({
+            await writeChatErrorSse({
                 writeSse,
                 sessionId,
                 userId,
@@ -461,7 +461,7 @@ function createChatRouter({
                     const assistantTokens = stats.assistantTokens;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
-                    const { assistantMessageResult } = persistAssistantTurn({
+                    const { assistantMessageResult } = await persistAssistantTurn({
                         sessionId,
                         userId,
                         userMessageId,
@@ -524,8 +524,7 @@ function createChatRouter({
                         detail: err.message,
                         persist: userMessagePersisted || regenerate,
                         log: req.log
-                    });
-                    res.end();
+                    }).then(() => res.end()).catch(() => res.end());
                 }
                 recordModelFailure(modelCfg, err);
                 finishChatTrace('error', { phase: 'stream', error: err.message });
@@ -570,7 +569,7 @@ function createChatRouter({
             }
 
             finishChatTrace('error', { phase: 'model_request', error: e.message, statusCode });
-            writeChatErrorSse({
+            await writeChatErrorSse({
                 writeSse,
                 sessionId,
                 userId,

@@ -9,7 +9,7 @@ const {
     updateAgentRunTitleAndGoalForUser
 } = require('../server/services/agent-runs');
 
-test('updateAgentRunTitleAndGoal modifies title and goal for a user run', () => {
+test('updateAgentRunTitleAndGoal modifies title and goal for a user run', async () => {
     const runId = 'test-run-edit-001';
     const userId = 9991;
     sql('DELETE FROM agent_runs WHERE id = ?').run(runId);
@@ -23,7 +23,7 @@ test('updateAgentRunTitleAndGoal modifies title and goal for a user run', () => 
         VALUES (?, ?, ?, ?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).run(runId, userId, '初始标题', '初始目标描述');
 
-    const updated = updateAgentRunTitleAndGoal(runId, userId, {
+    const updated = await updateAgentRunTitleAndGoal(runId, userId, {
         title: '新标题名称',
         goal: '详细更新后的任务目标与分析需求'
     });
@@ -33,15 +33,15 @@ test('updateAgentRunTitleAndGoal modifies title and goal for a user run', () => 
     assert.equal(updated.title, '新标题名称');
     assert.equal(updated.goal, '详细更新后的任务目标与分析需求');
 
-    const saved = getRunForUser(runId, userId);
+    const saved = await getRunForUser(runId, userId);
     assert.equal(saved.title, '新标题名称');
     assert.equal(saved.goal, '详细更新后的任务目标与分析需求');
 
-    const wrongUserResult = updateAgentRunTitleAndGoal(runId, 8888, { title: '非法黑客修改' });
+    const wrongUserResult = await updateAgentRunTitleAndGoal(runId, 8888, { title: '非法黑客修改' });
     assert.equal(wrongUserResult, null);
 
     const userObj = { id: userId };
-    const serviceUpdated = updateAgentRunTitleAndGoalForUser(runId, userObj, {
+    const serviceUpdated = await updateAgentRunTitleAndGoalForUser(runId, userObj, {
         title: '二次修改标题'
     });
     assert.equal(serviceUpdated.title, '二次修改标题');

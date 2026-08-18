@@ -6,7 +6,7 @@ const {
 } = require('../security-helpers');
 const { preflightAgentRun } = require('../../server/services/agent-preflight');
 
-test('agent preflight exposes readiness and capability health signals', () => {
+test('agent preflight exposes readiness and capability health signals', async () => {
     const suffix = Date.now().toString(36);
     const now = getBeijingTimestamp();
     const userInfo = db.prepare(`
@@ -25,7 +25,7 @@ test('agent preflight exposes readiness and capability health signals', () => {
     `).run(user.id, `Preflight MCP ${suffix}`, 'https://tools.example/mcp', 'preflight tool', 'tool failed', now, now);
 
     try {
-        const result = preflightAgentRun(user, {
+        const result = await preflightAgentRun(user, {
             goal: '整理项目资料并生成检查建议',
             modelId,
             toolPolicy: 'all',
@@ -39,7 +39,7 @@ test('agent preflight exposes readiness and capability health signals', () => {
         assert.ok(Number.isInteger(result.summary.readinessScore));
         assert.equal(result.status, 'warning');
 
-        const automaticAudit = preflightAgentRun(user, {
+        const automaticAudit = await preflightAgentRun(user, {
             goal: '审查项目资料并输出完整风险清单',
             modelId,
             runMode: 'audit',

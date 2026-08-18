@@ -1,4 +1,4 @@
-function enterpriseSchemaSql() {
+function enterpriseTablesSql() {
     return `
         CREATE TABLE IF NOT EXISTS rag_debug_queries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +94,11 @@ function enterpriseSchemaSql() {
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             UNIQUE(provider_type, provider_key)
         );
+    `;
+}
 
+function enterpriseIndexesSql() {
+    return `
         CREATE INDEX IF NOT EXISTS idx_rag_debug_queries_user_created ON rag_debug_queries(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_rag_debug_queries_created ON rag_debug_queries(created_at);
         CREATE INDEX IF NOT EXISTS idx_teams_org_status ON teams(organization_id, status);
@@ -106,6 +110,15 @@ function enterpriseSchemaSql() {
     `;
 }
 
+/**
+ * 兼容旧调用点：表 + 索引一次性返回（SQLite 单次 db.exec 场景）
+ */
+function enterpriseSchemaSql() {
+    return `${enterpriseTablesSql()}\n${enterpriseIndexesSql()}`;
+}
+
 module.exports = {
+    enterpriseTablesSql,
+    enterpriseIndexesSql,
     enterpriseSchemaSql
 };

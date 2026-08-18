@@ -1,4 +1,11 @@
-const { sql } = require('../db/statements');
+/**
+ * server/repositories/agent-runs.js
+ * 智能体运行记录数据访问层（SQLite / PostgreSQL 双方言）
+ *
+ * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
+ */
+const { query, queryOne, execute } = require('../db/client');
+const { jsonExtract, jsonValid, likeOperator } = require('../db/dialect');
 const { parseJsonObject } = require('../services/agent-validators');
 
 function normalizeBooleanOption(value) {
@@ -6,20 +13,25 @@ function normalizeBooleanOption(value) {
     return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+/**
+ * 排除预览运行与评测运行的过滤条件。
+ * metadata 是 TEXT 列且历史数据可能非法，故两侧都需容错取值：
+ * SQLite 靠 json_valid 守卫，PG 靠 pivot_json_extract 内建异常捕获。
+ */
 function previewRunFilterSql(alias = 'r') {
     return `((CASE
-        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND json_valid(${alias}.metadata)
+        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND ${jsonValid(`${alias}.metadata`)}
         THEN lower(COALESCE(
-            json_extract(${alias}.metadata, '$.workflowRunSource'),
-            json_extract(${alias}.metadata, '$.workflow_run_source'),
-            json_extract(${alias}.metadata, '$.runSource'),
+            ${jsonExtract(`${alias}.metadata`, '$.workflowRunSource')},
+            ${jsonExtract(`${alias}.metadata`, '$.workflow_run_source')},
+            ${jsonExtract(`${alias}.metadata`, '$.runSource')},
             ''
         ))
         ELSE ''
     END) != 'preview'
     AND (CASE
-        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND json_valid(${alias}.metadata)
-        THEN json_extract(${alias}.metadata, '$.evaluation.evalRunId')
+        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND ${jsonValid(`${alias}.metadata`)}
+        THEN ${jsonExtract(`${alias}.metadata`, '$.evaluation.evalRunId')}
         ELSE NULL
     END) IS NULL)`;
 }
@@ -32,26 +44,28 @@ function normalizeRunTypeFilter(value) {
     return '';
 }
 
-function getRunById(runId, { includeDeleted = false } = {}) {
-    const row = sql(`SELECT * FROM agent_runs WHERE id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}`).get(runId);
+async function getRunById(runId, { includeDeleted = false } = {}) {
+    const row = await queryOne(
+        `SELECT * FROM agent_runs WHERE id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}`,
+        [runId]
+    );
     return row || null;
 }
 
 function getRunForUser(runId, userId, { includeDeleted = false } = {}) {
-    const row = sql(`
+    return queryOne(`
         SELECT * FROM agent_runs
         WHERE id = ? AND user_id = ?
           ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
-    `).get(runId, userId);
-    return row;
+    `, [runId, userId]);
 }
 
-function listRuns(userId, options = {}) {
+async function listRuns(userId, options = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 15, 1), 100);
     const safePage = Math.max(Number.parseInt(options.page, 10) || 1, 1);
     const offset = (safePage - 1) * safeLimit;
     const status = String(options.status || '').trim();
-    const query = String(options.query || '').trim();
+    const searchText = String(options.query || '').trim();
     const runType = normalizeRunTypeFilter(options.runType || options.run_type || options.type);
     const where = ['r.user_id = ?', 'r.deleted_at IS NULL'];
     const params = [userId];
@@ -76,19 +90,23 @@ function listRuns(userId, options = {}) {
     } else if (runType === 'scheduled') {
         where.push('r.schedule_id IS NOT NULL');
     }
-    if (query) {
-        where.push('(r.title LIKE ? OR r.goal LIKE ? OR m.name LIKE ?)');
-        const pattern = `%${query}%`;
+    if (searchText) {
+        const like = likeOperator();
+        where.push(`(r.title ${like} ? OR r.goal ${like} ? OR m.name ${like} ?)`);
+        const pattern = `%${searchText}%`;
         params.push(pattern, pattern, pattern);
     }
     const whereSql = where.join('\n          AND ');
-    const total = sql(`
+
+    const totalRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM agent_runs r
         LEFT JOIN models m ON m.id = r.model_id
         WHERE ${whereSql}
-    `).get(...params)?.count || 0;
-    const data = sql(`
+    `, params);
+    const total = Number(totalRow?.count || 0);
+
+    const data = await query(`
         WITH filtered_runs AS (
             SELECT r.id, r.session_id, r.model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
                    r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
@@ -120,13 +138,14 @@ function listRuns(userId, options = {}) {
         FROM filtered_runs fr
         LEFT JOIN step_stats ss ON ss.run_id = fr.id
         ORDER BY fr.created_at DESC
-    `).all(...params, safeLimit, offset);
+    `, [...params, safeLimit, offset]);
+
     return { data, total, page: safePage, limit: safeLimit };
 }
 
 function listDeletedRunsForAdmin(limit = 100) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
-    return sql(`
+    return query(`
         SELECT r.id, r.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, r.session_id, r.model_id,
                m.name AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
                r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.approval_policy,
@@ -146,30 +165,33 @@ function listDeletedRunsForAdmin(limit = 100) {
         WHERE r.deleted_at IS NOT NULL
         ORDER BY r.deleted_at DESC
         LIMIT ?
-    `).all(safeLimit);
+    `, [safeLimit]);
 }
 
-function listSteps(runId) {
-    return sql(`
+async function listSteps(runId) {
+    const steps = await query(`
         SELECT id, step_index, type, title, tool_name, input, output, error_message, status, duration_ms, started_at, completed_at, created_at
         FROM agent_steps
         WHERE run_id = ?
         ORDER BY step_index ASC, id ASC
-    `).all(runId).map(step => ({
+    `, [runId]);
+    return steps.map(step => ({
         ...step,
         input: parseJsonObject(step.input) || step.input,
         output: parseJsonObject(step.output) || step.output
     }));
 }
 
-function listDagNodes(runId) {
-    return sql(`
-        SELECT id, run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, condition, status,
+async function listDagNodes(runId) {
+    // condition 在 PG 中是关键字，需加引号；SQLite 同样接受双引号标识符
+    const nodes = await query(`
+        SELECT id, run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, "condition", status,
                output, error_message, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
         FROM agent_dag_nodes
         WHERE run_id = ?
         ORDER BY id ASC
-    `).all(runId).map(node => ({
+    `, [runId]);
+    return nodes.map(node => ({
         ...node,
         input: parseJsonObject(node.input) || {},
         input_schema: parseJsonObject(node.input_schema) || {},
@@ -180,17 +202,17 @@ function listDagNodes(runId) {
     }));
 }
 
-function updateAgentRunTitleAndGoal(runId, userId, { title, goal } = {}) {
-    const run = getRunForUser(runId, userId);
+async function updateAgentRunTitleAndGoal(runId, userId, { title, goal } = {}) {
+    const run = await getRunForUser(runId, userId);
     if (!run) return null;
     const now = new Date().toISOString();
     const newTitle = title !== undefined ? String(title || '').trim().slice(0, 200) : run.title;
     const newGoal = goal !== undefined ? String(goal || '').trim().slice(0, 12000) : run.goal;
-    sql(`
+    await execute(`
         UPDATE agent_runs
         SET title = ?, goal = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(newTitle, newGoal, now, runId, userId);
+    `, [newTitle, newGoal, now, runId, userId]);
     return getRunForUser(runId, userId);
 }
 

@@ -1,32 +1,35 @@
-const { db } = require('./connection');
+/**
+ * server/db/migrate.js
+ * 数据库迁移编排入口（SQLite 同步 + PostgreSQL 异步双模式）
+ */
 const { logger } = require('../logger');
-const legacyMigrations = require('./migrations/legacy');
-const versionedMigrations = require('./migrations');
-const {
-    ensureSchemaMigrationTable,
-    hasMigration: hasVersionedMigration,
-    recordMigration: recordVersionedMigration,
-    runVersionedMigrations
-} = require('./migrations/runner');
+
+// ── SQLite 同步模式 ────────────────────────────────────────────────────────
 
 function recordMigration(key, value = 'done') {
+    const legacyMigrations = require('./migrations/legacy');
     return legacyMigrations.recordMigration(key, value);
 }
 
 function ensureMigrationTable() {
+    const { db } = require('./connection');
+    const { ensureSchemaMigrationTable } = require('./migrations/runner');
     ensureSchemaMigrationTable(db);
 }
 
-
 function recordSchemaMigration(id, description = '') {
+    const { db } = require('./connection');
+    const { recordMigration: recordVersionedMigration } = require('./migrations/runner');
     ensureMigrationTable();
     recordVersionedMigration(db, id, description);
     recordMigration(id);
 }
 
 function runSchemaMigration(id, description, fn) {
+    const { db } = require('./connection');
+    const { hasMigration, recordMigration: recordVersionedMigration } = require('./migrations/runner');
     ensureMigrationTable();
-    if (hasVersionedMigration(db, id)) return false;
+    if (hasMigration(db, id)) return false;
     const migrate = db.transaction(() => {
         fn(db);
         recordVersionedMigration(db, id, description || '');
@@ -38,6 +41,10 @@ function runSchemaMigration(id, description, fn) {
 }
 
 function runMigrations() {
+    const { db } = require('./connection');
+    const legacyMigrations = require('./migrations/legacy');
+    const versionedMigrations = require('./migrations');
+    const { runVersionedMigrations } = require('./migrations/runner');
     ensureMigrationTable();
     legacyMigrations.runMigrations();
     const applied = runVersionedMigrations(db, versionedMigrations, { logger });
@@ -45,9 +52,81 @@ function runMigrations() {
     return applied;
 }
 
+// ── PostgreSQL 异步模式 ─────────────────────────────────────────────────────
+
+/**
+ * PG 侧迁移策略：Baseline（基线标记）
+ *
+ * 历史版本化迁移（migrations/index.js、migrations/legacy.js、regulations.js）
+ * 全部是 SQLite 方言实现（PRAGMA table_info、db.prepare 同步 API），传入 pg
+ * client 会直接抛错；而它们的最终效果——所有补列与新表——已经完整体现在
+ * schema/base.js 的建表 DDL 里，由 initSchemaPg() 一次性建出。
+ *
+ * 因此 PG 库的正确做法是把这些历史迁移标记为「已应用」而不执行（baseline），
+ * 后续新增迁移若需在 PG 生效，必须提供 `upPg(client, options)` 方法；仅有
+ * `up` 的迁移视为 SQLite 专属，在 PG 侧跳过并记录。
+ */
+async function runMigrationsPg() {
+    const { getPgPool } = require('./pg-connection');
+    const versionedMigrations = require('./migrations');
+    const {
+        ensurePgMigrationTable,
+        hasPgMigration,
+        recordPgMigration,
+    } = require('./migrations/runner');
+
+    const client = await getPgPool().connect();
+    try {
+        await ensurePgMigrationTable(client);
+
+        const sorted = versionedMigrations
+            .slice()
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+        const applied = [];
+        const baselined = [];
+
+        for (const migration of sorted) {
+            if (!migration || !migration.id) continue;
+            if (await hasPgMigration(client, migration.id)) continue;
+
+            if (typeof migration.upPg === 'function') {
+                await client.query('BEGIN');
+                try {
+                    await migration.upPg(client, { logger });
+                    await recordPgMigration(client, migration.id, migration.description || '');
+                    await client.query('COMMIT');
+                } catch (err) {
+                    await client.query('ROLLBACK');
+                    throw new Error(`[PG] 迁移 ${migration.id} 执行失败: ${err.message}`);
+                }
+                applied.push(migration.id);
+                continue;
+            }
+
+            // SQLite 专属迁移：其结果已由 initSchemaPg 的建表 DDL 覆盖，标记基线
+            await recordPgMigration(
+                client,
+                migration.id,
+                `${migration.description || ''} [baseline: schema 已内置]`.trim()
+            );
+            baselined.push(migration.id);
+        }
+
+        if (applied.length > 0) logger.info({ applied }, '[PG] 已应用版本化迁移');
+        if (baselined.length > 0) {
+            logger.info({ count: baselined.length }, '[PG] 历史迁移已基线标记（schema 已内置，无需执行）');
+        }
+        return applied;
+    } finally {
+        client.release();
+    }
+}
+
 module.exports = {
     runMigrations,
+    runMigrationsPg,
     recordMigration,
     recordSchemaMigration,
-    runSchemaMigration
+    runSchemaMigration,
 };

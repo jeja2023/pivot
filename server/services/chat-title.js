@@ -107,7 +107,7 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
         logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');
     }
 
-    const session = sessionsRepository.getSessionTitle(sessionId, userId);
+    const session = await sessionsRepository.getSessionTitle(sessionId, userId);
     if (!session) return;
 
     if (!shouldReplaceAutoTitle(session.title, userMsg)) {
@@ -115,14 +115,14 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
         return;
     }
 
-    sessionsRepository.updateSessionTitle(sessionId, userId, newTitle);
+    await sessionsRepository.updateSessionTitle(sessionId, userId, newTitle);
     logger.info({ sessionId, newTitle }, '会话标题已更新');
 }
 
-function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user = null) {
-    const msgCount = countVisibleConversationMessages(sessionId, userId);
+async function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user = null) {
+    const msgCount = await countVisibleConversationMessages(sessionId, userId);
     if (msgCount <= 2) {
-        generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user);
+        await generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user);
     }
 }
 

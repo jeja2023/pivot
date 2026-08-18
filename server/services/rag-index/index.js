@@ -280,12 +280,12 @@ function insertDenseCandidate(top, candidate, limit) {
     if (top.length > limit) top.pop();
 }
 
-function selectDenseCandidates(userId, queryVector, limit, scope = {}, user = null) {
+async function selectDenseCandidates(userId, queryVector, limit, scope = {}, user = null) {
     if (!Array.isArray(queryVector) || !queryVector.length || limit <= 0) return [];
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const queryNorm = computeVectorNorm(queryVector);
     const top = [];
-    const chunks = knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user });
+    const chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user })) || [];
     for (const chunk of chunks) {
         const entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
         if (!entry) continue;
@@ -576,7 +576,7 @@ async function debugRetrieveContext(userId, query, {
     let usedKeywordFallback = false;
     try {
         const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
-        const denseCandidates = selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
+        const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
         const graphCandidates = selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
         scored = scoreCandidatesHybrid(candidates, vector, hybrid);
@@ -692,7 +692,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         let chunks = lexicalCandidates;
         try {
             const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
-            const denseCandidates = selectDenseCandidates(
+            const denseCandidates = await selectDenseCandidates(
                 userId,
                 queryVector,
                 config.candidateLimit,
@@ -769,7 +769,7 @@ function buildEnrichedChunkText(content, headingPath) {
 async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
-    const docRow = knowledgeRepository.getDocumentName(docId);
+    const docRow = await knowledgeRepository.getDocumentName(docId);
     const docName = docRow.name || '';
     const docType = detectDocType(docName, text);
     const typedChunkSize = getChunkSizeForDocType(docType, ragConfig.chunkSize, userId);
@@ -828,7 +828,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
                 }
             });
             transaction(results);
-            safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
+            await safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             indexed += batch.length;
             if (typeof onProgress === 'function') {
                 onProgress({

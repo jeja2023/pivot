@@ -2,7 +2,7 @@ const { saveAssistantMessage, updateLastAssistantStats } = require('./chat-messa
 const { maybeGenerateTitle } = require('./chat-title');
 const { scheduleMemoryExtraction } = require('./long-term-memory');
 
-function persistAssistantTurn({
+async function persistAssistantTurn({
     sessionId,
     userId,
     userMessageId = null,
@@ -14,16 +14,16 @@ function persistAssistantTurn({
     costTime = null,
     tps = null
 }) {
-    const assistantMessageResult = saveAssistantMessage({
+    const assistantMessageResult = await saveAssistantMessage({
         sessionId,
         userId,
         content: assistantContent,
         tokenCount: assistantTokens,
         modelId: modelCfg.id
     });
-    const assistantMessageId = Number(assistantMessageResult.lastInsertRowid || 0) || null;
+    const assistantMessageId = Number(assistantMessageResult?.lastInsertRowid || 0) || null;
     if (costTime !== null || tps !== null) {
-        updateLastAssistantStats({ sessionId, userId, costTime, tps });
+        await updateLastAssistantStats({ sessionId, userId, costTime, tps });
     }
     scheduleMemoryExtraction({
         userId,
@@ -32,7 +32,7 @@ function persistAssistantTurn({
         user,
         modelCfg
     });
-    maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
+    await maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
     return { assistantMessageResult, assistantMessageId };
 }
 

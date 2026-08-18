@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 1535,
+  "total": 1543,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -12,8 +12,20 @@
       "count": 4
     },
     {
+      "file": "scripts/check_sqlite_tables.js",
+      "count": 4
+    },
+    {
+      "file": "scripts/diff_schema_sqlite_pg.js",
+      "count": 1
+    },
+    {
       "file": "server/auth.js",
       "count": 6
+    },
+    {
+      "file": "server/db/client.js",
+      "count": 3
     },
     {
       "file": "server/db/migrations/index.js",

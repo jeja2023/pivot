@@ -1,11 +1,21 @@
 const { db } = require('../connection');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
-const { enterpriseSchemaSql } = require('./enterprise');
+const { enterpriseTablesSql, enterpriseIndexesSql } = require('./enterprise');
 
-function initSchema() {
-    applyLegacySchemaPreflight();
-
-    db.exec(`
+/**
+ * 建表 DDL（SQLite 方言，权威单一数据源）
+ *
+ * 本函数返回的文本同时被 PostgreSQL 侧复用：server/db/schema/pg.js 会读取
+ * 此文本并做方言转换（INTEGER→BIGINT、DATETIME→TIMESTAMPTZ、AUTOINCREMENT→
+ * IDENTITY、外键后置化）。因此新增表或列只需改这里一处，两种方言自动同步。
+ *
+ * 约束：
+ *  - 外键必须写成独立的 `FOREIGN KEY (col) REFERENCES tbl(col)` 单行子句，
+ *    不要用内联 `col INTEGER REFERENCES tbl(col)` —— PG 转换器按行剥离外键。
+ *  - 布尔语义列统一用 `INTEGER DEFAULT 0/1`（两侧一致，应用层 === 1 判断成立）。
+ */
+function baseTablesSql() {
+    return `
         CREATE TABLE IF NOT EXISTS app_meta (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -42,6 +52,7 @@ function initSchema() {
             password_hash TEXT NOT NULL,
             nickname TEXT,
             unit TEXT,
+            default_model_id INTEGER,
             role TEXT DEFAULT 'user',
             status TEXT DEFAULT 'active',
             deleted_at DATETIME,
@@ -82,6 +93,8 @@ function initSchema() {
             context_archived INTEGER DEFAULT 0,
             compressed_at DATETIME,
             model_id INTEGER,
+            cost_time REAL,
+            tokens_per_sec REAL,
             deleted_at DATETIME,
             deleted_by_user INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
@@ -1233,8 +1246,15 @@ function initSchema() {
             created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
         );
 
-        ${enterpriseSchemaSql()}
+        ${enterpriseTablesSql()}
+    `;
+}
 
+/**
+ * 索引 DDL（SQLite 与 PostgreSQL 共用；PG 侧仅做少量方言修正）
+ */
+function baseIndexesSql() {
+    return `
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -1346,6 +1366,35 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
         CREATE INDEX IF NOT EXISTS idx_prompts_created ON prompts(created_at);
 
+        CREATE INDEX IF NOT EXISTS idx_regulation_documents_status ON regulation_documents(status, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_regulation_documents_category ON regulation_documents(category, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_regulation_documents_jurisdiction ON regulation_documents(jurisdiction, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_regulation_documents_updated ON regulation_documents(updated_at DESC, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_regulation_versions_document ON regulation_versions(document_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_regulation_articles_document ON regulation_articles(document_id, sort_order, id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_articles_version ON regulation_articles(version_id, sort_order, id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_version ON regulation_article_links(version_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_source ON regulation_article_links(source_article_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_target ON regulation_article_links(target_article_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_document ON regulation_aliases(document_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_normalized ON regulation_aliases(normalized_alias);
+        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_article ON regulation_article_annotations(article_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_user ON regulation_article_annotations(user_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_user ON regulation_access_logs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_document ON regulation_access_logs(document_id);
+        CREATE INDEX IF NOT EXISTS idx_regulation_access_created ON regulation_access_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_regulation_saved_searches_user ON regulation_saved_searches(user_id);
+
+        ${enterpriseIndexesSql()}
+    `;
+}
+
+/**
+ * SQLite 专属：FTS5 全文索引虚拟表与同步触发器。
+ * PostgreSQL 侧不建虚拟表，改用 pg_trgm GIN 索引，见 server/db/schema/pg.js。
+ */
+function sqliteFtsSql() {
+    return `
         CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
             content,
             tokenize='unicode61'
@@ -1377,24 +1426,6 @@ function initSchema() {
         CREATE TRIGGER IF NOT EXISTS trg_regulation_articles_update AFTER UPDATE ON regulation_articles BEGIN
             UPDATE regulation_articles_fts SET content = COALESCE(new.search_content, new.content) WHERE rowid = new.id;
         END;
-        CREATE INDEX IF NOT EXISTS idx_regulation_documents_status ON regulation_documents(status, deleted_at, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_regulation_documents_category ON regulation_documents(category, deleted_at, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_regulation_documents_jurisdiction ON regulation_documents(jurisdiction, deleted_at, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_regulation_documents_updated ON regulation_documents(updated_at DESC, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_regulation_versions_document ON regulation_versions(document_id, id DESC);
-        CREATE INDEX IF NOT EXISTS idx_regulation_articles_document ON regulation_articles(document_id, sort_order, id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_articles_version ON regulation_articles(version_id, sort_order, id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_version ON regulation_article_links(version_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_source ON regulation_article_links(source_article_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_article_links_target ON regulation_article_links(target_article_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_document ON regulation_aliases(document_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_aliases_normalized ON regulation_aliases(normalized_alias);
-        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_article ON regulation_article_annotations(article_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_annotations_user ON regulation_article_annotations(user_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_access_user ON regulation_access_logs(user_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_access_document ON regulation_access_logs(document_id);
-        CREATE INDEX IF NOT EXISTS idx_regulation_access_created ON regulation_access_logs(created_at);
-        CREATE INDEX IF NOT EXISTS idx_regulation_saved_searches_user ON regulation_saved_searches(user_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             content,
@@ -1414,7 +1445,14 @@ function initSchema() {
         CREATE TRIGGER IF NOT EXISTS trg_messages_update AFTER UPDATE ON messages WHEN old.content != new.content BEGIN
             UPDATE messages_fts SET content = new.content WHERE rowid = new.id;
         END;
-    `);
+    `;
 }
 
-module.exports = { initSchema };
+function initSchema() {
+    applyLegacySchemaPreflight();
+    db.exec(baseTablesSql());
+    db.exec(baseIndexesSql());
+    db.exec(sqliteFtsSql());
+}
+
+module.exports = { initSchema, baseTablesSql, baseIndexesSql, sqliteFtsSql };

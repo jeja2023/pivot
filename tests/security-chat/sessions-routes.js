@@ -89,7 +89,7 @@ test('getContext 返回模型上下文前会压缩超过阈值的历史', async 
     }
 });
 
-test('聊天消息服务会保存消息并更新会话统计', () => {
+test('聊天消息服务会保存消息并更新会话统计', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -102,27 +102,27 @@ test('聊天消息服务会保存消息并更新会话统计', () => {
     `).run(sessionId, userInfo.lastInsertRowid, 'Chat Message Test');
 
     try {
-        saveUserMessage({
+        await saveUserMessage({
             sessionId,
             userId: userInfo.lastInsertRowid,
             content: 'hello',
             modelId: null
         });
-        saveAssistantMessage({
+        await saveAssistantMessage({
             sessionId,
             userId: userInfo.lastInsertRowid,
             content: 'world',
             tokenCount: 7,
             modelId: null
         });
-        assert.equal(countVisibleConversationMessages(sessionId, userInfo.lastInsertRowid), 2);
-        assert.equal(updateLastAssistantStats({
+        assert.equal(await countVisibleConversationMessages(sessionId, userInfo.lastInsertRowid), 2);
+        assert.equal(await updateLastAssistantStats({
             sessionId,
             userId: userInfo.lastInsertRowid,
             costTime: 1.5,
             tps: 3.2
         }), true);
-        touchSession(sessionId, '2099-01-01 00:00:00');
+        await touchSession(sessionId, '2099-01-01 00:00:00');
 
         const row = db.prepare(`
             SELECT token_count, cost_time, tokens_per_sec

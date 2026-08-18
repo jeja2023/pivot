@@ -8,7 +8,7 @@ const { getBeijingTimestamp } = require('../time');
 const {
     enqueueModelUsageEvent,
     getPendingModelUsageTotal
-} = require('./sqlite-write-queue');
+} = require('./db-write-queue');
 
 const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 

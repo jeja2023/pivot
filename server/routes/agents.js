@@ -170,7 +170,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.post('/agents/preflight', authMiddleware, asyncHandler(async (req, res) => {
-        res.json(preflightAgentRun(req.user, req.body || {}));
+        res.json(await preflightAgentRun(req.user, req.body || {}));
     }));
 
     router.get('/agents/templates', authMiddleware, asyncHandler(async (req, res) => {
@@ -198,7 +198,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listAgentWorkflows(req.user) });
+        res.json({ data: await listAgentWorkflows(req.user) });
     }));
 
     router.get('/agents/workflows/share-options', authMiddleware, asyncHandler(async (req, res) => {
@@ -206,13 +206,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
-        const resolved = resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
+        const resolved = await resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
         if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
         res.json(getAgentWorkflowDependencyConfiguration(resolved, req.user));
     }));
 
     router.put('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
-        const resolved = resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
+        const resolved = await resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
         if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
         const configuration = saveAgentWorkflowDependencyConfiguration(resolved, req.user, req.body || {});
         logAction(req, '确认共享工作流依赖映射', `工作流ID: ${resolved.workflow.id}，发布版本: ${resolved.version}`);
@@ -220,60 +220,60 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.post('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = createAgentWorkflow(req.user, req.body || {});
+        const workflow = await createAgentWorkflow(req.user, req.body || {});
         logAction(req, '保存智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
         res.status(201).json({ success: true, workflow });
     }));
 
     router.put('/agents/workflows/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = updateAgentWorkflow(req.params.id, req.user, req.body || {});
+        const workflow = await updateAgentWorkflow(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改。' });
         logAction(req, '更新智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}，版本: ${workflow.current_version}`);
         res.json({ success: true, workflow });
     }));
 
     router.patch('/agents/workflows/:id/metadata', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = updateAgentWorkflowMetadata(req.params.id, req.user, req.body || {});
+        const workflow = await updateAgentWorkflowMetadata(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改。' });
         logAction(req, '更新智能体工作流信息', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
         res.json({ success: true, workflow });
     }));
 
     router.patch('/agents/workflows/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = updateAgentWorkflowSharing(req.params.id, req.user, req.body || {});
+        const workflow = await updateAgentWorkflowSharing(req.params.id, req.user, req.body || {});
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权修改共享设置。' });
         logAction(req, '更新智能体工作流共享设置', `工作流ID: ${workflow.id}，范围: ${workflow.scope}，单位: ${(workflow.allowed_units || []).join(',') || '-'}，个人: ${(workflow.allowed_user_ids || []).join(',') || '-'}`);
         res.json({ success: true, workflow });
     }));
 
     router.post('/agents/workflows/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = publishAgentWorkflowVersion(req.params.id, req.user, req.body?.version || 'current');
+        const workflow = await publishAgentWorkflowVersion(req.params.id, req.user, req.body?.version || 'current');
         if (!workflow) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
         logAction(req, '发布智能体工作流版本', `工作流ID: ${workflow.id}，发布版本: ${workflow.published_version || '-'}`);
         res.json({ success: true, workflow });
     }));
 
     router.get('/agents/workflows/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
-        const versions = listAgentWorkflowVersions(req.params.id, req.user);
+        const versions = await listAgentWorkflowVersions(req.params.id, req.user);
         if (!versions) return res.status(404).json({ error: '智能体工作流不存在。' });
         res.json({ data: versions });
     }));
 
     router.get('/agents/workflows/:id/diff', authMiddleware, asyncHandler(async (req, res) => {
-        const diff = diffAgentWorkflowVersions(req.params.id, req.user, req.query.from, req.query.to || 'current');
+        const diff = await diffAgentWorkflowVersions(req.params.id, req.user, req.query.from, req.query.to || 'current');
         if (!diff) return res.status(404).json({ error: '智能体工作流或版本不存在。' });
         res.json(diff);
     }));
 
     router.post('/agents/workflows/:id/versions/:version/restore', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = restoreAgentWorkflowVersion(req.params.id, req.user, req.params.version);
+        const workflow = await restoreAgentWorkflowVersion(req.params.id, req.user, req.params.version);
         if (!workflow) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
         logAction(req, '回滚智能体工作流版本', `工作流ID: ${workflow.id}，当前版本: ${workflow.current_version}`);
         res.json({ success: true, workflow });
     }));
 
     router.delete('/agents/workflows/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = deleteAgentWorkflow(req.params.id, req.user);
+        const workflow = await deleteAgentWorkflow(req.params.id, req.user);
         if (!workflow) return res.status(404).json({ error: '智能体工作流不存在或无权删除。' });
         logAction(req, '删除智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
         res.json({ success: true, workflow: { id: workflow.id, name: workflow.name } });
@@ -281,7 +281,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
 
     // 恢复已删除工作流
     router.patch('/agents/workflows/:id/restore', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = restoreAgentWorkflow(req.params.id, req.user);
+        const workflow = await restoreAgentWorkflow(req.params.id, req.user);
         if (!workflow) return res.status(404).json({ error: '工作流不存在、未删除或已超过 30 天恢复期限。' });
         logAction(req, '恢复智能体工作流', `工作流ID: ${workflow.id}，名称: ${workflow.name}`);
         res.json({ success: true, workflow });
@@ -454,7 +454,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
-        const result = listRuns(req.user, {
+        const result = await listRuns(req.user, {
             page: req.query.page,
             limit: normalizeLimit(req.query.limit, 15, 100),
             status: req.query.status,
@@ -467,11 +467,11 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/runs/deleted/audit', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listDeletedRunsForAdmin(req.user, normalizeLimit(req.query.limit, 100, 200)) });
+        res.json({ data: await listDeletedRunsForAdmin(req.user, normalizeLimit(req.query.limit, 100, 200)) });
     }));
 
     router.post('/agents/runs', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
-        const run = createAgentRun({
+        const run = await createAgentRun({
             user: req.user,
             goal: req.body?.goal,
             modelId: req.body?.modelId,
@@ -503,7 +503,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = getRunDetailForUser(req.params.id, req.user);
+        const detail = await getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
     }));
@@ -521,17 +521,17 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.post('/agents/runs/:id/workflow-draft', authMiddleware, asyncHandler(async (req, res) => {
-        const draft = createWorkflowDraftFromRun(req.params.id, req.user);
+        const draft = await createWorkflowDraftFromRun(req.params.id, req.user);
         if (!draft) return res.status(404).json({ error: '自由任务不存在或无权访问。' });
         logAction(req, '从自由任务生成工作流草稿', `任务ID: ${req.params.id}，节点数: ${draft.summary?.nodeCount || 0}`);
         res.json({ success: true, draft });
     }));
 
     router.post('/agents/runs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {
-        const run = cancelAgentRun(req.params.id, req.user);
-        if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
-        logAction(req, '停止智能体任务', `任务ID: ${run.id}`);
-        res.json({ success: true, run, steps: listSteps(run.id) });
+        const run = await cancelAgentRun(req.params.id, req.user);
+        if (!run) return res.status(404).json({ error: '智能体任务不存在或不可取消。' });
+        logAction(req, '取消智能体任务', `任务ID: ${run.id}`);
+        res.json({ success: true, run });
     }));
 
     router.post('/agents/runs/:id/approval', authMiddleware, asyncHandler(async (req, res) => {
@@ -550,7 +550,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.post('/agents/runs/:id/rerun', authMiddleware, asyncHandler(async (req, res) => {
-        const run = rerunAgentRun(req.params.id, req.user);
+        const run = await rerunAgentRun(req.params.id, req.user);
         if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
         logAction(req, '重新运行智能体任务', `任务ID: ${run.id}，来源任务ID: ${req.params.id}`);
         res.status(202).json({ success: true, run });
@@ -578,7 +578,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.patch('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const run = updateAgentRunTitleAndGoalForUser(req.params.id, req.user, {
+        const run = await updateAgentRunTitleAndGoalForUser(req.params.id, req.user, {
             title: req.body?.title,
             goal: req.body?.goal
         });

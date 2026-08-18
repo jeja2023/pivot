@@ -1,4 +1,3 @@
-const { db } = require('../db');
 const {
     ACTIVE_STATUSES,
     normalizeMaxSteps
@@ -8,27 +7,27 @@ const { getAgentTraceForUser } = require('./agent-traces');
 const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
 const runRepository = require('../repositories/agent-runs');
 
-function getRunForUser(runId, user, options = {}) {
-    return runRepository.getRunForUser(runId, user.id, {
+async function getRunForUser(runId, user, options = {}) {
+    return await runRepository.getRunForUser(runId, user?.id, {
         includeDeleted: Boolean(options.includeDeleted)
     });
 }
 
-function listRuns(user, options = {}) {
-    return runRepository.listRuns(user.id, options);
+async function listRuns(user, options = {}) {
+    return await runRepository.listRuns(user?.id, options);
 }
 
-function listDeletedRunsForAdmin(user, limit = 100) {
+async function listDeletedRunsForAdmin(user, limit = 100) {
     if (!isSuperAdmin(user)) {
         const err = new Error('仅 admin 权限层级可查看智能体任务删除审计。');
         err.status = 403;
         throw err;
     }
-    return runRepository.listDeletedRunsForAdmin(limit);
+    return await runRepository.listDeletedRunsForAdmin(limit);
 }
 
-function listSteps(runId) {
-    return runRepository.listSteps(runId);
+async function listSteps(runId) {
+    return await runRepository.listSteps(runId);
 }
 
 function safeWorkflowNodeId(value, fallback = 'node') {
@@ -277,20 +276,15 @@ function buildWorkflowDraftFromRun(run, steps = []) {
     };
 }
 
-function createWorkflowDraftFromRun(runId, user) {
-    const run = db.prepare(`
-        SELECT r.*, m.name AS model_name
-        FROM agent_runs r
-        LEFT JOIN models m ON m.id = r.model_id
-        WHERE r.id = ? AND r.user_id = ? AND r.deleted_at IS NULL
-    `).get(runId, user.id);
+async function createWorkflowDraftFromRun(runId, user) {
+    const run = await runRepository.getRunForUser(runId, user?.id);
     if (!run) return null;
     if (String(run.run_mode || '') === 'dag') {
         const err = new Error('工作流任务已经具备编排结构，请直接在工作流页加载或复制。');
         err.status = 400;
         throw err;
     }
-    return buildWorkflowDraftFromRun(run, listSteps(run.id));
+    return buildWorkflowDraftFromRun(run, await listSteps(run.id));
 }
 
 function sortDagNodesByDependencies(nodes = []) {
@@ -322,9 +316,9 @@ function sortDagNodesByDependencies(nodes = []) {
     return ordered;
 }
 
-function listDagNodes(runId) {
-    const nodes = runRepository.listDagNodes(runId);
-    return sortDagNodesByDependencies(nodes);
+async function listDagNodes(runId) {
+    const nodes = await runRepository.listDagNodes(runId);
+    return sortDagNodesByDependencies(nodes || []);
 }
 
 function getRunProgress(run, steps = []) {
@@ -350,24 +344,24 @@ function getRunProgress(run, steps = []) {
     };
 }
 
-function getRunDetailForUser(runId, user) {
-    const run = getRunForUser(runId, user);
+async function getRunDetailForUser(runId, user) {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const steps = listSteps(run.id);
+    const steps = await listSteps(run.id);
     return {
         run,
-        steps,
-        dagNodes: listDagNodes(run.id),
-        progress: getRunProgress(run, steps),
+        steps: steps || [],
+        dagNodes: await listDagNodes(run.id),
+        progress: getRunProgress(run, steps || []),
         trace: getAgentTraceForUser(run.id, user),
         checkpoints: summarizeAgentCheckpoints(run.id)
     };
 }
 
-function updateAgentRunTitleAndGoalForUser(runId, user, payload = {}) {
+async function updateAgentRunTitleAndGoalForUser(runId, user, payload = {}) {
     const userId = Number(user?.id);
     if (!userId) return null;
-    return runRepository.updateAgentRunTitleAndGoal(runId, userId, payload);
+    return await runRepository.updateAgentRunTitleAndGoal(runId, userId, payload);
 }
 
 module.exports = {

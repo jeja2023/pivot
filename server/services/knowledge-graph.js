@@ -408,14 +408,14 @@ function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, 
     upsertRelationStmt.run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now);
 }
 
-function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
+async function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
     if (!userId || !docId || !Array.isArray(chunks) || chunks.length === 0) return { entities: 0, relations: 0 };
     let entityCount = 0;
     let relationCount = 0;
     // 按文档类型选择关系抽取规则集（法规文档叠加法规领域关系）。
-    const docRow = knowledgeRepository.getDocumentName(docId);
+    const docRow = await knowledgeRepository.getDocumentName(docId);
     const sampleText = chunks.slice(0, 24).map(item => item.content).join('\n');
-    const docType = detectDocType(docRow.name || '', sampleText);
+    const docType = detectDocType(docRow?.name || '', sampleText);
     const indexTransaction = db.transaction(() => {
         chunks.forEach(chunk => {
             const graph = extractKnowledgeGraph(chunk.content, docType);
@@ -969,18 +969,18 @@ function confirmRelation({ userId, relationId }) {
     return db.prepare('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?').get(relationId, userId);
 }
 
-function rebuildGraphForDocument({ userId, docId }) {
+async function rebuildGraphForDocument({ userId, docId }) {
     const doc = db.prepare("SELECT * FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(docId, userId);
     if (!doc) return null;
-    const chunks = knowledgeRepository.listAllDocumentChunks(docId);
+    const chunks = (await knowledgeRepository.listAllDocumentChunks(docId)) || [];
     clearKnowledgeGraphForDocument(docId);
-    const result = indexKnowledgeGraphForChunks({ userId, docId, chunks });
+    const result = await indexKnowledgeGraphForChunks({ userId, docId, chunks });
     return { docId, ...result };
 }
 
-function safeIndexKnowledgeGraphForChunks(payload) {
+async function safeIndexKnowledgeGraphForChunks(payload) {
     try {
-        return indexKnowledgeGraphForChunks(payload);
+        return await indexKnowledgeGraphForChunks(payload);
     } catch (e) {
         logger.warn({ err: e.message, docId: payload?.docId }, '知识图谱已跳过文档批次索引');
         return { entities: 0, relations: 0, error: e.message };

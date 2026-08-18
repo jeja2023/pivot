@@ -1246,7 +1246,7 @@ test('工作流交付节点未完成时不使用数据库行数冒充最终结�
     assert.equal(oversized.structuredContent.oversizedRowCount, 0);
 });
 
-test('agent runs can be cancelled and rerun from an existing run', () => {
+test('agent runs can be cancelled and rerun from an existing run', async () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1258,7 +1258,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
         VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
     `).run(user.id, 'Agent Test Model', 'http://127.0.0.1:65530/v1/chat/completions', 'agent-test-model');
 
-    const toolOnlyWorkflow = createAgentWorkflow(user, {
+    const toolOnlyWorkflow = await createAgentWorkflow(user, {
         name: '纯工具工作流',
         dagSpec: {
             nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {}, dependsOn: [] }]
@@ -1267,7 +1267,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(toolOnlyWorkflow.dag_spec.nodes.length, 1);
     assert.equal(toolOnlyWorkflow.dag_spec.nodes[0].tool, 'models.list');
 
-    const run = createAgentRun({
+    const run = await createAgentRun({
         user,
         goal: '整理项目风险',
         modelId: Number(modelInfo.lastInsertRowid),
@@ -1284,10 +1284,10 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(run.approval_policy, 'approve_all_mcp');
     assert.equal(run.retry_limit, 2);
     assert.equal(run.max_token_budget, 100000);
-    assert.throws(() => rerunAgentRun(run.id, user), /仍在执行/);
+    await assert.rejects(async () => await rerunAgentRun(run.id, user), /仍在执行/);
 
     const corruptTitle = String.fromCharCode(0xFFFD).repeat(8);
-    const repairedTitleRun = createAgentRun({
+    const repairedTitleRun = await createAgentRun({
         user,
         goal: '请使用数据库 MCP 查询 hcd_b 表并输出部门统计',
         title: corruptTitle,
@@ -1299,24 +1299,24 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     db.prepare('UPDATE agent_runs SET title = ? WHERE id = ?').run(corruptTitle, repairedTitleRun.id);
     const realtime = createFakeSseResponse();
     const unsubscribeRealtime = subscribeUserEvents(user, realtime, { heartbeatMs: 0 });
-    cancelAgentRun(repairedTitleRun.id, user);
+    await cancelAgentRun(repairedTitleRun.id, user);
     const realtimePayload = realtime.chunks.join('');
     assert.doesNotMatch(realtimePayload, /\?{3,}/);
     assert.match(realtimePayload, /请使用数据库 MCP 查询 hcd_b 表并输出部门统计/);
     unsubscribeRealtime();
 
-    const cancelled = cancelAgentRun(run.id, user);
+    const cancelled = await cancelAgentRun(run.id, user);
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(Boolean(cancelled.cancelled_at), true);
-    const detail = getRunDetailForUser(run.id, user);
+    const detail = await getRunDetailForUser(run.id, user);
     assert.equal(detail.progress.errorCount, 0);
     assert.equal(detail.progress.stepCount >= 1, true);
-    const listedRun = listRuns(user, { limit: 30 }).data.find(item => item.id === run.id);
+    const listedRun = (await listRuns(user, { limit: 30 })).data.find(item => item.id === run.id);
     assert.equal(listedRun.step_count, detail.steps.length);
     assert.equal(listedRun.tool_count, detail.steps.filter(step => step.type === 'tool').length);
     assert.equal(listedRun.error_count, detail.steps.filter(step => step.status === 'error').length);
 
-    const previewRun = createAgentRun({
+    const previewRun = await createAgentRun({
         user,
         goal: '预览当前工作流执行结果',
         modelId: Number(modelInfo.lastInsertRowid),
@@ -1324,9 +1324,9 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
         toolPolicy: 'builtin_only',
         metadata: { workflowRunSource: 'preview', workflowVersionMode: 'draft' }
     });
-    cancelAgentRun(previewRun.id, user);
-    assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === previewRun.id), false);
-    assert.equal(listRuns(user, { limit: 30, includePreview: true }).data.some(item => item.id === previewRun.id), true);
+    await cancelAgentRun(previewRun.id, user);
+    assert.equal((await listRuns(user, { limit: 30 })).data.some(item => item.id === previewRun.id), false);
+    assert.equal((await listRuns(user, { limit: 30, includePreview: true })).data.some(item => item.id === previewRun.id), true);
     assert.equal(listAgentNotifications(user, 50).some(item => item.run_id === previewRun.id), false);
 
     db.prepare(`
@@ -1335,7 +1335,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
             started_at, completed_at, created_at
         ) VALUES (?, 2, 'tool', '工具执行完成：rag.search', 'rag.search', ?, ?, 'success', 12, datetime('now', '+8 hours'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))
     `).run(run.id, JSON.stringify({ query: '项目风险', topK: 3 }), JSON.stringify({ matches: [{ text: '风险 A' }] }));
-    const draft = createWorkflowDraftFromRun(run.id, user);
+    const draft = await createWorkflowDraftFromRun(run.id, user);
     assert.match(draft.name, /由自由任务生成/);
     assert.equal(draft.summary.toolNodeCount, 1);
     assert.equal(draft.dagSpec.nodes.length, 3);
@@ -1347,7 +1347,7 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(draft.dagSpec.nodes[2].tool, 'workflow.output');
     assert.deepEqual(draft.dagSpec.nodes[2].dependsOn, [draft.dagSpec.nodes[1].id]);
 
-    const workflowRun = createAgentRun({
+    const workflowRun = await createAgentRun({
         user,
         goal: '执行生产检查工作流',
         modelId: Number(modelInfo.lastInsertRowid),
@@ -1365,8 +1365,8 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
             }]
         }
     });
-    cancelAgentRun(workflowRun.id, user);
-    const toolOnlyWorkflowRun = createAgentRun({
+    await cancelAgentRun(workflowRun.id, user);
+    const toolOnlyWorkflowRun = await createAgentRun({
         user,
         goal: '执行不依赖大模型的工具工作流',
         runMode: 'dag',
@@ -1376,16 +1376,16 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
         }
     });
     assert.equal(toolOnlyWorkflowRun.model_id, null);
-    cancelAgentRun(toolOnlyWorkflowRun.id, user);
-    const freeRuns = listRuns(user, { limit: 30, runType: 'free' }).data;
-    const workflowRuns = listRuns(user, { limit: 30, runType: 'workflow' }).data;
+    await cancelAgentRun(toolOnlyWorkflowRun.id, user);
+    const freeRuns = (await listRuns(user, { limit: 30, runType: 'free' })).data;
+    const workflowRuns = (await listRuns(user, { limit: 30, runType: 'workflow' })).data;
     assert.equal(freeRuns.some(item => item.id === run.id), true);
     assert.equal(freeRuns.some(item => item.id === workflowRun.id), false);
     assert.equal(workflowRuns.some(item => item.id === workflowRun.id), true);
     assert.equal(workflowRuns.some(item => item.id === run.id), false);
-    assert.throws(() => createWorkflowDraftFromRun(workflowRun.id, user), /已经具备编排结构/);
+    await assert.rejects(async () => await createWorkflowDraftFromRun(workflowRun.id, user), /已经具备编排结构/);
 
-    const rerun = rerunAgentRun(run.id, user);
+    const rerun = await rerunAgentRun(run.id, user);
     assert.equal(rerun.goal, run.goal);
     assert.equal(rerun.model_id, run.model_id);
     assert.equal(rerun.max_steps, run.max_steps);
@@ -1394,8 +1394,8 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(rerun.tool_policy, run.tool_policy);
     assert.equal(rerun.approval_policy, run.approval_policy);
 
-    cancelAgentRun(rerun.id, user);
-    assert.equal(getRunForUser(rerun.id, user).status, 'cancelled');
+    await cancelAgentRun(rerun.id, user);
+    assert.equal((await getRunForUser(rerun.id, user)).status, 'cancelled');
     assert.equal(getRunProgress({ status: 'completed', max_steps: 3 }, []).percent, 100);
     const multiRecordProgress = getRunProgress({ status: 'running', run_mode: 'standard', max_steps: 3 }, [
         { type: 'plan', status: 'completed' },
@@ -1407,20 +1407,20 @@ test('agent runs can be cancelled and rerun from an existing run', () => {
     assert.equal(multiRecordProgress.roundCount, 1);
     assert.equal(multiRecordProgress.isLimitReached, false);
 
-    const deleted = softDeleteAgentRun(run.id, user, '用户清理任务列表');
+    const deleted = await softDeleteAgentRun(run.id, user, '用户清理任务列表');
     assert.equal(Boolean(deleted.deleted_at), true);
     assert.equal(deleted.deleted_by_user, user.id);
-    assert.equal(getRunForUser(run.id, user), undefined);
-    assert.equal(getRunDetailForUser(run.id, user), null);
-    assert.equal(listRuns(user, { limit: 30 }).data.some(item => item.id === run.id), false);
-    assert.throws(() => listDeletedRunsForAdmin(user, 20), /admin 权限层级/);
-    const adminAudit = listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
+    assert.ok(!await getRunForUser(run.id, user));
+    assert.equal(await getRunDetailForUser(run.id, user), null);
+    assert.equal((await listRuns(user, { limit: 30 })).data.some(item => item.id === run.id), false);
+    await assert.rejects(async () => await listDeletedRunsForAdmin(user, 20), /admin 权限层级/);
+    const adminAudit = await listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
     assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
 
     assert.throws(() => normalizeAgentGoal('短'), /更明确/);
 });
 
-test('agent model visibility excludes other users private models', () => {
+test('agent model visibility excludes other users private models', async () => {
     const suffix = Date.now();
     const ownerInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1451,7 +1451,7 @@ test('agent model visibility excludes other users private models', () => {
     assert.equal(getUserRunnableModels(owner).some(model => model.id === privateId), true);
     assert.equal(getUserRunnableModels(other).some(model => model.id === privateId), false);
     assert.equal(getUserRunnableModels(superAdmin).some(model => model.id === privateId), false);
-    assert.throws(() => createAgentRun({
+    await assert.rejects(async () => await createAgentRun({
         user: superAdmin,
         goal: '检查其他用户私有模型是否可用于自动化',
         modelId: privateId,
@@ -1459,7 +1459,7 @@ test('agent model visibility excludes other users private models', () => {
     }), /可用的模型/);
 });
 
-test('enterprise agent templates schedules artifacts and resume are user scoped', () => {
+test('enterprise agent templates schedules artifacts and resume are user scoped', async () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1501,14 +1501,14 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     assert.equal(JSON.parse(schedule.run_config).maxSteps, 0);
     assert.equal(listAgentSchedules(user).some(item => item.id === schedule.id), true);
 
-    const run = runAgentScheduleNow(schedule.id, user);
+    const run = await runAgentScheduleNow(schedule.id, user);
     assert.equal(run.schedule_id, schedule.id);
     assert.equal(run.template_id, template.id);
     assert.equal(run.max_steps, 60);
     assert.equal(JSON.parse(run.context_config).mode, 'knowledge');
-    cancelAgentRun(run.id, user);
-    const scheduledRuns = listRuns(user, { limit: 30, runType: 'scheduled' }).data;
-    const freeRuns = listRuns(user, { limit: 30, runType: 'free' }).data;
+    await cancelAgentRun(run.id, user);
+    const scheduledRuns = (await listRuns(user, { limit: 30, runType: 'scheduled' })).data;
+    const freeRuns = (await listRuns(user, { limit: 30, runType: 'free' })).data;
     assert.equal(scheduledRuns.some(item => item.id === run.id), true);
     assert.equal(freeRuns.some(item => item.id === run.id), false);
     const saved = saveAgentRunArtifact(run.id, user, { content: '风险结果摘要', title: '风险摘要' });
@@ -1516,12 +1516,12 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     assert.equal(listAgentArtifacts(user).some(item => item.id === saved.id), true);
     assert.equal(listAgentNotifications(user, 20).some(item => item.run_id === run.id), true);
 
-    const resumed = resumeAgentRun(run.id, user);
+    const resumed = await resumeAgentRun(run.id, user);
     assert.equal(resumed.parent_run_id, run.id);
     assert.equal(resumed.resume_from_step >= 1, true);
-    cancelAgentRun(resumed.id, user);
+    await cancelAgentRun(resumed.id, user);
 
-    const dagRun = createAgentRun({
+    const dagRun = await createAgentRun({
         user,
         goal: '使用 DAG 检查可用模型',
         modelId,
@@ -1544,11 +1544,11 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
             ]
         }
     });
-    cancelAgentRun(dagRun.id, user);
-    const dagResumed = resumeAgentRun(dagRun.id, user);
+    await cancelAgentRun(dagRun.id, user);
+    const dagResumed = await resumeAgentRun(dagRun.id, user);
     const dagMetadata = JSON.parse(dagResumed.metadata || '{}');
     assert.equal(dagMetadata.dagSpec.nodes[0].tool, 'models.list');
-    cancelAgentRun(dagResumed.id, user);
+    await cancelAgentRun(dagResumed.id, user);
 });
 
 test('DAG final answer uses the terminal node output without an implicit summary call', async () => {
@@ -1621,7 +1621,7 @@ test('DAG final answer uses the terminal node output without an implicit summary
         );
 
         await runAgent(runId, user);
-        const detail = getRunDetailForUser(runId, user);
+        const detail = await getRunDetailForUser(runId, user);
         assert.equal(detail.run.status, 'completed');
         assert.equal(detail.run.final_answer, '这是大模型节点输出');
         assert.equal(detail.dagNodes[0].tool_name, 'agent.llm');
@@ -1657,7 +1657,7 @@ test('DAG final answer uses the terminal node output without an implicit summary
             now
         );
         await runAgent(toolOnlyRunId, user);
-        const toolOnlyDetail = getRunDetailForUser(toolOnlyRunId, user);
+        const toolOnlyDetail = await getRunDetailForUser(toolOnlyRunId, user);
         assert.equal(toolOnlyDetail.run.status, 'completed');
         assert.equal(toolOnlyDetail.run.model_id, null);
         assert.match(toolOnlyDetail.run.final_answer, /工作流执行完成/);
@@ -1803,7 +1803,7 @@ test('agent.streaming SSE 事件按用户隔离并携带累加快照字段', () 
     assert.doesNotMatch(other.chunks.join(''), /run_streaming_test/);
 });
 
-test('automation schedules validate Sunday, reject malformed payloads, and deduplicate manual runs', () => {
+test('automation schedules validate Sunday, reject malformed payloads, and deduplicate manual runs', async () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1861,12 +1861,12 @@ test('automation schedules validate Sunday, reject malformed payloads, and dedup
         frequency: 'manual',
         timeOfDay: '09:00'
     });
-    const first = runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
-    const second = runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
+    const first = await runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
+    const second = await runAgentScheduleNow(schedule.id, user, { idempotencyKey: 'click-1' });
     assert.equal(second.id, first.id);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_runs WHERE schedule_id = ?').get(schedule.id).count, 1);
-    assert.equal(listRuns(user, { scheduleId: schedule.id, limit: 10 }).data.length, 1);
-    cancelAgentRun(first.id, user);
+    assert.equal((await listRuns(user, { scheduleId: schedule.id, limit: 10 })).data.length, 1);
+    await cancelAgentRun(first.id, user);
 });
 
 test('revoked accounts cannot dispatch due automation schedules', () => {

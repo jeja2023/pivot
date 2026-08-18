@@ -135,19 +135,19 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
     res.json({ data: docs, total, page, limit });
 });
 
-ragRouter.get('/collections', authMiddleware, (req, res) => {
-    res.json({ data: listKnowledgeCollections(req.user) });
-});
+ragRouter.get('/collections', authMiddleware, asyncHandler(async (req, res) => {
+    res.json({ data: await listKnowledgeCollections(req.user) });
+}));
 
 ragRouter.get('/tags', authMiddleware, (req, res) => {
     res.json({ data: listKnowledgeTags(req.user, { collectionId: req.query.collectionId }) });
 });
 
-ragRouter.get('/collections/share-options', authMiddleware, (req, res) => {
-    const options = getKnowledgeCollectionShareOptions({ collectionId: req.query.collectionId, user: req.user });
+ragRouter.get('/collections/share-options', authMiddleware, asyncHandler(async (req, res) => {
+    const options = await getKnowledgeCollectionShareOptions({ collectionId: req.query.collectionId, user: req.user });
     if (!options) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
     return res.json({ data: options });
-});
+}));
 
 ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
     try {
@@ -166,7 +166,7 @@ ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
 });
 
 ragRouter.post('/collections', authMiddleware, asyncHandler(async (req, res) => {
-    const collection = createKnowledgeCollection({
+    const collection = await createKnowledgeCollection({
         userId: req.user.id,
         name: req.body?.name,
         description: req.body?.description
@@ -177,7 +177,7 @@ ragRouter.post('/collections', authMiddleware, asyncHandler(async (req, res) => 
 }));
 
 ragRouter.post('/tags', authMiddleware, asyncHandler(async (req, res) => {
-    const tag = createKnowledgeTag({
+    const tag = await createKnowledgeTag({
         userId: req.user.id,
         tag: req.body?.tag || req.body?.name
     });
@@ -207,9 +207,9 @@ ragRouter.get('/summary', authMiddleware, (req, res) => {
     res.json(summary);
 });
 
-ragRouter.get('/quality-report', authMiddleware, (req, res) => {
-    res.json(getKnowledgeQualityReport(req.user));
-});
+ragRouter.get('/quality-report', authMiddleware, asyncHandler(async (req, res) => {
+    res.json(await getKnowledgeQualityReport(req.user));
+}));
 
 ragRouter.get('/graph/summary', authMiddleware, (req, res) => {
     res.json(getGraphSummary(req.user));
@@ -312,15 +312,15 @@ ragRouter.delete('/graph/relations/:id', authMiddleware, asyncHandler(async (req
 }));
 
 ragRouter.post('/graph/docs/:id/rebuild', authMiddleware, asyncHandler(async (req, res) => {
-    const result = rebuildGraphForDocument({ userId: req.user.id, docId: req.params.id });
+    const result = await rebuildGraphForDocument({ userId: req.user.id, docId: req.params.id });
     if (!result) return res.status(404).json({ error: '文档不存在' });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识图谱文档重建', result);
     return res.json({ success: true, ...result });
 }));
 
-ragRouter.get('/docs/:id', authMiddleware, (req, res) => {
-    const detail = getKnowledgeDocumentDetail({
+ragRouter.get('/docs/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const detail = await getKnowledgeDocumentDetail({
         docId: req.params.id,
         userId: req.user.id,
         user: req.user,
@@ -329,7 +329,7 @@ ragRouter.get('/docs/:id', authMiddleware, (req, res) => {
     });
     if (!detail) return res.status(404).json({ error: '文档不存在' });
     return res.json(detail);
-});
+}));
 
 ragRouter.put('/docs/:id/enabled', authMiddleware, asyncHandler(async (req, res) => {
     const enabled = req.body?.enabled !== false;
@@ -341,7 +341,7 @@ ragRouter.put('/docs/:id/enabled', authMiddleware, asyncHandler(async (req, res)
 }));
 
 ragRouter.put('/docs/:id/collection', authMiddleware, asyncHandler(async (req, res) => {
-    const doc = setKnowledgeDocumentCollection({
+    const doc = await setKnowledgeDocumentCollection({
         docId: req.params.id,
         userId: req.user.id,
         collectionId: req.body?.collectionId,
@@ -390,7 +390,7 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), uploadSecurityM
 
     req.file.originalname = normalizeUploadedOriginalName(req.file.originalname);
 
-    const { docId, collectionId } = createKnowledgeDocumentFromUpload({
+    const { docId, collectionId } = await createKnowledgeDocumentFromUpload({
         userId: req.user.id,
         file: req.file,
         collectionId: req.body?.collectionId,
@@ -404,7 +404,7 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), uploadSecurityM
 }));
 
 ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res) => {
-    const doc = getKnowledgeDocumentForUser(req.params.id, req.user.id);
+    const doc = await getKnowledgeDocumentForUser(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ error: '文档不存在' });
     if (!doc.source_path) {
         return res.status(409).json({ error: '原始文件不存在，无法重新索引，请重新上传文档' });

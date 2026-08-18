@@ -37,7 +37,7 @@ const {
     normalizeShareSettings
 } = require('./unit-visibility');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
-const { enqueueMcpCallLog } = require('./sqlite-write-queue');
+const { enqueueMcpCallLog } = require('./db-write-queue');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;

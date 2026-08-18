@@ -33,13 +33,13 @@ function assertWorkflowAccess(workflow, user, write = false) {
 }
 
 // 读取工作流原始行，不做归属过滤，由调用方用 assertWorkflowAccess 判定
-function findWorkflowRow(workflowId, { includeDeleted = false } = {}) {
-    return workflowRepository.getWorkflowById(workflowId, { includeDeleted });
+async function findWorkflowRow(workflowId, { includeDeleted = false } = {}) {
+    return await workflowRepository.getWorkflowById(workflowId, { includeDeleted });
 }
 
 // 取出仅所有者可操作的工作流，权限不足统一返回 null 交给路由层转 404
-function findOwnedWorkflowRow(workflowId, user) {
-    const row = findWorkflowRow(workflowId);
+async function findOwnedWorkflowRow(workflowId, user) {
+    const row = await findWorkflowRow(workflowId);
     return row && assertWorkflowAccess(row, user, true) ? row : null;
 }
 
@@ -212,14 +212,15 @@ function sanitizeSharedDagSpec(dagSpec = {}) {
     return next;
 }
 
-function getAgentWorkflowForUser(workflowId, user) {
-    const row = workflowRepository.getWorkflowForUser(workflowId);
+async function getAgentWorkflowForUser(workflowId, user) {
+    const row = await workflowRepository.getWorkflowForUser(workflowId);
     if (!assertWorkflowAccess(row, user, false)) return null;
     return formatAgentWorkflow(row, user);
 }
 
-function listAgentWorkflows(user) {
-    return workflowRepository.listWorkflowsForUser(user.id)
+async function listAgentWorkflows(user) {
+    const rows = await workflowRepository.listWorkflowsForUser(user.id);
+    return (rows || [])
         .filter(row => assertWorkflowAccess(row, user, false))
         .slice(0, 100)
         .map(row => formatAgentWorkflow(row, user));
@@ -229,10 +230,10 @@ function listAgentWorkflowShareOptions(user) {
     return listShareTargets(user);
 }
 
-function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
+async function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
     const normalizedWorkflowId = Number.parseInt(workflowId, 10);
     if (!normalizedWorkflowId) return null;
-    const workflow = workflowRepository.getWorkflowVersionContext(normalizedWorkflowId);
+    const workflow = await workflowRepository.getWorkflowVersionContext(normalizedWorkflowId);
     if (!assertWorkflowAccess(workflow, user, false)) return null;
     const isOwner = Number(workflow.user_id) === Number(user.id);
     let requested = String(version || 'current').trim().toLowerCase();
@@ -255,14 +256,14 @@ function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
             err.status = 400;
             throw err;
         }
-        versionRow = workflowRepository.getWorkflowVersionById(workflow.id, workflow.published_version_id);
+        versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.published_version_id);
     } else if (requested === 'current') {
-        versionRow = workflowRepository.getWorkflowVersionById(workflow.id, workflow.current_version_id);
+        versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.current_version_id);
     } else {
         const numericVersion = Number.parseInt(requested, 10);
         if (!numericVersion) return null;
         mode = 'version';
-        versionRow = workflowRepository.getWorkflowVersionByNumber(workflow.id, numericVersion);
+        versionRow = await workflowRepository.getWorkflowVersionByNumber(workflow.id, numericVersion);
     }
     if (!versionRow) return null;
     const dagSpec = normalizeDagSpec(parseJsonObject(versionRow.dag_spec) || {});
@@ -288,7 +289,7 @@ function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
     };
 }
 
-function createAgentWorkflow(user, body = {}) {
+async function createAgentWorkflow(user, body = {}) {
     const data = normalizeWorkflowPayload(body, {}, user);
     const now = getBeijingTimestamp();
     const create = db.transaction(() => {
@@ -305,14 +306,14 @@ function createAgentWorkflow(user, body = {}) {
             .run(versionInfo.lastInsertRowid, workflowId);
         return workflowId;
     });
-    return getAgentWorkflowForUser(create(), user);
+    return await getAgentWorkflowForUser(create(), user);
 }
 
-function updateAgentWorkflow(workflowId, user, body = {}) {
-    const current = findOwnedWorkflowRow(workflowId, user);
+async function updateAgentWorkflow(workflowId, user, body = {}) {
+    const current = await findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
     const data = normalizeWorkflowPayload(body, current, user);
-    const currentVersion = workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
+    const currentVersion = await workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
     const shareUnchanged = normalizeShareScope(current.scope) === data.scope
         && String(current.allowed_units || '') === data.allowedUnits
         && String(current.allowed_user_ids || '') === data.allowedUserIds;
@@ -321,7 +322,7 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
         && String(current.name || '') === data.name
         && String(current.description || '') === data.description
         && JSON.stringify(normalizeDagSpec(parseJsonObject(currentVersion.dag_spec) || {})) === JSON.stringify(data.dagSpec);
-    if (unchanged) return getAgentWorkflowForUser(current.id, user);
+    if (unchanged) return await getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
     const update = db.transaction(() => {
         const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(current.id)?.next || 1);
@@ -336,16 +337,16 @@ function updateAgentWorkflow(workflowId, user, body = {}) {
         `).run(data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.lastInsertRowid, now, current.id);
         return current.id;
     });
-    return getAgentWorkflowForUser(update(), user);
+    return await getAgentWorkflowForUser(update(), user);
 }
 
-function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
-    const current = findOwnedWorkflowRow(workflowId, user);
+async function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
+    const current = await findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
     const name = String(body.name ?? current.name ?? '').trim().slice(0, 100) || '未命名工作流';
     const description = String(body.description ?? current.description ?? '').trim().slice(0, 300);
     if (String(current.name || '') === name && String(current.description || '') === description) {
-        return getAgentWorkflowForUser(current.id, user);
+        return await getAgentWorkflowForUser(current.id, user);
     }
     const now = getBeijingTimestamp();
     sql(`
@@ -353,15 +354,15 @@ function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
         SET name = ?, description = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `).run(name, description, now, current.id, user.id);
-    return getAgentWorkflowForUser(current.id, user);
+    return await getAgentWorkflowForUser(current.id, user);
 }
 
-function updateAgentWorkflowSharing(workflowId, user, body = {}) {
-    const current = findOwnedWorkflowRow(workflowId, user);
+async function updateAgentWorkflowSharing(workflowId, user, body = {}) {
+    const current = await findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
     const share = normalizeShareSettings(body, user, current);
     if (share.scope === 'shared' && current.published_version_id) {
-        const published = workflowRepository.getWorkflowVersionById(current.id, current.published_version_id);
+        const published = await workflowRepository.getWorkflowVersionById(current.id, current.published_version_id);
         const dagSpec = normalizeDagSpec(parseJsonObject(published?.dag_spec) || {});
         const manifest = buildAgentWorkflowDependencyManifest(dagSpec);
         if (manifest.sensitiveLiterals?.length) {
@@ -375,7 +376,7 @@ function updateAgentWorkflowSharing(workflowId, user, body = {}) {
     const unchanged = normalizeShareScope(current.scope) === share.scope
         && String(current.allowed_units || '') === share.allowedUnits
         && String(current.allowed_user_ids || '') === share.allowedUserIds;
-    if (unchanged) return getAgentWorkflowForUser(current.id, user);
+    if (unchanged) return await getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
     const update = db.transaction(() => sql(`
         UPDATE agent_workflows
@@ -383,13 +384,13 @@ function updateAgentWorkflowSharing(workflowId, user, body = {}) {
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `).run(share.scope, share.allowedUnits, share.allowedUserIds, now, current.id, user.id));
     if (update().changes === 0) return null;
-    return getAgentWorkflowForUser(current.id, user);
+    return await getAgentWorkflowForUser(current.id, user);
 }
 
-function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
+async function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
     // 发布属于写操作，先确认所有者身份再解析版本
-    if (!findOwnedWorkflowRow(workflowId, user)) return null;
-    const resolved = resolveAgentWorkflowVersion(workflowId, user, version || 'current');
+    if (!await findOwnedWorkflowRow(workflowId, user)) return null;
+    const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current');
     if (!resolved) return null;
     const topology = inspectDagTopology(resolved.dagSpec);
     if (topology.blockers.length) {
@@ -405,7 +406,7 @@ function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
         err.details = { contracts: contractReport };
         throw err;
     }
-    if (normalizeShareScope(findWorkflowRow(workflowId)?.scope) === 'shared') {
+    if (normalizeShareScope((await findWorkflowRow(workflowId))?.scope) === 'shared') {
         const manifest = buildAgentWorkflowDependencyManifest(resolved.dagSpec);
         if (manifest.sensitiveLiterals?.length) {
             const err = new Error('共享工作流不能发布直接写入 HTTP 请求的敏感凭据，请改用凭据引用或平台托管执行。');
@@ -420,22 +421,23 @@ function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
         SET published_version_id = ?, published_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `).run(resolved.version_id, now, now, resolved.workflow.id, user.id);
-    return getAgentWorkflowForUser(resolved.workflow.id, user);
+    return await getAgentWorkflowForUser(resolved.workflow.id, user);
 }
 
-function listAgentWorkflowVersions(workflowId, user) {
-    const workflow = workflowRepository.getOwnedWorkflow(workflowId, user.id);
+async function listAgentWorkflowVersions(workflowId, user) {
+    const workflow = await workflowRepository.getOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
-    return workflowRepository.listWorkflowVersions(workflow.id).map(row => ({
+    const rows = await workflowRepository.listWorkflowVersions(workflow.id);
+    return (rows || []).map(row => ({
         ...row,
         dag_spec: parseJsonObject(row.dag_spec) || { nodes: [] }
     }));
 }
 
-function restoreAgentWorkflowVersion(workflowId, user, version) {
-    const workflow = workflowRepository.getOwnedWorkflow(workflowId, user.id);
+async function restoreAgentWorkflowVersion(workflowId, user, version) {
+    const workflow = await workflowRepository.getOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
-    const source = workflowRepository.getWorkflowVersionByNumber(workflow.id, version);
+    const source = await workflowRepository.getWorkflowVersionByNumber(workflow.id, version);
     if (!source) return null;
     const dagSpec = normalizeDagSpec(parseJsonObject(source.dag_spec) || {});
     if (!dagSpec.nodes.length) {
@@ -454,7 +456,7 @@ function restoreAgentWorkflowVersion(workflowId, user, version) {
             .run(versionInfo.lastInsertRowid, now, workflow.id);
         return workflow.id;
     });
-    return getAgentWorkflowForUser(restore(), user);
+    return await getAgentWorkflowForUser(restore(), user);
 }
 
 function normalizeWorkflowNodesForDiff(spec = {}) {
@@ -466,8 +468,8 @@ function sameJsonValue(left, right) {
     return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
-function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'current') {
-    const workflow = workflowRepository.getWorkflowDiffContext(workflowId, user.id);
+async function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'current') {
+    const workflow = await workflowRepository.getWorkflowDiffContext(workflowId, user.id);
     if (!workflow) return null;
     const normalizeVersion = value => {
         if (String(value || '').trim() === 'current') return Number(workflow.current_version || 0);
@@ -476,9 +478,9 @@ function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'c
     const from = normalizeVersion(fromVersion);
     const to = normalizeVersion(toVersion);
     if (!from || !to) return null;
-    const rows = workflowRepository.listWorkflowVersionsForDiff(workflow.id, from, to);
-    const fromRow = rows.find(row => Number(row.version) === from);
-    const toRow = rows.find(row => Number(row.version) === to);
+    const rows = await workflowRepository.listWorkflowVersionsForDiff(workflow.id, from, to);
+    const fromRow = (rows || []).find(row => Number(row.version) === from);
+    const toRow = (rows || []).find(row => Number(row.version) === to);
     if (!fromRow || !toRow) return null;
     const fromNodes = normalizeWorkflowNodesForDiff(parseJsonObject(fromRow.dag_spec) || {});
     const toNodes = normalizeWorkflowNodesForDiff(parseJsonObject(toRow.dag_spec) || {});
@@ -524,8 +526,8 @@ function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'c
     };
 }
 
-function deleteAgentWorkflow(workflowId, user) {
-    const workflow = workflowRepository.getOwnedWorkflow(workflowId, user.id);
+async function deleteAgentWorkflow(workflowId, user) {
+    const workflow = await workflowRepository.getOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
     const now = getBeijingTimestamp();
     db.prepare('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, workflow.id);
@@ -542,12 +544,12 @@ function deleteAgentWorkflow(workflowId, user) {
 }
 
 // 恢复已删除工作流（软撤销）
-function restoreAgentWorkflow(workflowId, user) {
-    const workflow = workflowRepository.getRecentlyDeletedOwnedWorkflow(workflowId, user.id);
+async function restoreAgentWorkflow(workflowId, user) {
+    const workflow = await workflowRepository.getRecentlyDeletedOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
     const now = getBeijingTimestamp();
     db.prepare('UPDATE agent_workflows SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(now, workflow.id);
-    return getAgentWorkflowForUser(workflow.id, user);
+    return await getAgentWorkflowForUser(workflow.id, user);
 }
 
 module.exports = {

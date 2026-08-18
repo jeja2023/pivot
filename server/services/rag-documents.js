@@ -74,34 +74,35 @@ function parseKnowledgeTags(value) {
     return [...new Set(values.map(normalizeKnowledgeTag).filter(Boolean))].slice(0, 20);
 }
 
-function upsertKnowledgeTags(userId, tags, now = getBeijingTimestamp()) {
+async function upsertKnowledgeTags(userId, tags, now = getBeijingTimestamp()) {
     const safeTags = parseKnowledgeTags(tags);
     if (!safeTags.length) return [];
-    return knowledgeRepository.upsertTags(userId, safeTags, now);
+    return await knowledgeRepository.upsertTags(userId, safeTags, now);
 }
 
 function normalizeKnowledgeCollectionId(value) {
     return normalizeKnowledgeDocId(value);
 }
 
-function getKnowledgeCollectionForUser(collectionId, user) {
+async function getKnowledgeCollectionForUser(collectionId, user) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (!normalizedId) return null;
-    return knowledgeRepository.getCollectionForUser(normalizedId, user);
+    return await knowledgeRepository.getCollectionForUser(normalizedId, user);
 }
 
-function resolveKnowledgeCollectionId({ userId, user = null, collectionId = null } = {}) {
+async function resolveKnowledgeCollectionId({ userId, user = null, collectionId = null } = {}) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (normalizedId) {
-        const collection = getKnowledgeCollectionForUser(normalizedId, user || userId);
+        const collection = await getKnowledgeCollectionForUser(normalizedId, user || userId);
         return collection ? collection.id : null;
     }
     return null;
 }
 
-function listKnowledgeCollections(user) {
+async function listKnowledgeCollections(user) {
     const normalizedUser = normalizeKnowledgeUser(user);
-    return knowledgeRepository.listCollections(normalizedUser).map(row => ({
+    const rows = await knowledgeRepository.listCollections(normalizedUser);
+    return (rows || []).map(row => ({
         ...row,
         doc_count: Number(row.doc_count || 0),
         ready_count: Number(row.ready_count || 0),
@@ -112,10 +113,10 @@ function listKnowledgeCollections(user) {
     }));
 }
 
-function createKnowledgeCollection({ userId, name, description = '' }) {
+async function createKnowledgeCollection({ userId, name, description = '' }) {
     const normalizedName = normalizeKnowledgeCollectionName(name);
     if (!normalizedName) return null;
-    const existing = knowledgeRepository.findCollectionByName(userId, normalizedName);
+    const existing = await knowledgeRepository.findCollectionByName(userId, normalizedName);
     if (existing) return existing;
 
     const now = getBeijingTimestamp();
@@ -123,11 +124,11 @@ function createKnowledgeCollection({ userId, name, description = '' }) {
         INSERT INTO knowledge_collections (user_id, name, description, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
     `).run(userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now);
-    return getKnowledgeCollectionForUser(info.lastInsertRowid, userId);
+    return await getKnowledgeCollectionForUser(info.lastInsertRowid, userId);
 }
 
-function getKnowledgeCollectionShareOptions({ collectionId, user }) {
-    const collection = getKnowledgeCollectionForUser(collectionId, user);
+async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
+    const collection = await getKnowledgeCollectionForUser(collectionId, user);
     if (!collection) return null;
     const normalizedUser = normalizeKnowledgeUser(user);
     if (Number(collection.user_id) !== normalizedUser.id && !isAdmin(user)) return null;
@@ -162,8 +163,8 @@ function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
     return getKnowledgeCollectionForUser(normalizedId, user);
 }
 
-function createKnowledgeTag({ userId, tag }) {
-    const safeTags = upsertKnowledgeTags(userId, [tag]);
+async function createKnowledgeTag({ userId, tag }) {
+    const safeTags = await upsertKnowledgeTags(userId, [tag]);
     if (!safeTags.length) return null;
     return listKnowledgeTags(userId).find(item => item.tag === safeTags[0]) || { tag: safeTags[0], doc_count: 0 };
 }
@@ -204,10 +205,10 @@ function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
     return safeTags;
 }
 
-function getKnowledgeDocumentTags({ docId, userId }) {
+async function getKnowledgeDocumentTags({ docId, userId }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return [];
-    return knowledgeRepository.listDocumentTags(normalizedDocId, userId);
+    return await knowledgeRepository.listDocumentTags(normalizedDocId, userId);
 }
 
 function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_docs') {
@@ -329,9 +330,9 @@ async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 
-function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {
+async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {
     const now = getBeijingTimestamp();
-    const resolvedCollectionId = resolveKnowledgeCollectionId({ userId, collectionId });
+    const resolvedCollectionId = await resolveKnowledgeCollectionId({ userId, collectionId });
     const fileInfo = db.prepare(`
         INSERT INTO knowledge_docs (
             user_id, collection_id, name, status, chunk_count, indexed_chunks, progress, error_message, created_at, updated_at
@@ -357,8 +358,8 @@ function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, 
     }
 }
 
-function getKnowledgeDocumentForUser(docId, user, { includeDeleted = false } = {}) {
-    return knowledgeRepository.getDocumentForUser(docId, user, { includeDeleted });
+async function getKnowledgeDocumentForUser(docId, user, { includeDeleted = false } = {}) {
+    return await knowledgeRepository.getDocumentForUser(docId, user, { includeDeleted });
 }
 
 function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive = false } = {}) {
@@ -469,17 +470,18 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     }
 }
 
-function getKnowledgeDocumentDetail({ docId, userId, user = null, limit = 20, offset = 0 }) {
+async function getKnowledgeDocumentDetail({ docId, userId, user = null, limit = 20, offset = 0 }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
     const accessUser = user || userId;
-    const doc = getKnowledgeDocumentForUser(normalizedDocId, accessUser);
+    const doc = await getKnowledgeDocumentForUser(normalizedDocId, accessUser);
     if (!doc) return null;
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const chunks = knowledgeRepository.listDocumentChunks(normalizedDocId, safeLimit, safeOffset);
-    const totalChunks = knowledgeRepository.countDocumentChunks(normalizedDocId);
-    return { doc: { ...doc, tags: getKnowledgeDocumentTags({ docId: normalizedDocId, userId: accessUser }) }, chunks, totalChunks, limit: safeLimit, offset: safeOffset };
+    const chunks = await knowledgeRepository.listDocumentChunks(normalizedDocId, safeLimit, safeOffset);
+    const totalChunks = await knowledgeRepository.countDocumentChunks(normalizedDocId);
+    const tags = await getKnowledgeDocumentTags({ docId: normalizedDocId, userId: accessUser });
+    return { doc: { ...doc, tags }, chunks: chunks || [], totalChunks: totalChunks || 0, limit: safeLimit, offset: safeOffset };
 }
 
 function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
@@ -569,12 +571,12 @@ function getRagFeedbackSummary(userId) {
     return summary;
 }
 
-function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) {
+async function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
-    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
     if (!doc) return null;
-    const resolvedCollectionId = resolveKnowledgeCollectionId({ userId, collectionId });
+    const resolvedCollectionId = await resolveKnowledgeCollectionId({ userId, collectionId });
     const now = getBeijingTimestamp();
     const changed = db.prepare(`
         UPDATE knowledge_docs
@@ -587,7 +589,7 @@ function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) 
             .run(now, resolvedCollectionId, userId);
     }
     clearRagCacheForUser(userId);
-    return getKnowledgeDocumentForUser(normalizedDocId, userId);
+    return await getKnowledgeDocumentForUser(normalizedDocId, userId);
 }
 
 function clampQualityScore(value) {
@@ -635,10 +637,10 @@ function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
     };
 }
 
-function getKnowledgeQualityReport(userId) {
+async function getKnowledgeQualityReport(userId) {
     const normalized = normalizeKnowledgeUser(userId);
-    const overview = knowledgeRepository.getDocumentQualityOverview(normalized.id);
-    const problemDocs = knowledgeRepository.listProblemDocuments(normalized.id);
+    const overview = (await knowledgeRepository.getDocumentQualityOverview(normalized.id)) || {};
+    const problemDocs = (await knowledgeRepository.listProblemDocuments(normalized.id)) || [];
     const feedback = getRagFeedbackSummary(normalized.id);
     const graph = getGraphSummary(userId);
     const signals = buildKnowledgeQualitySignals({ overview, feedback, graph });

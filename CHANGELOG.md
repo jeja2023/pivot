@@ -1,3 +1,20 @@
+## [v0.0.269] - 2026-08-18
+
+### 生产环境 PostgreSQL 双模式迁移全栈就绪、全链路数据访问层异步化改造与元数据字典注释系统
+
+- **生产级 SQLite ➔ PostgreSQL 双模式无损迁移就绪**：依据《Pivot生产环境迁移PostgreSQL实施方案》(v2.2)，在 `server/db/schema/pg.js` 中构建基于单源事实的动态方言转换引擎，实现全量 79 张业务表的 `BIGINT GENERATED ALWAYS AS IDENTITY` 自增序列、`TIMESTAMPTZ`（东八区统一绑定）、`DOUBLE PRECISION`、外键依赖解耦与后置幂等创建，并部署 `pg_trgm` GIN 索引与 IMMUTABLE 容错 JSON 提取函数 `pivot_json_extract`。
+- **全量 79 张表中文元数据注释字典（Data Dictionary）**：在 `server/db/schema/comments.js` 中新增覆盖全部 79 张业务表及其核心业务字段（包含用户角色、消息 thought 思维链、Token 用量、RAG 向量、智能体 DAG、MCP 工具及工作流凭证）的权威中文注释，在 PostgreSQL 初始化与建表时自动执行 `COMMENT ON TABLE` 与 `COMMENT ON COLUMN`，支持 Navicat / DBeaver / DataGrip 等客户端直接查阅结构含义。
+- **全链路数据访问层（Repository）与应用层异步化（Promise API）改造**：
+  - 全面重构 `server/repositories/`（`sessions.js`、`agent-runs.js`、`agent-workflows.js`、`knowledge.js` 等），统一采用 `server/db/client.js` 导出的异步 Promise 接口，支持 SQLite 与 PostgreSQL 双模式动态参数绑定（`?` 自动转换 `$1, $2`）。
+  - 服务层与路由层（`server/services/chat-messages.js`、`chat-errors.js`、`agent-runs.js`、`agent-runtime/index.js`、`agent-dag-runtime.js`、`agent-workflows.js`、`server/routes/agents.js`、`routes/chat/`、`routes/sessions.js`）全面实现正确的 `async/await` 调用，彻底清零未 await 导致的 Promise 穿透与对象属性读取异常。
+- **双模式写队列与服务启动生命周期管理**：在 `server/services/db-write-queue.js` 中实现双模式路由——SQLite 模式下路由到批量串行写入队列以消除文件锁竞争，PostgreSQL 模式下直接通过连接池并发高效入库；在 `server/index.js` 中集成 `initPostgresDatabase`，保证在服务启动监听前完成 PostgreSQL Schema 与基线迁移就绪。
+- **自动化迁移与四级一致性核验工具链**：
+  - 新增 `scripts/setup_pg_db.js`（数据库初始化与 pgvector / pg_trgm 扩展安装）。
+  - 新增 `scripts/migrate_sqlite_to_pg.js`（基于 79 表拓扑依赖、主键游标 Keyset 分页、65535 参数防爆、分表独立事务与序列重置的数据搬迁引擎）。
+  - 新增 `scripts/verify_pg_migration.js`（行数、主键范围、核心文本 SHA-256 哈希比对与孤儿数据关系排查的四级深度核验工具）。
+  - 新增 `scripts/diff_schema_sqlite_pg.js`（两端表结构与列类型逐项对账工具）及 `scripts/truncate_all_pg_tables.js`（重跑演练重置工具）。
+- **质量门禁与全量测试套件 100% 通过**：新增 `tests/db-dual-mode-contracts.test.js` 双模式合约测试；通过全量 456 个 JS 文件语法检查（`npm run check`）、ESLint 0 错误 0 警告（`npm run lint`）、双模式合约测试及全量 Node.js 测试套件（`npm run test:all`，共 471 项测试 100% 全部通过）。
+
 ## [v0.0.268] - 2026-08-17
 
 ### 聊天输入区能力聚合优化、文件夹上传与工具白名单精细化过滤

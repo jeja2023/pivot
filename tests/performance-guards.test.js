@@ -168,7 +168,7 @@ test('withTimeout aborts work with the requested error code', async () => {
     assert.equal(operationSignal.aborted, true);
 });
 
-test('session message pagination returns stable chronological cursor pages', () => {
+test('session message pagination returns stable chronological cursor pages', async () => {
     const suffix = Date.now().toString(36);
     const username = `message_page_${suffix}`;
     const sessionId = `message-page-${suffix}`;
@@ -178,14 +178,14 @@ test('session message pagination returns stable chronological cursor pages', () 
     `).run(username).lastInsertRowid);
 
     try {
-        sessionsRepository.createSession({
+        await sessionsRepository.createSession({
             id: sessionId,
             userId,
             title: 'Pagination',
             createdAt: '2026-01-01 00:00:00'
         });
         for (let index = 1; index <= 5; index += 1) {
-            sessionsRepository.insertMessage({
+            await sessionsRepository.insertMessage({
                 sessionId,
                 userId,
                 role: index % 2 ? 'user' : 'assistant',
@@ -196,18 +196,18 @@ test('session message pagination returns stable chronological cursor pages', () 
             });
         }
 
-        const newest = sessionsRepository.listMessagePage(sessionId, userId, { limit: 2 });
+        const newest = await sessionsRepository.listMessagePage(sessionId, userId, { limit: 2 });
         assert.deepEqual(newest.messages.map(row => row.content), ['message-4', 'message-5']);
         assert.equal(newest.page.hasMore, true);
 
-        const middle = sessionsRepository.listMessagePage(sessionId, userId, {
+        const middle = await sessionsRepository.listMessagePage(sessionId, userId, {
             limit: 2,
             beforeId: newest.page.beforeId
         });
         assert.deepEqual(middle.messages.map(row => row.content), ['message-2', 'message-3']);
         assert.equal(middle.page.hasMore, true);
 
-        const oldest = sessionsRepository.listMessagePage(sessionId, userId, {
+        const oldest = await sessionsRepository.listMessagePage(sessionId, userId, {
             limit: 2,
             beforeId: middle.page.beforeId
         });

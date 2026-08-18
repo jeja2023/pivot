@@ -20,19 +20,19 @@ function buildPersistedChatErrorContent({ error, detail, statusCode, code } = {}
     return lines.join('\n');
 }
 
-function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detail, statusCode, code, log }) {
+async function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detail, statusCode, code, log }) {
     if (!sessionId || !userId) return null;
     const content = buildPersistedChatErrorContent({ error, detail, statusCode, code });
     const tokenCount = estimateTokens(content);
     try {
-        const result = saveAssistantMessage({
+        const result = await saveAssistantMessage({
             sessionId,
             userId,
             content,
             tokenCount,
             modelId
         });
-        touchSession(sessionId);
+        await touchSession(sessionId);
         return { content, messageId: result.lastInsertRowid, tokenCount };
     } catch (err) {
         log?.error?.({ sessionId, err: err.message }, '保存模型错误消息失败');
@@ -40,7 +40,7 @@ function persistAssistantErrorMessage({ sessionId, userId, modelId, error, detai
     }
 }
 
-function writeChatErrorSse({
+async function writeChatErrorSse({
     writeSse,
     sessionId,
     userId,
@@ -56,7 +56,7 @@ function writeChatErrorSse({
     const payload = { error, detail, statusCode, code };
     if (retryable !== undefined) payload.retryable = retryable;
     if (persist) {
-        const saved = persistAssistantErrorMessage({
+        const saved = await persistAssistantErrorMessage({
             sessionId,
             userId,
             modelId,

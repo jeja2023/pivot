@@ -37,7 +37,7 @@ const {
 const {
     enqueueAuditLog,
     flushAllSqliteWrites
-} = require('./services/sqlite-write-queue');
+} = require('./services/db-write-queue');
 const appConfig = validateConfig();
 const appVersion = getAppVersion();
 const chatHtmlTemplate = loadChatHtmlTemplate();

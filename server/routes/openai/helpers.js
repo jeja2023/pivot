@@ -1,6 +1,6 @@
 const { db } = require('../../db');
 const { getBeijingTimestamp } = require('../../time');
-const { enqueueApiCallLog } = require('../../services/sqlite-write-queue');
+const { enqueueApiCallLog } = require('../../services/db-write-queue');
 const { createVisibleReasoningStreamFilter } = require('../../llm');
 const { normalizeTokenUsage } = require('../../services/token-accounting');
 const { createSseEventParser } = require('../../streaming');

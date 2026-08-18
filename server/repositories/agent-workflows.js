@@ -1,36 +1,43 @@
-const { sql } = require('../db/statements');
+/**
+ * server/repositories/agent-workflows.js
+ * 智能体工作流数据访问层（SQLite / PostgreSQL 双方言）
+ *
+ * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
+ */
+const { query, queryOne } = require('../db/client');
+const { nowOffsetExpr } = require('../db/dialect');
 
 function normalizeWorkflowId(workflowId) {
     const normalized = Number.parseInt(workflowId, 10);
     return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
-function getWorkflowById(workflowId, { includeDeleted = false } = {}) {
+async function getWorkflowById(workflowId, { includeDeleted = false } = {}) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId) return null;
-    const row = sql(`
+    const row = await queryOne(`
         SELECT *
         FROM agent_workflows
         WHERE id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
-    `).get(normalizedId);
+    `, [normalizedId]);
     return row || null;
 }
 
-function getOwnedWorkflow(workflowId, userId, { includeDeleted = false } = {}) {
+async function getOwnedWorkflow(workflowId, userId, { includeDeleted = false } = {}) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId || !userId) return null;
-    const row = sql(`
+    const row = await queryOne(`
         SELECT *
         FROM agent_workflows
         WHERE id = ? AND user_id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
-    `).get(normalizedId, userId);
+    `, [normalizedId, userId]);
     return row || null;
 }
 
-function getWorkflowForUser(workflowId) {
+async function getWorkflowForUser(workflowId) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId) return null;
-    const row = sql(`
+    const row = await queryOne(`
         SELECT
             w.*,
             COALESCE(NULLIF(u.nickname, ''), NULLIF(u.deleted_username, ''), u.username) AS owner_name,
@@ -47,13 +54,13 @@ function getWorkflowForUser(workflowId) {
         LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
         LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
         WHERE w.id = ? AND w.deleted_at IS NULL
-    `).get(normalizedId);
+    `, [normalizedId]);
     return row || null;
 }
 
 function listWorkflowsForUser(userId, limit = 200) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 200, 1), 200);
-    return sql(`
+    return query(`
         SELECT
             w.*,
             COALESCE(NULLIF(u.nickname, ''), NULLIF(u.deleted_username, ''), u.username) AS owner_name,
@@ -72,13 +79,13 @@ function listWorkflowsForUser(userId, limit = 200) {
         WHERE (w.user_id = ? OR w.scope = 'shared') AND w.deleted_at IS NULL
         ORDER BY w.updated_at DESC, w.id DESC
         LIMIT ?
-    `).all(userId, safeLimit);
+    `, [userId, safeLimit]);
 }
 
-function getWorkflowVersionContext(workflowId) {
+async function getWorkflowVersionContext(workflowId) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId) return null;
-    const row = sql(`
+    const row = await queryOne(`
         SELECT
             w.*,
             cv.version AS current_version,
@@ -87,73 +94,77 @@ function getWorkflowVersionContext(workflowId) {
         LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
         LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
         WHERE w.id = ? AND w.deleted_at IS NULL
-    `).get(normalizedId);
+    `, [normalizedId]);
     return row || null;
 }
 
-function getWorkflowVersionById(workflowId, versionId) {
+async function getWorkflowVersionById(workflowId, versionId) {
     const normalizedWorkflowId = normalizeWorkflowId(workflowId);
     const normalizedVersionId = Number.parseInt(versionId, 10);
     if (!normalizedWorkflowId || !Number.isInteger(normalizedVersionId) || normalizedVersionId <= 0) return null;
-    return sql(`
+    const row = await queryOne(`
         SELECT *
         FROM agent_workflow_versions
         WHERE id = ? AND workflow_id = ?
-    `).get(normalizedVersionId, normalizedWorkflowId) || null;
+    `, [normalizedVersionId, normalizedWorkflowId]);
+    return row || null;
 }
 
-function getWorkflowVersionByNumber(workflowId, version) {
+async function getWorkflowVersionByNumber(workflowId, version) {
     const normalizedWorkflowId = normalizeWorkflowId(workflowId);
     const normalizedVersion = Number.parseInt(version, 10);
     if (!normalizedWorkflowId || !Number.isInteger(normalizedVersion) || normalizedVersion <= 0) return null;
-    return sql(`
+    const row = await queryOne(`
         SELECT *
         FROM agent_workflow_versions
         WHERE workflow_id = ? AND version = ?
-    `).get(normalizedWorkflowId, normalizedVersion) || null;
+    `, [normalizedWorkflowId, normalizedVersion]);
+    return row || null;
 }
 
-function listWorkflowVersions(workflowId) {
+async function listWorkflowVersions(workflowId) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId) return [];
-    return sql(`
+    return query(`
         SELECT id, workflow_id, version, dag_spec, note, created_by, created_at
         FROM agent_workflow_versions
         WHERE workflow_id = ?
         ORDER BY version DESC
-    `).all(normalizedId);
+    `, [normalizedId]);
 }
 
-function getWorkflowDiffContext(workflowId, userId) {
+async function getWorkflowDiffContext(workflowId, userId) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId || !userId) return null;
-    return sql(`
+    const row = await queryOne(`
         SELECT w.*, cv.version AS current_version
         FROM agent_workflows w
         LEFT JOIN agent_workflow_versions cv ON cv.id = w.current_version_id
         WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
-    `).get(normalizedId, userId) || null;
+    `, [normalizedId, userId]);
+    return row || null;
 }
 
-function listWorkflowVersionsForDiff(workflowId, fromVersion, toVersion) {
+async function listWorkflowVersionsForDiff(workflowId, fromVersion, toVersion) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId) return [];
-    return sql(`
+    return query(`
         SELECT version, dag_spec, note, created_at
         FROM agent_workflow_versions
         WHERE workflow_id = ? AND version IN (?, ?)
-    `).all(normalizedId, fromVersion, toVersion);
+    `, [normalizedId, fromVersion, toVersion]);
 }
 
-function getRecentlyDeletedOwnedWorkflow(workflowId, userId) {
+async function getRecentlyDeletedOwnedWorkflow(workflowId, userId) {
     const normalizedId = normalizeWorkflowId(workflowId);
     if (!normalizedId || !userId) return null;
-    return sql(`
+    const row = await queryOne(`
         SELECT *
         FROM agent_workflows
         WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
-          AND deleted_at > datetime('now', '+8 hours', '-30 days')
-    `).get(normalizedId, userId) || null;
+          AND deleted_at > ${nowOffsetExpr('-30 days')}
+    `, [normalizedId, userId]);
+    return row || null;
 }
 
 module.exports = {

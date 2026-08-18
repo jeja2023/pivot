@@ -7,22 +7,38 @@ const {
 const { startHttpServer } = require('./server');
 const { startMaintenanceTasks } = require('./services/maintenance');
 
+const { isPostgres } = require('./db/dialect');
+const { initPostgresDatabase } = require('./db');
+
 registerProcessErrorHandlers({ logger, flushAllSqliteWrites });
-startBackgroundServices({ logger });
 
-const scheduleMaintenanceTasks = createMaintenanceScheduler({
-    delayMs: appConfig.maintenanceStartDelayMs,
-    logger,
-    startMaintenanceTasks
+async function init() {
+    if (isPostgres()) {
+        await initPostgresDatabase();
+    }
+    startBackgroundServices({ logger });
+
+    const scheduleMaintenanceTasks = createMaintenanceScheduler({
+        delayMs: appConfig.maintenanceStartDelayMs,
+        logger,
+        startMaintenanceTasks
+    });
+
+    const { server } = startHttpServer({
+        app,
+        port: appConfig.port,
+        logger,
+        version: appVersion,
+        scheduleMaintenanceTasks,
+        flushAllSqliteWrites
+    });
+
+    return { server };
+}
+
+const initPromise = init().catch(err => {
+    logger.fatal({ err }, '服务器启动失败');
+    process.exit(1);
 });
 
-const { server } = startHttpServer({
-    app,
-    port: appConfig.port,
-    logger,
-    version: appVersion,
-    scheduleMaintenanceTasks,
-    flushAllSqliteWrites
-});
-
-module.exports = { app, server };
+module.exports = { app, initPromise };

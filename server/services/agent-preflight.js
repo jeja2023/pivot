@@ -44,7 +44,7 @@ function getMcpHealthForPreflight(user) {
     `).get(...params);
 }
 
-function preflightAgentRun(user, body = {}) {
+async function preflightAgentRun(user, body = {}) {
     const goal = String(body.goal || '').trim();
     const toolPolicy = normalizeToolPolicy(body.toolPolicy || body.tool_policy);
     const toolAllowlist = normalizeToolAllowlist(body.toolAllowlist || body.tool_allowlist);
@@ -79,7 +79,7 @@ function preflightAgentRun(user, body = {}) {
         const workflowId = body.workflowId || body.workflow_id;
         if (workflowId) {
             try {
-                const resolved = resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current');
+                const resolved = await resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current');
                 if (resolved) {
                     const bound = resolveAgentWorkflowDependencyBindings(resolved, user, { enforce: false });
                     dag = bound.dagSpec;

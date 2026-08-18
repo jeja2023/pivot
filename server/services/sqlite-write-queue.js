@@ -1,3 +1,11 @@
+/**
+ * server/services/sqlite-write-queue.js
+ * SQLite 专属写入队列实现（同步事务攒批）
+ *
+ * 业务代码不应直接引用本模块 —— 请统一使用 services/db-write-queue.js，
+ * 它会按 PIVOT_DB_DIALECT 路由到 SQLite 或 PostgreSQL 实现。
+ * 本模块在 PG 模式下不会被加载（顶层 db.prepare 依赖 SQLite 连接）。
+ */
 const { db } = require('../db');
 const { logger } = require('../logger');
 

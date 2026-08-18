@@ -459,7 +459,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (topology.blockers.length) throw new Error(`DAG 拒绝执行：${topology.blockers[0]}`);
     assertWorkflowLlmNodesConfigured(dagSpec);
 
-    const persistedDagNodes = new Map(listDagNodes(run.id).map(node => [node.node_key, node]));
+    const persistedDagNodes = new Map((await listDagNodes(run.id)).map(node => [node.node_key, node]));
     dagSpec.nodes.forEach(node => {
         const existing = persistedDagNodes.get(node.id);
         if (existing && ['completed', 'continued_error', 'skipped', 'waiting_approval'].includes(existing.status)) return;

@@ -343,8 +343,8 @@ function assertRunNotCancelled(runId) {
     }
 }
 
-function cancelAgentRun(runId, user) {
-    const run = getRunForUser(runId, user);
+async function cancelAgentRun(runId, user) {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (!ACTIVE_STATUSES.has(run.status)) return run;
     const now = getBeijingTimestamp();
@@ -358,18 +358,19 @@ function cancelAgentRun(runId, user) {
     const abortError = new Error('Run cancelled by user.');
     abortError.code = 'AGENT_RUN_CANCELLED';
     activeRunControllers.get(runId)?.abort(abortError);
-    insertStep(runId, listSteps(runId).length + 1, {
+    const steps = await listSteps(runId);
+    insertStep(runId, (steps || []).length + 1, {
         type: 'control',
         title: 'User cancelled run',
         output: { status: 'cancelled' }
     });
     createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
-    return getRunForUser(runId, user);
+    return await getRunForUser(runId, user);
 }
 
-function createChildRunFromExisting(run, user) {
+async function createChildRunFromExisting(run, user) {
     const metadata = getRunMetadata(run);
-    return createAgentRun({
+    return await createAgentRun({
         user,
         goal: run.goal,
         modelId: run.model_id,
@@ -394,23 +395,23 @@ function createChildRunFromExisting(run, user) {
     });
 }
 
-function rerunAgentRun(runId, user) {
-    const run = getRunForUser(runId, user);
+async function rerunAgentRun(runId, user) {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status)) {
         const err = new Error('当前任务仍在执行中，请停止或等待结束后再重新运行。');
         err.status = 400;
         throw err;
     }
-    return createChildRunFromExisting(run, user);
+    return await createChildRunFromExisting(run, user);
 }
 
-function buildDagResumeSpec(originalRun, startNodeId = '') {
+async function buildDagResumeSpec(originalRun, startNodeId = '') {
     const metadata = getRunMetadata(originalRun);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
     if (!dagSpec.nodes.length) return null;
-    const dagNodes = listDagNodes(originalRun.id);
-    const failed = dagNodes.filter(node => node.status === 'error');
+    const dagNodes = await listDagNodes(originalRun.id);
+    const failed = (dagNodes || []).filter(node => node.status === 'error');
     const startIds = startNodeId
         ? [String(startNodeId)]
         : failed.map(node => node.node_key);
@@ -429,7 +430,7 @@ function buildDagResumeSpec(originalRun, startNodeId = '') {
         });
     }
     const reusable = {};
-    dagNodes.forEach(node => {
+    (dagNodes || []).forEach(node => {
         if (include.has(node.node_key)) return;
         if (node.status !== 'completed') return;
         reusable[node.node_key] = {
@@ -449,8 +450,8 @@ function buildDagResumeSpec(originalRun, startNodeId = '') {
     return { dagSpec: { nodes, layout }, reusable };
 }
 
-function rerunAgentDagFromNode(runId, user, nodeId = '') {
-    const run = getRunForUser(runId, user);
+async function rerunAgentDagFromNode(runId, user, nodeId = '') {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status)) {
         const err = new Error('当前任务仍在执行中，请停止或等待结束后再重跑节点。');
@@ -462,14 +463,14 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
         err.status = 400;
         throw err;
     }
-    const resume = buildDagResumeSpec(run, nodeId);
+    const resume = await buildDagResumeSpec(run, nodeId);
     if (!resume || !resume.dagSpec.nodes.length) {
         const err = new Error('没有找到可重用的工作流节点。');
         err.status = 400;
         throw err;
     }
     const metadata = getRunMetadata(run);
-    return createAgentRun({
+    return await createAgentRun({
         user,
         goal: run.goal,
         modelId: run.model_id,
@@ -501,8 +502,8 @@ function rerunAgentDagFromNode(runId, user, nodeId = '') {
     });
 }
 
-function resumeAgentRun(runId, user) {
-    const run = getRunForUser(runId, user);
+async function resumeAgentRun(runId, user) {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status) || run.status === 'approval_required') {
         const err = new Error('当前任务仍在执行中，无需断点续跑。');
@@ -510,15 +511,15 @@ function resumeAgentRun(runId, user) {
         throw err;
     }
     if (run.run_mode === 'dag') {
-        const dagResume = buildDagResumeSpec(run);
-        if (dagResume?.dagSpec?.nodes?.length) return rerunAgentDagFromNode(runId, user, '');
+        const dagResume = await buildDagResumeSpec(run);
+        if (dagResume?.dagSpec?.nodes?.length) return await rerunAgentDagFromNode(runId, user, '');
     }
-    const steps = listSteps(run.id);
-    const lastStep = steps.length ? Math.max(...steps.map(step => Number(step.step_index || 0))) : 0;
-    const failed = steps.filter(step => step.status === 'error').slice(-3);
+    const steps = await listSteps(run.id);
+    const lastStep = (steps || []).length ? Math.max(...steps.map(step => Number(step.step_index || 0))) : 0;
+    const failed = (steps || []).filter(step => step.status === 'error').slice(-3);
     const resumeContext = buildAgentResumeContext(run.id);
     const previousMetadata = getRunMetadata(run);
-    return createAgentRun({
+    return await createAgentRun({
         user,
         goal: run.goal,
         modelId: run.model_id,
@@ -554,8 +555,8 @@ function resumeAgentRun(runId, user) {
     });
 }
 
-function softDeleteAgentRun(runId, user, reason = '') {
-    const run = getRunForUser(runId, user);
+async function softDeleteAgentRun(runId, user, reason = '') {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (ACTIVE_STATUSES.has(run.status)) {
         const err = new Error('正在执行的任务不能删除。');
@@ -578,11 +579,16 @@ function softDeleteAgentRun(runId, user, reason = '') {
             deletedBy: user.username || user.id
         }
     });
-    return getRunForUser(runId, user, { includeDeleted: true });
+    return await getRunForUser(runId, user, { includeDeleted: true });
 }
 
 function insertStep(runId, stepIndex, data = {}) {
     const now = getBeijingTimestamp();
+    let safeStepIndex = Number.isInteger(stepIndex) && stepIndex > 0 ? stepIndex : null;
+    if (safeStepIndex === null) {
+        const row = db.prepare('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?').get(runId);
+        safeStepIndex = row?.next_index || 1;
+    }
     const info = db.prepare(`
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
@@ -591,7 +597,7 @@ function insertStep(runId, stepIndex, data = {}) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         runId,
-        stepIndex,
+        safeStepIndex,
         data.type || 'note',
         data.title || '',
         data.toolName || '',
@@ -606,7 +612,7 @@ function insertStep(runId, stepIndex, data = {}) {
     );
     if (info.changes > 0) {
         recordAgentCheckpoint(runId, {
-            stepIndex,
+            stepIndex: safeStepIndex,
             type: data.type || 'control',
             status: data.status || 'completed',
             state: {
@@ -676,7 +682,7 @@ async function runAgent(runId, user) {
     let deadlineTimer = null;
     try {
         assertRunUserActive(user);
-        const run = getRunForUser(runId, user, { includeDeleted: true });
+        const run = await getRunForUser(runId, user, { includeDeleted: true });
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at) return;
         ensureAgentTrace(run, {
@@ -1104,8 +1110,8 @@ function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
     return agentRecoveryTimer;
 }
 
-function approveAgentTool(runId, user, approve = true) {
-    const run = getRunForUser(runId, user);
+async function approveAgentTool(runId, user, approve = true) {
+    const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (run.status !== 'approval_required') return run;
     const metadata = getRunMetadata(run);
@@ -1127,7 +1133,7 @@ function approveAgentTool(runId, user, approve = true) {
             output: { status: 'rejected' }
         });
         createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
-        return getRunForUser(runId, user);
+        return await getRunForUser(runId, user);
     }
     const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
     const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
@@ -1146,7 +1152,7 @@ function approveAgentTool(runId, user, approve = true) {
         output: { status: 'approved', tool: pending.tool || '' }
     });
     enqueueAgentRun(runId, user);
-    return getRunForUser(runId, user);
+    return await getRunForUser(runId, user);
 }
 
 function getAgentRuntimeStatus(user = null) {
@@ -1205,7 +1211,7 @@ configureAgentArtifacts({
     getRunDetailForUser: getRunDetailForUserHelper
 });
 
-function createAgentRun({
+async function createAgentRun({
     user,
     goal,
     modelId,
@@ -1284,7 +1290,7 @@ function createAgentRun({
         const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
         const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
         if (requestedWorkflowId && requestedWorkflowVersion) {
-            const sourceWorkflow = resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
+            const sourceWorkflow = await resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
             if (!sourceWorkflow) {
                 const err = new Error('工作流版本不可用。');
                 err.status = 404;
@@ -1351,13 +1357,14 @@ function createAgentRun({
         );
     } catch (err) {
         if (normalizedDedupeKey && String(err.code || '').includes('CONSTRAINT')) {
-            const existing = db.prepare('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
+            const { sql } = require('../../db/statements');
+            const existing = sql('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
             if (existing) return existing;
         }
         throw err;
     }
     enqueueAgentRun(runId, user);
-    const run = getRunForUser(runId, user);
+    const run = await getRunForUser(runId, user);
     publishAgentRunEvent(runId, 'created');
     return run;
 }

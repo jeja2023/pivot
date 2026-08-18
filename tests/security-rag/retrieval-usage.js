@@ -269,7 +269,7 @@ test('RAG cache scope changes when knowledge version changes', () => {
     }
 });
 
-test('knowledge quality report exposes scored governance signals', () => {
+test('knowledge quality report exposes scored governance signals', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -283,7 +283,7 @@ test('knowledge quality report exposes scored governance signals', () => {
     `).run(userId, `quality-${suffix}.md`);
 
     try {
-        const report = getKnowledgeQualityReport(userId);
+        const report = await getKnowledgeQualityReport(userId);
         assert.equal(report.overview.readyEnabled, 1);
         assert.equal(report.signals.readinessRate, 100);
         assert.equal(report.signals.avgChunksPerReadyDoc, 4);

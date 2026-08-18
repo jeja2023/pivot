@@ -1,23 +1,31 @@
-const { sql } = require('../db/statements');
+/**
+ * server/repositories/knowledge.js
+ * 知识库数据访问层（SQLite / PostgreSQL 双方言）
+ *
+ * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
+ */
+const { query, queryOne, execute } = require('../db/client');
+const { nowOffsetExpr, orderNocase } = require('../db/dialect');
 const {
     buildCollectionAccessFilter,
     buildDocumentAccessFilter,
     normalizeKnowledgeUser
 } = require('../services/knowledge-access');
 
-function getCollectionForUser(collectionId, user) {
+async function getCollectionForUser(collectionId, user) {
     const access = buildCollectionAccessFilter(user, 'c');
-    return sql(`
+    const row = await queryOne(`
         SELECT c.*
         FROM knowledge_collections c
         WHERE c.id = ? AND c.deleted_at IS NULL AND ${access.sql}
-    `).get(collectionId, ...access.params) || null;
+    `, [collectionId, ...access.params]);
+    return row || null;
 }
 
 function listCollections(user) {
     const normalized = normalizeKnowledgeUser(user);
     const access = buildCollectionAccessFilter(normalized, 'c');
-    return sql(`
+    return query(`
         SELECT
             c.id,
             c.user_id,
@@ -39,29 +47,36 @@ function listCollections(user) {
         WHERE c.deleted_at IS NULL AND ${access.sql}
         GROUP BY c.id
         ORDER BY c.updated_at DESC, c.created_at DESC, c.id DESC
-    `).all(...access.params);
+    `, access.params);
 }
 
-function findCollectionByName(userId, name) {
-    return sql(`
+async function findCollectionByName(userId, name) {
+    const row = await queryOne(`
         SELECT *
         FROM knowledge_collections
         WHERE user_id = ? AND deleted_at IS NULL AND lower(name) = lower(?)
         ORDER BY updated_at DESC, id DESC
         LIMIT 1
-    `).get(userId, name) || null;
+    `, [userId, name]);
+    return row || null;
 }
 
-function upsertTags(userId, tags, now) {
+async function upsertTags(userId, tags, now) {
     if (!Array.isArray(tags) || tags.length === 0) return [];
-    const statement = sql('INSERT INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(user_id, tag) DO UPDATE SET deleted_at = NULL, updated_at = excluded.updated_at');
-    tags.forEach(tag => statement.run(userId, tag, now, now));
+    for (const tag of tags) {
+        await execute(`
+            INSERT INTO knowledge_tags (user_id, tag, created_at, updated_at, deleted_at)
+            VALUES (?, ?, ?, ?, NULL)
+            ON CONFLICT(user_id, tag) DO UPDATE
+                SET deleted_at = NULL, updated_at = excluded.updated_at
+        `, [userId, tag, now, now]);
+    }
     return tags;
 }
 
 function getDocumentForUser(docId, user, { includeDeleted = false } = {}) {
     const access = buildDocumentAccessFilter(user, 'd', 'c');
-    return sql(`
+    return queryOne(`
         SELECT d.*, c.name AS collection_name, c.scope AS collection_scope,
                c.allowed_units AS collection_allowed_units,
                c.allowed_user_ids AS collection_allowed_user_ids
@@ -69,42 +84,57 @@ function getDocumentForUser(docId, user, { includeDeleted = false } = {}) {
         LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
         WHERE d.id = ? ${includeDeleted ? '' : 'AND d.deleted_at IS NULL'}
           AND ${access.sql}
-    `).get(docId, ...access.params);
+    `, [docId, ...access.params]);
 }
 
-function listDocumentTags(docId, user) {
+async function listDocumentTags(docId, user) {
     const access = buildDocumentAccessFilter(user, 'd', 'c');
-    return sql(`
+    const rows = await query(`
         SELECT t.tag
         FROM knowledge_doc_tags t
         JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
         LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
         WHERE t.doc_id = ? AND ${access.sql}
-        ORDER BY tag COLLATE NOCASE ASC
-    `).all(docId, ...access.params).map(row => row.tag);
+        ORDER BY ${orderNocase('t.tag')} ASC
+    `, [docId, ...access.params]);
+    return rows.map(row => row.tag);
 }
 
 function listDocumentChunks(docId, limit, offset) {
-    return sql(`
+    return query(`
         SELECT id, content, LENGTH(content) AS length
         FROM knowledge_chunks
         WHERE doc_id = ?
         ORDER BY id ASC
         LIMIT ? OFFSET ?
-    `).all(docId, limit, offset);
+    `, [docId, limit, offset]);
 }
 
-function countDocumentChunks(docId) {
-    return sql('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?').get(docId).count;
+async function countDocumentChunks(docId) {
+    const row = await queryOne('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?', [docId]);
+    return Number(row?.count || 0);
 }
 
 function listAllDocumentChunks(docId) {
-    return sql('SELECT id AS chunkId, content FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC').all(docId);
+    return query(
+        'SELECT id AS "chunkId", content FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC',
+        [docId]
+    );
 }
 
-function iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
+/**
+ * 拉取可访问的分块向量集合。
+ *
+ * 历史实现返回 better-sqlite3 的同步迭代器（statement.iterate）；PG 无同源
+ * 语义，且调用方随后要在 JS 侧逐条计算余弦相似度，故统一返回数组。
+ * 候选集规模由 scopeFilter 与 RAG_CANDIDATE_LIMIT 约束，不会无界膨胀。
+ */
+function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    const statement = sql(`
+    const params = user
+        ? [...scopeFilter.params, ...scopeFilter.accessParams]
+        : [userId, ...scopeFilter.params];
+    return query(`
         SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
@@ -117,37 +147,34 @@ function iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) 
           AND COALESCE(d.is_enabled, 1) = 1
           ${scopeFilter.sql}
           ${scopeFilter.accessSql}
-    `);
-    const params = user
-        ? [...scopeFilter.params, ...scopeFilter.accessParams]
-        : [userId, ...scopeFilter.params];
-    return statement.iterate(...params);
+    `, params);
 }
 
-function getDocumentName(docId) {
-    return sql('SELECT name FROM knowledge_docs WHERE id = ?').get(docId) || {};
+async function getDocumentName(docId) {
+    const row = await queryOne('SELECT name FROM knowledge_docs WHERE id = ?', [docId]);
+    return row || {};
 }
 
 function getDocumentQualityOverview(userId) {
-    return sql(`
+    return queryOne(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS readyEnabled,
+            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS "readyEnabled",
             SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
             SUM(CASE WHEN COALESCE(is_enabled, 1) = 0 THEN 1 ELSE 0 END) AS disabled,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS emptyReady,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(updated_at, processed_at, created_at) < datetime('now', '+8 hours', '-180 days') THEN 1 ELSE 0 END) AS staleReady,
+            SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS "emptyReady",
+            SUM(CASE WHEN status = 'ready' AND COALESCE(updated_at, processed_at, created_at) < ${nowOffsetExpr('-180 days')} THEN 1 ELSE 0 END) AS "staleReady",
             COALESCE(SUM(chunk_count), 0) AS chunks,
-            COALESCE(SUM(source_size), 0) AS sourceSize
+            COALESCE(SUM(source_size), 0) AS "sourceSize"
         FROM knowledge_docs
         WHERE user_id = ? AND deleted_at IS NULL
-    `).get(userId);
+    `, [userId]);
 }
 
 function listProblemDocuments(userId) {
-    return sql(`
+    return query(`
         SELECT d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
                d.progress, d.error_message, d.updated_at,
                COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0) AS unhelpful,
@@ -155,11 +182,13 @@ function listProblemDocuments(userId) {
         FROM knowledge_docs d
         LEFT JOIN rag_feedback f ON f.user_id = d.user_id AND f.doc_name = d.name
         WHERE d.user_id = ? AND d.deleted_at IS NULL
-        GROUP BY d.id
+        GROUP BY d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
+                 d.progress, d.error_message, d.updated_at, d.created_at
         HAVING d.status = 'error'
             OR COALESCE(d.is_enabled, 1) = 0
             OR (d.status = 'ready' AND COALESCE(d.chunk_count, 0) = 0)
-            OR unhelpful > helpful
+            OR COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0)
+             > COALESCE(SUM(CASE WHEN f.helpful = 1 THEN 1 ELSE 0 END), 0)
         ORDER BY
             CASE
                 WHEN d.status = 'error' THEN 0
@@ -169,7 +198,7 @@ function listProblemDocuments(userId) {
             END,
             COALESCE(d.updated_at, d.created_at) DESC
         LIMIT 12
-    `).all(userId);
+    `, [userId]);
 }
 
 module.exports = {
@@ -182,7 +211,8 @@ module.exports = {
     listDocumentChunks,
     countDocumentChunks,
     listAllDocumentChunks,
-    iterateAccessibleChunkEmbeddings,
+    listAccessibleChunkEmbeddings,
+    iterateAccessibleChunkEmbeddings: listAccessibleChunkEmbeddings,
     getDocumentName,
     getDocumentQualityOverview,
     listProblemDocuments

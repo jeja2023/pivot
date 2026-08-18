@@ -418,7 +418,7 @@ test('Agent 工具列表将数据库连接作为参数暴露，并路由通用 D
         );
 
         await runAgent(runId, user);
-        const detail = getRunDetailForUser(runId, user);
+        const detail = await getRunDetailForUser(runId, user);
         assert.equal(detail.run.status, 'completed');
         assert.equal(detail.run.final_answer, 'DAG 查询完成');
         assert.equal(detail.dagNodes[0].tool_name, 'db.run_readonly_query');

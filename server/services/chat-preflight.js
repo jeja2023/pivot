@@ -34,9 +34,9 @@ function buildChatRequestState(req) {
     };
 }
 
-function validateChatPreflight({ state, user, req, logAction }) {
+async function validateChatPreflight({ state, user, req, logAction }) {
     const { sessionId, userId, modelId, modelContent } = state;
-    const session = sessionsRepository.getSessionIdForUser(sessionId, userId);
+    const session = await sessionsRepository.getSessionIdForUser(sessionId, userId);
     if (!session) {
         return { error: { error: '无权访问或会话不存在', code: 'FORBIDDEN' } };
     }

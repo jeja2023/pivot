@@ -1,3 +1,11 @@
+/**
+ * server/db/statements.js
+ * SQLite 预编译语句缓存层（仅在 SQLite 模式下有效）
+ *
+ * PG 模式请使用 server/db/client.js 的异步 query/queryOne/execute/transaction。
+ */
+const { isPostgres } = require('./dialect');
+
 const defaultCache = new Map();
 
 function normalizeSqlText(text) {
@@ -34,7 +42,18 @@ function createStatementCache(database) {
     };
 }
 
+/**
+ * 返回 SQLite 预编译语句（.get/.all/.run）。
+ * 在 PG 模式下调用会抛出错误，提示使用 client.js。
+ */
 function sql(text) {
+    if (isPostgres()) {
+        throw new Error(
+            `[DB] sql() 在 PostgreSQL 模式下不可用。请将调用方改为使用 server/db/client.js 的异步 API：\n` +
+            `  query()、queryOne()、execute()、transaction()\n` +
+            `SQL: ${String(text).slice(0, 120)}`
+        );
+    }
     const { db } = require('./connection');
     return prepareCached(defaultCache, db, text);
 }

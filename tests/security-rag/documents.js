@@ -73,7 +73,7 @@ test('knowledge_docs 支持索引状态元数据', () => {
     }
 });
 
-test('knowledge_docs 支持启用进度和反馈元数据', () => {
+test('knowledge_docs 支持启用进度和反馈元数据', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -89,7 +89,7 @@ test('knowledge_docs 支持启用进度和反馈元数据', () => {
     `).run(docInfo.lastInsertRowid, 'RAG feedback chunk', 'RAG feedback chunk', JSON.stringify([1, 0]));
 
     try {
-        const detail = getKnowledgeDocumentDetail({
+        const detail = await getKnowledgeDocumentDetail({
             docId: docInfo.lastInsertRowid,
             userId: userInfo.lastInsertRowid
         });
@@ -127,7 +127,7 @@ test('RAG 文档源路径限制在 knowledge_docs 上传目录内', () => {
     assert.equal(getKnowledgeSourcePath('uploads/knowledge_docs/%2e%2e/secret.txt'), null);
 });
 
-test('RAG 文档上传会保存修复后的中文文件名', () => {
+test('RAG 文档上传会保存修复后的中文文件名', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -142,7 +142,7 @@ test('RAG 文档上传会保存修复后的中文文件名', () => {
     let docId = null;
 
     try {
-        const result = createKnowledgeDocumentFromUpload({
+        const result = await createKnowledgeDocumentFromUpload({
             userId,
             file: {
                 path: tempPath,
@@ -524,8 +524,8 @@ test('RAG collection scope limits debug retrieval candidates', async () => {
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`rag_collection_${suffix}`, 'hash', 'RAG Collection Test', 'QA', 'user', 'active');
     const userId = userInfo.lastInsertRowid;
-    const collectionA = createKnowledgeCollection({ userId, name: `制度专题 ${suffix}` });
-    const collectionB = createKnowledgeCollection({ userId, name: `项目专题 ${suffix}` });
+    const collectionA = await createKnowledgeCollection({ userId, name: `制度专题 ${suffix}` });
+    const collectionB = await createKnowledgeCollection({ userId, name: `项目专题 ${suffix}` });
     const docA = db.prepare(`
         INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
         VALUES (?, ?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
@@ -564,9 +564,9 @@ test('RAG collection scope limits debug retrieval candidates', async () => {
         assert.equal(allIds.includes(chunkA.lastInsertRowid), true);
         assert.equal(allIds.includes(chunkB.lastInsertRowid), true);
 
-        const moved = setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: collectionA.id });
+        const moved = await setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: collectionA.id });
         assert.equal(moved.collection_id, collectionA.id);
-        const collections = listKnowledgeCollections(userId);
+        const collections = await listKnowledgeCollections(userId);
         const updatedA = collections.find(item => item.id === collectionA.id);
         assert.equal(updatedA.doc_count, 2);
     } finally {
@@ -584,8 +584,8 @@ test('RAG collection scope limits chat retrieval context', async () => {
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`rag_chat_scope_${suffix}`, 'hash', 'RAG Chat Scope Test', 'QA', 'user', 'active');
     const userId = userInfo.lastInsertRowid;
-    const collectionA = createKnowledgeCollection({ userId, name: `Chat Scope A ${suffix}` });
-    const collectionB = createKnowledgeCollection({ userId, name: `Chat Scope B ${suffix}` });
+    const collectionA = await createKnowledgeCollection({ userId, name: `Chat Scope A ${suffix}` });
+    const collectionB = await createKnowledgeCollection({ userId, name: `Chat Scope B ${suffix}` });
     const docAName = `chat-scope-a-${suffix}.txt`;
     const docBName = `chat-scope-b-${suffix}.txt`;
     const docA = db.prepare(`
@@ -629,8 +629,8 @@ test('RAG tag scope limits debug retrieval candidates', async () => {
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`rag_tag_${suffix}`, 'hash', 'RAG Tag Test', 'QA', 'user', 'active');
     const userId = userInfo.lastInsertRowid;
-    const financeCollection = createKnowledgeCollection({ userId, name: `财务专题-${suffix}` });
-    const opsCollection = createKnowledgeCollection({ userId, name: `运维专题-${suffix}` });
+    const financeCollection = await createKnowledgeCollection({ userId, name: `财务专题-${suffix}` });
+    const opsCollection = await createKnowledgeCollection({ userId, name: `运维专题-${suffix}` });
     const docA = db.prepare(`
         INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, created_at, updated_at)
         VALUES (?, ?, 'ready', 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
@@ -649,13 +649,15 @@ test('RAG tag scope limits debug retrieval candidates', async () => {
     const chunkB = insertChunk.run(docB.lastInsertRowid, contentB, buildRagSearchContent(contentB), JSON.stringify([0.5, 0.5]));
 
     try {
-        assert.ok(setKnowledgeDocumentCollection({ docId: docA.lastInsertRowid, userId, collectionId: financeCollection.id }));
-        assert.ok(setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: opsCollection.id }));
-        ['财务', '合同', '2026', '运维'].forEach(tag => createKnowledgeTag({ userId, tag }));
+        assert.ok(await setKnowledgeDocumentCollection({ docId: docA.lastInsertRowid, userId, collectionId: financeCollection.id }));
+        assert.ok(await setKnowledgeDocumentCollection({ docId: docB.lastInsertRowid, userId, collectionId: opsCollection.id }));
+        for (const tag of ['财务', '合同', '2026', '运维']) {
+            await createKnowledgeTag({ userId, tag });
+        }
         assert.deepEqual(setKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId, tags: ['财务', '合同', '2026'] }), ['财务', '合同', '2026']);
         assert.deepEqual(setKnowledgeDocumentTags({ docId: docB.lastInsertRowid, userId, tags: ['运维', '合同'] }), ['运维', '合同']);
-        assert.deepEqual(getKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId }), ['2026', '合同', '财务']);
-        const standaloneTag = createKnowledgeTag({ userId, tag: `待分配-${suffix}` });
+        assert.deepEqual(await getKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId }), ['2026', '合同', '财务']);
+        const standaloneTag = await createKnowledgeTag({ userId, tag: `待分配-${suffix}` });
         assert.equal(standaloneTag.tag, `待分配-${suffix}`);
         assert.equal(standaloneTag.doc_count, 0);
         const tagSummary = listKnowledgeTags(userId);
@@ -757,7 +759,7 @@ test('GET /docs 接口能正确连表查询总数并返回文档列表', async (
     const { sql } = require('../../server/db/statements');
     const user = sql('SELECT * FROM users WHERE id = ?').get(userId);
 
-    const collection = createKnowledgeCollection({ userId, name: `Docs Collection ${suffix}` });
+    const collection = await createKnowledgeCollection({ userId, name: `Docs Collection ${suffix}` });
     const docInfo = db.prepare(`
         INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at)
         VALUES (?, ?, ?, 'ready', 1, 0, datetime('now', '+8 hours'), datetime('now', '+8 hours'))

@@ -263,7 +263,7 @@ test('RRF 会融合独立向量召回，不受已占满的关键词候选池限�
     }
 });
 
-test('知识图谱会索引并丰富检索上下文，同时支持整理操作', () => {
+test('知识图谱会索引并丰富检索上下文，同时支持整理操作', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status)
@@ -283,7 +283,7 @@ test('知识图谱会索引并丰富检索上下文，同时支持整理操作',
     `).run(docId, text, buildRagSearchContent(text), JSON.stringify([1, 0]));
 
     try {
-        const indexed = indexKnowledgeGraphForChunks({
+        const indexed = await indexKnowledgeGraphForChunks({
             userId,
             docId,
             chunks: [{ chunkId: chunkInfo.lastInsertRowid, content: text }]
@@ -333,7 +333,7 @@ test('知识图谱会索引并丰富检索上下文，同时支持整理操作',
     }
 });
 
-test('知识图谱会治理低可信关系并支持确认、质量摘要和图谱查询', () => {
+test('知识图谱会治理低可信关系并支持确认、质量摘要和图谱查询', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status)
@@ -353,7 +353,7 @@ test('知识图谱会治理低可信关系并支持确认、质量摘要和图�
     `).run(docId, text, buildRagSearchContent(text), JSON.stringify([1, 0]));
 
     try {
-        const indexed = indexKnowledgeGraphForChunks({
+        const indexed = await indexKnowledgeGraphForChunks({
             userId,
             docId,
             chunks: [{ chunkId: chunkInfo.lastInsertRowid, content: text }]

@@ -75,9 +75,9 @@ function decodeSessionCursor(value) {
     }
 }
 
-function appendAttachmentTokens(messages, userId, sessionId) {
-    const rows = sessionsRepository.listAttachmentTokens(userId, sessionId, getBeijingTimestamp());
-    if (rows.length === 0) return messages;
+async function appendAttachmentTokens(messages, userId, sessionId) {
+    const rows = await sessionsRepository.listAttachmentTokens(userId, sessionId, getBeijingTimestamp());
+    if (!rows || rows.length === 0) return messages;
 
     const tokenEntries = rows.flatMap(row => {
             const plainUrl = '/' + String(row.file_path || '').replace(/\\/g, '/');
@@ -90,7 +90,7 @@ function appendAttachmentTokens(messages, userId, sessionId) {
         });
     const tokenByUrl = new Map(tokenEntries);
 
-    return messages.map(message => {
+    return (messages || []).map(message => {
         let content = String(message.content || '');
         for (const [url, tokenizedUrl] of tokenByUrl.entries()) {
             const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -198,7 +198,7 @@ function createSessionsRouter({
     router.post('/sessions', authMiddleware, asyncHandler(async (req, res) => {
         const id = uuidv4();
         const title = req.body.title || '新对话';
-        sessionsRepository.createSession({
+        await sessionsRepository.createSession({
             id,
             userId: req.user.id,
             title,
@@ -209,7 +209,7 @@ function createSessionsRouter({
     }));
 
     router.get('/sessions/tags/list', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = sessionsRepository.listSessionTagValues(req.user.id);
+        const rows = await sessionsRepository.listSessionTagValues(req.user.id);
         const tags = [...new Set(rows.flatMap(row => String(row.tags).split(',').map(tag => tag.trim()).filter(Boolean)))].sort();
         res.json(tags);
     }));
@@ -279,29 +279,29 @@ function createSessionsRouter({
     }));
 
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const session = sessionsRepository.getSessionById(req.params.id, req.user.id);
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
         const requestedLimit = Number.parseInt(req.query.messageLimit, 10);
         if (Number.isSafeInteger(requestedLimit) && requestedLimit > 0) {
-            const pageResult = sessionsRepository.listMessagePage(req.params.id, req.user.id, {
+            const pageResult = await sessionsRepository.listMessagePage(req.params.id, req.user.id, {
                 beforeId: req.query.beforeMessageId,
                 limit: requestedLimit
             });
-            const messages = appendAttachmentTokens(pageResult.messages, req.user.id, req.params.id);
+            const messages = await appendAttachmentTokens(pageResult.messages, req.user.id, req.params.id);
             const contextMeta = req.query.beforeMessageId
                 ? null
-                : buildContextMeta(sessionsRepository.listMessages(req.params.id, req.user.id));
+                : buildContextMeta(await sessionsRepository.listMessages(req.params.id, req.user.id));
             return res.json({ session, messages, page: pageResult.page, contextMeta });
         }
-        const rawMessages = sessionsRepository.listMessages(req.params.id, req.user.id);
-        const messages = appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
+        const rawMessages = await sessionsRepository.listMessages(req.params.id, req.user.id);
+        const messages = await appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
         res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
     }));
 
     router.get('/sessions/:id/context', authMiddleware, asyncHandler(async (req, res) => {
-        const session = sessionsRepository.getSessionById(req.params.id, req.user.id);
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const rawMessages = sessionsRepository.listMessages(req.params.id, req.user.id);
+        const rawMessages = await sessionsRepository.listMessages(req.params.id, req.user.id);
         res.json({ contextMeta: buildContextMeta(rawMessages) });
     }));
 
