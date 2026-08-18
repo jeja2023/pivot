@@ -2,8 +2,13 @@ const SQLITE_DIALECT = 'sqlite';
 const POSTGRES_DIALECT = 'postgres';
 
 function getDialect() {
-    const value = String(process.env.PIVOT_DB_DIALECT || SQLITE_DIALECT).trim().toLowerCase();
-    return value === POSTGRES_DIALECT ? POSTGRES_DIALECT : SQLITE_DIALECT;
+    const explicit = String(
+        process.env.PIVOT_DB_DIALECT ||
+        process.env.DB_CLIENT ||
+        (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgres://') || process.env.DATABASE_URL.startsWith('postgresql://')) ? POSTGRES_DIALECT : '') ||
+        SQLITE_DIALECT
+    ).trim().toLowerCase();
+    return ['postgres', 'postgresql', 'pg'].includes(explicit) ? POSTGRES_DIALECT : SQLITE_DIALECT;
 }
 
 function isPostgres() {
