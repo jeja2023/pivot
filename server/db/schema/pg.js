@@ -113,9 +113,17 @@ function buildAddForeignKeySql(fk) {
             IF NOT EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}'
             ) THEN
-                ALTER TABLE "${fk.table}"
-                    ADD CONSTRAINT "${constraintName}"
-                    FOREIGN KEY ("${fk.column}") REFERENCES "${fk.refTable}"("${fk.refColumn}")${onDelete};
+                BEGIN
+                    ALTER TABLE "${fk.table}"
+                        ADD CONSTRAINT "${constraintName}"
+                        FOREIGN KEY ("${fk.column}") REFERENCES "${fk.refTable}"("${fk.refColumn}")${onDelete};
+                EXCEPTION WHEN foreign_key_violation OR others THEN
+                    -- 若历史存量数据存在孤儿关联，使用 NOT VALID 挂载约束，保障后续新增数据受控
+                    ALTER TABLE "${fk.table}"
+                        ADD CONSTRAINT "${constraintName}"
+                        FOREIGN KEY ("${fk.column}") REFERENCES "${fk.refTable}"("${fk.refColumn}")${onDelete}
+                        NOT VALID;
+                END;
             END IF;
         END $$`;
 }

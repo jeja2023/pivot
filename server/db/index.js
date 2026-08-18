@@ -8,8 +8,13 @@
 const { isPostgres } = require('./dialect');
 const { db, dataDir, dbPath } = require('./connection');
 
-// SQLite 模式：同步初始化
 let stmts = {};
+exports.db = db;
+exports.dataDir = dataDir;
+exports.dbPath = dbPath;
+exports.stmts = stmts;
+exports.initPostgresDatabase = initPostgresDatabase;
+
 if (!isPostgres()) {
     const { initSchema } = require('./schema');
     const { runMigrations } = require('./migrate');

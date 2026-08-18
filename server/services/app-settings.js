@@ -131,13 +131,70 @@ function setAppSetting(key, value, options = {}) {
     return getAppSettingRow(key);
 }
 
+const { isPostgres } = require('../db/dialect');
+const { query, queryOne, execute } = require('../db/client');
+
+async function getAppSettingRowAsync(key) {
+    if (!isPostgres()) return getAppSettingRow(key);
+    return await queryOne(
+        'SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = $1',
+        [key]
+    );
+}
+
+async function ensureAppSettingAsync(key, value, options = {}) {
+    if (!isPostgres()) return ensureAppSetting(key, value, options);
+    const existing = await getAppSettingRowAsync(key);
+    if (existing) return { inserted: false, row: existing };
+    const updatedAt = options.updatedAt || new Date().toISOString();
+    await execute(
+        'INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING',
+        [key, String(value), updatedAt, options.updatedBy || null]
+    );
+    return { inserted: true, row: await getAppSettingRowAsync(key) };
+}
+
+async function setAppSettingAsync(key, value, options = {}) {
+    if (!isPostgres()) return setAppSetting(key, value, options);
+    const updatedAt = options.updatedAt || new Date().toISOString();
+    await execute(
+        `INSERT INTO app_settings (key, value, updated_at, updated_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (key) DO UPDATE SET
+            value = EXCLUDED.value,
+            updated_at = EXCLUDED.updated_at,
+            updated_by = EXCLUDED.updated_by`,
+        [key, String(value), updatedAt, options.updatedBy || null]
+    );
+    return await getAppSettingRowAsync(key);
+}
+
+async function getAppSettingsMapAsync() {
+    if (!isPostgres()) return getAppSettingsMap();
+    const rows = await query('SELECT key, value, updated_at, updated_by FROM app_settings ORDER BY key ASC');
+    const settings = {};
+    rows.forEach(row => {
+        settings[row.key] = {
+            value: row.value,
+            enabled: row.value === 'true',
+            updatedAt: row.updated_at,
+            updatedBy: row.updated_by
+        };
+    });
+    return settings;
+}
+
 module.exports = {
     deleteAppSetting,
     ensureAppSetting,
+    ensureAppSettingAsync,
     getAppSettingRow,
+    getAppSettingRowAsync,
     getAppSettingRows,
     getAppSettingsMap,
+    getAppSettingsMapAsync,
     getAppSettingValue,
     isAppSettingsConflictTargetError,
-    setAppSetting
+    setAppSetting,
+    setAppSettingAsync
 };
