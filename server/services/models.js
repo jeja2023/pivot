@@ -231,6 +231,7 @@ function getOrCreateEmbeddingUsageModel({ userId = null, url = '', model = '' } 
 }
 
 function migrateModelSecrets() {
+    if (!db) return;
     const models = db.prepare("SELECT id, api_key FROM models WHERE api_key IS NOT NULL AND api_key != '' AND api_key NOT LIKE 'enc:v1:%'").all();
     const update = db.prepare('UPDATE models SET api_key = ? WHERE id = ?');
     models.forEach(model => update.run(encryptSecret(model.api_key), model.id));

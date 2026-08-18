@@ -19,6 +19,7 @@ let monitorRefreshPromise = null;
 let monitorRefreshTimer = null;
 
 function getActiveEndpointModels() {
+    if (!db) return [];
     return db.prepare(`
         SELECT id, name, url, monitor_url, max_concurrent, supports_vision
         FROM models

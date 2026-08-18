@@ -850,6 +850,7 @@ function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = nu
 }
 
 function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
+    if (!db) return;
     const rows = db.prepare(`
         SELECT id, user_id, source_path
         FROM knowledge_docs

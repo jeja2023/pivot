@@ -18,7 +18,7 @@ function clearRuntimeConfigCache() {
 }
 
 function loadRuntimeSettingsRows() {
-    if (RUNTIME_SETTING_DEFINITIONS.length === 0) return new Map();
+    if (!db || RUNTIME_SETTING_DEFINITIONS.length === 0) return new Map();
     const keys = RUNTIME_SETTING_DEFINITIONS.map(definition => definition.key);
     const placeholders = keys.map(() => '?').join(',');
     try {
@@ -57,6 +57,7 @@ function getSettingRow(key) {
     if (RUNTIME_SETTING_DEFINITION_BY_KEY[key]) {
         return getCachedRuntimeRows().get(key) || null;
     }
+    if (!db) return null;
     try {
         return db.prepare(`
             SELECT key, value, updated_at, updated_by

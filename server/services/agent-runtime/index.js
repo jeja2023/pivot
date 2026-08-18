@@ -1056,6 +1056,7 @@ function enqueueAgentRun(runId, _user) {
 }
 
 function recoverAgentRuns() {
+    if (!db) return;
     const now = getBeijingTimestamp();
     const cutoff = getBeijingTimestamp(new Date(Date.now() - (AGENT_STALE_RUNNING_MINUTES * 60 * 1000)));
     const staleRunning = db.prepare(`
