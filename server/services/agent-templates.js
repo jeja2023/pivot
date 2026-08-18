@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { normalizeStrategy: normalizeRouterStrategy } = require('./model-router');
 const { normalizeDagInputsPayload } = require('./agent-workflows');
@@ -58,60 +58,62 @@ function normalizeTemplatePayload(body = {}, user = {}) {
     };
 }
 
-function listAgentTemplates(user) {
-    return db.prepare(`
+async function listAgentTemplates(user) {
+    const rows = await query(`
         SELECT *
         FROM agent_templates
         WHERE deleted_at IS NULL
           AND (user_id = ? OR scope = 'shared')
         ORDER BY scope DESC, updated_at DESC, id DESC
         LIMIT 100
-    `).all(user.id).filter(template => assertTemplateAccess(template, user, false));
+    `, [user.id]);
+    return rows.filter(template => assertTemplateAccess(template, user, false));
 }
 
-function createAgentTemplate(user, body = {}) {
+async function createAgentTemplate(user, body = {}) {
     const data = normalizeTemplatePayload(body, user);
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO agent_templates (
             user_id, scope, name, description, goal_template, run_mode, tool_policy, tool_allowlist,
             approval_policy, max_steps, max_token_budget, retry_limit, context_config, allowed_units,
             model_router, dag_spec, dag_inputs, workflow_id, workflow_version, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+        RETURNING id
+    `, [
         user.id, data.scope, data.name, data.description, data.goalTemplate, data.runMode,
         data.toolPolicy, data.toolAllowlist, data.approvalPolicy, data.maxSteps,
         data.maxTokenBudget, data.retryLimit, data.contextConfig, data.allowedUnits,
         data.modelRouter, data.dagSpec, data.dagInputs, data.workflowId, data.workflowVersion, now, now
-    );
-    return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(info.lastInsertRowid);
+    ]);
+    return await queryOne('SELECT * FROM agent_templates WHERE id = ?', [row?.id]);
 }
 
-function updateAgentTemplate(templateId, user, body = {}) {
-    const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
+async function updateAgentTemplate(templateId, user, body = {}) {
+    const template = await queryOne('SELECT * FROM agent_templates WHERE id = ?', [templateId]);
     if (!assertTemplateAccess(template, user, true)) return null;
     const data = normalizeTemplatePayload(body, user);
-    db.prepare(`
+    await execute(`
         UPDATE agent_templates
         SET scope = ?, name = ?, description = ?, goal_template = ?, run_mode = ?, tool_policy = ?,
             tool_allowlist = ?, approval_policy = ?, max_steps = ?, max_token_budget = ?, retry_limit = ?,
             context_config = ?, allowed_units = ?, model_router = ?, dag_spec = ?, dag_inputs = ?,
             workflow_id = ?, workflow_version = ?, updated_at = ?
         WHERE id = ?
-    `).run(
+    `, [
         data.scope, data.name, data.description, data.goalTemplate, data.runMode, data.toolPolicy,
         data.toolAllowlist, data.approvalPolicy, data.maxSteps, data.maxTokenBudget, data.retryLimit,
         data.contextConfig, data.allowedUnits, data.modelRouter, data.dagSpec, data.dagInputs,
         data.workflowId, data.workflowVersion, getBeijingTimestamp(), templateId
-    );
-    return db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
+    ]);
+    return await queryOne('SELECT * FROM agent_templates WHERE id = ?', [templateId]);
 }
 
-function deleteAgentTemplate(templateId, user) {
-    const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(templateId);
+async function deleteAgentTemplate(templateId, user) {
+    const template = await queryOne('SELECT * FROM agent_templates WHERE id = ?', [templateId]);
     if (!assertTemplateAccess(template, user, true)) return null;
     const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_templates SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, templateId);
+    await execute('UPDATE agent_templates SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, templateId]);
     return { ...template, deleted_at: now };
 }
 

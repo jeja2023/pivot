@@ -29,7 +29,7 @@ test('awaiting approval is a legal non-terminal run status transition', () => {
     assert.equal(canTransitionAgentRunStatus('awaiting_approval', 'running'), true);
 });
 
-test('runtime recovery leaves stale awaiting approval runs suspended', () => {
+test('runtime recovery leaves stale awaiting approval runs suspended', async () => {
     const userId = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()?.id;
     assert.ok(userId, 'test database should contain a seeded user');
 
@@ -66,7 +66,7 @@ test('runtime recovery leaves stale awaiting approval runs suspended', () => {
     );
 
     try {
-        recoverAgentRuns();
+        await recoverAgentRuns();
 
         const staleRunning = db.prepare('SELECT status, error_message FROM agent_runs WHERE id = ?').get(staleRunningId);
         const awaitingApproval = db.prepare('SELECT status, error_message FROM agent_runs WHERE id = ?').get(awaitingApprovalId);

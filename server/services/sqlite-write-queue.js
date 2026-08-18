@@ -37,7 +37,7 @@ const BASE_RETRY_DELAY_MS = Math.max(FLUSH_INTERVAL_MS, 10);
 const MAX_RETRY_DELAY_MS = Math.max(BASE_RETRY_DELAY_MS * 16, 1000);
 let retryDelayMs = BASE_RETRY_DELAY_MS;
 
-const statements = {
+const statements = db ? {
     auditLogs: db.prepare(`
         INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp)
         VALUES (@userId, @action, @details, @ipAddress, @timestamp)
@@ -63,19 +63,22 @@ const statements = {
         )
     `),
     modelUsageEvents: db.prepare(`
-        INSERT INTO model_usage_events (user_id, model_id, source, token_count, input_tokens, output_tokens, created_at)
-        VALUES (@userId, @modelId, @source, @tokenCount, @inputTokens, @outputTokens, @createdAt)
+        INSERT INTO model_usage_events (
+            user_id, model_id, source, token_count, input_tokens, output_tokens, created_at
+        ) VALUES (
+            @userId, @modelId, @source, @tokenCount, @inputTokens, @outputTokens, @createdAt
+        )
     `)
-};
+} : {};
 
-const transactions = Object.fromEntries(
+const transactions = db ? Object.fromEntries(
     Object.entries(statements).map(([name, statement]) => [
         name,
         db.transaction((items) => {
             for (const item of items) statement.run(item);
         })
     ])
-);
+) : {};
 
 function scheduleFlush(delayMs = FLUSH_INTERVAL_MS) {
     if (flushTimer) return;

@@ -261,8 +261,8 @@ test('共享工作流响应会遮蔽 HTTP 节点里的直接敏感值', () => {
     assert.equal(response.dag_spec.nodes[0].input.body.value, 'visible');
 });
 
-test('共享工作流预检会阻止接收者缺失的模型和凭据', () => {
-    const report = inspectAgentWorkflowDependencies({
+test('共享工作流预检会阻止接收者缺失的模型和凭据', async () => {
+    const report = await inspectAgentWorkflowDependencies({
         nodes: [
             { id: 'llm', title: '生成结果', tool: 'agent.llm', input: { model: '999999999' } },
             { id: 'http', title: '调用接口', tool: 'agent.http', input: { credentialSecret: 'MISSING_SHARED_CREDENTIAL' } }
@@ -303,7 +303,7 @@ test('依赖清单去重并将模型、工具和凭据替换为接收者映射',
     assert.equal(dagSpec.nodes[0].input.model, 'OWNER_MODEL');
 });
 
-test('接收者依赖映射固定到发布版本且凭据接口不返回明文', () => {
+test('接收者依赖映射固定到发布版本且凭据接口不返回明文', async () => {
     const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     const ownerInfo = sql(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status)
@@ -350,12 +350,12 @@ test('接收者依赖映射固定到发布版本且凭据接口不返回明文',
     };
 
     try {
-        const initial = getAgentWorkflowDependencyConfiguration(resolved, receiver);
+        const initial = await getAgentWorkflowDependencyConfiguration(resolved, receiver);
         assert.equal(initial.status, 'blocked');
         assert.match(initial.blockers[0], /配置并确认/);
-        assert.throws(() => resolveAgentWorkflowDependencyBindings(resolved, receiver), /配置并确认/);
+        await assert.rejects(async () => resolveAgentWorkflowDependencyBindings(resolved, receiver), /配置并确认/);
 
-        const saved = saveAgentWorkflowDependencyConfiguration(resolved, receiver, {
+        const saved = await saveAgentWorkflowDependencyConfiguration(resolved, receiver, {
             bindings: {
                 models: { [`owner-model-${suffix}`]: String(modelInfo.lastInsertRowid) },
                 credentials: { OWNER_SECRET: String(credentialInfo.lastInsertRowid) },
@@ -365,7 +365,7 @@ test('接收者依赖映射固定到发布版本且凭据接口不返回明文',
         assert.equal(saved.status, 'ready');
         assert.equal(JSON.stringify(saved).includes('DO_NOT_RETURN_THIS_SECRET'), false);
 
-        const bound = resolveAgentWorkflowDependencyBindings(resolved, receiver);
+        const bound = await resolveAgentWorkflowDependencyBindings(resolved, receiver);
         assert.equal(bound.dagSpec.nodes[0].input.model, String(modelInfo.lastInsertRowid));
         assert.equal(bound.dagSpec.nodes[1].input.credentialSecret, `PIVOT_BOUND_CREDENTIAL_${credentialInfo.lastInsertRowid}`);
 
@@ -373,7 +373,7 @@ test('接收者依赖映射固定到发布版本且凭据接口不返回明文',
             INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, created_by)
             VALUES (?, 2, ?, ?)
         `).run(workflowId, JSON.stringify(dagSpec), owner.id);
-        const stale = getAgentWorkflowDependencyConfiguration({
+        const stale = await getAgentWorkflowDependencyConfiguration({
             ...resolved,
             version: 2,
             version_id: Number(versionTwoInfo.lastInsertRowid)

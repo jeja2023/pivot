@@ -1,4 +1,4 @@
-const { getAccessibleModel, getModelDailyUsage } = require('./models');
+const { getAccessibleModelAsync, getModelDailyUsageAsync } = require('./models');
 const {
     ContextLengthExceededError,
     buildContextLengthExceededPayload,
@@ -41,7 +41,7 @@ async function validateChatPreflight({ state, user, req, logAction }) {
         return { error: { error: '无权访问或会话不存在', code: 'FORBIDDEN' } };
     }
 
-    const modelCfg = getAccessibleModel(modelId, user);
+    const modelCfg = await getAccessibleModelAsync(modelId, user);
     if (!modelCfg) {
         return { error: { error: '未找到可用的模型配置', code: 'MODEL_NOT_FOUND' } };
     }
@@ -67,7 +67,7 @@ async function validateChatPreflight({ state, user, req, logAction }) {
     }
 
     if (modelCfg.daily_token_limit && modelCfg.daily_token_limit > 0) {
-        const usedToday = getModelDailyUsage(userId, modelCfg.id);
+        const usedToday = await getModelDailyUsageAsync(userId, modelCfg.id);
         if (usedToday >= modelCfg.daily_token_limit) {
             logAction?.(req, '模型额度拦截', `模型: ${modelCfg.name}，今日已用 ${usedToday}/${modelCfg.daily_token_limit}`);
             return {

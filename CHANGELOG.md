@@ -1,3 +1,20 @@
+## [v0.1.0] - 2026-08-18
+
+### 核心数据库纯 PostgreSQL 架构全面升级与全链路异步化、数据字典元数据注释与生产级核验保障
+
+- **核心数据库纯 PostgreSQL（PostgreSQL 14+/17+）架构升级**：彻底解除单机 SQLite 数据库依赖与双模式兼容包袱，全面切换至纯 PostgreSQL 关系型数据库架构。仅保留 DuckDB 作为独立的高性能列式内存数据分析与处理引擎。
+- **全量 79 张表中文元数据注释字典（Data Dictionary）**：在 `server/db/schema/comments.js` 中新增覆盖系统全部 79 张核心业务表及所有核心业务字段（包含用户身份、权限治理、会话消息、思维链 Thought、Token 用量与成本、RAG 向量与图谱、智能体 DAG 工作流、MCP 工具服务与受控凭证）的原生中文注释字典，在初始化建表时自动执行 `COMMENT ON TABLE` 与 `COMMENT ON COLUMN`，无缝支持 Navicat、DBeaver、DataGrip 等企业级数据库治理客户端直接查阅。
+- **全链路数据访问层与异步 Promise API 改造**：
+  - 全面重构 `server/repositories/`、`server/services/` 和 `server/routes/`，彻底消除所有遗留的同步 `db.prepare` 与 SQLite 方言调用，全链路基于 `server/db/client.js` 导出的异步 Promise 接口（`query`、`queryOne`、`execute`、`transaction`）进行高并发连接池访问。
+  - 深度重构数据分析服务（`server/services/data-analysis/`）、知识图谱拓扑与实体合并（`server/services/knowledge-graph.js`）、长期记忆管理（`server/services/long-term-memory/`）、存储垃圾回收与日志归档（`server/services/storage-gc.js`、`server/services/maintenance.js`）、MCP 工具治理与工作流凭据（`server/services/mcp-client.js`、`workflow-credentials.js`、`share-targets.js`）及指标统计（`server/metrics.js`）。
+- **SQL 方言与参数化标准收口**：
+  - 消除 SQLite 专有语法（`UPDATE OR IGNORE` 升级为 PostgreSQL 标准防冲突更新，标量 `MAX`/`MIN` 升级为 `GREATEST`/`LEAST`，时间间隔统一收口为 `(? || ' days')::interval`）。
+  - 修复时间字段（`timestamptz`）与空字符串比较及 `LIMIT` 参数类型绑定错位，杜绝潜在类型转换异常。
+  - 智能体运行时后台周期性自愈与巡检（`startAgentRecoveryRunner`）进行日志降噪优化，仅在有实际异常任务恢复时记录 `INFO` 日志。
+- **自动化迁移、一致性校验工具链与全量自动化测试**：
+  - 提供完整的初始化（`scripts/setup_pg_db.js`）、拓扑感知数据迁移（`scripts/migrate_sqlite_to_pg.js`）、四级一致性深度核验（`scripts/verify_pg_migration.js`）与表结构对账（`scripts/diff_schema_sqlite_pg.js`）工具链。
+  - 全端通过 236 个服务端模块加载校验（`OK: 236 ERRORS: 0`）与全部 21 项业务端点自动化集成测试（通过率 100%）。
+
 ## [v0.0.269] - 2026-08-18
 
 ### 生产环境 PostgreSQL 双模式迁移全栈就绪、全链路数据访问层异步化改造与元数据字典注释系统

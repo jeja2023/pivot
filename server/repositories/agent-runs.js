@@ -5,7 +5,7 @@
  * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
  */
 const { query, queryOne, execute } = require('../db/client');
-const { jsonExtract, jsonValid, likeOperator } = require('../db/dialect');
+const { likeOperator } = require('../db/dialect');
 const { parseJsonObject } = require('../services/agent-validators');
 
 function normalizeBooleanOption(value) {
@@ -14,26 +14,19 @@ function normalizeBooleanOption(value) {
 }
 
 /**
- * 排除预览运行与评测运行的过滤条件。
- * metadata 是 TEXT 列且历史数据可能非法，故两侧都需容错取值：
- * SQLite 靠 json_valid 守卫，PG 靠 pivot_json_extract 内建异常捕获。
+ * 排除预览运行与评测运行的过滤条件（PostgreSQL）。
+ * metadata 是 TEXT 列且历史数据可能非法，PG 统一靠 pivot_json_extract 内建异常捕获。
  */
 function previewRunFilterSql(alias = 'r') {
-    return `((CASE
-        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND ${jsonValid(`${alias}.metadata`)}
-        THEN lower(COALESCE(
-            ${jsonExtract(`${alias}.metadata`, '$.workflowRunSource')},
-            ${jsonExtract(`${alias}.metadata`, '$.workflow_run_source')},
-            ${jsonExtract(`${alias}.metadata`, '$.runSource')},
+    return `(
+        lower(COALESCE(
+            pivot_json_extract(${alias}.metadata::text, '{workflowRunSource}'),
+            pivot_json_extract(${alias}.metadata::text, '{workflow_run_source}'),
+            pivot_json_extract(${alias}.metadata::text, '{runSource}'),
             ''
-        ))
-        ELSE ''
-    END) != 'preview'
-    AND (CASE
-        WHEN ${alias}.metadata IS NOT NULL AND ${alias}.metadata != '' AND ${jsonValid(`${alias}.metadata`)}
-        THEN ${jsonExtract(`${alias}.metadata`, '$.evaluation.evalRunId')}
-        ELSE NULL
-    END) IS NULL)`;
+        )) != 'preview'
+        AND pivot_json_extract(${alias}.metadata::text, '{evaluation,evalRunId}') IS NULL
+    )`;
 }
 
 function normalizeRunTypeFilter(value) {

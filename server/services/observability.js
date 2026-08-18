@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { db } = require('../db/connection');
+const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { assertSafeOutboundUrl } = require('../security');
@@ -113,32 +113,34 @@ async function sendWebhookAlert(event) {
             title: event.message,
             durationMs: event.duration_ms,
             thresholdMs: event.threshold_ms,
-            details: event.details ? JSON.parse(event.details) : null,
+            details: event.details ? (typeof event.details === 'object' ? event.details : JSON.parse(event.details)) : null,
             createdAt: event.created_at
         }, {
             user: guardUser,
             timeout: WEBHOOK_TIMEOUT_MS,
             headers: { 'Content-Type': 'application/json', 'User-Agent': 'Pivot-Alert/1.0' }
         });
-        db.prepare('UPDATE observability_events SET alerted_at = ? WHERE id = ?')
-            .run(getBeijingTimestamp(), event.id);
+        await execute('UPDATE observability_events SET alerted_at = ? WHERE id = ?', [
+            getBeijingTimestamp(), event.id
+        ]);
     } catch (e) {
         logger.warn({ err: e.message, eventId: event.id }, '可观测性 Webhook 告警发送失败');
     }
 }
 
-function recordObservabilityEvent(input = {}) {
+async function recordObservabilityEvent(input = {}) {
     const type = EVENT_TYPES.has(input.type) ? input.type : 'system';
     const durationMs = Math.max(0, Math.round(Number(input.durationMs || input.duration_ms || 0)));
     const thresholdMs = Math.max(0, Math.round(Number(input.thresholdMs || input.threshold_ms || 0)));
     const severity = normalizeSeverity(input.severity, durationMs, thresholdMs);
     const now = getBeijingTimestamp();
     try {
-        const info = db.prepare(`
+        const event = await queryOne(`
             INSERT INTO observability_events (
                 type, source, severity, duration_ms, threshold_ms, message, details, status, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-        `).run(
+            RETURNING *
+        `, [
             type,
             String(input.source || '').slice(0, 160),
             severity,
@@ -147,8 +149,7 @@ function recordObservabilityEvent(input = {}) {
             String(input.message || '').slice(0, 500),
             safeJson(input.details || {}),
             now
-        );
-        const event = db.prepare('SELECT * FROM observability_events WHERE id = ?').get(info.lastInsertRowid);
+        ]);
         if (event && (severity === 'warning' || severity === 'critical')) {
             sendWebhookAlert(event);
         }
@@ -215,7 +216,7 @@ function recordSlowRagRetrieval(query, durationMs, details = {}) {
     });
 }
 
-function listObservabilityEvents(options = {}) {
+async function listObservabilityEvents(options = {}) {
     const limit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 50, 1), 200);
     const type = EVENT_TYPES.has(options.type) ? options.type : '';
     const status = EVENT_STATUSES.has(options.status) ? options.status : '';
@@ -231,24 +232,24 @@ function listObservabilityEvents(options = {}) {
     }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT ?';
     params.push(limit);
-    return db.prepare(sql).all(...params).map(row => ({
+    const rows = await query(sql, params);
+    return (rows || []).map(row => ({
         ...row,
         details: (() => {
-            try { return JSON.parse(row.details || '{}'); } catch (e) { return {}; }
+            try { return typeof row.details === 'object' ? row.details : JSON.parse(row.details || '{}'); } catch (e) { return {}; }
         })()
     }));
 }
 
-function updateObservabilityEventStatus(id, status = 'ack') {
+async function updateObservabilityEventStatus(id, status = 'ack') {
     const nextStatus = EVENT_STATUSES.has(status) ? status : 'ack';
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    return await queryOne(`
         UPDATE observability_events
         SET status = ?, acknowledged_at = CASE WHEN ? = 'ack' THEN COALESCE(acknowledged_at, ?) ELSE acknowledged_at END
         WHERE id = ?
-    `).run(nextStatus, nextStatus, now, id);
-    if (info.changes === 0) return null;
-    return db.prepare('SELECT * FROM observability_events WHERE id = ?').get(id);
+        RETURNING *
+    `, [nextStatus, nextStatus, now, id]);
 }
 
 function getObservabilitySettings() {

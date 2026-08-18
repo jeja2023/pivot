@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const { db } = require('../db');
+const { query, queryOne } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getHttpMetricsSnapshot, getRagMetricsSnapshot } = require('../metrics');
 const { aiSemaphore } = require('../services/concurrency');
@@ -59,12 +59,12 @@ function formatUsageRoleLabel(role) {
 }
 
 async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT id, name, url, monitor_url, max_concurrent
         FROM models
         WHERE COALESCE(status, 'active') = 'active'
         ORDER BY id ASC
-    `).all();
+    `);
     const localNames = await getResolvedLocalHostnames({ requestHosts, publicUrl });
     const summary = {
         total: rows.length,
@@ -117,47 +117,52 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
     return summary;
 }
 
-// 计算"北京当日"的半开区间边界 [start, nextStart)，避免在 SQL 中对 created_at 套 date() 而失去索引。
-// created_at 以北京本地时间字符串 'YYYY-MM-DD HH:MM:SS' 存储，可直接做字典序比较，等价于原 date(col) = date('now','+8 hours')。
+// ─────────────────────────────────────────────────────────────────────────────
+// 日期工具（北京时间，SQLite 格式字符串比较 or PG AT TIME ZONE）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 计算"北京当日"的半开区间边界 [start, nextStart)
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10); // YYYY-MM-DD（北京当日）
     const start = `${day} 00:00:00`;
-    // 下一日 00:00:00 作为排他上界。用 UTC 算术避免本地时区/夏令时影响日期进位。
     const next = new Date(`${day}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
     const nextStart = `${next.toISOString().slice(0, 10)} 00:00:00`;
     return { start, nextStart };
 }
 
-// 将一个 'YYYY-MM-DD' 日期字符串按 UTC 算术偏移 deltaDays 天，返回 'YYYY-MM-DD'。
-// 仅做日期进位运算，不涉及时区换算（输入/输出均为纯日期）。
+// 将一个 'YYYY-MM-DD' 日期字符串按 UTC 算术偏移 deltaDays 天
 function shiftDayString(day, deltaDays) {
     const d = new Date(`${day}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() + deltaDays);
     return d.toISOString().slice(0, 10);
 }
 
-// "最近 N 天"的起始边界（含今天，向前 N-? 与原 SQL 对齐）：等价于 date('now','+8 hours','-N days')。
-// 原 SQL 的 date('now','+8 hours','-N days') 取北京当日的日期再减 N 天，得到一个 'YYYY-MM-DD' 边界（与 created_at 比较时按 00:00:00 起算）。
+// "最近 N 天"的起始边界（含今天）
 function getBeijingDaysAgoStart(days, date = new Date()) {
     const today = getBeijingTimestamp(date).slice(0, 10);
     return `${shiftDayString(today, -Math.abs(days))} 00:00:00`;
 }
 
-// 某个北京日期（'YYYY-MM-DD'）的次日 00:00:00，用作"截止日期（含当日）"的排他上界。
+// 某个北京日期（'YYYY-MM-DD'）的次日 00:00:00
 function getBeijingDateExclusiveEnd(day) {
     return `${shiftDayString(day, 1)} 00:00:00`;
 }
 
-// "当前北京时刻向前 N 分钟"的时间戳 'YYYY-MM-DD HH:MM:SS'，用于把 datetime('now','+8 hours','-N minutes') 改写为裸列范围。
+// "当前北京时刻向前 N 分钟"的时间戳
 function getBeijingMinutesAgoTimestamp(minutes, date = new Date()) {
     return getBeijingTimestamp(new Date(date.getTime() - minutes * 60 * 1000));
 }
 
-// 谓词下推：将过滤条件注入 UNION 两个分支内部（而非在派生表外部过滤），
-// 使 messages / model_usage_events 各自的 created_at / user_id 等索引可用，避免对两表全量物化。
-// innerWhere 中引用的列须在两表均存在（created_at / user_id / model_id / token_count）。
-// 使用命名参数（@name），可在多分支/多处复用同一参数。
+// ─────────────────────────────────────────────────────────────────────────────
+// SQL 构建工具
+// created_at 列在 SQLite 存为北京时间字符串，在 PG 中存为 timestamptz（UTC）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 生成 token 使用聚合的 UNION 子查询（messages + model_usage_events）。
+ * innerWhere 中的条件使用位置参数占位符 ?，由调用方管理参数数组。
+ */
 function tokenUsageSubquery(innerWhere = '') {
     const whereClause = innerWhere ? `WHERE ${innerWhere}` : '';
     return `
@@ -182,22 +187,50 @@ function balancedInputSql(alias) {
 }
 
 function balancedOutputSql(alias) {
-    return `MAX(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
+    return `GREATEST(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
 }
 
 function usageCostSql(usageAlias = 'usage', modelAlias = 'm') {
-    return `ROUND(((${balancedInputSql(usageAlias)}) * COALESCE(${modelAlias}.input_price_per_million, 0) + (${balancedOutputSql(usageAlias)}) * COALESCE(${modelAlias}.output_price_per_million, 0)) / 1000000.0, 6)`;
+    const expr = `((${balancedInputSql(usageAlias)}) * COALESCE(${modelAlias}.input_price_per_million, 0) + (${balancedOutputSql(usageAlias)}) * COALESCE(${modelAlias}.output_price_per_million, 0)) / 1000000.0`;
+    return `ROUND((${expr})::numeric, 6)`;
 }
 
-function getMonitorKnowledgeChunkCount() {
-    const row = db.prepare(`
+/**
+ * 生成 created_at 时间范围条件（PostgreSQL timestamptz）。
+ * 返回 { conditions: string[], params: any[] }
+ */
+function buildDateRangeConditions(startTs, endTs) {
+    const conditions = [];
+    const params = [];
+    if (startTs) {
+        conditions.push("created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai')");
+        params.push(startTs);
+    }
+    if (endTs) {
+        conditions.push("created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')");
+        params.push(endTs);
+    }
+    return { conditions, params };
+}
+
+/**
+ * 将 created_at（timestamptz）转换为北京时区的日期字符串，用于 GROUP BY day。
+ */
+function dateGroupExpr(col = 'created_at') {
+    return `(${col} AT TIME ZONE 'Asia/Shanghai')::date::text`;
+}
+
+async function getMonitorKnowledgeChunkCount() {
+    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const enabledDocCond = "COALESCE(d.is_enabled, 1) != 0";
+    const row = await queryOne(`
         SELECT COUNT(c.id) AS count
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON d.id = c.doc_id
         WHERE d.status = 'ready'
           AND d.deleted_at IS NULL
-          AND COALESCE(d.is_enabled, 1) = 1
-    `).get();
+          AND ${enabledDocCond}
+    `);
     return Number(row?.count || 0);
 }
 
@@ -218,8 +251,6 @@ function createAdminStatsRouter({
 }) {
     const router = express.Router();
 
-    // /monitor-summary 整体快照缓存：该处理器每次都执行较重的 SQL + DNS 解析，且仪表盘会高频轮询。
-    // 用 5s TTL 缓存装配好的成功响应对象，命中时直接返回，显著降低重复开销。错误响应不缓存。
     router.get('/monitor-summary', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const cacheNow = Date.now();
         const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1' || req.query?.cache === 'none';
@@ -229,26 +260,27 @@ function createAdminStatsRouter({
         const httpMetrics = getHttpMetricsSnapshot();
         const ragMetrics = {
             ...getRagMetricsSnapshot(),
-            chunksIndexed: getMonitorKnowledgeChunkCount()
+            chunksIndexed: await getMonitorKnowledgeChunkCount()
         };
-        const observabilityEvents = listObservabilityEvents({ limit: 12 });
-        const observabilityOpen = db.prepare(`
+        const observabilityEvents = await listObservabilityEvents({ limit: 12 });
+
+        const observabilityOpen = await query(`
             SELECT type, COUNT(*) AS count
             FROM observability_events
             WHERE status IN ('open', 'alerted')
             GROUP BY type
-        `).all();
+        `);
+
         const memory = process.memoryUsage();
         const cpu = process.cpuUsage();
-        
-        // 统计 15 分钟内活跃用户：把 datetime('now','+8 hours','-15 minutes') 改写为 JS 预计算的北京时间戳裸列比较，
-        // 使 idx_audit_logs_timestamp 可用（timestamp 同样以北京本地时间字符串存储）。
+
+        // 统计 15 分钟内活跃用户
         const activeUsersSince = getBeijingMinutesAgoTimestamp(15);
-        const activeUsersCount = db.prepare(`
-            SELECT COUNT(DISTINCT user_id) AS count
-            FROM audit_logs
-            WHERE timestamp >= ?
-        `).get(activeUsersSince).count || 0;
+        const activeUsersRow = await queryOne(
+            "SELECT COUNT(DISTINCT user_id) AS count FROM audit_logs WHERE timestamp >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai')",
+            [activeUsersSince]
+        );
+        const activeUsersCount = Number(activeUsersRow?.count || 0);
 
         // 获取存储统计
         const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '../../data');
@@ -261,7 +293,7 @@ function createAdminStatsRouter({
                 if (fs.existsSync(walFile)) dbSize += fs.statSync(walFile).size;
             }
         } catch(e) {}
-        
+
         const uploadsDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
             ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
             : path.resolve(__dirname, '../../uploads');
@@ -270,29 +302,38 @@ function createAdminStatsRouter({
             uploadsSize = await getCachedDirSize(uploadsDir);
         } catch(e) {}
 
-        // 北京当日半开区间 [start, nextStart)，谓词下推到 UNION 各分支内部，命中 created_at 索引。
+        // 北京当日 token 统计
         const dayBounds = getBeijingDayBounds();
-        const dayParams = { dayStart: dayBounds.start, dayNext: dayBounds.nextStart };
-        const todayDateRange = 'created_at >= @dayStart AND created_at < @dayNext';
-        const todayTokens = db.prepare(`
-            SELECT COALESCE(SUM(token_count), 0) AS total
-            FROM (${tokenUsageSubquery(todayDateRange)}) usage
-        `).get(dayParams).total || 0;
-        const totalTokens = db.prepare(`
-            SELECT COALESCE(SUM(token_count), 0) AS total
-            FROM (${tokenUsageSubquery()}) usage
-        `).get().total || 0;
-        const todayMessages = db.prepare(
-            'SELECT COUNT(*) AS count FROM messages WHERE created_at >= @dayStart AND created_at < @dayNext'
-        ).get(dayParams).count || 0;
-        const tokenByModel = db.prepare(`
-            SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
-            FROM (${tokenUsageSubquery(todayDateRange)}) usage
-            LEFT JOIN models md ON md.id = usage.model_id
-            GROUP BY COALESCE(md.name, '未知模型')
-            ORDER BY tokens DESC
-            LIMIT 8
-        `).all(dayParams);
+        const { conditions: dayConditions, params: dayParams } = buildDateRangeConditions(dayBounds.start, dayBounds.nextStart);
+        const dayWhere = dayConditions.join(' AND ');
+
+        // 总 token 统计（无日期过滤）
+        const todayTokensRow = await queryOne(
+            `SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery(dayWhere)}) usage`,
+            dayParams.length ? [...dayParams, ...dayParams] : []
+        );
+        const todayTokens = Number(todayTokensRow?.total || 0);
+
+        const totalTokensRow = await queryOne(
+            `SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery()}) usage`
+        );
+        const totalTokens = Number(totalTokensRow?.total || 0);
+
+        const todayMessagesRow = await queryOne(
+            "SELECT COUNT(*) AS count FROM messages WHERE created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai') AND created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')",
+            [dayBounds.start, dayBounds.nextStart]
+        );
+        const todayMessages = Number(todayMessagesRow?.count || 0);
+
+        const tokenByModel = await query(
+            `SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
+             FROM (${tokenUsageSubquery(dayWhere)}) usage
+             LEFT JOIN models md ON md.id = usage.model_id
+             GROUP BY COALESCE(md.name, '未知模型')
+             ORDER BY tokens DESC
+             LIMIT 8`,
+            dayParams.length ? [...dayParams, ...dayParams] : []
+        );
 
         const concurrency = aiSemaphore.getStatus();
         const gpu = getGpuMonitorStatus();
@@ -302,7 +343,7 @@ function createAdminStatsRouter({
         const health = getSystemHealthSnapshot();
         const maintenance = getMaintenanceStatus();
         const diskHealth = (health.checks || []).find(item => item.name === 'disk') || {};
-        
+
         // 标记运行时的模型端点是否为本地
         if (Array.isArray(modelEndpoints.runtime)) {
             await Promise.all(modelEndpoints.runtime.map(async item => {
@@ -373,13 +414,12 @@ function createAdminStatsRouter({
             },
             activeUsers: activeUsersCount
         };
-        // 仅缓存成功装配的快照（错误路径会在上游 asyncHandler 抛出，不会走到这里）。
         monitorSummaryCache = { data: payload, expires: Date.now() + MONITOR_SUMMARY_CACHE_TTL_MS };
         res.json(payload);
     }));
 
     router.get('/observability/events', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listObservabilityEvents({
+        res.json({ data: await listObservabilityEvents({
             type: req.query.type,
             status: req.query.status,
             limit: req.query.limit
@@ -387,7 +427,7 @@ function createAdminStatsRouter({
     }));
 
     router.put('/observability/events/:id/status', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const event = updateObservabilityEventStatus(req.params.id, req.body?.status);
+        const event = await updateObservabilityEventStatus(req.params.id, req.body?.status);
         if (!event) return res.status(404).json({ error: '观测事件不存在。' });
         logAction(req, '更新观测事件状态', `事件ID: ${event.id}，状态: ${event.status}`);
         res.json({ success: true, event });
@@ -405,15 +445,16 @@ function createAdminStatsRouter({
         logAction(req, '更新慢查询与告警设置', settings.webhookConfigured ? '已配置 webhook' : '未配置 webhook');
         res.json({ success: true, settings });
     }));
-    
+
     router.get('/usage', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
         const offset = (page - 1) * limit;
-        const filterParams = {};
-        const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
-        if (!canViewAll) filterParams.userId = req.user.id;
+
+        const whereParams = [];
+        const whereClause = canViewAll ? '' : (() => { whereParams.push(req.user.id); return 'WHERE usage.user_id = ?'; })();
+
         const groupedQuery = `
             SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
@@ -427,24 +468,27 @@ function createAdminStatsRouter({
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models m ON usage.model_id = m.id
             ${whereClause}
-            GROUP BY u.id, usage.model_id
+            GROUP BY u.id, usage.model_id, u.username, u.deleted_username, u.nickname, m.name, m.price_currency
         `;
-        const stats = db.prepare(`
-            ${groupedQuery}
-            ORDER BY last_active DESC
-            LIMIT @limit OFFSET @offset
-        `).all({ ...filterParams, limit, offset });
-        const totalStmt = db.prepare(`SELECT COUNT(*) AS count FROM (${groupedQuery}) grouped`);
-        const totalRow = Object.keys(filterParams).length ? totalStmt.get(filterParams) : totalStmt.get();
-        const total = totalRow?.count || 0;
+
+        const stats = await query(
+            `${groupedQuery} ORDER BY last_active DESC LIMIT ? OFFSET ?`,
+            [...whereParams, limit, offset]
+        );
+        const totalRow = await queryOne(
+            `SELECT COUNT(*) AS count FROM (${groupedQuery}) grouped`,
+            whereParams
+        );
+        const total = Number(totalRow?.count || 0);
         res.json({ data: stats, total, page, limit });
     }));
+
     router.get('/usage/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const params = {};
-        const whereClause = canViewAll ? '' : 'WHERE usage.user_id = @userId';
-        if (!canViewAll) params.userId = req.user.id;
-        const usageExportStmt = db.prepare(`
+        const whereParams = [];
+        const whereClause = canViewAll ? '' : (() => { whereParams.push(req.user.id); return 'WHERE usage.user_id = ?'; })();
+
+        const rows = await query(`
             SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
                    COUNT(usage.id) as msg_count,
                    COALESCE(SUM(${balancedInputSql('usage')}), 0) as input_tokens,
@@ -457,10 +501,10 @@ function createAdminStatsRouter({
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models m ON usage.model_id = m.id
             ${whereClause}
-            GROUP BY u.id, usage.model_id
+            GROUP BY u.id, usage.model_id, u.username, u.deleted_username, u.nickname, m.name, m.price_currency
             ORDER BY last_active DESC
-        `);
-        const rows = Object.keys(params).length ? usageExportStmt.all(params) : usageExportStmt.all();
+        `, whereParams);
+
         let csv = '\uFEFF用户,显示名,模型,消息数,输入Token,输出Token,总Token,估算费用,最后活动\n';
         rows.forEach(row => {
             csv += [
@@ -480,87 +524,95 @@ function createAdminStatsRouter({
         res.setHeader('Content-Disposition', 'attachment; filename=usage_stats.csv');
         res.send(csv);
     }));
+
     router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        // 把"最近 30 天"日期范围与可选的个人过滤下推到 UNION 各分支内部，命中 created_at / user_id 索引。
-        // date('now','+8 hours','-30 days') 在 JS 端预计算为北京日期边界 '<YYYY-MM-DD> 00:00:00'。
-        const inner = ['created_at >= @startTs'];
-        const params = { startTs: getBeijingDaysAgoStart(30) };
+        const innerConditions = [];
+        const innerParams = [];
+
+        const { conditions: dateConditions, params: dateParams } = buildDateRangeConditions(getBeijingDaysAgoStart(30), null);
+        innerConditions.push(...dateConditions);
+        innerParams.push(...dateParams);
+
         if (!canViewAll) {
-            inner.push('user_id = @userId');
-            params.userId = req.user.id;
+            innerConditions.push('user_id = ?');
+            innerParams.push(req.user.id);
         }
-        // 外层 SELECT/GROUP BY 中的 date(created_at) 仅用于按日分桶，不影响内部范围谓词命中索引。
-        const query = `
-            SELECT date(created_at) as day, SUM(token_count) as tokens
-            FROM (${tokenUsageSubquery(inner.join(' AND '))}) usage
-            GROUP BY day
-            ORDER BY day
-        `;
-        const trend = db.prepare(query).all(params);
+
+        const innerWhere = innerConditions.join(' AND ');
+        const dayExpr = dateGroupExpr('usage.created_at');
+        // UNION ALL: 参数需传两份（messages + model_usage_events 各一份）
+        const trend = await query(
+            `SELECT ${dayExpr} as day, SUM(token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage
+             GROUP BY ${dayExpr}
+             ORDER BY day`,
+            [...innerParams, ...innerParams]
+        );
         res.json(trend);
     }));
 
     router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const { unit, username, days = 30, start, end } = req.query;
-        // 日期范围谓词下推到 UNION 内部（裸列范围，命中 created_at 索引）；用户表过滤（unit/username）
-        // 引用 JOIN 后的 users 列，必须留在外层 WHERE。内/外均使用命名参数，避免分支重复绑定的脆弱性。
         const innerConditions = [];
+        const innerParams = [];
         const outerConditions = [];
-        const params = {};
+        const outerParams = [];
+
         if (start || end) {
-            if (start) {
-                // 将 date(usage.created_at) >= date(start) 改写为 created_at >= '<start> 00:00:00'。
-                innerConditions.push('created_at >= @startTs');
-                params.startTs = `${String(start)} 00:00:00`;
-            }
-            if (end) {
-                // date(usage.created_at) <= date(end)（含当日）→ created_at < '<end+1天> 00:00:00'
-                innerConditions.push('created_at < @endTs');
-                params.endTs = getBeijingDateExclusiveEnd(String(end));
-            }
+            const { conditions, params } = buildDateRangeConditions(
+                start ? `${String(start)} 00:00:00` : null,
+                end ? getBeijingDateExclusiveEnd(String(end)) : null
+            );
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
         } else {
             const safeDays = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
-            // usage.created_at >= date('now','+8 hours','-N days') → JS 预计算的北京日期边界
-            innerConditions.push('created_at >= @startTs');
-            params.startTs = getBeijingDaysAgoStart(safeDays);
+            const { conditions, params } = buildDateRangeConditions(getBeijingDaysAgoStart(safeDays), null);
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
         }
 
         if (unit) {
-            outerConditions.push('u.unit = @unit');
-            params.unit = unit;
+            outerConditions.push('u.unit = ?');
+            outerParams.push(unit);
         }
         if (username) {
-            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE @username");
-            params.username = `%${username}%`;
+            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
+            outerParams.push(`%${username}%`);
         }
 
         const innerWhere = innerConditions.join(' AND ');
         const outerWhere = outerConditions.length ? `WHERE ${outerConditions.join(' AND ')}` : '';
+        // UNION ALL 内部条件 innerParams 需传两份
+        const unionParams = [...innerParams, ...innerParams];
+        const dayExpr = dateGroupExpr('usage.created_at');
 
-        const trend = db.prepare(`
-            SELECT date(usage.created_at) as day, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
-            ${outerWhere}
-            GROUP BY day ORDER BY day
-        `).all(params);
+        const trend = await query(
+            `SELECT ${dayExpr} as day, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY ${dayExpr} ORDER BY day`,
+            [...unionParams, ...outerParams]
+        );
 
-        const byUser = db.prepare(`
-            SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
-            ${outerWhere}
-            GROUP BY u.id ORDER BY tokens DESC LIMIT 10
-        `).all(params);
+        const byUser = await query(
+            `SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY u.id, u.username, u.deleted_username, u.nickname ORDER BY tokens DESC LIMIT 10`,
+            [...unionParams, ...outerParams]
+        );
 
-        const byUnit = db.prepare(`
-            SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
-            FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
-            ${outerWhere}
-            GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC
-        `).all(params);
+        const byUnit = await query(
+            `SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC`,
+            [...unionParams, ...outerParams]
+        );
 
-        // 过滤用于下拉选择框的选项。
-        const units = db.prepare("SELECT DISTINCT unit FROM users WHERE unit IS NOT NULL AND unit != ''").all().map(r => r.unit);
+        const units = (await query("SELECT DISTINCT unit FROM users WHERE unit IS NOT NULL AND unit != ''")).map(r => r.unit);
 
         res.json({ trend, byUser, byUnit, units });
     }));
@@ -572,22 +624,39 @@ function createAdminStatsRouter({
                 ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
                 : path.resolve(__dirname, '../../uploads');
             const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../data');
-            // 合并多个 COUNT 为单条标量子查询，减少往返与锁争用；目录大小为异步文件操作，保持并行
+
+            const dayBounds = getBeijingDayBounds();
+            const auditCountRow = await queryOne(
+                "SELECT COUNT(*) AS count FROM audit_logs WHERE timestamp >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai') AND timestamp < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')",
+                [dayBounds.start, dayBounds.nextStart]
+            );
+
             const [counts, uploadsSize, dataSize] = await Promise.all([
-                Promise.resolve(db.prepare(`
-                    SELECT
-                        (SELECT COUNT(*) FROM users) AS users,
-                        (SELECT COUNT(*) FROM users WHERE status != 'disabled' AND deleted_at IS NULL) AS activeUsers,
-                        (SELECT COUNT(*) FROM sessions) AS sessions,
-                        (SELECT COUNT(*) FROM messages) AS messages,
-                        (SELECT COUNT(*) FROM attachments) AS attachments,
-                        (SELECT COUNT(*) FROM models) AS models,
-                        (SELECT COALESCE(SUM(token_count), 0) FROM (${tokenUsageSubquery()}) usage) AS tokens,
-                        (SELECT COUNT(*) FROM audit_logs WHERE timestamp >= @dayStart AND timestamp < @dayNext) AS auditToday
-                `).get((() => { const b = getBeijingDayBounds(); return { dayStart: b.start, dayNext: b.nextStart }; })())),
+                (async () => {
+                    const [users, activeUsers, sessions, messages, attachments, models, tokens] = await Promise.all([
+                        queryOne('SELECT COUNT(*) AS count FROM users'),
+                        queryOne("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled' AND deleted_at IS NULL"),
+                        queryOne('SELECT COUNT(*) AS count FROM sessions'),
+                        queryOne('SELECT COUNT(*) AS count FROM messages'),
+                        queryOne('SELECT COUNT(*) AS count FROM attachments'),
+                        queryOne('SELECT COUNT(*) AS count FROM models'),
+                        queryOne(`SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery()}) usage`)
+                    ]);
+                    return {
+                        users: Number(users?.count || 0),
+                        activeUsers: Number(activeUsers?.count || 0),
+                        sessions: Number(sessions?.count || 0),
+                        messages: Number(messages?.count || 0),
+                        attachments: Number(attachments?.count || 0),
+                        models: Number(models?.count || 0),
+                        tokens: Number(tokens?.total || 0),
+                        auditToday: Number(auditCountRow?.count || 0)
+                    };
+                })(),
                 getCachedDirSize(uploadDir),
                 getCachedDirSize(dataDir)
             ]);
+
             res.json({
                 users: counts.users,
                 activeUsers: counts.activeUsers,
@@ -602,21 +671,20 @@ function createAdminStatsRouter({
                 isPersonal: false
             });
         } else {
-            // 合并个人维度的多个 COUNT 为单条查询
-            const counts = db.prepare(`
-                SELECT
-                    (SELECT COUNT(*) FROM sessions WHERE user_id = @uid AND deleted_at IS NULL) AS sessions,
-                    (SELECT COUNT(*) FROM messages WHERE user_id = @uid AND deleted_at IS NULL) AS messages,
-                    (SELECT COUNT(*) FROM attachments WHERE user_id = @uid AND deleted_at IS NULL) AS attachments,
-                    (SELECT COUNT(*) FROM models WHERE user_id IS NULL OR user_id = @uid) AS models,
-                    (SELECT COALESCE(SUM(token_count), 0) FROM (${tokenUsageSubquery()}) usage WHERE user_id = @uid) AS tokens
-            `).get({ uid: req.user.id });
+            const uid = req.user.id;
+            const [sessions, messages, attachments, models, tokens] = await Promise.all([
+                queryOne('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND deleted_at IS NULL', [uid]),
+                queryOne('SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND deleted_at IS NULL', [uid]),
+                queryOne('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ? AND deleted_at IS NULL', [uid]),
+                queryOne('SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?', [uid]),
+                queryOne(`SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery('user_id = ?')}) usage`, [uid, uid])
+            ]);
             res.json({
-                sessions: counts.sessions,
-                messages: counts.messages,
-                attachments: counts.attachments,
-                models: counts.models,
-                tokens: counts.tokens,
+                sessions: Number(sessions?.count || 0),
+                messages: Number(messages?.count || 0),
+                attachments: Number(attachments?.count || 0),
+                models: Number(models?.count || 0),
+                tokens: Number(tokens?.total || 0),
                 isPersonal: true
             });
         }
@@ -628,9 +696,10 @@ function createAdminStatsRouter({
         const limit = parseInt(req.query.limit, 10) || 20;
         const offset = (page - 1) * limit;
 
-        // 个人维度过滤下推到 UNION 内部（user_id 命中索引）；分页参数同用命名参数（better-sqlite3 不允许命名与匿名混用）。
-        const innerWhere = canViewAll ? '' : 'user_id = @userId';
-        const query = `
+        const innerParams = [];
+        const innerWhere = canViewAll ? '' : (() => { innerParams.push(req.user.id); return 'user_id = ?'; })();
+
+        const detailsSql = `
             SELECT usage.id, usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name,
                    usage.role, usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
@@ -642,19 +711,27 @@ function createAdminStatsRouter({
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
             ORDER BY usage.created_at DESC
-            LIMIT @limit OFFSET @offset
+            LIMIT ? OFFSET ?
         `;
-        const queryParams = canViewAll ? { limit, offset } : { limit, offset, userId: req.user.id };
-        const details = db.prepare(query).all(queryParams);
+        // UNION ALL 内部 innerParams 传两份
+        const unionParams = [...innerParams, ...innerParams];
+        const details = await query(detailsSql, [...unionParams, limit, offset]);
 
-        const countQuery = `SELECT COUNT(*) as count FROM (${tokenUsageSubquery(innerWhere)}) usage`;
-        const total = canViewAll ? db.prepare(countQuery).get().count : db.prepare(countQuery).get({ userId: req.user.id }).count;
+        const countRow = await queryOne(
+            `SELECT COUNT(*) as count FROM (${tokenUsageSubquery(innerWhere)}) usage`,
+            unionParams
+        );
+        const total = Number(countRow?.count || 0);
         res.json({ data: details, total });
     }));
 
     router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const query = `
+        const innerParams = [];
+        const innerWhere = canViewAll ? '' : (() => { innerParams.push(req.user.id); return 'user_id = ?'; })();
+        const unionParams = [...innerParams, ...innerParams];
+
+        const details = await query(`
             SELECT usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name, usage.role,
                    usage.token_count,
                    ${balancedInputSql('usage')} AS input_tokens,
@@ -662,12 +739,12 @@ function createAdminStatsRouter({
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
                    COALESCE(md.price_currency, '人民币') AS price_currency,
                    usage.usage_source
-            FROM (${tokenUsageSubquery(canViewAll ? '' : 'user_id = @userId')}) usage
+            FROM (${tokenUsageSubquery(innerWhere)}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
             ORDER BY usage.created_at DESC LIMIT 10000
-        `;
-        const details = canViewAll ? db.prepare(query).all() : db.prepare(query).all({ userId: req.user.id });
+        `, unionParams);
+
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,输入Token,输出Token,总Token\n';
         details.forEach(d => {
             const roleLabel = formatUsageRoleLabel(d.role);
@@ -684,31 +761,32 @@ function createAdminStatsRouter({
         const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
         const start = String(req.query.start || '').trim();
         const end = String(req.query.end || '').trim();
-        // 日期范围与可选的个人过滤全部下推到 UNION 内部（裸列范围 + user_id，命中索引）。
-        // 外层仅按 model_id 聚合并 LEFT JOIN models，不再持有 usage.created_at / usage.user_id 谓词。
+
         const innerConditions = [];
-        const params = {};
-        if (start) {
-            // 将 date(usage.created_at) >= date(start) 改写为 created_at >= '<start> 00:00:00'。
-            innerConditions.push('created_at >= @startTs');
-            params.startTs = `${start} 00:00:00`;
+        const innerParams = [];
+
+        if (start || end) {
+            const { conditions, params } = buildDateRangeConditions(
+                start ? `${start} 00:00:00` : null,
+                end ? getBeijingDateExclusiveEnd(end) : null
+            );
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
+        } else {
+            const { conditions, params } = buildDateRangeConditions(getBeijingDaysAgoStart(days), null);
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
         }
-        if (end) {
-            // date(usage.created_at) <= date(end)（含当日）→ created_at < '<end+1天> 00:00:00'
-            innerConditions.push('created_at < @endTs');
-            params.endTs = getBeijingDateExclusiveEnd(end);
-        }
-        if (!start && !end) {
-            // usage.created_at >= date('now','+8 hours','-N days') → JS 预计算的北京日期边界
-            innerConditions.push('created_at >= @startTs');
-            params.startTs = getBeijingDaysAgoStart(days);
-        }
+
         if (!canViewAll) {
-            innerConditions.push('user_id = @userId');
-            params.userId = req.user.id;
+            innerConditions.push('user_id = ?');
+            innerParams.push(req.user.id);
         }
+
         const innerWhere = innerConditions.join(' AND ');
-        const rows = db.prepare(`
+        const unionParams = [...innerParams, ...innerParams];
+
+        const rows = await query(`
             SELECT md.id AS model_id, COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
                    COALESCE(md.price_currency, '人民币') AS price_currency,
@@ -723,9 +801,10 @@ function createAdminStatsRouter({
                    MAX(usage.created_at) AS last_used_at
             FROM (${tokenUsageSubquery(innerWhere)}) usage
             LEFT JOIN models md ON md.id = usage.model_id
-            GROUP BY usage.model_id
+            GROUP BY usage.model_id, md.id, md.name, md.model_name, md.price_currency, md.input_price_per_million, md.output_price_per_million
             ORDER BY estimated_cost DESC, total_tokens DESC
-        `).all(params);
+        `, unionParams);
+
         const totals = rows.reduce((acc, row) => {
             acc.input_tokens += Number(row.input_tokens || 0);
             acc.output_tokens += Number(row.output_tokens || 0);
@@ -740,15 +819,22 @@ function createAdminStatsRouter({
     router.get('/model-costs/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
-        // "最近 N 天"与可选个人过滤下推到 UNION 内部（裸列范围 + user_id）。
-        const innerConditions = ['created_at >= @startTs'];
-        const params = { startTs: getBeijingDaysAgoStart(days) };
+
+        const innerConditions = [];
+        const innerParams = [];
+        const { conditions, params } = buildDateRangeConditions(getBeijingDaysAgoStart(days), null);
+        innerConditions.push(...conditions);
+        innerParams.push(...params);
+
         if (!canViewAll) {
-            innerConditions.push('user_id = @userId');
-            params.userId = req.user.id;
+            innerConditions.push('user_id = ?');
+            innerParams.push(req.user.id);
         }
+
         const innerWhere = innerConditions.join(' AND ');
-        const rows = db.prepare(`
+        const unionParams = [...innerParams, ...innerParams];
+
+        const rows = await query(`
             SELECT COALESCE(md.name, 'Unknown') AS model_name,
                    COALESCE(md.model_name, '') AS upstream_model,
                    COALESCE(md.price_currency, '人民币') AS price_currency,
@@ -760,9 +846,10 @@ function createAdminStatsRouter({
                    COALESCE(SUM(${usageCostSql('usage', 'md')}), 0) AS estimated_cost
             FROM (${tokenUsageSubquery(innerWhere)}) usage
             LEFT JOIN models md ON md.id = usage.model_id
-            GROUP BY usage.model_id
+            GROUP BY usage.model_id, md.name, md.model_name, md.price_currency, md.input_price_per_million, md.output_price_per_million
             ORDER BY estimated_cost DESC, total_tokens DESC
-        `).all(params);
+        `, unionParams);
+
         let csv = '\uFEFFModel,Upstream Model,计价币种,Input Price / 1M,Output Price / 1M,Input Tokens,Output Tokens,Total Tokens,Estimated Cost\n';
         rows.forEach(row => {
             csv += [
@@ -791,16 +878,18 @@ function createAdminStatsRouter({
         const keyword = String(req.query.keyword || '').trim();
         const conditions = [];
         const params = [];
+
         if (keyword) {
             conditions.push("(COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ? OR u.nickname LIKE ? OR l.model_name LIKE ? OR l.request_messages LIKE ? OR l.response_text LIKE ?)");
             const like = `%${keyword}%`;
             params.push(like, like, like, like, like);
         }
+
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT l.id, l.created_at, l.model_name, l.status, l.error_message,
                    COALESCE(l.input_tokens, 0) AS input_tokens,
-                   MAX(COALESCE(l.output_tokens, 0), COALESCE(l.total_tokens, 0) - COALESCE(l.input_tokens, 0)) AS output_tokens,
+                   GREATEST(COALESCE(l.output_tokens, 0), COALESCE(l.total_tokens, 0) - COALESCE(l.input_tokens, 0)) AS output_tokens,
                    l.total_tokens, l.stream, l.ip_address,
                    l.request_messages, l.response_text,
                    COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, k.name AS api_key_name, k.key_preview
@@ -810,17 +899,18 @@ function createAdminStatsRouter({
             ${where}
             ORDER BY l.created_at DESC
             LIMIT ? OFFSET ?
-        `).all(...params, limit, offset);
-        const total = db.prepare(`
+        `, [...params, limit, offset]);
+
+        const totalRow = await queryOne(`
             SELECT COUNT(*) AS count
             FROM api_call_logs l
             JOIN users u ON u.id = l.user_id
             LEFT JOIN api_keys k ON k.id = l.api_key_id
             ${where}
-        `).get(...params).count;
+        `, params);
+        const total = Number(totalRow?.count || 0);
         res.json({ data: rows, total });
     }));
-
 
     return router;
 }

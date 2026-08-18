@@ -35,7 +35,7 @@ function registerDocumentRoutes(router, deps) {
 
     router.get('/documents', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
-            const result = listRegulationDocuments({
+            const result = await listRegulationDocuments({
                 query: req.query.query || '',
                 category: req.query.category || '',
                 jurisdiction: req.query.jurisdiction || '',
@@ -52,7 +52,7 @@ function registerDocumentRoutes(router, deps) {
             if (!query) return res.json({ matches: [] });
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
             const documentId = normalizeRegulationId(req.query.documentId || req.query.document_id);
-            const matches = searchRegulationArticles({
+            const matches = await searchRegulationArticles({
                 query,
                 documentId,
                 limit: req.query.limit,
@@ -63,20 +63,20 @@ function registerDocumentRoutes(router, deps) {
     
         router.get('/facets', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
-            const facets = listRegulationFacets({ includeArchived });
+            const facets = await listRegulationFacets({ includeArchived });
             res.json(facets);
         }));
     
         router.get('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user);
-            const detail = getRegulationDocumentDetail(req.params.id, {
+            const detail = await getRegulationDocumentDetail(req.params.id, {
                 versionId: req.query.versionId || req.query.version_id,
                 includeArchived
             });
             if (!detail || (!includeArchived && detail.document.status === 'archived')) {
                 return res.status(404).json({ error: { message: '法规文档不存在或已归档', type: 'invalid_request_error' } });
             }
-            recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'view', detail: detail.document.title });
+            await recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'view', detail: detail.document.title });
             res.json({ detail });
         }));
     
@@ -87,7 +87,7 @@ function registerDocumentRoutes(router, deps) {
                 return res.status(400).json({ error: { message: '需要提供 from 和 to 版本 ID', type: 'invalid_request_error' } });
             }
             try {
-                const diff = diffRegulationVersions({ documentId: req.params.id, fromVersionId, toVersionId });
+                const diff = await diffRegulationVersions({ documentId: req.params.id, fromVersionId, toVersionId });
                 logAction(req, '法规查询版本对比', `${diff.document.title} (v${diff.from.id} → v${diff.to.id})`);
                 res.json({ diff });
             } catch (error) {
@@ -102,7 +102,7 @@ function registerDocumentRoutes(router, deps) {
                 return res.status(400).json({ error: { message: '需要提供 from 和 to 版本 ID', type: 'invalid_request_error' } });
             }
             try {
-                const impact = analyzeRegulationChangeImpact({ documentId: req.params.id, fromVersionId, toVersionId });
+                const impact = await analyzeRegulationChangeImpact({ documentId: req.params.id, fromVersionId, toVersionId });
                 res.json({ impact });
             } catch (error) {
                 res.status(404).json({ error: { message: error.message || '影响分析失败', type: 'not_found' } });
@@ -110,7 +110,7 @@ function registerDocumentRoutes(router, deps) {
         }));
     
         router.get('/documents/:id/citation-graph', authMiddleware, asyncHandler(async (req, res) => {
-            const graph = getRegulationCitationGraph(req.params.id, {
+            const graph = await getRegulationCitationGraph(req.params.id, {
                 versionId: req.query.versionId || req.query.version_id
             });
             res.json({ graph });
@@ -119,7 +119,7 @@ function registerDocumentRoutes(router, deps) {
         router.post('/cross-links/rebuild', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
             const documentId = req.body?.documentId || req.body?.document_id || null;
-            const result = rebuildRegulationCrossLinks(documentId);
+            const result = await rebuildRegulationCrossLinks(documentId);
             logAction(req, '法规查询重建跨法关联', `回连 ${result.resolved} 条 / 共 ${result.versions} 版本`);
             res.json(result);
         }));
@@ -127,19 +127,23 @@ function registerDocumentRoutes(router, deps) {
         router.get('/documents/:id/download', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
             const includeArchived = isAdmin(req.user);
-            const detail = getRegulationDocumentDetail(req.params.id, {
+            const detail = await getRegulationDocumentDetail(req.params.id, {
                 versionId: req.query.versionId || req.query.version_id,
                 includeArchived
             });
-            if (!detail || (!includeArchived && detail.document.status === 'archived') || !detail.currentVersion) {
+            if (!detail || (!includeArchived && detail.document.status === 'archived')) {
                 return res.status(404).json({ error: { message: '法规源文件不存在', type: 'invalid_request_error' } });
             }
-            const filePath = resolveRegulationVersionDownloadPath(detail.currentVersion);
+            const currentVer = detail.currentVersion || detail.version;
+            if (!currentVer) {
+                return res.status(404).json({ error: { message: '法规源文件不存在', type: 'invalid_request_error' } });
+            }
+            const filePath = resolveRegulationVersionDownloadPath(currentVer);
             if (!filePath || !fs.existsSync(filePath)) {
                 return res.status(404).json({ error: { message: '源文件已被移动或删除', type: 'not_found' } });
             }
-            recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'download', detail: detail.document.title });
-            res.download(filePath, detail.currentVersion.source_name || `${detail.document.title}.txt`);
+            await recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'download', detail: detail.document.title });
+            res.download(filePath, currentVer.source_name || `${detail.document.title}.txt`);
         }));
     
         router.post('/documents/batch', authMiddleware, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
@@ -156,7 +160,7 @@ function registerDocumentRoutes(router, deps) {
             const failed = [];
             for (const file of files) {
                 try {
-                    const duplicateOf = findRegulationDuplicateByHash(hashUploadedFile(file));
+                    const duplicateOf = await findRegulationDuplicateByHash(hashUploadedFile(file));
                     const prepared = await prepareRegulationUploadMetadata(file, sharedMetadata);
                     const result = await createRegulationDocumentFromUpload({
                         userId: req.user.id,
@@ -196,7 +200,7 @@ function registerDocumentRoutes(router, deps) {
                 return res.status(400).json({ error: { message: `请选择要导入的法规文档，支持 ${SUPPORTED_UPLOAD_LABEL}`, type: 'invalid_request_error' } });
             }
             try {
-                const duplicateOf = findRegulationDuplicateByHash(hashUploadedFile(req.file));
+                const duplicateOf = await findRegulationDuplicateByHash(hashUploadedFile(req.file));
                 const prepared = await prepareRegulationUploadMetadata(req.file, readRegulationMetadata(req.body || {}));
                 const result = await createRegulationDocumentFromUpload({
                     userId: req.user.id,
@@ -246,8 +250,7 @@ function registerDocumentRoutes(router, deps) {
             }
         }));
     
-
-    router.post('/documents/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        router.post('/documents/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
                 cleanupTempUpload(req.file);
                 return;
@@ -280,7 +283,7 @@ function registerDocumentRoutes(router, deps) {
     
         router.put('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
-            const updated = updateRegulationDocument({
+            const updated = await updateRegulationDocument({
                 documentId: req.params.id,
                 userId: req.user.id,
                 patch: req.body || {}
@@ -294,7 +297,7 @@ function registerDocumentRoutes(router, deps) {
     
         router.delete('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsSuperAdmin(req, res)) return;
-            const deleted = deleteRegulationDocument({
+            const deleted = await deleteRegulationDocument({
                 documentId: req.params.id,
                 userId: req.user.id
             });

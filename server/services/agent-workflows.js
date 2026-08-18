@@ -1,5 +1,4 @@
-const { db } = require('../db');
-const { sql } = require('../db/statements');
+const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
     parseJsonObject,
@@ -91,11 +90,17 @@ function assertWorkflowLlmNodesConfigured(dagSpec) {
     }
 }
 
-function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
-    const name = String(body.name || fallback.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
-    const dagSpec = normalizeDagSpec(body.dagSpec || body.dag_spec || fallback.dagSpec || fallback.dag_spec || {});
+async function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
+    const name = String(body.name || fallback.name || '').trim();
+    if (!name) {
+        const err = new Error('工作流名称不能为空');
+        err.status = 400;
+        throw err;
+    }
+    const rawDag = body.dagSpec || body.dag_spec || fallback.dag_spec || fallback.dagSpec || {};
+    const dagSpec = normalizeDagSpec(parseJsonObject(rawDag));
     if (!dagSpec.nodes.length) {
-        const err = new Error('保存工作流需要至少一个有效节点。');
+        const err = new Error('工作流画布为空，至少需要包含一个节点');
         err.status = 400;
         throw err;
     }
@@ -107,7 +112,6 @@ function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
         throw err;
     }
     assertWorkflowLlmNodesConfigured(dagSpec);
-    // 未显式传共享设置时沿用原值，保证旧客户端保存不会意外改变可见性
     const share = normalizeShareSettings(body, user, fallback);
     const hasExplicitUserTargets = Object.prototype.hasOwnProperty.call(body, 'allowedUserIds')
         || Object.prototype.hasOwnProperty.call(body, 'allowed_user_ids');
@@ -118,7 +122,7 @@ function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
         scope: share.scope,
         allowedUnits: share.allowedUnits,
         allowedUserIds: hasExplicitUserTargets
-            ? filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id })
+            ? await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id })
             : share.allowedUserIds,
         dagSpec
     };
@@ -190,14 +194,14 @@ function sanitizeSharedDagSpec(dagSpec = {}) {
         const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input) ? node.input : {};
         if (input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)) {
             input.headers = Object.fromEntries(Object.entries(input.headers).map(([key, value]) => {
-                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|private[-_]?key)/i.test(String(key));
+                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|pwd|private[-_]?key)/i.test(String(key));
                 return [key, sensitive && String(value ?? '').trim() ? '[需要配置受控凭据]' : value];
             }));
         }
         const redactObject = value => {
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|private[-_]?key)/i.test(String(key));
+                const sensitive = /(authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|pwd|private[-_]?key)/i.test(String(key));
                 if (sensitive && String(item ?? '').trim()) return [key, '[需要配置受控凭据]'];
                 return [key, item && typeof item === 'object' ? redactObject(item) : item];
             }));
@@ -226,8 +230,8 @@ async function listAgentWorkflows(user) {
         .map(row => formatAgentWorkflow(row, user));
 }
 
-function listAgentWorkflowShareOptions(user) {
-    return listShareTargets(user);
+async function listAgentWorkflowShareOptions(user) {
+    return await listShareTargets(user);
 }
 
 async function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
@@ -290,29 +294,27 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
 }
 
 async function createAgentWorkflow(user, body = {}) {
-    const data = normalizeWorkflowPayload(body, {}, user);
+    const data = await normalizeWorkflowPayload(body, {}, user);
     const now = getBeijingTimestamp();
-    const create = db.transaction(() => {
-        const workflowInfo = db.prepare(`
-            INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(user.id, data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, now);
-        const workflowId = workflowInfo.lastInsertRowid;
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(workflowId, 1, JSON.stringify(data.dagSpec), data.note, user.id, now);
-        db.prepare('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?')
-            .run(versionInfo.lastInsertRowid, workflowId);
-        return workflowId;
-    });
-    return await getAgentWorkflowForUser(create(), user);
+    const workflowInfo = await queryOne(`
+        INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+    `, [user.id, data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, now]);
+    const workflowId = workflowInfo.id;
+    const versionInfo = await queryOne(`
+        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
+    `, [workflowId, 1, JSON.stringify(data.dagSpec), data.note, user.id, now]);
+    await execute('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?', [versionInfo.id, workflowId]);
+    return await getAgentWorkflowForUser(workflowId, user);
 }
 
 async function updateAgentWorkflow(workflowId, user, body = {}) {
     const current = await findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
-    const data = normalizeWorkflowPayload(body, current, user);
+    const data = await normalizeWorkflowPayload(body, current, user);
     const currentVersion = await workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
     const shareUnchanged = normalizeShareScope(current.scope) === data.scope
         && String(current.allowed_units || '') === data.allowedUnits
@@ -324,20 +326,19 @@ async function updateAgentWorkflow(workflowId, user, body = {}) {
         && JSON.stringify(normalizeDagSpec(parseJsonObject(currentVersion.dag_spec) || {})) === JSON.stringify(data.dagSpec);
     if (unchanged) return await getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
-    const update = db.transaction(() => {
-        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(current.id)?.next || 1);
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now);
-        db.prepare(`
-            UPDATE agent_workflows
-            SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, current_version_id = ?, updated_at = ?
-            WHERE id = ?
-        `).run(data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.lastInsertRowid, now, current.id);
-        return current.id;
-    });
-    return await getAgentWorkflowForUser(update(), user);
+    const nextRow = await queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?', [current.id]);
+    const nextVersion = Number(nextRow?.next || 1);
+    const versionInfo = await queryOne(`
+        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
+    `, [current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now]);
+    await execute(`
+        UPDATE agent_workflows
+        SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, current_version_id = ?, updated_at = ?
+        WHERE id = ?
+    `, [data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.id, now, current.id]);
+    return await getAgentWorkflowForUser(current.id, user);
 }
 
 async function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
@@ -349,11 +350,11 @@ async function updateAgentWorkflowMetadata(workflowId, user, body = {}) {
         return await getAgentWorkflowForUser(current.id, user);
     }
     const now = getBeijingTimestamp();
-    sql(`
+    await execute(`
         UPDATE agent_workflows
         SET name = ?, description = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(name, description, now, current.id, user.id);
+    `, [name, description, now, current.id, user.id]);
     return await getAgentWorkflowForUser(current.id, user);
 }
 
@@ -372,23 +373,22 @@ async function updateAgentWorkflowSharing(workflowId, user, body = {}) {
             throw err;
         }
     }
-    share.allowedUserIds = filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
+    share.allowedUserIds = await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
     const unchanged = normalizeShareScope(current.scope) === share.scope
         && String(current.allowed_units || '') === share.allowedUnits
         && String(current.allowed_user_ids || '') === share.allowedUserIds;
     if (unchanged) return await getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
-    const update = db.transaction(() => sql(`
+    const updateResult = await execute(`
         UPDATE agent_workflows
         SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(share.scope, share.allowedUnits, share.allowedUserIds, now, current.id, user.id));
-    if (update().changes === 0) return null;
+    `, [share.scope, share.allowedUnits, share.allowedUserIds, now, current.id, user.id]);
+    if ((updateResult?.rowCount || updateResult?.changes || 0) === 0) return null;
     return await getAgentWorkflowForUser(current.id, user);
 }
 
 async function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
-    // 发布属于写操作，先确认所有者身份再解析版本
     if (!await findOwnedWorkflowRow(workflowId, user)) return null;
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current');
     if (!resolved) return null;
@@ -416,11 +416,11 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
         }
     }
     const now = getBeijingTimestamp();
-    db.prepare(`
+    await execute(`
         UPDATE agent_workflows
         SET published_version_id = ?, published_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(resolved.version_id, now, now, resolved.workflow.id, user.id);
+    `, [resolved.version_id, now, now, resolved.workflow.id, user.id]);
     return await getAgentWorkflowForUser(resolved.workflow.id, user);
 }
 
@@ -446,17 +446,17 @@ async function restoreAgentWorkflowVersion(workflowId, user, version) {
         throw err;
     }
     const now = getBeijingTimestamp();
-    const restore = db.transaction(() => {
-        const nextVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?').get(workflow.id)?.next || 1);
-        const versionInfo = db.prepare(`
-            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(workflow.id, nextVersion, JSON.stringify(dagSpec), `从 v${source.version} 回滚`, user.id, now);
-        db.prepare('UPDATE agent_workflows SET current_version_id = ?, updated_at = ? WHERE id = ?')
-            .run(versionInfo.lastInsertRowid, now, workflow.id);
-        return workflow.id;
-    });
-    return await getAgentWorkflowForUser(restore(), user);
+    const nextRow = await queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?', [workflow.id]);
+    const nextVersion = Number(nextRow?.next || 1);
+    const versionInfo = await queryOne(`
+        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
+    `, [workflow.id, nextVersion, JSON.stringify(dagSpec), `从 v${source.version} 回滚`, user.id, now]);
+    await execute('UPDATE agent_workflows SET current_version_id = ?, updated_at = ? WHERE id = ?', [
+        versionInfo.id, now, workflow.id
+    ]);
+    return await getAgentWorkflowForUser(workflow.id, user);
 }
 
 function normalizeWorkflowNodesForDiff(spec = {}) {
@@ -530,16 +530,15 @@ async function deleteAgentWorkflow(workflowId, user) {
     const workflow = await workflowRepository.getOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
     const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, workflow.id);
-    db.prepare(`
+    await execute('UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, workflow.id]);
+    await execute(`
         UPDATE agent_schedules
         SET status = 'paused', next_run_at = NULL, dispatch_retry_at = NULL,
             claim_token = NULL, claim_expires_at = NULL,
             last_error = '引用的工作流已删除', updated_at = ?
         WHERE user_id = ? AND deleted_at IS NULL
-          AND json_valid(run_config)
-          AND CAST(json_extract(run_config, '$.workflowId') AS INTEGER) = ?
-    `).run(now, user.id, workflow.id);
+          AND (run_config::jsonb->>'workflowId') = ?
+    `, [now, user.id, String(workflow.id)]);
     return workflow;
 }
 
@@ -548,7 +547,7 @@ async function restoreAgentWorkflow(workflowId, user) {
     const workflow = await workflowRepository.getRecentlyDeletedOwnedWorkflow(workflowId, user.id);
     if (!workflow) return null;
     const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_workflows SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(now, workflow.id);
+    await execute('UPDATE agent_workflows SET deleted_at = NULL, updated_at = ? WHERE id = ?', [now, workflow.id]);
     return await getAgentWorkflowForUser(workflow.id, user);
 }
 

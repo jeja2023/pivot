@@ -440,7 +440,7 @@ test('usage statistics page has pagination controls and cache-bypassed monitor r
     assert.match(stats, /stats\/usage\?\$\{params\.toString\(\)\}/);
     assert.match(stats, /renderPagination\('stats', total, requestedPage\)/);
     assert.match(stats, /window\.exportStats = \(\) => downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export`, 'usage_stats\.csv'\)/);
-    assert.match(adminStatsRoute, /router\.get\('\/usage'[\s\S]*LIMIT @limit OFFSET @offset/);
+    assert.match(adminStatsRoute, /router\.get\('\/usage'[\s\S]*LIMIT (?:\?|@limit) OFFSET (?:\?|@offset)/);
     assert.match(adminStatsRoute, /router\.get\('\/usage\/export'[\s\S]*filename=usage_stats\.csv/);
     assert.match(adminStatsRoute, /res\.json\(\{ data: stats, total, page, limit \}\)/);
     assert.match(adminStatsRoute, /const forceRefresh = req\.query\?\.refresh === '1'/);

@@ -10,7 +10,7 @@ const { asyncHandler } = require('../../http');
 const { logger } = require('../../logger');
 const { estimateTokens } = require('../../llm');
 const {
-    getModelDailyUsage,
+    getModelDailyUsageAsync,
     recordModelTokenUsage
 } = require('../../services/models');
 const { aiSemaphore } = require('../../services/concurrency');
@@ -77,7 +77,7 @@ function buildModelSecretErrorPayload(modelCfg) {
     };
 }
 async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null }) {
-    const modelCfg = resolveAppsModel(String(req.body?.model || '').trim(), req.user);
+    const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
         return res.status(404).json({
             error: {
@@ -293,14 +293,14 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
     if (!datasetId || !userPrompt) {
         return res.status(400).json({ error: { message: '缺少数据集或问题。', type: 'invalid_request_error' } });
     }
-    const modelCfg = resolveAppsModel(String(body.model || '').trim(), req.user);
+    const modelCfg = await resolveAppsModel(String(body.model || '').trim(), req.user);
     if (!modelCfg) {
         return res.status(404).json({ error: { message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。', type: 'invalid_request_error', code: 'model_not_found' } });
     }
     if (modelCfg.secret_error) {
         return res.status(400).json(buildModelSecretErrorPayload(modelCfg));
     }
-    if (modelCfg.daily_token_limit > 0 && getModelDailyUsage(req.user.id, modelCfg.id) >= modelCfg.daily_token_limit) {
+    if (modelCfg.daily_token_limit > 0 && (await getModelDailyUsageAsync(req.user.id, modelCfg.id)) >= modelCfg.daily_token_limit) {
         return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
     }
 
@@ -410,11 +410,11 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ datasets: listDatasets(req.user.id) });
+        res.json({ datasets: await listDatasets(req.user.id) });
     }));
 
     router.get('/apps/data-analysis/datasets/summary', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ summary: getDatasetSummary(req.user.id) });
+        res.json({ summary: await getDatasetSummary(req.user.id) });
     }));
 
     router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
@@ -439,7 +439,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.delete('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const dataset = softDeleteDataset(req.user.id, req.params.id);
+        const dataset = await softDeleteDataset(req.user.id, req.params.id);
         logAction(req, '数据分析-删除数据集', `数据集: ${dataset.name}`);
         res.json({ success: true });
     }));
@@ -482,7 +482,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
     router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
         const limit = Number.parseInt(req.query.limit, 10) || 30;
-        res.json({ artifacts: listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
+        res.json({ artifacts: await listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
     }));
 
     router.get('/apps/data-analysis/datasets/:id/export.csv', authMiddleware, asyncHandler(async (req, res) => {
@@ -567,7 +567,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         // 文本类模式（起草/润色/全文改写/选区/逐句改写）均可流式；
         // review 模式需要在后端把整段输出解析为结构化 JSON 条目，必须拿到完整文本，故不参与流式。
         const wantStream = !!body.stream && OFFICIAL_WRITING_STREAMABLE_MODES.has(mode);
-        const modelCfg = resolveOfficialWritingModel(String(body.model || '').trim(), req.user);
+        const modelCfg = await resolveOfficialWritingModel(String(body.model || '').trim(), req.user);
         if (!modelCfg) {
             return res.status(404).json({
                 error: {

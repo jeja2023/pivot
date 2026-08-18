@@ -1,15 +1,12 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { db, stmts } = require('./db');
-const { isPostgres } = require('./db/dialect');
 const { queryOne, execute } = require('./db/client');
 const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
 const { normalizeRole, withPermissionFlags } = require('./permissions');
 const { getApiAccessSetting } = require('./services/api-access-settings');
-const { archiveDeletedUsername } = require('./services/user-identity');
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -98,30 +95,22 @@ function hashRefreshToken(token) {
     return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
-function generateRefreshToken(userId) {
+async function generateRefreshToken(userId) {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
     
-    if (isPostgres()) {
-        return execute('INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr])
-            .then(() => token);
-    }
-
-    stmts.insertRefreshToken.run(userId, hashRefreshToken(token), expiresAtStr);
+    await execute('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr]);
     return token;
 }
 
-function rotateRefreshToken(tokenHash, userId) {
-    const rotate = db.transaction(() => {
-        const deleted = stmts.deleteRefreshToken.run(tokenHash);
-        if (deleted.changes !== 1) {
-            throw new Error('Refresh token has already been used. Please sign in again.');
-        }
-        return generateRefreshToken(userId);
-    });
-    return rotate();
+async function rotateRefreshToken(tokenHash, userId) {
+    const changes = await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+    if (changes !== 1) {
+        throw new Error('Refresh token has already been used. Please sign in again.');
+    }
+    return await generateRefreshToken(userId);
 }
 
 function validatePassword(password) {
@@ -147,7 +136,7 @@ function getCookie(req, name) {
 }
 
 function resolveAuthenticatedUser(req) {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers?.authorization;
     const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
     const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : cookieToken;
 
@@ -157,11 +146,7 @@ function resolveAuthenticatedUser(req) {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = stmts?.getUserById ? stmts.getUserById.get(decoded.id) : null;
-        if (user && user.status !== 'disabled') {
-            return { user: withPermissionFlags(user), token, code: 'AUTH_OK' };
-        }
-        if (decoded && decoded.id && isPostgres()) {
+        if (decoded && decoded.id) {
             return {
                 user: withPermissionFlags({
                     id: decoded.id,
@@ -183,22 +168,11 @@ function resolveAuthenticatedUser(req) {
         return { user: null, token, code: 'API_ACCESS_DISABLED' };
     }
 
-    if (db) {
-        const apiKeyData = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(hashApiKey(token));
-        if (apiKeyData) {
-            const user = stmts?.getUserById ? stmts.getUserById.get(apiKeyData.user_id) : null;
-            if (user && user.status !== 'disabled') {
-                db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(getBeijingTimestamp(), apiKeyData.id);
-                return { user: withPermissionFlags(user), token, apiKeyData, code: 'AUTH_OK' };
-            }
-        }
-    }
-
     return { user: null, token, code: 'TOKEN_INVALID' };
 }
 
 async function resolveAuthenticatedUserAsync(req) {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers?.authorization;
     const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
     const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : cookieToken;
 
@@ -208,15 +182,10 @@ async function resolveAuthenticatedUserAsync(req) {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        let user;
-        if (isPostgres()) {
-            user = await queryOne(
-                'SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ? AND deleted_at IS NULL',
-                [decoded.id]
-            );
-        } else {
-            user = stmts?.getUserById ? stmts.getUserById.get(decoded.id) : null;
-        }
+        const user = await queryOne(
+            'SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ? AND deleted_at IS NULL',
+            [decoded.id]
+        );
         if (user && user.status !== 'disabled') {
             return { user: withPermissionFlags(user), token, code: 'AUTH_OK' };
         }
@@ -249,7 +218,7 @@ async function resolveAuthenticatedUserAsync(req) {
 }
 
 // 注册用户
-function register(username, password, nickname, unit, role = 'user') {
+async function register(username, password, nickname, unit, role = 'user') {
     const cleanUsername = String(username || '').trim();
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(cleanUsername)) {
         throw new UserInputError('用户名需为 3-32 位字母、数字、点、下划线或短横线');
@@ -258,43 +227,19 @@ function register(username, password, nickname, unit, role = 'user') {
     const hash = bcrypt.hashSync(password, 10);
     const safeRole = normalizeRole(role);
 
-    if (isPostgres()) {
-        return (async () => {
-            const deletedUser = await queryOne('SELECT id FROM users WHERE username = ? AND deleted_at IS NOT NULL', [cleanUsername]);
-            if (deletedUser) {
-                await execute('UPDATE users SET username = ? WHERE id = ?', [`deleted_${deletedUser.id}_${cleanUsername}`, deletedUser.id]);
-            }
-            try {
-                await execute(
-                    'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp()]
-                );
-                const created = await queryOne('SELECT id, username, nickname, role, status FROM users WHERE username = ? AND deleted_at IS NULL', [cleanUsername]);
-                return withPermissionFlags(created);
-            } catch (e) {
-                if (e.code === '23505' || String(e.message).includes('duplicate key') || String(e.message).includes('unique constraint')) {
-                    throw new UserInputError('用户名已存在');
-                }
-                throw e;
-            }
-        })();
+    const deletedUser = await queryOne('SELECT id FROM users WHERE username = ? AND deleted_at IS NOT NULL', [cleanUsername]);
+    if (deletedUser) {
+        await execute('UPDATE users SET username = ? WHERE id = ?', [`deleted_${deletedUser.id}_${cleanUsername}`, deletedUser.id]);
     }
-
-    const stmt = db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    const createUser = db.transaction(() => {
-        const deletedUser = db.prepare(`
-            SELECT id
-            FROM users
-            WHERE username = ? AND deleted_at IS NOT NULL
-        `).get(cleanUsername);
-        if (deletedUser) archiveDeletedUsername(db, deletedUser.id);
-        return stmt.run(cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp());
-    });
     try {
-        const info = createUser();
-        return withPermissionFlags({ id: info.lastInsertRowid, username: cleanUsername, nickname, role: safeRole, status: 'active' });
+        await execute(
+            'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp()]
+        );
+        const created = await queryOne('SELECT id, username, nickname, role, status FROM users WHERE username = ? AND deleted_at IS NULL', [cleanUsername]);
+        return withPermissionFlags(created);
     } catch (e) {
-        if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        if (e.code === '23505' || String(e.message).includes('duplicate key') || String(e.message).includes('unique constraint')) {
             throw new UserInputError('用户名已存在');
         }
         throw e;
@@ -302,41 +247,17 @@ function register(username, password, nickname, unit, role = 'user') {
 }
 
 // 登录验证
-function login(username, password) {
-    if (isPostgres()) {
-        return (async () => {
-            const user = await queryOne('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL', [username]);
-            if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-                throw new Error('用户名或密码错误');
-            }
-            if (user.status === 'disabled') {
-                throw new Error('账号已被禁用，请联系管理员');
-            }
-            const accessToken = generateAccessToken(user);
-            const refreshToken = await generateRefreshToken(user.id);
-            await execute('UPDATE users SET last_login_at = ? WHERE id = ?', [getBeijingTimestamp(), user.id]);
-            return { 
-                accessToken, 
-                refreshToken, 
-                user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' })
-            };
-        })();
-    }
-
-    const user = db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(username);
+async function login(username, password) {
+    const user = await queryOne('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL', [username]);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
         throw new Error('用户名或密码错误');
     }
     if (user.status === 'disabled') {
         throw new Error('账号已被禁用，请联系管理员');
     }
-    
     const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user.id);
-    
-    // 更新最后登录时间
-    db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(getBeijingTimestamp(), user.id);
-    
+    const refreshToken = await generateRefreshToken(user.id);
+    await execute('UPDATE users SET last_login_at = ? WHERE id = ?', [getBeijingTimestamp(), user.id]);
     return { 
         accessToken, 
         refreshToken, 
@@ -345,60 +266,31 @@ function login(username, password) {
 }
 
 // 刷新 Token
-function refreshTokens(token) {
+async function refreshTokens(token) {
     const tokenHash = hashRefreshToken(token);
-    if (isPostgres()) {
-        return (async () => {
-            const refreshTokenData = await queryOne('SELECT * FROM refresh_tokens WHERE token_hash = ?', [tokenHash]);
-            if (!refreshTokenData) {
-                throw new Error('无效的刷新令牌');
-            }
-            const now = getBeijingTimestamp();
-            if (refreshTokenData.expires_at < now) {
-                await execute('DELETE FROM refresh_tokens WHERE token_hash = ?', [tokenHash]);
-                throw new Error('刷新令牌已过期，请重新登录');
-            }
-            const user = await queryOne('SELECT * FROM users WHERE id = ?', [refreshTokenData.user_id]);
-            if (!user || user.status === 'disabled') {
-                throw new Error('用户状态异常');
-            }
-            const accessToken = generateAccessToken(user);
-            await execute('DELETE FROM refresh_tokens WHERE token_hash = ?', [tokenHash]);
-            const newRefreshToken = await generateRefreshToken(user.id);
-            return { accessToken, refreshToken: newRefreshToken };
-        })();
-    }
-
-    const refreshTokenData = stmts.getRefreshToken.get(tokenHash);
+    const refreshTokenData = await queryOne('SELECT * FROM refresh_tokens WHERE token = ?', [tokenHash]);
     if (!refreshTokenData) {
         throw new Error('无效的刷新令牌');
     }
-
-    // 检查是否过期
     const now = getBeijingTimestamp();
     if (refreshTokenData.expires_at < now) {
-        stmts.deleteRefreshToken.run(tokenHash);
+        await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
         throw new Error('刷新令牌已过期，请重新登录');
     }
-
-    const user = stmts.getUserById.get(refreshTokenData.user_id);
+    const user = await queryOne('SELECT * FROM users WHERE id = ?', [refreshTokenData.user_id]);
     if (!user || user.status === 'disabled') {
         throw new Error('用户状态异常');
     }
-
-    // 生成新的 Access Token
     const accessToken = generateAccessToken(user);
-    
-    // 实施 Refresh Token 轮换（可选，为了更安全，生成一个新的并删除旧的）
-    const newRefreshToken = rotateRefreshToken(tokenHash, user.id);
-
+    await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+    const newRefreshToken = await generateRefreshToken(user.id);
     return { accessToken, refreshToken: newRefreshToken };
 }
 
 // 鉴权中间件
 async function authMiddleware(req, res, next) {
     try {
-        const auth = isPostgres() ? await resolveAuthenticatedUserAsync(req) : resolveAuthenticatedUser(req);
+        const auth = await resolveAuthenticatedUserAsync(req);
 
         if (!auth.token) {
             return res.status(401).json({ error: '未授权访问', code: 'AUTH_MISSING' });
@@ -462,5 +354,7 @@ module.exports = {
     UserInputError,
     PASSWORD_RULE_DESCRIPTION,
     getPasswordValidationMessage,
-    hashRefreshToken
+    hashRefreshToken,
+    rotateRefreshToken,
+    generateRefreshToken
 };

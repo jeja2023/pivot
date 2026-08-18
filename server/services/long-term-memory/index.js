@@ -1,8 +1,8 @@
-const { db } = require('../../db');
+const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
 const { KeyedConcurrencyGuard } = require('../concurrency');
-const { getAccessibleModel } = require('../models');
+const { getAccessibleModelAsync } = require('../models');
 const { generateEmbedding, cosineSimilarity } = require('../rag-index');
 
 const {
@@ -48,36 +48,36 @@ const extractionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, Number.parseInt(process.env.LONG_TERM_MEMORY_EXTRACTION_MAX_CONCURRENT, 10) || 2)
 });
 
-function getMemoryRow(userId, memoryId, options = {}) {
+async function getMemoryRow(userId, memoryId, options = {}) {
     const id = Number.parseInt(memoryId, 10);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
     const includeDeleted = options.includeDeleted === true;
-    return db.prepare(`
+    return await queryOne(`
         SELECT *
         FROM memories
         WHERE id = ? AND user_id = ?${includeDeleted ? '' : ' AND status != ?'}
-    `).get(...(includeDeleted ? [id, userId] : [id, userId, MEMORY_STATUS.deleted])) || null;
+    `, includeDeleted ? [id, userId] : [id, userId, MEMORY_STATUS.deleted]);
 }
 
-function isLongTermMemoryEnabled(userId) {
-    const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, MEMORY_SETTING_KEY);
+async function isLongTermMemoryEnabled(userId) {
+    const row = await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [userId, MEMORY_SETTING_KEY]);
     if (!row) return true;
     return row.value !== 'false';
 }
 
-function setLongTermMemoryEnabled(userId, enabled) {
+async function setLongTermMemoryEnabled(userId, enabled) {
     const value = enabled ? 'true' : 'false';
-    db.prepare(`
+    await execute(`
         INSERT INTO user_settings (user_id, key, value, updated_at)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(user_id, key) DO UPDATE SET
             value = excluded.value,
             updated_at = excluded.updated_at
-    `).run(userId, MEMORY_SETTING_KEY, value, getBeijingTimestamp());
-    return isLongTermMemoryEnabled(userId);
+    `, [userId, MEMORY_SETTING_KEY, value, getBeijingTimestamp()]);
+    return await isLongTermMemoryEnabled(userId);
 }
 
-function listMemories(userId, options = {}) {
+async function listMemories(userId, options = {}) {
     const status = String(options.status || MEMORY_STATUS.active);
     const type = options.type ? normalizeMemoryType(options.type) : '';
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 100, 500));
@@ -97,7 +97,7 @@ function listMemories(userId, options = {}) {
         where.push('(content LIKE ? OR source_session_id LIKE ?)');
         params.push(`%${search}%`, `%${search}%`);
     }
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM memories
         WHERE ${where.join(' AND ')}
@@ -106,24 +106,27 @@ function listMemories(userId, options = {}) {
             salience DESC,
             COALESCE(last_used_at, updated_at, created_at) DESC
         LIMIT ? OFFSET ?
-    `).all(...params, limit, offset);
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM memories WHERE ${where.join(' AND ')}`).get(...params).count;
+    `, [...params, limit, offset]);
+    const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM memories WHERE ${where.join(' AND ')}`, params);
+    const total = Number(totalRow?.count || 0);
+    const enabled = await isLongTermMemoryEnabled(userId);
     return {
-        enabled: isLongTermMemoryEnabled(userId),
+        enabled,
         total,
         memories: rows.map(serializeMemory)
     };
 }
 
-function getMemorySummary(userId) {
-    const rows = db.prepare(`
+async function getMemorySummary(userId) {
+    const rows = await query(`
         SELECT type, status, COUNT(*) AS count
         FROM memories
         WHERE user_id = ?
         GROUP BY type, status
-    `).all(userId);
+    `, [userId]);
+    const enabled = await isLongTermMemoryEnabled(userId);
     const summary = {
-        enabled: isLongTermMemoryEnabled(userId),
+        enabled,
         active: 0,
         deleted: 0,
         disabled: 0,
@@ -143,24 +146,24 @@ function getMemorySummary(userId) {
     return summary;
 }
 
-function getMemoryJobSummary(userId) {
-    const rows = db.prepare(`
+async function getMemoryJobSummary(userId) {
+    const rows = await query(`
         SELECT status, COUNT(*) AS count
         FROM memory_extraction_jobs
         WHERE user_id = ?
         GROUP BY status
-    `).all(userId);
+    `, [userId]);
     const byStatus = Object.fromEntries(Object.values(MEMORY_JOB_STATUS).map(status => [status, 0]));
     rows.forEach(row => {
         byStatus[row.status] = Number(row.count || 0);
     });
-    const recentRows = db.prepare(`
+    const recentRows = await query(`
         SELECT status
         FROM memory_extraction_jobs
         WHERE user_id = ?
         ORDER BY id DESC
         LIMIT 50
-    `).all(userId);
+    `, [userId]);
     const completed = recentRows.filter(row => [MEMORY_JOB_STATUS.succeeded, MEMORY_JOB_STATUS.failed, MEMORY_JOB_STATUS.skipped].includes(row.status));
     const succeeded = completed.filter(row => row.status === MEMORY_JOB_STATUS.succeeded).length;
     return {
@@ -172,29 +175,36 @@ function getMemoryJobSummary(userId) {
     };
 }
 
-function getMemoryQualitySummary(userId) {
+async function getMemoryQualitySummary(userId) {
     const now = getBeijingTimestamp();
-    const base = getMemorySummary(userId);
-    const lowConfidence = db.prepare(`
+    const base = await getMemorySummary(userId);
+    const lowConfidenceRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM memories
         WHERE user_id = ? AND status = ? AND confidence < 0.55
-    `).get(userId, MEMORY_STATUS.active).count || 0;
-    const expired = db.prepare(`
+    `, [userId, MEMORY_STATUS.active]);
+    const lowConfidence = Number(lowConfidenceRow?.count || 0);
+
+    const expiredRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM memories
         WHERE user_id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?
-    `).get(userId, MEMORY_STATUS.active, now).count || 0;
-    const unused = db.prepare(`
+    `, [userId, MEMORY_STATUS.active, now]);
+    const expired = Number(expiredRow?.count || 0);
+
+    const unusedCutoff = getBeijingTimestamp(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const unusedRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM memories
         WHERE user_id = ?
           AND status = ?
           AND last_used_at IS NULL
-          AND created_at < datetime('now', '+8 hours', '-30 days')
-    `).get(userId, MEMORY_STATUS.active).count || 0;
-    const mergeSuggestions = getMemoryMergeSuggestions(userId, { limit: 20 });
-    const jobSummary = getMemoryJobSummary(userId);
+          AND created_at < ?
+    `, [userId, MEMORY_STATUS.active, unusedCutoff]);
+    const unused = Number(unusedRow?.count || 0);
+
+    const mergeSuggestions = await getMemoryMergeSuggestions(userId, { limit: 20 });
+    const jobSummary = await getMemoryJobSummary(userId);
     const risks = [];
     if (lowConfidence > 0) risks.push({ type: 'low_confidence', count: lowConfidence });
     if (expired > 0) risks.push({ type: 'expired', count: expired });
@@ -215,25 +225,25 @@ function getMemoryQualitySummary(userId) {
     };
 }
 
-function softDeleteMemory(userId, memoryId) {
+async function softDeleteMemory(userId, memoryId) {
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const changes = await execute(`
         UPDATE memories
         SET status = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND status != ?
-    `).run(MEMORY_STATUS.deleted, now, memoryId, userId, MEMORY_STATUS.deleted);
-    return info.changes > 0;
+    `, [MEMORY_STATUS.deleted, now, memoryId, userId, MEMORY_STATUS.deleted]);
+    return changes > 0;
 }
 
-function updateMemoryStatus(userId, memoryId, status) {
+async function updateMemoryStatus(userId, memoryId, status) {
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const changes = await execute(`
         UPDATE memories
         SET status = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(normalized, now, memoryId, userId);
-    return info.changes > 0;
+    `, [normalized, now, memoryId, userId]);
+    return changes > 0;
 }
 
 function normalizeMemoryIds(ids = []) {
@@ -244,24 +254,24 @@ function normalizeMemoryIds(ids = []) {
         .slice(0, 500);
 }
 
-function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STATUS.active) {
+async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STATUS.active) {
     const ids = normalizeMemoryIds(memoryIds);
     if (ids.length === 0) return { updated: 0 };
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const changes = await execute(`
         UPDATE memories
         SET status = ?, updated_at = ?
         WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})
-    `).run(normalized, now, userId, ...ids);
-    return { updated: info.changes, ids };
+    `, [normalized, now, userId, ...ids]);
+    return { updated: changes, ids };
 }
 
-function archiveExpiredMemories(userId, options = {}) {
+async function archiveExpiredMemories(userId, options = {}) {
     const now = getBeijingTimestamp();
     const status = Object.values(MEMORY_STATUS).includes(options.status) ? options.status : MEMORY_STATUS.disabled;
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 500, 1000));
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT id
         FROM memories
         WHERE user_id = ?
@@ -270,37 +280,38 @@ function archiveExpiredMemories(userId, options = {}) {
           AND expires_at <= ?
         ORDER BY expires_at ASC, id ASC
         LIMIT ?
-    `).all(userId, MEMORY_STATUS.active, now, limit);
+    `, [userId, MEMORY_STATUS.active, now, limit]);
     if (rows.length === 0) return { archived: 0, ids: [] };
     const ids = rows.map(row => row.id);
-    const info = db.prepare(`
+    const changes = await execute(`
         UPDATE memories
         SET status = ?,
             updated_at = ?
         WHERE user_id = ?
           AND id IN (${ids.map(() => '?').join(',')})
-    `).run(status, now, userId, ...ids);
-    return { archived: info.changes, ids, status };
+    `, [status, now, userId, ...ids]);
+    return { archived: changes, ids, status };
 }
 
-function exportMemories(userId, options = {}) {
-    const listed = listMemories(userId, {
+async function exportMemories(userId, options = {}) {
+    const listed = await listMemories(userId, {
         status: options.status || 'all',
         type: options.type || '',
         search: options.search || '',
         limit: Math.min(Number.parseInt(options.limit, 10) || 500, 500),
         offset: options.offset || 0
     });
+    const summary = await getMemorySummary(userId);
     return {
         exportedAt: getBeijingTimestamp(),
         version: 1,
-        summary: getMemorySummary(userId),
+        summary,
         memories: listed.memories
     };
 }
 
 async function updateMemory(userId, memoryId, updates = {}, options = {}) {
-    const existing = getMemoryRow(userId, memoryId);
+    const existing = await getMemoryRow(userId, memoryId);
     if (!existing) return null;
     const hasContent = Object.prototype.hasOwnProperty.call(updates, 'content');
     const content = hasContent ? normalizeMemoryContent(updates.content) : existing.content;
@@ -331,7 +342,7 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     const embedding = hasContent && content !== existing.content && !options.skipEmbedding
         ? await maybeGenerateMemoryEmbedding(content, userId, options.user || null)
         : existing.embedding;
-    db.prepare(`
+    await execute(`
         UPDATE memories
         SET scope = ?,
             type = ?,
@@ -343,25 +354,27 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
             expires_at = ?,
             updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(scope, type, content, embedding, salience, confidence, status, expiresAt, now, existing.id, userId);
-    return serializeMemory(db.prepare('SELECT * FROM memories WHERE id = ? AND user_id = ?').get(existing.id, userId));
+    `, [scope, type, content, embedding, salience, confidence, status, expiresAt, now, existing.id, userId]);
+    const updated = await queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [existing.id, userId]);
+    return serializeMemory(updated);
 }
 
-function getMemorySource(userId, memoryId) {
-    const row = getMemoryRow(userId, memoryId);
+async function getMemorySource(userId, memoryId) {
+    const row = await getMemoryRow(userId, memoryId);
     if (!row) return null;
     const sourceIds = parseJsonArray(row.source_message_ids);
     let messages = [];
     if (sourceIds.length > 0) {
         const placeholders = sourceIds.map(() => '?').join(',');
-        messages = db.prepare(`
+        const rows = await query(`
             SELECT id, session_id, role, content, created_at
             FROM messages
             WHERE user_id = ?
               AND id IN (${placeholders})
               AND deleted_at IS NULL
             ORDER BY id ASC
-        `).all(userId, ...sourceIds).map(message => ({
+        `, [userId, ...sourceIds]);
+        messages = rows.map(message => ({
             id: message.id,
             sessionId: message.session_id,
             role: message.role,
@@ -370,7 +383,7 @@ function getMemorySource(userId, memoryId) {
         }));
     }
     const session = row.source_session_id
-        ? db.prepare('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ?').get(row.source_session_id, userId)
+        ? await queryOne('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ?', [row.source_session_id, userId])
         : null;
     return {
         memory: serializeMemory(row),
@@ -384,16 +397,16 @@ function getMemorySource(userId, memoryId) {
     };
 }
 
-function getMemoryMergeSuggestions(userId, options = {}) {
+async function getMemoryMergeSuggestions(userId, options = {}) {
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 20, 100));
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM memories
         WHERE user_id = ?
           AND status = ?
         ORDER BY type ASC, salience DESC, updated_at DESC
         LIMIT 500
-    `).all(userId, MEMORY_STATUS.active);
+    `, [userId, MEMORY_STATUS.active]);
     const suggestions = [];
     for (let i = 0; i < rows.length; i += 1) {
         for (let j = i + 1; j < rows.length; j += 1) {
@@ -421,8 +434,8 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     if (!Number.isSafeInteger(normalizedTargetId) || !Number.isSafeInteger(normalizedSourceId) || normalizedTargetId === normalizedSourceId) {
         throw createMemoryValidationError('Invalid memory merge target');
     }
-    const target = getMemoryRow(userId, normalizedTargetId);
-    const source = getMemoryRow(userId, normalizedSourceId);
+    const target = await getMemoryRow(userId, normalizedTargetId);
+    const source = await getMemoryRow(userId, normalizedSourceId);
     if (!target || !source) return null;
     if (normalizeMemoryType(target.type) !== normalizeMemoryType(source.type)) {
         throw createMemoryValidationError('Only memories of the same type can be merged');
@@ -439,8 +452,9 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     const embedding = options.skipEmbedding
         ? target.embedding
         : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
-    const tx = db.transaction(() => {
-        db.prepare(`
+
+    await transaction(async (trx) => {
+        await trx.execute(`
             UPDATE memories
             SET content = ?,
                 embedding = ?,
@@ -450,7 +464,7 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
                 source_message_ids = ?,
                 updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(
+        `, [
             content,
             embedding,
             Math.max(Number(target.salience || 0), Number(source.salience || 0)),
@@ -460,30 +474,31 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
             now,
             target.id,
             userId
-        );
-        db.prepare(`
+        ]);
+        await trx.execute(`
             UPDATE memories
             SET status = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(MEMORY_STATUS.deleted, now, source.id, userId);
+        `, [MEMORY_STATUS.deleted, now, source.id, userId]);
     });
-    tx();
+
+    const updatedTarget = await queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [target.id, userId]);
     return {
         merged: true,
-        target: serializeMemory(db.prepare('SELECT * FROM memories WHERE id = ? AND user_id = ?').get(target.id, userId)),
+        target: serializeMemory(updatedTarget),
         deletedSourceId: source.id
     };
 }
 
-function findSimilarMemory(userId, type, content) {
+async function findSimilarMemory(userId, type, content) {
     const fingerprint = fingerprintMemory(type, content);
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM memories
         WHERE user_id = ? AND type = ? AND status = ?
         ORDER BY updated_at DESC
         LIMIT 200
-    `).all(userId, type, MEMORY_STATUS.active);
+    `, [userId, type, MEMORY_STATUS.active]);
     return rows.find(row => fingerprintMemory(row.type, row.content) === fingerprint)
         || rows.find(row => {
             const a = normalizeComparableText(row.content);
@@ -515,7 +530,7 @@ async function upsertMemory(userId, candidate, options = {}) {
     const confidence = clamp(candidate.confidence, 0, 1, 0.6);
     const sourceMessageIds = normalizeSourceMessageIds(candidate.sourceMessageIds);
     const now = getBeijingTimestamp();
-    const existing = findSimilarMemory(userId, type, content);
+    const existing = await findSimilarMemory(userId, type, content);
 
     if (existing) {
         const mergedMessageIds = [...new Set([
@@ -523,7 +538,7 @@ async function upsertMemory(userId, candidate, options = {}) {
             ...sourceMessageIds
         ])].slice(-20);
         const mergedContent = content.length > String(existing.content || '').length ? content : existing.content;
-        db.prepare(`
+        await execute(`
             UPDATE memories
             SET content = ?,
                 scope = ?,
@@ -533,7 +548,7 @@ async function upsertMemory(userId, candidate, options = {}) {
                 source_message_ids = ?,
                 updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(
+        `, [
             mergedContent,
             scope,
             Math.max(Number(existing.salience || 0), salience),
@@ -543,18 +558,19 @@ async function upsertMemory(userId, candidate, options = {}) {
             now,
             existing.id,
             userId
-        );
+        ]);
         return { merged: true, id: existing.id };
     }
 
     const embedding = options.skipEmbedding ? null : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
-    const info = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO memories (
             user_id, scope, type, content, embedding, salience, confidence,
             source_session_id, source_message_ids, status, expires_at, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+        RETURNING id
+    `, [
         userId,
         scope,
         type,
@@ -568,29 +584,29 @@ async function upsertMemory(userId, candidate, options = {}) {
         candidate.expiresAt || null,
         now,
         now
-    );
-    return { inserted: true, id: info.lastInsertRowid };
+    ]);
+    return { inserted: true, id: row?.id };
 }
 
-function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelId = null } = {}) {
+async function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelId = null } = {}) {
     if (!userId || !sessionId || !Array.isArray(messageIds) || messageIds.length === 0) {
         return { queued: false, reason: 'missing_context' };
     }
-    if (!isLongTermMemoryEnabled(userId)) {
+    if (!(await isLongTermMemoryEnabled(userId))) {
         return { queued: false, reason: 'disabled' };
     }
     const ids = normalizeSourceMessageIds(messageIds);
     if (ids.length === 0) return { queued: false, reason: 'missing_context' };
     const now = getBeijingTimestamp();
     const dedupeKey = buildMemoryJobDedupeKey(userId, sessionId, ids);
-    const existing = db.prepare(`
+    const existing = await queryOne(`
         SELECT *
         FROM memory_extraction_jobs
         WHERE dedupe_key = ?
           AND status IN (?, ?)
         ORDER BY id DESC
         LIMIT 1
-    `).get(dedupeKey, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running);
+    `, [dedupeKey, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running]);
     if (existing) {
         return {
             queued: true,
@@ -599,13 +615,15 @@ function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelI
             messageIds: ids
         };
     }
-    const info = db.prepare(`
+
+    const row = await queryOne(`
         INSERT INTO memory_extraction_jobs (
             user_id, session_id, message_ids, model_id, dedupe_key,
             status, attempts, max_attempts, created_at, updated_at, next_run_at
         )
         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-    `).run(
+        RETURNING id
+    `, [
         userId,
         sessionId,
         JSON.stringify(ids),
@@ -616,23 +634,25 @@ function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelI
         now,
         now,
         now
-    );
+    ]);
+    const insertedId = row?.id;
+
+    const insertedJob = await queryOne('SELECT * FROM memory_extraction_jobs WHERE id = ?', [insertedId]);
     return {
         queued: true,
-        job: serializeMemoryJob(db.prepare('SELECT * FROM memory_extraction_jobs WHERE id = ?').get(info.lastInsertRowid)),
+        job: serializeMemoryJob(insertedJob),
         messageIds: ids
     };
 }
 
-function resolveMemoryJobUser(row) {
-    return db.prepare('SELECT id, username, nickname, unit, role, status FROM users WHERE id = ? AND status = ?')
-        .get(row.user_id, 'active')
-        || { id: row.user_id, role: 'user' };
+async function resolveMemoryJobUser(row) {
+    const user = await queryOne('SELECT id, username, nickname, unit, role, status FROM users WHERE id = ? AND status = ?', [row.user_id, 'active']);
+    return user || { id: row.user_id, role: 'user' };
 }
 
-function resolveMemoryJobModel(row, user) {
+async function resolveMemoryJobModel(row, user) {
     if (!row.model_id) return null;
-    const model = getAccessibleModel(row.model_id, user);
+    const model = await getAccessibleModelAsync(row.model_id, user);
     if (!model || model.secret_error) return null;
     return model;
 }
@@ -647,9 +667,9 @@ function triggerMemoryExtractionWorker() {
     }, 0).unref?.();
 }
 
-function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null } = {}) {
+async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null } = {}) {
     void user;
-    const queued = enqueueMemoryExtractionJob({
+    const queued = await enqueueMemoryExtractionJob({
         userId,
         sessionId,
         messageIds,
@@ -668,13 +688,10 @@ function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = n
     };
 }
 
-function claimMemoryExtractionJobs(limit = 5) {
+async function claimMemoryExtractionJobs(limit = 5) {
     const now = getBeijingTimestamp();
-    const staleBefore = new Date(Date.now() - MEMORY_JOB_STALE_LOCK_MINUTES * 60000)
-        .toISOString()
-        .slice(0, 19)
-        .replace('T', ' ');
-    const rows = db.prepare(`
+    const staleBefore = getBeijingTimestamp(new Date(Date.now() - MEMORY_JOB_STALE_LOCK_MINUTES * 60000));
+    const rows = await query(`
         SELECT *
         FROM memory_extraction_jobs
         WHERE (
@@ -684,10 +701,11 @@ function claimMemoryExtractionJobs(limit = 5) {
         )
         ORDER BY COALESCE(next_run_at, created_at) ASC, id ASC
         LIMIT ?
-    `).all(MEMORY_JOB_STATUS.queued, now, MEMORY_JOB_STATUS.running, staleBefore, Math.max(1, Math.min(Number(limit) || 5, 20)));
+    `, [MEMORY_JOB_STATUS.queued, now, MEMORY_JOB_STATUS.running, staleBefore, Math.max(1, Math.min(Number(limit) || 5, 20))]);
+
     const claimed = [];
-    rows.forEach(row => {
-        const info = db.prepare(`
+    for (const row of rows) {
+        const changes = await execute(`
             UPDATE memory_extraction_jobs
             SET status = ?,
                 locked_at = ?,
@@ -698,22 +716,23 @@ function claimMemoryExtractionJobs(limit = 5) {
                   status = ?
                   OR (status = ? AND locked_at IS NOT NULL AND locked_at < ?)
               )
-        `).run(MEMORY_JOB_STATUS.running, now, now, row.id, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running, staleBefore);
-        if (info.changes > 0) {
-            claimed.push(db.prepare('SELECT * FROM memory_extraction_jobs WHERE id = ?').get(row.id));
+        `, [MEMORY_JOB_STATUS.running, now, now, row.id, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running, staleBefore]);
+        if (changes > 0) {
+            const freshRow = await queryOne('SELECT * FROM memory_extraction_jobs WHERE id = ?', [row.id]);
+            if (freshRow) claimed.push(freshRow);
         }
-    });
+    }
     return claimed;
 }
 
 function nextMemoryJobRunAt(attempts) {
     const delaySeconds = Math.min(3600, Math.max(15, 15 * (2 ** Math.max(0, Number(attempts || 1) - 1))));
-    return new Date(Date.now() + delaySeconds * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    return getBeijingTimestamp(new Date(Date.now() + delaySeconds * 1000));
 }
 
-function finishMemoryExtractionJob(jobId, status, fields = {}) {
+async function finishMemoryExtractionJob(jobId, status, fields = {}) {
     const now = getBeijingTimestamp();
-    db.prepare(`
+    await execute(`
         UPDATE memory_extraction_jobs
         SET status = ?,
             locked_at = NULL,
@@ -723,7 +742,7 @@ function finishMemoryExtractionJob(jobId, status, fields = {}) {
             completed_at = ?,
             updated_at = ?
         WHERE id = ?
-    `).run(
+    `, [
         status,
         fields.lastError || null,
         fields.result ? JSON.stringify(fields.result).slice(0, 4000) : null,
@@ -731,12 +750,12 @@ function finishMemoryExtractionJob(jobId, status, fields = {}) {
         [MEMORY_JOB_STATUS.succeeded, MEMORY_JOB_STATUS.failed, MEMORY_JOB_STATUS.skipped].includes(status) ? now : null,
         now,
         jobId
-    );
+    ]);
 }
 
 async function processMemoryExtractionJob(row) {
-    const user = resolveMemoryJobUser(row);
-    const modelCfg = resolveMemoryJobModel(row, user);
+    const user = await resolveMemoryJobUser(row);
+    const modelCfg = await resolveMemoryJobModel(row, user);
     const result = await runMemoryExtraction({
         userId: row.user_id,
         sessionId: row.session_id,
@@ -745,13 +764,13 @@ async function processMemoryExtractionJob(row) {
         modelCfg
     });
     const finalStatus = result.skipped ? MEMORY_JOB_STATUS.skipped : MEMORY_JOB_STATUS.succeeded;
-    finishMemoryExtractionJob(row.id, finalStatus, { result });
+    await finishMemoryExtractionJob(row.id, finalStatus, { result });
     return result;
 }
 
 async function processMemoryExtractionJobs(options = {}) {
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 5, 20));
-    const rows = claimMemoryExtractionJobs(limit);
+    const rows = await claimMemoryExtractionJobs(limit);
     const results = [];
     for (const row of rows) {
         const key = `${row.user_id}:${row.session_id}:${row.id}`;
@@ -759,11 +778,11 @@ async function processMemoryExtractionJobs(options = {}) {
             const result = await extractionGuard.run(key, () => processMemoryExtractionJob(row));
             results.push({ id: row.id, ok: true, result });
         } catch (err) {
-            const latest = db.prepare('SELECT attempts, max_attempts FROM memory_extraction_jobs WHERE id = ?').get(row.id) || row;
+            const latest = (await queryOne('SELECT attempts, max_attempts FROM memory_extraction_jobs WHERE id = ?', [row.id])) || row;
             const attempts = Number(latest.attempts || row.attempts || 1);
             const maxAttempts = Number(latest.max_attempts || DEFAULT_MEMORY_JOB_MAX_ATTEMPTS);
             const exhausted = attempts >= maxAttempts;
-            finishMemoryExtractionJob(row.id, exhausted ? MEMORY_JOB_STATUS.failed : MEMORY_JOB_STATUS.queued, {
+            await finishMemoryExtractionJob(row.id, exhausted ? MEMORY_JOB_STATUS.failed : MEMORY_JOB_STATUS.queued, {
                 lastError: String(err.message || err).slice(0, 1000),
                 nextRunAt: exhausted ? null : nextMemoryJobRunAt(attempts)
             });
@@ -779,7 +798,7 @@ async function processMemoryExtractionJobs(options = {}) {
     };
 }
 
-function listMemoryExtractionJobs(userId, options = {}) {
+async function listMemoryExtractionJobs(userId, options = {}) {
     const status = String(options.status || 'all');
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 50, 200));
     const offset = Math.max(0, Number.parseInt(options.offset, 10) || 0);
@@ -789,18 +808,20 @@ function listMemoryExtractionJobs(userId, options = {}) {
         where.push('status = ?');
         params.push(status);
     }
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM memory_extraction_jobs
         WHERE ${where.join(' AND ')}
         ORDER BY id DESC
         LIMIT ? OFFSET ?
-    `).all(...params, limit, offset);
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_extraction_jobs WHERE ${where.join(' AND ')}`).get(...params).count || 0;
-    return { total, jobs: rows.map(serializeMemoryJob), summary: getMemoryJobSummary(userId) };
+    `, [...params, limit, offset]);
+    const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM memory_extraction_jobs WHERE ${where.join(' AND ')}`, params);
+    const total = Number(totalRow?.count || 0);
+    const summary = await getMemoryJobSummary(userId);
+    return { total, jobs: rows.map(serializeMemoryJob), summary };
 }
 
-function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
+async function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
     const ids = normalizeMemoryIds(jobIds);
     const now = getBeijingTimestamp();
     const where = ['user_id = ?', 'status = ?'];
@@ -809,7 +830,7 @@ function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
         where.push(`id IN (${ids.map(() => '?').join(',')})`);
         params.push(...ids);
     }
-    const info = db.prepare(`
+    const changes = await execute(`
         UPDATE memory_extraction_jobs
         SET status = ?,
             locked_at = NULL,
@@ -817,17 +838,16 @@ function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
             next_run_at = ?,
             updated_at = ?
         WHERE ${where.join(' AND ')}
-    `).run(MEMORY_JOB_STATUS.queued, now, now, ...params);
-    if (info.changes > 0) triggerMemoryExtractionWorker();
-    return { queued: info.changes };
+    `, [MEMORY_JOB_STATUS.queued, now, now, ...params]);
+    if (changes > 0) triggerMemoryExtractionWorker();
+    return { queued: changes };
 }
 
-function cleanupMemoryExtractionJobs(userId, options = {}) {
+async function cleanupMemoryExtractionJobs(userId, options = {}) {
     const retentionDays = Math.max(1, Math.min(Number.parseInt(options.retentionDays, 10) || DEFAULT_COMPLETED_JOB_RETENTION_DAYS, 365));
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 1000, 5000));
-    const cutoff = db.prepare("SELECT datetime('now', '+8 hours', ?) AS cutoff")
-        .get(`-${retentionDays} days`).cutoff;
-    const rows = db.prepare(`
+    const cutoff = getBeijingTimestamp(new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000));
+    const rows = await query(`
         SELECT id
         FROM memory_extraction_jobs
         WHERE user_id = ?
@@ -835,36 +855,36 @@ function cleanupMemoryExtractionJobs(userId, options = {}) {
           AND COALESCE(completed_at, updated_at, created_at) < ?
         ORDER BY COALESCE(completed_at, updated_at, created_at) ASC, id ASC
         LIMIT ?
-    `).all(
+    `, [
         userId,
         MEMORY_JOB_STATUS.succeeded,
         MEMORY_JOB_STATUS.failed,
         MEMORY_JOB_STATUS.skipped,
         cutoff,
         limit
-    );
+    ]);
     if (rows.length === 0) return { deleted: 0, cutoff, retentionDays };
     const ids = rows.map(row => row.id);
-    const info = db.prepare(`
+    const changes = await execute(`
         DELETE FROM memory_extraction_jobs
         WHERE user_id = ?
           AND id IN (${ids.map(() => '?').join(',')})
-    `).run(userId, ...ids);
-    return { deleted: info.changes, cutoff, retentionDays };
+    `, [userId, ...ids]);
+    return { deleted: changes, cutoff, retentionDays };
 }
 
 async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null } = {}) {
     const ids = normalizeSourceMessageIds(messageIds);
-    if (!isLongTermMemoryEnabled(userId) || ids.length === 0) {
+    if (!(await isLongTermMemoryEnabled(userId)) || ids.length === 0) {
         return { skipped: true };
     }
     const placeholders = ids.map(() => '?').join(',');
-    const messages = db.prepare(`
+    const messages = await query(`
         SELECT id, session_id, role, content
         FROM messages
         WHERE user_id = ? AND session_id = ? AND id IN (${placeholders}) AND deleted_at IS NULL
         ORDER BY id ASC
-    `).all(userId, sessionId, ...ids);
+    `, [userId, sessionId, ...ids]);
     let extractor = 'heuristic';
     let candidates = [];
     if (modelCfg?.url) {
@@ -894,13 +914,13 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     };
 }
 
-async function retrieveLongTermMemories(userId, query, options = {}) {
-    if (!isLongTermMemoryEnabled(userId)) return [];
-    const normalizedQuery = String(query || '').trim();
+async function retrieveLongTermMemories(userId, queryText, options = {}) {
+    if (!(await isLongTermMemoryEnabled(userId))) return [];
+    const normalizedQuery = String(queryText || '').trim();
     if (!normalizedQuery) return [];
     const now = getBeijingTimestamp();
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || DEFAULT_MAX_INJECTED_MEMORIES, 20));
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM memories
         WHERE user_id = ?
@@ -908,7 +928,7 @@ async function retrieveLongTermMemories(userId, query, options = {}) {
           AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY salience DESC, confidence DESC, updated_at DESC
         LIMIT 200
-    `).all(userId, MEMORY_STATUS.active, now);
+    `, [userId, MEMORY_STATUS.active, now]);
     if (rows.length === 0) return [];
 
     let queryVector = null;
@@ -947,8 +967,7 @@ async function retrieveLongTermMemories(userId, query, options = {}) {
 
     if (scored.length > 0) {
         const ids = scored.map(item => item.id);
-        db.prepare(`UPDATE memories SET last_used_at = ? WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})`)
-            .run(now, userId, ...ids);
+        await execute(`UPDATE memories SET last_used_at = ? WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [now, userId, ...ids]);
     }
     return scored;
 }

@@ -16,7 +16,7 @@ const {
     hashRefreshToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
-const { db, stmts } = require('../db');
+const { query, execute } = require('../db/client');
 const crypto = require('crypto');
 const { hashApiKey, previewApiKey } = require('../auth');
 const { getApiAccessSetting } = require('../services/api-access-settings');
@@ -63,7 +63,7 @@ function createAuthRouter({
 
     router.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
         try {
-            const data = login(req.body.username, req.body.password);
+            const data = await login(req.body.username, req.body.password);
             req.user = data.user;
             logAction(req, '用户登录', '登录成功');
             
@@ -96,7 +96,7 @@ function createAuthRouter({
         }
 
         try {
-            const data = refreshTokens(refreshToken);
+            const data = await refreshTokens(refreshToken);
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
@@ -131,13 +131,13 @@ function createAuthRouter({
         res.json({ authenticated: true, user: auth.user, csrfToken });
     });
 
-    router.post('/auth/logout', authMiddleware, (req, res) => {
+    router.post('/auth/logout', authMiddleware, asyncHandler(async (req, res) => {
         logAction(req, '用户退出', '退出登录');
         
         // 尝试从 Cookie 中获取并删除数据库中的 Refresh Token
         const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
         if (refreshToken) {
-            stmts.deleteRefreshToken.run(hashRefreshToken(refreshToken));
+            await execute('DELETE FROM refresh_tokens WHERE token = ?', [hashRefreshToken(refreshToken)]);
         }
 
         res.clearCookie(AUTH_COOKIE_NAME, { ...ACCESS_COOKIE_OPTIONS, maxAge: 0 });
@@ -145,18 +145,19 @@ function createAuthRouter({
         res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
         res.clearCookie(CSRF_COOKIE_NAME, { sameSite: 'lax', path: '/', secure: process.env.COOKIE_SECURE === 'true', maxAge: 0 });
         res.json({ success: true });
-    });
+    }));
 
     // --- API Key 管理 ---
     router.get('/auth/keys', authMiddleware, asyncHandler(async (req, res) => {
-        const keys = db.prepare(`
+        const maxOutputExpr = "GREATEST(COALESCE(output_tokens, 0), COALESCE(usage_tokens, 0) - COALESCE(input_tokens, 0))";
+        const keys = await query(`
             SELECT id, name, key_preview, created_at, last_used_at, status, usage_tokens,
                    COALESCE(input_tokens, 0) AS input_tokens,
-                   MAX(COALESCE(output_tokens, 0), COALESCE(usage_tokens, 0) - COALESCE(input_tokens, 0)) AS output_tokens
+                   ${maxOutputExpr} AS output_tokens
             FROM api_keys
             WHERE user_id = ?
             ORDER BY created_at DESC
-        `).all(req.user.id);
+        `, [req.user.id]);
         res.json({
             apiAccessEnabled: getApiAccessSetting(),
             keys: keys.map(k => ({ ...k, key: k.key_preview || 'sk-****' }))
@@ -169,15 +170,19 @@ function createAuthRouter({
         }
         const { name } = req.body;
         const key = 'sk-' + crypto.randomBytes(24).toString('hex');
-        db.prepare('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key) VALUES (?, ?, ?, ?, NULL)')
-          .run(req.user.id, name || '未命名密钥', hashApiKey(key), previewApiKey(key));
+        await execute('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key) VALUES (?, ?, ?, ?, NULL)', [
+            req.user.id,
+            name || '未命名密钥',
+            hashApiKey(key),
+            previewApiKey(key)
+        ]);
         logAction(req, '创建 API Key', `名称: ${name}`);
         res.json({ key, name });
     }));
 
     router.delete('/auth/keys/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const result = db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-        if (result.changes === 0) return res.status(404).json({ error: '密钥不存在' });
+        const changes = await execute('DELETE FROM api_keys WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+        if (changes === 0) return res.status(404).json({ error: '密钥不存在' });
         logAction(req, '删除 API Key', `ID: ${req.params.id}`);
         res.json({ success: true });
     }));

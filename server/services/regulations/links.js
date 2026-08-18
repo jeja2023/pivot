@@ -1,5 +1,7 @@
 const {
-    db,
+    query,
+    queryOne,
+    execute,
     normalizeRegulationAlias,
     normalizeRegulationId
 } = require('./shared');
@@ -98,66 +100,68 @@ function parseCrossLinkLabel(targetLabel) {
 }
 
 // 跨法引用回连：把指定版本中悬空的「《XX法》第N条」外链，匹配库内文档并对齐到目标条文 id
-function resolveRegulationCrossLinks(versionId) {
+async function resolveRegulationCrossLinks(versionId) {
     const vId = normalizeRegulationId(versionId);
     if (!vId) return { resolved: 0 };
     // 取该版本下尚未连上、且 target_label 带书名号的外链
-    const pending = db.prepare(`
+    const pending = await query(`
         SELECT id, target_label
         FROM regulation_article_links
         WHERE version_id = ? AND target_article_id IS NULL AND target_label LIKE '《%'
-    `).all(vId);
+    `, [vId]);
     if (!pending.length) return { resolved: 0 };
 
-    const updateLink = db.prepare(`
-        UPDATE regulation_article_links
-        SET target_document_id = ?, target_article_id = ?, confidence = ?
-        WHERE id = ?
-    `);
     let resolved = 0;
-    pending.forEach(row => {
+    for (const row of pending) {
         const parsed = parseCrossLinkLabel(row.target_label);
-        if (!parsed?.bookName) return;
+        if (!parsed?.bookName) continue;
         const norm = normalizeRegulationAlias(parsed.bookName);
         // 通过别名表匹配目标文档（在用、未归档）
-        const aliasRow = db.prepare(`
+        const aliasRow = await queryOne(`
             SELECT a.document_id
             FROM regulation_aliases a
             JOIN regulation_documents d ON d.id = a.document_id
             WHERE a.normalized_alias = ? AND d.deleted_at IS NULL
             ORDER BY a.is_primary DESC
             LIMIT 1
-        `).get(norm);
-        if (!aliasRow) return;
+        `, [norm]);
+        if (!aliasRow) continue;
         const targetDocId = aliasRow.document_id;
         let targetArticleId = null;
         if (parsed.articleLabel) {
             // 在目标文档当前版本里按条号对齐
-            const art = db.prepare(`
+            const art = await queryOne(`
                 SELECT a.id
                 FROM regulation_articles a
                 JOIN regulation_documents d ON d.id = a.document_id
                 WHERE a.document_id = ? AND a.version_id = d.current_version_id AND a.article_label = ?
                 LIMIT 1
-            `).get(targetDocId, parsed.articleLabel);
+            `, [targetDocId, parsed.articleLabel]);
             targetArticleId = art?.id || null;
         }
-        updateLink.run(targetDocId, targetArticleId, targetArticleId ? 0.8 : 0.65, row.id);
+        await execute(`
+            UPDATE regulation_article_links
+            SET target_document_id = ?, target_article_id = ?, confidence = ?
+            WHERE id = ?
+        `, [targetDocId, targetArticleId, targetArticleId ? 0.8 : 0.65, row.id]);
         resolved += 1;
-    });
+    }
     return { resolved };
 }
 
 // 重建：对全库（或指定文档）当前版本重新解析跨法引用回连
-function rebuildRegulationCrossLinks(documentId = null) {
+async function rebuildRegulationCrossLinks(documentId = null) {
     const docId = normalizeRegulationId(documentId);
     const versions = docId
-        ? db.prepare('SELECT current_version_id AS id FROM regulation_documents WHERE id = ? AND deleted_at IS NULL').all(docId)
-        : db.prepare('SELECT current_version_id AS id FROM regulation_documents WHERE deleted_at IS NULL AND current_version_id IS NOT NULL').all();
+        ? await query('SELECT current_version_id AS id FROM regulation_documents WHERE id = ? AND deleted_at IS NULL', [docId])
+        : await query('SELECT current_version_id AS id FROM regulation_documents WHERE deleted_at IS NULL AND current_version_id IS NOT NULL');
     let total = 0;
-    versions.forEach(v => {
-        if (v.id) total += resolveRegulationCrossLinks(v.id).resolved;
-    });
+    for (const v of versions) {
+        if (v.id) {
+            const res = await resolveRegulationCrossLinks(v.id);
+            total += res.resolved;
+        }
+    }
     return { resolved: total, versions: versions.length };
 }
 

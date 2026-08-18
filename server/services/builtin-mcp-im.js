@@ -4,7 +4,7 @@
  * 文本/Markdown 通知。由 builtin-mcp.js 拆分而来，逻辑保持不变。
  */
 const {
-    getRequiredBuiltinConfig,
+    getRequiredBuiltinConfigAsync,
     IM_TIMEOUT_MS
 } = require('./builtin-mcp-common');
 const {
@@ -206,7 +206,7 @@ async function sendIm(config, secret, payload, user = null, options = {}) {
 }
 
 async function executeImTool(server, name, input = {}, user = null, options = {}) {
-    const { config, secret } = getRequiredBuiltinConfig(server, 'im');
+    const { config, secret } = await getRequiredBuiltinConfigAsync(server, 'im');
     if (name === 'im.list_allowed_targets') {
         return {
             allowedTargets: config.allowedTargets,

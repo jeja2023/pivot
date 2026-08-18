@@ -1,5 +1,5 @@
 const { randomUUID } = require('crypto');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 
 const MAX_CHECKPOINT_STATE_LENGTH = 120000;
@@ -25,16 +25,16 @@ function serializeCheckpointState(value) {
     }
 }
 
-function recordAgentCheckpoint(runId, data = {}) {
+async function recordAgentCheckpoint(runId, data = {}) {
     if (!runId) return null;
     const type = CHECKPOINT_TYPES.has(String(data.type || '')) ? String(data.type) : 'control';
     try {
         const checkpointId = randomUUID();
-        const info = db.prepare(`
+        const changes = await execute(`
             INSERT INTO agent_run_checkpoints (
                 checkpoint_id, run_id, step_index, checkpoint_type, status, state, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
+        `, [
             checkpointId,
             runId,
             Math.max(Number(data.stepIndex) || 0, 0),
@@ -42,35 +42,37 @@ function recordAgentCheckpoint(runId, data = {}) {
             String(data.status || 'completed').slice(0, 30),
             serializeCheckpointState(data.state || {}),
             data.createdAt || getBeijingTimestamp()
-        );
-        return info.changes ? checkpointId : null;
+        ]);
+        return changes ? checkpointId : null;
     } catch (e) {
         return null;
     }
 }
 
-function listAgentCheckpoints(runId, options = {}) {
+async function listAgentCheckpoints(runId, options = {}) {
     const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 200);
-    return db.prepare(`
+    const rows = await query(`
         SELECT checkpoint_id, run_id, step_index, checkpoint_type, status, state, created_at
         FROM agent_run_checkpoints
         WHERE run_id = ?
         ORDER BY step_index DESC, id DESC
         LIMIT ?
-    `).all(runId, limit).map(row => ({ ...row, state: parseCheckpointState(row.state) }));
+    `, [runId, limit]);
+    return rows.map(row => ({ ...row, state: parseCheckpointState(row.state) }));
 }
 
-function listAgentCheckpointsForUser(runId, user, options = {}) {
-    const run = db.prepare('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(runId, user.id);
-    return run ? listAgentCheckpoints(runId, options) : null;
+async function listAgentCheckpointsForUser(runId, user, options = {}) {
+    const run = await queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, user.id]);
+    return run ? await listAgentCheckpoints(runId, options) : null;
 }
 
-function getLatestAgentCheckpoint(runId) {
-    return listAgentCheckpoints(runId, { limit: 1 })[0] || null;
+async function getLatestAgentCheckpoint(runId) {
+    const list = await listAgentCheckpoints(runId, { limit: 1 });
+    return list[0] || null;
 }
 
-function buildAgentResumeContext(runId) {
-    const allCheckpoints = listAgentCheckpoints(runId, { limit: 80 }).reverse();
+async function buildAgentResumeContext(runId) {
+    const allCheckpoints = (await listAgentCheckpoints(runId, { limit: 80 })).reverse();
     const checkpoints = allCheckpoints.filter(item => ['completed', 'success'].includes(String(item.status || '')));
     const observations = checkpoints
         .filter(item => ['tool', 'dag'].includes(item.checkpoint_type))
@@ -103,15 +105,15 @@ function buildAgentResumeContext(runId) {
     };
 }
 
-function summarizeAgentCheckpoints(runId) {
-    const row = db.prepare(`
+async function summarizeAgentCheckpoints(runId) {
+    const row = (await queryOne(`
         SELECT COUNT(*) AS total,
                MAX(step_index) AS latest_step,
                MAX(created_at) AS latest_at,
                SUM(CASE WHEN checkpoint_type = 'tool' THEN 1 ELSE 0 END) AS tool_count,
                SUM(CASE WHEN checkpoint_type = 'dag' THEN 1 ELSE 0 END) AS dag_count
         FROM agent_run_checkpoints WHERE run_id = ?
-    `).get(runId) || {};
+    `, [runId])) || {};
     return {
         total: Number(row.total || 0),
         latestStep: Number(row.latest_step || 0),

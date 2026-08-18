@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { buildRagSearchTerms, normalizeSearchText } = require('./rag-tokenizer');
@@ -352,126 +352,123 @@ function extractKnowledgeGraph(text, docType = 'prose') {
 
 // 将预编译语句提到逐实体/逐关系的索引循环（indexKnowledgeGraphForChunks）之外：
 // 惰性编译一次并跨调用复用，避免每个分块重复编译相同 SQL。db 虽为模块级常量，
-// 但惰性初始化可避免 require 加载顺序带来的问题。
-let upsertEntityStmt = null;
-let recordMentionStmt = null;
-let upsertRelationStmt = null;
-
-function upsertEntity({ userId, name, type = 'concept', confidence = 0.7, sourceDocId = null, description = '' }) {
+async function upsertEntity({ userId, name, type = 'concept', confidence = 0.7, sourceDocId = null, description = '' }) {
     const normalized = normalizeEntityName(name);
     if (!normalized) return null;
     const now = getBeijingTimestamp();
-    // ON CONFLICT DO UPDATE + RETURNING 让插入与更新两条路径都能在一次往返内拿到行 id
-    //（SQLite 的 RETURNING 对两种路径都会触发）。
-    upsertEntityStmt ||= db.prepare(`
+    return await queryOne(`
         INSERT INTO knowledge_entities (user_id, name, normalized_name, type, description, confidence, source_doc_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, normalized_name) DO UPDATE SET
-            name = CASE WHEN LENGTH(excluded.name) > LENGTH(knowledge_entities.name) THEN excluded.name ELSE knowledge_entities.name END,
-            type = CASE WHEN knowledge_entities.type = 'concept' THEN excluded.type ELSE knowledge_entities.type END,
-            confidence = MAX(knowledge_entities.confidence, excluded.confidence),
-            updated_at = excluded.updated_at,
+            name = CASE WHEN LENGTH(EXCLUDED.name) > LENGTH(knowledge_entities.name) THEN EXCLUDED.name ELSE knowledge_entities.name END,
+            type = CASE WHEN knowledge_entities.type = 'concept' THEN EXCLUDED.type ELSE knowledge_entities.type END,
+            confidence = GREATEST(knowledge_entities.confidence, EXCLUDED.confidence),
+            updated_at = EXCLUDED.updated_at,
             deleted_at = NULL
         RETURNING *
-    `);
-    return upsertEntityStmt.get(userId, cleanEntityName(name), normalized, type, description, confidence, sourceDocId, now, now);
+    `, [userId, cleanEntityName(name), normalized, type, description, confidence, sourceDocId, now, now]);
 }
 
-function recordMention({ userId, entityId, docId, chunkId, snippet = '' }) {
-    recordMentionStmt ||= db.prepare(`
-        INSERT OR IGNORE INTO knowledge_entity_mentions (user_id, entity_id, doc_id, chunk_id, snippet, created_at)
+async function recordMention({ userId, entityId, docId, chunkId, snippet = '' }) {
+    await execute(`
+        INSERT INTO knowledge_entity_mentions (user_id, entity_id, doc_id, chunk_id, snippet, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    recordMentionStmt.run(userId, entityId, docId, chunkId, String(snippet || '').slice(0, 500), getBeijingTimestamp());
+        ON CONFLICT DO NOTHING
+    `, [userId, entityId, docId, chunkId, String(snippet || '').slice(0, 500), getBeijingTimestamp()]);
 }
 
-function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, description = '', confidence = 0.6, sourceDocId = null, sourceChunkId = null }) {
+async function upsertRelation({ userId, sourceEntityId, targetEntityId, relationType, description = '', confidence = 0.6, sourceDocId = null, sourceChunkId = null }) {
     if (!sourceEntityId || !targetEntityId || sourceEntityId === targetEntityId) return null;
     const now = getBeijingTimestamp();
     const status = relationStatusForConfidence(confidence);
-    upsertRelationStmt ||= db.prepare(`
+    await execute(`
         INSERT INTO knowledge_relations (
             user_id, source_entity_id, target_entity_id, relation_type, description,
             confidence, source_doc_id, source_chunk_id, status, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, source_entity_id, target_entity_id, relation_type, source_chunk_id) DO UPDATE SET
-            description = CASE WHEN excluded.description != '' THEN excluded.description ELSE knowledge_relations.description END,
-            confidence = MAX(knowledge_relations.confidence, excluded.confidence),
+            description = CASE WHEN EXCLUDED.description != '' THEN EXCLUDED.description ELSE knowledge_relations.description END,
+            confidence = GREATEST(knowledge_relations.confidence, EXCLUDED.confidence),
             status = CASE
-                WHEN knowledge_relations.status = 'deleted' THEN excluded.status
+                WHEN knowledge_relations.status = 'deleted' THEN EXCLUDED.status
                 WHEN knowledge_relations.status = 'active' THEN 'active'
-                ELSE excluded.status
+                ELSE EXCLUDED.status
             END,
-            updated_at = excluded.updated_at
-    `);
-    upsertRelationStmt.run(userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now);
+            updated_at = EXCLUDED.updated_at
+    `, [userId, sourceEntityId, targetEntityId, relationType, description, confidence, sourceDocId, sourceChunkId, status, now, now]);
 }
 
 async function indexKnowledgeGraphForChunks({ userId, docId, chunks }) {
     if (!userId || !docId || !Array.isArray(chunks) || chunks.length === 0) return { entities: 0, relations: 0 };
     let entityCount = 0;
     let relationCount = 0;
-    // 按文档类型选择关系抽取规则集（法规文档叠加法规领域关系）。
     const docRow = await knowledgeRepository.getDocumentName(docId);
     const sampleText = chunks.slice(0, 24).map(item => item.content).join('\n');
     const docType = detectDocType(docRow?.name || '', sampleText);
-    const indexTransaction = db.transaction(() => {
-        chunks.forEach(chunk => {
-            const graph = extractKnowledgeGraph(chunk.content, docType);
-            const entityRows = new Map();
-            graph.entities.forEach(entity => {
-                const row = upsertEntity({ userId, sourceDocId: docId, ...entity });
-                if (!row) return;
-                entityRows.set(entity.normalizedName, row);
-                recordMention({
-                    userId,
-                    entityId: row.id,
-                    docId,
-                    chunkId: chunk.chunkId,
-                    snippet: chunk.content
-                });
-                entityCount += 1;
+    for (const chunk of chunks) {
+        const graph = extractKnowledgeGraph(chunk.content, docType);
+        const entityRows = new Map();
+        for (const entity of graph.entities) {
+            const row = await upsertEntity({ userId, sourceDocId: docId, ...entity });
+            if (!row) continue;
+            entityRows.set(entity.normalizedName, row);
+            await recordMention({
+                userId,
+                entityId: row.id,
+                docId,
+                chunkId: chunk.chunkId,
+                snippet: chunk.content
             });
-            graph.relations.forEach(relation => {
-                const source = entityRows.get(normalizeEntityName(relation.sourceName));
-                const target = entityRows.get(normalizeEntityName(relation.targetName));
-                if (!source || !target) return;
-                upsertRelation({
-                    userId,
-                    sourceEntityId: source.id,
-                    targetEntityId: target.id,
-                    relationType: relation.relationType,
-                    description: relation.description,
-                    confidence: relation.confidence,
-                    sourceDocId: docId,
-                    sourceChunkId: chunk.chunkId
-                });
-                relationCount += 1;
+            entityCount += 1;
+        }
+        for (const relation of graph.relations) {
+            const source = entityRows.get(normalizeEntityName(relation.sourceName));
+            const target = entityRows.get(normalizeEntityName(relation.targetName));
+            if (!source || !target) continue;
+            await upsertRelation({
+                userId,
+                sourceEntityId: source.id,
+                targetEntityId: target.id,
+                relationType: relation.relationType,
+                description: relation.description,
+                confidence: relation.confidence,
+                sourceDocId: docId,
+                sourceChunkId: chunk.chunkId
             });
-        });
-    });
-    indexTransaction();
+            relationCount += 1;
+        }
+    }
     return { entities: entityCount, relations: relationCount };
 }
 
-function clearKnowledgeGraphForDocument(docId) {
-    const chunkIds = db.prepare('SELECT id FROM knowledge_chunks WHERE doc_id = ?').all(docId).map(row => row.id);
+async function clearKnowledgeGraphForDocument(docId) {
+    const chunkRows = await query('SELECT id FROM knowledge_chunks WHERE doc_id = ?', [docId]);
+    const chunkIds = (chunkRows || []).map(row => row.id);
     if (chunkIds.length === 0) return;
     const placeholders = chunkIds.map(() => '?').join(',');
-    db.prepare(`DELETE FROM knowledge_relations WHERE source_chunk_id IN (${placeholders})`).run(...chunkIds);
-    db.prepare(`DELETE FROM knowledge_entity_mentions WHERE chunk_id IN (${placeholders})`).run(...chunkIds);
+    await execute(`DELETE FROM knowledge_relations WHERE source_chunk_id IN (${placeholders})`, chunkIds);
+    await execute(`DELETE FROM knowledge_entity_mentions WHERE chunk_id IN (${placeholders})`, chunkIds);
 }
 
-function getGraphSummary(userOrId) {
+async function getGraphSummaryAsync(userOrId) {
     const entityAccess = buildGraphEntityAccessFilter(userOrId, 'e');
     const relationAccess = buildGraphRelationAccessFilter(userOrId, 'r');
     const userId = entityAccess.params[0];
-    const entityCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL`).get(...entityAccess.params).count;
-    const relationCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'active'`).get(...relationAccess.params).count;
-    const pendingRelationCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'pending'`).get(...relationAccess.params).count;
-    const mentionCount = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entity_mentions m WHERE m.user_id = ? OR EXISTS (SELECT 1 FROM knowledge_docs d_access LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL WHERE d_access.id = m.doc_id AND ${buildDocumentAccessFilter(userOrId, 'd_access', 'c_access').sql})`).get(userId, ...buildDocumentAccessFilter(userOrId, 'd_access', 'c_access').params).count;
-    const orphanEntities = db.prepare(`
+    const entityRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL`, entityAccess.params);
+    const entityCount = Number(entityRow?.count || 0);
+
+    const relationRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'active'`, relationAccess.params);
+    const relationCount = Number(relationRow?.count || 0);
+
+    const pendingRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'pending'`, relationAccess.params);
+    const pendingRelationCount = Number(pendingRow?.count || 0);
+
+    const docAccess = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
+    const mentionRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entity_mentions m WHERE m.user_id = ? OR EXISTS (SELECT 1 FROM knowledge_docs d_access LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL WHERE d_access.id = m.doc_id AND ${docAccess.sql})`, [userId, ...docAccess.params]);
+    const mentionCount = Number(mentionRow?.count || 0);
+
+    const orphanRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM knowledge_entities e
         WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
@@ -481,26 +478,33 @@ function getGraphSummary(userOrId) {
                 AND r.status IN ('active', 'pending')
                 AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
           )
-    `).get(...entityAccess.params, ...relationAccess.params).count;
-    const lowConfidenceRelations = db.prepare(`
+    `, [...entityAccess.params, ...relationAccess.params]);
+    const orphanEntities = Number(orphanRow?.count || 0);
+
+    const lowConfidenceRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM knowledge_relations r
         WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND confidence < ?
-    `).get(...relationAccess.params, LOW_CONFIDENCE_THRESHOLD).count;
-    const sourceLessRelations = db.prepare(`
+    `, [...relationAccess.params, LOW_CONFIDENCE_THRESHOLD]);
+    const lowConfidenceRelations = Number(lowConfidenceRow?.count || 0);
+
+    const sourceLessRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM knowledge_relations r
         WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND source_doc_id IS NULL
-    `).get(...relationAccess.params).count;
-    const topTypes = db.prepare(`
+    `, relationAccess.params);
+    const sourceLessRelations = Number(sourceLessRow?.count || 0);
+
+    const topTypes = await query(`
         SELECT type, COUNT(*) AS count
         FROM knowledge_entities e
         WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
         GROUP BY type
         ORDER BY count DESC, type ASC
         LIMIT 12
-    `).all(...entityAccess.params);
-    const duplicateSuggestions = suggestDuplicateEntities(userId, 5);
+    `, entityAccess.params);
+
+    const duplicateSuggestions = await suggestDuplicateEntities(userId, 5);
     const quality = buildGraphQualitySignals({
         entityCount,
         relationCount,
@@ -518,23 +522,25 @@ function getGraphSummary(userOrId) {
         relations: relationCount,
         pendingRelations: pendingRelationCount,
         mentions: mentionCount,
-        topTypes,
+        topTypes: topTypes || [],
         quality,
         suggestions: quality.recommendations,
         duplicateSuggestions
     };
 }
 
-function listEntities({ userId, user = null, query = '', type = '', quality = '', limit = 50, offset = 0 }) {
+const getGraphSummary = getGraphSummaryAsync;
+
+async function listEntities({ userId, user = null, query: queryText = '', type = '', quality = '', limit = 50, offset = 0 }) {
     const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const where = [entityAccess.sql, 'e.deleted_at IS NULL'];
     const params = [...entityAccess.params];
-    const normalizedQuery = normalizeEntityName(query);
+    const normalizedQuery = normalizeEntityName(queryText);
     if (normalizedQuery) {
         where.push('(e.normalized_name LIKE ? OR e.name LIKE ?)');
-        params.push(`%${normalizedQuery}%`, `%${String(query).trim()}%`);
+        params.push(`%${normalizedQuery}%`, `%${String(queryText).trim()}%`);
     }
     if (type) {
         where.push('e.type = ?');
@@ -555,28 +561,29 @@ function listEntities({ userId, user = null, query = '', type = '', quality = ''
     const whereSql = where.join(' AND ');
     const relationAccess1 = buildGraphRelationAccessFilter(user || userId, 'r1');
     const relationAccess2 = buildGraphRelationAccessFilter(user || userId, 'r2');
-    const data = db.prepare(`
+    const data = await query(`
         SELECT e.*,
             COUNT(DISTINCT m.id) AS mention_count,
             COUNT(DISTINCT r1.id) + COUNT(DISTINCT r2.id) AS relation_count
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
         LEFT JOIN knowledge_relations r1 ON r1.source_entity_id = e.id AND r1.status = 'active'
-            AND (${buildGraphRelationAccessFilter(user || userId, 'r1').sql})
+            AND (${relationAccess1.sql})
         LEFT JOIN knowledge_relations r2 ON r2.target_entity_id = e.id AND r2.status = 'active'
-            AND (${buildGraphRelationAccessFilter(user || userId, 'r2').sql})
+            AND (${relationAccess2.sql})
         WHERE ${whereSql}
         GROUP BY e.id
         ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC
         LIMIT ? OFFSET ?
-    `).all(...relationAccess1.params, ...relationAccess2.params, ...params, safeLimit, safeOffset);
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${whereSql}`).get(...params).count;
-    return { data, total, limit: safeLimit, offset: safeOffset };
+    `, [...relationAccess1.params, ...relationAccess2.params, ...params, safeLimit, safeOffset]);
+    const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${whereSql}`, params);
+    const total = Number(totalRow?.count || 0);
+    return { data: data || [], total, limit: safeLimit, offset: safeOffset };
 }
 
-function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
+async function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
     const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
-    const entity = db.prepare(`SELECT * FROM knowledge_entities e WHERE e.id = ? AND ${entityAccess.sql} AND e.deleted_at IS NULL`).get(entityId, ...entityAccess.params);
+    const entity = await queryOne(`SELECT * FROM knowledge_entities e WHERE e.id = ? AND ${entityAccess.sql} AND e.deleted_at IS NULL`, [entityId, ...entityAccess.params]);
     if (!entity) return null;
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 80, 10), 300);
     const statusList = normalizeRelationStatusFilter(status);
@@ -588,7 +595,7 @@ function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, 
         relationWhere.push('r.relation_type = ?');
         params.push(String(relationType).trim());
     }
-    const relations = db.prepare(`
+    const relations = await query(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
                d.name AS doc_name, c.content AS chunk_text
         FROM knowledge_relations r
@@ -599,9 +606,9 @@ function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, 
         WHERE ${relationWhere.join(' AND ')}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ?
-    `).all(...params, safeLimit);
+    `, [...params, safeLimit]);
     const nodeMap = new Map([[entity.id, entity]]);
-    relations.forEach(row => {
+    (relations || []).forEach(row => {
         nodeMap.set(row.source_entity_id, { id: row.source_entity_id, name: row.source_name, type: row.source_type });
         nodeMap.set(row.target_entity_id, { id: row.target_entity_id, name: row.target_name, type: row.target_type });
     });
@@ -609,7 +616,7 @@ function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, 
         center: entity,
         depth: Math.min(Math.max(Number.parseInt(depth, 10) || 1, 1), 2),
         nodes: Array.from(nodeMap.values()),
-        relations
+        relations: relations || []
     };
 }
 
@@ -621,7 +628,7 @@ function normalizeRelationStatusFilter(status = 'active') {
     return ['active'];
 }
 
-function listRelations({ userId, user = null, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
+async function listRelations({ userId, user = null, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const statusList = normalizeRelationStatusFilter(status);
@@ -647,8 +654,7 @@ function listRelations({ userId, user = null, entityId = null, relationType = ''
         where.push('r.source_doc_id = ?');
         params.push(safeDocId);
     }
-    const whereSql = where.join(' AND ');
-    const data = db.prepare(`
+    const data = await query(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
                d.name AS doc_name, c.content AS chunk_text
         FROM knowledge_relations r
@@ -659,9 +665,10 @@ function listRelations({ userId, user = null, entityId = null, relationType = ''
         WHERE ${whereSql}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ? OFFSET ?
-    `).all(...params, safeLimit, safeOffset);
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${whereSql}`).get(...params).count;
-    return { data, total, limit: safeLimit, offset: safeOffset };
+    `, [...params, safeLimit, safeOffset]);
+    const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${whereSql}`, params);
+    const total = Number(totalRow?.count || 0);
+    return { data: data || [], total, limit: safeLimit, offset: safeOffset };
 }
 
 function buildGraphQualitySignals({
@@ -705,16 +712,16 @@ function buildGraphQualitySignals({
     };
 }
 
-function suggestDuplicateEntities(userId, limit = 20) {
+async function suggestDuplicateEntities(userId, limit = 20) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT id, name, normalized_name, type, aliases, confidence, updated_at
         FROM knowledge_entities
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY type ASC, normalized_name ASC
-    `).all(userId);
+    `, [userId]);
     const groups = new Map();
-    rows.forEach(row => {
+    (rows || []).forEach(row => {
         const normalized = String(row.normalized_name || normalizeEntityName(row.name));
         const prefix = normalized.slice(0, Math.min(Math.max(GRAPH_DUPLICATE_PREFIX_MIN, 1), normalized.length));
         const aliases = parseEntityAliases(row.aliases).map(normalizeEntityName);
@@ -753,9 +760,8 @@ function suggestDuplicateEntities(userId, limit = 20) {
 // 在 JS 打分前，最多从 SQL 拉取的候选实体数量上限。
 const QUERY_ENTITY_CANDIDATE_LIMIT = 200;
 
-function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, options = {}) {
-    const terms = buildRagSearchTerms(query, 20);
-    // 没有可用的查询词元：保持原有的空结果（不做全表扫描）。
+async function findQueryEntities(userId, queryText, limit = GRAPH_CONTEXT_ENTITY_LIMIT, options = {}) {
+    const terms = buildRagSearchTerms(queryText, 20);
     if (terms.length === 0) return [];
     const scopeFilter = buildGraphEntityScopeSql(options.scope);
     const access = options.user ? buildDocumentAccessFilter(options.user, 'd_access', 'c_access') : null;
@@ -768,16 +774,14 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, op
                 WHERE m_access.entity_id = e.id AND ${access.sql}
             ))`
         : 'AND e.user_id = ?';
-    // 在 SQL 层预筛候选，避免每次 RAG 查询都拉取该用户的全部实体。每个词元都必须
-    // 以子串形式出现在参与打分的某一列中，与下方 JS 打分逻辑一致，从而保持排序不变。
     const tokenClauses = [];
     const tokenParams = [];
-    terms.forEach(term => {
+    terms.slice(0, 8).forEach(term => {
         const like = `%${String(term).toLowerCase()}%`;
         tokenClauses.push('(LOWER(e.normalized_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(COALESCE(e.aliases, \'\')) LIKE ?)');
         tokenParams.push(like, like, like);
     });
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT e.*, COUNT(m.id) AS mention_count
         FROM knowledge_entities e
         LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
@@ -787,13 +791,13 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, op
         ${accessSql}
         GROUP BY e.id
         LIMIT ?
-    `).all(
+    `, [
         ...tokenParams,
         ...scopeFilter.params,
         ...(options.user ? [userId, ...access.params] : [userId]),
         QUERY_ENTITY_CANDIDATE_LIMIT
-    );
-    return rows
+    ]);
+    return (rows || [])
         .map(row => {
             const haystack = `${row.name} ${row.normalized_name} ${row.aliases || ''}`.toLowerCase();
             const score = terms.reduce((acc, term) => acc + (haystack.includes(String(term).toLowerCase()) ? Math.min(String(term).length, 6) : 0), 0);
@@ -804,8 +808,8 @@ function findQueryEntities(userId, query, limit = GRAPH_CONTEXT_ENTITY_LIMIT, op
         .slice(0, limit);
 }
 
-function getGraphContextForQuery(userId, query, options = {}) {
-    const entities = findQueryEntities(userId, query, options.entityLimit || GRAPH_CONTEXT_ENTITY_LIMIT, options);
+async function getGraphContextForQuery(userId, queryText, options = {}) {
+    const entities = await findQueryEntities(userId, queryText, options.entityLimit || GRAPH_CONTEXT_ENTITY_LIMIT, options);
     if (entities.length === 0) return { entities: [], relations: [], chunkIds: [], context: '' };
     const entityIds = entities.map(entity => entity.id);
     const placeholders = entityIds.map(() => '?').join(',');
@@ -819,7 +823,7 @@ function getGraphContextForQuery(userId, query, options = {}) {
                 WHERE d_access.id = r.source_doc_id AND ${access.sql}
             ))`
         : 'AND r.user_id = ?';
-    const relations = db.prepare(`
+    const relations = await query(`
         SELECT r.*, s.name AS source_name, t.name AS target_name, d.name AS doc_name
         FROM knowledge_relations r
         JOIN knowledge_entities s ON s.id = r.source_entity_id
@@ -831,13 +835,13 @@ function getGraphContextForQuery(userId, query, options = {}) {
           ${accessSql}
         ORDER BY r.confidence DESC, r.updated_at DESC
         LIMIT ?
-    `).all(
+    `, [
         ...entityIds,
         ...entityIds,
         ...relationScope.params,
         ...(options.user ? [userId, ...access.params] : [userId]),
         options.relationLimit || GRAPH_CONTEXT_RELATION_LIMIT
-    );
+    ]);
     const chunkIds = [...new Set(relations.map(row => row.source_chunk_id).filter(Boolean))];
     return {
         entities,
@@ -890,58 +894,88 @@ function formatGraphContext({ entities = [], relations = [] }) {
     return `\n\n【参考知识图谱信息如下】：\n相关实体：${entityText || '-'}\n${relationText}\n请结合上述实体关系与知识库引用回答；如果实体关系不足以支撑结论，请明确说明依据不足。\n`;
 }
 
-function updateEntity({ userId, entityId, patch }) {
-    const current = db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(entityId, userId);
+async function updateEntity({ userId, entityId, patch }) {
+    const current = await queryOne('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [entityId, userId]);
     if (!current) return null;
     const name = cleanEntityName(patch.name ?? current.name);
     const normalized = normalizeEntityName(name);
     const type = String(patch.type || current.type || 'concept').slice(0, 40);
     const description = String(patch.description ?? current.description ?? '').slice(0, 1000);
     const aliases = patch.aliases !== undefined ? JSON.stringify(buildAliasList(patch.aliases)) : current.aliases;
-    db.prepare(`
+    await execute(`
         UPDATE knowledge_entities
         SET name = ?, normalized_name = ?, type = ?, description = ?, aliases = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(name, normalized, type, description, aliases, getBeijingTimestamp(), entityId, userId);
-    return db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ?').get(entityId, userId);
+    `, [name, normalized, type, description, aliases, getBeijingTimestamp(), entityId, userId]);
+    return await queryOne('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ?', [entityId, userId]);
 }
 
-function mergeEntities({ userId, sourceEntityId, targetEntityId }) {
+async function mergeEntities({ userId, sourceEntityId, targetEntityId }) {
     const sourceId = Number.parseInt(sourceEntityId, 10);
     const targetId = Number.parseInt(targetEntityId, 10);
     if (!Number.isSafeInteger(sourceId) || !Number.isSafeInteger(targetId) || sourceId <= 0 || targetId <= 0 || sourceId === targetId) return null;
-    const source = db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sourceId, userId);
-    const target = db.prepare('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(targetId, userId);
+    const source = await queryOne('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sourceId, userId]);
+    const target = await queryOne('SELECT * FROM knowledge_entities WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [targetId, userId]);
     if (!source || !target) return null;
-    const tx = db.transaction(() => {
-        db.prepare('UPDATE OR IGNORE knowledge_entity_mentions SET entity_id = ? WHERE entity_id = ?').run(targetId, sourceId);
-        db.prepare('DELETE FROM knowledge_entity_mentions WHERE entity_id = ?').run(sourceId);
-        db.prepare('UPDATE OR IGNORE knowledge_relations SET source_entity_id = ?, updated_at = ? WHERE source_entity_id = ?').run(targetId, getBeijingTimestamp(), sourceId);
-        db.prepare('DELETE FROM knowledge_relations WHERE source_entity_id = ?').run(sourceId);
-        db.prepare('UPDATE OR IGNORE knowledge_relations SET target_entity_id = ?, updated_at = ? WHERE target_entity_id = ?').run(targetId, getBeijingTimestamp(), sourceId);
-        db.prepare('DELETE FROM knowledge_relations WHERE target_entity_id = ?').run(sourceId);
-        db.prepare('DELETE FROM knowledge_relations WHERE source_entity_id = target_entity_id').run();
-        const aliases = new Set();
-        try { JSON.parse(target.aliases || '[]').forEach(alias => aliases.add(alias)); } catch (_) {}
-        aliases.add(source.name);
-        db.prepare('UPDATE knowledge_entities SET aliases = ?, updated_at = ?, deleted_at = ? WHERE id = ? AND user_id = ?')
-            .run(JSON.stringify([...aliases].slice(0, 20)), getBeijingTimestamp(), getBeijingTimestamp(), sourceId, userId);
-    });
-    tx();
-    return getEntityGraph({ userId, entityId: targetId });
+    
+    await execute(`
+        UPDATE knowledge_entity_mentions
+        SET entity_id = ?
+        WHERE entity_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM knowledge_entity_mentions m2
+              WHERE m2.entity_id = ? AND m2.chunk_id = knowledge_entity_mentions.chunk_id
+          )
+    `, [targetId, sourceId, targetId]);
+    await execute('DELETE FROM knowledge_entity_mentions WHERE entity_id = ?', [sourceId]);
+
+    await execute(`
+        UPDATE knowledge_relations
+        SET source_entity_id = ?, updated_at = ?
+        WHERE source_entity_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM knowledge_relations r2
+              WHERE r2.source_entity_id = ? AND r2.target_entity_id = knowledge_relations.target_entity_id
+                AND r2.relation_type = knowledge_relations.relation_type
+                AND COALESCE(r2.source_chunk_id, 0) = COALESCE(knowledge_relations.source_chunk_id, 0)
+          )
+    `, [targetId, getBeijingTimestamp(), sourceId, targetId]);
+    await execute('DELETE FROM knowledge_relations WHERE source_entity_id = ?', [sourceId]);
+
+    await execute(`
+        UPDATE knowledge_relations
+        SET target_entity_id = ?, updated_at = ?
+        WHERE target_entity_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM knowledge_relations r2
+              WHERE r2.source_entity_id = knowledge_relations.source_entity_id AND r2.target_entity_id = ?
+                AND r2.relation_type = knowledge_relations.relation_type
+                AND COALESCE(r2.source_chunk_id, 0) = COALESCE(knowledge_relations.source_chunk_id, 0)
+          )
+    `, [targetId, getBeijingTimestamp(), sourceId, targetId]);
+    await execute('DELETE FROM knowledge_relations WHERE target_entity_id = ?', [sourceId]);
+    await execute('DELETE FROM knowledge_relations WHERE source_entity_id = target_entity_id');
+
+    const aliases = new Set();
+    try { JSON.parse(target.aliases || '[]').forEach(alias => aliases.add(alias)); } catch (_) {}
+    aliases.add(source.name);
+    await execute('UPDATE knowledge_entities SET aliases = ?, updated_at = ?, deleted_at = ? WHERE id = ? AND user_id = ?', [
+        JSON.stringify([...aliases].slice(0, 20)), getBeijingTimestamp(), getBeijingTimestamp(), sourceId, userId
+    ]);
+    return await getEntityGraph({ userId, entityId: targetId });
 }
 
-function updateRelation({ userId, relationId, patch }) {
-    const current = db.prepare("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status IN ('active', 'pending')").get(relationId, userId);
+async function updateRelation({ userId, relationId, patch }) {
+    const current = await queryOne("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status IN ('active', 'pending')", [relationId, userId]);
     if (!current) return null;
     const nextStatus = ['active', 'pending'].includes(String(patch.status || '').trim())
         ? String(patch.status).trim()
         : relationStatusForConfidence(patch.confidence ?? current.confidence);
-    db.prepare(`
+    await execute(`
         UPDATE knowledge_relations
         SET relation_type = ?, description = ?, confidence = ?, status = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(
+    `, [
         String(patch.relationType || current.relation_type || 'related_to').slice(0, 60),
         String(patch.description ?? current.description ?? '').slice(0, 1000),
         Math.min(Math.max(Number(patch.confidence ?? current.confidence ?? 0.6), 0), 1),
@@ -949,31 +983,33 @@ function updateRelation({ userId, relationId, patch }) {
         getBeijingTimestamp(),
         relationId,
         userId
-    );
-    return db.prepare('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?').get(relationId, userId);
+    ]);
+    return await queryOne('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?', [relationId, userId]);
 }
 
-function deleteRelation({ userId, relationId }) {
-    return db.prepare("UPDATE knowledge_relations SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?")
-        .run(getBeijingTimestamp(), relationId, userId).changes > 0;
+async function deleteRelation({ userId, relationId }) {
+    const result = await execute("UPDATE knowledge_relations SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?", [
+        getBeijingTimestamp(), relationId, userId
+    ]);
+    return (result?.rowCount || result?.changes || 0) > 0;
 }
 
-function confirmRelation({ userId, relationId }) {
-    const current = db.prepare("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status = 'pending'").get(relationId, userId);
+async function confirmRelation({ userId, relationId }) {
+    const current = await queryOne("SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ? AND status = 'pending'", [relationId, userId]);
     if (!current) return null;
-    db.prepare(`
+    await execute(`
         UPDATE knowledge_relations
-        SET status = 'active', confidence = MAX(confidence, ?), updated_at = ?
+        SET status = 'active', confidence = GREATEST(confidence, ?), updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(LOW_CONFIDENCE_THRESHOLD, getBeijingTimestamp(), relationId, userId);
-    return db.prepare('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?').get(relationId, userId);
+    `, [LOW_CONFIDENCE_THRESHOLD, getBeijingTimestamp(), relationId, userId]);
+    return await queryOne('SELECT * FROM knowledge_relations WHERE id = ? AND user_id = ?', [relationId, userId]);
 }
 
 async function rebuildGraphForDocument({ userId, docId }) {
-    const doc = db.prepare("SELECT * FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(docId, userId);
+    const doc = await queryOne("SELECT * FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL", [docId, userId]);
     if (!doc) return null;
     const chunks = (await knowledgeRepository.listAllDocumentChunks(docId)) || [];
-    clearKnowledgeGraphForDocument(docId);
+    await clearKnowledgeGraphForDocument(docId);
     const result = await indexKnowledgeGraphForChunks({ userId, docId, chunks });
     return { docId, ...result };
 }
@@ -1001,6 +1037,7 @@ module.exports = {
     getEntityGraph,
     getGraphContextForQuery,
     getGraphSummary,
+    getGraphSummaryAsync,
     indexKnowledgeGraphForChunks,
     listEntities,
     listRelations,

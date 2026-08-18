@@ -1,5 +1,5 @@
 const { randomUUID } = require('crypto');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 
 const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled', 'deleted']);
@@ -41,7 +41,7 @@ function serializeTraceValue(value) {
     }
 }
 
-function ensureAgentTrace(run, metadata = {}) {
+async function ensureAgentTrace(run, metadata = {}) {
     if (!run?.id || !run?.user_id) return null;
     const now = getBeijingTimestamp();
     const hasMetadata = metadata && typeof metadata === 'object'
@@ -49,7 +49,7 @@ function ensureAgentTrace(run, metadata = {}) {
         : Boolean(metadata);
     const metadataText = hasMetadata ? serializeTraceValue(metadata) : '';
     try {
-        db.prepare(`
+        await execute(`
             INSERT INTO agent_traces (run_id, user_id, status, metadata, started_at, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
@@ -57,7 +57,7 @@ function ensureAgentTrace(run, metadata = {}) {
                 metadata = CASE WHEN excluded.metadata = '' THEN agent_traces.metadata ELSE excluded.metadata END,
                 started_at = COALESCE(agent_traces.started_at, excluded.started_at),
                 updated_at = excluded.updated_at
-        `).run(
+        `, [
             run.id,
             run.user_id,
             run.status || 'queued',
@@ -65,24 +65,24 @@ function ensureAgentTrace(run, metadata = {}) {
             run.started_at || now,
             now,
             now
-        );
+        ]);
         return run.id;
     } catch (e) {
         return null;
     }
 }
 
-function startAgentTraceSpan(runId, data = {}) {
+async function startAgentTraceSpan(runId, data = {}) {
     if (!runId) return '';
     const spanId = randomUUID();
     const now = data.startedAt || getBeijingTimestamp();
     try {
-        db.prepare(`
+        await execute(`
             INSERT INTO agent_trace_spans (
                 span_id, run_id, parent_span_id, span_type, name, status,
                 input_summary, details, started_at, created_at
             ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
-        `).run(
+        `, [
             spanId,
             runId,
             data.parentSpanId || null,
@@ -92,27 +92,27 @@ function startAgentTraceSpan(runId, data = {}) {
             serializeTraceValue(data.details),
             now,
             now
-        );
+        ]);
         return spanId;
     } catch (e) {
         return '';
     }
 }
 
-function finishAgentTraceSpan(spanId, data = {}) {
+async function finishAgentTraceSpan(spanId, data = {}) {
     if (!spanId) return false;
     const completedAt = data.completedAt || getBeijingTimestamp();
     try {
-        const current = db.prepare('SELECT started_at FROM agent_trace_spans WHERE span_id = ?').get(spanId);
+        const current = await queryOne('SELECT started_at FROM agent_trace_spans WHERE span_id = ?', [spanId]);
         const measured = current?.started_at ? Math.max(Date.now() - new Date(`${current.started_at} GMT+0800`).getTime(), 0) : 0;
         const durationMs = Math.max(Number(data.durationMs) || measured || 0, 0);
-        const info = db.prepare(`
+        const changes = await execute(`
             UPDATE agent_trace_spans
             SET status = ?, output_summary = ?, details = CASE WHEN ? = '' THEN details ELSE ? END,
                 error_message = ?, input_tokens = ?, output_tokens = ?,
                 completed_at = ?, duration_ms = ?
             WHERE span_id = ?
-        `).run(
+        `, [
             data.status || (data.errorMessage ? 'error' : 'completed'),
             serializeTraceValue(data.output),
             serializeTraceValue(data.details),
@@ -123,61 +123,62 @@ function finishAgentTraceSpan(spanId, data = {}) {
             completedAt,
             durationMs,
             spanId
-        );
-        return info.changes > 0;
+        ]);
+        return changes > 0;
     } catch (e) {
         return false;
     }
 }
 
-function recordAgentTraceSpan(runId, data = {}) {
-    const spanId = startAgentTraceSpan(runId, data);
+async function recordAgentTraceSpan(runId, data = {}) {
+    const spanId = await startAgentTraceSpan(runId, data);
     if (!spanId) return '';
-    finishAgentTraceSpan(spanId, data);
+    await finishAgentTraceSpan(spanId, data);
     return spanId;
 }
 
-function syncAgentTraceFromRun(runId) {
+async function syncAgentTraceFromRun(runId) {
     if (!runId) return null;
     try {
-        const run = db.prepare(`
+        const run = await queryOne(`
             SELECT id, user_id, status, started_at, completed_at, created_at
             FROM agent_runs WHERE id = ?
-        `).get(runId);
+        `, [runId]);
         if (!run) return null;
-        ensureAgentTrace(run);
+        await ensureAgentTrace(run);
         const completedAt = run.completed_at || (TERMINAL_TRACE_STATUSES.has(run.status) ? getBeijingTimestamp() : null);
         const startedAt = run.started_at || run.created_at;
         const durationMs = completedAt && startedAt
             ? Math.max(new Date(`${completedAt} GMT+0800`).getTime() - new Date(`${startedAt} GMT+0800`).getTime(), 0)
             : 0;
-        db.prepare(`
+        await execute(`
             UPDATE agent_traces
             SET status = ?, started_at = COALESCE(started_at, ?), completed_at = ?, duration_ms = ?, updated_at = ?
             WHERE run_id = ?
-        `).run(run.status, startedAt, completedAt, durationMs, getBeijingTimestamp(), runId);
+        `, [run.status, startedAt, completedAt, durationMs, getBeijingTimestamp(), runId]);
         return run;
     } catch (e) {
         return null;
     }
 }
 
-function getAgentTraceForUser(runId, user) {
-    const run = db.prepare('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(runId, user.id);
+async function getAgentTraceForUser(runId, user) {
+    const run = await queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, user.id]);
     if (!run) return null;
-    syncAgentTraceFromRun(runId);
-    const trace = db.prepare(`
+    await syncAgentTraceFromRun(runId);
+    const trace = await queryOne(`
         SELECT run_id, status, metadata, started_at, completed_at, duration_ms, created_at, updated_at
         FROM agent_traces WHERE run_id = ? AND user_id = ?
-    `).get(runId, user.id);
-    const spans = db.prepare(`
+    `, [runId, user.id]);
+    const rawSpans = await query(`
         SELECT span_id, parent_span_id, span_type, name, status, input_summary, output_summary,
                details, error_message, input_tokens, output_tokens, started_at, completed_at,
                duration_ms, created_at
         FROM agent_trace_spans
         WHERE run_id = ?
         ORDER BY COALESCE(started_at, created_at) ASC, id ASC
-    `).all(runId).map(span => ({
+    `, [runId]);
+    const spans = rawSpans.map(span => ({
         ...span,
         input: safeJsonParse(span.input_summary, span.input_summary || null),
         output: safeJsonParse(span.output_summary, span.output_summary || null),

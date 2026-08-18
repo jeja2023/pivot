@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { assertSafeModelRuntimeUrl, createSafeModelHttpAgents } = require('./model-adapter');
@@ -17,14 +17,24 @@ const runtimes = new Map();
 let monitorStarted = false;
 let monitorRefreshPromise = null;
 let monitorRefreshTimer = null;
+let cachedActiveEndpointModels = [];
+
+async function getActiveEndpointModelsAsync() {
+    try {
+        const rows = await query(`
+            SELECT id, name, url, monitor_url, max_concurrent, supports_vision
+            FROM models
+            WHERE COALESCE(status, 'active') = 'active'
+        `);
+        cachedActiveEndpointModels = rows || [];
+        return cachedActiveEndpointModels;
+    } catch (e) {
+        return cachedActiveEndpointModels;
+    }
+}
 
 function getActiveEndpointModels() {
-    if (!db) return [];
-    return db.prepare(`
-        SELECT id, name, url, monitor_url, max_concurrent, supports_vision
-        FROM models
-        WHERE COALESCE(status, 'active') = 'active'
-    `).all();
+    return cachedActiveEndpointModels;
 }
 
 function normalizeEndpointKey(modelCfg) {
@@ -257,7 +267,8 @@ async function refreshEndpointMonitor(runtime) {
 }
 
 async function refreshAllEndpointMonitorsCore() {
-    syncConfiguredRuntimes(getActiveEndpointModels());
+    const models = await getActiveEndpointModelsAsync();
+    syncConfiguredRuntimes(models);
     const jobs = Array.from(runtimes.values()).map(refreshEndpointMonitor);
     await Promise.allSettled(jobs);
 }

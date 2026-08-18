@@ -472,7 +472,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
     try {
         await new Promise(resolve => plannerServer.listen(0, '127.0.0.1', resolve));
         await refreshMcpTools(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId), adminUser);
-        const tools = listCachedMcpTools(null, adminUser).filter(tool => tool.serverId === serverId);
+        const tools = (await listCachedMcpTools(null, adminUser)).filter(tool => tool.serverId === serverId);
         assert.equal(tools.some(tool => tool.fullName === toolName), true);
         assert.equal(tools.some(tool => tool.fullName === listTablesToolName), true);
         assert.equal(tools.some(tool => tool.fullName === countTablesToolName), true);

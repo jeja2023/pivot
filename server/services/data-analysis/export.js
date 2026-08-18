@@ -112,7 +112,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
         err.status = 400;
         throw err;
     }
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const columns = jsonParse(row.columns_json, []);
     const { parquetPath } = getDatasetPaths(row);
     const exportDir = resolveInside(exportRoot, String(userId));
@@ -136,7 +136,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
             await duckWriteXlsx(parquetPath, columns, filePath, row.name);
         }
     });
-    recordArtifact({
+    await recordArtifact({
         userId,
         datasetId,
         type: 'export',

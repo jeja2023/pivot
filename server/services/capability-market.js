@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getBuiltInToolDefinitions } = require('./agent-tools');
 const { listMcpServers } = require('./mcp-client');
@@ -66,14 +66,14 @@ function normalizePackageConfig(config = {}, existing = {}) {
     };
 }
 
-function upsertCapabilityPackage({ type, sourceRef, name, description = '', scope = 'user', userId = null, status = 'enabled', config = {} }) {
+async function upsertCapabilityPackage({ type, sourceRef, name, description = '', scope = 'user', userId = null, status = 'enabled', config = {} }) {
     const sourceRefText = String(sourceRef ?? '').trim();
     if (!PACKAGE_TYPES.has(type) || !sourceRefText || !name) return null;
     const key = sourceKey(type, sourceRefText);
     const now = getBeijingTimestamp();
-    const existing = db.prepare('SELECT config FROM capability_packages WHERE package_key = ?').get(key);
+    const existing = await queryOne('SELECT config FROM capability_packages WHERE package_key = ?', [key]);
     const nextConfig = normalizePackageConfig(config, existing?.config);
-    db.prepare(`
+    await execute(`
         INSERT INTO capability_packages (
             package_key, type, source_ref, user_id, scope, name, description, status, config, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -87,7 +87,7 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
             status = CASE WHEN excluded.type IN ('mcp_server', 'database_connection') THEN excluded.status ELSE capability_packages.status END,
             config = CASE WHEN excluded.type IN ('mcp_server', 'database_connection') THEN excluded.config ELSE capability_packages.config END,
             updated_at = excluded.updated_at
-    `).run(
+    `, [
         key,
         type,
         sourceRefText,
@@ -99,13 +99,14 @@ function upsertCapabilityPackage({ type, sourceRef, name, description = '', scop
         JSON.stringify(nextConfig),
         now,
         now
-    );
-    return db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(key);
+    ]);
+    return await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [key]);
 }
 
-function syncCapabilityPackages(user) {
-    getBuiltInToolDefinitions(user).forEach(tool => {
-        upsertCapabilityPackage({
+async function syncCapabilityPackages(user) {
+    const builtInDefs = getBuiltInToolDefinitions(user);
+    for (const tool of builtInDefs) {
+        await upsertCapabilityPackage({
             type: 'builtin_tool',
             sourceRef: tool.name,
             name: tool.title || tool.name,
@@ -114,11 +115,12 @@ function syncCapabilityPackages(user) {
             userId: null,
             config: { toolName: tool.name, admin: Boolean(tool.admin) }
         });
-    });
+    }
 
-    listMcpServers(user).forEach(server => {
+    const mcpServers = await listMcpServers(user);
+    for (const server of mcpServers) {
         const isDatabase = server.server_type === 'database';
-        upsertCapabilityPackage({
+        await upsertCapabilityPackage({
             type: isDatabase ? 'database_connection' : 'mcp_server',
             sourceRef: String(server.id),
             name: server.name,
@@ -132,7 +134,7 @@ function syncCapabilityPackages(user) {
                 databaseType: server.database_connection?.database_type || ''
             }
         });
-    });
+    }
 }
 
 function canAccessPackage(row, user) {
@@ -152,9 +154,9 @@ function canAccessGlobalPolicyPackage(row, user) {
     return true;
 }
 
-function listCapabilityPackages(user) {
-    syncCapabilityPackages(user);
-    const rows = db.prepare(`
+async function listCapabilityPackages(user) {
+    await syncCapabilityPackages(user);
+    const rows = await query(`
         SELECT *
         FROM capability_packages
         WHERE (? = 1 OR scope != 'admin')
@@ -162,7 +164,7 @@ function listCapabilityPackages(user) {
         ORDER BY
             CASE type WHEN 'builtin_tool' THEN 1 WHEN 'database_connection' THEN 2 ELSE 3 END,
             name ASC
-    `).all(isSuperAdmin(user) ? 1 : 0, isSuperAdmin(user) ? 1 : 0, user.id);
+    `, [isSuperAdmin(user) ? 1 : 0, isSuperAdmin(user) ? 1 : 0, user.id]);
     return rows.map(row => ({
         ...row,
         enabled: row.status !== 'disabled',
@@ -170,10 +172,10 @@ function listCapabilityPackages(user) {
     }));
 }
 
-function listGlobalCapabilityPackages(user) {
-    syncCapabilityPackages(user);
+async function listGlobalCapabilityPackages(user) {
+    await syncCapabilityPackages(user);
     if (!isAdmin(user)) return [];
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM capability_packages
         WHERE user_id IS NULL
@@ -182,7 +184,7 @@ function listGlobalCapabilityPackages(user) {
         ORDER BY
             CASE type WHEN 'builtin_tool' THEN 1 WHEN 'database_connection' THEN 2 ELSE 3 END,
             name ASC
-    `).all(isSuperAdmin(user) ? 1 : 0);
+    `, [isSuperAdmin(user) ? 1 : 0]);
     return rows.map(row => ({
         ...row,
         enabled: row.status !== 'disabled',
@@ -190,9 +192,9 @@ function listGlobalCapabilityPackages(user) {
     }));
 }
 
-function getCapabilityPackage(packageKey, user) {
-    syncCapabilityPackages(user);
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function getCapabilityPackage(packageKey, user) {
+    await syncCapabilityPackages(user);
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessPackage(row, user)) return null;
     return {
         ...row,
@@ -201,9 +203,9 @@ function getCapabilityPackage(packageKey, user) {
     };
 }
 
-function getGlobalCapabilityPackage(packageKey, user) {
-    syncCapabilityPackages(user);
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function getGlobalCapabilityPackage(packageKey, user) {
+    await syncCapabilityPackages(user);
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessGlobalPolicyPackage(row, user)) return null;
     return {
         ...row,
@@ -212,8 +214,8 @@ function getGlobalCapabilityPackage(packageKey, user) {
     };
 }
 
-function setCapabilityPackageStatus(packageKey, user, status = 'enabled') {
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function setCapabilityPackageStatus(packageKey, user, status = 'enabled') {
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessPackage(row, user)) return null;
     if (row.scope === 'global' && !isSuperAdmin(user)) {
         const err = new Error('只有 admin 权限层级可以启停全局能力包。');
@@ -221,13 +223,14 @@ function setCapabilityPackageStatus(packageKey, user, status = 'enabled') {
         throw err;
     }
     const nextStatus = normalizeStatus(status);
-    db.prepare('UPDATE capability_packages SET status = ?, updated_at = ? WHERE package_key = ?')
-        .run(nextStatus, getBeijingTimestamp(), packageKey);
-    return db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    await execute('UPDATE capability_packages SET status = ?, updated_at = ? WHERE package_key = ?', [
+        nextStatus, getBeijingTimestamp(), packageKey
+    ]);
+    return await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
 }
 
-function setGlobalCapabilityPackageStatus(packageKey, user, status = 'enabled') {
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function setGlobalCapabilityPackageStatus(packageKey, user, status = 'enabled') {
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessGlobalPolicyPackage(row, user)) return null;
     if (!isSuperAdmin(user)) {
         const err = new Error('只有系统管理员可以调整全局工具策略。');
@@ -235,22 +238,23 @@ function setGlobalCapabilityPackageStatus(packageKey, user, status = 'enabled') 
         throw err;
     }
     const nextStatus = normalizeStatus(status);
-    db.prepare('UPDATE capability_packages SET status = ?, updated_at = ? WHERE package_key = ?')
-        .run(nextStatus, getBeijingTimestamp(), packageKey);
-    return db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+    await execute('UPDATE capability_packages SET status = ?, updated_at = ? WHERE package_key = ?', [
+        nextStatus, getBeijingTimestamp(), packageKey
+    ]);
+    return await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
 }
 
-function isCapabilityEnabled(type, sourceRef, user = null) {
+async function isCapabilityEnabled(type, sourceRef, user = null) {
     const key = sourceKey(type, sourceRef);
-    const row = db.prepare('SELECT status, scope, user_id FROM capability_packages WHERE package_key = ?').get(key);
+    const row = await queryOne('SELECT status, scope, user_id FROM capability_packages WHERE package_key = ?', [key]);
     if (!row) return true;
     if (user && !canAccessPackage(row, user)) return false;
     return row.status !== 'disabled';
 }
 
-function getCapabilityToolGovernance(type, sourceRef, toolName, user = null) {
+async function getCapabilityToolGovernance(type, sourceRef, toolName, user = null) {
     const key = sourceKey(type, sourceRef);
-    const row = db.prepare('SELECT status, scope, user_id, config FROM capability_packages WHERE package_key = ?').get(key);
+    const row = await queryOne('SELECT status, scope, user_id, config FROM capability_packages WHERE package_key = ?', [key]);
     if (!row) return normalizeToolGovernance();
     if (user && !canAccessPackage(row, user)) return { ...normalizeToolGovernance(), enabled: false };
     if (row.status === 'disabled') return { ...normalizeToolGovernance(), enabled: false };
@@ -258,12 +262,13 @@ function getCapabilityToolGovernance(type, sourceRef, toolName, user = null) {
     return normalizeToolGovernance(config.tools?.[toolName] || {});
 }
 
-function isToolCapabilityEnabled(type, sourceRef, toolName, user = null) {
-    return getCapabilityToolGovernance(type, sourceRef, toolName, user).enabled;
+async function isToolCapabilityEnabled(type, sourceRef, toolName, user = null) {
+    const gov = await getCapabilityToolGovernance(type, sourceRef, toolName, user);
+    return gov.enabled;
 }
 
-function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessPackage(row, user)) return null;
     if (row.scope === 'global' && !isSuperAdmin(user)) {
         const err = new Error('只有 admin 权限层级可以调整全局能力工具。');
@@ -289,8 +294,9 @@ function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
             [name]: next
         }
     };
-    db.prepare('UPDATE capability_packages SET config = ?, updated_at = ? WHERE package_key = ?')
-        .run(JSON.stringify(nextConfig), getBeijingTimestamp(), packageKey);
+    await execute('UPDATE capability_packages SET config = ?, updated_at = ? WHERE package_key = ?', [
+        JSON.stringify(nextConfig), getBeijingTimestamp(), packageKey
+    ]);
     return {
         packageKey,
         toolName: name,
@@ -298,36 +304,43 @@ function setCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
     };
 }
 
-function setGlobalCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
-    const row = db.prepare('SELECT * FROM capability_packages WHERE package_key = ?').get(packageKey);
+async function setGlobalCapabilityToolGovernance(packageKey, user, toolName, patch = {}) {
+    const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessGlobalPolicyPackage(row, user)) return null;
     if (!isSuperAdmin(user)) {
         const err = new Error('只有系统管理员可以调整全局工具策略。');
         err.status = 403;
         throw err;
     }
-    return setCapabilityToolGovernance(packageKey, user, toolName, patch);
+    return await setCapabilityToolGovernance(packageKey, user, toolName, patch);
 }
 
-function filterBuiltInToolsByCapability(tools, user) {
-    return tools
-        .filter(tool => isCapabilityEnabled('builtin_tool', tool.name, user))
-        .map(tool => ({
-            ...tool,
-            governance: getCapabilityToolGovernance('builtin_tool', tool.name, tool.name, user)
-        }))
-        .filter(tool => tool.governance.enabled);
+async function filterBuiltInToolsByCapability(tools, user) {
+    const results = [];
+    for (const tool of tools) {
+        const enabled = await isCapabilityEnabled('builtin_tool', tool.name, user);
+        if (!enabled) continue;
+        const governance = await getCapabilityToolGovernance('builtin_tool', tool.name, tool.name, user);
+        if (governance.enabled) {
+            results.push({ ...tool, governance });
+        }
+    }
+    return results;
 }
 
-function filterMcpToolsByCapability(tools, user) {
-    return tools.map(tool => {
+async function filterMcpToolsByCapability(tools, user) {
+    const results = [];
+    for (const tool of tools) {
         const type = tool.serverType === 'database'
             ? 'database_connection'
             : 'mcp_server';
         const sourceRef = String(tool.serverId ?? '');
-        const governance = getCapabilityToolGovernance(type, sourceRef, tool.name, user);
-        return { ...tool, governance };
-    }).filter(tool => tool.governance.enabled);
+        const governance = await getCapabilityToolGovernance(type, sourceRef, tool.name, user);
+        if (governance.enabled) {
+            results.push({ ...tool, governance });
+        }
+    }
+    return results;
 }
 
 module.exports = {

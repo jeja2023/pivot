@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
-const { db } = require('../../db');
+const { queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { normalizeUploadedOriginalName } = require('../../upload');
 const { isImageExtension, isPdfExtension } = require('./constants');
@@ -101,12 +101,12 @@ function serializeFile(row) {
     };
 }
 
-function getDocumentFileForUser(fileId, userId) {
-    return db.prepare(`
+async function getDocumentFileForUser(fileId, userId) {
+    return await queryOne(`
         SELECT *
         FROM document_files
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).get(fileId, userId) || null;
+    `, [fileId, userId]) || null;
 }
 
 function getDocumentFilePath(row) {
@@ -115,22 +115,22 @@ function getDocumentFilePath(row) {
     return target;
 }
 
-function updateDocumentFileMetadata({ fileId, userId, pageCount = null, metadata = null }) {
-    const existing = getDocumentFileForUser(fileId, userId);
+async function updateDocumentFileMetadata({ fileId, userId, pageCount = null, metadata = null }) {
+    const existing = await getDocumentFileForUser(fileId, userId);
     if (!existing) return null;
     const mergedMetadata = metadata ? { ...parseJson(existing.metadata_json, {}), ...metadata } : parseJson(existing.metadata_json, {});
-    db.prepare(`
+    await execute(`
         UPDATE document_files
         SET page_count = COALESCE(?, page_count), metadata_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(
+    `, [
         pageCount === null || pageCount === undefined ? null : Number(pageCount) || 0,
         normalizeJson(mergedMetadata),
         getBeijingTimestamp(),
         fileId,
         userId
-    );
-    return getDocumentFileForUser(fileId, userId);
+    ]);
+    return await getDocumentFileForUser(fileId, userId);
 }
 
 async function registerUploadedFile({ user, file, sourceModule = 'document_processing', sourceRef = '', metadata = {} }) {
@@ -146,13 +146,14 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
     const ext = safeExtension(originalName);
     const kind = detectDocumentKind({ ext, mimeType: file.mimetype });
     const initialSize = Number(file.size || 0) || fs.statSync(file.path).size;
-    const info = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO document_files (
             user_id, original_name, file_type, file_ext, file_size, source_module, source_ref, metadata_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, originalName, kind, ext, initialSize, sourceModule, String(sourceRef || '').slice(0, 120), normalizeJson(metadata), now, now);
+        RETURNING id
+    `, [userId, originalName, kind, ext, initialSize, sourceModule, String(sourceRef || '').slice(0, 120), normalizeJson(metadata), now, now]);
 
-    const fileId = info.lastInsertRowid;
+    const fileId = row.id;
     const storedName = `${fileId}-${crypto.randomUUID()}${ext}`;
     const targetPath = buildManagedPath(originalsRoot, userId, storedName);
     try {
@@ -161,18 +162,18 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
         const digest = sha256File(targetPath);
         const imageMetadata = kind === 'image' ? await readImageMetadata(targetPath) : {};
         const nextMetadata = { ...metadata, mimeType: file.mimetype || '', ...imageMetadata };
-        db.prepare(`
+        await execute(`
             UPDATE document_files
             SET stored_name = ?, file_path = ?, file_size = ?, sha256 = ?, metadata_json = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(storedName, toProjectRelativePath(targetPath), stat.size, digest, normalizeJson(nextMetadata), getBeijingTimestamp(), fileId, userId);
+        `, [storedName, toProjectRelativePath(targetPath), stat.size, digest, normalizeJson(nextMetadata), getBeijingTimestamp(), fileId, userId]);
     } catch (err) {
-        db.prepare('UPDATE document_files SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?')
-            .run(getBeijingTimestamp(), getBeijingTimestamp(), fileId, userId);
+        await execute('UPDATE document_files SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+            [getBeijingTimestamp(), getBeijingTimestamp(), fileId, userId]);
         throw err;
     }
 
-    return getDocumentFileForUser(fileId, userId);
+    return await getDocumentFileForUser(fileId, userId);
 }
 
 module.exports = {

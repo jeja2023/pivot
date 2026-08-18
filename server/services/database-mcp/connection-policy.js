@@ -47,7 +47,20 @@ function getConnectionOwner(connection = {}) {
     if (connection._owner) return connection._owner;
     if (!connection.user_id) return null;
     try {
-        return appDb().prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
+        const database = appDb();
+        if (!database) return null;
+        return database.prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function getConnectionOwnerAsync(connection = {}) {
+    if (connection._owner) return connection._owner;
+    if (!connection.user_id) return null;
+    try {
+        const { queryOne } = require('../../db/client');
+        return await queryOne('SELECT id, username, role, status FROM users WHERE id = ?', [connection.user_id]) || null;
     } catch (e) {
         return null;
     }
@@ -322,6 +335,7 @@ module.exports = {
     assertSafeDatabaseHost,
     databaseSafeLookup,
     getConnectionOwner,
+    getConnectionOwnerAsync,
     createDatabaseMcpError,
     databaseConnectionDiagnostics,
     normalizeDatabaseConnectionError,

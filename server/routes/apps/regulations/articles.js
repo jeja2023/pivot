@@ -19,10 +19,10 @@ const {
 function registerArticleRoutes(router, deps) {
     const { authMiddleware, logAction } = deps;
 
-// #8 设置条文级状态（管理员）
+    // #8 设置条文级状态（管理员）
     router.put('/articles/:articleId/status', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireRegulationsAdmin(req, res)) return;
-        const updated = setRegulationArticleStatus({
+        const updated = await setRegulationArticleStatus({
             articleId: req.params.articleId,
             status: req.body?.status,
             amendedDate: req.body?.amendedDate || req.body?.amended_date || ''
@@ -36,12 +36,12 @@ function registerArticleRoutes(router, deps) {
 
     // #10 条文批注 CRUD
     router.get('/articles/:articleId/annotations', authMiddleware, asyncHandler(async (req, res) => {
-        const annotations = listRegulationAnnotations({ articleId: req.params.articleId });
+        const annotations = await listRegulationAnnotations({ articleId: req.params.articleId });
         res.json({ annotations });
     }));
 
     router.post('/articles/:articleId/annotations', authMiddleware, asyncHandler(async (req, res) => {
-        const annotation = createRegulationAnnotation({
+        const annotation = await createRegulationAnnotation({
             articleId: req.params.articleId,
             userId: req.user.id,
             content: req.body?.content
@@ -54,7 +54,7 @@ function registerArticleRoutes(router, deps) {
     }));
 
     router.put('/annotations/:annotationId', authMiddleware, asyncHandler(async (req, res) => {
-        const annotation = updateRegulationAnnotation({
+        const annotation = await updateRegulationAnnotation({
             annotationId: req.params.annotationId,
             userId: req.user.id,
             content: req.body?.content
@@ -66,7 +66,7 @@ function registerArticleRoutes(router, deps) {
     }));
 
     router.delete('/annotations/:annotationId', authMiddleware, asyncHandler(async (req, res) => {
-        const ok = deleteRegulationAnnotation({
+        const ok = await deleteRegulationAnnotation({
             annotationId: req.params.annotationId,
             userId: req.user.id
         });
@@ -91,7 +91,7 @@ function registerArticleRoutes(router, deps) {
     // #12 查阅审计日志（管理员）
     router.get('/access-logs', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireRegulationsAdmin(req, res)) return;
-        const result = listRegulationAccessLogs({
+        const result = await listRegulationAccessLogs({
             documentId: req.query.documentId,
             userId: req.query.userId,
             limit: req.query.limit,
@@ -123,12 +123,12 @@ function registerArticleRoutes(router, deps) {
 
     // #14 保存检索 CRUD
     router.get('/saved-searches', authMiddleware, asyncHandler(async (req, res) => {
-        const searches = listSavedSearches({ userId: req.user.id });
+        const searches = await listSavedSearches({ userId: req.user.id });
         res.json({ searches });
     }));
 
     router.post('/saved-searches', authMiddleware, asyncHandler(async (req, res) => {
-        const search = createSavedSearch({
+        const search = await createSavedSearch({
             userId: req.user.id,
             name: req.body?.name,
             query: req.body?.query,
@@ -142,7 +142,7 @@ function registerArticleRoutes(router, deps) {
     }));
 
     router.delete('/saved-searches/:searchId', authMiddleware, asyncHandler(async (req, res) => {
-        const ok = deleteSavedSearch({
+        const ok = await deleteSavedSearch({
             searchId: req.params.searchId,
             userId: req.user.id
         });

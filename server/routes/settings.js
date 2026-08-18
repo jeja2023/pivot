@@ -1,10 +1,14 @@
 /* 系统设置路由 */
 const express = require('express');
-const { db, stmts } = require('../db');
+const { queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { clearAllRagCache } = require('../services/rag-cache');
-const { getAppSettingsMap, getAppSettingValue, setAppSetting } = require('../services/app-settings');
+const {
+    getAppSettingsMap,
+    getAppSettingValue,
+    setAppSettingAsync
+} = require('../services/app-settings');
 const { assertSafeOutboundUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
@@ -113,14 +117,7 @@ function getSettings() {
 }
 
 async function saveUserEmbeddingSettings(req, updates) {
-    const stmt = db.prepare(`
-        INSERT INTO user_settings (user_id, key, value, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at
-    `);
-    const removeStmt = db.prepare('DELETE FROM user_settings WHERE user_id = ? AND key = ?');
+    const now = getBeijingTimestamp();
     const changed = [];
 
     for (const key of Object.keys(updates || {})) {
@@ -131,11 +128,18 @@ async function saveUserEmbeddingSettings(req, updates) {
         }
         if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
         if (key !== RAG_CONFIG_KEYS.embeddingApiKey && !value) {
-            removeStmt.run(req.user.id, key);
+            await execute('DELETE FROM user_settings WHERE user_id = ? AND key = ?', [req.user.id, key]);
             changed.push(`${key}=<fallback>`);
-            return;
+            continue;
         }
-        stmt.run(req.user.id, key, value, getBeijingTimestamp());
+        // Upsert: INSERT ... ON CONFLICT DO UPDATE（SQLite & PG 均支持，由 client.js 统一处理）
+        await execute(`
+            INSERT INTO user_settings (user_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+        `, [req.user.id, key, value, now]);
         changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
     }
 
@@ -176,7 +180,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         apiUrl = String(apiUrl || '').trim();
         apiKey = String(apiKey || '').trim();
-        
+
         // 如果用户没填密钥（输入框为空），尝试使用已保存的密钥
         if (!apiKey) {
             const savedConfig = getEmbeddingConfig(req.user.id).http;
@@ -244,15 +248,16 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             const sql = isSuperAdmin(req.user)
                 ? 'SELECT id FROM models WHERE id = ?'
                 : 'SELECT id FROM models WHERE id = ? AND (user_id = ? OR user_id IS NULL)';
-            const model = isSuperAdmin(req.user)
-                ? db.prepare(sql).get(parsedModelId)
-                : db.prepare(sql).get(parsedModelId, req.user.id);
+            const params = isSuperAdmin(req.user)
+                ? [parsedModelId]
+                : [parsedModelId, req.user.id];
+            const model = await queryOne(sql, params);
             if (!model) {
                 return res.status(400).json({ error: '只能将您可访问的模型设为默认' });
             }
         }
 
-        db.prepare('UPDATE users SET default_model_id = ? WHERE id = ?').run(parsedModelId, req.user.id);
+        await execute('UPDATE users SET default_model_id = ? WHERE id = ?', [parsedModelId, req.user.id]);
         const changed = parsedModelId === null ? '清空个人默认模型' : `模型ID: ${parsedModelId}`;
         logAction(req, '修改个人默认模型', changed);
         res.json({ success: true, personalDefaultModelId: parsedModelId });
@@ -260,7 +265,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/admin/settings/memory', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const value = toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, req.body?.memory_threshold ?? req.body?.threshold);
-        setAppSetting(MEMORY_CONFIG_KEYS.threshold, value, { updatedBy: req.user.id });
+        await setAppSettingAsync(MEMORY_CONFIG_KEYS.threshold, value, { updatedBy: req.user.id });
 
         logAction(req, 'UPDATE_MEMORY_THRESHOLD', `${MEMORY_CONFIG_KEYS.threshold}=${value}`);
         const settings = getSettings();
@@ -325,7 +330,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             if (!allowedSettings.has(key)) continue;
             const value = toSettingValue(key, updates[key]);
             if (key === 'default_model_id' && value) {
-                const globalModel = db.prepare('SELECT id FROM models WHERE id = ? AND user_id IS NULL').get(value);
+                const globalModel = await queryOne('SELECT id FROM models WHERE id = ? AND user_id IS NULL', [value]);
                 if (!globalModel) {
                     throw new Error('系统默认模型只能选择全局模型，不能选择用户私有模型');
                 }
@@ -334,7 +339,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
                 await assertSafeOutboundUrl(value, req.user);
             }
             if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
-            setAppSetting(key, value, { updatedBy: req.user.id });
+            await setAppSettingAsync(key, value, { updatedBy: req.user.id });
             changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
         }
 
@@ -366,7 +371,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             return res.status(400).json({ error: '旧密码和新密码均不能为空' });
         }
 
-        const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+        const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
         const bcrypt = require('bcryptjs');
         if (!bcrypt.compareSync(oldPassword, user.password_hash)) {
             return res.status(400).json({ error: '旧密码错误' });
@@ -380,10 +385,10 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
 
         const newHash = bcrypt.hashSync(newPassword, 10);
-        db.transaction(() => {
-            db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
-            return stmts.deleteUserRefreshTokens.run(req.user.id);
-        })();
+        await transaction(async (trx) => {
+            await trx.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, req.user.id]);
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
+        });
 
         logAction(req, '修改密码', '用户自主修改了登录密码');
         res.json({ success: true, message: '密码修改成功' });

@@ -1,5 +1,5 @@
 const { extractModelText } = require('../../services/chat-route-helpers');
-const { getAccessibleModel, modelSupportsReasoning } = require('../../services/models');
+const { getAccessibleModelAsync, modelSupportsReasoning } = require('../../services/models');
 
 function stripThinkTags(text) {
     return String(text || '')
@@ -58,20 +58,20 @@ function applyNoThinkSoftSwitch(messages) {
 }
 
 // 解析公文写作可用模型：优先显式选择，其次个人默认模型，最后系统默认模型。
-function resolveOfficialWritingModel(requestedModel, user) {
+async function resolveOfficialWritingModel(requestedModel, user) {
     if (requestedModel) {
-        const selected = getAccessibleModel(requestedModel, user);
+        const selected = await getAccessibleModelAsync(requestedModel, user);
         if (selected) return selected;
     }
     if (user?.default_model_id) {
-        const personal = getAccessibleModel(user.default_model_id, user);
+        const personal = await getAccessibleModelAsync(user.default_model_id, user);
         if (personal) return personal;
     }
-    return getAccessibleModel(null, user);
+    return await getAccessibleModelAsync(null, user);
 }
 
-function resolveAppsModel(requestedModel, user) {
-    return resolveOfficialWritingModel(requestedModel, user);
+async function resolveAppsModel(requestedModel, user) {
+    return await resolveOfficialWritingModel(requestedModel, user);
 }
 
 

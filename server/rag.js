@@ -1,7 +1,8 @@
 /* 知识库与 RAG API 门面 */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { db } = require('./db');
+const { query, queryOne, execute } = require('./db/client');
+const { groupConcat } = require('./db/dialect');
 const { authMiddleware } = require('./auth');
 const { asyncHandler, getClientIp } = require('./http');
 const { getBeijingTimestamp } = require('./time');
@@ -47,7 +48,7 @@ const {
     confirmRelation,
     deleteRelation,
     getEntityGraph,
-    getGraphSummary,
+    getGraphSummaryAsync,
     listEntities,
     listRelations,
     mergeEntities,
@@ -72,15 +73,18 @@ const debugQueryLimiter = rateLimit({
 const upload = createKnowledgeUploadMiddleware();
 
 function auditRagAction(req, action, details) {
-    try {
-        db.prepare('INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp) VALUES (?, ?, ?, ?, ?)')
-            .run(req.user?.id || null, normalizeAuditAction(action), JSON.stringify(details || {}), getClientIp(req), getBeijingTimestamp());
-    } catch (e) {
+    execute('INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp) VALUES (?, ?, ?, ?, ?)', [
+        req.user?.id || null,
+        normalizeAuditAction(action),
+        JSON.stringify(details || {}),
+        getClientIp(req),
+        getBeijingTimestamp()
+    ]).catch(e => {
         req.log?.warn({ err: e.message, action }, 'RAG 审计日志写入失败');
-    }
+    });
 }
 
-ragRouter.get('/docs', authMiddleware, (req, res) => {
+ragRouter.get('/docs', authMiddleware, asyncHandler(async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
     const offset = (page - 1) * limit;
@@ -98,13 +102,15 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
         params.push(tag);
     }
     const whereSql = filters.join(' AND ');
-    const total = db.prepare(`
+    const countRow = await queryOne(`
         SELECT COUNT(*) AS total
         FROM knowledge_docs d
         LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
         WHERE ${whereSql}
-    `).get(...params)?.total || 0;
-    const docs = db.prepare(`
+    `, params);
+    const total = Number(countRow?.total || 0);
+    const tagAgg = groupConcat('t.tag', ',');
+    const docs = (await query(`
         SELECT
             d.*,
             c.name AS collection_name,
@@ -112,7 +118,7 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
             c.allowed_units AS collection_allowed_units,
             c.allowed_user_ids AS collection_allowed_user_ids,
             COALESCE((
-                SELECT GROUP_CONCAT(t.tag, ',')
+                SELECT ${tagAgg}
                 FROM knowledge_doc_tags t
                 WHERE t.doc_id = d.id AND t.user_id = d.user_id
             ), '') AS tags
@@ -121,7 +127,7 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
         WHERE ${whereSql}
         ORDER BY d.created_at DESC
         LIMIT ? OFFSET ?
-    `).all(...params, limit, offset).map(doc => ({
+    `, [...params, limit, offset])).map(doc => ({
         ...doc,
         can_edit: Number(doc.user_id) === Number(req.user.id),
         read_only: Number(doc.user_id) !== Number(req.user.id),
@@ -133,15 +139,15 @@ ragRouter.get('/docs', authMiddleware, (req, res) => {
         }, req.user)
     }));
     res.json({ data: docs, total, page, limit });
-});
+}));
 
 ragRouter.get('/collections', authMiddleware, asyncHandler(async (req, res) => {
     res.json({ data: await listKnowledgeCollections(req.user) });
 }));
 
-ragRouter.get('/tags', authMiddleware, (req, res) => {
-    res.json({ data: listKnowledgeTags(req.user, { collectionId: req.query.collectionId }) });
-});
+ragRouter.get('/tags', authMiddleware, asyncHandler(async (req, res) => {
+    res.json({ data: await listKnowledgeTags(req.user, { collectionId: req.query.collectionId }) });
+}));
 
 ragRouter.get('/collections/share-options', authMiddleware, asyncHandler(async (req, res) => {
     const options = await getKnowledgeCollectionShareOptions({ collectionId: req.query.collectionId, user: req.user });
@@ -149,9 +155,9 @@ ragRouter.get('/collections/share-options', authMiddleware, asyncHandler(async (
     return res.json({ data: options });
 }));
 
-ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
+ragRouter.patch('/collections/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
     try {
-        const collection = updateKnowledgeCollectionSharing({ collectionId: req.params.id, user: req.user, body: req.body || {} });
+        const collection = await updateKnowledgeCollectionSharing({ collectionId: req.params.id, user: req.user, body: req.body || {} });
         if (!collection) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
         auditRagAction(req, '知识库集合共享设置更新', {
             collectionId: collection.id,
@@ -163,7 +169,7 @@ ragRouter.patch('/collections/:id/sharing', authMiddleware, (req, res) => {
     } catch (error) {
         return res.status(error.status || 400).json({ error: error.message });
     }
-});
+}));
 
 ragRouter.post('/collections', authMiddleware, asyncHandler(async (req, res) => {
     const collection = await createKnowledgeCollection({
@@ -186,37 +192,37 @@ ragRouter.post('/tags', authMiddleware, asyncHandler(async (req, res) => {
     return res.json({ success: true, tag });
 }));
 
-ragRouter.get('/admin/docs/audit', authMiddleware, (req, res) => {
+ragRouter.get('/admin/docs/audit', authMiddleware, asyncHandler(async (req, res) => {
     if (!isSuperAdmin(req.user)) {
         return res.status(403).json({ error: '仅 admin 权限层级可查看知识库删除审计' });
     }
-    return res.json(getKnowledgeDocumentAuditList({
+    return res.json(await getKnowledgeDocumentAuditList({
         limit: req.query.limit,
         offset: req.query.offset,
         includeActive: req.query.includeActive === 'true'
     }));
-});
+}));
 
-ragRouter.get('/summary', authMiddleware, (req, res) => {
-    const summary = getKnowledgeDocumentSummaryForUser(req.user, {
+ragRouter.get('/summary', authMiddleware, asyncHandler(async (req, res) => {
+    const summary = await getKnowledgeDocumentSummaryForUser(req.user, {
         collectionId: req.query.collectionId,
         tag: req.query.tag || req.query.tagName,
         tagNames: req.query.tagNames
     });
-    summary.feedback = getRagFeedbackSummary(req.user.id);
+    summary.feedback = await getRagFeedbackSummary(req.user.id);
     res.json(summary);
-});
+}));
 
 ragRouter.get('/quality-report', authMiddleware, asyncHandler(async (req, res) => {
     res.json(await getKnowledgeQualityReport(req.user));
 }));
 
-ragRouter.get('/graph/summary', authMiddleware, (req, res) => {
-    res.json(getGraphSummary(req.user));
-});
+ragRouter.get('/graph/summary', authMiddleware, asyncHandler(async (req, res) => {
+    res.json(await getGraphSummaryAsync(req.user));
+}));
 
-ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
-    res.json(listEntities({
+ragRouter.get('/graph/entities', authMiddleware, asyncHandler(async (req, res) => {
+    res.json(await listEntities({
         userId: req.user.id,
         user: req.user,
         query: req.query.query,
@@ -225,10 +231,10 @@ ragRouter.get('/graph/entities', authMiddleware, (req, res) => {
         limit: req.query.limit,
         offset: req.query.offset
     }));
-});
+}));
 
-ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
-    res.json(listRelations({
+ragRouter.get('/graph/relations', authMiddleware, asyncHandler(async (req, res) => {
+    res.json(await listRelations({
         userId: req.user.id,
         user: req.user,
         entityId: req.query.entityId,
@@ -239,20 +245,20 @@ ragRouter.get('/graph/relations', authMiddleware, (req, res) => {
         limit: req.query.limit,
         offset: req.query.offset
     }));
-});
+}));
 
-ragRouter.get('/graph/query', authMiddleware, (req, res) => {
-    res.json(queryKnowledgeGraph({
+ragRouter.get('/graph/query', authMiddleware, asyncHandler(async (req, res) => {
+    res.json(await queryKnowledgeGraph({
         userId: req.user.id,
         user: req.user,
         query: req.query.query,
         entityLimit: req.query.entityLimit,
         relationLimit: req.query.relationLimit
     }));
-});
+}));
 
-ragRouter.get('/graph/entities/:id', authMiddleware, (req, res) => {
-    const graph = getEntityGraph({
+ragRouter.get('/graph/entities/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const graph = await getEntityGraph({
         userId: req.user.id,
         user: req.user,
         entityId: req.params.id,
@@ -263,17 +269,17 @@ ragRouter.get('/graph/entities/:id', authMiddleware, (req, res) => {
     });
     if (!graph) return res.status(404).json({ error: '实体不存在' });
     return res.json(graph);
-});
+}));
 
 ragRouter.put('/graph/entities/:id', authMiddleware, asyncHandler(async (req, res) => {
-    const entity = updateEntity({ userId: req.user.id, entityId: req.params.id, patch: req.body || {} });
+    const entity = await updateEntity({ userId: req.user.id, entityId: req.params.id, patch: req.body || {} });
     if (!entity) return res.status(404).json({ error: '实体不存在' });
     auditRagAction(req, '知识图谱实体更新', { entityId: req.params.id, name: entity.name });
     return res.json({ success: true, entity });
 }));
 
 ragRouter.post('/graph/entities/merge', authMiddleware, asyncHandler(async (req, res) => {
-    const graph = mergeEntities({
+    const graph = await mergeEntities({
         userId: req.user.id,
         sourceEntityId: req.body?.sourceEntityId,
         targetEntityId: req.body?.targetEntityId
@@ -288,7 +294,7 @@ ragRouter.post('/graph/entities/merge', authMiddleware, asyncHandler(async (req,
 }));
 
 ragRouter.put('/graph/relations/:id', authMiddleware, asyncHandler(async (req, res) => {
-    const relation = updateRelation({ userId: req.user.id, relationId: req.params.id, patch: req.body || {} });
+    const relation = await updateRelation({ userId: req.user.id, relationId: req.params.id, patch: req.body || {} });
     if (!relation) return res.status(404).json({ error: '关系不存在' });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识图谱关系更新', { relationId: req.params.id });
@@ -296,7 +302,7 @@ ragRouter.put('/graph/relations/:id', authMiddleware, asyncHandler(async (req, r
 }));
 
 ragRouter.post('/graph/relations/:id/confirm', authMiddleware, asyncHandler(async (req, res) => {
-    const relation = confirmRelation({ userId: req.user.id, relationId: req.params.id });
+    const relation = await confirmRelation({ userId: req.user.id, relationId: req.params.id });
     if (!relation) return res.status(404).json({ error: '关系不存在或不是待确认状态' });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识图谱关系确认', { relationId: req.params.id });
@@ -304,7 +310,7 @@ ragRouter.post('/graph/relations/:id/confirm', authMiddleware, asyncHandler(asyn
 }));
 
 ragRouter.delete('/graph/relations/:id', authMiddleware, asyncHandler(async (req, res) => {
-    const deleted = deleteRelation({ userId: req.user.id, relationId: req.params.id });
+    const deleted = await deleteRelation({ userId: req.user.id, relationId: req.params.id });
     if (!deleted) return res.status(404).json({ error: '关系不存在' });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识图谱关系删除', { relationId: req.params.id });
@@ -333,7 +339,7 @@ ragRouter.get('/docs/:id', authMiddleware, asyncHandler(async (req, res) => {
 
 ragRouter.put('/docs/:id/enabled', authMiddleware, asyncHandler(async (req, res) => {
     const enabled = req.body?.enabled !== false;
-    const changed = setKnowledgeDocumentEnabled({ docId: req.params.id, userId: req.user.id, enabled });
+    const changed = await setKnowledgeDocumentEnabled({ docId: req.params.id, userId: req.user.id, enabled });
     if (!changed) return res.status(404).json({ error: '文档不存在' });
     auditRagAction(req, '知识库文档启停', { docId: req.params.id, enabled });
     req.log?.info({ docId: req.params.id, enabled }, 'RAG 文档启停状态已更新');
@@ -353,7 +359,7 @@ ragRouter.put('/docs/:id/collection', authMiddleware, asyncHandler(async (req, r
 }));
 
 ragRouter.put('/docs/:id/tags', authMiddleware, asyncHandler(async (req, res) => {
-    const tags = setKnowledgeDocumentTags({
+    const tags = await setKnowledgeDocumentTags({
         docId: req.params.id,
         userId: req.user.id,
         tags: req.body?.tags
@@ -363,23 +369,23 @@ ragRouter.put('/docs/:id/tags', authMiddleware, asyncHandler(async (req, res) =>
     return res.json({ success: true, tags });
 }));
 
-ragRouter.delete('/docs/:id', authMiddleware, (req, res) => {
-    const deleted = deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
+ragRouter.delete('/docs/:id', authMiddleware, asyncHandler(async (req, res) => {
+    const deleted = await deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
     if (!deleted) return res.status(404).json({ error: 'Knowledge document not found or not owned' });
     auditRagAction(req, '知识库文档删除', { docId: req.params.id, deleted });
     req.log?.info({ docId: req.params.id, deleted }, 'RAG 文档删除');
     res.json({ success: true });
-});
+}));
 
 ragRouter.post('/docs/batch-delete', authMiddleware, asyncHandler(async (req, res) => {
-    const result = batchDeleteKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds });
+    const result = await batchDeleteKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds });
     auditRagAction(req, '知识库文档批量删除', result);
     req.log?.info(result, 'RAG 文档批量删除');
     return res.json({ success: true, ...result });
 }));
 
 ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, res) => {
-    const result = batchReindexKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds, user: req.user });
+    const result = await batchReindexKnowledgeDocuments({ userId: req.user.id, docIds: req.body?.docIds, user: req.user });
     auditRagAction(req, '知识库文档批量重建索引', result);
     req.log?.info(result, 'RAG 文档批量重建索引');
     return res.json({ success: true, ...result });
@@ -428,9 +434,9 @@ ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, re
     return res.json({ success: true, ...result });
 }));
 
-ragRouter.get('/debug-query/history', authMiddleware, (req, res) => {
-    res.json({ data: listRagDebugQueries(req.user.id, { limit: req.query.limit }) });
-});
+ragRouter.get('/debug-query/history', authMiddleware, asyncHandler(async (req, res) => {
+    res.json({ data: await listRagDebugQueries(req.user.id, { limit: req.query.limit }) });
+}));
 
 ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(async (req, res) => {
     const query = String(req.body?.query || '').trim();
@@ -500,7 +506,7 @@ ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (r
 }));
 
 ragRouter.post('/feedback', authMiddleware, asyncHandler(async (req, res) => {
-    const result = recordRagFeedback({
+    const result = await recordRagFeedback({
         userId: req.user.id,
         query: req.body?.query,
         chunkId: req.body?.chunkId,

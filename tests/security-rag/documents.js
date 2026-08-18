@@ -98,7 +98,7 @@ test('knowledge_docs 支持启用进度和反馈元数据', async () => {
         assert.equal(detail.totalChunks, 1);
         assert.equal(detail.chunks[0].id, chunkInfo.lastInsertRowid);
 
-        const feedback = recordRagFeedback({
+        const feedback = await recordRagFeedback({
             userId: userInfo.lastInsertRowid,
             query: 'RAG feedback',
             chunkId: chunkInfo.lastInsertRowid,
@@ -108,7 +108,7 @@ test('knowledge_docs 支持启用进度和反馈元数据', async () => {
             note: 'not enough detail'
         });
         assert.ok(feedback.id > 0);
-        const summary = getRagFeedbackSummary(userInfo.lastInsertRowid);
+        const summary = await getRagFeedbackSummary(userInfo.lastInsertRowid);
         assert.equal(summary.unhelpful, 1);
         assert.equal(summary.byDoc[0].unhelpful, 1);
     } finally {
@@ -195,7 +195,7 @@ test('RAG 文档读取器支持 Office、数据和网页文本格式', async () 
     }
 });
 
-test('RAG 文档删除为软删除并保持可审计', () => {
+test('RAG 文档删除为软删除并保持可审计', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -220,16 +220,16 @@ test('RAG 文档删除为软删除并保持可审计', () => {
     `).run(docInfo.lastInsertRowid, 'soft delete audit chunk', 'soft delete audit chunk', JSON.stringify([1, 0]));
 
     try {
-        assert.equal(deleteKnowledgeDocument({ docId: docInfo.lastInsertRowid, userId: userInfo.lastInsertRowid }), true);
+        assert.equal(await deleteKnowledgeDocument({ docId: docInfo.lastInsertRowid, userId: userInfo.lastInsertRowid }), true);
         const doc = db.prepare('SELECT deleted_at, deleted_by_user, is_enabled FROM knowledge_docs WHERE id = ?')
             .get(docInfo.lastInsertRowid);
         assert.ok(doc.deleted_at);
         assert.equal(doc.deleted_by_user, userInfo.lastInsertRowid);
         assert.equal(doc.is_enabled, 0);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?').get(docInfo.lastInsertRowid).count, 1);
-        assert.equal(getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid).total, 0);
+        assert.equal((await getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid)).total, 0);
 
-        const audit = getKnowledgeDocumentAuditList({ limit: 20 });
+        const audit = await getKnowledgeDocumentAuditList({ limit: 20 });
         const row = audit.data.find(item => item.id === docInfo.lastInsertRowid);
         assert.ok(row);
         assert.equal(row.username, `rag_delete_${suffix}`);
@@ -394,7 +394,7 @@ test('RAG 重建索引会把缺少源文件的旧文档标记为错误', async (
     }
 });
 
-test('RAG 恢复会把缺少源文件的中断处理文档标记为错误', () => {
+test('RAG 恢复会把缺少源文件的中断处理文档标记为错误', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -406,7 +406,7 @@ test('RAG 恢复会把缺少源文件的中断处理文档标记为错误', () =
     `).run(userInfo.lastInsertRowid, `rag_recover_${suffix}.txt`, 'processing', 0, '');
 
     try {
-        const result = recoverStaleKnowledgeDocumentIndexes({ limit: 10 });
+        const result = await recoverStaleKnowledgeDocumentIndexes({ limit: 10 });
         assert.ok(result.total >= 1);
         assert.ok(result.failed >= 1);
         const row = db.prepare('SELECT status, error_message FROM knowledge_docs WHERE id = ?')
@@ -419,7 +419,7 @@ test('RAG 恢复会把缺少源文件的中断处理文档标记为错误', () =
     }
 });
 
-test('RAG 汇总会统计文档并调度可重试失败文档', () => {
+test('RAG 汇总会统计文档并调度可重试失败文档', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -443,7 +443,7 @@ test('RAG 汇总会统计文档并调度可重试失败文档', () => {
     );
 
     try {
-        const summary = getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
+        const summary = await getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
         assert.equal(summary.total, 2);
         assert.equal(summary.ready, 1);
         assert.equal(summary.error, 1);
@@ -452,9 +452,9 @@ test('RAG 汇总会统计文档并调度可重试失败文档', () => {
         assert.equal(summary.retryableErrors, 1);
         assert.equal(summary.lastError.id, failedDoc.lastInsertRowid);
 
-        const retry = scheduleFailedKnowledgeDocumentsForUser({ userId: userInfo.lastInsertRowid, limit: 10 });
+        const retry = await scheduleFailedKnowledgeDocumentsForUser({ userId: userInfo.lastInsertRowid, limit: 10 });
         assert.deepEqual(retry, { total: 1, scheduled: 1, alreadyProcessing: 0 });
-        const queuedAgain = scheduleFailedKnowledgeDocumentsForUser({ userId: userInfo.lastInsertRowid, limit: 10 });
+        const queuedAgain = await scheduleFailedKnowledgeDocumentsForUser({ userId: userInfo.lastInsertRowid, limit: 10 });
         assert.deepEqual(queuedAgain, { total: 1, scheduled: 0, alreadyProcessing: 1 });
     } finally {
         db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(readyDoc.lastInsertRowid, failedDoc.lastInsertRowid);
@@ -654,17 +654,17 @@ test('RAG tag scope limits debug retrieval candidates', async () => {
         for (const tag of ['财务', '合同', '2026', '运维']) {
             await createKnowledgeTag({ userId, tag });
         }
-        assert.deepEqual(setKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId, tags: ['财务', '合同', '2026'] }), ['财务', '合同', '2026']);
-        assert.deepEqual(setKnowledgeDocumentTags({ docId: docB.lastInsertRowid, userId, tags: ['运维', '合同'] }), ['运维', '合同']);
+        assert.deepEqual(await setKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId, tags: ['财务', '合同', '2026'] }), ['财务', '合同', '2026']);
+        assert.deepEqual(await setKnowledgeDocumentTags({ docId: docB.lastInsertRowid, userId, tags: ['运维', '合同'] }), ['运维', '合同']);
         assert.deepEqual(await getKnowledgeDocumentTags({ docId: docA.lastInsertRowid, userId }), ['2026', '合同', '财务']);
         const standaloneTag = await createKnowledgeTag({ userId, tag: `待分配-${suffix}` });
         assert.equal(standaloneTag.tag, `待分配-${suffix}`);
         assert.equal(standaloneTag.doc_count, 0);
-        const tagSummary = listKnowledgeTags(userId);
+        const tagSummary = await listKnowledgeTags(userId);
         assert.equal(tagSummary.find(item => item.tag === '合同')?.doc_count, 2);
         assert.equal(tagSummary.find(item => item.tag === '财务')?.doc_count, 1);
         assert.equal(tagSummary.find(item => item.tag === `待分配-${suffix}`)?.doc_count, 0);
-        const financeTags = listKnowledgeTags(userId, { collectionId: financeCollection.id });
+        const financeTags = await listKnowledgeTags(userId, { collectionId: financeCollection.id });
         assert.equal(financeTags.find(item => item.tag === '合同')?.doc_count, 1);
         assert.equal(financeTags.find(item => item.tag === '财务')?.doc_count, 1);
         assert.equal(financeTags.some(item => item.tag === '运维'), false);

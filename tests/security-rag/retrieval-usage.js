@@ -76,7 +76,7 @@ test('RAG 索引在向量服务失败时保留关键词分片', async () => {
     }
 });
 
-test('RAG 汇总会返回个人检索配置', () => {
+test('RAG 汇总会返回个人检索配置', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -88,7 +88,7 @@ test('RAG 汇总会返回个人检索配置', () => {
     `).run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.topK, '7');
 
     try {
-        const summary = getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
+        const summary = await getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
         assert.equal(summary.config.topK, 7);
     } finally {
         db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userInfo.lastInsertRowid);

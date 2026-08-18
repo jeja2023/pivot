@@ -1,7 +1,7 @@
 const parse5 = require('parse5');
 const { estimateTokens } = require('../llm');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
-const { getRunnableModelForUser } = require('./models');
+const { getRunnableModelForUserAsync } = require('./models');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
 const { createOrUpdateRunArtifact } = require('./agent-artifacts');
 
@@ -260,7 +260,7 @@ function reportSummary(records, stats, artifact, maxChars, reportTitle) {
 async function executeContentReview(input = {}, user, context = {}, injectedDeps = {}) {
     const deps = { callModelText, recordAgentModelUsage, createOrUpdateRunArtifact, ...injectedDeps };
     const modelId = String(input.model ?? input.modelId ?? input.model_id ?? context.modelCfg?.id ?? context.run?.model_id ?? '').trim();
-    const modelCfg = getRunnableModelForUser(modelId, user);
+    const modelCfg = await getRunnableModelForUserAsync(modelId, user);
     if (!modelCfg) throw new Error('内容校对节点需要选择当前用户可用的模型。');
     const rawRecords = input.records ?? input.rows ?? input.data;
     const allRows = rowsFromReviewInput(rawRecords);

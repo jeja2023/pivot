@@ -1,5 +1,5 @@
-const { db } = require('../db');
-const { getRunnableModelForUser } = require('./models');
+const { queryOne } = require('../db/client');
+const { getRunnableModelForUserAsync } = require('./models');
 const { formatToolList } = require('./agent-tool-catalog');
 const { assertWorkflowLlmNodesConfigured, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { isSuperAdmin } = require('../permissions');
@@ -29,19 +29,19 @@ function clampReadinessScore(value) {
     return Math.max(0, Math.min(score, 100));
 }
 
-function getMcpHealthForPreflight(user) {
+async function getMcpHealthForPreflight(user) {
     const superAdmin = isSuperAdmin(user);
     const scope = superAdmin ? "status != 'deleted'" : "status != 'deleted' AND (user_id IS NULL OR user_id = ?)";
     const params = superAdmin ? [] : [user.id];
-    return db.prepare(`
+    return await queryOne(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
             SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END) AS error,
-            SUM(CASE WHEN last_checked_at IS NULL OR last_checked_at = '' THEN 1 ELSE 0 END) AS unchecked
+            SUM(CASE WHEN last_checked_at IS NULL THEN 1 ELSE 0 END) AS unchecked
         FROM mcp_servers
         WHERE ${scope}
-    `).get(...params);
+    `, params);
 }
 
 async function preflightAgentRun(user, body = {}) {
@@ -53,12 +53,12 @@ async function preflightAgentRun(user, body = {}) {
     const requestedMaxSteps = normalizeOptionalMaxSteps(body.maxSteps ?? body.max_steps);
     const maxSteps = resolveMaxSteps(requestedMaxSteps, runMode);
     const maxTokenBudget = normalizePositiveInt(body.maxTokenBudget || body.max_token_budget, 0, 0, 10000000);
-    const toolList = formatToolList(user, { toolPolicy, toolAllowlist });
+    const toolList = await formatToolList(user, { toolPolicy, toolAllowlist });
     const mcpTools = toolList.filter(tool => tool.source === 'mcp');
     const highRiskTools = mcpTools.filter(tool => tool.requiresApproval || tool.risk === 'high');
-    const mcpHealth = getMcpHealthForPreflight(user) || {};
+    const mcpHealth = (await getMcpHealthForPreflight(user)) || {};
     const estimatedInputTokens = estimatePromptTokens(goal) + Math.min(Number(body.contextPreviewTokens || body.context_preview_tokens || 0), 20000);
-    const knowledge = db.prepare(`
+    const knowledge = (await queryOne(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS ready,
@@ -66,7 +66,7 @@ async function preflightAgentRun(user, body = {}) {
             COALESCE(SUM(chunk_count), 0) AS chunks
         FROM knowledge_docs
         WHERE user_id = ? AND deleted_at IS NULL
-    `).get(user.id);
+    `, [user.id])) || {};
     const warnings = [];
     const blockers = [];
     let dag = null;
@@ -81,7 +81,7 @@ async function preflightAgentRun(user, body = {}) {
             try {
                 const resolved = await resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current');
                 if (resolved) {
-                    const bound = resolveAgentWorkflowDependencyBindings(resolved, user, { enforce: false });
+                    const bound = await resolveAgentWorkflowDependencyBindings(resolved, user, { enforce: false });
                     dag = bound.dagSpec;
                     dependencyBinding = bound.dependency_binding;
                     blockers.push(...(dependencyBinding?.blockers || []));
@@ -93,7 +93,7 @@ async function preflightAgentRun(user, body = {}) {
         dag = dag || normalizeDagSpec(body.dagSpec || body.dag_spec || {});
     }
     const effectiveModelId = body.modelId || body.model_id || '';
-    const modelCfg = getRunnableModelForUser(effectiveModelId, user);
+    const modelCfg = await getRunnableModelForUserAsync(effectiveModelId, user);
     if (goal.length < 4) blockers.push('任务目标过短，智能体无法稳定规划。');
     if (runMode !== 'dag' && !modelCfg) blockers.push('未选择可用模型。');
     if (toolList.length === 0) blockers.push('当前工具范围内没有可用能力。');
@@ -116,7 +116,7 @@ async function preflightAgentRun(user, body = {}) {
             contractReport = inspectDagContracts(dag, toolList);
             blockers.push(...contractReport.blockers);
             warnings.push(...contractReport.warnings);
-            dependencyReport = inspectAgentWorkflowDependencies(dag, user);
+            dependencyReport = await inspectAgentWorkflowDependencies(dag, user);
             if (dependencyBinding) dependencyReport.binding = dependencyBinding;
             blockers.push(...dependencyReport.blockers);
         }

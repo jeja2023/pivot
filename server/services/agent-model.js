@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { queryOne, execute } = require('../db/client');
 const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
@@ -151,12 +151,12 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
     });
 }
 
-function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '') {
+async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '') {
     const inputTokens = estimateTokens(JSON.stringify(messages || []));
     const outputTokens = estimateTokens(output || '');
     recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
     if (runId) {
-        db.prepare(`
+        await execute(`
             UPDATE agent_runs
             SET input_tokens = COALESCE(input_tokens, 0) + ?,
                 output_tokens = COALESCE(output_tokens, 0) + ?,
@@ -164,8 +164,8 @@ function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent
                 last_heartbeat_at = ?,
                 updated_at = ?
             WHERE id = ?
-        `).run(inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId);
-        const run = db.prepare('SELECT max_token_budget, total_tokens FROM agent_runs WHERE id = ?').get(runId);
+        `, [inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId]);
+        const run = await queryOne('SELECT max_token_budget, total_tokens FROM agent_runs WHERE id = ?', [runId]);
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
             const err = new Error(`智能体任务已超过模型用量上限 ${run.max_token_budget}`);
             err.code = 'AGENT_BUDGET_EXCEEDED';

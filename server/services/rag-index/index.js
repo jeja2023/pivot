@@ -1,4 +1,4 @@
-const { db } = require('../../db');
+const { query, queryOne } = require('../../db/client');
 const { logger } = require('../../logger');
 const {
     normalizeCacheQuery,
@@ -189,42 +189,41 @@ function buildRetrievalScopeSql(scope, docAlias = 'd', user = null) {
     };
 }
 
-function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
+async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
-    const ftsQuery = buildFtsOrQuery(keywords);
-    if (!ftsQuery) return [];
+    const keywordWhere = keywords.map(() => '(c.search_content ILIKE ? OR c.content ILIKE ?)').join(' OR ');
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
+    const searchParams = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
 
     try {
-        return db.prepare(`
+        return await query(`
             SELECT c.id, c.content, c.embedding, c.heading_path, d.name
-            FROM knowledge_chunks_fts
-            JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.rowid
+            FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
-            WHERE knowledge_chunks_fts MATCH ?
+            WHERE (${keywordWhere})
               ${ownerFilter}
               AND d.status = 'ready'
               AND d.deleted_at IS NULL
               AND COALESCE(d.is_enabled, 1) = 1
               ${scopeFilter.sql}
               ${scopeFilter.accessSql}
-            ORDER BY bm25(knowledge_chunks_fts)
+            ORDER BY c.id DESC
             LIMIT ?
-        `).all(ftsQuery, ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
+        `, [...searchParams, ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit]);
     } catch (e) {
-        logger.warn({ err: e.message }, 'RAG FTS 候选召回失败，已回退到 LIKE 扫描');
+        logger.warn({ err: e.message }, 'RAG 文本检索候选召回失败');
         return [];
     }
 }
 
-function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) {
+async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
-    const keywordWhere = keywords.map(() => 'LOWER(c.content) LIKE ?').join(' OR ');
+    const keywordWhere = keywords.map(() => 'c.content ILIKE ?').join(' OR ');
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    return db.prepare(`
+    return await query(`
         SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
@@ -232,16 +231,16 @@ function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) 
         WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
         ORDER BY c.id DESC
         LIMIT ?
-    `).all(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), ...keywords.map(k => `%${k}%`), limit);
+    `, [...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), ...keywords.map(k => `%${k}%`), limit]);
 }
 
-function selectLexicalCandidates(userId, query, candidateLimit, scope = {}, user = null) {
-    const keywords = buildKeywordCandidates(query);
-    const ftsChunks = selectFtsCandidates(userId, keywords, candidateLimit, scope, user);
-    let chunks = ftsChunks.slice();
+async function selectLexicalCandidates(userId, queryText, candidateLimit, scope = {}, user = null) {
+    const keywords = buildKeywordCandidates(queryText);
+    const ftsChunks = await selectFtsCandidates(userId, keywords, candidateLimit, scope, user);
+    let chunks = (ftsChunks || []).slice();
     if (chunks.length < candidateLimit) {
         const existingIds = new Set(chunks.map(chunk => Number(chunk.id)));
-        const likeChunks = selectLikeCandidates(userId, keywords, candidateLimit, scope, user)
+        const likeChunks = (await selectLikeCandidates(userId, keywords, candidateLimit, scope, user))
             .filter(chunk => !existingIds.has(Number(chunk.id)));
         chunks = chunks.concat(likeChunks).slice(0, candidateLimit);
     }
@@ -249,10 +248,10 @@ function selectLexicalCandidates(userId, query, candidateLimit, scope = {}, user
     return chunks;
 }
 
-function hasAccessibleChunks(userId, scope = {}, user = null) {
+async function hasAccessibleChunks(userId, scope = {}, user = null) {
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    const row = db.prepare(`
+    const row = await queryOne(`
         SELECT 1 AS found
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
@@ -264,7 +263,7 @@ function hasAccessibleChunks(userId, scope = {}, user = null) {
           ${scopeFilter.sql}
           ${scopeFilter.accessSql}
         LIMIT 1
-    `).get(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]));
+    `, (user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]));
     return Boolean(row?.found);
 }
 
@@ -311,13 +310,13 @@ function mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCan
     return [...merged.values()];
 }
 
-function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
+async function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
     const ids = [...new Set((chunkIds || []).map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0))];
     if (ids.length === 0) return [];
     const placeholders = ids.slice(0, limit).map(() => '?').join(',');
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    return db.prepare(`
+    return await query(`
         SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
@@ -330,7 +329,7 @@ function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = null) {
           ${scopeFilter.sql}
           ${scopeFilter.accessSql}
         LIMIT ?
-    `).all(...ids.slice(0, limit), ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit);
+    `, [...ids.slice(0, limit), ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit]);
 }
 
 // 两个已解析向量(含范数)之间的余弦相似度，用于 MMR 多样性度量。
@@ -455,13 +454,13 @@ function formatInjectedContext(topChunks) {
     return injectedContext;
 }
 
-function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
+async function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
     const hybrid = getHybridRetrievalConfig();
     const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs', user);
     const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
     const accessFilter = user ? scopeFilter.accessSql : '';
     const accessJoin = user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = knowledge_docs.collection_id AND c_access.deleted_at IS NULL' : '';
-    const docs = db.prepare(`
+    const docs = (await queryOne(`
         SELECT
             COUNT(*) AS doc_count,
             COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
@@ -474,12 +473,13 @@ function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
           AND COALESCE(knowledge_docs.is_enabled, 1) = 1
           ${scopeFilter.sql}
           ${accessFilter}
-    `).get(...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params])) || {};
-    const graph = db.prepare(`
-        SELECT
-            COALESCE((SELECT MAX(updated_at) FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL), '') AS entity_version,
-            COALESCE((SELECT MAX(updated_at) FROM knowledge_relations WHERE user_id = ? AND status = 'active'), '') AS relation_version
-    `).get(userId, userId) || {};
+    `, (user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]))) || {};
+    const entityVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at), \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]);
+    const relationVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at), \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]);
+    const graph = {
+        entity_version: entityVersionRow?.entity_version || '',
+        relation_version: relationVersionRow?.relation_version || ''
+    };
 
     return [
         'algo=dual_rrf_v2',
@@ -552,9 +552,9 @@ async function debugRetrieveContext(userId, query, {
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user });
-    const lexicalCandidates = selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user);
-    if (!hasAccessibleChunks(userId, normalizedScope, user) && !graphContext.context) {
+    const graphContext = await getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user });
+    const lexicalCandidates = await selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user);
+    if (!(await hasAccessibleChunks(userId, normalizedScope, user)) && !graphContext.context) {
         return {
             query: normalizedQuery,
             keywords,
@@ -577,14 +577,14 @@ async function debugRetrieveContext(userId, query, {
     try {
         const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
         const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
-        const graphCandidates = selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
+        const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
         scored = scoreCandidatesHybrid(candidates, vector, hybrid);
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
     } catch (e) {
         usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
-        const graphCandidates = selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
+        const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
         scored = scoreKeywordChunks(candidates, normalizedQuery)
             .sort((a, b) => b.score - a.score)
@@ -633,7 +633,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     if (!normalizedQuery) return '';
     const config = getRagConfig({ topK }, userId);
     const retrievalScope = normalizeRetrievalScope(options.scope || {});
-    const cacheScope = buildRagCacheScope(userId, config, retrievalScope, options.user || null);
+    const cacheScope = await buildRagCacheScope(userId, config, retrievalScope, options.user || null);
     const recordRetrieval = (payload) => {
         recordRagRetrieval(payload);
         recordSlowRagRetrieval({
@@ -657,15 +657,15 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     }
 
     try {
-        const graphContext = getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null });
-        const lexicalCandidates = selectLexicalCandidates(
+        const graphContext = await getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null });
+        const lexicalCandidates = await selectLexicalCandidates(
             userId,
             normalizedQuery,
             config.candidateLimit,
             retrievalScope,
             options.user || null
         );
-        const corpusAvailable = hasAccessibleChunks(userId, retrievalScope, options.user || null);
+        const corpusAvailable = await hasAccessibleChunks(userId, retrievalScope, options.user || null);
 
         if (!corpusAvailable && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
@@ -699,7 +699,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 retrievalScope,
                 options.user || null
             );
-            const graphCandidates = selectChunksByIds(
+            const graphCandidates = await selectChunksByIds(
                 userId,
                 graphContext.chunkIds,
                 config.candidateLimit,
@@ -715,7 +715,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         } catch (e) {
             usedKeywordFallback = true;
             logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
-            const graphCandidates = selectChunksByIds(
+            const graphCandidates = await selectChunksByIds(
                 userId,
                 graphContext.chunkIds,
                 config.candidateLimit,
@@ -812,22 +812,24 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
                 vector: Array.isArray(vectors) ? vectors[index] : null
             }));
 
-            const insert = db.prepare('INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, embedding) VALUES (?, ?, ?, ?, ?)');
             const insertedChunks = [];
-            const transaction = db.transaction((items) => {
-                for (const item of items) {
-                    const embedding = Array.isArray(item.vector) ? JSON.stringify(item.vector) : null;
-                    const result = insert.run(
-                        docId,
-                        item.content,
-                        buildRagSearchContent(item.enriched),
-                        item.headingPath || null,
-                        embedding
-                    );
-                    insertedChunks.push({ chunkId: result.lastInsertRowid, content: item.content });
+            for (const item of results) {
+                const embedding = Array.isArray(item.vector) ? JSON.stringify(item.vector) : null;
+                const inserted = await queryOne(`
+                    INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, embedding)
+                    VALUES (?, ?, ?, ?, ?)
+                    RETURNING id
+                `, [
+                    docId,
+                    item.content,
+                    buildRagSearchContent(item.enriched),
+                    item.headingPath || null,
+                    embedding
+                ]);
+                if (inserted?.id) {
+                    insertedChunks.push({ chunkId: inserted.id, content: item.content });
                 }
-            });
-            transaction(results);
+            }
             await safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             indexed += batch.length;
             if (typeof onProgress === 'function') {

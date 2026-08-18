@@ -11,7 +11,7 @@ const {
     DEFAULT_PORTS,
     assertSafeDatabaseHost,
     databaseSafeLookup,
-    getConnectionOwner,
+    getConnectionOwnerAsync,
     createDatabaseMcpError,
     databaseConnectionDiagnostics,
     normalizeDatabaseConnectionError,
@@ -47,15 +47,26 @@ const {
 
 
 function getDatabaseConnectionForServer(serverId, { includeSecret = false } = {}) {
-    const row = appDb().prepare(`
+    const database = appDb();
+    if (!database) return null;
+    const row = database.prepare(`
         SELECT * FROM mcp_database_connections
         WHERE mcp_server_id = ? AND status != 'deleted'
     `).get(serverId);
     return normalizeDatabaseConnection(row, { includeSecret });
 }
 
+async function getDatabaseConnectionForServerAsync(serverId, { includeSecret = false } = {}) {
+    const { queryOne } = require('../../db/client');
+    const row = await queryOne(`
+        SELECT * FROM mcp_database_connections
+        WHERE mcp_server_id = ? AND status != 'deleted'
+    `, [serverId]);
+    return normalizeDatabaseConnection(row, { includeSecret });
+}
+
 function listDatabaseMcpTools(server) {
-    const connection = getDatabaseConnectionForServer(server.id);
+    const connection = server?.database_connection || getDatabaseConnectionForServer(server.id);
     if (!connection) throw new Error('Database MCP connection not found.');
     return listDatabaseConnectionMcpTools(connection);
 }
@@ -96,7 +107,7 @@ function withOperationTimeout(promise, timeoutMs, connection, phase) {
 async function withPostgres(connection, handler) {
     const { Client } = optionalRequire('pg', 'Install it with npm install pg.');
     const timeoutMs = getConnectionTimeoutMs(connection);
-    const owner = getConnectionOwner(connection);
+    const owner = await getConnectionOwnerAsync(connection);
     // 连接前再次解析校验，缓解配置入库后 DNS 被改写（rebinding）的 SSRF。
     await assertSafeDatabaseHost(connection.host, owner);
     const client = new Client({
@@ -129,7 +140,7 @@ async function withPostgres(connection, handler) {
 async function withMysql(connection, handler) {
     const mysql = optionalRequire('mysql2/promise', 'Install it with npm install mysql2.');
     const timeoutMs = getConnectionTimeoutMs(connection);
-    const owner = getConnectionOwner(connection);
+    const owner = await getConnectionOwnerAsync(connection);
     // mysql2 不支持自定义 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
     await assertSafeDatabaseHost(connection.host, owner);
     const client = await mysql.createConnection({
@@ -157,7 +168,7 @@ async function withMysql(connection, handler) {
 async function withSqlServer(connection, handler) {
     const sql = optionalRequire('mssql', 'Install it with npm install mssql.');
     const timeoutMs = getConnectionTimeoutMs(connection);
-    const owner = getConnectionOwner(connection);
+    const owner = await getConnectionOwnerAsync(connection);
     // mssql/tedious 不便注入 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
     await assertSafeDatabaseHost(connection.host, owner);
     const pool = new sql.ConnectionPool({
@@ -372,7 +383,7 @@ async function executeMongoTool(connection, name, input = {}) {
     const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
     const cfg = connection;
     // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, getConnectionOwner(connection));
+    await assertSafeDatabaseHost(connection.host, await getConnectionOwnerAsync(connection));
     const auth = connection.username
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
@@ -469,7 +480,7 @@ async function testDatabaseConnection(connection) {
     if (testConnection.database_type === 'mongodb') {
         const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
         // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-        await assertSafeDatabaseHost(testConnection.host, getConnectionOwner(testConnection));
+        await assertSafeDatabaseHost(testConnection.host, await getConnectionOwnerAsync(testConnection));
         const auth = testConnection.username
             ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';
@@ -496,7 +507,7 @@ async function testDatabaseConnection(connection) {
 }
 
 async function executeDatabaseMcpTool(server, name, input = {}) {
-    const connection = getDatabaseConnectionForServer(server.id, { includeSecret: true });
+    const connection = server?.database_connection || await getDatabaseConnectionForServerAsync(server.id, { includeSecret: true });
     if (!connection) throw new Error('Database MCP connection not found.');
     return executeDatabaseConnectionTool(connection, name, input);
 }
@@ -577,6 +588,7 @@ module.exports = {
     executeDatabaseConnectionTool,
     buildDatabaseTestConnectionConfig,
     getDatabaseConnectionForServer,
+    getDatabaseConnectionForServerAsync,
     listDatabaseConnectionMcpTools,
     listDatabaseMcpTools,
     normalizeDatabaseConnection,

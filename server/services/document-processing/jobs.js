@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { db } = require('../../db');
+const { query, queryOne, execute } = require('../../db/client');
 const { extractDocumentText, isPasswordError, truncateExtractedText } = require('../../document-text');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
@@ -139,23 +139,23 @@ function normalizeConfig(config = {}) {
     };
 }
 
-function getJobRow(jobId, userId = null) {
+async function getJobRow(jobId, userId = null) {
     const id = Number.parseInt(jobId, 10);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
     if (userId) {
-        return db.prepare('SELECT * FROM document_jobs WHERE id = ? AND user_id = ?').get(id, userId) || null;
+        return await queryOne('SELECT * FROM document_jobs WHERE id = ? AND user_id = ?', [id, userId]) || null;
     }
-    return db.prepare('SELECT * FROM document_jobs WHERE id = ?').get(id) || null;
+    return await queryOne('SELECT * FROM document_jobs WHERE id = ?', [id]) || null;
 }
 
-function getOutputRow(outputId, userId) {
+async function getOutputRow(outputId, userId) {
     const id = Number.parseInt(outputId, 10);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
-    return db.prepare(`
+    return await queryOne(`
         SELECT *
         FROM document_outputs
         WHERE id = ? AND user_id = ? AND status = 'ready'
-    `).get(id, userId) || null;
+    `, [id, userId]) || null;
 }
 
 function serializeJob(row) {
@@ -211,9 +211,9 @@ function serializeBlock(row) {
     };
 }
 
-function setJobStatus(jobId, status, patch = {}) {
+async function setJobStatus(jobId, status, patch = {}) {
     const now = getBeijingTimestamp();
-    const current = getJobRow(jobId);
+    const current = await getJobRow(jobId);
     if (!current) return null;
     const result = patch.result === undefined ? parseJson(current.result_json, {}) : patch.result;
     const progress = patch.progress === undefined ? current.progress : Math.max(0, Math.min(Number(patch.progress) || 0, 100));
@@ -222,102 +222,100 @@ function setJobStatus(jobId, status, patch = {}) {
         ? (patch.completedAt || now)
         : current.completed_at;
     const cancelledAt = status === JOB_STATUSES.CANCELLED ? (patch.cancelledAt || now) : current.cancelled_at;
-    db.prepare(`
+    await execute(`
         UPDATE document_jobs
         SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?
         WHERE id = ?
-    `).run(status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt, jobId);
-    return getJobRow(jobId);
+    `, [status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt, jobId]);
+    return await getJobRow(jobId);
 }
 
-function isCancelled(jobId) {
-    const row = getJobRow(jobId);
+async function isCancelled(jobId) {
+    const row = await getJobRow(jobId);
     return !row || row.status === JOB_STATUSES.CANCELLED;
 }
 
-function touchProgress(jobId, progress, resultPatch = null) {
-    const row = getJobRow(jobId);
+async function touchProgress(jobId, progress, resultPatch = null) {
+    const row = await getJobRow(jobId);
     if (!row || row.status === JOB_STATUSES.CANCELLED) return null;
     const result = resultPatch ? { ...parseJson(row.result_json, {}), ...resultPatch } : parseJson(row.result_json, {});
-    return setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result });
+    return await setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result });
 }
 
-function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, imagePath = '', text = '', ocrStatus = 'pending', confidence = null }) {
+async function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, imagePath = '', text = '', ocrStatus = 'pending', confidence = null }) {
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    return await queryOne(`
         INSERT INTO document_pages (
             user_id, file_id, job_id, page_number, width, height, image_path, text, text_length, ocr_status, confidence, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, fileId, jobId, pageNumber, width, height, imagePath, text, String(text || '').length, ocrStatus, confidence, now, now);
-    return db.prepare('SELECT * FROM document_pages WHERE id = ?').get(info.lastInsertRowid);
+        RETURNING *
+    `, [userId, fileId, jobId, pageNumber, width, height, imagePath, text, String(text || '').length, ocrStatus, confidence, now, now]);
 }
 
-function updatePageText({ pageId, text, ocrStatus, confidence }) {
-    db.prepare(`
+async function updatePageText({ pageId, text, ocrStatus, confidence }) {
+    return await queryOne(`
         UPDATE document_pages
         SET text = ?, text_length = ?, ocr_status = ?, confidence = ?, updated_at = ?
         WHERE id = ?
-    `).run(String(text || ''), String(text || '').length, ocrStatus, confidence, getBeijingTimestamp(), pageId);
-    return db.prepare('SELECT * FROM document_pages WHERE id = ?').get(pageId);
+        RETURNING *
+    `, [String(text || ''), String(text || '').length, ocrStatus, confidence, getBeijingTimestamp(), pageId]);
 }
 
-function insertOcrBlocks({ userId, fileId, jobId, pageId, pageNumber, blocks = [] }) {
+async function insertOcrBlocks({ userId, fileId, jobId, pageId, pageNumber, blocks = [] }) {
+    if (!blocks || !blocks.length) return;
     const now = getBeijingTimestamp();
-    const insert = db.prepare(`
-        INSERT INTO document_ocr_blocks (
-            user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, bbox_json, confidence, language, engine, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const write = db.transaction(() => {
-        blocks.forEach((block, index) => {
-            insert.run(
-                userId,
-                fileId,
-                jobId,
-                pageId,
-                pageNumber,
-                Number(block.sortOrder ?? index),
-                block.blockType || 'line',
-                String(block.text || '').trim(),
-                safeJson(block.bbox || []),
-                Number(block.confidence || 0),
-                block.language || '',
-                block.engine || '',
-                now,
-                now
-            );
-        });
-    });
-    write();
+    for (let index = 0; index < blocks.length; index++) {
+        const block = blocks[index];
+        await execute(`
+            INSERT INTO document_ocr_blocks (
+                user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, bbox_json, confidence, language, engine, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            userId,
+            fileId,
+            jobId,
+            pageId,
+            pageNumber,
+            Number(block.sortOrder ?? index),
+            block.blockType || 'line',
+            String(block.text || '').trim(),
+            safeJson(block.bbox || []),
+            Number(block.confidence || 0),
+            block.language || '',
+            block.engine || '',
+            now,
+            now
+        ]);
+    }
 }
 
-function getPages(jobId) {
-    return db.prepare('SELECT * FROM document_pages WHERE job_id = ? ORDER BY page_number ASC, id ASC').all(jobId);
+async function getPages(jobId) {
+    return await query('SELECT * FROM document_pages WHERE job_id = ? ORDER BY page_number ASC, id ASC', [jobId]);
 }
 
-function getBlocks(jobId) {
-    return db.prepare('SELECT * FROM document_ocr_blocks WHERE job_id = ? ORDER BY page_number ASC, sort_order ASC, id ASC').all(jobId);
+async function getBlocks(jobId) {
+    return await query('SELECT * FROM document_ocr_blocks WHERE job_id = ? ORDER BY page_number ASC, sort_order ASC, id ASC', [jobId]);
 }
 
-function getOutputs(jobId) {
-    return db.prepare('SELECT * FROM document_outputs WHERE job_id = ? AND status = ? ORDER BY created_at DESC, id DESC').all(jobId, 'ready');
+async function getOutputs(jobId) {
+    return await query('SELECT * FROM document_outputs WHERE job_id = ? AND status = ? ORDER BY created_at DESC, id DESC', [jobId, 'ready']);
 }
 
-function getReviews(jobId) {
-    return db.prepare('SELECT * FROM document_reviews WHERE job_id = ? ORDER BY updated_at DESC, id DESC').all(jobId);
+async function getReviews(jobId) {
+    return await query('SELECT * FROM document_reviews WHERE job_id = ? ORDER BY updated_at DESC, id DESC', [jobId]);
 }
 
-function cleanupJobArtifacts(jobId) {
-    const outputs = db.prepare('SELECT file_path FROM document_outputs WHERE job_id = ?').all(jobId);
-    const pages = db.prepare('SELECT image_path FROM document_pages WHERE job_id = ?').all(jobId);
+async function cleanupJobArtifacts(jobId) {
+    const outputs = await query('SELECT file_path FROM document_outputs WHERE job_id = ?', [jobId]);
+    const pages = await query('SELECT image_path FROM document_pages WHERE job_id = ?', [jobId]);
     outputs.forEach(row => safeUnlinkManaged(row.file_path));
     pages.forEach(row => {
         if (String(row.image_path || '').includes('/pages/')) safeUnlinkManaged(row.image_path);
     });
-    db.prepare('DELETE FROM document_outputs WHERE job_id = ?').run(jobId);
-    db.prepare('DELETE FROM document_ocr_blocks WHERE job_id = ?').run(jobId);
-    db.prepare('DELETE FROM document_reviews WHERE job_id = ?').run(jobId);
-    db.prepare('DELETE FROM document_pages WHERE job_id = ?').run(jobId);
+    await execute('DELETE FROM document_outputs WHERE job_id = ?', [jobId]);
+    await execute('DELETE FROM document_ocr_blocks WHERE job_id = ?', [jobId]);
+    await execute('DELETE FROM document_reviews WHERE job_id = ?', [jobId]);
+    await execute('DELETE FROM document_pages WHERE job_id = ?', [jobId]);
 }
 
 function removeQueuedJob(jobId) {
@@ -342,18 +340,19 @@ function getJobSourceFileIds(job) {
     return Array.from(ids);
 }
 
-function cleanupJobSourceFiles(job, userId) {
+async function cleanupJobSourceFiles(job, userId) {
     const now = getBeijingTimestamp();
-    getJobSourceFileIds(job).forEach(fileId => {
-        const row = db.prepare('SELECT id, file_path FROM document_files WHERE id = ? AND user_id = ?').get(fileId, userId);
-        if (!row) return;
+    const fileIds = getJobSourceFileIds(job);
+    for (const fileId of fileIds) {
+        const row = await queryOne('SELECT id, file_path FROM document_files WHERE id = ? AND user_id = ?', [fileId, userId]);
+        if (!row) continue;
         safeUnlinkManaged(row.file_path);
-        db.prepare(`
+        await execute(`
             UPDATE document_files
             SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(now, now, fileId, userId);
-    });
+        `, [now, now, fileId, userId]);
+    }
 }
 
 function enqueueJob(jobId) {
@@ -367,13 +366,14 @@ function enqueueJob(jobId) {
 function drainQueue() {
     while (runningCount < getMaxConcurrentJobs() && queue.length > 0) {
         const jobId = queue.shift();
-        const row = getJobRow(jobId);
-        if (!row || row.status !== JOB_STATUSES.QUEUED) continue;
         runningCount += 1;
         runningJobs.add(jobId);
         setImmediate(async () => {
             try {
-                await processJob(jobId);
+                const row = await getJobRow(jobId);
+                if (row && row.status === JOB_STATUSES.QUEUED) {
+                    await processJob(jobId);
+                }
             } catch (err) {
                 logger.error({ err: sanitizeErrorMessage(err), jobId }, '文档处理任务执行失败');
             } finally {
@@ -385,21 +385,22 @@ function drainQueue() {
     }
 }
 
-function createJobRecord({ userId, fileId, jobType, sourceModule, config }) {
+async function createJobRecord({ userId, fileId, jobType, sourceModule, config }) {
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO document_jobs (
             user_id, file_id, job_type, status, progress, config_json, result_json, attempts, max_attempts, source_module, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, fileId, normalizeJobType(jobType), JOB_STATUSES.QUEUED, 0, safeJson(normalizeConfig(config)), '{}', 0, 3, sourceModule, now, now);
-    return getJobRow(info.lastInsertRowid, userId);
+        RETURNING *
+    `, [userId, fileId, normalizeJobType(jobType), JOB_STATUSES.QUEUED, 0, safeJson(normalizeConfig(config)), '{}', 0, 3, sourceModule, now, now]);
+    return row;
 }
 
 async function createJobFromUpload({ user, file, jobType = JOB_TYPES.AUTO, sourceModule = 'document_processing', sourceRef = '', config = {} }) {
     const registeredFile = await registerUploadedFile({ user, file, sourceModule, sourceRef, metadata: { createdBy: sourceModule } });
-    const job = createJobRecord({ userId: user.id, fileId: registeredFile.id, jobType, sourceModule, config });
+    const job = await createJobRecord({ userId: user.id, fileId: registeredFile.id, jobType, sourceModule, config });
     enqueueJob(job.id);
-    return getJobDetail({ userId: user.id, jobId: job.id });
+    return await getJobDetail({ userId: user.id, jobId: job.id });
 }
 
 async function createPdfToolJobFromUploads({ user, files = [], operation, sourceRef = '', config = {} }) {
@@ -420,7 +421,7 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
         }));
     }
     const firstFile = registeredFiles[0];
-    const job = createJobRecord({
+    const job = await createJobRecord({
         userId: user.id,
         fileId: firstFile.id,
         jobType: JOB_TYPES.PDF_TOOL,
@@ -432,10 +433,10 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
         }
     });
     enqueueJob(job.id);
-    return getJobDetail({ userId: user.id, jobId: job.id });
+    return await getJobDetail({ userId: user.id, jobId: job.id });
 }
 
-function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '', sourceModule = '' }) {
+async function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '', sourceModule = '' }) {
     const safePage = Math.max(Number.parseInt(page, 10) || 1, 1);
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 15, 1), 100);
     const filters = ['j.user_id = ?'];
@@ -455,15 +456,16 @@ function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '', sou
         params.push(String(sourceModule).slice(0, 80));
     }
     const whereSql = filters.join(' AND ');
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM document_jobs j WHERE ${whereSql}`).get(...params).count;
-    const rows = db.prepare(`
+    const countRow = await queryOne(`SELECT COUNT(*) AS count FROM document_jobs j WHERE ${whereSql}`, params);
+    const total = Number(countRow?.count || 0);
+    const rows = await query(`
         SELECT j.*, f.original_name, f.file_type, f.file_ext, f.file_size, f.page_count
         FROM document_jobs j
         JOIN document_files f ON f.id = j.file_id
         WHERE ${whereSql}
         ORDER BY j.created_at DESC, j.id DESC
         LIMIT ? OFFSET ?
-    `).all(...params, safeLimit, (safePage - 1) * safeLimit);
+    `, [...params, safeLimit, (safePage - 1) * safeLimit]);
     return {
         data: rows.map(row => ({
             ...serializeJob(row),
@@ -482,19 +484,21 @@ function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '', sou
     };
 }
 
-function getJobDetail({ userId, jobId }) {
-    const job = getJobRow(jobId, userId);
+async function getJobDetail({ userId, jobId }) {
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
-    const file = getDocumentFileForUser(job.file_id, userId);
-    const pages = getPages(job.id);
-    const blocks = getBlocks(job.id);
+    const file = await getDocumentFileForUser(job.file_id, userId);
+    const pages = await getPages(job.id);
+    const blocks = await getBlocks(job.id);
+    const outputs = await getOutputs(job.id);
+    const reviews = await getReviews(job.id);
     return {
         job: serializeJob(job),
         file: serializeFile(file),
         pages: pages.map(serializePage),
         blocks: blocks.map(serializeBlock),
-        outputs: getOutputs(job.id).map(serializeOutput),
-        reviews: getReviews(job.id).map(row => ({
+        outputs: outputs.map(serializeOutput),
+        reviews: reviews.map(row => ({
             id: row.id,
             pageId: row.page_id,
             reviewStatus: row.review_status,
@@ -511,8 +515,8 @@ async function preparePagesForJob({ job, file, filePath, config }) {
     const ext = file.file_ext;
     if (isImageExtension(ext)) {
         const page = await imageFileToPage({ filePath, relativePath: file.file_path, pageNumber: 1 });
-        const row = insertPage({ userId, fileId: file.id, jobId: job.id, ...page, ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending' });
-        updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: 1, metadata: { image: { width: page.width, height: page.height } } });
+        const row = await insertPage({ userId, fileId: file.id, jobId: job.id, ...page, ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending' });
+        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: 1, metadata: { image: { width: page.width, height: page.height } } });
         return [row];
     }
     if (isPdfExtension(ext)) {
@@ -522,17 +526,20 @@ async function preparePagesForJob({ job, file, filePath, config }) {
             jobId: job.id,
             options: { password: config.password, maxPages: config.maxRenderPages, desiredWidth: Math.round(config.dpi * 6.4) }
         });
-        const rows = rendered.map(page => insertPage({
-            userId,
-            fileId: file.id,
-            jobId: job.id,
-            pageNumber: page.pageNumber,
-            width: page.width,
-            height: page.height,
-            imagePath: page.imagePath,
-            ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
-        }));
-        updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: rows.length });
+        const rows = [];
+        for (const page of rendered) {
+            rows.push(await insertPage({
+                userId,
+                fileId: file.id,
+                jobId: job.id,
+                pageNumber: page.pageNumber,
+                width: page.width,
+                height: page.height,
+                imagePath: page.imagePath,
+                ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
+            }));
+        }
+        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: rows.length });
         return rows;
     }
     return [];
@@ -544,7 +551,7 @@ async function recognizePages({ job, file, pages, config }) {
     const allBlocks = [];
     let needsReview = false;
     for (let index = 0; index < maxPages; index += 1) {
-        if (isCancelled(job.id)) throw new Error('任务已取消');
+        if (await isCancelled(job.id)) throw new Error('任务已取消');
         const page = pages[index];
         const imagePath = resolveStoredDocumentPath(page.image_path);
         if (!imagePath || !fs.existsSync(imagePath)) {
@@ -559,13 +566,13 @@ async function recognizePages({ job, file, pages, config }) {
         });
         const pageNeedsReview = Number(result.confidence || 0) < config.confidenceThreshold;
         needsReview = needsReview || pageNeedsReview;
-        const updatedPage = updatePageText({
+        const updatedPage = await updatePageText({
             pageId: page.id,
             text: result.text,
             ocrStatus: pageNeedsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
             confidence: result.confidence
         });
-        insertOcrBlocks({
+        await insertOcrBlocks({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -575,7 +582,7 @@ async function recognizePages({ job, file, pages, config }) {
         });
         recognizedPages.push(updatedPage);
         allBlocks.push(...result.blocks);
-        touchProgress(job.id, 35 + Math.floor(((index + 1) / maxPages) * 50), { processedPages: index + 1 });
+        await touchProgress(job.id, 35 + Math.floor(((index + 1) / maxPages) * 50), { processedPages: index + 1 });
     }
     if (pages.length > maxPages) needsReview = true;
     return { pages: recognizedPages, blocks: allBlocks, needsReview, truncated: pages.length > maxPages };
@@ -585,7 +592,7 @@ async function processTextExtraction({ job, file, filePath, config }) {
     const text = truncateExtractedText(await extractDocumentText(filePath, '', file.original_name, { password: config.password }), getKnowledgeLimits().extractMaxChars);
     const normalizedText = String(text || '').trim();
     if (normalizedText) {
-        const page = insertPage({
+        const page = await insertPage({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -594,7 +601,7 @@ async function processTextExtraction({ job, file, filePath, config }) {
             ocrStatus: 'text_extracted',
             confidence: 1
         });
-        const outputs = createTextOutputs({ userId: job.user_id, file, job, text: normalizedText, pages: [page], blocks: [] });
+        const outputs = await createTextOutputs({ userId: job.user_id, file, job, text: normalizedText, pages: [page], blocks: [] });
         return {
             status: JOB_STATUSES.SUCCEEDED,
             progress: 100,
@@ -606,9 +613,9 @@ async function processTextExtraction({ job, file, filePath, config }) {
         const pages = await preparePagesForJob({ job, file, filePath, config });
         if (job.job_type === JOB_TYPES.OCR) {
             const recognized = await recognizePages({ job, file, pages, config });
-            const finalPages = getPages(job.id);
-            const blocks = getBlocks(job.id);
-            const outputs = createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
+            const finalPages = await getPages(job.id);
+            const blocks = await getBlocks(job.id);
+            const outputs = await createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
             return {
                 status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
                 progress: 100,
@@ -632,9 +639,9 @@ async function processTextExtraction({ job, file, filePath, config }) {
 async function processImageOcr({ job, file, filePath, config }) {
     const pages = await preparePagesForJob({ job, file, filePath, config });
     const recognized = await recognizePages({ job, file, pages, config });
-    const finalPages = getPages(job.id);
-    const blocks = getBlocks(job.id);
-    const outputs = createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
+    const finalPages = await getPages(job.id);
+    const blocks = await getBlocks(job.id);
+    const outputs = await createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
     return {
         status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
         progress: 100,
@@ -647,13 +654,17 @@ async function processPdfToolJob({ job, file, config }) {
         .map(id => Number.parseInt(id, 10))
         .filter(id => Number.isSafeInteger(id) && id > 0)
         .slice(0, 50);
-    const files = sourceIds.map(id => getDocumentFileForUser(id, job.user_id)).filter(Boolean);
-    if (!files.length) throw new Error('PDF \u5de5\u5177\u4efb\u52a1\u7684\u6e90\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u3002');
+    const files = [];
+    for (const id of sourceIds) {
+        const f = await getDocumentFileForUser(id, job.user_id);
+        if (f) files.push(f);
+    }
+    if (!files.length) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
     const operation = normalizePdfOperation(config.operation);
     if (operation === PDF_TOOL_OPERATIONS.SEARCHABLE_PDF) {
         const targetFile = files.find(item => isPdfExtension(item.file_ext) || isImageExtension(item.file_ext)) || files[0];
         const targetPath = getDocumentFilePath(targetFile);
-        if (!targetPath) throw new Error('PDF \u5de5\u5177\u4efb\u52a1\u7684\u6e90\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u3002');
+        if (!targetPath) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
         const pageLimit = Math.min(Math.max(Number.parseInt(config.maxToolPages, 10) || 20, 1), 300);
         const searchableConfig = {
             ...config,
@@ -662,8 +673,8 @@ async function processPdfToolJob({ job, file, config }) {
         };
         const pages = await preparePagesForJob({ job, file: targetFile, filePath: targetPath, config: searchableConfig });
         const recognized = await recognizePages({ job, file: targetFile, pages, config: searchableConfig });
-        const finalPages = getPages(job.id);
-        const blocks = getBlocks(job.id);
+        const finalPages = await getPages(job.id);
+        const blocks = await getBlocks(job.id);
         const output = await createSearchablePdfOutput({ userId: job.user_id, file: targetFile, job, pages: finalPages, blocks });
         return {
             status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
@@ -700,24 +711,24 @@ async function processPdfToolJob({ job, file, config }) {
 }
 
 async function processJob(jobId) {
-    const job = getJobRow(jobId);
+    const job = await getJobRow(jobId);
     if (!job || job.status !== JOB_STATUSES.QUEUED) return null;
-    const file = getDocumentFileForUser(job.file_id, job.user_id);
+    const file = await getDocumentFileForUser(job.file_id, job.user_id);
     const filePath = getDocumentFilePath(file);
     if (!file || !filePath) {
-        return setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
+        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
     }
     const config = normalizeConfig(parseJson(job.config_json, {}));
-    db.prepare(`
+    await execute(`
         UPDATE document_jobs
         SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, updated_at = ?
         WHERE id = ?
-    `).run(JOB_STATUSES.PROCESSING, 5, getBeijingTimestamp(), getBeijingTimestamp(), jobId);
+    `, [JOB_STATUSES.PROCESSING, 5, getBeijingTimestamp(), getBeijingTimestamp(), jobId]);
 
     try {
-        if (isCancelled(jobId)) return getJobRow(jobId);
-        cleanupJobArtifacts(jobId);
-        touchProgress(jobId, 12, { fileType: file.file_type });
+        if (await isCancelled(jobId)) return await getJobRow(jobId);
+        await cleanupJobArtifacts(jobId);
+        await touchProgress(jobId, 12, { fileType: file.file_type });
         let outcome;
         if (job.job_type === JOB_TYPES.PDF_TOOL) {
             outcome = await processPdfToolJob({ job, file, config });
@@ -735,17 +746,17 @@ async function processJob(jobId) {
         } else {
             outcome = { status: JOB_STATUSES.NEEDS_REVIEW, progress: 100, result: { message: '该文件类型暂不支持自动文本抽取。' } };
         }
-        if (isCancelled(jobId)) return getJobRow(jobId);
-        return setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '' });
+        if (await isCancelled(jobId)) return await getJobRow(jobId);
+        return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '' });
     } catch (error) {
-        if (isCancelled(jobId)) return getJobRow(jobId);
+        if (await isCancelled(jobId)) return await getJobRow(jobId);
         const message = sanitizeErrorMessage(error);
-        return setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() } });
+        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() } });
     }
 }
 
-function retryJob({ userId, jobId }) {
-    const job = getJobRow(jobId, userId);
+async function retryJob({ userId, jobId }) {
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
     const retryableStatuses = [
         JOB_STATUSES.FAILED,
@@ -758,39 +769,39 @@ function retryJob({ userId, jobId }) {
         error.status = 409;
         throw error;
     }
-    cleanupJobArtifacts(job.id);
-    db.prepare(`
+    await cleanupJobArtifacts(job.id);
+    await execute(`
         UPDATE document_jobs
         SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(JOB_STATUSES.QUEUED, getBeijingTimestamp(), job.id, userId);
+    `, [JOB_STATUSES.QUEUED, getBeijingTimestamp(), job.id, userId]);
     enqueueJob(job.id);
-    return getJobDetail({ userId, jobId: job.id });
+    return await getJobDetail({ userId, jobId: job.id });
 }
 
-function cancelJob({ userId, jobId }) {
-    const job = getJobRow(jobId, userId);
+async function cancelJob({ userId, jobId }) {
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if ([JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
-        return getJobDetail({ userId, jobId: job.id });
+        return await getJobDetail({ userId, jobId: job.id });
     }
     removeQueuedJob(job.id);
-    setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '用户已取消任务。' } });
-    return getJobDetail({ userId, jobId: job.id });
+    await setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '用户已取消任务。' } });
+    return await getJobDetail({ userId, jobId: job.id });
 }
 
-function deleteJob({ userId, jobId, sourceModule = '' }) {
-    const job = getJobRow(jobId, userId);
+async function deleteJob({ userId, jobId, sourceModule = '' }) {
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if (sourceModule && job.source_module !== sourceModule) return null;
     const deleted = serializeJob(job);
     removeQueuedJob(job.id);
     if (![JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
-        setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '任务已删除。' } });
+        await setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '任务已删除。' } });
     }
-    cleanupJobArtifacts(job.id);
-    cleanupJobSourceFiles(job, userId);
-    db.prepare('DELETE FROM document_jobs WHERE id = ? AND user_id = ?').run(job.id, userId);
+    await cleanupJobArtifacts(job.id);
+    await cleanupJobSourceFiles(job, userId);
+    await execute('DELETE FROM document_jobs WHERE id = ? AND user_id = ?', [job.id, userId]);
     return deleted;
 }
 
@@ -818,11 +829,11 @@ function uniqueArchiveFileName(value, seen, fallback) {
     return name;
 }
 
-function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
-    const job = getJobRow(jobId, userId);
+async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if (sourceModule && job.source_module !== sourceModule) return null;
-    const outputs = getOutputs(job.id);
+    const outputs = await getOutputs(job.id);
     if (!outputs.length) return null;
     const seen = new Set();
     const entries = outputs.map(output => {
@@ -834,7 +845,7 @@ function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
         };
     }).filter(Boolean);
     if (!entries.length) return null;
-    const file = db.prepare('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?').get(job.file_id, userId);
+    const file = await queryOne('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?', [job.file_id, userId]);
     const base = sanitizeArchiveFileName(path.basename(String(file?.original_name || `pdf-job-${job.id}`), path.extname(String(file?.original_name || ''))), `pdf-job-${job.id}`);
     return {
         buffer: createZip(entries),
@@ -843,8 +854,9 @@ function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
         count: entries.length
     };
 }
-function getOutputDownload({ userId, outputId }) {
-    const output = getOutputRow(outputId, userId);
+
+async function getOutputDownload({ userId, outputId }) {
+    const output = await getOutputRow(outputId, userId);
     if (!output) return null;
     const filePath = resolveStoredDocumentPath(output.file_path);
     if (!filePath || !fs.existsSync(filePath)) return null;
@@ -855,51 +867,50 @@ function getOutputDownload({ userId, outputId }) {
     };
 }
 
-function getPageImage({ userId, pageId }) {
-    const page = db.prepare(`
+async function getPageImage({ userId, pageId }) {
+    const page = await queryOne(`
         SELECT *
         FROM document_pages
         WHERE id = ? AND user_id = ?
-    `).get(Number.parseInt(pageId, 10), userId);
+    `, [Number.parseInt(pageId, 10), userId]);
     if (!page || !page.image_path) return null;
     const filePath = resolveStoredDocumentPath(page.image_path);
     if (!filePath || !fs.existsSync(filePath)) return null;
     return { filePath, page };
 }
 
-function savePageReview({ userId, pageId, revisedText, reviewStatus = 'reviewed', lowConfidenceConfirmed = false }) {
-    const page = db.prepare('SELECT * FROM document_pages WHERE id = ? AND user_id = ?').get(Number.parseInt(pageId, 10), userId);
+async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'reviewed', lowConfidenceConfirmed = false }) {
+    const page = await queryOne('SELECT * FROM document_pages WHERE id = ? AND user_id = ?', [Number.parseInt(pageId, 10), userId]);
     if (!page) return null;
     const now = getBeijingTimestamp();
-    const existing = db.prepare('SELECT * FROM document_reviews WHERE page_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(page.id, userId);
+    const existing = await queryOne('SELECT * FROM document_reviews WHERE page_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1', [page.id, userId]);
     if (existing) {
-        db.prepare(`
+        await execute(`
             UPDATE document_reviews
             SET review_status = ?, revised_text = ?, low_confidence_confirmed = ?, reviewed_at = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(reviewStatus, String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, existing.id, userId);
+        `, [reviewStatus, String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, existing.id, userId]);
     } else {
-        db.prepare(`
+        await execute(`
             INSERT INTO document_reviews (
                 user_id, file_id, job_id, page_id, review_status, original_text, revised_text, low_confidence_confirmed, reviewed_at, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(userId, page.file_id, page.job_id, page.id, reviewStatus, page.text || '', String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, now);
+        `, [userId, page.file_id, page.job_id, page.id, reviewStatus, page.text || '', String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, now]);
     }
-    updatePageText({ pageId: page.id, text: revisedText, ocrStatus: reviewStatus, confidence: lowConfidenceConfirmed ? 1 : page.confidence });
-    const job = getJobRow(page.job_id, userId);
+    await updatePageText({ pageId: page.id, text: revisedText, ocrStatus: reviewStatus, confidence: lowConfidenceConfirmed ? 1 : page.confidence });
+    const job = await getJobRow(page.job_id, userId);
     if (job && job.status === JOB_STATUSES.NEEDS_REVIEW) {
-        const lowPages = db.prepare(`
+        const lowPagesRow = await queryOne(`
             SELECT COUNT(*) AS count
             FROM document_pages
             WHERE job_id = ? AND ocr_status = ?
-        `).get(job.id, JOB_STATUSES.NEEDS_REVIEW).count;
-        if (Number(lowPages || 0) === 0) {
-            setJobStatus(job.id, JOB_STATUSES.SUCCEEDED, { progress: 100, result: { ...parseJson(job.result_json, {}), reviewed: true } });
+        `, [job.id, JOB_STATUSES.NEEDS_REVIEW]);
+        if (Number(lowPagesRow?.count || 0) === 0) {
+            await setJobStatus(job.id, JOB_STATUSES.SUCCEEDED, { progress: 100, result: { ...parseJson(job.result_json, {}), reviewed: true } });
         }
     }
-    return getJobDetail({ userId, jobId: page.job_id });
+    return await getJobDetail({ userId, jobId: page.job_id });
 }
-
 
 function sanitizeShareFileName(value) {
     const base = path.basename(String(value || 'ocr-result'), path.extname(String(value || ''))).trim() || 'ocr-result';
@@ -936,7 +947,7 @@ function createTempTextUpload({ userId, originalName, text }) {
 
 async function shareJobResult({ user, jobId, target, options = {} }) {
     const userId = user?.id;
-    const detail = getJobDetail({ userId, jobId });
+    const detail = await getJobDetail({ userId, jobId });
     if (!detail) return null;
     const text = buildJobShareText(detail);
     if (!text) {
@@ -993,16 +1004,16 @@ async function shareJobResult({ user, jobId, target, options = {} }) {
 }
 
 async function createJobExport({ userId, jobId, format = OUTPUT_TYPES.TEXT }) {
-    const job = getJobRow(jobId, userId);
+    const job = await getJobRow(jobId, userId);
     if (!job) return null;
-    const file = getDocumentFileForUser(job.file_id, userId);
-    const pages = getPages(job.id);
-    const blocks = getBlocks(job.id);
+    const file = await getDocumentFileForUser(job.file_id, userId);
+    const pages = await getPages(job.id);
+    const blocks = await getBlocks(job.id);
     const normalizedFormat = Object.values(OUTPUT_TYPES).includes(format) ? format : OUTPUT_TYPES.TEXT;
     if (normalizedFormat === OUTPUT_TYPES.SEARCHABLE_PDF) {
-        return createSearchablePdfOutput({ userId, file, job, pages, blocks });
+        return await createSearchablePdfOutput({ userId, file, job, pages, blocks });
     }
-    const outputs = createTextOutputs({ userId, file, job, pages, blocks, formats: [normalizedFormat] });
+    const outputs = await createTextOutputs({ userId, file, job, pages, blocks, formats: [normalizedFormat] });
     return outputs[0] || null;
 }
 
@@ -1013,25 +1024,28 @@ function rowsToCountObject(rows, key = 'status') {
     }, {});
 }
 
-function getDocumentProcessingStats() {
-    const jobsByStatus = rowsToCountObject(db.prepare('SELECT status, COUNT(*) AS count FROM document_jobs GROUP BY status').all(), 'status');
-    const jobsByType = rowsToCountObject(db.prepare('SELECT job_type, COUNT(*) AS count FROM document_jobs GROUP BY job_type').all(), 'job_type');
-    const outputs = db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes FROM document_outputs').get();
-    const durationSql = [
-        'SELECT AVG((julianday(completed_at) - julianday(created_at)) * 86400.0) AS seconds',
-        'FROM document_jobs',
-        "WHERE completed_at IS NOT NULL AND completed_at != ''"
-    ].join('\n');
-    const duration = db.prepare(durationSql).get();
-    const failuresSql = [
-        'SELECT j.id, j.job_type, j.status, j.error_message, j.updated_at, f.original_name',
-        'FROM document_jobs j',
-        'LEFT JOIN document_files f ON f.id = j.file_id',
-        'WHERE j.status = ?',
-        'ORDER BY j.updated_at DESC, j.id DESC',
-        'LIMIT 10'
-    ].join('\n');
-    const recentFailures = db.prepare(failuresSql).all(JOB_STATUSES.FAILED).map(row => ({
+async function getDocumentProcessingStats() {
+    const jobsByStatusRows = await query('SELECT status, COUNT(*) AS count FROM document_jobs GROUP BY status');
+    const jobsByTypeRows = await query('SELECT job_type, COUNT(*) AS count FROM document_jobs GROUP BY job_type');
+    const jobsByStatus = rowsToCountObject(jobsByStatusRows, 'status');
+    const jobsByType = rowsToCountObject(jobsByTypeRows, 'job_type');
+    const outputs = await queryOne('SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes FROM document_outputs');
+    const durationSql = `
+        SELECT AVG(EXTRACT(EPOCH FROM (completed_at::timestamptz - created_at::timestamptz))) AS seconds
+        FROM document_jobs
+        WHERE completed_at IS NOT NULL
+    `;
+    const duration = await queryOne(durationSql);
+    const failuresSql = `
+        SELECT j.id, j.job_type, j.status, j.error_message, j.updated_at, f.original_name
+        FROM document_jobs j
+        LEFT JOIN document_files f ON f.id = j.file_id
+        WHERE j.status = ?
+        ORDER BY j.updated_at DESC, j.id DESC
+        LIMIT 10
+    `;
+    const recentFailuresRows = await query(failuresSql, [JOB_STATUSES.FAILED]);
+    const recentFailures = recentFailuresRows.map(row => ({
         id: row.id,
         jobType: row.job_type,
         status: row.status,
@@ -1045,10 +1059,10 @@ function getDocumentProcessingStats() {
         jobsByStatus,
         jobsByType,
         outputs: {
-            count: Number(outputs.count || 0),
-            bytes: Number(outputs.bytes || 0)
+            count: Number(outputs?.count || 0),
+            bytes: Number(outputs?.bytes || 0)
         },
-        averageDurationSeconds: Number(duration.seconds || 0),
+        averageDurationSeconds: Number(duration?.seconds || 0),
         recentFailures
     };
 }

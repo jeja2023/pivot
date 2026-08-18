@@ -347,14 +347,19 @@ function getRunProgress(run, steps = []) {
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const steps = await listSteps(run.id);
+    const [steps, dagNodes, trace, checkpoints] = await Promise.all([
+        listSteps(run.id),
+        listDagNodes(run.id),
+        getAgentTraceForUser(run.id, user),
+        summarizeAgentCheckpoints(run.id)
+    ]);
     return {
         run,
         steps: steps || [],
-        dagNodes: await listDagNodes(run.id),
+        dagNodes: dagNodes || [],
         progress: getRunProgress(run, steps || []),
-        trace: getAgentTraceForUser(run.id, user),
-        checkpoints: summarizeAgentCheckpoints(run.id)
+        trace,
+        checkpoints
     };
 }
 

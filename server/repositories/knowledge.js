@@ -25,6 +25,8 @@ async function getCollectionForUser(collectionId, user) {
 function listCollections(user) {
     const normalized = normalizeKnowledgeUser(user);
     const access = buildCollectionAccessFilter(normalized, 'c');
+    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const isEnabledCond = 'COALESCE(d.is_enabled, 1) != 0';
     return query(`
         SELECT
             c.id,
@@ -38,7 +40,7 @@ function listCollections(user) {
             c.updated_at,
             COUNT(d.id) AS doc_count,
             COALESCE(SUM(CASE WHEN d.status = 'ready' THEN 1 ELSE 0 END), 0) AS ready_count,
-            COALESCE(SUM(CASE WHEN d.status = 'ready' AND COALESCE(d.is_enabled, 1) = 1 THEN d.chunk_count ELSE 0 END), 0) AS chunk_count
+            COALESCE(SUM(CASE WHEN d.status = 'ready' AND ${isEnabledCond} THEN d.chunk_count ELSE 0 END), 0) AS chunk_count
         FROM knowledge_collections c
         LEFT JOIN knowledge_docs d
           ON d.collection_id = c.id
@@ -134,6 +136,8 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
     const params = user
         ? [...scopeFilter.params, ...scopeFilter.accessParams]
         : [userId, ...scopeFilter.params];
+    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const isEnabledCond = 'COALESCE(d.is_enabled, 1) != 0';
     return query(`
         SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
@@ -144,7 +148,7 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
           ${ownerFilter}
           AND d.status = 'ready'
           AND d.deleted_at IS NULL
-          AND COALESCE(d.is_enabled, 1) = 1
+          AND ${isEnabledCond}
           ${scopeFilter.sql}
           ${scopeFilter.accessSql}
     `, params);
@@ -156,14 +160,17 @@ async function getDocumentName(docId) {
 }
 
 function getDocumentQualityOverview(userId) {
+    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const isEnabledTrue = 'COALESCE(is_enabled, 1) != 0';
+    const isEnabledFalse = 'COALESCE(is_enabled, 1) = 0';
     return queryOne(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready,
-            SUM(CASE WHEN status = 'ready' AND COALESCE(is_enabled, 1) = 1 THEN 1 ELSE 0 END) AS "readyEnabled",
+            SUM(CASE WHEN status = 'ready' AND ${isEnabledTrue} THEN 1 ELSE 0 END) AS "readyEnabled",
             SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
-            SUM(CASE WHEN COALESCE(is_enabled, 1) = 0 THEN 1 ELSE 0 END) AS disabled,
+            SUM(CASE WHEN ${isEnabledFalse} THEN 1 ELSE 0 END) AS disabled,
             SUM(CASE WHEN status = 'ready' AND COALESCE(chunk_count, 0) = 0 THEN 1 ELSE 0 END) AS "emptyReady",
             SUM(CASE WHEN status = 'ready' AND COALESCE(updated_at, processed_at, created_at) < ${nowOffsetExpr('-180 days')} THEN 1 ELSE 0 END) AS "staleReady",
             COALESCE(SUM(chunk_count), 0) AS chunks,
@@ -174,25 +181,29 @@ function getDocumentQualityOverview(userId) {
 }
 
 function listProblemDocuments(userId) {
+    // is_enabled / helpful 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const isEnabledFalse = 'COALESCE(d.is_enabled, 1) = 0';
+    const isHelpfulFalse = 'f.helpful = 0';
+    const isHelpfulTrue = 'f.helpful = 1';
     return query(`
         SELECT d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
                d.progress, d.error_message, d.updated_at,
-               COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0) AS unhelpful,
-               COALESCE(SUM(CASE WHEN f.helpful = 1 THEN 1 ELSE 0 END), 0) AS helpful
+               COALESCE(SUM(CASE WHEN ${isHelpfulFalse} THEN 1 ELSE 0 END), 0) AS unhelpful,
+               COALESCE(SUM(CASE WHEN ${isHelpfulTrue} THEN 1 ELSE 0 END), 0) AS helpful
         FROM knowledge_docs d
         LEFT JOIN rag_feedback f ON f.user_id = d.user_id AND f.doc_name = d.name
         WHERE d.user_id = ? AND d.deleted_at IS NULL
         GROUP BY d.id, d.name, d.status, d.is_enabled, d.chunk_count, d.indexed_chunks,
                  d.progress, d.error_message, d.updated_at, d.created_at
         HAVING d.status = 'error'
-            OR COALESCE(d.is_enabled, 1) = 0
+            OR ${isEnabledFalse}
             OR (d.status = 'ready' AND COALESCE(d.chunk_count, 0) = 0)
-            OR COALESCE(SUM(CASE WHEN f.helpful = 0 THEN 1 ELSE 0 END), 0)
-             > COALESCE(SUM(CASE WHEN f.helpful = 1 THEN 1 ELSE 0 END), 0)
+            OR COALESCE(SUM(CASE WHEN ${isHelpfulFalse} THEN 1 ELSE 0 END), 0)
+             > COALESCE(SUM(CASE WHEN ${isHelpfulTrue} THEN 1 ELSE 0 END), 0)
         ORDER BY
             CASE
                 WHEN d.status = 'error' THEN 0
-                WHEN COALESCE(d.is_enabled, 1) = 0 THEN 1
+                WHEN ${isEnabledFalse} THEN 1
                 WHEN COALESCE(d.chunk_count, 0) = 0 THEN 2
                 ELSE 3
             END,

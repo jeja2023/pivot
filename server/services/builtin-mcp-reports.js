@@ -11,7 +11,7 @@ function getXlsx() {
     return XLSX;
 }
 const {
-    getRequiredBuiltinConfig,
+    getRequiredBuiltinConfigAsync,
     isPathInside,
     getExtension
 } = require('./builtin-mcp-common');
@@ -299,7 +299,7 @@ async function executeReportConfigTool(config, name, input = {}) {
 }
 
 async function executeReportTool(server, name, input = {}) {
-    const { config } = getRequiredBuiltinConfig(server, 'reports');
+    const { config } = await getRequiredBuiltinConfigAsync(server, 'reports');
     return executeReportConfigTool(config, name, input);
 }
 

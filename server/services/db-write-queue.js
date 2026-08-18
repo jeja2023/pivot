@@ -13,7 +13,6 @@
  * 注意 flushAllSqliteWrites() 在 PG 模式下返回 Promise：进程退出路径若需
  * 确保落库，应改用 await flushAllWrites()。
  */
-const { isPostgres } = require('../db/dialect');
 const { logger } = require('../logger');
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -207,51 +206,43 @@ function pgQueueStatus() {
 
 // ──────────────────────────────────────────────────────────────────────────
 // 模式路由（SQLite 侧懒加载，避免 PG 模式下触发 db.prepare 于 null）
-// ──────────────────────────────────────────────────────────────────────────
-
-function sqliteQueue() {
-    return require('./sqlite-write-queue');
-}
-
 function enqueueAuditLog(item) {
-    return isPostgres() ? pgEnqueue('auditLogs', item) : sqliteQueue().enqueueAuditLog(item);
+    return pgEnqueue('auditLogs', item);
 }
 
 function enqueueApiCallLog(item) {
-    return isPostgres() ? pgEnqueue('apiCallLogs', item) : sqliteQueue().enqueueApiCallLog(item);
+    return pgEnqueue('apiCallLogs', item);
 }
 
 function enqueueMcpCallLog(item) {
-    return isPostgres() ? pgEnqueue('mcpCallLogs', item) : sqliteQueue().enqueueMcpCallLog(item);
+    return pgEnqueue('mcpCallLogs', item);
 }
 
 function enqueueModelUsageEvent(item) {
-    return isPostgres() ? pgEnqueue('modelUsageEvents', item) : sqliteQueue().enqueueModelUsageEvent(item);
+    return pgEnqueue('modelUsageEvents', item);
 }
 
 /**
  * 触发一次刷新（不保证刷完）
  */
 function flushWriteQueue() {
-    return isPostgres() ? pgFlush() : sqliteQueue().flushSqliteWriteQueue();
+    return pgFlush();
 }
 
 /**
  * 刷空全部队列。
- * SQLite 模式同步完成；PG 模式返回 Promise —— 需要确保落库的调用方应 await。
+ * PG 模式返回 Promise —— 需要确保落库的调用方应 await。
  */
 function flushAllWrites() {
-    return isPostgres() ? pgFlushAll() : sqliteQueue().flushAllSqliteWrites();
+    return pgFlushAll();
 }
 
 function getPendingModelUsageTotal(userId, modelId, datePrefix) {
-    return isPostgres()
-        ? pgPendingModelUsageTotal(userId, modelId, datePrefix)
-        : sqliteQueue().getPendingModelUsageTotal(userId, modelId, datePrefix);
+    return pgPendingModelUsageTotal(userId, modelId, datePrefix);
 }
 
 function getQueueStatus() {
-    return isPostgres() ? pgQueueStatus() : sqliteQueue().getQueueStatus();
+    return pgQueueStatus();
 }
 
 module.exports = {
@@ -263,15 +254,15 @@ module.exports = {
     flushWriteQueue,
     getPendingModelUsageTotal,
     getQueueStatus,
-    // 向后兼容别名（历史调用点使用 SQLite 命名）
+    // 向后兼容别名
     flushAllSqliteWrites: flushAllWrites,
     flushSqliteWriteQueue: flushWriteQueue,
 };
 
-// PG 模式下由本模块负责退出前落库；SQLite 模式由 sqlite-write-queue 自身处理
+// PostgreSQL 模式下退出前落库
 process.once('beforeExit', () => {
-    if (!isPostgres()) return;
     pgFlushAll().catch(err => {
         logger.warn({ err: err.message }, '[PG] 退出时写入队列刷新失败');
     });
 });
+

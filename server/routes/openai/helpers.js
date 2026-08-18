@@ -1,4 +1,4 @@
-const { db } = require('../../db');
+const { execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { enqueueApiCallLog } = require('../../services/db-write-queue');
 const { createVisibleReasoningStreamFilter } = require('../../llm');
@@ -341,8 +341,9 @@ function applyCompletionNoThinkSoftSwitch(messages = [], modelCfg = {}) {
 function updateApiKeyUsage(req, { inputTokens = 0, outputTokens = 0, totalTokens = 0 } = {}) {
     const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens });
     if (!req.isApiKey || !req.apiKeyId || usage.totalTokens <= 0) return;
-    db.prepare('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
-      .run(usage.totalTokens, usage.inputTokens, usage.outputTokens, req.apiKeyId);
+    execute('UPDATE api_keys SET usage_tokens = usage_tokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?', [
+        usage.totalTokens, usage.inputTokens, usage.outputTokens, req.apiKeyId
+    ]).catch(() => {});
 }
 
 function extractChatCompletionText(choice = {}) {

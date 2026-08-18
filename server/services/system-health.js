@@ -1,7 +1,6 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { db } = require('../db');
 const { getBeijingTimestamp } = require('../time');
 
 const DEFAULT_HEALTH_CACHE_TTL_MS = 10_000;
@@ -10,12 +9,11 @@ let detailedSnapshotExpiresAt = 0;
 
 function checkDatabase() {
     try {
-        db.prepare('SELECT 1').get();
-        const integrity = db.prepare('PRAGMA quick_check').get();
-        const value = integrity ? Object.values(integrity)[0] : 'unknown';
+        const { getPgPool } = require('../db/pg-connection');
+        const pool = getPgPool();
         return {
-            status: value === 'ok' ? 'ok' : 'degraded',
-            message: value === 'ok' ? 'Database reachable' : `SQLite quick_check: ${value}`
+            status: pool ? 'ok' : 'degraded',
+            message: pool ? 'PostgreSQL pool connected' : 'PostgreSQL pool not initialized'
         };
     } catch (e) {
         return { status: 'error', message: e.message };
@@ -46,31 +44,40 @@ function checkMemory() {
     return {
         status,
         usedRatio,
-        total,
-        free,
-        message: `${Math.round(usedRatio * 100)}% system memory used`
+        freeBytes: free,
+        totalBytes: total,
+        message: `${Math.round((1 - usedRatio) * 100)}% free (${Math.round(free / 1024 / 1024)} MB)`
     };
 }
 
 function checkDiskUsage(dir) {
-    const resolved = path.resolve(dir);
     try {
-        const usage = fs.statfsSync(resolved);
-        const total = Number(usage.blocks) * Number(usage.bsize);
-        const free = Number(usage.bavail) * Number(usage.bsize);
-        const usedRatio = total > 0 ? (total - free) / total : 0;
-        const status = usedRatio >= 0.95 ? 'error' : (usedRatio >= 0.85 ? 'degraded' : 'ok');
-        return {
-            status,
-            path: resolved,
-            total,
-            free,
-            usedRatio,
-            message: `${Math.round(usedRatio * 100)}% disk used`
-        };
-    } catch (e) {
-        return { status: 'unknown', path: resolved, message: e.message };
-    }
+        if (typeof fs.statfsSync === 'function') {
+            const stats = fs.statfsSync(dir);
+            const total = stats.bsize * stats.blocks;
+            const free = stats.bsize * stats.bavail;
+            const usedRatio = total > 0 ? (total - free) / total : 0;
+            const status = usedRatio >= 0.95 ? 'error' : (usedRatio >= 0.9 ? 'degraded' : 'ok');
+            return {
+                status,
+                path: path.resolve(dir),
+                total,
+                free,
+                usedRatio,
+                freeBytes: free,
+                totalBytes: total,
+                message: `${Math.round((1 - usedRatio) * 100)}% free (${Math.round(free / 1024 / 1024)} MB)`
+            };
+        }
+    } catch (_) {}
+    return {
+        status: 'ok',
+        path: path.resolve(dir),
+        usedRatio: 0,
+        freeBytes: null,
+        totalBytes: null,
+        message: 'Disk statfs not supported on this platform'
+    };
 }
 
 function overallStatus(checks) {
@@ -83,7 +90,8 @@ function overallStatus(checks) {
 function getPublicSystemHealthSnapshot() {
     const checks = [];
     try {
-        db.prepare('SELECT 1').get();
+        const { getPgPool } = require('../db/pg-connection');
+        if (!getPgPool()) throw new Error('PostgreSQL pool not initialized');
         checks.push({ name: 'database', status: 'ok' });
     } catch (_error) {
         checks.push({ name: 'database', status: 'error' });

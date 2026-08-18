@@ -1,5 +1,5 @@
 const {
-    db,
+    query,
     normalizeRegulationId,
     normalizeRegulationSummary
 } = require('./shared');
@@ -41,18 +41,18 @@ function computeLineDiff(textA, textB) {
     return segments;
 }
 
-function diffRegulationVersions({ documentId, fromVersionId, toVersionId }) {
+async function diffRegulationVersions({ documentId, fromVersionId, toVersionId }) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) throw new Error('文档 ID 无效');
-    const doc = getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
     if (!doc) throw new Error('文档不存在');
-    const versions = listRegulationVersions(docId);
+    const versions = await listRegulationVersions(docId);
     const fromVer = versions.find(v => Number(v.id) === Number(fromVersionId));
     const toVer = versions.find(v => Number(v.id) === Number(toVersionId));
     if (!fromVer || !toVer) throw new Error('版本不存在');
 
-    const fromArticles = db.prepare('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id').all(docId, fromVer.id);
-    const toArticles = db.prepare('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id').all(docId, toVer.id);
+    const fromArticles = await query('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id', [docId, fromVer.id]);
+    const toArticles = await query('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id', [docId, toVer.id]);
 
     const fromMap = new Map(fromArticles.map(a => [a.article_label, a]));
     const toMap = new Map(toArticles.map(a => [a.article_label, a]));
@@ -101,13 +101,13 @@ const REGULATION_RELATION_LABELS = {
 };
 
 // 沿引用边扩展命中条文：把直接命中条文所引用、以及引用它们的关联条文补进候选
-function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
+async function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
     const baseIds = matches.map(m => Number(m.article_id)).filter(Boolean);
     if (!baseIds.length) return [];
     const seen = new Set(baseIds);
     const placeholders = baseIds.map(() => '?').join(',');
     // 双向：作为 source 引用出去的目标，以及作为 target 被其它条文引用的来源
-    const linkRows = db.prepare(`
+    const linkRows = await query(`
         SELECT l.source_article_id, l.target_article_id, l.relation_type,
                sa.id AS sa_id, ta.id AS ta_id
         FROM regulation_article_links l
@@ -115,7 +115,7 @@ function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
         LEFT JOIN regulation_articles ta ON ta.id = l.target_article_id
         WHERE (l.source_article_id IN (${placeholders}) OR l.target_article_id IN (${placeholders}))
           AND l.target_article_id IS NOT NULL
-    `).all(...baseIds, ...baseIds);
+    `, [...baseIds, ...baseIds]);
 
     // 收集关联条文 id 及其与命中条文的关系说明
     const relatedInfo = new Map(); // articleId -> {relation}
@@ -132,25 +132,25 @@ function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
     const relatedIds = [...relatedInfo.keys()].slice(0, Math.max(0, limit));
     if (!relatedIds.length) return [];
     const relPlaceholders = relatedIds.map(() => '?').join(',');
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT
             d.id AS document_id, d.title AS document_title, d.category, d.issuing_body,
             d.jurisdiction, d.summary AS document_summary,
             v.id AS version_id, v.version_label,
             a.id AS article_id, a.sort_order, a.article_label, a.article_title, a.content,
-            substr(replace(a.content, char(10), ' '), 1, 240) AS excerpt
+            substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt
         FROM regulation_articles a
         JOIN regulation_documents d ON d.id = a.document_id
         JOIN regulation_versions v ON v.id = a.version_id
         WHERE a.id IN (${relPlaceholders}) AND d.deleted_at IS NULL
-    `).all(...relatedIds);
+    `, relatedIds);
 
     return rows.map(row => ({ ...row, viaLink: true, relation: relatedInfo.get(row.article_id)?.relation || '关联' }));
 }
 
 // #6 变更影响分析：找出两版本间变更的条文，再反查引用了这些条文的其它条文（被影响方）
-function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId }) {
-    const diff = diffRegulationVersions({ documentId, fromVersionId, toVersionId });
+async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId }) {
+    const diff = await diffRegulationVersions({ documentId, fromVersionId, toVersionId });
     // 变更 + 删除的条文标签（这些是可能影响引用方的）
     const impactedLabels = [...diff.changed.map(a => a.label), ...diff.removed.map(a => a.label)];
     if (!impactedLabels.length) {
@@ -160,18 +160,18 @@ function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId 
     const toVerId = normalizeRegulationId(toVersionId);
     const docId = normalizeRegulationId(documentId);
     const impacts = [];
-    impactedLabels.forEach(label => {
+    for (const label of impactedLabels) {
         // 反查：哪些条文引用了「本文档的这个条号」（同文档内引用）
-        const referers = db.prepare(`
+        const referers = await query(`
             SELECT DISTINCT sa.id AS article_id, sa.article_label, sa.article_title, l.relation_type
             FROM regulation_article_links l
             JOIN regulation_articles sa ON sa.id = l.source_article_id
             WHERE l.target_document_id = ? AND l.target_article_id IN (
                 SELECT id FROM regulation_articles WHERE document_id = ? AND article_label = ?
             )
-        `).all(docId, docId, label);
+        `, [docId, docId, label]);
         // 跨文档：其它法律引用了本文档（通过 target_document_id 对齐）
-        const crossReferers = db.prepare(`
+        const crossReferers = await query(`
             SELECT DISTINCT sa.id AS article_id, sa.article_label, sa.article_title,
                    d.id AS document_id, d.title AS document_title, l.relation_type
             FROM regulation_article_links l
@@ -179,29 +179,29 @@ function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId 
             JOIN regulation_documents d ON d.id = sa.document_id
             WHERE l.target_document_id = ? AND d.id != ? AND d.deleted_at IS NULL
               AND l.target_label LIKE ?
-        `).all(docId, docId, `%${label}%`);
+        `, [docId, docId, `%${label}%`]);
         if (referers.length || crossReferers.length) {
             impacts.push({ label, internalReferers: referers, crossReferers });
         }
-    });
+    }
     return { ...diff, impacts, impactVersionId: toVerId };
 }
 
 // #4 条文引用网络：聚合一篇文档当前版本（或指定版本）的条文节点与引用边
-function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
+async function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) return { nodes: [], edges: [] };
-    const doc = getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
     if (!doc) return { nodes: [], edges: [] };
     const vId = normalizeRegulationId(versionId) || doc.current_version_id;
     if (!vId) return { nodes: [], edges: [] };
 
-    const articles = db.prepare(`
+    const articles = await query(`
         SELECT id, article_label, article_title, sort_order
         FROM regulation_articles
         WHERE document_id = ? AND version_id = ?
         ORDER BY sort_order, id
-    `).all(docId, vId);
+    `, [docId, vId]);
     const nodes = articles.map(a => ({
         id: a.id,
         label: a.article_label,
@@ -211,12 +211,13 @@ function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
     const nodeIds = new Set(nodes.map(n => n.id));
 
     // 同文档内的引用边（两端都在本版本）
-    const edges = db.prepare(`
+    const rawEdges = await query(`
         SELECT source_article_id AS source, target_article_id AS target, relation_type AS type,
                target_label, confidence
         FROM regulation_article_links
         WHERE version_id = ?
-    `).all(vId).map(e => ({
+    `, [vId]);
+    const edges = rawEdges.map(e => ({
         source: e.source,
         target: e.target,
         type: e.relation_type || 'cite',
@@ -230,15 +231,15 @@ function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
 }
 
 // #5 查文档中被其它法律废止/修订的条文（supersede 关系指向本文档条文）
-function getRegulationSupersedeNotices(documentId, { versionId = null } = {}) {
+async function getRegulationSupersedeNotices(documentId, { versionId = null } = {}) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) return [];
-    const doc = getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
     if (!doc) return [];
     const vId = normalizeRegulationId(versionId) || doc.current_version_id;
     if (!vId) return [];
     // 其它文档里 relation_type=supersede 且 target 指向本文档当前版本条文
-    return db.prepare(`
+    return await query(`
         SELECT ta.id AS article_id, ta.article_label,
                sd.id AS source_document_id, sd.title AS source_document_title,
                sa.article_label AS source_article_label
@@ -249,12 +250,12 @@ function getRegulationSupersedeNotices(documentId, { versionId = null } = {}) {
         WHERE l.relation_type = 'supersede'
           AND ta.document_id = ? AND ta.version_id = ?
           AND sd.deleted_at IS NULL AND sd.id != ?
-    `).all(docId, vId, docId);
+    `, [docId, vId, docId]);
 }
 
-function buildRegulationAiContext({ query, documentId = null, limit = 12, expandLinks = true, relatedLimit = 8 } = {}) {
-    const matches = searchRegulationArticles({ query, documentId, limit });
-    const related = expandLinks ? expandRegulationMatchesByLinks(matches, { limit: relatedLimit }) : [];
+async function buildRegulationAiContext({ query: searchQuery, documentId = null, limit = 12, expandLinks = true, relatedLimit = 8 } = {}) {
+    const matches = await searchRegulationArticles({ query: searchQuery, documentId, limit });
+    const related = expandLinks ? await expandRegulationMatchesByLinks(matches, { limit: relatedLimit }) : [];
     const all = [...matches, ...related];
 
     const sources = all.map((match, index) => ({

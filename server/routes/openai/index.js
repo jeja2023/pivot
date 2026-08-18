@@ -1,10 +1,10 @@
 const express = require('express');
 const { asyncHandler } = require('../../http');
 const {
-    getAccessibleModel,
-    getModelDailyUsage,
-    getUserAccessibleModels,
-    getOrCreateEmbeddingUsageModel,
+    getAccessibleModelAsync,
+    getModelDailyUsageAsync,
+    getUserAccessibleModelsAsync,
+    getOrCreateEmbeddingUsageModelAsync,
     recordModelTokenUsage,
     modelSupportsVision,
     messagesContainVisionInput
@@ -151,7 +151,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
 
     // 1. 获取模型列表 (OpenAI 兼容)
     router.get('/models', authMiddleware, asyncHandler(async (req, res) => {
-        const models = getUserAccessibleModels(req.user);
+        const models = await getUserAccessibleModelsAsync(req.user);
         const embeddingModel = buildEmbeddingModelItem(getEmbeddingConfig(req.user?.id));
         const data = models.map(m => ({
             id: m.model_name || m.id.toString(), // 外部调用核心标识：优先使用语义化的 model_name
@@ -258,7 +258,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 user: getEmbeddingRuntimeGuardUser(config, req.user)
             });
             const payload = buildEmbeddingResponse({ vectors, model: configuredModel, promptTokens });
-            const usageModelId = getOrCreateEmbeddingUsageModel({
+            const usageModelId = await getOrCreateEmbeddingUsageModelAsync({
                 userId: config.source?.url === 'user' || config.source?.model === 'user' || config.source?.apiKey === 'user' ? req.user.id : null,
                 url: config.http.url,
                 model: configuredModel
@@ -484,7 +484,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         }
 
         // 1. 获取模型配置 (通过模型标识符或 ID)
-        const modelCfg = getAccessibleModel(model, req.user);
+        const modelCfg = await getAccessibleModelAsync(model, req.user);
         if (!modelCfg) return res.status(404).json({ error: { message: `Model '${model}' not found or no access.`, type: 'invalid_request_error' } });
         if (modelCfg.secret_error) {
             return res.status(400).json({ error: { message: modelCfg.secret_error, type: 'invalid_request_error' } });
@@ -583,10 +583,10 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             }
             throw e;
         }
-        
+
         // 2. 检查配额
         if (modelCfg.daily_token_limit > 0) {
-            const usedToday = getModelDailyUsage(userId, modelCfg.id);
+            const usedToday = await getModelDailyUsageAsync(userId, modelCfg.id);
             if (usedToday >= modelCfg.daily_token_limit) {
                 return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
             }

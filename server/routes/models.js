@@ -1,7 +1,7 @@
 /* 模型管理路由 */
 const express = require('express');
 const crypto = require('crypto');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { asyncHandler } = require('../http');
 const {
     assertSafeOutboundUrl,
@@ -16,20 +16,20 @@ const {
     normalizePriceCurrency,
     normalizePriceValue,
     isChatThinkingEnabled,
-    getAccessibleModel,
-    getUserRunnableModels
+    getAccessibleModelAsync,
+    getUserRunnableModelsAsync
 } = require('../services/models');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
 
-function clearModelDefaultReferences(modelId) {
+async function clearModelDefaultReferences(modelId) {
     const id = String(modelId || '').trim();
     if (!id) return;
-    db.prepare("UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'default_model_id' AND value = ?")
-        .run(getBeijingTimestamp(), id);
-    db.prepare('UPDATE users SET default_model_id = NULL WHERE default_model_id = ?').run(Number(id) || id);
+    await execute("UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'default_model_id' AND value = ?",
+        [getBeijingTimestamp(), id]);
+    await execute('UPDATE users SET default_model_id = NULL WHERE default_model_id = ?', [Number(id) || id]);
 }
 
 function canManageModel(model, user) {
@@ -52,15 +52,22 @@ function normalizeChatThinkingEnabledFlag(body = {}) {
     return normalizeBooleanFlag(body.chat_thinking_enabled);
 }
 
-function getTestableModel(modelId, user) {
+async function getTestableModel(modelId, user) {
     if (!modelId || !user?.id) return null;
     const isNumeric = /^\d+$/.test(String(modelId));
     const canTestGlobal = isAdmin(user) ? 1 : 0;
-    const sql = isNumeric
-        ? "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))"
-        : "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))";
-    const params = isNumeric ? [modelId, modelId, user.id, canTestGlobal] : [modelId, user.id, canTestGlobal];
-    const model = db.prepare(sql).get(...params);
+    let model;
+    if (isNumeric) {
+        model = await queryOne(
+            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
+            [modelId, modelId, user.id, canTestGlobal]
+        );
+    } else {
+        model = await queryOne(
+            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
+            [modelId, user.id, canTestGlobal]
+        );
+    }
     if (!model) return null;
     if (model.user_id && model.user_id !== user.id) return null;
     if (!model.user_id && !isAdmin(user) && model.allowed_units) {
@@ -94,7 +101,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
     const router = express.Router();
 
     router.get('/models/available', authMiddleware, asyncHandler(async (req, res) => {
-        const models = getUserRunnableModels(req.user).map(model => ({
+        const models = (await getUserRunnableModelsAsync(req.user)).map(model => ({
             id: model.id,
             user_id: model.user_id,
             name: model.name,
@@ -152,7 +159,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         // 处理掩码情况：只能复用当前用户可访问模型且 URL 未被替换时的真实 Key
         if (id && api_key === '********') {
-            const storedModel = getAccessibleModel(id, req.user);
+            const storedModel = await getAccessibleModelAsync(id, req.user);
             if (!storedModel || String(storedModel.id) !== String(id) || !canUseStoredModelSecret(storedModel, req.user)) {
                 logAction(req, '模型列表拉取拦截', `无权复用模型密钥，模型ID: ${id}`);
                 return res.status(403).json({ success: false, error: '无权访问该模型或模型不存在' });
@@ -195,7 +202,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const testSource = source || (id ? 'auto' : 'manual');
 
         if (id) {
-            const storedModel = getTestableModel(id, req.user);
+            const storedModel = await getTestableModel(id, req.user);
             if (!storedModel || String(storedModel.id) !== String(id) || !canTestModel(storedModel, req.user)) {
                 return res.status(403).json({ error: '无权测试该模型或模型不存在' });
             }
@@ -265,24 +272,28 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const limit = normalizeLimit(req.query.limit);
         const offset = (page - 1) * limit;
         let where = '';
-        let params = [];
+        let filterParams = [];
 
         if (!isAdmin(req.user)) {
-            where = "WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND (COALESCE(m.allowed_units, '') = '' OR instr(',' || m.allowed_units || ',', ?) > 0)))";
-            params = [req.user.id, `,${(req.user.unit || '').trim()},`];
+            const unitCheck = "(COALESCE(m.allowed_units, '') = '' OR (',' || COALESCE(m.allowed_units, '') || ',') LIKE ('%,' || ? || ',%'))";
+            where = `WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND ${unitCheck}))`;
+            filterParams = [req.user.id, (req.user.unit || '').trim()];
         } else {
             where = "WHERE COALESCE(m.status, 'active') = 'active'";
         }
 
         // 为管理员增加过滤：不显示普通用户的私有默认模型
         if (isAdmin(req.user)) {
+            const isDefaultZeroCond = 'COALESCE(m.is_default, 0) = 0';
             const adminFilter = isSuperAdmin(req.user)
-                ? "(m.user_id IS NULL OR u.role = 'admin' OR m.is_default = 0)"
+                ? `(m.user_id IS NULL OR u.role = 'admin' OR ${isDefaultZeroCond})`
                 : "(m.user_id IS NULL OR m.user_id = ?)";
             where = where ? `${where} AND ${adminFilter}` : `WHERE ${adminFilter}`;
-            if (!isSuperAdmin(req.user)) params.push(req.user.id);
+            if (!isSuperAdmin(req.user)) filterParams.push(req.user.id);
         }
 
+        const isSA = isSuperAdmin(req.user) ? 1 : 0;
+        const sortDefaultExpr = 'COALESCE(m.is_default, 0)';
         const sql = `
             SELECT 
                 m.id, m.user_id, m.name, 
@@ -300,10 +311,10 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             FROM models m
             LEFT JOIN users u ON m.user_id = u.id
             ${where} 
-            ORDER BY m.is_default DESC, m.id ASC 
+            ORDER BY ${sortDefaultExpr} DESC, m.id ASC 
             LIMIT ? OFFSET ?
         `;
-        const models = db.prepare(sql).all(isSuperAdmin(req.user) ? 1 : 0, req.user.id, ...params, limit, offset)
+        const models = (await query(sql, [isSA, req.user.id, ...filterParams, limit, offset]))
             .map(model => ({
                 ...model,
                 price_currency: normalizePriceCurrency(model.price_currency)
@@ -314,7 +325,8 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             LEFT JOIN users u ON m.user_id = u.id
             ${where}
         `;
-        const total = db.prepare(countSql).get(...params).count;
+        const countRow = await queryOne(countSql, filterParams);
+        const total = Number(countRow?.count || 0);
         res.json({ data: models, total });
     }));
 
@@ -342,8 +354,10 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency);
 
-        db.prepare('INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency);
+        await execute(
+            'INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency]
+        );
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
         res.json({ success: true });
@@ -355,7 +369,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         validateModelUrl(url, req.user);
         if (monitor_url) validateModelUrl(monitor_url, req.user);
 
-        const existing = db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.id);
+        const existing = await queryOne('SELECT * FROM models WHERE id = ?', [req.params.id]);
         if (!canManageModel(existing, req.user)) return res.status(403).json({ error: '无权操作或模型不存在' });
 
         const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
@@ -376,16 +390,20 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
 
-        let info;
+        let changed;
         if (isSuperAdmin(req.user) && existing.user_id === null) {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id);
+            changed = await execute(
+                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?',
+                [name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id]
+            );
         } else {
-            info = db.prepare('UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?')
-              .run(name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id);
+            changed = await execute(
+                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
+                [name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id]
+            );
         }
 
-        if (info.changes > 0) {
+        if (changed > 0) {
             logAction(req, '修改模型', `更新模型: ${name} (ID: ${req.params.id})`);
             res.json({ success: true });
         } else {
@@ -394,18 +412,18 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
     }));
 
     router.delete('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.id);
+        const existing = await queryOne('SELECT * FROM models WHERE id = ?', [req.params.id]);
         if (!canManageModel(existing, req.user)) {
             return res.status(403).json({ error: '无权删除或模型不存在' });
         }
-        let info;
+        let changed;
         if (isSuperAdmin(req.user) && existing.user_id === null) {
-            info = db.prepare("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ?").run(req.params.id);
+            changed = await execute("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ?", [req.params.id]);
         } else {
-            info = db.prepare("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ? AND user_id = ?").run(req.params.id, req.user.id);
+            changed = await execute("UPDATE models SET status = 'deleted', is_default = 0 WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
         }
-        if (info.changes > 0) {
-            clearModelDefaultReferences(req.params.id);
+        if (changed > 0) {
+            await clearModelDefaultReferences(req.params.id);
             logAction(req, '删除模型', `删除模型ID: ${req.params.id}`);
             res.json({ success: true });
         } else {
@@ -417,11 +435,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const { password } = req.body;
         if (!password) return res.status(400).json({ error: '需要输入密码进行二次验证' });
 
-        const model = getAccessibleModel(req.params.id, req.user);
+        const model = await getAccessibleModelAsync(req.params.id, req.user);
         if (!canUseStoredModelSecret(model, req.user)) return res.status(403).json({ error: '无权查看该模型密钥' });
 
         const bcrypt = require('bcryptjs');
-        const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+        const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
         if (!bcrypt.compareSync(password, user.password_hash)) {
             logAction(req, '模型密钥查看失败', `密码验证失败，模型ID: ${req.params.id}`);
             return res.status(401).json({ error: '密码错误' });

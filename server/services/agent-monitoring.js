@@ -1,19 +1,25 @@
-const { db } = require('../db');
+const { query, queryOne } = require('../db/client');
+const { nowOffsetExpr } = require('../db/dialect');
 const { normalizePositiveInt } = require('./agent-validators');
 const { isSuperAdmin } = require('../permissions');
 
-function getAgentRuntimeStatus(options = {}) {
+async function getAgentRuntimeStatus(options = {}) {
     const user = options.user || null;
     const queueStatus = options.queueStatus || {};
     const maxConcurrent = normalizePositiveInt(options.maxConcurrent, 1, 1, 1000);
-    const queuedTotal = db.prepare(`
+    const totalRow = await queryOne(`
         SELECT COUNT(*) AS count FROM agent_runs
         WHERE status = 'queued' AND deleted_at IS NULL
-    `).get().count || 0;
-    const userQueued = user?.id ? db.prepare(`
-        SELECT COUNT(*) AS count FROM agent_runs
-        WHERE status = 'queued' AND deleted_at IS NULL AND user_id = ?
-    `).get(user.id).count || 0 : 0;
+    `);
+    const queuedTotal = Number(totalRow?.count || 0);
+    let userQueued = 0;
+    if (user?.id) {
+        const userRow = await queryOne(`
+            SELECT COUNT(*) AS count FROM agent_runs
+            WHERE status = 'queued' AND deleted_at IS NULL AND user_id = ?
+        `, [user.id]);
+        userQueued = Number(userRow?.count || 0);
+    }
     return {
         maxConcurrent,
         instanceId: queueStatus.instanceId || '',
@@ -25,15 +31,15 @@ function getAgentRuntimeStatus(options = {}) {
     };
 }
 
-function getAgentMetrics(user, days = 7) {
+async function getAgentMetrics(user, days = 7) {
     const safeDays = normalizePositiveInt(days, 7, 1, 90);
-    const params = [user.id, `-${safeDays} days`];
     const superAdmin = isSuperAdmin(user);
+    const timeFilter = nowOffsetExpr(`-${safeDays} days`);
     const baseWhere = superAdmin
-        ? "created_at >= datetime('now', '+8 hours', ?)"
-        : "user_id = ? AND created_at >= datetime('now', '+8 hours', ?)";
-    const actualParams = superAdmin ? [`-${safeDays} days`] : params;
-    const summary = db.prepare(`
+        ? `created_at >= ${timeFilter}`
+        : `user_id = ? AND created_at >= ${timeFilter}`;
+    const actualParams = superAdmin ? [] : [user.id];
+    const summary = await queryOne(`
         SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
@@ -44,8 +50,8 @@ function getAgentMetrics(user, days = 7) {
             COALESCE(SUM(total_tokens), 0) AS totalTokens
         FROM agent_runs
         WHERE deleted_at IS NULL AND ${baseWhere}
-    `).get(...actualParams);
-    const toolStats = db.prepare(`
+    `, actualParams);
+    const toolStats = await query(`
         SELECT s.tool_name, COUNT(*) AS count
         FROM agent_steps s
         JOIN agent_runs r ON r.id = s.run_id
@@ -53,18 +59,18 @@ function getAgentMetrics(user, days = 7) {
         GROUP BY s.tool_name
         ORDER BY count DESC
         LIMIT 10
-    `).all(...actualParams);
+    `, actualParams);
     return {
         days: safeDays,
-        total: Number(summary.total || 0),
-        completed: Number(summary.completed || 0),
-        completedWithErrors: Number(summary.completedWithErrors || 0),
-        error: Number(summary.error || 0),
-        cancelled: Number(summary.cancelled || 0),
-        active: Number(summary.active || 0),
-        successRate: Number(summary.total || 0) ? Math.round((Number(summary.completed || 0) / Number(summary.total || 0)) * 100) : 0,
-        totalTokens: Number(summary.totalTokens || 0),
-        toolStats
+        total: Number(summary?.total || 0),
+        completed: Number(summary?.completed || 0),
+        completedWithErrors: Number(summary?.completedWithErrors || 0),
+        error: Number(summary?.error || 0),
+        cancelled: Number(summary?.cancelled || 0),
+        active: Number(summary?.active || 0),
+        successRate: Number(summary?.total || 0) ? Math.round((Number(summary?.completed || 0) / Number(summary?.total || 0)) * 100) : 0,
+        totalTokens: Number(summary?.totalTokens || 0),
+        toolStats: toolStats || []
     };
 }
 

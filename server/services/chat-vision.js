@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { queryOne } = require('../db/client');
 const { imageFileToDataUrl, getMaxImagesPerMessage } = require('../image-safety');
 const { resolveUploadUrlPath, toProjectRelativePath } = require('../security');
 
@@ -6,11 +6,11 @@ async function getImageDataUrl(uploadUrl, userId, sessionId) {
     const target = resolveUploadUrlPath(uploadUrl);
     const filePath = target ? toProjectRelativePath(target) : '';
     if (!filePath) return null;
-    const attachment = db.prepare(`
+    const attachment = await queryOne(`
         SELECT id FROM attachments
         WHERE user_id = ? AND session_id = ? AND file_path = ?
           AND deleted_at IS NULL
-    `).get(userId, sessionId, filePath);
+    `, [userId, sessionId, filePath]);
     if (!attachment) return null;
     return imageFileToDataUrl(target);
 }

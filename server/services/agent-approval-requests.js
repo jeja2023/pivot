@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
@@ -8,7 +8,7 @@ const { parseJsonObject } = require('./agent-validators');
 const { buildAgentResumeContext } = require('./agent-checkpoints');
 const { resolveCredentialSecret } = require('./workflow-credentials');
 const {
-    getRequiredBuiltinConfig
+    getRequiredBuiltinConfigAsync
 } = require('./builtin-mcp-common');
 const {
     buildImPayload,
@@ -92,7 +92,7 @@ function resolveApprovalTimeoutMs(input = {}) {
     return normalizeTimeoutMs(hours * 60 * 60 * 1000);
 }
 
-function resolveUserReferences(values = []) {
+async function resolveUserReferences(values = []) {
     const refs = Array.isArray(values) ? values : splitList(values);
     const ids = [];
     const usernames = [];
@@ -111,11 +111,11 @@ function resolveUserReferences(values = []) {
     const names = uniqueStrings(usernames);
     if (names.length) {
         const placeholders = names.map(() => '?').join(', ');
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT id FROM users
             WHERE username IN (${placeholders})
                OR nickname IN (${placeholders})
-        `).all(...names, ...names);
+        `, [...names, ...names]);
         rows.forEach(row => resolvedIds.push(row.id));
     }
     return uniqueNumbers(resolvedIds);
@@ -132,8 +132,8 @@ function collectLevelUserRefs(source = {}) {
     ];
 }
 
-function normalizeLevel(source = {}, ownerUser = {}, fallbackMode = 'any') {
-    const approverUserIds = resolveUserReferences(collectLevelUserRefs(source));
+async function normalizeLevel(source = {}, ownerUser = {}, fallbackMode = 'any') {
+    const approverUserIds = await resolveUserReferences(collectLevelUserRefs(source));
     const approverUnits = uniqueStrings([
         ...splitList(source.approverUnits),
         ...splitList(source.approver_units),
@@ -154,78 +154,85 @@ function normalizeLevel(source = {}, ownerUser = {}, fallbackMode = 'any') {
     };
 }
 
-function normalizeApprovalLevels(input = {}, ownerUser = {}) {
+async function normalizeApprovalLevels(input = {}, ownerUser = {}) {
     const fallbackMode = String(input.mode || input.approvalMode || input.approval_mode || 'any').trim().toLowerCase() === 'all'
         ? 'all'
         : 'any';
     const rawLevels = Array.isArray(input.approvalLevels || input.approval_levels || input.levels)
         ? (input.approvalLevels || input.approval_levels || input.levels)
         : [];
-    const levels = rawLevels.length
-        ? rawLevels.map(level => normalizeLevel(level, ownerUser, fallbackMode))
-        : [normalizeLevel(input, ownerUser, fallbackMode)];
+    const levels = [];
+    if (rawLevels.length) {
+        for (const level of rawLevels) {
+            levels.push(await normalizeLevel(level, ownerUser, fallbackMode));
+        }
+    } else {
+        levels.push(await normalizeLevel(input, ownerUser, fallbackMode));
+    }
     return levels
         .filter(level => level.approverUserIds.length || level.approverUnits.length)
         .slice(0, 10);
 }
 
-function getRun(runId) {
-    return db.prepare('SELECT * FROM agent_runs WHERE id = ? AND deleted_at IS NULL').get(runId) || null;
+async function getRun(runId) {
+    return await queryOne('SELECT * FROM agent_runs WHERE id = ? AND deleted_at IS NULL', [runId]);
 }
 
-function getRunOwner(runId) {
-    return db.prepare(`
+async function getRunOwner(runId) {
+    return await queryOne(`
         SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username,
                u.nickname, u.unit, u.role
         FROM agent_runs r
         JOIN users u ON u.id = r.user_id
         WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL
-    `).get(runId) || null;
+    `, [runId]);
 }
 
-function getRunMetadataById(runId) {
-    const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
+async function getRunMetadataById(runId) {
+    const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
     return parseJsonObject(row.metadata) || {};
 }
 
-function mergeRunMetadata(runId, patch = {}) {
+async function mergeRunMetadata(runId, patch = {}) {
     if (typeof callbacks.setRunMetadata === 'function') {
-        callbacks.setRunMetadata(runId, patch);
+        await callbacks.setRunMetadata(runId, patch);
         return;
     }
-    const current = getRunMetadataById(runId);
-    db.prepare('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ?')
-        .run(JSON.stringify({ ...current, ...patch }), getBeijingTimestamp(), runId);
+    const current = await getRunMetadataById(runId);
+    await execute('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ?', [
+        JSON.stringify({ ...current, ...patch }), getBeijingTimestamp(), runId
+    ]);
 }
 
-function refreshRunResumeContext(runId) {
-    const resumeContext = buildAgentResumeContext(runId);
-    mergeRunMetadata(runId, { resumeContext });
+async function refreshRunResumeContext(runId) {
+    const resumeContext = await buildAgentResumeContext(runId);
+    await mergeRunMetadata(runId, { resumeContext });
     return resumeContext;
 }
 
-function updateRunRecord(runId, fields = {}) {
+async function updateRunRecord(runId, fields = {}) {
     const entries = Object.entries(fields);
     if (!entries.length) return;
     if (typeof callbacks.updateRun === 'function') {
-        callbacks.updateRun(runId, fields);
+        await callbacks.updateRun(runId, fields);
         return;
     }
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ?`).run(...entries.map(([, value]) => value), runId);
+    await execute(`UPDATE agent_runs SET ${set} WHERE id = ?`, [...entries.map(([, value]) => value), runId]);
 }
 
-function updateRunRecordCas(runId, expectedStatuses, fields = {}) {
+async function updateRunRecordCas(runId, expectedStatuses, fields = {}) {
     if (typeof callbacks.updateRunCas === 'function') {
-        return callbacks.updateRunCas(runId, expectedStatuses, fields);
+        return await callbacks.updateRunCas(runId, expectedStatuses, fields);
     }
     const statuses = Array.isArray(expectedStatuses) ? expectedStatuses : [expectedStatuses];
     const entries = Object.entries(fields);
     if (!entries.length || !statuses.length) return 0;
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
     const placeholders = statuses.map(() => '?').join(', ');
-    return db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`)
-        .run(...entries.map(([, value]) => value), runId, ...statuses).changes;
+    return await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`, [
+        ...entries.map(([, value]) => value), runId, ...statuses
+    ]);
 }
 
 function hashToken(token) {
@@ -240,10 +247,10 @@ function createCallbackNonce() {
     return crypto.randomBytes(16).toString('hex');
 }
 
-function resolveCallbackSecretSlug(slug, user) {
+async function resolveCallbackSecretSlug(slug, user) {
     const normalizedSlug = String(slug || '').trim();
     if (!normalizedSlug) return '';
-    const resolved = user ? resolveCredentialSecret(normalizedSlug, user) : null;
+    const resolved = user ? await resolveCredentialSecret(normalizedSlug, user) : null;
     return resolved?.value || '';
 }
 
@@ -260,9 +267,6 @@ function approvalKeyFor(node = {}, input = {}, fallback = '') {
     ).trim().slice(0, 240);
 }
 
-// Approval requests created by nested workflows must never address a root DAG node
-// with the same local id. Keep root node ids stable for existing clients, while
-// persisting a deterministic namespaced key for nested workflow approvals.
 function persistedApprovalNodeKey(node = {}, approvalKey = '') {
     const key = String(approvalKey || '').trim();
     return key.includes(':subworkflow:') ? key.slice(0, 240) : String(node.id || key || '').trim().slice(0, 240);
@@ -272,17 +276,17 @@ function delayKeyFor(node = {}, fallback = '') {
     return String(fallback || `workflow.delay:${node.id || 'node'}`).trim().slice(0, 240);
 }
 
-function getRequestByRunKey(runId, requestType, approvalKey) {
-    return db.prepare(`
+async function getRequestByRunKey(runId, requestType, approvalKey) {
+    return await queryOne(`
         SELECT * FROM agent_approval_requests
         WHERE run_id = ? AND request_type = ? AND approval_key = ?
         ORDER BY created_at DESC, id DESC
         LIMIT 1
-    `).get(runId, requestType, approvalKey) || null;
+    `, [runId, requestType, approvalKey]);
 }
 
-function getRequestById(requestId) {
-    return db.prepare('SELECT * FROM agent_approval_requests WHERE id = ?').get(requestId) || null;
+async function getRequestById(requestId) {
+    return await queryOne('SELECT * FROM agent_approval_requests WHERE id = ?', [requestId]);
 }
 
 function formatRequest(row, user = null) {
@@ -393,9 +397,9 @@ function approvalCompletionKind(row, level = {}, decisions = []) {
     return done ? 'completed' : 'pending';
 }
 
-function listWorkflowApprovalRequests(user, options = {}) {
+async function listWorkflowApprovalRequests(user, options = {}) {
     const status = String(options.status || 'pending').trim();
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT ar.*
         FROM agent_approval_requests ar
         JOIN agent_runs r ON r.id = ar.run_id
@@ -404,17 +408,17 @@ function listWorkflowApprovalRequests(user, options = {}) {
           AND r.deleted_at IS NULL
         ORDER BY ar.created_at DESC
         LIMIT 200
-    `).all(status, status);
+    `, [status, status]);
     return rows
         .filter(row => row.user_id === user.id || canUserDecide(row, user) || isSuperAdmin(user))
         .map(row => formatRequest(row, user));
 }
 
-function updateRunToAwaiting(runId, errorMessage = '') {
-    const run = getRun(runId);
+async function updateRunToAwaiting(runId, errorMessage = '') {
+    const run = await getRun(runId);
     if (!run || ['cancelled', 'deleted', 'completed', 'completed_with_errors', 'error'].includes(run.status)) return;
     const now = getBeijingTimestamp();
-    updateRunRecord(runId, {
+    await updateRunRecord(runId, {
         status: 'awaiting_approval',
         error_message: errorMessage,
         last_heartbeat_at: now,
@@ -424,61 +428,68 @@ function updateRunToAwaiting(runId, errorMessage = '') {
     });
 }
 
-function enqueueRun(runId) {
-    const user = getRunOwner(runId);
+async function enqueueRun(runId) {
+    const user = await getRunOwner(runId);
     if (!user) return;
     callbacks.enqueueAgentRun?.(runId, user);
 }
 
-function insertStep(runId, data = {}) {
-    const stepIndex = typeof callbacks.listSteps === 'function'
-        ? callbacks.listSteps(runId).length + 1
-        : (db.prepare('SELECT COALESCE(MAX(step_index), 0) AS maxStep FROM agent_steps WHERE run_id = ?').get(runId)?.maxStep || 0) + 1;
+async function insertStep(runId, data = {}) {
+    let stepIndex = 1;
+    if (typeof callbacks.listSteps === 'function') {
+        const steps = await callbacks.listSteps(runId);
+        stepIndex = (Array.isArray(steps) ? steps.length : 0) + 1;
+    } else {
+        const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) AS "maxStep" FROM agent_steps WHERE run_id = ?', [runId]);
+        stepIndex = Number(row?.maxStep || row?.maxstep || 0) + 1;
+    }
     if (typeof callbacks.insertStep === 'function') {
-        callbacks.insertStep(runId, stepIndex, data);
+        await callbacks.insertStep(runId, stepIndex, data);
         return;
     }
     const now = getBeijingTimestamp();
-    db.prepare(`
+    await execute(`
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
             status, duration_ms, started_at, completed_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
         runId,
         stepIndex,
         data.type || 'note',
-        data.title || '',
+        String(data.title || 'Step').slice(0, 160),
         data.toolName || '',
-        data.input === undefined ? '' : JSON.stringify(data.input),
-        data.output === undefined ? '' : JSON.stringify(data.output),
+        data.input ? JSON.stringify(data.input) : null,
+        data.output ? JSON.stringify(data.output) : null,
         data.errorMessage || '',
         data.status || 'success',
         Number(data.durationMs) || 0,
         data.startedAt || now,
         data.completedAt || now,
         now
-    );
+    ]);
 }
 
-function throwAwaiting(message, requestId = '') {
+function throwAwaiting(message, requestId) {
     const err = new Error(message);
-    err.code = 'AGENT_APPROVAL_REQUIRED';
-    err.approvalRequestId = requestId;
+    err.code = 'AGENT_RUN_AWAITING_APPROVAL';
+    err.requestId = requestId;
     throw err;
 }
 
-function buildApprovalOutput(row, status = 'approved') {
+function buildApprovalOutput(row, decision = 'approved') {
+    const decisions = parseJson(row.decisions_json, []);
+    const lastDecision = decisions[decisions.length - 1] || {};
     return {
-        approved: status === 'approved',
-        status,
+        status: decision,
         requestId: row.id,
         approvalKey: row.approval_key,
-        title: row.title || '',
-        summary: row.summary || '',
         currentLevel: Number(row.current_level || 1),
         requiredLevels: Number(row.required_levels || 1),
-        decisions: parseJson(row.decisions_json, [])
+        decisions,
+        comment: String(lastDecision.comment || ''),
+        decidedBy: lastDecision.userId || row.decided_by || null,
+        decidedAt: lastDecision.decidedAt || row.decided_at || getBeijingTimestamp()
     };
 }
 
@@ -486,18 +497,16 @@ function buildDelayOutput(row) {
     const input = parseJson(row.input_json, {});
     return {
         delayed: true,
-        status: 'completed',
-        requestId: row.id,
-        delayKey: row.approval_key,
-        durationMs: Number(input.durationMs ?? input.duration_ms ?? 0) || 0,
+        durationMs: Number(input.durationMs ?? input.duration_ms ?? 0),
         reason: String(input.reason || ''),
+        requestId: row.id,
         completedAt: row.decided_at || getBeijingTimestamp()
     };
 }
 
-function persistWorkflowApproval(runId, key, value) {
-    const metadata = getRunMetadataById(runId);
-    mergeRunMetadata(runId, {
+async function persistWorkflowApproval(runId, key, value) {
+    const metadata = await getRunMetadataById(runId);
+    await mergeRunMetadata(runId, {
         workflowApprovals: {
             ...(metadata.workflowApprovals && typeof metadata.workflowApprovals === 'object' ? metadata.workflowApprovals : {}),
             [key]: value
@@ -506,9 +515,9 @@ function persistWorkflowApproval(runId, key, value) {
     });
 }
 
-function persistWorkflowDelay(runId, key, value) {
-    const metadata = getRunMetadataById(runId);
-    mergeRunMetadata(runId, {
+async function persistWorkflowDelay(runId, key, value) {
+    const metadata = await getRunMetadataById(runId);
+    await mergeRunMetadata(runId, {
         workflowDelays: {
             ...(metadata.workflowDelays && typeof metadata.workflowDelays === 'object' ? metadata.workflowDelays : {}),
             [key]: value
@@ -517,10 +526,10 @@ function persistWorkflowDelay(runId, key, value) {
     });
 }
 
-function maybeCompleteDagNode(row, output) {
+async function maybeCompleteDagNode(row, output) {
     if (!row.node_key || String(row.node_key).includes(':subworkflow:')) return;
     if (typeof callbacks.upsertDagNode === 'function') {
-        callbacks.upsertDagNode(
+        await callbacks.upsertDagNode(
             row.run_id,
             { id: row.node_key, title: row.title || row.node_key, tool: row.request_type === 'delay' ? 'workflow.delay' : 'workflow.approval' },
             {
@@ -533,20 +542,20 @@ function maybeCompleteDagNode(row, output) {
         );
         return;
     }
-    db.prepare(`
+    await execute(`
         UPDATE agent_dag_nodes
         SET status = 'completed',
             output = ?,
             error_message = '',
             completed_at = ?
         WHERE run_id = ? AND node_key = ?
-    `).run(JSON.stringify(output), getBeijingTimestamp(), row.run_id, row.node_key);
+    `, [JSON.stringify(output), getBeijingTimestamp(), row.run_id, row.node_key]);
 }
 
-function markDagNodeWaiting(row, output) {
+async function markDagNodeWaiting(row, output) {
     if (!row.node_key || String(row.node_key).includes(':subworkflow:')) return;
     if (typeof callbacks.upsertDagNode === 'function') {
-        callbacks.upsertDagNode(
+        await callbacks.upsertDagNode(
             row.run_id,
             { id: row.node_key, title: row.title || row.node_key, tool: row.request_type === 'delay' ? 'workflow.delay' : 'workflow.approval' },
             {
@@ -559,7 +568,7 @@ function markDagNodeWaiting(row, output) {
         );
         return;
     }
-    db.prepare(`
+    await execute(`
         UPDATE agent_dag_nodes
         SET status = 'waiting_approval',
             output = ?,
@@ -567,7 +576,7 @@ function markDagNodeWaiting(row, output) {
             started_at = COALESCE(started_at, ?),
             completed_at = NULL
         WHERE run_id = ? AND node_key = ?
-    `).run(JSON.stringify(output), row.started_at || getBeijingTimestamp(), row.run_id, row.node_key);
+    `, [JSON.stringify(output), row.started_at || getBeijingTimestamp(), row.run_id, row.node_key]);
 }
 
 function signatureFor(secret, token, requestId, decision, nonce = '') {
@@ -577,16 +586,16 @@ function signatureFor(secret, token, requestId, decision, nonce = '') {
         .digest('hex')}`;
 }
 
-function getRequestSecret(row) {
+async function getRequestSecret(row) {
     const slug = String(row.callback_credential_slug || '').trim();
     if (!slug) return '';
-    const owner = getRunOwner(row.run_id);
-    return owner ? resolveCallbackSecretSlug(slug, owner) : '';
+    const owner = await getRunOwner(row.run_id);
+    return owner ? await resolveCallbackSecretSlug(slug, owner) : '';
 }
 
-function buildCallbackActions(row, token) {
+async function buildCallbackActions(row, token) {
     if (!token) return {};
-    const secret = getRequestSecret(row);
+    const secret = await getRequestSecret(row);
     const nonce = String(row.callback_nonce || '').trim();
     const build = decision => {
         const payload = { decision, requestId: row.id, approvalRequestId: row.id };
@@ -606,22 +615,22 @@ function callbackUrlFor(input = {}, token = '') {
 }
 
 async function notifyApprovers(row, token = '') {
-    const run = getRun(row.run_id);
+    const run = await getRun(row.run_id);
     if (!run) return;
-    const owner = getRunOwner(row.run_id) || { id: row.user_id };
+    const owner = (await getRunOwner(row.run_id)) || { id: row.user_id };
     const level = currentLevel(row);
     const directIds = uniqueNumbers(level.approverUserIds || []);
     const units = uniqueStrings(level.approverUnits || []);
     let userIds = directIds;
     if (units.length) {
         const placeholders = units.map(() => '?').join(', ');
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT id FROM users
             WHERE unit IN (${placeholders})
               AND COALESCE(status, 'active') != 'disabled'
               AND deleted_at IS NULL
             LIMIT 100
-        `).all(...units);
+        `, units);
         userIds = uniqueNumbers([...userIds, ...rows.map(item => item.id)]);
     }
     if (!userIds.length && owner?.id) userIds = [owner.id];
@@ -642,9 +651,9 @@ async function maybeSendApprovalIm(row, token, run, user) {
     const serverId = Number.parseInt(input.imServerId ?? input.im_server_id ?? input.im_server ?? 0, 10);
     if (!serverId) return;
     try {
-        const server = db.prepare("SELECT * FROM mcp_servers WHERE id = ? AND status != 'deleted'").get(serverId);
+        const server = await queryOne("SELECT * FROM mcp_servers WHERE id = ? AND status != 'deleted'", [serverId]);
         if (!server) return;
-        const { config, secret } = getRequiredBuiltinConfig(server, 'im');
+        const { config, secret } = await getRequiredBuiltinConfigAsync(server, 'im');
         const targetType = String(input.imTargetType || input.im_target_type || input.targetType || 'user').toLowerCase() === 'group'
             ? 'group'
             : 'user';
@@ -668,7 +677,7 @@ async function maybeSendApprovalIm(row, token, run, user) {
                 requiredLevels: Number(row.required_levels || 1),
                 levelMode: String(currentLevel(row).mode || 'any'),
                 callbackUrl,
-                actions: buildCallbackActions(row, token)
+                actions: await buildCallbackActions(row, token)
             }
         };
         const payload = buildImPayload(config, defaultPayload, user, { run, approval: formatRequest(row) });
@@ -678,15 +687,15 @@ async function maybeSendApprovalIm(row, token, run, user) {
     }
 }
 
-function createApprovalRequest({ run, user, node, input, key }) {
-    const levels = normalizeApprovalLevels(input, user);
+async function createApprovalRequest({ run, user, node, input, key }) {
+    const levels = await normalizeApprovalLevels(input, user);
     if (!levels.length) throw invalid('Approval node has no valid approver.', 400);
     const token = createCallbackToken();
     const now = getBeijingTimestamp();
     const timeoutMs = resolveApprovalTimeoutMs(input);
     const expiresAt = timeoutMs ? getBeijingTimestamp(new Date(Date.now() + timeoutMs)) : null;
     const callbackCredential = String(input.callbackCredential || input.callback_credential || '').trim();
-    const callbackSecret = resolveCallbackSecretSlug(callbackCredential, user);
+    const callbackSecret = await resolveCallbackSecretSlug(callbackCredential, user);
     if (callbackCredential && !callbackSecret) {
         throw invalid('Callback credential is unavailable or cannot be decrypted.', 403);
     }
@@ -695,14 +704,15 @@ function createApprovalRequest({ run, user, node, input, key }) {
         ? ''
         : (typeof input.summary === 'string' ? input.summary : JSON.stringify(input.summary));
     const callbackNonce = callbackSecret ? createCallbackNonce() : '';
-    const info = db.prepare(`
-        INSERT OR IGNORE INTO agent_approval_requests (
+    const changes = await execute(`
+        INSERT INTO agent_approval_requests (
             id, run_id, user_id, request_type, node_key, approval_key, title, summary, instructions,
             status, current_level, required_levels, levels_json, decisions_json, input_json,
             callback_token_hash, callback_token_hint, callback_nonce, callback_credential_slug, callback_signature_required,
             timeout_action, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'approval', ?, ?, ?, ?, ?, 'pending', 1, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+        ON CONFLICT(id) DO NOTHING
+    `, [
         requestId,
         run.id,
         run.user_id,
@@ -723,24 +733,24 @@ function createApprovalRequest({ run, user, node, input, key }) {
         expiresAt,
         now,
         now
-    );
-    if (!info.changes) {
-        const existing = getRequestByRunKey(run.id, 'approval', key);
+    ]);
+    if (!changes) {
+        const existing = await getRequestByRunKey(run.id, 'approval', key);
         if (existing) return { row: existing, token: '', created: false };
         throw invalid('Approval request could not be created.', 409);
     }
-    return { row: getRequestById(requestId), token, created: true };
+    return { row: await getRequestById(requestId), token, created: true };
 }
 
 async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }) {
     const approvalKey = approvalKeyFor(node, input, key);
-    const metadata = getRunMetadataById(run.id);
+    const metadata = await getRunMetadataById(run.id);
     const recorded = metadata.workflowApprovals?.[approvalKey];
     if (recorded?.status === 'approved') return recorded.output || recorded;
-    const existing = getRequestByRunKey(run.id, 'approval', approvalKey);
+    const existing = await getRequestByRunKey(run.id, 'approval', approvalKey);
     if (existing?.status === 'approved') {
         const output = buildApprovalOutput(existing, 'approved');
-        persistWorkflowApproval(run.id, approvalKey, { status: 'approved', requestId: existing.id, output });
+        await persistWorkflowApproval(run.id, approvalKey, { status: 'approved', requestId: existing.id, output });
         return output;
     }
     if (existing && ['rejected', 'expired', 'cancelled'].includes(existing.status)) {
@@ -752,13 +762,13 @@ async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }
     let token = '';
     let shouldNotify = false;
     if (!row) {
-        const created = createApprovalRequest({ run, user, node, input, key: approvalKey });
+        const created = await createApprovalRequest({ run, user, node, input, key: approvalKey });
         row = created.row;
         token = created.token;
         shouldNotify = created.created;
         if (created.created) {
-            markDagNodeWaiting(row, { status: 'pending', requestId: row.id, approvalKey });
-            insertStep(run.id, {
+            await markDagNodeWaiting(row, { status: 'pending', requestId: row.id, approvalKey });
+            await insertStep(run.id, {
                 type: 'approval',
                 title: 'Workflow approval requested',
                 toolName: 'workflow.approval',
@@ -767,7 +777,7 @@ async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }
             });
         }
     }
-    mergeRunMetadata(run.id, {
+    await mergeRunMetadata(run.id, {
         pendingWorkflowApproval: {
             requestId: row.id,
             approvalKey,
@@ -777,23 +787,24 @@ async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }
             requiredLevels: row.required_levels || 1
         }
     });
-    updateRunToAwaiting(run.id, 'Waiting for workflow approval.');
+    await updateRunToAwaiting(run.id, 'Waiting for workflow approval.');
     if (shouldNotify) await notifyApprovers(row, token);
     throwAwaiting('Workflow approval is pending.', row.id);
 }
 
-function createDelayRequest({ run, node, input, key }) {
+async function createDelayRequest({ run, node, input, key }) {
     const durationMs = normalizeTimeoutMs(input.durationMs ?? input.duration_ms);
     const now = getBeijingTimestamp();
     const expiresAt = getBeijingTimestamp(new Date(Date.now() + durationMs));
     const requestId = crypto.randomUUID();
-    const info = db.prepare(`
-        INSERT OR IGNORE INTO agent_approval_requests (
+    const changes = await execute(`
+        INSERT INTO agent_approval_requests (
             id, run_id, user_id, request_type, node_key, approval_key, title, summary, instructions,
             status, current_level, required_levels, levels_json, decisions_json, input_json,
             timeout_action, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'delay', ?, ?, ?, ?, '', 'pending', 1, 1, '[]', '[]', ?, 'approve', ?, ?, ?)
-    `).run(
+        ON CONFLICT(id) DO NOTHING
+    `, [
         requestId,
         run.id,
         run.user_id,
@@ -805,49 +816,44 @@ function createDelayRequest({ run, node, input, key }) {
         expiresAt,
         now,
         now
-    );
-    if (!info.changes) {
-        const existing = getRequestByRunKey(run.id, 'delay', key);
+    ]);
+    if (!changes) {
+        const existing = await getRequestByRunKey(run.id, 'delay', key);
         if (existing) return { row: existing, created: false };
         throw invalid('Delay request could not be created.', 409);
     }
-    return { row: getRequestById(requestId), created: true };
+    return { row: await getRequestById(requestId), created: true };
 }
 
-function completeDelayRequest(row, { enqueue = true } = {}) {
+async function completeDelayRequest(row, { enqueue = true } = {}) {
     const now = getBeijingTimestamp();
-    let output = null;
-    const applied = db.transaction(() => {
-        const info = db.prepare(`
-            UPDATE agent_approval_requests
-            SET status = 'completed', decided_at = ?, updated_at = ?
-            WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
-        `).run(now, now, row.id, row.updated_at);
-        if (!info.changes) return false;
-        const updated = getRequestById(row.id) || row;
-        output = buildDelayOutput(updated);
-        if (enqueue) {
-            const runChanged = updateRunRecordCas(row.run_id, ['awaiting_approval'], {
-                status: 'queued',
-                error_message: '',
-                locked_by: null,
-                lock_expires_at: null,
-                updated_at: now
-            });
-            if (!runChanged) throw invalid('Workflow run is no longer awaiting this delay.', 409);
-        }
-        persistWorkflowDelay(row.run_id, row.approval_key, { status: 'completed', requestId: row.id, output });
-        refreshRunResumeContext(row.run_id);
-        maybeCompleteDagNode(updated, output);
-        insertStep(row.run_id, {
-            type: 'control',
-            title: 'Workflow delay completed',
-            output
+    const changes = await execute(`
+        UPDATE agent_approval_requests
+        SET status = 'completed', decided_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
+    `, [now, now, row.id, row.updated_at]);
+    if (!changes) return buildDelayOutput((await getRequestById(row.id)) || row);
+    const updated = (await getRequestById(row.id)) || row;
+    const output = buildDelayOutput(updated);
+    if (enqueue) {
+        const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval'], {
+            status: 'queued',
+            error_message: '',
+            locked_by: null,
+            lock_expires_at: null,
+            updated_at: now
         });
-        return true;
-    })();
-    if (!applied) return buildDelayOutput(getRequestById(row.id) || row);
-    if (enqueue) enqueueRun(row.run_id);
+        if (!runChanged) throw invalid('Workflow run is no longer awaiting this delay.', 409);
+    }
+    await persistWorkflowDelay(row.run_id, row.approval_key, { status: 'completed', requestId: row.id, output });
+    await refreshRunResumeContext(row.run_id);
+    await maybeCompleteDagNode(updated, output);
+    await insertStep(row.run_id, {
+        type: 'control',
+        title: 'Workflow delay completed',
+        output
+    });
+    if (enqueue) await enqueueRun(row.run_id);
     return output;
 }
 
@@ -857,23 +863,23 @@ async function waitForWorkflowDelay({ run, node, input = {}, key = '' }) {
         return { delayed: false, durationMs: 0, reason: String(input.reason || ''), completedAt: getBeijingTimestamp() };
     }
     const delayKey = delayKeyFor(node, key);
-    const metadata = getRunMetadataById(run.id);
+    const metadata = await getRunMetadataById(run.id);
     const recorded = metadata.workflowDelays?.[delayKey];
     if (recorded?.status === 'completed') return recorded.output || recorded;
-    const existing = getRequestByRunKey(run.id, 'delay', delayKey);
+    const existing = await getRequestByRunKey(run.id, 'delay', delayKey);
     if (existing?.status === 'completed') {
         const output = buildDelayOutput(existing);
-        persistWorkflowDelay(run.id, delayKey, { status: 'completed', requestId: existing.id, output });
+        await persistWorkflowDelay(run.id, delayKey, { status: 'completed', requestId: existing.id, output });
         return output;
     }
     if (existing?.status === 'pending' && existing.expires_at && existing.expires_at <= getBeijingTimestamp()) {
-        return completeDelayRequest(existing, { enqueue: false });
+        return await completeDelayRequest(existing, { enqueue: false });
     }
-    const created = existing ? { row: existing, created: false } : createDelayRequest({ run, node, input: { ...input, durationMs }, key: delayKey });
+    const created = existing ? { row: existing, created: false } : (await createDelayRequest({ run, node, input: { ...input, durationMs }, key: delayKey }));
     const row = created.row;
-    markDagNodeWaiting(row, { status: 'pending', requestId: row.id, delayKey, durationMs });
+    await markDagNodeWaiting(row, { status: 'pending', requestId: row.id, delayKey, durationMs });
     if (created.created) {
-        insertStep(run.id, {
+        await insertStep(run.id, {
             type: 'control',
             title: 'Workflow delay requested',
             toolName: 'workflow.delay',
@@ -881,7 +887,7 @@ async function waitForWorkflowDelay({ run, node, input = {}, key = '' }) {
             output: { status: 'pending', requestId: row.id, delayKey, durationMs }
         });
     }
-    mergeRunMetadata(run.id, {
+    await mergeRunMetadata(run.id, {
         pendingWorkflowDelay: {
             requestId: row.id,
             delayKey,
@@ -889,7 +895,7 @@ async function waitForWorkflowDelay({ run, node, input = {}, key = '' }) {
             expiresAt: row.expires_at || ''
         }
     });
-    updateRunToAwaiting(run.id, 'Waiting for workflow delay.');
+    await updateRunToAwaiting(run.id, 'Waiting for workflow delay.');
     throwAwaiting('Workflow delay is pending.', row.id);
 }
 
@@ -926,59 +932,54 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
         decidedAt: now
     });
     if (!approve) {
-        const applied = db.transaction(() => {
-            const info = db.prepare(`
-                UPDATE agent_approval_requests
-                SET status = 'rejected', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
-                    callback_token_hash = NULL, callback_nonce = ''
-                WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
-            `).run(JSON.stringify(decisions), now, actor?.id || null, now, row.id, row.updated_at, row.decisions_json);
-            if (!info.changes) return false;
-            const runChanged = updateRunRecordCas(row.run_id, ['awaiting_approval', 'running'], {
-                status: 'cancelled',
-                error_message: 'Workflow approval rejected.',
-                cancelled_at: now,
-                completed_at: now,
-                locked_by: null,
-                lock_expires_at: null,
-                updated_at: now
-            });
-            if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
-            persistWorkflowApproval(row.run_id, row.approval_key, { status: 'rejected', requestId: row.id });
-            insertStep(row.run_id, {
-                type: 'approval',
-                title: 'Workflow approval rejected',
-                toolName: 'workflow.approval',
-                output: { status: 'rejected', requestId: row.id, comment: String(comment || '') }
-            });
-            return true;
-        })();
-        if (!applied) return formatRequest(getRequestById(row.id), actor);
-        return formatRequest(getRequestById(row.id), actor);
+        const changes = await execute(`
+            UPDATE agent_approval_requests
+            SET status = 'rejected', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
+                callback_token_hash = NULL, callback_nonce = ''
+            WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+        `, [JSON.stringify(decisions), now, actor?.id || null, now, row.id, row.updated_at, row.decisions_json]);
+        if (!changes) return formatRequest(await getRequestById(row.id), actor);
+        const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval', 'running'], {
+            status: 'cancelled',
+            error_message: 'Workflow approval rejected.',
+            cancelled_at: now,
+            completed_at: now,
+            locked_by: null,
+            lock_expires_at: null,
+            updated_at: now
+        });
+        if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
+        await persistWorkflowApproval(row.run_id, row.approval_key, { status: 'rejected', requestId: row.id });
+        await insertStep(row.run_id, {
+            type: 'approval',
+            title: 'Workflow approval rejected',
+            toolName: 'workflow.approval',
+            output: { status: 'rejected', requestId: row.id, comment: String(comment || '') }
+        });
+        return formatRequest(await getRequestById(row.id), actor);
     }
 
     const required = Number(row.required_levels || 1);
     const current = Number(row.current_level || 1);
     if (approvalCompletionKind(row, level, decisions) !== 'completed') {
-        const info = db.prepare(`
+        await execute(`
             UPDATE agent_approval_requests
             SET decisions_json = ?, updated_at = ?
             WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
-        `).run(JSON.stringify(decisions), now, row.id, row.updated_at, row.decisions_json);
-        if (!info.changes) return formatRequest(getRequestById(row.id), actor);
-        return formatRequest(getRequestById(row.id), actor);
+        `, [JSON.stringify(decisions), now, row.id, row.updated_at, row.decisions_json]);
+        return formatRequest(await getRequestById(row.id), actor);
     }
     if (current < required) {
         const token = createCallbackToken();
-        const info = db.prepare(`
+        const changes = await execute(`
             UPDATE agent_approval_requests
             SET current_level = current_level + 1, decisions_json = ?, updated_at = ?,
                 callback_token_hash = ?, callback_token_hint = ?, callback_nonce = ?
             WHERE id = ? AND status = 'pending' AND current_level = ? AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
-        `).run(JSON.stringify(decisions), now, hashToken(token), token.slice(-8), createCallbackNonce(), row.id, current, row.updated_at, row.decisions_json);
-        if (!info.changes) return formatRequest(getRequestById(row.id), actor);
-        const updated = getRequestById(row.id);
-        insertStep(row.run_id, {
+        `, [JSON.stringify(decisions), now, hashToken(token), token.slice(-8), createCallbackNonce(), row.id, current, row.updated_at, row.decisions_json]);
+        if (!changes) return formatRequest(await getRequestById(row.id), actor);
+        const updated = await getRequestById(row.id);
+        await insertStep(row.run_id, {
             type: 'approval',
             title: 'Workflow approval advanced to next level',
             toolName: 'workflow.approval',
@@ -988,53 +989,47 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
         return formatRequest(updated, actor);
     }
 
-    let updated = null;
-    let output = null;
-    const applied = db.transaction(() => {
-        const info = db.prepare(`
-            UPDATE agent_approval_requests
-            SET status = 'approved', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
-                callback_token_hash = NULL, callback_nonce = ''
-            WHERE id = ? AND status = 'pending' AND current_level = ? AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
-        `).run(JSON.stringify(decisions), now, actor?.id || null, now, row.id, current, row.updated_at, row.decisions_json);
-        if (!info.changes) return false;
-        updated = getRequestById(row.id);
-        output = buildApprovalOutput(updated, 'approved');
-        const runChanged = updateRunRecordCas(row.run_id, ['awaiting_approval'], {
-            status: 'queued',
-            error_message: '',
-            locked_by: null,
-            lock_expires_at: null,
-            updated_at: now
-        });
-        if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
-        persistWorkflowApproval(row.run_id, row.approval_key, { status: 'approved', requestId: row.id, output });
-        refreshRunResumeContext(row.run_id);
-        maybeCompleteDagNode(updated, output);
-        insertStep(row.run_id, {
-            type: 'approval',
-            title: 'Workflow approval approved',
-            toolName: 'workflow.approval',
-            output
-        });
-        return true;
-    })();
-    if (!applied) return formatRequest(getRequestById(row.id), actor);
-    enqueueRun(row.run_id);
+    const changes = await execute(`
+        UPDATE agent_approval_requests
+        SET status = 'approved', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
+            callback_token_hash = NULL, callback_nonce = ''
+        WHERE id = ? AND status = 'pending' AND current_level = ? AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+    `, [JSON.stringify(decisions), now, actor?.id || null, now, row.id, current, row.updated_at, row.decisions_json]);
+    if (!changes) return formatRequest(await getRequestById(row.id), actor);
+    const updated = await getRequestById(row.id);
+    const output = buildApprovalOutput(updated, 'approved');
+    const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval'], {
+        status: 'queued',
+        error_message: '',
+        locked_by: null,
+        lock_expires_at: null,
+        updated_at: now
+    });
+    if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
+    await persistWorkflowApproval(row.run_id, row.approval_key, { status: 'approved', requestId: row.id, output });
+    await refreshRunResumeContext(row.run_id);
+    await maybeCompleteDagNode(updated, output);
+    await insertStep(row.run_id, {
+        type: 'approval',
+        title: 'Workflow approval approved',
+        toolName: 'workflow.approval',
+        output
+    });
+    await enqueueRun(row.run_id);
     return formatRequest(updated, actor);
 }
 
 async function decideWorkflowApprovalRequest(requestId, user, body = {}) {
-    const row = getRequestById(requestId);
+    const row = await getRequestById(requestId);
     if (!row || row.request_type !== 'approval') return null;
     if (!canUserDecide(row, user)) throw invalid('Current user is not a designated approver for this level.', 403);
     const approve = body.approve !== false && String(body.decision || body.action || 'approve').toLowerCase() !== 'reject';
-    return applyApprovalDecision(row, user, approve, body.comment || body.reason || '');
+    return await applyApprovalDecision(row, user, approve, body.comment || body.reason || '');
 }
 
-function verifyCallbackSignature(row, token, payload = {}, headers = {}) {
+async function verifyCallbackSignature(row, token, payload = {}, headers = {}) {
     if (!row.callback_signature_required) return;
-    const secret = getRequestSecret(row);
+    const secret = await getRequestSecret(row);
     if (!secret) throw invalid('Approval callback signature secret is unavailable.', 403);
     const decision = normalizeCallbackDecision(payload);
     const nonce = String(row.callback_nonce || '').trim();
@@ -1061,26 +1056,26 @@ function normalizeCallbackDecision(payload = {}) {
 async function handleImApprovalCallback(token, payload = {}, headers = {}) {
     const safeToken = String(token || '').trim();
     if (!CALLBACK_TOKEN_PATTERN.test(safeToken)) return null;
-    const row = db.prepare(`
+    const row = await queryOne(`
         SELECT * FROM agent_approval_requests
         WHERE request_type = 'approval'
           AND status = 'pending'
           AND callback_token_hash = ?
         LIMIT 1
-    `).get(hashToken(safeToken));
+    `, [hashToken(safeToken)]);
     if (!row) return null;
     const suppliedRequestId = String(payload.approvalRequestId || payload.requestId || '').trim();
     if (suppliedRequestId && suppliedRequestId !== String(row.id)) {
         throw invalid('Approval callback requestId does not match the token.', 403);
     }
-    verifyCallbackSignature(row, safeToken, payload, headers);
+    await verifyCallbackSignature(row, safeToken, payload, headers);
     const decision = normalizeCallbackDecision(payload);
     const actor = {
         id: Number(payload.userId || payload.user_id || 0) || null,
         username: String(payload.username || payload.approver || 'im-callback').slice(0, 120),
         unit: String(payload.unit || payload.approverUnit || '').trim()
     };
-    return applyApprovalDecision(row, actor, decision === 'approve', payload.comment || payload.reason || '', {
+    return await applyApprovalDecision(row, actor, decision === 'approve', payload.comment || payload.reason || '', {
         source: 'im-callback',
         tokenAuthenticated: true
     });
@@ -1089,43 +1084,38 @@ async function handleImApprovalCallback(token, payload = {}, headers = {}) {
 async function expireApprovalRequest(row) {
     const action = normalizeTimeoutAction(row.timeout_action);
     if (action === 'approve') {
-        return applyApprovalDecision(row, { username: 'timeout' }, true, '', { system: true, reason: 'timeout' });
+        return await applyApprovalDecision(row, { username: 'timeout' }, true, '', { system: true, reason: 'timeout' });
     }
     const now = getBeijingTimestamp();
-    const applied = db.transaction(() => {
-        const info = db.prepare(`
-            UPDATE agent_approval_requests
-            SET status = 'expired', decided_at = ?, updated_at = ?, callback_token_hash = NULL, callback_nonce = ''
-            WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
-        `).run(now, now, row.id, row.updated_at);
-        if (!info.changes) return false;
-        const runChanged = updateRunRecordCas(row.run_id, ['awaiting_approval'], {
-            status: 'cancelled',
-            error_message: 'Workflow approval timed out.',
-            cancelled_at: now,
-            completed_at: now,
-            locked_by: null,
-            lock_expires_at: null,
-            updated_at: now
-        });
-        if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
-        persistWorkflowApproval(row.run_id, row.approval_key, { status: 'expired', requestId: row.id });
-        insertStep(row.run_id, {
-            type: 'approval',
-            title: 'Workflow approval timed out',
-            toolName: 'workflow.approval',
-            output: { status: 'expired', requestId: row.id }
-        });
-        return true;
-    })();
-    if (!applied) return formatRequest(getRequestById(row.id));
-    return formatRequest(getRequestById(row.id));
+    const changes = await execute(`
+        UPDATE agent_approval_requests
+        SET status = 'expired', decided_at = ?, updated_at = ?, callback_token_hash = NULL, callback_nonce = ''
+        WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
+    `, [now, now, row.id, row.updated_at]);
+    if (!changes) return formatRequest(await getRequestById(row.id));
+    const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval'], {
+        status: 'cancelled',
+        error_message: 'Workflow approval timed out.',
+        cancelled_at: now,
+        completed_at: now,
+        locked_by: null,
+        lock_expires_at: null,
+        updated_at: now
+    });
+    if (!runChanged) throw invalid('Workflow run is no longer awaiting this approval.', 409);
+    await persistWorkflowApproval(row.run_id, row.approval_key, { status: 'expired', requestId: row.id });
+    await insertStep(row.run_id, {
+        type: 'approval',
+        title: 'Workflow approval timed out',
+        toolName: 'workflow.approval',
+        output: { status: 'expired', requestId: row.id }
+    });
+    return formatRequest(await getRequestById(row.id));
 }
 
 async function runApprovalTimeouts(limit = 50) {
-    if (!db) return 0;
     const currentTimeExpr = nowExpr();
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM agent_approval_requests
         WHERE status = 'pending'
@@ -1133,16 +1123,17 @@ async function runApprovalTimeouts(limit = 50) {
           AND expires_at <= ${currentTimeExpr}
         ORDER BY expires_at ASC
         LIMIT ?
-    `).all(Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200)));
+    `, [Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200))]);
     for (const row of rows) {
         try {
-            const run = getRun(row.run_id);
+            const run = await getRun(row.run_id);
             if (!run || ['cancelled', 'deleted', 'completed', 'completed_with_errors', 'error'].includes(run.status)) {
-                db.prepare("UPDATE agent_approval_requests SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'pending'")
-                    .run(getBeijingTimestamp(), row.id);
+                await execute("UPDATE agent_approval_requests SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'pending'", [
+                    getBeijingTimestamp(), row.id
+                ]);
                 continue;
             }
-            if (row.request_type === 'delay') completeDelayRequest(row);
+            if (row.request_type === 'delay') await completeDelayRequest(row);
             else await expireApprovalRequest(row);
         } catch (err) {
             logger.warn({ err: err.message, requestId: row.id }, 'Approval timeout processing failed');

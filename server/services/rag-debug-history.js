@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query, queryOne } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 
@@ -38,10 +38,10 @@ function normalizeDebugScores(matches = []) {
     }));
 }
 
-function recordRagDebugQuery(input = {}) {
+async function recordRagDebugQuery(input = {}) {
     const userId = Number(input.userId || input.user_id || 0);
-    const query = String(input.query || '').trim();
-    if (!userId || !query) return null;
+    const queryStr = String(input.query || '').trim();
+    if (!userId || !queryStr) return null;
 
     const result = input.result || {};
     const matches = Array.isArray(result.matches) ? result.matches : [];
@@ -52,31 +52,34 @@ function recordRagDebugQuery(input = {}) {
         .filter(Boolean);
     const matchedCount = scores.filter(item => item.matched).length;
 
+    const params = [
+        userId,
+        queryStr.slice(0, 1000),
+        safeJson(input.scope || result.scope || {}, {}),
+        Math.max(0, Number.parseInt(input.topK ?? input.top_k ?? result.topK ?? 0, 10) || 0),
+        Math.max(0, Number.parseInt(input.candidateLimit ?? input.candidate_limit ?? result.candidateLimit ?? 0, 10) || 0),
+        Number(input.scoreThreshold ?? input.score_threshold ?? result.threshold ?? 0) || 0,
+        Math.max(0, Number.parseInt(result.candidateCount ?? input.candidateCount ?? 0, 10) || 0),
+        matchedCount,
+        safeJson(selectedChunkIds, []),
+        safeJson(scores, []),
+        safeJson(input.queue || {}, {}),
+        Math.max(0, Math.round(Number(input.elapsedMs ?? input.elapsed_ms ?? 0) || 0)),
+        getBeijingTimestamp()
+    ];
+
     try {
-        const info = db.prepare(`
+        const row = await queryOne(`
             INSERT INTO rag_debug_queries (
                 user_id, query, scope_json, top_k, candidate_limit, score_threshold,
                 candidate_count, matched_count, selected_chunk_ids, scores_json,
                 queue_json, elapsed_ms, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            userId,
-            query.slice(0, 1000),
-            safeJson(input.scope || result.scope || {}, {}),
-            Math.max(0, Number.parseInt(input.topK ?? input.top_k ?? result.topK ?? 0, 10) || 0),
-            Math.max(0, Number.parseInt(input.candidateLimit ?? input.candidate_limit ?? result.candidateLimit ?? 0, 10) || 0),
-            Number(input.scoreThreshold ?? input.score_threshold ?? result.threshold ?? 0) || 0,
-            Math.max(0, Number.parseInt(result.candidateCount ?? input.candidateCount ?? 0, 10) || 0),
-            matchedCount,
-            safeJson(selectedChunkIds, []),
-            safeJson(scores, []),
-            safeJson(input.queue || {}, {}),
-            Math.max(0, Math.round(Number(input.elapsedMs ?? input.elapsed_ms ?? 0) || 0)),
-            getBeijingTimestamp()
-        );
-        return db.prepare('SELECT * FROM rag_debug_queries WHERE id = ?').get(info.lastInsertRowid) || null;
+            RETURNING *
+        `, params);
+        return row || null;
     } catch (err) {
-        logger.warn({ err: err.message, userId }, 'RAG debug history write failed');
+        logger.warn({ err: err.message, userId }, 'RAG 调试历史写入失败');
         return null;
     }
 }
@@ -101,18 +104,18 @@ function mapRagDebugRow(row) {
     };
 }
 
-function listRagDebugQueries(userId, options = {}) {
+async function listRagDebugQueries(userId, options = {}) {
     const safeUserId = Number(userId || 0);
     if (!safeUserId) return [];
     const limit = normalizeLimit(options.limit, 20, 100);
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT *
         FROM rag_debug_queries
         WHERE user_id = ?
         ORDER BY created_at DESC, id DESC
         LIMIT ?
-    `).all(safeUserId, limit);
-    return rows.map(mapRagDebugRow);
+    `, [safeUserId, limit]);
+    return (rows || []).map(mapRagDebugRow);
 }
 
 module.exports = {

@@ -39,7 +39,7 @@ test('长期记忆表支持四类记忆并保留来源', async () => {
         assert.equal(result.inserted, true);
     }
 
-    const listed = longTermMemory.listMemories(user.id);
+    const listed = await longTermMemory.listMemories(user.id);
     assert.equal(listed.total, 4);
     assert.deepEqual(new Set(listed.memories.map(memory => memory.type)), new Set(Object.values(longTermMemory.MEMORY_TYPES)));
     assert.deepEqual(listed.memories[0].sourceMessageIds, sourceMessageIds);
@@ -118,12 +118,13 @@ test('长期记忆治理接口支持查看、禁用、删除和关闭自动记�
     await runExpressHandlers(settingsRoute.route.stack.map(layer => layer.handle), settingsReq, settingsRes);
     assert.equal(settingsRes.body.enabled, false);
 
-    assert.equal(longTermMemory.scheduleMemoryExtraction({
+    const extractionRes = await longTermMemory.scheduleMemoryExtraction({
         userId: user.id,
         sessionId: user.sessionId,
         messageIds: [1],
         user
-    }).reason, 'disabled');
+    });
+    assert.equal(extractionRes.reason, 'disabled');
 
     const statusRoute = router.stack.find(layer => layer.route?.path === '/memories/:id/status' && layer.route?.methods?.put);
     const statusReq = { params: { id: inserted.id }, body: { status: 'disabled' }, user };
@@ -306,7 +307,7 @@ test('长期记忆治理接口支持编辑、来源追溯、合并建议和合�
 test('长期记忆产品级治理支持持久化任务、质量摘要、批量状态和导出', async () => {
     const user = createMemoryTestUser('memory_product');
     const messageId = insertSourceMessage(user, 'user', '我更喜欢回答使用要点列表。');
-    const queued = longTermMemory.scheduleMemoryExtraction({
+    const queued = await longTermMemory.scheduleMemoryExtraction({
         userId: user.id,
         sessionId: user.sessionId,
         messageIds: [messageId],

@@ -1,4 +1,5 @@
 const { Buffer } = require('node:buffer');
+const { query } = require('../db/client');
 const { normalizePriceCurrency } = require('./model-costs');
 
 const CRC_TABLE = (() => {
@@ -116,7 +117,7 @@ function buildDateConditions(alias, column, { start, end } = {}) {
     return { conditions, params };
 }
 
-function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters = {} }) {
+async function buildComplianceAuditPackage({ escapeCsvCell, generatedAt, filters = {} }) {
     const manifest = {
         generatedAt,
         filters: {
@@ -139,7 +140,7 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
     const auditWhere = auditDate.conditions;
     const usageWhere = usageDate.conditions;
 
-    const sessions = db.prepare(`
+    const sessions = await query(`
         SELECT s.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, s.title, s.tags, s.is_pinned, s.is_archived,
                s.deleted_at, s.created_at, s.updated_at,
                (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count,
@@ -149,18 +150,18 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
         ${sessionWhere.length ? `WHERE ${sessionWhere.join(' AND ')}` : ''}
         ORDER BY COALESCE(s.updated_at, s.created_at) DESC
         LIMIT 50000
-    `).all(...sessionDate.params);
+    `, sessionDate.params);
 
-    const audits = db.prepare(`
+    const audits = await query(`
         SELECT al.id, al.timestamp, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, al.ip_address, al.action, al.details
         FROM audit_logs al
         LEFT JOIN users u ON u.id = al.user_id
         ${auditWhere.length ? `WHERE ${auditWhere.join(' AND ')}` : ''}
         ORDER BY al.timestamp DESC
         LIMIT 50000
-    `).all(...auditDate.params);
+    `, auditDate.params);
 
-    const usage = db.prepare(`
+    const usage = await query(`
         SELECT usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name AS model_name,
                usage.role, usage.token_count, usage.input_tokens, usage.output_tokens, usage.usage_source
         FROM (
@@ -181,9 +182,9 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
         ${usageWhere.length ? `WHERE ${usageWhere.join(' AND ')}` : ''}
         ORDER BY usage.created_at DESC
         LIMIT 50000
-    `).all(...usageDate.params);
+    `, usageDate.params);
 
-    const modelCosts = db.prepare(`
+    const modelCosts = await query(`
         SELECT md.id, md.name, md.model_name, md.price_currency,
                COALESCE(md.input_price_per_million, 0) AS input_price_per_million,
                COALESCE(md.output_price_per_million, 0) AS output_price_per_million,
@@ -213,7 +214,7 @@ function buildComplianceAuditPackage({ db, escapeCsvCell, generatedAt, filters =
         ) usage ON usage.model_id = md.id ${usageWhere.length ? `AND ${usageWhere.join(' AND ')}` : ''}
         GROUP BY md.id
         ORDER BY estimated_cost DESC, total_tokens DESC
-    `).all(...usageDate.params);
+    `, usageDate.params);
 
     const files = [
         {

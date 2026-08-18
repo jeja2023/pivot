@@ -1,4 +1,4 @@
-const { db } = require('../db');
+const { query, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { removeAttachmentFiles } = require('../security');
 
@@ -13,27 +13,27 @@ function normalizeBatchSize(limit) {
     return Math.min(value, 1000);
 }
 
-function cleanupPurgedAttachmentRows(rows) {
+async function cleanupPurgedAttachmentRows(rows) {
     if (rows.length === 0) return 0;
-    const clearAttachment = db.prepare(`
+    const ids = rows.map(r => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await execute(`
         UPDATE attachments
         SET file_path = '',
             file_size = 0,
             access_token = NULL,
             expires_at = NULL
-        WHERE id = ?
-    `);
-    const tx = db.transaction((items) => {
-        for (const item of items) clearAttachment.run(item.id);
-    });
-    tx(rows);
+        WHERE id IN (${placeholders})
+    `, ids);
     return rows.length;
 }
 
-function cleanupPurgedKnowledgeDocs(rows) {
+async function cleanupPurgedKnowledgeDocs(rows) {
     if (rows.length === 0) return 0;
-    const deleteChunks = db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?');
-    const clearDoc = db.prepare(`
+    const ids = rows.map(r => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await execute(`DELETE FROM knowledge_chunks WHERE doc_id IN (${placeholders})`, ids);
+    await execute(`
         UPDATE knowledge_docs
         SET status = 'purged',
             is_enabled = 0,
@@ -43,25 +43,16 @@ function cleanupPurgedKnowledgeDocs(rows) {
             source_path = '',
             source_size = 0,
             error_message = ''
-        WHERE id = ?
-    `);
-    const tx = db.transaction((items) => {
-        for (const item of items) {
-            deleteChunks.run(item.id);
-            clearDoc.run(item.id);
-        }
-    });
-    tx(rows);
+        WHERE id IN (${placeholders})
+    `, ids);
     return rows.length;
 }
 
-function cleanupPurgedMessages(rows) {
+async function cleanupPurgedMessages(rows) {
     if (rows.length === 0) return 0;
-    const deleteMessage = db.prepare('DELETE FROM messages WHERE id = ?');
-    const tx = db.transaction((items) => {
-        for (const item of items) deleteMessage.run(item.id);
-    });
-    tx(rows);
+    const ids = rows.map(r => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await execute(`DELETE FROM messages WHERE id IN (${placeholders})`, ids);
     return rows.length;
 }
 
@@ -74,53 +65,51 @@ function filterRowsWithRemovedFiles(rows, cleanupResults) {
     return rows.filter(row => !failedIds.has(row.id));
 }
 
-function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
+async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
     const safeRetentionDays = normalizeRetentionDays(retentionDays ?? process.env.STORAGE_GC_RETENTION_DAYS);
     const safeLimit = normalizeBatchSize(limit ?? process.env.STORAGE_GC_BATCH_SIZE);
-    if (!db) return { retentionDays: safeRetentionDays, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0 };
-    const cutoffModifier = `-${safeRetentionDays} days`;
 
-    const attachments = db.prepare(`
+    const attachments = await query(`
         SELECT id, file_path
         FROM attachments
         WHERE deleted_at IS NOT NULL
-          AND deleted_at < datetime('now', '+8 hours', ?)
+          AND deleted_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)
           AND file_path IS NOT NULL
           AND file_path != ''
         ORDER BY deleted_at ASC
         LIMIT ?
-    `).all(cutoffModifier, safeLimit);
+    `, [String(safeRetentionDays), safeLimit]);
 
-    const knowledgeDocs = db.prepare(`
+    const knowledgeDocs = await query(`
         SELECT id, source_path AS file_path
         FROM knowledge_docs
         WHERE deleted_at IS NOT NULL
-          AND deleted_at < datetime('now', '+8 hours', ?)
+          AND deleted_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)
           AND (
               source_path IS NOT NULL AND source_path != ''
               OR EXISTS (SELECT 1 FROM knowledge_chunks c WHERE c.doc_id = knowledge_docs.id)
           )
         ORDER BY deleted_at ASC
         LIMIT ?
-    `).all(cutoffModifier, safeLimit);
+    `, [String(safeRetentionDays), safeLimit]);
 
-    const messages = db.prepare(`
+    const messages = await query(`
         SELECT id
         FROM messages
         WHERE deleted_at IS NOT NULL
-          AND deleted_at < datetime('now', '+8 hours', ?)
+          AND deleted_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)
         ORDER BY deleted_at ASC
         LIMIT ?
-    `).all(cutoffModifier, safeLimit);
+    `, [String(safeRetentionDays), safeLimit]);
 
-    const attachmentCleanupResults = removeAttachmentFiles(attachments);
-    const knowledgeDocCleanupResults = removeAttachmentFiles(knowledgeDocs);
-    const purgeableAttachments = filterRowsWithRemovedFiles(attachments, attachmentCleanupResults);
-    const purgeableKnowledgeDocs = filterRowsWithRemovedFiles(knowledgeDocs, knowledgeDocCleanupResults);
+    const attachmentCleanupResults = removeAttachmentFiles(attachments || []);
+    const knowledgeDocCleanupResults = removeAttachmentFiles(knowledgeDocs || []);
+    const purgeableAttachments = filterRowsWithRemovedFiles(attachments || [], attachmentCleanupResults);
+    const purgeableKnowledgeDocs = filterRowsWithRemovedFiles(knowledgeDocs || [], knowledgeDocCleanupResults);
 
-    const attachmentRows = cleanupPurgedAttachmentRows(purgeableAttachments);
-    const knowledgeDocRows = cleanupPurgedKnowledgeDocs(purgeableKnowledgeDocs);
-    const messageRows = cleanupPurgedMessages(messages);
+    const attachmentRows = await cleanupPurgedAttachmentRows(purgeableAttachments);
+    const knowledgeDocRows = await cleanupPurgedKnowledgeDocs(purgeableKnowledgeDocs);
+    const messageRows = await cleanupPurgedMessages(messages || []);
 
     if (attachmentRows > 0 || knowledgeDocRows > 0 || messageRows > 0) {
         logger.info({

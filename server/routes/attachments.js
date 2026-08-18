@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { extractDocumentText, isPasswordError, renderPdfPages, truncateExtractedText } = require('../document-text');
@@ -80,13 +80,13 @@ function createAttachmentsRouter({
 }) {
     const router = express.Router();
 
-    router.get('/uploads/:userId/:sessionId/:filename', (req, res, next) => {
+    router.get('/uploads/:userId/:sessionId/:filename', asyncHandler(async (req, res, next) => {
         const token = req.query.token;
         if (token) {
             // 尝试通过 URL 中的 token 参数验证 (且校验过期时间)
             const requestedUserId = parseInt(req.params.userId, 10);
             const expectedPath = `uploads/${requestedUserId}/${req.params.sessionId}/${req.params.filename}`;
-            const attachment = db.prepare(`
+            const attachment = await queryOne(`
                 SELECT user_id FROM attachments
                 WHERE access_token = ?
                   AND user_id = ?
@@ -94,9 +94,9 @@ function createAttachmentsRouter({
                   AND file_path = ?
                   AND deleted_at IS NULL
                   AND (expires_at IS NULL OR expires_at > ?)
-            `).get(token, requestedUserId, req.params.sessionId, expectedPath, getBeijingTimestamp());
+            `, [token, requestedUserId, req.params.sessionId, expectedPath, getBeijingTimestamp()]);
             if (attachment) {
-                const user = db.prepare('SELECT * FROM users WHERE id = ?').get(attachment.user_id);
+                const user = await queryOne('SELECT * FROM users WHERE id = ?', [attachment.user_id]);
                 if (user && user.status !== 'disabled') {
                     req.user = user; // 临时赋予权限
                     return next();
@@ -106,7 +106,7 @@ function createAttachmentsRouter({
 
         // 如果没有 token 或 token 验证失败，尝试通过 Cookie/Header 验证 (例如管理员访问)
         authMiddleware(req, res, next);
-    }, asyncHandler(async (req, res) => {
+    }), asyncHandler(async (req, res) => {
         const requestedUserId = parseInt(req.params.userId, 10);
         const { sessionId, filename } = req.params;
 
@@ -115,8 +115,9 @@ function createAttachmentsRouter({
         }
 
         const expectedPath = `uploads/${requestedUserId}/${sessionId}/${filename}`;
-        const attachment = db.prepare('SELECT id, deleted_at FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?')
-            .get(requestedUserId, sessionId, expectedPath);
+        const attachment = await queryOne('SELECT id, deleted_at FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?', [
+            requestedUserId, sessionId, expectedPath
+        ]);
         if (!attachment || (attachment.deleted_at && !isSuperAdmin(req.user))) {
             return res.status(403).json({ error: '附件归属校验失败' });
         }
@@ -147,7 +148,7 @@ function createAttachmentsRouter({
         const mimeType = req.file.mimetype;
         const password = String(req.body?.password || '').trim() || undefined;
 
-        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
+        const session = await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sessionId, userId]);
         if (!session) {
             removeTempUploadFile(req.file);
             return res.status(404).json({ error: '会话不存在或无权上传附件' });
@@ -168,6 +169,8 @@ function createAttachmentsRouter({
         const relativePath = toProjectRelativePath(finalPath);
         const publicUrl = encodeAttachmentUrl(relativePath);
         const accessToken = crypto.randomBytes(24).toString('base64url');
+        const now = getBeijingTimestamp();
+        const expiresAt = getBeijingTimestamp(Date.now() + 7 * 24 * 60 * 60 * 1000);
         let extractedText = null;
         const visionAttachments = [];
 
@@ -208,10 +211,10 @@ function createAttachmentsRouter({
                             fs.writeFileSync(pagePath, page.data);
                             const pageRelativePath = toProjectRelativePath(pagePath);
                             const pageUrl = encodeAttachmentUrl(pageRelativePath, pageToken);
-                            db.prepare(`
+                            await execute(`
                                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
-                            `).run(userId, sessionId, `${originalName} 第 ${page.page} 页`, pageRelativePath, page.mimeType, page.data.length, pageToken, getBeijingTimestamp(), getBeijingTimestamp());
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `, [userId, sessionId, `${originalName} 第 ${page.page} 页`, pageRelativePath, page.mimeType, page.data.length, pageToken, expiresAt, now]);
                             visionAttachments.push({
                                 name: `${originalName} 第 ${page.page} 页`,
                                 url: pageUrl,
@@ -226,10 +229,10 @@ function createAttachmentsRouter({
                 }
             }
 
-            db.prepare(`
+            await execute(`
                 INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token, expires_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, '+7 days'), ?)
-            `).run(userId, sessionId, originalName, relativePath, imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, getBeijingTimestamp(), getBeijingTimestamp());
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [userId, sessionId, originalName, relativePath, imageOutput ? 'image/jpeg' : mimeType, req.file.size, accessToken, expiresAt, now]);
 
             logAction(req, '上传附件', `上传附件: ${originalName} (会话: ${sessionId})`);
             clearDirSizeCache();
@@ -266,7 +269,7 @@ function createAttachmentsRouter({
             where += ' AND a.file_name LIKE ?';
             params.push(`%${keyword}%`);
         }
-        const data = db.prepare(`
+        const rows = await query(`
             SELECT a.*, s.title AS session_title, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname
             FROM attachments a
             LEFT JOIN sessions s ON s.id = a.session_id
@@ -274,18 +277,20 @@ function createAttachmentsRouter({
             ${where}
             ORDER BY a.created_at DESC
             LIMIT ? OFFSET ?
-        `).all(...params, limit, offset).map(item => ({
+        `, [...params, limit, offset]);
+        const data = rows.map(item => ({
             ...item,
             url: encodeAttachmentUrl(item.file_path, item.access_token)
         }));
-        const total = db.prepare(`SELECT COUNT(*) AS count FROM attachments a ${where}`).get(...params).count;
+        const countRow = await queryOne(`SELECT COUNT(*) AS count FROM attachments a ${where}`, params);
+        const total = Number(countRow?.count || 0);
         res.json({ data, total, hasMore: offset + data.length < total, isSuperAdmin: isSuperAdmin(req.user) });
     }));
 
     router.delete('/api/attachments/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const attachment = db.prepare('SELECT * FROM attachments WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(req.params.id, req.user.id);
+        const attachment = await queryOne('SELECT * FROM attachments WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [req.params.id, req.user.id]);
         if (!attachment) return res.status(404).json({ error: '附件不存在' });
-        db.prepare('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ?').run(getBeijingTimestamp(), req.params.id, req.user.id);
+        await execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ?', [getBeijingTimestamp(), req.params.id, req.user.id]);
         logAction(req, '删除附件', `附件: ${attachment.file_name}`);
         res.json({ success: true });
     }));

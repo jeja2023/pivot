@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('./document-processing/text-extraction');
 const { getKnowledgeLimits } = require('./resource-limits');
-const { db } = require('../db');
+const { query, queryOne, execute, transaction } = require('../db/client');
+const { orderNocase } = require('../db/dialect');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
@@ -120,11 +121,12 @@ async function createKnowledgeCollection({ userId, name, description = '' }) {
     if (existing) return existing;
 
     const now = getBeijingTimestamp();
-    const info = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO knowledge_collections (user_id, name, description, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-    `).run(userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now);
-    return await getKnowledgeCollectionForUser(info.lastInsertRowid, userId);
+        RETURNING id
+    `, [userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now]);
+    return await getKnowledgeCollectionForUser(row?.id, userId);
 }
 
 async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
@@ -140,67 +142,68 @@ async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
             allowed_units: collection.allowed_units || '',
             allowed_user_ids: collection.allowed_user_ids || ''
         },
-        ...listShareTargets(user, { excludeUserId: collection.user_id })
+        ...(await listShareTargets(user, { excludeUserId: collection.user_id }))
     };
 }
 
-function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
+async function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (!normalizedId) return null;
-    const current = db.prepare(`
+    const current = await queryOne(`
         SELECT * FROM knowledge_collections
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).get(normalizedId, normalizeKnowledgeUser(user).id);
+    `, [normalizedId, normalizeKnowledgeUser(user).id]);
     if (!current) return null;
     const settings = normalizeShareSettings(body, user, current);
-    settings.allowedUserIds = filterExistingShareUserIds(settings.allowedUserIds, { excludeUserId: current.user_id });
-    db.prepare(`
+    settings.allowedUserIds = await filterExistingShareUserIds(settings.allowedUserIds, { excludeUserId: current.user_id });
+    await execute(`
         UPDATE knowledge_collections
         SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id);
+    `, [settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id]);
     clearRagCacheForUser(normalizeKnowledgeUser(user).id);
-    return getKnowledgeCollectionForUser(normalizedId, user);
+    return await getKnowledgeCollectionForUser(normalizedId, user);
 }
 
 async function createKnowledgeTag({ userId, tag }) {
     const safeTags = await upsertKnowledgeTags(userId, [tag]);
     if (!safeTags.length) return null;
-    return listKnowledgeTags(userId).find(item => item.tag === safeTags[0]) || { tag: safeTags[0], doc_count: 0 };
+    const allTags = await listKnowledgeTags(userId);
+    return allTags.find(item => item.tag === safeTags[0]) || { tag: safeTags[0], doc_count: 0 };
 }
 
-function filterExistingKnowledgeTags(userId, tags = []) {
+async function filterExistingKnowledgeTags(userId, tags = []) {
     const safeTags = parseKnowledgeTags(tags);
     if (!safeTags.length) return [];
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT tag
         FROM knowledge_tags
         WHERE user_id = ?
           AND deleted_at IS NULL
           AND tag IN (${safeTags.map(() => '?').join(',')})
-    `).all(userId, ...safeTags);
+    `, [userId, ...safeTags]);
     const existing = new Set(rows.map(row => row.tag));
     return safeTags.filter(tag => existing.has(tag));
 }
 
-function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
+async function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
-    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
     if (!doc) return null;
-    const safeTags = filterExistingKnowledgeTags(userId, tags);
+    const safeTags = await filterExistingKnowledgeTags(userId, tags);
     const now = getBeijingTimestamp();
-    const transaction = db.transaction(() => {
-        db.prepare('DELETE FROM knowledge_doc_tags WHERE doc_id = ? AND user_id = ?').run(normalizedDocId, userId);
-        const insert = db.prepare(`
-            INSERT OR IGNORE INTO knowledge_doc_tags (user_id, doc_id, tag, created_at)
-            VALUES (?, ?, ?, ?)
-        `);
-        safeTags.forEach(tag => insert.run(userId, normalizedDocId, tag, now));
-        db.prepare('UPDATE knowledge_docs SET updated_at = ? WHERE id = ? AND user_id = ?')
-            .run(now, normalizedDocId, userId);
+    await transaction(async (trx) => {
+        await trx.execute('DELETE FROM knowledge_doc_tags WHERE doc_id = ? AND user_id = ?', [normalizedDocId, userId]);
+        for (const tag of safeTags) {
+            await trx.execute(`
+                INSERT INTO knowledge_doc_tags (user_id, doc_id, tag, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+            `, [userId, normalizedDocId, tag, now]);
+        }
+        await trx.execute('UPDATE knowledge_docs SET updated_at = ? WHERE id = ? AND user_id = ?', [now, normalizedDocId, userId]);
     });
-    transaction();
     clearRagCacheForUser(userId);
     return safeTags;
 }
@@ -237,14 +240,14 @@ function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_doc
     };
 }
 
-function listKnowledgeTags(user, { collectionId = null } = {}) {
+async function listKnowledgeTags(user, { collectionId = null } = {}) {
     const normalizedUser = normalizeKnowledgeUser(user);
     const normalizedCollectionId = normalizeKnowledgeCollectionId(collectionId);
     if (normalizedCollectionId) {
-        const collection = getKnowledgeCollectionForUser(normalizedCollectionId, normalizedUser);
+        const collection = await getKnowledgeCollectionForUser(normalizedCollectionId, normalizedUser);
         if (!collection) return [];
         const access = buildDocumentAccessFilter(normalizedUser, 'd', 'c');
-        return db.prepare(`
+        const rows = await query(`
             SELECT t.tag, COUNT(DISTINCT t.doc_id) AS doc_count
             FROM knowledge_doc_tags t
             JOIN knowledge_docs d ON d.id = t.doc_id AND d.user_id = t.user_id
@@ -252,15 +255,16 @@ function listKnowledgeTags(user, { collectionId = null } = {}) {
             WHERE d.deleted_at IS NULL AND ${access.sql}
               AND d.collection_id = ?
             GROUP BY t.tag
-            ORDER BY doc_count DESC, t.tag COLLATE NOCASE ASC
-        `).all(...access.params, normalizedCollectionId).map(row => ({
+            ORDER BY doc_count DESC, ${orderNocase('t.tag')} ASC
+        `, [...access.params, normalizedCollectionId]);
+        return rows.map(row => ({
             tag: row.tag,
             doc_count: Number(row.doc_count || 0)
         }));
     }
 
     const access = buildDocumentAccessFilter(normalizedUser, 'd', 'c');
-    return db.prepare(`
+    const rows = await query(`
         WITH tag_names AS (
             SELECT tag
             FROM knowledge_tags
@@ -283,8 +287,9 @@ function listKnowledgeTags(user, { collectionId = null } = {}) {
         SELECT tag_names.tag, COALESCE(tag_counts.doc_count, 0) AS doc_count
         FROM tag_names
         LEFT JOIN tag_counts ON tag_counts.tag = tag_names.tag
-        ORDER BY doc_count DESC, tag_names.tag COLLATE NOCASE ASC
-    `).all(normalizedUser.id, ...access.params, ...access.params).map(row => ({
+        ORDER BY doc_count DESC, ${orderNocase('tag_names.tag')} ASC
+    `, [normalizedUser.id, ...access.params, ...access.params]);
+    return rows.map(row => ({
         tag: row.tag,
         doc_count: Number(row.doc_count || 0)
     }));
@@ -333,27 +338,28 @@ async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
 async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {
     const now = getBeijingTimestamp();
     const resolvedCollectionId = await resolveKnowledgeCollectionId({ userId, collectionId });
-    const fileInfo = db.prepare(`
+    const row = await queryOne(`
         INSERT INTO knowledge_docs (
             user_id, collection_id, name, status, chunk_count, indexed_chunks, progress, error_message, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, resolvedCollectionId, file.originalname, 'processing', 0, 0, 0, '', now, now);
-    const docId = fileInfo.lastInsertRowid;
+        RETURNING id
+    `, [userId, resolvedCollectionId, file.originalname, 'processing', 0, 0, 0, '', now, now]);
+    const docId = row?.id;
     const safeTags = parseKnowledgeTags(tags);
-    const assignedTags = safeTags.length ? setKnowledgeDocumentTags({ docId, userId, tags: safeTags }) : [];
+    const assignedTags = safeTags.length ? await setKnowledgeDocumentTags({ docId, userId, tags: safeTags }) : [];
 
     try {
         const savedFile = persistUploadedKnowledgeFile(file, userId, docId);
-        db.prepare(`
+        await execute(`
             UPDATE knowledge_docs
             SET source_path = ?, source_size = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `).run(savedFile.sourcePath, savedFile.sourceSize, getBeijingTimestamp(), docId, userId);
+        `, [savedFile.sourcePath, savedFile.sourceSize, getBeijingTimestamp(), docId, userId]);
         clearRagCacheForUser(userId);
         return { docId, collectionId: resolvedCollectionId, tags: assignedTags, ...savedFile };
     } catch (e) {
-        markKnowledgeDocumentError({ docId, userId, error: e });
+        await markKnowledgeDocumentError({ docId, userId, error: e });
         throw e;
     }
 }
@@ -362,11 +368,11 @@ async function getKnowledgeDocumentForUser(docId, user, { includeDeleted = false
     return await knowledgeRepository.getDocumentForUser(docId, user, { includeDeleted });
 }
 
-function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive = false } = {}) {
+async function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive = false } = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const deletedFilter = includeActive ? '' : 'WHERE d.deleted_at IS NOT NULL';
-    const data = db.prepare(`
+    const data = await query(`
         SELECT
             d.id,
             d.user_id,
@@ -391,41 +397,45 @@ function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeActive 
         ${deletedFilter}
         ORDER BY COALESCE(d.deleted_at, d.updated_at, d.created_at) DESC
         LIMIT ? OFFSET ?
-    `).all(safeLimit, safeOffset);
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM knowledge_docs d ${deletedFilter}`).get().count;
+    `, [safeLimit, safeOffset]);
+    const countRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_docs d ${deletedFilter}`);
+    const total = Number(countRow?.count || 0);
     return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
-function markKnowledgeDocumentProcessing({ docId, userId }) {
+async function markKnowledgeDocumentProcessing({ docId, userId }) {
     const now = getBeijingTimestamp();
-    return db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET status = ?, chunk_count = 0, indexed_chunks = 0, progress = 0, error_message = '', updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run('processing', now, docId, userId).changes > 0;
+    `, ['processing', now, docId, userId]);
+    return Number(result || 0) > 0;
 }
 
-function markKnowledgeDocumentReady({ docId, userId, chunkCount }) {
+async function markKnowledgeDocumentReady({ docId, userId, chunkCount }) {
     const now = getBeijingTimestamp();
-    return db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET status = ?, chunk_count = ?, indexed_chunks = ?, progress = 100, error_message = '', processed_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run('ready', chunkCount, chunkCount, now, now, docId, userId).changes > 0;
+    `, ['ready', chunkCount, chunkCount, now, now, docId, userId]);
+    return Number(result || 0) > 0;
 }
 
-function markKnowledgeDocumentError({ docId, userId, error }) {
+async function markKnowledgeDocumentError({ docId, userId, error }) {
     const now = getBeijingTimestamp();
-    return db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET status = ?, progress = 0, error_message = ?, processed_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run('error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId).changes > 0;
+    `, ['error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId]);
+    return Number(result || 0) > 0;
 }
 
 async function processKnowledgeDocument({ docId, userId, user = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
-    const doc = normalizedDocId ? getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
+    const doc = normalizedDocId ? await getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
     if (!doc) {
         const error = new Error('Knowledge document not found');
         error.statusCode = 404;
@@ -435,36 +445,36 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     const sourcePath = getKnowledgeSourcePath(doc.source_path);
     if (!sourcePath || !fs.existsSync(sourcePath)) {
         const error = new Error('原始文件不存在，无法重新索引，请重新上传文档');
-        markKnowledgeDocumentError({ docId: normalizedDocId, userId, error });
+        await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error });
         throw error;
     }
 
-    markKnowledgeDocumentProcessing({ docId: normalizedDocId, userId });
+    await markKnowledgeDocumentProcessing({ docId: normalizedDocId, userId });
     clearRagCacheForUser(userId);
-    clearKnowledgeGraphForDocument(normalizedDocId);
-    db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(normalizedDocId);
+    await clearKnowledgeGraphForDocument(normalizedDocId);
+    await execute('DELETE FROM knowledge_chunks WHERE doc_id = ?', [normalizedDocId]);
 
     try {
         const text = await readKnowledgeDocumentFromPath(sourcePath, doc.name);
         const chunkCount = await indexDocumentChunks(normalizedDocId, text, {
             userId,
             user,
-            onProgress: ({ indexed, total }) => {
+            onProgress: async ({ indexed, total }) => {
                 const now = getBeijingTimestamp();
                 const progress = total > 0 ? Math.min(Math.floor((indexed / total) * 100), 99) : 0;
-                db.prepare(`
+                await execute(`
                     UPDATE knowledge_docs
                     SET indexed_chunks = ?, chunk_count = ?, progress = ?, updated_at = ?
                     WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-                `).run(indexed, total, progress, now, normalizedDocId, userId);
+                `, [indexed, total, progress, now, normalizedDocId, userId]);
             }
         });
-        markKnowledgeDocumentReady({ docId: normalizedDocId, userId, chunkCount });
+        await markKnowledgeDocumentReady({ docId: normalizedDocId, userId, chunkCount });
         clearRagCacheForUser(userId);
         return { docId: normalizedDocId, chunkCount };
     } catch (e) {
-        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(normalizedDocId);
-        markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e });
+        await execute('DELETE FROM knowledge_chunks WHERE doc_id = ?', [normalizedDocId]);
+        await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e });
         clearRagCacheForUser(userId);
         throw e;
     }
@@ -484,14 +494,15 @@ async function getKnowledgeDocumentDetail({ docId, userId, user = null, limit = 
     return { doc: { ...doc, tags }, chunks: chunks || [], totalChunks: totalChunks || 0, limit: safeLimit, offset: safeOffset };
 }
 
-function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
+async function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return false;
-    const changed = db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET is_enabled = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(enabled ? 1 : 0, getBeijingTimestamp(), normalizedDocId, userId).changes > 0;
+    `, [enabled ? 1 : 0, getBeijingTimestamp(), normalizedDocId, userId]);
+    const changed = Number(result || 0) > 0;
     if (changed) clearRagCacheForUser(userId);
     return changed;
 }
@@ -501,21 +512,21 @@ function normalizeDocIds(docIds) {
     return [...new Set(docIds.map(normalizeKnowledgeDocId).filter(Boolean))].slice(0, 100);
 }
 
-function batchDeleteKnowledgeDocuments({ userId, docIds }) {
+async function batchDeleteKnowledgeDocuments({ userId, docIds }) {
     const ids = normalizeDocIds(docIds);
     let deleted = 0;
     for (const id of ids) {
-        if (deleteKnowledgeDocument({ docId: id, userId })) deleted += 1;
+        if (await deleteKnowledgeDocument({ docId: id, userId })) deleted += 1;
     }
     return { requested: ids.length, deleted };
 }
 
-function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
+async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     const ids = normalizeDocIds(docIds);
     let scheduled = 0;
     let skipped = 0;
     for (const id of ids) {
-        const doc = getKnowledgeDocumentForUser(id, userId);
+        const doc = await getKnowledgeDocumentForUser(id, userId);
         if (!doc || !doc.source_path) {
             skipped += 1;
             continue;
@@ -528,14 +539,16 @@ function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     return { requested: ids.length, scheduled, skipped };
 }
 
-function recordRagFeedback({ userId, query, chunkId, docName, score, helpful, note }) {
-    const safeQuery = String(query || '').trim().slice(0, 1000);
+async function recordRagFeedback({ userId, query: userQuery, chunkId, docName, score, helpful, note }) {
+    const safeQuery = String(userQuery || '').trim().slice(0, 1000);
     if (!safeQuery) return null;
     const safeChunkId = normalizeKnowledgeDocId(chunkId);
-    const info = db.prepare(`
+    const now = getBeijingTimestamp();
+    const row = await queryOne(`
         INSERT INTO rag_feedback (user_id, query, chunk_id, doc_name, score, helpful, note, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+        RETURNING id
+    `, [
         userId,
         safeQuery,
         safeChunkId,
@@ -543,27 +556,28 @@ function recordRagFeedback({ userId, query, chunkId, docName, score, helpful, no
         Number.isFinite(Number(score)) ? Number(score) : null,
         helpful ? 1 : 0,
         String(note || '').slice(0, 1000),
-        getBeijingTimestamp()
-    );
-    return { id: info.lastInsertRowid };
+        now
+    ]);
+    return { id: row?.id };
 }
 
-function getRagFeedbackSummary(userId) {
-    const rows = db.prepare(`
+async function getRagFeedbackSummary(userId) {
+    const rows = await query(`
         SELECT doc_name, helpful, COUNT(*) AS count
         FROM rag_feedback
         WHERE user_id = ?
         GROUP BY doc_name, helpful
-    `).all(userId);
+    `, [userId]);
     const summary = { helpful: 0, unhelpful: 0, byDoc: [] };
     const byDoc = new Map();
     for (const row of rows) {
         const count = Number(row.count || 0);
-        if (row.helpful) summary.helpful += count;
+        const isHelpful = row.helpful === true || Number(row.helpful) === 1 || String(row.helpful) === '1' || String(row.helpful).toLowerCase() === 'true';
+        if (isHelpful) summary.helpful += count;
         else summary.unhelpful += count;
         const name = row.doc_name || '未知文档';
         const item = byDoc.get(name) || { docName: name, helpful: 0, unhelpful: 0 };
-        if (row.helpful) item.helpful += count;
+        if (isHelpful) item.helpful += count;
         else item.unhelpful += count;
         byDoc.set(name, item);
     }
@@ -578,15 +592,14 @@ async function setKnowledgeDocumentCollection({ docId, userId, collectionId = nu
     if (!doc) return null;
     const resolvedCollectionId = await resolveKnowledgeCollectionId({ userId, collectionId });
     const now = getBeijingTimestamp();
-    const changed = db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET collection_id = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(resolvedCollectionId, now, normalizedDocId, userId).changes > 0;
-    if (!changed) return null;
+    `, [resolvedCollectionId, now, normalizedDocId, userId]);
+    if (Number(result || 0) <= 0) return null;
     if (resolvedCollectionId) {
-        db.prepare('UPDATE knowledge_collections SET updated_at = ? WHERE id = ? AND user_id = ?')
-            .run(now, resolvedCollectionId, userId);
+        await execute('UPDATE knowledge_collections SET updated_at = ? WHERE id = ? AND user_id = ?', [now, resolvedCollectionId, userId]);
     }
     clearRagCacheForUser(userId);
     return await getKnowledgeDocumentForUser(normalizedDocId, userId);
@@ -641,7 +654,7 @@ async function getKnowledgeQualityReport(userId) {
     const normalized = normalizeKnowledgeUser(userId);
     const overview = (await knowledgeRepository.getDocumentQualityOverview(normalized.id)) || {};
     const problemDocs = (await knowledgeRepository.listProblemDocuments(normalized.id)) || [];
-    const feedback = getRagFeedbackSummary(normalized.id);
+    const feedback = await getRagFeedbackSummary(normalized.id);
     const graph = getGraphSummary(userId);
     const signals = buildKnowledgeQualitySignals({ overview, feedback, graph });
     const recommendations = [];
@@ -745,13 +758,16 @@ function getKnowledgeIndexQueueStatus(userId = null) {
     };
 }
 
-function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
+async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
     const normalized = normalizeKnowledgeUser(userId);
     const scopeFilter = buildKnowledgeDocumentScopeFilter(scope, 'd');
     const access = buildDocumentAccessFilter(normalized, 'd', 'c');
     const fromSql = 'FROM knowledge_docs d LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL';
     const wherePrefix = `${access.sql} AND d.deleted_at IS NULL`;
-    const rows = db.prepare(`
+    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const isEnabledCond = 'COALESCE(d.is_enabled, 1) != 0';
+
+    const rows = await query(`
         SELECT
             d.status,
             COUNT(*) AS count,
@@ -761,8 +777,9 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         WHERE ${wherePrefix}
           ${scopeFilter.sql}
         GROUP BY d.status
-    `).all(...access.params, ...scopeFilter.params);
-    const retryableErrors = db.prepare(`
+    `, [...access.params, ...scopeFilter.params]);
+
+    const retryableErrorsRow = await queryOne(`
         SELECT COUNT(*) AS count
         ${fromSql}
         WHERE ${wherePrefix}
@@ -770,16 +787,20 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
           AND d.source_path IS NOT NULL
           AND d.source_path != ''
           ${scopeFilter.sql}
-    `).get(...access.params, ...scopeFilter.params).count;
-    const readyEnabled = db.prepare(`
+    `, [...access.params, ...scopeFilter.params]);
+    const retryableErrors = Number(retryableErrorsRow?.count || 0);
+
+    const readyEnabledRow = await queryOne(`
         SELECT COUNT(*) AS count
         ${fromSql}
         WHERE ${wherePrefix}
           AND d.status = 'ready'
-          AND COALESCE(d.is_enabled, 1) = 1
+          AND ${isEnabledCond}
           ${scopeFilter.sql}
-    `).get(...access.params, ...scopeFilter.params).count;
-    const lastError = db.prepare(`
+    `, [...access.params, ...scopeFilter.params]);
+    const readyEnabled = Number(readyEnabledRow?.count || 0);
+
+    const lastError = await queryOne(`
         SELECT d.id, d.name, d.error_message, d.updated_at
         ${fromSql}
         WHERE ${wherePrefix}
@@ -789,7 +810,7 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
           ${scopeFilter.sql}
         ORDER BY COALESCE(d.updated_at, d.processed_at, d.created_at) DESC
         LIMIT 1
-    `).get(...access.params, ...scopeFilter.params) || null;
+    `, [...access.params, ...scopeFilter.params]);
 
     const summary = {
         total: 0,
@@ -821,8 +842,8 @@ function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
     return summary;
 }
 
-function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = null }) {
-    const rows = db.prepare(`
+async function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = null }) {
+    const rows = await query(`
         SELECT id
         FROM knowledge_docs
         WHERE user_id = ?
@@ -832,7 +853,7 @@ function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = nu
           AND source_path != ''
         ORDER BY COALESCE(updated_at, processed_at, created_at) DESC
         LIMIT ?
-    `).all(userId, Math.max(Number.parseInt(limit, 10) || 20, 1));
+    `, [userId, Math.max(Number.parseInt(limit, 10) || 20, 1)]);
 
     let scheduled = 0;
     let alreadyProcessing = 0;
@@ -849,22 +870,21 @@ function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, user = nu
     };
 }
 
-function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
-    if (!db) return;
-    const rows = db.prepare(`
+async function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
+    const rows = await query(`
         SELECT id, user_id, source_path
         FROM knowledge_docs
         WHERE status = 'processing'
           AND deleted_at IS NULL
         ORDER BY COALESCE(updated_at, created_at) ASC
         LIMIT ?
-    `).all(Math.max(Number.parseInt(limit, 10) || 50, 1));
+    `, [Math.max(Number.parseInt(limit, 10) || 50, 1)]);
     let scheduled = 0;
     let failed = 0;
 
     for (const row of rows) {
         if (!row.source_path) {
-            markKnowledgeDocumentError({
+            await markKnowledgeDocumentError({
                 docId: row.id,
                 userId: row.user_id,
                 error: new Error('索引任务中断，原始文件缺失，请重新上传文档')
@@ -882,23 +902,25 @@ function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
     return { total: rows.length, scheduled, failed };
 }
 
-function deleteKnowledgeDocument({ docId, userId }) {
+async function deleteKnowledgeDocument({ docId, userId }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return false;
-    const doc = getKnowledgeDocumentForUser(normalizedDocId, userId);
+    const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
     if (!doc) return false;
 
     const queueKey = `${userId}:${normalizedDocId}`;
     if (pendingIndexes.delete(queueKey)) activeIndexes.delete(queueKey);
     const now = getBeijingTimestamp();
-    const changed = db.prepare(`
+    const result = await execute(`
         UPDATE knowledge_docs
         SET deleted_at = ?, deleted_by_user = ?, is_enabled = 0, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).run(now, userId, now, normalizedDocId, userId).changes > 0;
+    `, [now, userId, now, normalizedDocId, userId]);
+    const changed = Number(result || 0) > 0;
     if (changed) clearRagCacheForUser(userId);
     return changed;
 }
+
 module.exports = {
     createKnowledgeCollection,
     getKnowledgeCollectionShareOptions,

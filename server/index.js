@@ -7,15 +7,12 @@ const {
 const { startHttpServer } = require('./server');
 const { startMaintenanceTasks } = require('./services/maintenance');
 
-const { isPostgres } = require('./db/dialect');
 const { initPostgresDatabase } = require('./db');
 
 registerProcessErrorHandlers({ logger, flushAllSqliteWrites });
 
 async function init() {
-    if (isPostgres()) {
-        await initPostgresDatabase();
-    }
+    await initPostgresDatabase();
     startBackgroundServices({ logger });
 
     const scheduleMaintenanceTasks = createMaintenanceScheduler({

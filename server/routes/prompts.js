@@ -1,6 +1,6 @@
 /* 角色与规范库路由 Prompt Library Routes */
 const express = require('express');
-const { db } = require('../db');
+const { query, queryOne, execute } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
@@ -59,15 +59,15 @@ function createPromptsRouter({
     const router = express.Router();
 
     router.get('/prompts', authMiddleware, asyncHandler(async (req, res) => {
-        const prompts = db.prepare(`
+        const prompts = await query(`
             SELECT * FROM prompts
             WHERE scope = 'global' OR user_id = ?
             ORDER BY CASE WHEN scope = 'global' THEN 0 ELSE 1 END, category, name
-        `).all(req.user.id);
-        const query = req.query || {};
-        const type = query.type ? normalizePromptType(query.type) : '';
-        const surface = PROMPT_TARGETS.has(String(query.surface || '').trim()) ? String(query.surface || '').trim() : '';
-        const keyword = String(query.q || '').trim().toLowerCase();
+        `, [req.user.id]);
+        const queryParams = req.query || {};
+        const type = queryParams.type ? normalizePromptType(queryParams.type) : '';
+        const surface = PROMPT_TARGETS.has(String(queryParams.surface || '').trim()) ? String(queryParams.surface || '').trim() : '';
+        const keyword = String(queryParams.q || '').trim().toLowerCase();
         const filtered = prompts
             .map(formatPrompt)
             .filter(prompt => !type || prompt.type === type)
@@ -83,16 +83,17 @@ function createPromptsRouter({
         if (!payload.name || !payload.content) return res.status(400).json({ error: '规范名称和内容不能为空' });
 
         const now = getBeijingTimestamp();
-        const info = db.prepare(`
+        const row = await queryOne(`
             INSERT INTO prompts (user_id, name, content, category, description, type, target_surfaces, scope, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(userId, payload.name, payload.content, payload.category, payload.description, payload.type, payload.target_surfaces, scope, now, now);
+            RETURNING id
+        `, [userId, payload.name, payload.content, payload.category, payload.description, payload.type, payload.target_surfaces, scope, now, now]);
         logAction(req, '创建角色与规范', `资产: ${payload.name}，范围: ${scope}`);
-        res.json({ success: true, id: info.lastInsertRowid });
+        res.json({ success: true, id: row?.id });
     }));
 
     router.put('/prompts/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const prompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id);
+        const prompt = await queryOne('SELECT * FROM prompts WHERE id = ?', [req.params.id]);
         if (!prompt) return res.status(404).json({ error: '角色与规范不存在' });
         if (prompt.scope === 'global' && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以修改全局角色与规范' });
         if (prompt.scope !== 'global' && prompt.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权修改该角色与规范' });
@@ -102,21 +103,21 @@ function createPromptsRouter({
         const userId = scope === 'global' ? null : (prompt.user_id || req.user.id);
         if (!payload.name || !payload.content) return res.status(400).json({ error: '规范名称和内容不能为空' });
 
-        db.prepare(`
+        await execute(`
             UPDATE prompts
             SET user_id = ?, name = ?, content = ?, category = ?, description = ?, type = ?, target_surfaces = ?, scope = ?, updated_at = ?
             WHERE id = ?
-        `).run(userId, payload.name, payload.content, payload.category, payload.description, payload.type, payload.target_surfaces, scope, getBeijingTimestamp(), req.params.id);
+        `, [userId, payload.name, payload.content, payload.category, payload.description, payload.type, payload.target_surfaces, scope, getBeijingTimestamp(), req.params.id]);
         logAction(req, '修改角色与规范', `资产ID: ${req.params.id}，名称: ${payload.name}`);
         res.json({ success: true });
     }));
 
     router.delete('/prompts/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const prompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id);
+        const prompt = await queryOne('SELECT * FROM prompts WHERE id = ?', [req.params.id]);
         if (!prompt) return res.status(404).json({ error: '角色与规范不存在' });
         if (prompt.scope === 'global' && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以删除全局角色与规范' });
         if (prompt.scope !== 'global' && prompt.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权删除该角色与规范' });
-        db.prepare('DELETE FROM prompts WHERE id = ?').run(req.params.id);
+        await execute('DELETE FROM prompts WHERE id = ?', [req.params.id]);
         logAction(req, '删除角色与规范', `资产ID: ${req.params.id}，名称: ${prompt.name}`);
         res.json({ success: true });
     }));

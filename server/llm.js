@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { db } = require('./db');
+const { query, queryOne, execute } = require('./db/client');
 const { getBeijingTimestamp } = require('./time');
 const { extractDocumentText, truncateExtractedText } = require('./document-text');
 const { imageFileToDataUrl, getMaxImagesPerMessage } = require('./image-safety');
@@ -32,13 +32,13 @@ function syncMemoryCompressionConcurrency() {
     return memoryCompressionGuard.updateMaxConcurrent(getBackgroundRuntimeConfig().memoryCompressionMaxConcurrent);
 }
 
-function loadSessionMessages(sessionId, userId) {
-    return db.prepare(`
+async function loadSessionMessages(sessionId, userId) {
+    return await query(`
         SELECT * FROM messages
         WHERE session_id = ? AND user_id = ?
           AND deleted_at IS NULL
         ORDER BY id ASC
-    `).all(sessionId, userId);
+    `, [sessionId, userId]);
 }
 
 function unwrapGuardedCompressionResult(guardedResult) {
@@ -373,16 +373,16 @@ function getMemoryThreshold() {
     }
 }
 
-function resolveOwnedAttachmentPath(uploadUrl, userId, sessionId) {
+async function resolveOwnedAttachmentPath(uploadUrl, userId, sessionId) {
     const targetPath = resolveUploadUrlPath(uploadUrl);
     if (!targetPath) return null;
     const filePath = toProjectRelativePath(targetPath);
     if (!filePath) return null;
-    const attachment = db.prepare(`
+    const attachment = await queryOne(`
         SELECT id FROM attachments
         WHERE user_id = ? AND session_id = ? AND file_path = ?
           AND deleted_at IS NULL
-    `).get(userId, sessionId, filePath);
+    `, [userId, sessionId, filePath]);
     if (!attachment || !fs.existsSync(targetPath)) return null;
     return targetPath;
 }
@@ -432,7 +432,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
             continue;
         }
 
-        const localPath = resolveOwnedAttachmentPath(match[1], userId, sessionId);
+        const localPath = await resolveOwnedAttachmentPath(match[1], userId, sessionId);
         if (localPath) {
             const imageUrl = await imageFileToDataUrl(localPath);
             if (imageUrl && totalImageCounter.count < maxImagesPerMessage) {
@@ -463,7 +463,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
                 fileFinalContent.push({ type: 'text', text: content.slice(fileLastIndex, fileMatch.index) });
             }
             const fileName = fileMatch[1];
-            const localPath = resolveOwnedAttachmentPath(fileMatch[2], userId, sessionId);
+            const localPath = await resolveOwnedAttachmentPath(fileMatch[2], userId, sessionId);
 
             if (localPath) {
                 try {
@@ -503,15 +503,13 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
 }
 
 async function getContext(sessionId, userId, modelCfg) {
-    const session = db.prepare('SELECT system_prompt FROM sessions WHERE id = ? AND deleted_at IS NULL').get(sessionId);
-    let messages = loadSessionMessages(sessionId, userId);
+    const session = await queryOne('SELECT system_prompt FROM sessions WHERE id = ? AND deleted_at IS NULL', [sessionId]);
+    let messages = (await loadSessionMessages(sessionId, userId)) || [];
 
     const { logger } = require('./logger');
     let contextMeta = buildContextMeta(messages);
     logger.info({ sessionId, messageCount: messages.length, contextMeta }, '检索会话历史');
 
-    // 压缩触发阈值按模型上下文收紧（仅下调、不上调）：当模型配置的输入预算小于全局阈值时，
-    // 提前压缩，避免请求时上下文预算只能硬丢历史。未配置上下文的模型预算无界，此处不改变行为。
     let compactionThreshold = contextMeta.threshold;
     try {
         const { getModelContextBudget } = require('./services/context-budget');
@@ -519,9 +517,7 @@ async function getContext(sessionId, userId, modelCfg) {
         if (!budget.unbounded && budget.inputBudget > 0) {
             compactionThreshold = Math.min(compactionThreshold, budget.inputBudget);
         }
-    } catch (_err) {
-        // 预算计算不可用时退回全局阈值
-    }
+    } catch (_err) {}
 
     if (contextMeta.activeTokens > compactionThreshold && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
         try {
@@ -529,7 +525,7 @@ async function getContext(sessionId, userId, modelCfg) {
             if (result?.skipped) {
                 logger.info({ sessionId, reason: result.reason }, '记忆压缩已跳过');
             } else if (result?.compressed) {
-                messages = loadSessionMessages(sessionId, userId);
+                messages = (await loadSessionMessages(sessionId, userId)) || [];
                 contextMeta = buildContextMeta(messages);
                 logger.info({ sessionId, contextMeta, summarizedCount: result.summarizedCount }, '记忆压缩完成，当前请求将使用压缩后上下文');
             }
@@ -557,7 +553,7 @@ async function getContext(sessionId, userId, modelCfg) {
 }
 
 async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
-    const messages = loadSessionMessages(sessionId, userId);
+    const messages = (await loadSessionMessages(sessionId, userId)) || [];
     const before = buildContextMeta(messages);
     if (!options.force && (before.activeTokens <= before.threshold || before.activeCount <= MIN_MESSAGES_TO_COMPRESS)) {
         return {
@@ -569,7 +565,7 @@ async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
     }
 
     const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
-    const afterMessages = loadSessionMessages(sessionId, userId);
+    const afterMessages = (await loadSessionMessages(sessionId, userId)) || [];
     const after = buildContextMeta(afterMessages);
     return {
         ...(result || {}),
@@ -611,18 +607,15 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
         });
         const summaryText = `【短期会话记忆摘要】： ${response.data.choices[0].message.content}`;
         const now = getBeijingTimestamp();
-        const transaction = db.transaction(() => {
-            const ids = toSummarize.map(m => m.id);
-            if (ids.length > 0) {
-                const placeholders = ids.map(() => '?').join(',');
-                db.prepare(`UPDATE messages SET context_archived = 1, compressed_at = ? WHERE id IN (${placeholders})`).run(now, ...ids);
-            }
-            db.prepare(`
-                INSERT INTO messages (session_id, user_id, role, content, token_count, is_summary, context_archived, model_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(sessionId, userId, 'system', summaryText, estimateTokens(summaryText), 1, 0, modelCfg.id, now);
-        });
-        transaction();
+        const ids = toSummarize.map(m => m.id);
+        if (ids.length > 0) {
+            const placeholders = ids.map(() => '?').join(',');
+            await execute(`UPDATE messages SET context_archived = 1, compressed_at = ? WHERE id IN (${placeholders})`, [now, ...ids]);
+        }
+        await execute(`
+            INSERT INTO messages (session_id, user_id, role, content, token_count, is_summary, context_archived, model_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [sessionId, userId, 'system', summaryText, estimateTokens(summaryText), 1, 0, modelCfg.id, now]);
         return { compressed: true, summarizedCount: toSummarize.length, summaryTokens: estimateTokens(summaryText) };
     } catch (e) {
         const { logger } = require('./logger');

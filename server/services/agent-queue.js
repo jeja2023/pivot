@@ -1,11 +1,10 @@
-const { createStatementCache } = require('../db/statements');
+const { query, queryOne, execute } = require('../db/client');
 const { nowExpr } = require('../db/dialect');
 
 const DEFAULT_LOCK_MS = 24 * 60 * 60 * 1000;
 
 function createAgentQueue({
-    db,
-    logger,
+    logger = { info() {}, warn() {}, error() {} },
     instanceId,
     maxConcurrent,
     maxConcurrentPerUser = 2,
@@ -15,21 +14,38 @@ function createAgentQueue({
     markRunError,
     getTimestamp
 }) {
+    const dbRunner = {
+        query,
+        execute,
+        queryOne
+    };
+
     const activeRunIds = new Set();
     const activeStartedAt = new Map();
     const lockRenewTimers = new Map();
     const queuedHints = new Set();
     const activeUserCounts = new Map();
     let processScheduled = false;
+    let isProcessing = false;
     let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
     const safeMaxConcurrentPerUser = Math.max(Number.parseInt(maxConcurrentPerUser, 10) || 2, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
     const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
-    const statementCache = createStatementCache(db);
-    const sql = statementCache.sql;
     const currentTimeExpr = nowExpr();
-    const statements = {
-        claimCandidates: sql(`
+
+    const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
+
+    function scheduleProcessQueue() {
+        if (processScheduled) return;
+        processScheduled = true;
+        setImmediate(async () => {
+            processScheduled = false;
+            await processQueue();
+        });
+    }
+
+    async function claimNextRun() {
+        const rows = await dbRunner.query(`
             SELECT id, user_id
             FROM agent_runs
             WHERE status = 'queued'
@@ -41,25 +57,38 @@ function createAgentQueue({
               )
             ORDER BY priority DESC, created_at ASC
             LIMIT 50
-        `),
-        claimRun: sql(`
-            UPDATE agent_runs
-            SET status = 'running',
-                locked_by = ?,
-                lock_expires_at = ?,
-                started_at = COALESCE(started_at, ?),
-                last_heartbeat_at = ?,
-                updated_at = ?
-            WHERE id = ?
-              AND status = 'queued'
-              AND deleted_at IS NULL
-              AND (
-                  locked_by IS NULL
-                  OR lock_expires_at IS NULL
-                  OR lock_expires_at <= ${currentTimeExpr}
-              )
-        `),
-        renewRunLock: sql(`
+        `);
+
+        for (const row of rows) {
+            if ((activeUserCounts.get(row.user_id) || 0) >= safeMaxConcurrentPerUser) continue;
+            const now = getTimestamp();
+            const changes = await dbRunner.execute(`
+                UPDATE agent_runs
+                SET status = 'running',
+                    locked_by = ?,
+                    lock_expires_at = ?,
+                    started_at = COALESCE(started_at, ?),
+                    last_heartbeat_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                  AND status = 'queued'
+                  AND deleted_at IS NULL
+                  AND (
+                      locked_by IS NULL
+                      OR lock_expires_at IS NULL
+                      OR lock_expires_at <= ${currentTimeExpr}
+                  )
+            `, [instanceId, lockExpiresAt(), now, now, now, row.id]);
+
+            if (changes === 1) return row;
+        }
+
+        return null;
+    }
+
+    async function renewRunLock(runId) {
+        const now = getTimestamp();
+        const changes = await dbRunner.execute(`
             UPDATE agent_runs
             SET lock_expires_at = ?,
                 last_heartbeat_at = ?,
@@ -68,72 +97,11 @@ function createAgentQueue({
               AND locked_by = ?
               AND status = 'running'
               AND deleted_at IS NULL
-        `),
-        releaseRun: sql(`
-            UPDATE agent_runs
-            SET locked_by = NULL,
-                lock_expires_at = NULL
-            WHERE id = ? AND locked_by = ?
-        `),
-        getRunStatus: sql('SELECT status FROM agent_runs WHERE id = ?'),
-        recoverQueued: sql(`
-            SELECT id
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-            ORDER BY priority DESC, created_at ASC
-            LIMIT ?
-        `),
-        queuedCount: sql(`
-            SELECT COUNT(*) AS count
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-        `),
-        oldestQueued: sql(`
-            SELECT
-                id,
-                created_at
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 1
-        `)
-    };
-
-    const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
-
-    function scheduleProcessQueue() {
-        if (processScheduled) return;
-        processScheduled = true;
-        setImmediate(() => {
-            processScheduled = false;
-            processQueue();
-        });
-    }
-
-    function claimNextRun() {
-        const rows = statements.claimCandidates.all();
-
-        for (const row of rows) {
-            if ((activeUserCounts.get(row.user_id) || 0) >= safeMaxConcurrentPerUser) continue;
-            const now = getTimestamp();
-            const result = statements.claimRun.run(instanceId, lockExpiresAt(), now, now, now, row.id);
-
-            if (result.changes === 1) return row;
-        }
-
-        return null;
-    }
-
-    function renewRunLock(runId) {
-        const now = getTimestamp();
-        const result = statements.renewRunLock.run(lockExpiresAt(), now, now, runId, instanceId);
-        if (result.changes === 0) {
+        `, [lockExpiresAt(), now, now, runId, instanceId]);
+        if (changes === 0) {
             logger.warn({ runId, instanceId }, 'Agent run lock renewal skipped; lock owner or status changed');
         }
-        return result.changes;
+        return changes;
     }
 
     function stopLockRenewal(runId) {
@@ -144,9 +112,9 @@ function createAgentQueue({
 
     function startLockRenewal(runId) {
         stopLockRenewal(runId);
-        const timer = setInterval(() => {
+        const timer = setInterval(async () => {
             try {
-                renewRunLock(runId);
+                await renewRunLock(runId);
             } catch (err) {
                 logger.warn({ err: err.message, runId }, 'Agent run lock renewal failed');
             }
@@ -154,43 +122,55 @@ function createAgentQueue({
         timer.unref?.();
         lockRenewTimers.set(runId, timer);
     }
-    function releaseRun(runId) {
-        statements.releaseRun.run(runId, instanceId);
+
+    async function releaseRun(runId) {
+        await dbRunner.execute(`
+            UPDATE agent_runs
+            SET locked_by = NULL,
+                lock_expires_at = NULL
+            WHERE id = ? AND locked_by = ?
+        `, [runId, instanceId]);
     }
 
-    function processQueue() {
-        while (activeRunIds.size < safeMaxConcurrent) {
-            const claimed = claimNextRun();
-            if (!claimed || activeRunIds.has(claimed.id)) break;
-            const runId = claimed.id;
-            const user = getRunUser(runId);
-            if (!user) {
-                const status = statements.getRunStatus.get(runId)?.status;
-                if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors'].includes(status)) {
-                    markRunError(runId, 'Agent run user no longer exists.');
+    async function processQueue() {
+        if (isProcessing) return;
+        isProcessing = true;
+        try {
+            while (activeRunIds.size < safeMaxConcurrent) {
+                const claimed = await claimNextRun();
+                if (!claimed || activeRunIds.has(claimed.id)) break;
+                const runId = claimed.id;
+                const user = await getRunUser(runId);
+                if (!user) {
+                    const row = await dbRunner.queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+                    if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors'].includes(row?.status)) {
+                        await markRunError(runId, 'Agent run user no longer exists.');
+                    }
+                    await releaseRun(runId);
+                    continue;
                 }
-                releaseRun(runId);
-                continue;
-            }
 
-            activeRunIds.add(runId);
-            activeUserCounts.set(user.id, (activeUserCounts.get(user.id) || 0) + 1);
-            activeStartedAt.set(runId, Date.now());
-            startLockRenewal(runId);
-            queuedHints.delete(runId);
-            runAgent(runId, user).catch(err => {
-                logger.error({ err: err.message, runId }, 'Agent run failed while protected by runtime lock');
-                markRunError(runId, err.message);
-            }).finally(() => {
-                activeRunIds.delete(runId);
-                const nextUserCount = Math.max((activeUserCounts.get(user.id) || 1) - 1, 0);
-                if (nextUserCount === 0) activeUserCounts.delete(user.id);
-                else activeUserCounts.set(user.id, nextUserCount);
-                activeStartedAt.delete(runId);
-                stopLockRenewal(runId);
-                releaseRun(runId);
-                scheduleProcessQueue();
-            });
+                activeRunIds.add(runId);
+                activeUserCounts.set(user.id, (activeUserCounts.get(user.id) || 0) + 1);
+                activeStartedAt.set(runId, Date.now());
+                startLockRenewal(runId);
+                queuedHints.delete(runId);
+                runAgent(runId, user).catch(async err => {
+                    logger.error({ err: err.message, runId }, 'Agent run failed while protected by runtime lock');
+                    await markRunError(runId, err.message);
+                }).finally(async () => {
+                    activeRunIds.delete(runId);
+                    const nextUserCount = Math.max((activeUserCounts.get(user.id) || 1) - 1, 0);
+                    if (nextUserCount === 0) activeUserCounts.delete(user.id);
+                    else activeUserCounts.set(user.id, nextUserCount);
+                    activeStartedAt.delete(runId);
+                    stopLockRenewal(runId);
+                    await releaseRun(runId);
+                    scheduleProcessQueue();
+                });
+            }
+        } finally {
+            isProcessing = false;
         }
     }
 
@@ -199,18 +179,23 @@ function createAgentQueue({
         scheduleProcessQueue();
     }
 
-    function recoverQueued(limit = 100) {
-        const queued = statements.recoverQueued.all(limit);
+    async function recoverQueued(limit = 100) {
+        const queued = await dbRunner.query(`
+            SELECT id
+            FROM agent_runs
+            WHERE status = 'queued'
+              AND deleted_at IS NULL
+            ORDER BY priority DESC, created_at ASC
+            LIMIT ?
+        `, [limit]);
         queued.forEach(run => queuedHints.add(run.id));
         scheduleProcessQueue();
         return queued.length;
     }
 
     function getStatus() {
-        const queued = statements.queuedCount.get().count;
-        const oldestQueued = statements.oldestQueued.get() || null;
+        const queuedCount = queuedHints.size;
         const now = Date.now();
-        const oldestQueuedAt = oldestQueued?.created_at ? new Date(String(oldestQueued.created_at).replace(' ', 'T')).getTime() : NaN;
         const activeRuns = Array.from(activeRunIds).map(runId => ({
             runId,
             activeMs: Math.max(0, now - (activeStartedAt.get(runId) || now)),
@@ -220,12 +205,12 @@ function createAgentQueue({
             instanceId,
             active: activeRunIds.size,
             activeRuns,
-            queued,
+            queued: queuedCount,
             hinted: queuedHints.size,
             maxConcurrent: safeMaxConcurrent,
             maxConcurrentPerUser: safeMaxConcurrentPerUser,
-            oldestQueuedRunId: oldestQueued?.id || null,
-            oldestQueuedAgeMs: Number.isFinite(oldestQueuedAt) ? Math.max(0, now - oldestQueuedAt) : 0
+            oldestQueuedRunId: null,
+            oldestQueuedAgeMs: 0
         };
     }
 

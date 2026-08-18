@@ -1,7 +1,7 @@
-const { sql } = require('../db/statements');
+const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { formatToolList } = require('./agent-tool-catalog');
-const { getRunnableModelForUser, getUserRunnableModels } = require('./models');
+const { getRunnableModelForUserAsync, getUserRunnableModelsAsync } = require('./models');
 const { listWorkflowCredentials, hasWorkflowCredentialAccess } = require('./workflow-credentials');
 
 const MANAGED_CREDENTIAL_PREFIX = 'managed:';
@@ -178,22 +178,22 @@ function applyAgentWorkflowDependencyBindings(dagSpec, bindings, credentialTarge
     return next;
 }
 
-function inspectAgentWorkflowDependencies(dagSpec = {}, user = {}, options = {}) {
+async function inspectAgentWorkflowDependencies(dagSpec = {}, user = {}, options = {}) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const toolsByName = new Map((options.toolList || formatToolList(user, { toolPolicy: 'all' }))
-        .map(tool => [String(tool.name || ''), tool]));
+    const toolList = options.toolList || (await formatToolList(user, { toolPolicy: 'all' }));
+    const toolsByName = new Map(toolList.map(tool => [String(tool.name || ''), tool]));
     const models = [];
     const tools = [];
     const credentials = [];
     const blockers = [];
 
-    nodes.forEach(node => {
+    for (const node of nodes) {
         const tool = String(node?.tool || '').trim();
         const title = dependencyTitle(node);
         if (tool === 'agent.llm' || tool === 'agent.content_review') {
             const requestedModel = String(node?.input?.model || node?.input?.modelId || node?.input?.model_id || '').trim();
             if (requestedModel) {
-                const available = Boolean(getRunnableModelForUser(requestedModel, user));
+                const available = Boolean(await getRunnableModelForUserAsync(requestedModel, user));
                 models.push({ nodeId: node.id, title, requestedModel, available });
                 if (!available) blockers.push(`${title} 引用的模型「${requestedModel}」对当前账号不可用。`);
             }
@@ -207,12 +207,12 @@ function inspectAgentWorkflowDependencies(dagSpec = {}, user = {}, options = {})
             const slug = String(node?.input?.credentialSecret || node?.input?.credential_secret || '').trim().toUpperCase();
             if (slug) {
                 const envName = `PIVOT_WORKFLOW_SECRET_${slug}`;
-                const available = hasWorkflowCredentialAccess(slug, user) || Boolean(process.env[envName]);
+                const available = (await hasWorkflowCredentialAccess(slug, user)) || Boolean(process.env[envName]);
                 credentials.push({ nodeId: node.id, title, slug, available });
                 if (!available) blockers.push(`${title} 需要凭据「${slug}」，但当前账号没有可用授权。`);
             }
         }
-    });
+    }
 
     return {
         status: blockers.length ? 'blocked' : 'ready',
@@ -231,15 +231,15 @@ function inspectAgentWorkflowDependencies(dagSpec = {}, user = {}, options = {})
     };
 }
 
-function getBindingRow(workflowId, userId) {
-    return sql(`
+async function getBindingRow(workflowId, userId) {
+    return await queryOne(`
         SELECT * FROM agent_workflow_dependency_bindings
         WHERE workflow_id = ? AND user_id = ?
-    `).get(workflowId, userId) || null;
+    `, [workflowId, userId]);
 }
 
-function buildDependencyCandidates(user, manifest) {
-    const credentials = listWorkflowCredentials(user);
+async function buildDependencyCandidates(user, manifest) {
+    const credentials = await listWorkflowCredentials(user);
     const managedCredentials = manifest.credentials
         .filter(item => Boolean(process.env[`PIVOT_WORKFLOW_SECRET_${item.source}`]))
         .map(item => ({
@@ -250,7 +250,8 @@ function buildDependencyCandidates(user, manifest) {
             is_owner: false,
             managed: true
         }));
-    const toolCandidates = formatToolList(user, { toolPolicy: 'all' }).flatMap(tool => {
+    const toolList = await formatToolList(user, { toolPolicy: 'all' });
+    const toolCandidates = toolList.flatMap(tool => {
         if (!tool.databaseTool) {
             return [{
                 binding_value: tool.name,
@@ -272,8 +273,9 @@ function buildDependencyCandidates(user, manifest) {
             connection_id: String(connection.connectionId || connection.serverId || '')
         }));
     });
+    const runnableModels = await getUserRunnableModelsAsync(user);
     return {
-        models: getUserRunnableModels(user).map(model => ({
+        models: runnableModels.map(model => ({
             id: String(model.id),
             name: model.name || model.model_name || `模型 ${model.id}`,
             model_name: model.model_name || '',
@@ -294,11 +296,11 @@ function buildDependencyCandidates(user, manifest) {
     };
 }
 
-function evaluateBinding(resolved, user, { includeCandidates = false } = {}) {
+async function evaluateBinding(resolved, user, { includeCandidates = false } = {}) {
     const manifest = buildAgentWorkflowDependencyManifest(resolved.dagSpec);
     const isOwner = Number(resolved.workflow.user_id) === Number(user.id);
-    const candidates = buildDependencyCandidates(user, manifest);
-    const row = isOwner ? null : getBindingRow(resolved.workflow.id, user.id);
+    const candidates = await buildDependencyCandidates(user, manifest);
+    const row = isOwner ? null : await getBindingRow(resolved.workflow.id, user.id);
     const bindings = parseBindings(row?.bindings_json);
     const blockers = [];
     const stale = Boolean(row && Number(row.published_version_id) !== Number(resolved.version_id));
@@ -342,7 +344,7 @@ function evaluateBinding(resolved, user, { includeCandidates = false } = {}) {
         ? applyAgentWorkflowDependencyBindings(resolved.dagSpec, bindings, credentialTargets, toolTargets)
         : cloneJson(resolved.dagSpec, { nodes: [] });
     if (canApply) {
-        const report = inspectAgentWorkflowDependencies(dagSpec, user, { toolList: formatToolList(user, { toolPolicy: 'all' }) });
+        const report = await inspectAgentWorkflowDependencies(dagSpec, user, { toolList: await formatToolList(user, { toolPolicy: 'all' }) });
         blockers.push(...report.blockers);
     }
 
@@ -364,8 +366,8 @@ function evaluateBinding(resolved, user, { includeCandidates = false } = {}) {
     };
 }
 
-function resolveAgentWorkflowDependencyBindings(resolved, user, { enforce = true } = {}) {
-    const evaluation = evaluateBinding(resolved, user);
+async function resolveAgentWorkflowDependencyBindings(resolved, user, { enforce = true } = {}) {
+    const evaluation = await evaluateBinding(resolved, user);
     if (enforce && evaluation.dependencyBinding.blockers.length) {
         throw invalid(`当前账号无法运行该工作流：${evaluation.dependencyBinding.blockers[0]}`, 409, {
             dependencies: evaluation.dependencyBinding
@@ -378,8 +380,8 @@ function resolveAgentWorkflowDependencyBindings(resolved, user, { enforce = true
     };
 }
 
-function getAgentWorkflowDependencyConfiguration(resolved, user) {
-    const evaluation = evaluateBinding(resolved, user, { includeCandidates: true });
+async function getAgentWorkflowDependencyConfiguration(resolved, user) {
+    const evaluation = await evaluateBinding(resolved, user, { includeCandidates: true });
     return {
         workflow: {
             id: resolved.workflow.id,
@@ -392,12 +394,12 @@ function getAgentWorkflowDependencyConfiguration(resolved, user) {
     };
 }
 
-function saveAgentWorkflowDependencyConfiguration(resolved, user, payload = {}) {
+async function saveAgentWorkflowDependencyConfiguration(resolved, user, payload = {}) {
     if (Number(resolved.workflow.user_id) === Number(user.id)) {
         throw invalid('工作流所有者使用原始依赖，无需配置接收者映射。', 403);
     }
     const manifest = buildAgentWorkflowDependencyManifest(resolved.dagSpec);
-    const candidates = buildDependencyCandidates(user, manifest);
+    const candidates = await buildDependencyCandidates(user, manifest);
     const requested = parseBindings(payload.bindings || payload);
     const modelIds = new Set(candidates.models.map(item => String(item.id)));
     const toolNames = new Set(candidates.tools.map(item => item.binding_value));
@@ -421,7 +423,7 @@ function saveAgentWorkflowDependencyConfiguration(resolved, user, payload = {}) 
     });
 
     const now = getBeijingTimestamp();
-    sql(`
+    await execute(`
         INSERT INTO agent_workflow_dependency_bindings (
             workflow_id, user_id, published_version_id, bindings_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?)
@@ -429,12 +431,12 @@ function saveAgentWorkflowDependencyConfiguration(resolved, user, payload = {}) 
             published_version_id = excluded.published_version_id,
             bindings_json = excluded.bindings_json,
             updated_at = excluded.updated_at
-    `).run(resolved.workflow.id, user.id, resolved.version_id, JSON.stringify(bindings), now, now);
-    return getAgentWorkflowDependencyConfiguration(resolved, user);
+    `, [resolved.workflow.id, user.id, resolved.version_id, JSON.stringify(bindings), now, now]);
+    return await getAgentWorkflowDependencyConfiguration(resolved, user);
 }
 
-function assertAgentWorkflowDependencies(dagSpec, user, options = {}) {
-    const report = inspectAgentWorkflowDependencies(dagSpec, user, options);
+async function assertAgentWorkflowDependencies(dagSpec, user, options = {}) {
+    const report = await inspectAgentWorkflowDependencies(dagSpec, user, options);
     if (!report.blockers.length) return report;
     throw invalid(`当前账号无法运行该工作流：${report.blockers[0]}`, 400, { dependencies: report });
 }

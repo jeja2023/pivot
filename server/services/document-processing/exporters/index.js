@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { db } = require('../../../db');
+const { queryOne } = require('../../../db/client');
 const { getBeijingTimestamp } = require('../../../time');
 const { OUTPUT_TYPES } = require('../constants');
 const { buildManagedPath, outputsRoot, resolveStoredDocumentPath, toProjectRelativePath } = require('../paths');
@@ -61,14 +61,14 @@ function serializeOutput(row) {
     };
 }
 
-function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName, mimeType, status = 'ready' }) {
+async function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName, mimeType, status = 'ready' }) {
     const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
-    const sql = [
-        'INSERT INTO document_outputs (',
-        '    user_id, file_id, job_id, output_type, file_path, file_name, mime_type, file_size, status, created_at',
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ].join('\n');
-    const info = db.prepare(sql).run(
+    return await queryOne(`
+        INSERT INTO document_outputs (
+            user_id, file_id, job_id, output_type, file_path, file_name, mime_type, file_size, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING *
+    `, [
         userId,
         fileId,
         jobId,
@@ -79,18 +79,17 @@ function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName,
         stat.size,
         status,
         getBeijingTimestamp()
-    );
-    return db.prepare('SELECT * FROM document_outputs WHERE id = ?').get(info.lastInsertRowid);
+    ]);
 }
 
-function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content }) {
+async function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content }) {
     const meta = outputTypeMeta(outputType);
     const diskName = String(jobId) + '-' + String(outputType) + '-' + Date.now() + meta.extension;
     const targetPath = buildManagedPath(outputsRoot, userId, diskName);
     if (Buffer.isBuffer(content)) fs.writeFileSync(targetPath, content);
     else fs.writeFileSync(targetPath, String(content || ''), 'utf8');
     const fileName = baseName(originalName) + '-' + outputType + meta.extension;
-    return registerOutput({
+    return await registerOutput({
         userId,
         fileId,
         jobId,
@@ -443,20 +442,20 @@ function buildDocx({ file, pages = [], text = '' }) {
     ]);
 }
 
-function createTextOutputs({ userId, file, job, text = '', pages = [], blocks = [], formats = [OUTPUT_TYPES.TEXT, OUTPUT_TYPES.MARKDOWN, OUTPUT_TYPES.JSON] }) {
+async function createTextOutputs({ userId, file, job, text = '', pages = [], blocks = [], formats = [OUTPUT_TYPES.TEXT, OUTPUT_TYPES.MARKDOWN, OUTPUT_TYPES.JSON] }) {
     const finalText = String(text || pagesToText(pages) || '').trim();
     const outputs = [];
     for (const format of formats) {
         if (format === OUTPUT_TYPES.MARKDOWN) {
-            outputs.push(writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText }) }));
         } else if (format === OUTPUT_TYPES.JSON) {
-            outputs.push(writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }) }));
         } else if (format === OUTPUT_TYPES.HTML) {
-            outputs.push(writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildHtml({ file, pages, blocks, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildHtml({ file, pages, blocks, text: finalText }) }));
         } else if (format === OUTPUT_TYPES.DOCX) {
-            outputs.push(writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildDocx({ file, pages, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildDocx({ file, pages, text: finalText }) }));
         } else {
-            outputs.push(writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: OUTPUT_TYPES.TEXT, content: finalText + '\n' }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: OUTPUT_TYPES.TEXT, content: finalText + '\n' }));
         }
     }
     return outputs.map(serializeOutput);

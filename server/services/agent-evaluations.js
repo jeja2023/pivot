@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { db } = require('../db');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
     normalizeJsonSchema,
@@ -120,22 +120,22 @@ function parseSuiteRow(row) {
     return { ...row, run_config: normalizeRunConfig(row.run_config) };
 }
 
-function getSuiteRow(suiteId, user) {
-    return db.prepare(`
+async function getSuiteRow(suiteId, user) {
+    return await queryOne(`
         SELECT s.*, w.name AS workflow_name, m.name AS model_name
         FROM agent_eval_suites s
         LEFT JOIN agent_workflows w ON w.id = s.workflow_id
         LEFT JOIN models m ON m.id = s.model_id
         WHERE s.id = ? AND s.user_id = ? AND s.deleted_at IS NULL
-    `).get(suiteId, user.id);
+    `, [suiteId, user.id]);
 }
 
-function assertEvaluationTarget(user, data) {
+async function assertEvaluationTarget(user, data) {
     if (data.modelId) {
-        const model = db.prepare(`
+        const model = await queryOne(`
             SELECT id FROM models
             WHERE id = ? AND status = 'active' AND (user_id IS NULL OR user_id = ?)
-        `).get(data.modelId, user.id);
+        `, [data.modelId, user.id]);
         if (!model) {
             const error = new Error('评测模型不存在、已停用或无权访问。');
             error.status = 400;
@@ -143,10 +143,10 @@ function assertEvaluationTarget(user, data) {
         }
     }
     if (data.targetType === 'workflow') {
-        const workflow = db.prepare(`
+        const workflow = await queryOne(`
             SELECT id, published_version_id FROM agent_workflows
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-        `).get(data.workflowId, user.id);
+        `, [data.workflowId, user.id]);
         if (!workflow || !workflow.published_version_id) {
             const error = new Error('请选择当前用户已发布的工作流进行评测。');
             error.status = 400;
@@ -155,11 +155,12 @@ function assertEvaluationTarget(user, data) {
     }
 }
 
-function listAgentEvalSuites(user) {
-    db.prepare("SELECT id FROM agent_eval_runs WHERE user_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 20")
-        .all(user.id)
-        .forEach(row => reconcileAgentEvalRun(row.id, user));
-    return db.prepare(`
+async function listAgentEvalSuites(user) {
+    const runningBatches = await query("SELECT id FROM agent_eval_runs WHERE user_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 20", [user.id]);
+    for (const row of runningBatches) {
+        await reconcileAgentEvalRun(row.id, user);
+    }
+    const rows = await query(`
         SELECT s.*, w.name AS workflow_name, m.name AS model_name,
                (SELECT COUNT(*) FROM agent_eval_cases c WHERE c.suite_id = s.id AND c.deleted_at IS NULL) AS case_count,
                (SELECT er.status FROM agent_eval_runs er WHERE er.suite_id = s.id ORDER BY er.created_at DESC LIMIT 1) AS latest_status,
@@ -171,83 +172,98 @@ function listAgentEvalSuites(user) {
         WHERE s.user_id = ? AND s.deleted_at IS NULL
         ORDER BY s.updated_at DESC, s.id DESC
         LIMIT 100
-    `).all(user.id).map(row => ({
+    `, [user.id]);
+    return rows.map(row => ({
         ...parseSuiteRow(row),
         latest_summary: parseJson(row.latest_summary, null)
     }));
 }
 
-function saveCases(suiteId, cases, now) {
-    const existing = db.prepare('SELECT id FROM agent_eval_cases WHERE suite_id = ? AND deleted_at IS NULL').all(suiteId);
+async function saveCases(trx, suiteId, cases, now) {
+    const existing = await trx.query('SELECT id FROM agent_eval_cases WHERE suite_id = ? AND deleted_at IS NULL', [suiteId]);
     const retained = new Set();
-    cases.forEach(item => {
+    for (const item of cases) {
         const owned = item.id && existing.some(row => Number(row.id) === Number(item.id));
         if (owned) {
-            db.prepare(`
+            await trx.execute(`
                 UPDATE agent_eval_cases
                 SET name = ?, input = ?, input_variables = ?, expected_output = ?, assertions = ?, sort_order = ?, updated_at = ?, deleted_at = NULL
                 WHERE id = ? AND suite_id = ?
-            `).run(item.name, item.input, JSON.stringify(item.inputVariables), item.expectedOutput,
-                JSON.stringify(item.assertions), item.sortOrder, now, item.id, suiteId);
+            `, [
+                item.name, item.input, JSON.stringify(item.inputVariables), item.expectedOutput,
+                JSON.stringify(item.assertions), item.sortOrder, now, item.id, suiteId
+            ]);
             retained.add(Number(item.id));
-            return;
+            continue;
         }
-        const result = db.prepare(`
+        const row = await trx.queryOne(`
             INSERT INTO agent_eval_cases (
                 suite_id, name, input, input_variables, expected_output, assertions, sort_order, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(suiteId, item.name, item.input, JSON.stringify(item.inputVariables), item.expectedOutput,
-            JSON.stringify(item.assertions), item.sortOrder, now, now);
-        retained.add(Number(result.lastInsertRowid));
-    });
-    existing.filter(row => !retained.has(Number(row.id))).forEach(row => {
-        db.prepare('UPDATE agent_eval_cases SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, row.id);
-    });
+            RETURNING id
+        `, [
+            suiteId, item.name, item.input, JSON.stringify(item.inputVariables), item.expectedOutput,
+            JSON.stringify(item.assertions), item.sortOrder, now, now
+        ]);
+        retained.add(Number(row?.id));
+    }
+    for (const row of existing) {
+        if (!retained.has(Number(row.id))) {
+            await trx.execute('UPDATE agent_eval_cases SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, row.id]);
+        }
+    }
 }
 
-function createAgentEvalSuite(user, body = {}) {
+async function createAgentEvalSuite(user, body = {}) {
     const data = normalizeSuitePayload(body);
-    assertEvaluationTarget(user, data);
+    await assertEvaluationTarget(user, data);
     const now = getBeijingTimestamp();
     let suiteId = 0;
-    db.transaction(() => {
-        const result = db.prepare(`
+    await transaction(async trx => {
+        const result = await trx.queryOne(`
             INSERT INTO agent_eval_suites (
                 user_id, name, description, target_type, workflow_id, workflow_version, model_id,
                 run_config, status, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-        `).run(user.id, data.name, data.description, data.targetType, data.workflowId, data.workflowVersion,
-            data.modelId, JSON.stringify(data.runConfig), now, now);
-        suiteId = Number(result.lastInsertRowid);
-        saveCases(suiteId, data.cases, now);
-    })();
-    return getAgentEvalSuite(suiteId, user);
+            RETURNING id
+        `, [
+            user.id, data.name, data.description, data.targetType, data.workflowId, data.workflowVersion,
+            data.modelId, JSON.stringify(data.runConfig), now, now
+        ]);
+        suiteId = Number(result?.id);
+        await saveCases(trx, suiteId, data.cases, now);
+    });
+    return await getAgentEvalSuite(suiteId, user);
 }
 
-function updateAgentEvalSuite(suiteId, user, body = {}) {
-    if (!getSuiteRow(suiteId, user)) return null;
+async function updateAgentEvalSuite(suiteId, user, body = {}) {
+    const existing = await getSuiteRow(suiteId, user);
+    if (!existing) return null;
     const data = normalizeSuitePayload(body);
-    assertEvaluationTarget(user, data);
+    await assertEvaluationTarget(user, data);
     const now = getBeijingTimestamp();
-    db.transaction(() => {
-        db.prepare(`
+    await transaction(async trx => {
+        await trx.execute(`
             UPDATE agent_eval_suites
             SET name = ?, description = ?, target_type = ?, workflow_id = ?, workflow_version = ?,
                 model_id = ?, run_config = ?, updated_at = ?
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-        `).run(data.name, data.description, data.targetType, data.workflowId, data.workflowVersion,
-            data.modelId, JSON.stringify(data.runConfig), now, suiteId, user.id);
-        saveCases(Number(suiteId), data.cases, now);
-    })();
-    return getAgentEvalSuite(suiteId, user);
+        `, [
+            data.name, data.description, data.targetType, data.workflowId, data.workflowVersion,
+            data.modelId, JSON.stringify(data.runConfig), now, suiteId, user.id
+        ]);
+        await saveCases(trx, Number(suiteId), data.cases, now);
+    });
+    return await getAgentEvalSuite(suiteId, user);
 }
 
-function deleteAgentEvalSuite(suiteId, user) {
-    const suite = getSuiteRow(suiteId, user);
+async function deleteAgentEvalSuite(suiteId, user) {
+    const suite = await getSuiteRow(suiteId, user);
     if (!suite) return null;
     const now = getBeijingTimestamp();
-    db.prepare('UPDATE agent_eval_suites SET deleted_at = ?, status = ?, updated_at = ? WHERE id = ? AND user_id = ?')
-        .run(now, 'archived', now, suiteId, user.id);
+    await execute('UPDATE agent_eval_suites SET deleted_at = ?, status = ?, updated_at = ? WHERE id = ? AND user_id = ?', [
+        now, 'archived', now, suiteId, user.id
+    ]);
     return parseSuiteRow({ ...suite, deleted_at: now, status: 'archived' });
 }
 
@@ -313,12 +329,12 @@ function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) 
     };
 }
 
-function evaluationRunSummary(evalRunId) {
-    const rows = db.prepare(`
+async function evaluationRunSummary(evalRunId) {
+    const rows = await query(`
         SELECT status, score, passed, duration_ms, total_tokens
         FROM agent_eval_results
         WHERE eval_run_id = ?
-    `).all(evalRunId);
+    `, [evalRunId]);
     const completed = rows.filter(row => ['passed', 'failed', 'error'].includes(row.status));
     const passed = rows.filter(row => row.passed).length;
     return {
@@ -334,46 +350,48 @@ function evaluationRunSummary(evalRunId) {
     };
 }
 
-function reconcileAgentEvalRun(evalRunId, user) {
-    const batch = db.prepare('SELECT * FROM agent_eval_runs WHERE id = ? AND user_id = ?').get(evalRunId, user.id);
+async function reconcileAgentEvalRun(evalRunId, user) {
+    const batch = await queryOne('SELECT * FROM agent_eval_runs WHERE id = ? AND user_id = ?', [evalRunId, user.id]);
     if (!batch) return null;
-    const pending = db.prepare(`
+    const pending = await query(`
         SELECT er.*, c.expected_output, c.assertions
         FROM agent_eval_results er
         JOIN agent_eval_cases c ON c.id = er.case_id
         WHERE er.eval_run_id = ? AND er.status IN ('queued', 'running')
-    `).all(evalRunId);
+    `, [evalRunId]);
     const config = normalizeRunConfig(parseJson(batch.target_snapshot, {})?.runConfig || {});
     const now = getBeijingTimestamp();
-    pending.forEach(result => {
-        const run = result.agent_run_id ? db.prepare(`
+    for (const result of pending) {
+        const run = result.agent_run_id ? await queryOne(`
             SELECT r.*, COALESCE(t.duration_ms, 0) AS trace_duration_ms
             FROM agent_runs r
             LEFT JOIN agent_traces t ON t.run_id = r.id
             WHERE r.id = ? AND r.user_id = ?
-        `).get(result.agent_run_id, user.id) : null;
-        if (!run) return;
+        `, [result.agent_run_id, user.id]) : null;
+        if (!run) continue;
         if (!TERMINAL_RUN_STATUSES.has(run.status)) {
-            if (result.status !== 'running') db.prepare("UPDATE agent_eval_results SET status = 'running' WHERE id = ?").run(result.id);
-            return;
+            if (result.status !== 'running') await execute("UPDATE agent_eval_results SET status = 'running' WHERE id = ?", [result.id]);
+            continue;
         }
         run.duration_ms = Number(run.trace_duration_ms || 0);
         const graded = gradeAgentOutput({ run, evalCase: result, passThreshold: config.passThreshold });
-        db.prepare(`
+        await execute(`
             UPDATE agent_eval_results
             SET status = ?, score = ?, passed = ?, grader_results = ?, actual_output = ?, error_message = ?,
                 duration_ms = ?, total_tokens = ?, completed_at = ?
             WHERE id = ?
-        `).run(graded.passed ? 'passed' : (run.status === 'completed' ? 'failed' : 'error'), graded.score,
+        `, [
+            graded.passed ? 'passed' : (run.status === 'completed' ? 'failed' : 'error'), graded.score,
             graded.passed ? 1 : 0, JSON.stringify(graded), String(run.final_answer || '').slice(0, 120000),
-            String(run.error_message || '').slice(0, 4000), run.duration_ms, Number(run.total_tokens || 0), now, result.id);
-    });
-    const summary = evaluationRunSummary(evalRunId);
+            String(run.error_message || '').slice(0, 4000), run.duration_ms, Number(run.total_tokens || 0), now, result.id
+        ]);
+    }
+    const summary = await evaluationRunSummary(evalRunId);
     const status = summary.pending > 0 ? 'running' : 'completed';
-    db.prepare(`
+    await execute(`
         UPDATE agent_eval_runs SET status = ?, summary = ?, completed_at = CASE WHEN ? = 'completed' THEN COALESCE(completed_at, ?) ELSE NULL END
         WHERE id = ? AND user_id = ?
-    `).run(status, JSON.stringify(summary), status, now, evalRunId, user.id);
+    `, [status, JSON.stringify(summary), status, now, evalRunId, user.id]);
     return { ...batch, status, summary, completed_at: status === 'completed' ? (batch.completed_at || now) : null };
 }
 
@@ -381,22 +399,22 @@ function parseEvalResult(row) {
     return { ...row, passed: Boolean(row.passed), grader_results: parseJson(row.grader_results, null) };
 }
 
-function getAgentEvalRun(evalRunId, user) {
-    const batch = reconcileAgentEvalRun(evalRunId, user);
+async function getAgentEvalRun(evalRunId, user) {
+    const batch = await reconcileAgentEvalRun(evalRunId, user);
     if (!batch) return null;
-    const results = db.prepare(`
+    const results = (await query(`
         SELECT er.*, c.name AS case_name, c.input AS case_input, r.title AS agent_run_title, r.status AS agent_run_status
         FROM agent_eval_results er
         JOIN agent_eval_cases c ON c.id = er.case_id
         LEFT JOIN agent_runs r ON r.id = er.agent_run_id
         WHERE er.eval_run_id = ?
         ORDER BY c.sort_order ASC, c.id ASC
-    `).all(evalRunId).map(parseEvalResult);
-    const previous = db.prepare(`
+    `, [evalRunId])).map(parseEvalResult);
+    const previous = await queryOne(`
         SELECT summary FROM agent_eval_runs
         WHERE suite_id = ? AND user_id = ? AND status = 'completed' AND id != ? AND created_at < ?
         ORDER BY created_at DESC LIMIT 1
-    `).get(batch.suite_id, user.id, evalRunId, batch.created_at);
+    `, [batch.suite_id, user.id, evalRunId, batch.created_at]);
     const baseline = parseJson(previous?.summary, null);
     return {
         run: { ...batch, target_snapshot: parseJson(batch.target_snapshot, {}), summary: batch.summary },
@@ -409,32 +427,35 @@ function getAgentEvalRun(evalRunId, user) {
     };
 }
 
-function listAgentEvalRuns(suiteId, user, limit = 10) {
-    if (!getSuiteRow(suiteId, user)) return null;
-    const rows = db.prepare(`
+async function listAgentEvalRuns(suiteId, user, limit = 10) {
+    if (!(await getSuiteRow(suiteId, user))) return null;
+    const rows = await query(`
         SELECT * FROM agent_eval_runs WHERE suite_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?
-    `).all(suiteId, user.id, clampInt(limit, 10, 1, 50));
-    return rows.map(row => {
-        const current = reconcileAgentEvalRun(row.id, user) || row;
-        return { ...current, target_snapshot: parseJson(current.target_snapshot, {}), summary: parseJson(current.summary, current.summary || null) };
-    });
+    `, [suiteId, user.id, clampInt(limit, 10, 1, 50)]);
+    const list = [];
+    for (const row of rows) {
+        const current = (await reconcileAgentEvalRun(row.id, user)) || row;
+        list.push({ ...current, target_snapshot: parseJson(current.target_snapshot, {}), summary: parseJson(current.summary, current.summary || null) });
+    }
+    return list;
 }
 
-function getAgentEvalSuite(suiteId, user) {
-    const suite = getSuiteRow(suiteId, user);
+async function getAgentEvalSuite(suiteId, user) {
+    const suite = await getSuiteRow(suiteId, user);
     if (!suite) return null;
-    const cases = db.prepare(`
+    const cases = (await query(`
         SELECT * FROM agent_eval_cases WHERE suite_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC
-    `).all(suiteId).map(parseCaseRow);
-    const runs = listAgentEvalRuns(suiteId, user, 10) || [];
+    `, [suiteId])).map(parseCaseRow);
+    const runs = (await listAgentEvalRuns(suiteId, user, 10)) || [];
     return { suite: parseSuiteRow(suite), cases, runs };
 }
 
-function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
-    db.prepare("SELECT id FROM agent_eval_runs WHERE user_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 20")
-        .all(user.id)
-        .forEach(row => reconcileAgentEvalRun(row.id, user));
-    const detail = getAgentEvalSuite(suiteId, user);
+async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
+    const runningBatches = await query("SELECT id FROM agent_eval_runs WHERE user_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 20", [user.id]);
+    for (const row of runningBatches) {
+        await reconcileAgentEvalRun(row.id, user);
+    }
+    const detail = await getAgentEvalSuite(suiteId, user);
     if (!detail) return null;
     if (typeof createAgentRun !== 'function') throw new Error('智能体评测运行时尚未配置。');
     if (!detail.cases.length) {
@@ -442,7 +463,7 @@ function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
         error.status = 400;
         throw error;
     }
-    const activeBatches = db.prepare("SELECT id, suite_id FROM agent_eval_runs WHERE user_id = ? AND status = 'running'").all(user.id);
+    const activeBatches = await query("SELECT id, suite_id FROM agent_eval_runs WHERE user_id = ? AND status = 'running'", [user.id]);
     if (activeBatches.some(row => String(row.suite_id) === String(suiteId))) {
         const error = new Error('该评测集已有运行中的批次，请等待完成后再运行。');
         error.status = 409;
@@ -477,14 +498,14 @@ function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
         modelId,
         runConfig: config
     };
-    db.prepare(`
+    await execute(`
         INSERT INTO agent_eval_runs (id, suite_id, user_id, status, target_snapshot, summary, started_at, created_at)
         VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
-    `).run(evalRunId, suite.id, user.id, JSON.stringify(snapshot), JSON.stringify({ total: detail.cases.length, completed: 0, pending: detail.cases.length }), now, now);
+    `, [evalRunId, suite.id, user.id, JSON.stringify(snapshot), JSON.stringify({ total: detail.cases.length, completed: 0, pending: detail.cases.length }), now, now]);
 
-    detail.cases.forEach(evalCase => {
+    for (const evalCase of detail.cases) {
         try {
-            const run = createAgentRun({
+            const run = await createAgentRun({
                 user,
                 goal: evalCase.input,
                 modelId,
@@ -500,20 +521,20 @@ function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
                 workflowVersion: suite.target_type === 'workflow' ? (suite.workflow_version || 'published') : null,
                 metadata: { evaluation: { evalRunId, suiteId: suite.id, caseId: evalCase.id } }
             });
-            db.prepare(`
+            await execute(`
                 INSERT INTO agent_eval_results (eval_run_id, case_id, agent_run_id, status, created_at)
                 VALUES (?, ?, ?, 'queued', ?)
-            `).run(evalRunId, evalCase.id, run.id, now);
+            `, [evalRunId, evalCase.id, run.id, now]);
         } catch (error) {
             const graded = gradeAgentOutput({ run: { status: 'error' }, evalCase, passThreshold: config.passThreshold });
-            db.prepare(`
+            await execute(`
                 INSERT INTO agent_eval_results (
                     eval_run_id, case_id, status, score, passed, grader_results, error_message, created_at, completed_at
                 ) VALUES (?, ?, 'error', 0, 0, ?, ?, ?, ?)
-            `).run(evalRunId, evalCase.id, JSON.stringify(graded), String(error.message || error).slice(0, 4000), now, now);
+            `, [evalRunId, evalCase.id, JSON.stringify(graded), String(error.message || error).slice(0, 4000), now, now]);
         }
-    });
-    return getAgentEvalRun(evalRunId, user);
+    }
+    return await getAgentEvalRun(evalRunId, user);
 }
 
 module.exports = {

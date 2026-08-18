@@ -96,7 +96,7 @@ test('大模型 JSON 输出契约校验使用解析后的业务对象', () => {
     assert.deepEqual(value, { answer: '完成' });
 });
 
-test('Agent Trace 对用户隔离并脱敏输入输出', () => {
+test('Agent Trace 对用户隔离并脱敏输入输出', async () => {
     const suffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -114,36 +114,36 @@ test('Agent Trace 对用户隔离并脱敏输入输出', () => {
             INSERT INTO agent_runs (id, user_id, goal, title, status, created_at, updated_at)
             VALUES (?, ?, '检查运行追踪', '追踪测试', 'running', datetime('now', '+8 hours'), datetime('now', '+8 hours'))
         `).run(runId, user.id);
-        ensureAgentTrace({ id: runId, user_id: user.id, status: 'running' }, { apiKey: 'trace-secret', mode: 'test' });
-        const spanId = startAgentTraceSpan(runId, {
+        await ensureAgentTrace({ id: runId, user_id: user.id, status: 'running' }, { apiKey: 'trace-secret', mode: 'test' });
+        const spanId = await startAgentTraceSpan(runId, {
             type: 'tool',
             name: '安全工具调用',
             input: { query: '风险', password: 'do-not-store', nested: { access_token: 'hidden' } }
         });
-        finishAgentTraceSpan(spanId, { output: { ok: true, token: 'hidden-output' }, durationMs: 25 });
-        const trace = getAgentTraceForUser(runId, user);
+        await finishAgentTraceSpan(spanId, { output: { ok: true, token: 'hidden-output' }, durationMs: 25 });
+        const trace = await getAgentTraceForUser(runId, user);
         assert.equal(trace.spans.length, 1);
         assert.equal(trace.spans[0].input.password, '[已脱敏]');
         assert.equal(trace.spans[0].input.nested.access_token, '[已脱敏]');
         assert.equal(trace.spans[0].output.token, '[已脱敏]');
         assert.equal(trace.trace.metadata.apiKey, '[已脱敏]');
-        assert.equal(getAgentTraceForUser(runId, other), null);
-        recordAgentCheckpoint(runId, {
+        assert.equal(await getAgentTraceForUser(runId, other), null);
+        await recordAgentCheckpoint(runId, {
             stepIndex: 2,
             type: 'tool',
             status: 'completed',
             state: { toolName: 'rag.search', input: { query: '风险' }, output: { matches: 2 } }
         });
-        recordAgentCheckpoint(runId, {
+        await recordAgentCheckpoint(runId, {
             stepIndex: 3,
             type: 'tool',
             status: 'error',
             state: { toolName: 'reports.read', errorMessage: '文件不可用' }
         });
-        const checkpoints = listAgentCheckpointsForUser(runId, user);
+        const checkpoints = await listAgentCheckpointsForUser(runId, user);
         assert.equal(checkpoints.length, 2);
-        assert.equal(listAgentCheckpointsForUser(runId, other), null);
-        const resumeContext = buildAgentResumeContext(runId);
+        assert.equal(await listAgentCheckpointsForUser(runId, other), null);
+        const resumeContext = await buildAgentResumeContext(runId);
         assert.equal(resumeContext.observations[0].tool, 'rag.search');
         assert.equal(resumeContext.recentFailures[0].error, '文件不可用');
     } finally {
@@ -196,7 +196,7 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
     const other = { id: Number(otherInfo.lastInsertRowid) };
     const createdRunIds = [];
     try {
-        const evaluation = createAgentEvalSuite(user, {
+        const evaluation = await createAgentEvalSuite(user, {
             name: '发布质量回归',
             targetType: 'free',
             runConfig: { passThreshold: 80 },
@@ -207,10 +207,10 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
             }]
         });
         assert.equal(evaluation.cases.length, 1);
-        assert.equal(listAgentEvalSuites(user).length, 1);
-        assert.equal(getAgentEvalSuite(evaluation.suite.id, other), null);
+        assert.equal((await listAgentEvalSuites(user)).length, 1);
+        assert.equal(await getAgentEvalSuite(evaluation.suite.id, other), null);
 
-        const batch = startAgentEvaluation(evaluation.suite.id, user, { modelId: 1 }, options => {
+        const batch = await startAgentEvaluation(evaluation.suite.id, user, { modelId: 1 }, options => {
             const runId = `eval-agent-run-${suffix}-${createdRunIds.length + 1}`;
             createdRunIds.push(runId);
             db.prepare(`
@@ -223,19 +223,22 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
         assert.equal(batch.run.status, 'completed');
         assert.equal(batch.run.summary.passRate, 100);
         assert.equal(batch.results[0].passed, true);
-        assert.equal(getAgentEvalRun(batch.run.id, other), null);
+        assert.equal(await getAgentEvalRun(batch.run.id, other), null);
         assert.equal((await listRuns(user)).total, 0);
         assert.equal((await listRuns(user, { includePreview: true })).total, 1);
 
-        const updated = updateAgentEvalSuite(evaluation.suite.id, user, {
+        const updated = await updateAgentEvalSuite(evaluation.suite.id, user, {
             name: '发布质量回归',
             targetType: 'free',
             cases: [{ name: '新用例', input: '输出新结果', assertions: { minLength: 2 } }]
         });
         assert.equal(updated.cases.length, 1);
         assert.equal(updated.cases[0].name, '新用例');
-        assert.equal(getAgentEvalRun(batch.run.id, user).results[0].case_name, '风险总结');
+        assert.equal((await getAgentEvalRun(batch.run.id, user)).results[0].case_name, '风险总结');
     } finally {
+        db.prepare('DELETE FROM agent_eval_results WHERE eval_run_id IN (SELECT id FROM agent_eval_runs WHERE suite_id IN (SELECT id FROM agent_eval_suites WHERE user_id = ?))').run(user.id);
+        db.prepare('DELETE FROM agent_eval_runs WHERE suite_id IN (SELECT id FROM agent_eval_suites WHERE user_id = ?)').run(user.id);
+        db.prepare('DELETE FROM agent_eval_cases WHERE suite_id IN (SELECT id FROM agent_eval_suites WHERE user_id = ?)').run(user.id);
         db.prepare('DELETE FROM agent_eval_suites WHERE user_id = ?').run(user.id);
         createdRunIds.forEach(runId => db.prepare('DELETE FROM agent_runs WHERE id = ?').run(runId));
         db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(user.id, other.id);

@@ -27,8 +27,8 @@ function buildAllowedTargetSql(alias, user) {
                     TRIM(COALESCE(${alias}.allowed_units, '')) = ''
                     AND TRIM(COALESCE(${alias}.allowed_user_ids, '')) = ''
                 )`}
-                OR instr(',' || replace(COALESCE(${alias}.allowed_units, ''), ' ', '') || ',', ',' || ? || ',') > 0
-                OR instr(',' || replace(COALESCE(${alias}.allowed_user_ids, ''), ' ', '') || ',', ',' || ? || ',') > 0
+                OR (',' || replace(COALESCE(${alias}.allowed_units, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
+                OR (',' || replace(COALESCE(${alias}.allowed_user_ids, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
             )
         )`,
         params: [normalized.unit, normalized.id]

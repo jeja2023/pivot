@@ -1,5 +1,6 @@
 const express = require('express');
-const { db } = require('../../db');
+const { query, queryOne, execute, transaction } = require('../../db/client');
+const { nowOffsetExpr } = require('../../db/dialect');
 const { asyncHandler } = require('../../http');
 const { getBeijingTimestamp } = require('../../time');
 const {
@@ -64,7 +65,7 @@ const {
     registerLocalBridgeDevice
 } = require('../../services/local-device-bridge');
 
-function createSystemBuiltinService(serviceType, user) {
+async function createSystemBuiltinService(serviceType, user) {
     const definition = SYSTEM_MCP_SERVICES[serviceType];
     if (!definition) {
         const err = new Error('不支持的系统工具。');
@@ -79,22 +80,24 @@ function createSystemBuiltinService(serviceType, user) {
     const service = normalizeBuiltinPayload(serviceType, {});
     const now = getBeijingTimestamp();
     const userId = isSuperAdmin(user) ? null : user.id;
-    const tx = db.transaction(() => {
-        const info = db.prepare(`
+    let serverId = 0;
+    await transaction(async trx => {
+        const info = await trx.queryOne(`
             INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
             VALUES (?, ?, ?, '', ?, 'active', ?, ?)
-        `).run(userId, definition.name, `${BUILTIN_MCP_PREFIXES[service.serviceType]}pending`, definition.description, now, now);
-        const serverId = info.lastInsertRowid;
-        db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
-          .run(`${BUILTIN_MCP_PREFIXES[service.serviceType]}system/${serverId}`, serverId);
-        db.prepare(`
+            RETURNING id
+        `, [userId, definition.name, `${BUILTIN_MCP_PREFIXES[service.serviceType]}pending`, definition.description, now, now]);
+        serverId = info?.id;
+        await trx.execute('UPDATE mcp_servers SET base_url = ? WHERE id = ?', [
+            `${BUILTIN_MCP_PREFIXES[service.serviceType]}system/${serverId}`, serverId
+        ]);
+        await trx.execute(`
             INSERT INTO mcp_builtin_configs (
                 mcp_server_id, user_id, service_type, config, secret, status, created_at, updated_at
             ) VALUES (?, ?, ?, ?, '', 'active', ?, ?)
-        `).run(serverId, userId, service.serviceType, JSON.stringify(service.config), now, now);
-        return serverId;
+        `, [serverId, userId, service.serviceType, JSON.stringify(service.config), now, now]);
     });
-    return tx();
+    return serverId;
 }
 
 function decryptExistingDatabasePassword(row) {
@@ -119,7 +122,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
     router.post('/mcp/local-device/heartbeat', authMiddleware, asyncHandler(async (req, res) => {
         const device = registerLocalBridgeDevice(req.user, req.body || {});
-        const tools = filterMcpToolsByCapability(listBridgeLocalDeviceMcpTools(req.user), req.user);
+        const tools = await filterMcpToolsByCapability(listBridgeLocalDeviceMcpTools(req.user), req.user);
         res.json({ success: true, device, tools });
     }));
 
@@ -138,18 +141,18 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listMcpServers(req.user) });
+        res.json({ data: await listMcpServers(req.user) });
     }));
 
     router.get('/mcp/servers/:id/share-options', authMiddleware, asyncHandler(async (req, res) => {
-        const options = getMcpServerShareOptions(req.params.id, req.user);
+        const options = await getMcpServerShareOptions(req.params.id, req.user);
         if (!options) return res.status(404).json({ error: '工具服务不存在或无权管理共享设置' });
         return res.json({ data: options });
     }));
 
     router.patch('/mcp/servers/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
         try {
-            const server = updateMcpServerSharing(req.params.id, req.user, req.body || {});
+            const server = await updateMcpServerSharing(req.params.id, req.user, req.body || {});
             if (!server) return res.status(404).json({ error: '工具服务不存在或无权管理共享设置' });
             logAction(req, '更新工具服务共享设置', `${server.name}: ${server.scope}`);
             return res.json({ success: true, server: normalizeServerRow(server) });
@@ -160,14 +163,14 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/governance', authMiddleware, asyncHandler(async (req, res) => {
         const superAdmin = isSuperAdmin(req.user);
-        const serverScope = superAdmin ? 's.status != \'deleted\'' : "s.status != 'deleted' AND (s.user_id IS NULL OR s.user_id = ?)";
+        const serverScope = superAdmin ? "s.status != 'deleted'" : "s.status != 'deleted' AND (s.user_id IS NULL OR s.user_id = ?)";
         const scopeParams = superAdmin ? [] : [req.user.id];
-        const summary = db.prepare(`
+        const summary = await queryOne(`
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN s.last_error IS NOT NULL AND s.last_error != '' THEN 1 ELSE 0 END) AS error,
-                SUM(CASE WHEN s.last_checked_at IS NULL OR s.last_checked_at = '' THEN 1 ELSE 0 END) AS unchecked,
+                SUM(CASE WHEN s.last_checked_at IS NULL THEN 1 ELSE 0 END) AS unchecked,
                 SUM(CASE WHEN s.base_url LIKE 'pivot-db://%' THEN 1 ELSE 0 END) AS databaseServers,
                 SUM(CASE WHEN s.base_url LIKE 'pivot-reports://%' THEN 1 ELSE 0 END) AS reportServers,
                 SUM(CASE WHEN s.base_url LIKE 'pivot-visualization://%' THEN 1 ELSE 0 END) AS visualizationServers,
@@ -175,54 +178,55 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 SUM(CASE WHEN s.base_url LIKE 'pivot-im://%' THEN 1 ELSE 0 END) AS imServers
             FROM mcp_servers s
             WHERE ${serverScope}
-        `).get(...scopeParams);
-        const recentWindow = "datetime('now', '+8 hours', '-7 days')";
+        `, scopeParams);
+        const recentWindow = nowOffsetExpr('-7 days');
         const callScope = superAdmin
             ? `l.created_at >= ${recentWindow}`
             : `(l.user_id = ? OR (l.server_id IS NOT NULL AND (s.user_id IS NULL OR s.user_id = ?))) AND l.created_at >= ${recentWindow}`;
         const callParams = superAdmin ? [] : [req.user.id, req.user.id];
-        const callSummary = db.prepare(`
+        const roundAvgExpr = 'ROUND(AVG(l.duration_ms)::numeric, 0)';
+        const callSummary = await queryOne(`
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN l.status = 'error' THEN 1 ELSE 0 END) AS errors,
-                ROUND(AVG(l.duration_ms), 0) AS avgDurationMs
+                ${roundAvgExpr} AS avgDurationMs
             FROM mcp_call_logs l
             LEFT JOIN mcp_servers s ON s.id = l.server_id
             WHERE ${callScope}
-        `).get(...callParams);
-        const topTools = db.prepare(`
+        `, callParams);
+        const topTools = await query(`
             SELECT l.tool_name, COALESCE(s.name, '我的电脑') AS server_name, COUNT(*) AS count,
                    SUM(CASE WHEN l.status = 'error' THEN 1 ELSE 0 END) AS errors,
-                   ROUND(AVG(l.duration_ms), 0) AS avgDurationMs
+                   ${roundAvgExpr} AS avgDurationMs
             FROM mcp_call_logs l
             LEFT JOIN mcp_servers s ON s.id = l.server_id
             WHERE ${callScope}
-            GROUP BY l.server_id, l.tool_name
+            GROUP BY l.server_id, s.name, l.tool_name
             ORDER BY count DESC
             LIMIT 8
-        `).all(...callParams);
-        const health = buildCapabilityHealth(summary, callSummary);
+        `, callParams);
+        const health = buildCapabilityHealth(summary || {}, callSummary || {});
         res.json({
             summary: {
-                total: Number(summary.total || 0),
-                active: Number(summary.active || 0),
-                error: Number(summary.error || 0),
-                unchecked: Number(summary.unchecked || 0),
-                databaseServers: Number(summary.databaseServers || 0),
-                reportServers: Number(summary.reportServers || 0),
-                visualizationServers: Number(summary.visualizationServers || 0),
-                reportComposerServers: Number(summary.reportComposerServers || 0),
-                imServers: Number(summary.imServers || 0),
-                calls7d: Number(callSummary.total || 0),
-                callErrors7d: Number(callSummary.errors || 0),
-                avgDurationMs: Number(callSummary.avgDurationMs || 0),
+                total: Number(summary?.total || 0),
+                active: Number(summary?.active || 0),
+                error: Number(summary?.error || 0),
+                unchecked: Number(summary?.unchecked || 0),
+                databaseServers: Number(summary?.databaseServers || 0),
+                reportServers: Number(summary?.reportServers || 0),
+                visualizationServers: Number(summary?.visualizationServers || 0),
+                reportComposerServers: Number(summary?.reportComposerServers || 0),
+                imServers: Number(summary?.imServers || 0),
+                calls7d: Number(callSummary?.total || 0),
+                callErrors7d: Number(callSummary?.errors || 0),
+                avgDurationMs: Number(callSummary?.avgDurationMs || 0),
                 healthScore: health.score,
                 healthLevel: health.level,
                 activeRate: health.activeRate,
                 callErrorRate: health.callErrorRate
             },
             health,
-            topTools
+            topTools: topTools || []
         });
     }));
 
@@ -231,7 +235,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const superAdmin = isSuperAdmin(req.user);
         const where = superAdmin ? "(l.server_id IS NULL OR s.status != 'deleted')" : "(l.user_id = ? OR (l.server_id IS NOT NULL AND (s.user_id IS NULL OR s.user_id = ?)))";
         const params = superAdmin ? [limit] : [req.user.id, req.user.id, limit];
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT l.id, l.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, l.server_id, COALESCE(s.name, '我的电脑') AS server_name,
                    l.tool_name, l.source, l.status, l.duration_ms, l.input_preview,
                    l.output_preview, l.error_message, l.created_at
@@ -241,16 +245,16 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             WHERE ${where}
             ORDER BY l.created_at DESC, l.id DESC
             LIMIT ?
-        `).all(...params);
+        `, params);
         res.json({ data: rows });
     }));
 
     router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listGlobalCapabilityPackages(req.user), scope: 'global' });
+        res.json({ data: await listGlobalCapabilityPackages(req.user), scope: 'global' });
     }));
 
     router.get('/capabilities/packages/:key/tools', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const item = getGlobalCapabilityPackage(req.params.key, req.user);
+        const item = await getGlobalCapabilityPackage(req.params.key, req.user);
         if (!item) return res.status(404).json({ error: '工具包不存在。' });
         const config = item.config || {};
         const storedTools = config.tools && typeof config.tools === 'object' ? config.tools : {};
@@ -263,46 +267,51 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                     fullName: definition.name,
                     title: definition.title || definition.name,
                     description: definition.description || '',
-                    governance: getCapabilityToolGovernance('builtin_tool', definition.name, definition.name, req.user)
+                    governance: await getCapabilityToolGovernance('builtin_tool', definition.name, definition.name, req.user)
                 }];
             }
         } else {
-            tools = listCachedMcpTools(item.source_ref, req.user)
-                .filter(tool => item.type === 'database_connection'
-                    ? tool.serverType === 'database'
-                    : tool.serverType !== 'database')
-                .map(tool => ({
+            const cachedList = await listCachedMcpTools(item.source_ref, req.user);
+            tools = [];
+            for (const tool of cachedList) {
+                if (item.type === 'database_connection' ? tool.serverType !== 'database' : tool.serverType === 'database') {
+                    continue;
+                }
+                const gov = await getCapabilityToolGovernance(item.type, item.source_ref, tool.name, req.user);
+                tools.push({
                     name: tool.name,
                     fullName: tool.fullName,
                     title: tool.name,
                     description: tool.description || '',
-                    governance: getCapabilityToolGovernance(item.type, item.source_ref, tool.name, req.user)
-                }));
+                    governance: gov
+                });
+            }
         }
         const known = new Set(tools.map(tool => tool.name));
-        Object.keys(storedTools).forEach(name => {
-            if (known.has(name)) return;
+        for (const name of Object.keys(storedTools)) {
+            if (known.has(name)) continue;
+            const gov = await getCapabilityToolGovernance(item.type, item.source_ref, name, req.user);
             tools.push({
                 name,
                 fullName: name,
                 title: name,
                 description: '已保存策略，当前工具缓存中未找到该工具。',
                 stale: true,
-                governance: getCapabilityToolGovernance(item.type, item.source_ref, name, req.user)
+                governance: gov
             });
-        });
+        }
         res.json({ item, tools });
     }));
 
     router.put('/capabilities/packages/:key', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const item = setGlobalCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
+        const item = await setGlobalCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
         if (!item) return res.status(404).json({ error: '工具包不存在。' });
         logAction(req, '更新工具包状态', `${item.package_key}: ${item.status}`);
         res.json({ success: true, item });
     }));
 
     router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const item = setGlobalCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
+        const item = await setGlobalCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
             enabled: parseBoolean(req.body?.enabled, true),
             riskLevel: req.body?.riskLevel || req.body?.risk_level,
             approvalRequired: req.body?.approvalRequired !== undefined
@@ -332,12 +341,12 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         let password = req.body?.password;
 
         if (serverId) {
-            const existing = getAccessibleMcpServer(serverId, req.user);
+            const existing = await getAccessibleMcpServer(serverId, req.user);
             if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
             if (!String(existing.base_url || '').startsWith('pivot-db://')) {
                 return res.status(400).json({ error: '该工具服务不是服务器可访问数据库。' });
             }
-            const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
+            const dbConnectionRow = await queryOne('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?', [existing.id]);
             if (!dbConnectionRow) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
             if (password === undefined || password === '********') {
                 password = decryptExistingDatabasePassword(dbConnectionRow);
@@ -348,7 +357,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         try {
             connection = validateDatabaseConnectionPayload({ ...req.body, password }, req.user);
             const result = await testDatabaseConnection(connection);
-        logAction(req, '测试数据库能力连接', `${connection.database_type}: ${connection.host || connection.database_name}`);
+            logAction(req, '测试数据库能力连接', `${connection.database_type}: ${connection.host || connection.database_name}`);
             res.json({ success: true, result });
         } catch (err) {
             const failure = normalizeDatabaseConnectionError(err, connection || req.body);
@@ -382,12 +391,14 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         await assertSafeMcpOutboundUrl(baseUrl, req.user);
         if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
         const now = getBeijingTimestamp();
-        const info = db.prepare(`
+        const row = await queryOne(`
             INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, config, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
-        `).run(shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now);
+            RETURNING id
+        `, [shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now]);
         logAction(req, '新增工具服务', `${name}: ${baseUrl}`);
-        res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(info.lastInsertRowid)) });
+        const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [row?.id]);
+        res.status(201).json({ success: true, server: normalizeServerRow(created) });
     }));
 
     router.post('/mcp/database-connections', authMiddleware, asyncHandler(async (req, res) => {
@@ -399,19 +410,22 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const connection = validateDatabaseConnectionPayload(req.body, req.user);
         const now = getBeijingTimestamp();
         const userId = shared ? null : req.user.id;
-        const tx = db.transaction(() => {
-            const info = db.prepare(`
+        let serverId = 0;
+        await transaction(async trx => {
+            const info = await trx.queryOne(`
                 INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
                 VALUES (?, ?, ?, '', ?, 'active', ?, ?)
-            `).run(userId, name, 'pivot-db://pending', description, now, now);
-            const serverId = info.lastInsertRowid;
-            db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
-              .run(`pivot-db://connection/${serverId}`, serverId);
-            db.prepare(`
+                RETURNING id
+            `, [userId, name, 'pivot-db://pending', description, now, now]);
+            serverId = info?.id;
+            await trx.execute('UPDATE mcp_servers SET base_url = ? WHERE id = ?', [
+                `pivot-db://connection/${serverId}`, serverId
+            ]);
+            await trx.execute(`
                 INSERT INTO mcp_database_connections (
                     mcp_server_id, user_id, database_type, host, port, database_name, username, password, options, status, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-            `).run(
+            `, [
                 serverId,
                 userId,
                 connection.database_type,
@@ -423,12 +437,11 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 JSON.stringify(connection.options),
                 now,
                 now
-            );
-            return serverId;
+            ]);
         });
-        const serverId = tx();
         logAction(req, '新增数据库工具服务', `${name}: ${connection.database_type}`);
-        res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
+        const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
+        res.status(201).json({ success: true, server: normalizeServerRow(created) });
     }));
 
     router.post('/mcp/builtin-services', authMiddleware, asyncHandler(async (req, res) => {
@@ -443,19 +456,22 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
         const now = getBeijingTimestamp();
         const userId = shared ? null : req.user.id;
-        const tx = db.transaction(() => {
-            const info = db.prepare(`
+        let serverId = 0;
+        await transaction(async trx => {
+            const info = await trx.queryOne(`
                 INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, status, created_at, updated_at)
                 VALUES (?, ?, ?, '', ?, 'active', ?, ?)
-            `).run(userId, name, `${BUILTIN_MCP_PREFIXES[service.serviceType]}pending`, description, now, now);
-            const serverId = info.lastInsertRowid;
-            db.prepare('UPDATE mcp_servers SET base_url = ? WHERE id = ?')
-              .run(`${BUILTIN_MCP_PREFIXES[service.serviceType]}connection/${serverId}`, serverId);
-            db.prepare(`
+                RETURNING id
+            `, [userId, name, `${BUILTIN_MCP_PREFIXES[service.serviceType]}pending`, description, now, now]);
+            serverId = info?.id;
+            await trx.execute('UPDATE mcp_servers SET base_url = ? WHERE id = ?', [
+                `${BUILTIN_MCP_PREFIXES[service.serviceType]}connection/${serverId}`, serverId
+            ]);
+            await trx.execute(`
                 INSERT INTO mcp_builtin_configs (
                     mcp_server_id, user_id, service_type, config, secret, status, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
-            `).run(
+            `, [
                 serverId,
                 userId,
                 service.serviceType,
@@ -463,12 +479,11 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 encryptSecret(service.secret),
                 now,
                 now
-            );
-            return serverId;
+            ]);
         });
-        const serverId = tx();
         logAction(req, '新增系统工具服务', `${name}: ${service.serviceType}`);
-        res.status(201).json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)) });
+        const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
+        res.status(201).json({ success: true, server: normalizeServerRow(created) });
     }));
 
     router.post('/mcp/system-services/:type/ensure', authMiddleware, asyncHandler(async (req, res) => {
@@ -476,27 +491,28 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!SYSTEM_MCP_SERVICES[serviceType]) {
             return res.status(400).json({ error: '不支持的系统工具。' });
         }
-        const existing = findAccessibleBuiltinService(serviceType, req.user);
-        const serverId = existing?.id || createSystemBuiltinService(serviceType, req.user);
-        const server = getAccessibleMcpServer(serverId, req.user);
+        const existing = await findAccessibleBuiltinService(serviceType, req.user);
+        const serverId = existing?.id || (await createSystemBuiltinService(serviceType, req.user));
+        const server = await getAccessibleMcpServer(serverId, req.user);
         const tools = await refreshMcpTools(server, req.user);
         logAction(req, existing ? '启用系统工具服务' : '新增系统工具服务', `${SYSTEM_MCP_SERVICES[serviceType].name}: ${tools.length}`);
+        const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
         res.status(existing ? 200 : 201).json({
             success: true,
-            server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId)),
+            server: normalizeServerRow(created),
             tools
         });
     }));
 
     router.put('/mcp/builtin-services/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        const existing = await getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         const serviceType = getBuiltinServiceTypeFromUrl(existing.base_url);
         if (!serviceType) return res.status(400).json({ error: '该工具服务不是系统预设。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
-        const configRow = db.prepare('SELECT * FROM mcp_builtin_configs WHERE mcp_server_id = ?').get(existing.id);
+        const configRow = await queryOne('SELECT * FROM mcp_builtin_configs WHERE mcp_server_id = ?', [existing.id]);
         if (!configRow) return res.status(404).json({ error: '系统工具配置不存在。' });
 
         const name = String(req.body?.name || existing.name).trim();
@@ -513,37 +529,38 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             await assertSafeMcpOutboundUrl(service.config.endpointUrl, req.user);
         }
         const now = getBeijingTimestamp();
-        db.transaction(() => {
-            db.prepare(`
+        await transaction(async trx => {
+            await trx.execute(`
                 UPDATE mcp_servers
                 SET name = ?, description = ?, status = ?, updated_at = ?
                 WHERE id = ?
-            `).run(name, description, status, now, existing.id);
-            db.prepare(`
+            `, [name, description, status, now, existing.id]);
+            await trx.execute(`
                 UPDATE mcp_builtin_configs
                 SET service_type = ?, config = ?, secret = ?, status = ?, updated_at = ?
                 WHERE mcp_server_id = ?
-            `).run(
+            `, [
                 service.serviceType,
                 JSON.stringify(service.config),
                 encryptSecret(service.secret),
                 status,
                 now,
                 existing.id
-            );
-        })();
+            ]);
+        });
         logAction(req, '修改系统工具服务', `${name}: ${service.serviceType}`);
-        res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
+        const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
+        res.json({ success: true, server: normalizeServerRow(updated) });
     }));
 
     router.put('/mcp/database-connections/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        const existing = await getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (!String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '该工具服务不是服务器可访问数据库。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以编辑全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权编辑该工具服务。' });
 
-        const dbConnectionRow = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(existing.id);
+        const dbConnectionRow = await queryOne('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?', [existing.id]);
         if (!dbConnectionRow) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
 
         const name = String(req.body?.name || existing.name).trim();
@@ -556,17 +573,17 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 : req.body?.password
         }, req.user);
         const now = getBeijingTimestamp();
-        db.transaction(() => {
-            db.prepare(`
+        await transaction(async trx => {
+            await trx.execute(`
                 UPDATE mcp_servers
                 SET name = ?, description = ?, status = ?, updated_at = ?
                 WHERE id = ?
-            `).run(name, description, status, now, existing.id);
-            db.prepare(`
+            `, [name, description, status, now, existing.id]);
+            await trx.execute(`
                 UPDATE mcp_database_connections
                 SET database_type = ?, host = ?, port = ?, database_name = ?, username = ?, password = ?, options = ?, status = ?, updated_at = ?
                 WHERE mcp_server_id = ?
-            `).run(
+            `, [
                 connection.database_type,
                 connection.host,
                 connection.port,
@@ -577,14 +594,15 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 status,
                 now,
                 existing.id
-            );
-        })();
+            ]);
+        });
         logAction(req, '修改数据库工具服务', `${name}: ${connection.database_type}`);
-        res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
+        const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
+        res.json({ success: true, server: normalizeServerRow(updated) });
     }));
 
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        const existing = await getAccessibleMcpServer(req.params.id, req.user);
         if (existing && existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
         if (existing && existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
@@ -604,63 +622,65 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             : encryptSecret(String(apiKeyInput || '').trim());
         await assertSafeMcpOutboundUrl(baseUrl, req.user);
         if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
-        db.prepare(`
+        await execute(`
             UPDATE mcp_servers
             SET name = ?, base_url = ?, api_key = ?, description = ?, config = ?, status = ?, updated_at = ?
             WHERE id = ?
-        `).run(name, baseUrl, nextApiKey, description, JSON.stringify(config), status, getBeijingTimestamp(), existing.id);
+        `, [name, baseUrl, nextApiKey, description, JSON.stringify(config), status, getBeijingTimestamp(), existing.id]);
         logAction(req, '修改工具服务', `${name}: ${baseUrl}`);
-        res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
+        const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
+        res.json({ success: true, server: normalizeServerRow(updated) });
     }));
 
     router.patch('/mcp/servers/:id/status', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        const existing = await getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以管理全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权管理该工具服务。' });
         const status = req.body?.status === 'paused' ? 'paused' : 'active';
         const now = getBeijingTimestamp();
-        db.prepare('UPDATE mcp_servers SET status = ?, updated_at = ? WHERE id = ?').run(status, now, existing.id);
+        await execute('UPDATE mcp_servers SET status = ?, updated_at = ? WHERE id = ?', [status, now, existing.id]);
         if (String(existing.base_url || '').startsWith('pivot-db://')) {
-            db.prepare('UPDATE mcp_database_connections SET status = ?, updated_at = ? WHERE mcp_server_id = ?').run(status, now, existing.id);
+            await execute('UPDATE mcp_database_connections SET status = ?, updated_at = ? WHERE mcp_server_id = ?', [status, now, existing.id]);
         } else if (getBuiltinServiceTypeFromUrl(existing.base_url)) {
-            db.prepare('UPDATE mcp_builtin_configs SET status = ?, updated_at = ? WHERE mcp_server_id = ?').run(status, now, existing.id);
+            await execute('UPDATE mcp_builtin_configs SET status = ?, updated_at = ? WHERE mcp_server_id = ?', [status, now, existing.id]);
         }
         logAction(req, status === 'paused' ? '停用工具服务' : '启用工具服务', existing.name);
-        res.json({ success: true, server: normalizeServerRow(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(existing.id)) });
+        const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
+        res.json({ success: true, server: normalizeServerRow(updated) });
     }));
 
     router.delete('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const existing = getAccessibleMcpServer(req.params.id, req.user);
+        const existing = await getAccessibleMcpServer(req.params.id, req.user);
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以删除全局工具服务。' });
         if (existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '无权删除该工具服务。' });
         const now = getBeijingTimestamp();
-        db.prepare("UPDATE mcp_servers SET status = 'deleted', updated_at = ? WHERE id = ?").run(now, existing.id);
-        db.prepare("UPDATE mcp_database_connections SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
-        db.prepare("UPDATE mcp_builtin_configs SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?").run(now, existing.id);
+        await execute("UPDATE mcp_servers SET status = 'deleted', updated_at = ? WHERE id = ?", [now, existing.id]);
+        await execute("UPDATE mcp_database_connections SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?", [now, existing.id]);
+        await execute("UPDATE mcp_builtin_configs SET status = 'deleted', updated_at = ? WHERE mcp_server_id = ?", [now, existing.id]);
 
         // 删除工具服务时，同步删除对应的工具包记录
         const isDatabase = String(existing.base_url || '').startsWith('pivot-db://');
         const packageType = isDatabase ? 'database_connection' : 'mcp_server';
         const packageKey = `${packageType}:${existing.id}`;
-        db.prepare("DELETE FROM capability_packages WHERE package_key = ?").run(packageKey);
+        await execute("DELETE FROM capability_packages WHERE package_key = ?", [packageKey]);
 
         logAction(req, '删除工具服务', existing.name);
         res.json({ success: true });
     }));
 
     router.post('/mcp/servers/:id/refresh', authMiddleware, asyncHandler(async (req, res) => {
-        const refreshTarget = String(req.params.id) === '0' ? null : getAccessibleMcpServer(req.params.id, req.user);
+        const refreshTarget = String(req.params.id) === '0' ? null : (await getAccessibleMcpServer(req.params.id, req.user));
         if (refreshTarget?.user_id !== null && refreshTarget && Number(refreshTarget.user_id) !== Number(req.user.id)) {
             return res.status(403).json({ error: '共享工具仅允许使用，不允许刷新工具缓存。' });
         }
         if (String(req.params.id) === '0') {
-            const tools = filterMcpToolsByCapability(listCachedMcpTools(0, req.user), req.user);
+            const tools = await filterMcpToolsByCapability(await listCachedMcpTools(0, req.user), req.user);
             logAction(req, '刷新本机虚拟工具', `mcp.0: ${tools.length}`);
             return res.json({ success: true, tools });
         }
-        const server = getAccessibleMcpServer(req.params.id, req.user);
+        const server = await getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const tools = await refreshMcpTools(server, req.user);
         logAction(req, '刷新工具库工具', `${server.name}: ${tools.length}`);
@@ -668,16 +688,16 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.post('/mcp/servers/:id/diagnose', authMiddleware, asyncHandler(async (req, res) => {
-        const diagnoseTarget = getAccessibleMcpServer(req.params.id, req.user);
+        const diagnoseTarget = await getAccessibleMcpServer(req.params.id, req.user);
         if (diagnoseTarget?.user_id !== null && diagnoseTarget && Number(diagnoseTarget.user_id) !== Number(req.user.id)) {
             return res.status(403).json({ error: '共享工具仅允许使用，不允许执行配置诊断。' });
         }
-        const server = getAccessibleMcpServer(req.params.id, req.user);
+        const server = await getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
         const baseUrl = String(server.base_url || '');
         const builtinType = getBuiltinServiceTypeFromUrl(baseUrl);
         if (baseUrl.startsWith('pivot-db://')) {
-            const row = db.prepare('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?').get(server.id);
+            const row = await queryOne('SELECT * FROM mcp_database_connections WHERE mcp_server_id = ?', [server.id]);
             if (!row) return res.status(404).json({ error: '服务器可访问数据库配置不存在。' });
             let connection = null;
             try {
@@ -769,13 +789,13 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 }, req.user);
             }
             const targets = await executeBuiltinMcpTool(server, 'im.list_allowed_targets', {}, req.user);
-            const recent = db.prepare(`
+            const recent = await query(`
                 SELECT tool_name, status, duration_ms, error_message, created_at
                 FROM mcp_call_logs
                 WHERE server_id = ?
                 ORDER BY created_at DESC, id DESC
                 LIMIT 8
-            `).all(server.id);
+            `, [server.id]);
             return res.json({
                 success: true,
                 type: 'im',
@@ -817,38 +837,39 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/mcp/servers/:id/tools', authMiddleware, asyncHandler(async (req, res) => {
         if (String(req.params.id) === '0') {
-            return res.json({ tools: filterMcpToolsByCapability(listCachedMcpTools(0, req.user), req.user) });
+            return res.json({ tools: await filterMcpToolsByCapability(await listCachedMcpTools(0, req.user), req.user) });
         }
-        const server = getAccessibleMcpServer(req.params.id, req.user);
+        const server = await getAccessibleMcpServer(req.params.id, req.user);
         if (!server) return res.status(404).json({ error: '工具服务不存在。' });
-        const allTools = listCachedMcpTools(server.id, req.user);
+        const allTools = await listCachedMcpTools(server.id, req.user);
         res.json({ tools: allTools });
     }));
 
     router.get('/mcp/tools', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ tools: filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user) });
+        res.json({ tools: await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user) });
     }));
 
     router.post('/mcp/tools/call', authMiddleware, asyncHandler(async (req, res) => {
         const name = String(req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: 'Tool name is required.' });
         if (name.startsWith('mcp.')) {
-            const cached = listCachedMcpTools(null, req.user).find(tool => tool.fullName === name);
+            const cachedList = await listCachedMcpTools(null, req.user);
+            const cached = cachedList.find(tool => tool.fullName === name);
             const sourceRef = cached
                 ? String(cached.serverId ?? cached.server_id ?? cached.serverName ?? '')
                 : '';
             const type = cached?.serverType === 'database'
                 ? 'database_connection'
                 : 'mcp_server';
-            if (sourceRef && !isCapabilityEnabled(type, sourceRef, req.user)) {
+            if (sourceRef && !(await isCapabilityEnabled(type, sourceRef, req.user))) {
                 return res.status(403).json({ error: '该工具包已停用。' });
             }
-            if (sourceRef && !isToolCapabilityEnabled(type, sourceRef, cached?.name || '', req.user)) {
+            if (sourceRef && !(await isToolCapabilityEnabled(type, sourceRef, cached?.name || '', req.user))) {
                 return res.status(403).json({ error: '该工具已在工具治理中停用。' });
             }
-        } else if (!isCapabilityEnabled('builtin_tool', name, req.user)) {
+        } else if (!(await isCapabilityEnabled('builtin_tool', name, req.user))) {
             return res.status(403).json({ error: '该系统工具包已停用。' });
-        } else if (!isToolCapabilityEnabled('builtin_tool', name, name, req.user)) {
+        } else if (!(await isToolCapabilityEnabled('builtin_tool', name, name, req.user))) {
             return res.status(403).json({ error: '该系统工具已在工具治理中停用。' });
         }
         const result = name.startsWith('mcp.')
@@ -869,8 +890,9 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 });
             }
             if (method === 'tools/list') {
+                const builtIns = await filterBuiltInToolsByCapability(getBuiltInToolDefinitions(req.user), req.user);
                 return sendJsonRpc(res, id, {
-                    tools: filterBuiltInToolsByCapability(getBuiltInToolDefinitions(req.user), req.user).map(tool => ({
+                    tools: builtIns.map(tool => ({
                         name: tool.name,
                         description: tool.description,
                         inputSchema: tool.input_schema
@@ -878,10 +900,10 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 });
             }
             if (method === 'tools/call') {
-                if (!isCapabilityEnabled('builtin_tool', params?.name, req.user)) {
+                if (!(await isCapabilityEnabled('builtin_tool', params?.name, req.user))) {
                     throw new Error('该系统工具包已停用。');
                 }
-                if (!isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user)) {
+                if (!(await isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user))) {
                     throw new Error('该系统工具已在工具治理中停用。');
                 }
                 const result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
@@ -918,7 +940,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.get('/admin/mcp/servers', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const rows = db.prepare("SELECT * FROM mcp_servers WHERE status != 'deleted' ORDER BY created_at DESC").all();
+        const rows = await query("SELECT * FROM mcp_servers WHERE status != 'deleted' ORDER BY created_at DESC");
         res.json({ data: rows.map(normalizeServerRow) });
     }));
 

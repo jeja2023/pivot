@@ -22,6 +22,7 @@ const {
     renderPrometheusMetrics
 } = require('./metrics');
 const { 
+    asyncHandler,
     getClientIp, 
     normalizePage, 
     normalizeLimit
@@ -238,10 +239,10 @@ app.get('/api/health/details', healthLimiter, authMiddleware, (req, res) => {
     });
 });
 
-app.get('/api/metrics', metricsAuthMiddleware, (req, res) => {
+app.get('/api/metrics', metricsAuthMiddleware, asyncHandler(async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(renderPrometheusMetrics());
-});
+    res.send(await renderPrometheusMetrics());
+}));
 
 // --- 模型接口 ---
 app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit, probeLimiter }));

@@ -4,12 +4,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DuckDBInstance } = require('@duckdb/node-api');
-const { db, dataDir } = require('../../db');
+const { query, queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
 const { analysisSemaphore } = require('../concurrency');
 
 const projectRoot = path.resolve(__dirname, '../../..');
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../../data');
 const analysisRoot = process.env.PIVOT_ANALYSIS_DIR
     ? path.resolve(process.env.PIVOT_ANALYSIS_DIR)
     : path.join(dataDir, 'analysis');
@@ -186,11 +187,11 @@ function serializeDataset(row) {
     };
 }
 
-function getDatasetForUser(userId, datasetId) {
-    const row = db.prepare(`
+async function getDatasetForUser(userId, datasetId) {
+    const row = await queryOne(`
         SELECT * FROM analysis_datasets
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `).get(datasetId, userId);
+    `, [datasetId, userId]);
     if (!row) {
         const err = new Error('数据集不存在或无权访问。');
         err.status = 404;
@@ -281,12 +282,12 @@ async function createParquetFromRows(columns, rows, parquetPath) {
     }
 }
 
-function recordArtifact({ userId, datasetId = '', type, title, content = '', filePath = '', metadata = {} }) {
+async function recordArtifact({ userId, datasetId = '', type, title, content = '', filePath = '', metadata = {} }) {
     const artifactId = analysisId('art');
-    db.prepare(`
+    await execute(`
         INSERT INTO analysis_artifacts (id, user_id, dataset_id, type, title, content, file_path, metadata_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
         artifactId,
         userId,
         datasetId,
@@ -296,7 +297,7 @@ function recordArtifact({ userId, datasetId = '', type, title, content = '', fil
         filePath ? toProjectRelative(filePath) : '',
         JSON.stringify(metadata),
         getBeijingTimestamp()
-    );
+    ]);
     return artifactId;
 }
 
@@ -318,7 +319,6 @@ function normalizeAggregation(value, hasValueField) {
 }
 
 module.exports = {
-    db,
     logger,
     projectRoot,
     analysisRoot,

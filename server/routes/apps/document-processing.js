@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const { asyncHandler } = require('../../http');
 const { isAdmin, isSuperAdmin } = require('../../permissions');
 const {
@@ -20,13 +20,13 @@ const {
 
 function requireDocumentProcessingAdmin(req, res) {
     if (isAdmin(req.user)) return true;
-    res.status(403).json({ error: '\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650\u3002' });
+    res.status(403).json({ error: '需要管理员权限。' });
     return false;
 }
 
 function requireDocumentProcessingSuperAdmin(req, res) {
     if (isSuperAdmin(req.user)) return true;
-    res.status(403).json({ error: '\u4ec5 admin \u8d26\u53f7\u53ef\u67e5\u770b\u548c\u914d\u7f6e OCR \u5f15\u64ce\u3002' });
+    res.status(403).json({ error: '仅 admin 账号可查看和配置 OCR 引擎。' });
     return false;
 }
 
@@ -54,13 +54,13 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
     router.put('/admin/settings', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireDocumentProcessingSuperAdmin(req, res)) return;
         const settings = updateDocumentProcessingSettings({ patch: req.body || {}, userId: req.user.id });
-        logAction?.(req, '\u6587\u6863\u5904\u7406\u914d\u7f6e\u66f4\u65b0', '\u66f4\u65b0 OCR/PDF \u5904\u7406\u9650\u5236');
+        logAction?.(req, '文档处理配置更新', '更新 OCR/PDF 处理限制');
         return res.json({ success: true, settings });
     }));
 
     router.get('/admin/stats', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireDocumentProcessingAdmin(req, res)) return;
-        return res.json(getDocumentProcessingStats());
+        return res.json(await getDocumentProcessingStats());
     }));
 
     router.get('/engines', authMiddleware, asyncHandler(async (req, res) => {
@@ -69,7 +69,7 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
     }));
 
     router.get('/jobs', authMiddleware, asyncHandler(async (req, res) => {
-        res.json(listJobs({
+        res.json(await listJobs({
             userId: req.user.id,
             page: req.query.page,
             limit: req.query.limit,
@@ -94,20 +94,20 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
     }));
 
     router.get('/jobs/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = getJobDetail({ userId: req.user.id, jobId: req.params.id });
+        const detail = await getJobDetail({ userId: req.user.id, jobId: req.params.id });
         if (!detail) return res.status(404).json({ error: '任务不存在' });
         return res.json(detail);
     }));
 
     router.post('/jobs/:id/retry', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = retryJob({ userId: req.user.id, jobId: req.params.id });
+        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id });
         if (!detail) return res.status(404).json({ error: '任务不存在' });
         logAction?.(req, '文档处理任务重试', `任务: ${req.params.id}`);
         return res.json({ success: true, ...detail });
     }));
 
     router.post('/jobs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = cancelJob({ userId: req.user.id, jobId: req.params.id });
+        const detail = await cancelJob({ userId: req.user.id, jobId: req.params.id });
         if (!detail) return res.status(404).json({ error: '任务不存在' });
         logAction?.(req, '文档处理任务取消', `任务: ${req.params.id}`);
         return res.json({ success: true, ...detail });
@@ -131,26 +131,26 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
             target: req.body?.target,
             options: req.body || {}
         });
-        if (!share) return res.status(404).json({ error: '\u6587\u6863\u5904\u7406\u4efb\u52a1\u4e0d\u5b58\u5728' });
-        logAction?.(req, 'OCR \u7ed3\u679c\u5206\u53d1', '\u4efb\u52a1: ' + req.params.id + '\uff0c\u76ee\u6807: ' + share.target);
+        if (!share) return res.status(404).json({ error: '文档处理任务不存在' });
+        logAction?.(req, 'OCR 结果分发', `任务: ${req.params.id}，目标: ${share.target}`);
         return res.json({ success: true, share });
     }));
 
     router.get('/outputs/:id/download', authMiddleware, asyncHandler(async (req, res) => {
-        const output = getOutputDownload({ userId: req.user.id, outputId: req.params.id });
+        const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id });
         if (!output) return res.status(404).json({ error: '输出文件不存在或已过期' });
         res.setHeader('Content-Type', output.mimeType);
         return res.download(output.filePath, output.fileName);
     }));
 
     router.get('/pages/:id/image', authMiddleware, asyncHandler(async (req, res) => {
-        const image = getPageImage({ userId: req.user.id, pageId: req.params.id });
+        const image = await getPageImage({ userId: req.user.id, pageId: req.params.id });
         if (!image) return res.status(404).json({ error: '页面预览不存在' });
         return res.sendFile(image.filePath);
     }));
 
     router.put('/pages/:id/review', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = savePageReview({
+        const detail = await savePageReview({
             userId: req.user.id,
             pageId: req.params.id,
             revisedText: req.body?.revisedText ?? req.body?.text,

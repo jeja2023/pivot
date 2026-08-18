@@ -1,12 +1,12 @@
 /* 会话管理路由 Session Management Routes */
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { db, stmts } = require('../db');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { buildFtsQuery } = require('../search');
 const { buildContextMeta, compactSessionMemory } = require('../llm');
-const { getAccessibleModel } = require('../services/models');
+const { getAccessibleModelAsync } = require('../services/models');
 const { TimeoutError } = require('../services/concurrency');
 const { encodeAttachmentUrl } = require('../security');
 const sessionsRepository = require('../repositories/sessions');
@@ -46,7 +46,11 @@ function renameTagValue(existingTags, fromTag, toTag) {
 }
 
 const SESSION_SORT_EXPR = 'COALESCE(s.updated_at, s.created_at)';
-const SESSION_SORT_DATE_EXPR = `date(${SESSION_SORT_EXPR})`;
+const SESSION_SORT_DATE_EXPR = `substr(${SESSION_SORT_EXPR}::text, 1, 10)`;
+
+const SESSION_PINNED_EXPR = "COALESCE(s.is_pinned, 0)";
+
+const SESSION_ARCHIVED_EXPR = "COALESCE(s.is_archived, 0)";
 
 function encodeSessionCursor(row) {
     if (!row) return null;
@@ -119,31 +123,31 @@ function createSessionsRouter({
         const includeTotal = req.query.includeTotal !== 'false' && req.query.total !== 'false';
         const offset = (page - 1) * limit;
 
-        let query = `
+        let queryStr = `
             SELECT s.*,
             ${SESSION_SORT_DATE_EXPR} AS sort_day,
             ${SESSION_SORT_EXPR} AS sort_time,
             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.deleted_at IS NULL) as msg_count
             FROM sessions s
-            WHERE s.user_id = ? AND COALESCE(s.is_archived, 0) = ? AND s.deleted_at IS NULL
+            WHERE s.user_id = ? AND ${SESSION_ARCHIVED_EXPR} = ? AND s.deleted_at IS NULL
         `;
         let params = [req.user.id, archived];
 
         if (keyword) {
-            query += ` AND s.title LIKE ? `;
+            queryStr += ` AND s.title LIKE ? `;
             params.push(`%${keyword}%`);
         }
         if (tagList.length > 0) {
             const tagClause = tagList.map(() => `(',' || COALESCE(s.tags, '') || ',') LIKE ?`).join(tagMode === 'all' ? ' AND ' : ' OR ');
-            query += ` AND (${tagClause}) `;
+            queryStr += ` AND (${tagClause}) `;
             params.push(...tagList.map(item => `%,${item},%`));
         }
         if (cursor) {
-            query += ` AND (
+            queryStr += ` AND (
                 ${SESSION_SORT_DATE_EXPR} < ?
-                OR (${SESSION_SORT_DATE_EXPR} = ? AND COALESCE(s.is_pinned, 0) < ?)
-                OR (${SESSION_SORT_DATE_EXPR} = ? AND COALESCE(s.is_pinned, 0) = ? AND ${SESSION_SORT_EXPR} < ?)
-                OR (${SESSION_SORT_DATE_EXPR} = ? AND COALESCE(s.is_pinned, 0) = ? AND ${SESSION_SORT_EXPR} = ? AND s.id < ?)
+                OR (${SESSION_SORT_DATE_EXPR} = ? AND ${SESSION_PINNED_EXPR} < ?)
+                OR (${SESSION_SORT_DATE_EXPR} = ? AND ${SESSION_PINNED_EXPR} = ? AND ${SESSION_SORT_EXPR} < ?)
+                OR (${SESSION_SORT_DATE_EXPR} = ? AND ${SESSION_PINNED_EXPR} = ? AND ${SESSION_SORT_EXPR} = ? AND s.id < ?)
             ) `;
             params.push(
                 cursor.day,
@@ -153,26 +157,26 @@ function createSessionsRouter({
             );
         }
 
-        query += ` ORDER BY
+        queryStr += ` ORDER BY
             ${SESSION_SORT_DATE_EXPR} DESC,
-            COALESCE(s.is_pinned, 0) DESC,
+            ${SESSION_PINNED_EXPR} DESC,
             ${SESSION_SORT_EXPR} DESC,
             s.id DESC
             LIMIT ? `;
         params.push(limit + 1);
         if (!cursor && page > 1) {
-            query += ` OFFSET ? `;
+            queryStr += ` OFFSET ? `;
             params.push(offset);
         }
 
-        const rows = db.prepare(query).all(...params);
+        const rows = await query(queryStr, params);
         const sessions = rows.slice(0, limit);
         const hasMore = rows.length > limit;
         const nextCursor = hasMore ? encodeSessionCursor(sessions[sessions.length - 1]) : null;
 
         let total = null;
         if (includeTotal) {
-            let countQuery = 'SELECT COUNT(*) as count FROM sessions s WHERE s.user_id = ? AND COALESCE(s.is_archived, 0) = ? AND s.deleted_at IS NULL';
+            let countQuery = `SELECT COUNT(*) as count FROM sessions s WHERE s.user_id = ? AND ${SESSION_ARCHIVED_EXPR} = ? AND s.deleted_at IS NULL`;
             const countParams = [req.user.id, archived];
             if (keyword) {
                 countQuery += ` AND s.title LIKE ?`;
@@ -183,7 +187,8 @@ function createSessionsRouter({
                 countQuery += ` AND (${tagClause})`;
                 countParams.push(...tagList.map(item => `%,${item},%`));
             }
-            total = db.prepare(countQuery).get(...countParams).count;
+            const countRow = await queryOne(countQuery, countParams);
+            total = Number(countRow?.count || 0);
         }
 
         const payload = {
@@ -216,12 +221,13 @@ function createSessionsRouter({
 
     router.get('/sessions/tags/summary', authMiddleware, asyncHandler(async (req, res) => {
         const includeArchived = req.query.includeArchived === 'true';
-        const rows = db.prepare(`
+        const archivedFilter = "AND COALESCE(is_archived, 0) = 0";
+        const rows = await query(`
             SELECT id, title, tags, is_archived, is_pinned, updated_at, created_at
             FROM sessions
-            WHERE user_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND COALESCE(is_archived, 0) = 0'}
+            WHERE user_id = ? AND deleted_at IS NULL ${includeArchived ? '' : archivedFilter}
             ORDER BY COALESCE(updated_at, created_at) DESC
-        `).all(req.user.id);
+        `, [req.user.id]);
 
         const byTag = new Map();
         rows.forEach(row => {
@@ -237,9 +243,11 @@ function createSessionsRouter({
                     recentSessionTitle: ''
                 };
                 current.count += 1;
-                if (Number(row.is_archived || 0) === 1) current.archivedCount += 1;
+                const isArchived = row.is_archived === true || Number(row.is_archived) === 1 || String(row.is_archived) === '1' || String(row.is_archived).toLowerCase() === 'true';
+                const isPinned = row.is_pinned === true || Number(row.is_pinned) === 1 || String(row.is_pinned) === '1' || String(row.is_pinned).toLowerCase() === 'true';
+                if (isArchived) current.archivedCount += 1;
                 else current.activeCount += 1;
-                if (Number(row.is_pinned || 0) === 1) current.pinnedCount += 1;
+                if (isPinned) current.pinnedCount += 1;
                 const rowTime = String(row.updated_at || row.created_at || '');
                 if (!current.lastUsedAt || rowTime > current.lastUsedAt) {
                     current.lastUsedAt = rowTime;
@@ -263,17 +271,18 @@ function createSessionsRouter({
         const ftsQuery = buildFtsQuery(keyword);
         if (!ftsQuery) return res.json({ data: [] });
 
-        const sessions = db.prepare(`
-            SELECT DISTINCT s.*, 
+        // FTS 内容搜索在 PostgreSQL 模式下暂不支持 SQLite 特有的 snippet/messages_fts 语法
+        const sessions = await query(`
+            SELECT DISTINCT s.*,
             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.deleted_at IS NULL) as msg_count,
-            snippet(messages_fts, 0, '<b>', '</b>', '...', 20) as snippet
+            '' as snippet
             FROM sessions s
             JOIN messages m ON m.session_id = s.id
-            JOIN messages_fts f ON f.rowid = m.id
-            WHERE s.user_id = ? AND s.deleted_at IS NULL AND m.deleted_at IS NULL AND messages_fts MATCH ?
+            WHERE s.user_id = ? AND s.deleted_at IS NULL AND m.deleted_at IS NULL
+              AND m.content ILIKE ?
             ORDER BY s.updated_at DESC
             LIMIT 50
-        `).all(req.user.id, ftsQuery);
+        `, [req.user.id, `%${keyword}%`]);
 
         res.json({ data: sessions });
     }));
@@ -306,11 +315,11 @@ function createSessionsRouter({
     }));
 
     router.post('/sessions/:id/compact', authMiddleware, asyncHandler(async (req, res) => {
-        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
 
         const modelId = req.body?.modelId ? parseInt(req.body.modelId, 10) : null;
-        const modelCfg = getAccessibleModel(modelId, req.user) || getAccessibleModel(null, req.user);
+        const modelCfg = (await getAccessibleModelAsync(modelId, req.user)) || (await getAccessibleModelAsync(null, req.user));
         if (!modelCfg) return res.status(400).json({ error: '没有可用于压缩的模型配置' });
         if (modelCfg.secret_error) return res.status(400).json({ error: `${modelCfg.secret_error}，请重新保存该模型的 API Key` });
 
@@ -341,32 +350,32 @@ function createSessionsRouter({
             inProgress: result.reason === 'duplicate',
             reason: result.reason || '',
             message,
-            contextMeta: result.after || result.before || buildContextMeta(stmts.getMessages.all(req.params.id, req.user.id))
+            contextMeta: result.after || result.before || buildContextMeta(await sessionsRepository.listMessages(req.params.id, req.user.id))
         });
     }));
 
     router.post('/sessions/:id/fork', authMiddleware, asyncHandler(async (req, res) => {
-        const source = stmts.getSessionById.get(req.params.id, req.user.id);
+        const source = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!source) return res.status(404).json({ error: '会话不存在' });
 
         const requestedMessageId = Number.parseInt(req.body?.messageId, 10);
-        const fallbackMessage = db.prepare(`
+        const fallbackMessage = await queryOne(`
             SELECT id
             FROM messages
             WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL
             ORDER BY id DESC
             LIMIT 1
-        `).get(source.id, req.user.id);
+        `, [source.id, req.user.id]);
         const forkedFromMessageId = Number.isSafeInteger(requestedMessageId)
             ? requestedMessageId
             : Number(fallbackMessage?.id || 0);
         if (!forkedFromMessageId) return res.status(400).json({ error: '当前会话没有可分叉的消息' });
 
-        const forkMessage = db.prepare(`
+        const forkMessage = await queryOne(`
             SELECT id
             FROM messages
             WHERE id = ? AND session_id = ? AND user_id = ? AND deleted_at IS NULL
-        `).get(forkedFromMessageId, source.id, req.user.id);
+        `, [forkedFromMessageId, source.id, req.user.id]);
         if (!forkMessage) return res.status(404).json({ error: '分叉消息不存在' });
 
         const newSessionId = uuidv4();
@@ -375,20 +384,20 @@ function createSessionsRouter({
         const title = (baseTitle.startsWith('分支：') ? baseTitle : `分支：${baseTitle}`).slice(0, 80);
         const forkNote = String(req.body?.note || '').trim().slice(0, 500);
         const rootSessionId = source.fork_root_session_id || source.parent_session_id || source.id;
-        const copiedMessages = db.prepare(`
+        const copiedMessages = await query(`
             SELECT role, content, token_count, is_summary, context_archived, compressed_at, model_id, created_at
             FROM messages
             WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL AND id <= ?
             ORDER BY id ASC
-        `).all(source.id, req.user.id, forkedFromMessageId);
+        `, [source.id, req.user.id, forkedFromMessageId]);
 
-        db.transaction(() => {
-            db.prepare(`
+        await transaction(async trx => {
+            await trx.execute(`
                 INSERT INTO sessions (
                     id, user_id, title, tags, system_prompt, parent_session_id, forked_from_message_id,
                     fork_root_session_id, fork_note, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
+            `, [
                 newSessionId,
                 req.user.id,
                 title,
@@ -400,16 +409,15 @@ function createSessionsRouter({
                 forkNote,
                 now,
                 now
-            );
+            ]);
 
-            const insertMessage = db.prepare(`
-                INSERT INTO messages (
-                    session_id, user_id, role, content, token_count, is_summary, context_archived,
-                    compressed_at, model_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            copiedMessages.forEach(message => {
-                insertMessage.run(
+            for (const message of copiedMessages) {
+                await trx.execute(`
+                    INSERT INTO messages (
+                        session_id, user_id, role, content, token_count, is_summary, context_archived,
+                        compressed_at, model_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `, [
                     newSessionId,
                     req.user.id,
                     message.role,
@@ -420,19 +428,19 @@ function createSessionsRouter({
                     message.compressed_at || null,
                     message.model_id || null,
                     message.created_at || now
-                );
-            });
-        })();
+                ]);
+            }
+        });
 
-        const forkedSession = stmts.getSessionById.get(newSessionId, req.user.id);
+        const forkedSession = await sessionsRepository.getSessionById(newSessionId, req.user.id);
         logAction(req, '分叉会话', `源会话ID: ${source.id}，新会话ID: ${newSessionId}，消息ID: ${forkedFromMessageId}`);
         res.status(201).json({ success: true, session: forkedSession, copiedMessages: copiedMessages.length });
     }));
 
     router.get('/sessions/:id/export', authMiddleware, asyncHandler(async (req, res) => {
-        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+        const messages = await sessionsRepository.listMessages(req.params.id, req.user.id);
 
         let content = `# ${session.title}\n\n`;
         content += `> 导出时间: ${getBeijingTimestamp()}\n\n`;
@@ -449,9 +457,9 @@ function createSessionsRouter({
 
     // 打印友好 HTML 视图：用户在浏览器中按 Ctrl/Cmd+P 即可"打印为 PDF"，无需服务端 puppeteer
     router.get('/sessions/:id/print', authMiddleware, asyncHandler(async (req, res) => {
-        const session = stmts.getSessionById.get(req.params.id, req.user.id);
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const messages = stmts.getMessages.all(req.params.id, req.user.id);
+        const messages = await sessionsRepository.listMessages(req.params.id, req.user.id);
 
         const escapeHtml = (value) => String(value ?? '')
             .replace(/&/g, '&amp;')
@@ -600,33 +608,34 @@ function createSessionsRouter({
     router.put('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { title } = req.body;
         const safeTitle = String(title || '').trim().slice(0, 80);
-        const info = stmts.updateSessionTitle.run(safeTitle, getBeijingTimestamp(), req.params.id, req.user.id);
-        if (info.changes > 0) logAction(req, '修改对话名称', `会话ID: ${req.params.id}，新名称: ${safeTitle}`);
-        res.json({ success: info.changes > 0 });
+        const changed = await execute(
+            'UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+            [safeTitle, getBeijingTimestamp(), req.params.id, req.user.id]
+        );
+        if (changed > 0) logAction(req, '修改对话名称', `会话ID: ${req.params.id}，新名称: ${safeTitle}`);
+        res.json({ success: changed > 0 });
     }));
 
     router.put('/sessions/:id/pin', authMiddleware, asyncHandler(async (req, res) => {
         const { isPinned } = req.body;
-        const stmt = db.prepare('UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ?');
-        const info = stmt.run(isPinned ? 1 : 0, req.params.id, req.user.id);
-        if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
+        const pinVal = isPinned ? 1 : 0;
+        const pinChanged = await execute('UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ?', [pinVal, req.params.id, req.user.id]);
+        if (pinChanged === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
     }));
 
     router.put('/sessions/:id/archive', authMiddleware, asyncHandler(async (req, res) => {
         const isArchived = req.body.isArchived ? 1 : 0;
-        const info = db.prepare('UPDATE sessions SET is_archived = ? WHERE id = ? AND user_id = ?')
-          .run(isArchived, req.params.id, req.user.id);
-        if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
+        const archiveChanged = await execute('UPDATE sessions SET is_archived = ? WHERE id = ? AND user_id = ?', [isArchived, req.params.id, req.user.id]);
+        if (archiveChanged === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, isArchived ? '归档对话' : '恢复对话', `会话ID: ${req.params.id}`);
         res.json({ success: true });
     }));
 
     router.put('/sessions/:id/tags', authMiddleware, asyncHandler(async (req, res) => {
         const tags = normalizeTags(req.body.tags);
-        const info = db.prepare('UPDATE sessions SET tags = ? WHERE id = ? AND user_id = ?')
-          .run(tags, req.params.id, req.user.id);
-        if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
+        const tagsChanged = await execute('UPDATE sessions SET tags = ? WHERE id = ? AND user_id = ?', [tags, req.params.id, req.user.id]);
+        if (tagsChanged === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, '更新对话标签', `会话ID: ${req.params.id}，标签: ${tags || '-'}`);
         res.json({ success: true, tags });
     }));
@@ -641,18 +650,20 @@ function createSessionsRouter({
         if (sessionIds.length === 0) return res.status(400).json({ error: 'sessionIds required' });
 
         const placeholders = sessionIds.map(() => '?').join(', ');
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT id, tags
             FROM sessions
             WHERE user_id = ? AND deleted_at IS NULL AND id IN (${placeholders})
-        `).all(req.user.id, ...sessionIds);
+        `, [req.user.id, ...sessionIds]);
         if (rows.length === 0) return res.status(404).json({ error: 'No matching sessions found' });
 
-        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
         const now = getBeijingTimestamp();
-        db.transaction(() => {
-            rows.forEach(row => update.run(applyTagOperation(row.tags, nextTags, operation), now, row.id, req.user.id));
-        })();
+        await transaction(async trx => {
+            for (const row of rows) {
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                    [applyTagOperation(row.tags, nextTags, operation), now, row.id, req.user.id]);
+            }
+        });
         logAction(req, '批量更新对话标签', `数量: ${rows.length}，操作: ${operation}，标签: ${nextTags.join(',') || '-'}`);
         res.json({ success: true, affected: rows.length, operation, tags: nextTags.join(',') });
     }));
@@ -663,18 +674,20 @@ function createSessionsRouter({
         if (!fromTag || !toTag) return res.status(400).json({ error: 'fromTag and toTag required' });
         if (fromTag === toTag) return res.json({ success: true, affected: 0, fromTag, toTag });
 
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT id, tags
             FROM sessions
             WHERE user_id = ? AND deleted_at IS NULL
               AND (',' || COALESCE(tags, '') || ',') LIKE ?
-        `).all(req.user.id, `%,${fromTag},%`);
+        `, [req.user.id, `%,${fromTag},%`]);
 
-        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
         const now = getBeijingTimestamp();
-        db.transaction(() => {
-            rows.forEach(row => update.run(renameTagValue(row.tags, fromTag, toTag), now, row.id, req.user.id));
-        })();
+        await transaction(async trx => {
+            for (const row of rows) {
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                    [renameTagValue(row.tags, fromTag, toTag), now, row.id, req.user.id]);
+            }
+        });
         logAction(req, '重命名对话标签', `标签: ${fromTag} -> ${toTag}，影响: ${rows.length}`);
         res.json({ success: true, affected: rows.length, fromTag, toTag });
     }));
@@ -682,55 +695,56 @@ function createSessionsRouter({
     router.post('/sessions/tags/remove', authMiddleware, asyncHandler(async (req, res) => {
         const tag = String(req.body?.tag || '').trim();
         if (!tag) return res.status(400).json({ error: 'tag required' });
-        const rows = db.prepare(`
+        const rows = await query(`
             SELECT id, tags
             FROM sessions
             WHERE user_id = ? AND deleted_at IS NULL
               AND (',' || COALESCE(tags, '') || ',') LIKE ?
-        `).all(req.user.id, `%,${tag},%`);
+        `, [req.user.id, `%,${tag},%`]);
 
-        const update = db.prepare('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?');
         const now = getBeijingTimestamp();
-        db.transaction(() => {
-            rows.forEach(row => update.run(applyTagOperation(row.tags, [tag], 'remove'), now, row.id, req.user.id));
-        })();
+        await transaction(async trx => {
+            for (const row of rows) {
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                    [applyTagOperation(row.tags, [tag], 'remove'), now, row.id, req.user.id]);
+            }
+        });
         logAction(req, '删除对话标签', `标签: ${tag}，影响: ${rows.length}`);
         res.json({ success: true, affected: rows.length, tag });
     }));
 
     router.put('/sessions/:id/system-prompt', authMiddleware, asyncHandler(async (req, res) => {
         const { systemPrompt } = req.body;
-        const stmt = db.prepare('UPDATE sessions SET system_prompt = ? WHERE id = ? AND user_id = ?');
-        const info = stmt.run(systemPrompt, req.params.id, req.user.id);
-        if (info.changes === 0) return res.status(404).json({ error: '会话不存在' });
+        const spChanged = await execute('UPDATE sessions SET system_prompt = ? WHERE id = ? AND user_id = ?', [systemPrompt, req.params.id, req.user.id]);
+        if (spChanged === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
     }));
 
     router.delete('/messages/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { id } = req.params;
-        const info = db.prepare('UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
-            .run(getBeijingTimestamp(), id, req.user.id);
-        if (info.changes > 0) logAction(req, '删除消息', `消息ID: ${id}`);
-        res.json({ success: info.changes > 0 });
+        const msgDeleted = await execute(
+            'UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+            [getBeijingTimestamp(), id, req.user.id]
+        );
+        if (msgDeleted > 0) logAction(req, '删除消息', `消息ID: ${id}`);
+        res.json({ success: msgDeleted > 0 });
     }));
 
     router.delete('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
         const sessionId = req.params.id;
         const userId = req.user.id;
-        const session = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(sessionId, userId);
+        const session = await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sessionId, userId]);
         if (!session) return res.status(403).json({ error: '无权删除或会话不存在' });
 
-        const deleteTx = db.transaction(() => {
-            const now = getBeijingTimestamp();
-            db.prepare('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL').run(now, sessionId, userId);
-            db.prepare('UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL').run(now, sessionId, userId);
-            const info = db.prepare('UPDATE sessions SET deleted_at = ?, deleted_by_user = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL').run(now, now, sessionId, userId);
-            return info;
+        const now = getBeijingTimestamp();
+        let sessionDeleted = 0;
+        await transaction(async trx => {
+            await trx.execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL', [now, sessionId, userId]);
+            await trx.execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL', [now, sessionId, userId]);
+            sessionDeleted = await trx.execute('UPDATE sessions SET deleted_at = ?, deleted_by_user = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [now, now, sessionId, userId]);
         });
-
-        const info = deleteTx();
         logAction(req, '删除对话', `删除会话ID: ${sessionId}`);
-        res.json({ success: info.changes > 0 });
+        res.json({ success: sessionDeleted > 0 });
     }));
 
     return router;

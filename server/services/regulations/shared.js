@@ -2,7 +2,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { db } = require('../../db');
+const { query, queryOne, execute, transaction } = require('../../db/client');
+const { orderNocase, nowExpr } = require('../../db/dialect');
 const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('../document-processing/text-extraction');
 const { getKnowledgeLimits } = require('../resource-limits');
 const { getBeijingTimestamp } = require('../../time');
@@ -121,25 +122,24 @@ function deriveRegulationAliases(title) {
 }
 
 // 落库一部文档的别名（含主名 + 派生简称），覆盖式写入
-function saveRegulationAliases(documentId, title) {
+async function saveRegulationAliases(documentId, title) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) return;
     const aliases = deriveRegulationAliases(title);
-    db.prepare('DELETE FROM regulation_aliases WHERE document_id = ? AND is_primary = 0').run(docId);
+    await execute('DELETE FROM regulation_aliases WHERE document_id = ? AND is_primary = 0', [docId]);
     // 主名（完整标题去书名号）置 is_primary=1，其余为派生
     const primary = aliases[0] || '';
     const now = getBeijingTimestamp();
-    const insert = db.prepare(`
-        INSERT INTO regulation_aliases (document_id, alias, normalized_alias, is_primary, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    `);
     const seen = new Set();
-    aliases.forEach(alias => {
+    for (const alias of aliases) {
         const norm = normalizeRegulationAlias(alias);
-        if (!norm || seen.has(norm)) return;
+        if (!norm || seen.has(norm)) continue;
         seen.add(norm);
-        insert.run(docId, alias, norm, alias === primary ? 1 : 0, now);
-    });
+        await execute(`
+            INSERT INTO regulation_aliases (document_id, alias, normalized_alias, is_primary, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        `, [docId, alias, norm, alias === primary ? 1 : 0, now]);
+    }
 }
 
 function ensureRegulationsSourceRoot() {
@@ -228,7 +228,12 @@ module.exports = {
     crypto,
     fs,
     path,
-    db,
+    query,
+    queryOne,
+    execute,
+    transaction,
+    orderNocase,
+    nowExpr,
     extractDocumentText: extractDocumentTextWithOcrFallback,
     truncateExtractedText,
     getKnowledgeLimits,

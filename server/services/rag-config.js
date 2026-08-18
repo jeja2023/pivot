@@ -1,4 +1,3 @@
-const { db } = require('../db');
 const { getAppSettingValue } = require('./app-settings');
 const { decryptSecret, encryptSecret } = require('../security');
 const { getRagLimits } = require('./resource-limits');
@@ -38,8 +37,26 @@ function getSettingValue(key) {
 function getUserSettingValue(userId, key) {
     const normalizedUserId = Number.parseInt(userId, 10);
     if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return undefined;
-    const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(normalizedUserId, key);
-    return row?.value;
+    const database = require('../db').db;
+    if (!database) return undefined;
+    try {
+        const row = database.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(normalizedUserId, key);
+        return row?.value;
+    } catch (e) {
+        return undefined;
+    }
+}
+
+async function getUserSettingValueAsync(userId, key) {
+    const normalizedUserId = Number.parseInt(userId, 10);
+    if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return undefined;
+    const { queryOne } = require('../db/client');
+    try {
+        const row = await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [normalizedUserId, key]);
+        return row?.value;
+    } catch (e) {
+        return undefined;
+    }
 }
 
 function normalizeEmbeddingMode(_value) {
@@ -224,6 +241,7 @@ module.exports = {
     getHybridRetrievalConfig,
     getChunkSizeForDocType,
     getUserSettingValue,
+    getUserSettingValueAsync,
     normalizeEmbeddingMode,
     toRagSettingValue
 };

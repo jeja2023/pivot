@@ -16,8 +16,8 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
         }
         const documentId = normalizeRegulationId(body.documentId || body.document_id);
         const limit = Number.parseInt(body.limit, 10) || 12;
-        const built = buildRegulationAiContext({ query, documentId, limit, expandLinks: true });
-        recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
+        const built = await buildRegulationAiContext({ query, documentId, limit, expandLinks: true });
+        await recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
         // 把命中条文的来源精简后随回答一并返回，便于前端展示「依据条文」并可点击跳转
         const sources = (built.sources || []).map(source => ({

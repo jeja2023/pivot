@@ -1,10 +1,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const Sqlite = require('better-sqlite3');
 const XLSX = require('@e965/xlsx');
+const { query, queryOne, execute } = require('../../db/client');
 const {
-    db,
     logger,
     datasetRoot,
     exportRoot,
@@ -304,55 +303,53 @@ async function importDataset({ user, file, name }) {
         const ingest = await withAnalysisSlot(() => ingestUpload({ datasetDir, file, ext }));
         const now = getBeijingTimestamp();
         const datasetName = normalizeDatasetName(ingest.sourceName, name);
-        const tx = db.transaction(() => {
-            db.prepare(`
-                INSERT INTO analysis_datasets (
-                    id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
-                    row_count, column_count, columns_json, profile_json, preview_json,
-                    sheet_name, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
-            `).run(
-                datasetId,
-                user.id,
-                datasetName,
-                ingest.sourceName,
-                ingest.sourceType,
-                ingest.fileSize,
-                toProjectRelative(ingest.sourcePath),
-                toProjectRelative(ingest.parquetPath),
-                ingest.rowCount,
-                ingest.columns.length,
-                JSON.stringify(ingest.columns),
-                JSON.stringify(ingest.profile),
-                JSON.stringify(ingest.previewRows),
-                ingest.sheetName,
-                now,
-                now
-            );
-        });
-        tx();
+        await execute(`
+            INSERT INTO analysis_datasets (
+                id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
+                row_count, column_count, columns_json, profile_json, preview_json,
+                sheet_name, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+        `, [
+            datasetId,
+            user.id,
+            datasetName,
+            ingest.sourceName,
+            ingest.sourceType,
+            ingest.fileSize,
+            toProjectRelative(ingest.sourcePath),
+            toProjectRelative(ingest.parquetPath),
+            ingest.rowCount,
+            ingest.columns.length,
+            JSON.stringify(ingest.columns),
+            JSON.stringify(ingest.profile),
+            JSON.stringify(ingest.previewRows),
+            ingest.sheetName,
+            now,
+            now
+        ]);
         committed = true;
-        return serializeDataset(getDatasetForUser(user.id, datasetId));
+        return serializeDataset(await getDatasetForUser(user.id, datasetId));
     } catch (err) {
         if (!committed) bestEffortRemove(datasetDir, { recursive: true });
         throw err;
     }
 }
 
-function listDatasets(userId) {
-    return db.prepare(`
+async function listDatasets(userId) {
+    const rows = await query(`
         SELECT * FROM analysis_datasets
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
-    `).all(userId).map(serializeDataset);
+    `, [userId]);
+    return rows.map(serializeDataset);
 }
 
-function getDatasetSummary(userId) {
-    const row = db.prepare(`
+async function getDatasetSummary(userId) {
+    const row = await queryOne(`
         SELECT COUNT(*) AS count, COALESCE(SUM(row_count), 0) AS row_count
         FROM analysis_datasets
         WHERE user_id = ? AND deleted_at IS NULL
-    `).get(userId);
+    `, [userId]);
     return {
         count: Number(row?.count) || 0,
         rowCount: Number(row?.row_count) || 0
@@ -360,7 +357,7 @@ function getDatasetSummary(userId) {
 }
 
 async function getDatasetDetail(userId, datasetId) {
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const dataset = serializeDataset(row);
     const { parquetPath } = getDatasetPaths(row);
     dataset.previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS }));
@@ -368,13 +365,13 @@ async function getDatasetDetail(userId, datasetId) {
 }
 
 // 删除数据集关联的 artifacts：先移除导出等落地文件，再删行。best-effort，失败只告警。
-function purgeDatasetArtifacts(userId, datasetId) {
+async function purgeDatasetArtifacts(userId, datasetId) {
     let artifacts = [];
     try {
-        artifacts = db.prepare(`
+        artifacts = await query(`
             SELECT id, file_path FROM analysis_artifacts
             WHERE user_id = ? AND dataset_id = ?
-        `).all(userId, datasetId);
+        `, [userId, datasetId]);
     } catch (err) {
         logger.warn({ err: err.message, datasetId }, '读取分析 artifacts 失败');
         return;
@@ -387,19 +384,19 @@ function purgeDatasetArtifacts(userId, datasetId) {
             logger.warn({ err: err.message, datasetId, artifactId: item.id }, 'artifact 文件清理失败');
         }
     });
-    db.prepare('DELETE FROM analysis_artifacts WHERE user_id = ? AND dataset_id = ?').run(userId, datasetId);
+    await execute('DELETE FROM analysis_artifacts WHERE user_id = ? AND dataset_id = ?', [userId, datasetId]);
 }
 
-function softDeleteDataset(userId, datasetId) {
-    const row = getDatasetForUser(userId, datasetId);
-    db.prepare(`
+async function softDeleteDataset(userId, datasetId) {
+    const row = await getDatasetForUser(userId, datasetId);
+    await execute(`
         UPDATE analysis_datasets
         SET deleted_at = ?, status = 'deleted', updated_at = ?
         WHERE id = ? AND user_id = ?
-    `).run(getBeijingTimestamp(), getBeijingTimestamp(), datasetId, userId);
+    `, [getBeijingTimestamp(), getBeijingTimestamp(), datasetId, userId]);
     // Soft delete also removes dataset files and related artifacts to avoid DB and disk growth.
     try {
-        purgeDatasetArtifacts(userId, datasetId);
+        await purgeDatasetArtifacts(userId, datasetId);
         const datasetDir = resolveInside(datasetRoot, String(userId), datasetId);
         bestEffortRemove(datasetDir, { recursive: true });
     } catch (err) {
@@ -445,16 +442,16 @@ function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmp
 
 // 历史记录：返回某数据集的图表/比对/导出 artifacts，供前端「历史」Tab 消费。
 // chart 类型解析出 content 供前端一键重渲染；其余类型仅返回元信息。
-function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
-    getDatasetForUser(userId, datasetId); // 校验归属，越权抛 404
+async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
+    await getDatasetForUser(userId, datasetId); // 校验归属，越权抛 404
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
-    const rows = db.prepare(`
+    const rows = await query(`
         SELECT id, type, title, content, file_path, metadata_json, created_at
         FROM analysis_artifacts
         WHERE user_id = ? AND dataset_id = ?
         ORDER BY created_at DESC
         LIMIT ?
-    `).all(userId, datasetId, safeLimit);
+    `, [userId, datasetId, safeLimit]);
     return rows.map(row => {
         const item = {
             id: row.id,
@@ -534,36 +531,32 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
             };
         });
         const now = getBeijingTimestamp();
-        const datasetName = normalizeDatasetName('', name);
-        const tx = db.transaction(() => {
-            db.prepare(`
-                INSERT INTO analysis_datasets (
-                    id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
-                    row_count, column_count, columns_json, profile_json, preview_json,
-                    sheet_name, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
-            `).run(
-                datasetId,
-                user.id,
-                datasetName,
-                ingest.sourceName,
-                sourceType,
-                ingest.fileSize,
-                '',
-                toProjectRelative(ingest.parquetPath),
-                ingest.rowCount,
-                ingest.columns.length,
-                JSON.stringify(ingest.columns),
-                JSON.stringify(ingest.profile),
-                JSON.stringify(ingest.previewRows),
-                '',
-                now,
-                now
-            );
-        });
-        tx();
+        await execute(`
+            INSERT INTO analysis_datasets (
+                id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
+                row_count, column_count, columns_json, profile_json, preview_json,
+                sheet_name, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+        `, [
+            datasetId,
+            user.id,
+            datasetName,
+            ingest.sourceName,
+            sourceType,
+            ingest.fileSize,
+            '',
+            toProjectRelative(ingest.parquetPath),
+            ingest.rowCount,
+            ingest.columns.length,
+            JSON.stringify(ingest.columns),
+            JSON.stringify(ingest.profile),
+            JSON.stringify(ingest.previewRows),
+            '',
+            now,
+            now
+        ]);
         committed = true;
-        return serializeDataset(getDatasetForUser(user.id, datasetId));
+        return serializeDataset(await getDatasetForUser(user.id, datasetId));
     } catch (err) {
         if (!committed) bestEffortRemove(datasetDir, { recursive: true });
         throw err;

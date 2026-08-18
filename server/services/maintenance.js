@@ -167,18 +167,13 @@ function cleanupOldBackups(options = {}) {
     };
 }
 
+const { execute } = require('../db/client');
+
 async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
     maintenanceState.auditCleanup.lastRunAt = getBeijingTimestamp();
     try {
-        let changes = 0;
-        if (db) {
-            const info = db.prepare("DELETE FROM audit_logs WHERE timestamp < datetime('now', '+8 hours', ?)").run(`-${days} days`);
-            changes = info.changes || 0;
-        } else {
-            const { execute } = require('../db/client');
-            const res = await execute("DELETE FROM audit_logs WHERE timestamp < (now() AT TIME ZONE 'Asia/Shanghai' - ($1 || ' days')::interval)", [String(days)]);
-            changes = res.rowCount || 0;
-        }
+        const res = await execute("DELETE FROM audit_logs WHERE timestamp < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)", [String(days)]);
+        const changes = res?.rowCount || res?.changes || 0;
         maintenanceState.auditCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.auditCleanup.lastError = '';
         maintenanceState.auditCleanup.lastChanges = changes;
@@ -198,15 +193,8 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
     maintenanceState.apiCallLogCleanup.lastRunAt = getBeijingTimestamp();
     maintenanceState.apiCallLogCleanup.retentionDays = days;
     try {
-        let changes = 0;
-        if (db) {
-            const info = db.prepare("DELETE FROM api_call_logs WHERE created_at < datetime('now', '+8 hours', ?)").run(`-${days} days`);
-            changes = info.changes || 0;
-        } else {
-            const { execute } = require('../db/client');
-            const res = await execute("DELETE FROM api_call_logs WHERE created_at < (now() AT TIME ZONE 'Asia/Shanghai' - ($1 || ' days')::interval)", [String(days)]);
-            changes = res.rowCount || 0;
-        }
+        const res = await execute("DELETE FROM api_call_logs WHERE created_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)", [String(days)]);
+        const changes = res?.rowCount || res?.changes || 0;
         maintenanceState.apiCallLogCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.apiCallLogCleanup.lastError = '';
         maintenanceState.apiCallLogCleanup.lastChanges = changes;
@@ -225,15 +213,8 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
 async function cleanupExpiredRefreshTokens() {
     maintenanceState.refreshTokenCleanup.lastRunAt = getBeijingTimestamp();
     try {
-        let changes = 0;
-        if (db) {
-            const info = db.prepare("DELETE FROM refresh_tokens WHERE expires_at < datetime('now', '+8 hours')").run();
-            changes = info.changes || 0;
-        } else {
-            const { execute } = require('../db/client');
-            const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai')");
-            changes = res.rowCount || 0;
-        }
+        const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai')");
+        const changes = res?.rowCount || res?.changes || 0;
         maintenanceState.refreshTokenCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.refreshTokenCleanup.lastError = '';
         maintenanceState.refreshTokenCleanup.lastChanges = changes;
@@ -253,7 +234,7 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
     maintenanceState.storageGc.lastRunAt = getBeijingTimestamp();
     maintenanceState.storageGc.retentionDays = days;
     try {
-        const result = cleanupSoftDeletedStorage({ retentionDays: days });
+        const result = await cleanupSoftDeletedStorage({ retentionDays: days });
         maintenanceState.storageGc.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.storageGc.lastError = '';
         maintenanceState.storageGc.lastAttachmentRows = result.attachmentRows;

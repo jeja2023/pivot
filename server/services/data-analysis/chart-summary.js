@@ -84,7 +84,7 @@ function buildChartOption({ chartType, title, labels, series, xName, yName, colo
 }
 
 async function buildChart(userId, datasetId, input = {}) {
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const xCol = getColumn(row, input.xField || input.xAxis);
     const yField = String(input.yField || input.yAxis || '').trim();
     const yCol = yField ? getColumn(row, yField) : null;
@@ -152,7 +152,7 @@ async function buildChart(userId, datasetId, input = {}) {
         yName: chart.yAxis.label,
         colors
     });
-    recordArtifact({
+    await recordArtifact({
         userId,
         datasetId,
         type: 'chart',
@@ -164,7 +164,7 @@ async function buildChart(userId, datasetId, input = {}) {
 }
 
 async function runSummary(userId, datasetId) {
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const profile = jsonParse(row.profile_json, []);
     const numericColumns = profile.filter(isMetricNumericColumn);
     const completeness = profile.length

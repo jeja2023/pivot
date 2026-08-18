@@ -156,14 +156,15 @@ function isInternalMcpUrl(baseUrl = '') {
 }
 
 function getBuiltinConfigRow(serverId) {
-    return appDb().prepare(`
+    const database = appDb();
+    if (!database) return null;
+    return database.prepare(`
         SELECT * FROM mcp_builtin_configs
         WHERE mcp_server_id = ? AND status != 'deleted'
     `).get(serverId) || null;
 }
 
-function getBuiltinConfigForServer(serverId, { includeSecret = false } = {}) {
-    const row = getBuiltinConfigRow(serverId);
+function normalizeBuiltinConfigRow(row, { includeSecret = false } = {}) {
     if (!row) return null;
     const serviceType = normalizeServiceType(row.service_type);
     const rawConfig = parseJson(row.config);
@@ -184,8 +185,32 @@ function getBuiltinConfigForServer(serverId, { includeSecret = false } = {}) {
     };
 }
 
+function getBuiltinConfigForServer(serverId, { includeSecret = false } = {}) {
+    const row = getBuiltinConfigRow(serverId);
+    return normalizeBuiltinConfigRow(row, { includeSecret });
+}
+
+async function getBuiltinConfigForServerAsync(serverId, { includeSecret = false } = {}) {
+    const { queryOne } = require('../db/client');
+    const row = await queryOne(`
+        SELECT * FROM mcp_builtin_configs
+        WHERE mcp_server_id = ? AND status != 'deleted'
+    `, [serverId]);
+    return normalizeBuiltinConfigRow(row, { includeSecret });
+}
+
 function getRequiredBuiltinConfig(server, expectedType) {
     const row = getBuiltinConfigForServer(server.id, { includeSecret: expectedType === 'im' });
+    if (!row || row.service_type !== expectedType) {
+        const err = new Error('Built-in MCP configuration is missing or mismatched.');
+        err.status = 404;
+        throw err;
+    }
+    return row;
+}
+
+async function getRequiredBuiltinConfigAsync(server, expectedType) {
+    const row = await getBuiltinConfigForServerAsync(server.id, { includeSecret: expectedType === 'im' });
     if (!row || row.service_type !== expectedType) {
         const err = new Error('Built-in MCP configuration is missing or mismatched.');
         err.status = 404;
@@ -315,7 +340,10 @@ module.exports = {
     isInternalMcpUrl,
     getBuiltinConfigRow,
     getBuiltinConfigForServer,
+    getBuiltinConfigForServerAsync,
+    normalizeBuiltinConfigRow,
     getRequiredBuiltinConfig,
+    getRequiredBuiltinConfigAsync,
     isPathInside,
     getExtension,
     toFiniteNumber,

@@ -1,5 +1,6 @@
-const { db } = require('../../db');
+const { queryOne } = require('../../db/client');
 const { isSuperAdmin } = require('../../permissions');
+
 const SYSTEM_MCP_SERVICES = {
     reports: {
         name: '服务器可访问报表目录',
@@ -140,8 +141,8 @@ function buildCapabilityHealth(summary = {}, callSummary = {}) {
     };
 }
 
-function findAccessibleBuiltinService(serviceType, user) {
-    return db.prepare(`
+async function findAccessibleBuiltinService(serviceType, user) {
+    const row = await queryOne(`
         SELECT s.*
         FROM mcp_servers s
         JOIN mcp_builtin_configs c ON c.mcp_server_id = s.id
@@ -151,7 +152,8 @@ function findAccessibleBuiltinService(serviceType, user) {
           AND (s.user_id IS NULL OR s.user_id = ? OR ? = 1)
         ORDER BY s.user_id IS NOT NULL, s.id ASC
         LIMIT 1
-    `).get(serviceType, user.id, isSuperAdmin(user) ? 1 : 0) || null;
+    `, [serviceType, user.id, isSuperAdmin(user) ? 1 : 0]);
+    return row || null;
 }
 
 module.exports = {
@@ -159,11 +161,8 @@ module.exports = {
     getDatabaseTestErrorStatus,
     sanitizeDatabaseConnectionForLog,
     parseServerConfig,
-    splitConfigList,
     parseBoolean,
-    pickConfigValue,
     normalizeExternalServerConfig,
-    clampHealthScore,
     buildCapabilityHealth,
     findAccessibleBuiltinService
 };

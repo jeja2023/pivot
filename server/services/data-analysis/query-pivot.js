@@ -91,7 +91,7 @@ async function readPivotRows(connection, sql) {
   }
 
 async function runPivot(userId, datasetId, input = {}) {
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const rowCol = getColumn(row, input.rowField);
     const colField = String(input.colField || '').trim();
     const colCol = colField ? getColumn(row, colField) : null;
@@ -226,7 +226,7 @@ async function runPivot(userId, datasetId, input = {}) {
             columnCount: Number(row.column_count) || 0
         }
     };
-    recordArtifact({
+    await recordArtifact({
         userId,
         datasetId,
         type: 'pivot',
@@ -310,7 +310,7 @@ function formatQueryExecutionError(err) {
 }
 
 async function runUserQuery(userId, datasetId, input = {}) {
-    const row = getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId);
     const userSql = validateUserSql(input.sql);
     const limit = Math.min(Math.max(Number(input.limit) || MAX_PREVIEW_ROWS, 1), MAX_QUERY_LIMIT);
     const columns = jsonParse(row.columns_json, []);
@@ -338,7 +338,7 @@ async function runUserQuery(userId, datasetId, input = {}) {
     const resultColumns = rows.length
         ? Object.keys(rows[0])
         : (columns.length ? columns.map(column => column.name) : []);
-    recordArtifact({
+    await recordArtifact({
         userId,
         datasetId,
         type: 'query',

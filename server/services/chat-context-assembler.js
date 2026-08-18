@@ -163,7 +163,7 @@ async function assembleChatContext({
     }
 
     if (mcpEnabled) {
-        const accessibleMcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, req.user), req.user);
+        const accessibleMcpTools = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
         const mcpTools = filterChatMcpToolsByAllowlist(accessibleMcpTools, mcpToolAllowlist);
         const mcpContext = await maybeBuildMcpChatContext({
             modelCfg,

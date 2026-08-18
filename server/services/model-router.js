@@ -17,7 +17,7 @@
  *   - 不依赖第三方包；所有信号都来自现有 DB / runtime 状态
  */
 
-const { getUserRunnableModels, getRunnableModelForUser, messagesContainVisionInput, modelSupportsVision } = require('./models');
+const { getUserRunnableModelsAsync, getRunnableModelForUserAsync, messagesContainVisionInput, modelSupportsVision } = require('./models');
 
 const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load', 'auto-escalate']);
 const DEFAULT_STRATEGY = 'fixed';
@@ -121,20 +121,20 @@ function pickAutoLoad(candidates, estimatedInputTokens, endpointStatusGetter) {
  * @param {function} [params.endpointStatusGetter] - 注入式：返回 getModelEndpointRuntimeStatus()，便于测试
  * @returns {{ model: object, strategy: string, reason: string, candidatesCount: number }|null}
  */
-function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter }) {
+async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter }) {
     if (!user) return null;
     const normalized = normalizeStrategy(strategy);
 
     // fixed 策略：直接返回指定模型，不进行候选筛选
     if (normalized === 'fixed') {
-        const fixed = hintModelId ? getRunnableModelForUser(hintModelId, user) : null;
+        const fixed = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
         if (fixed) return { model: fixed, strategy: 'fixed', reason: '固定模型', candidatesCount: 1 };
         // 没有指定模型时也按 auto-context 兜底
     }
 
-    const candidates = getUserRunnableModels(user).filter(model => model.status !== 'usage_only');
+    const candidates = (await getUserRunnableModelsAsync(user)).filter(model => model.status !== 'usage_only');
     if (candidates.length === 0) {
-        const fallback = hintModelId ? getRunnableModelForUser(hintModelId, user) : null;
+        const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
         return fallback ? { model: fallback, strategy: 'fixed', reason: '无可用模型候选，回退到原模型', candidatesCount: 0 } : null;
     }
 
@@ -169,7 +169,7 @@ function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatu
 
     if (!chosen) {
         // 任何策略选不出时降级到 hint 指定模型
-        const fallback = hintModelId ? getRunnableModelForUser(hintModelId, user) : null;
+        const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
         if (fallback) return { model: fallback, strategy: 'fixed', reason: '路由未命中，回退到原模型', candidatesCount: candidates.length };
         // hint 都拿不到再回到候选第一个
         return { model: candidates[0], strategy: normalized, reason: '路由未命中，使用第一个可用候选', candidatesCount: candidates.length };
@@ -201,9 +201,9 @@ function assessConfidence({ output = '', finishReason = '', minOutputChars = 20 
  * auto-escalate 第二轮：从可用候选中挑一个比当前模型更强的（按"成本更高 OR 上下文更大"）
  * 输入：用户、当前模型、估算 token；输出：升级目标模型或 null（没有更强候选）
  */
-function pickEscalationModel({ user, currentModel, messages = [] }) {
+async function pickEscalationModel({ user, currentModel, messages = [] }) {
     if (!user || !currentModel) return null;
-    const candidates = getUserRunnableModels(user).filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
+    const candidates = (await getUserRunnableModelsAsync(user)).filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
     if (candidates.length === 0) return null;
     const estimatedTokens = estimateMessageTokens(messages);
     const currentPrice = modelTotalPrice(currentModel);

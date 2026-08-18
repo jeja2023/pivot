@@ -1,8 +1,8 @@
-const { db } = require('../../db');
+const { query, queryOne, execute } = require('../../db/client');
 const crypto = require('crypto');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
-const { getRunnableModelForUser } = require('../models');
+const { getRunnableModelForUser, getRunnableModelForUserAsync } = require('../models');
 const { clampText, compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
 const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
@@ -139,7 +139,6 @@ let agentQueue = null;
 const activeRunControllers = new Map();
 let agentRecoveryTimer = null;
 const createAgentNotification = createAgentNotificationFactory({
-    db,
     getTimestamp: getBeijingTimestamp,
     publishUserEvent
 });
@@ -156,7 +155,7 @@ const { shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers(
 
 
 
-function updateRun(runId, fields = {}) {
+async function updateRun(runId, fields = {}) {
     const allowed = [
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
@@ -171,16 +170,18 @@ function updateRun(runId, fields = {}) {
     const statusEntry = entries.find(([key]) => key === 'status');
     let currentStatus = '';
     if (statusEntry) {
-        currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+        const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+        currentStatus = row?.status || '';
         assertAgentRunStatusTransition(currentStatus, statusEntry[1], { runId });
     }
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
     const where = statusEntry ? 'WHERE id = ? AND status = ?' : 'WHERE id = ?';
     const params = [...entries.map(([, value]) => value), runId];
     if (statusEntry) params.push(currentStatus);
-    const info = db.prepare(`UPDATE agent_runs SET ${set} ${where}`).run(...params);
-    if (statusEntry && info.changes === 0) {
-        const latestStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+    const changes = await execute(`UPDATE agent_runs SET ${set} ${where}`, params);
+    if (statusEntry && changes === 0) {
+        const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+        const latestStatus = row?.status || '';
         if (latestStatus !== statusEntry[1]) {
             const error = new Error(`Agent run status changed concurrently: ${currentStatus || '<missing>'} -> ${latestStatus || '<missing>'}`);
             error.code = 'AGENT_STATUS_CONFLICT';
@@ -188,7 +189,7 @@ function updateRun(runId, fields = {}) {
             throw error;
         }
     }
-    if (info.changes > 0 && entries.some(([key]) => [
+    if (changes > 0 && entries.some(([key]) => [
         'status',
         'final_answer',
         'error_message',
@@ -197,17 +198,18 @@ function updateRun(runId, fields = {}) {
         'deleted_at',
         'last_heartbeat_at'
     ].includes(key))) {
-        publishAgentRunEvent(runId, 'updated');
+        await publishAgentRunEvent(runId, 'updated');
     }
-    return info.changes;
+    return changes;
 }
 
-function updateRunCas(runId, expectedStatuses = [], fields = {}) {
+async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
     const allowedStatuses = [...new Set((Array.isArray(expectedStatuses) ? expectedStatuses : [expectedStatuses])
         .map(value => String(value || '').trim())
         .filter(Boolean))];
     if (!allowedStatuses.length) return 0;
-    const currentStatus = db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+    const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+    const currentStatus = row?.status || '';
     if (!allowedStatuses.includes(currentStatus)) return 0;
     if (fields.status) assertAgentRunStatusTransition(currentStatus, fields.status, { runId });
     const allowed = [
@@ -223,18 +225,18 @@ function updateRunCas(runId, expectedStatuses = [], fields = {}) {
     if (!entries.length) return 0;
     const placeholders = allowedStatuses.map(() => '?').join(', ');
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    const info = db.prepare(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`)
-        .run(...entries.map(([, value]) => value), runId, ...allowedStatuses);
-    if (info.changes) publishAgentRunEvent(runId, 'updated');
-    return info.changes;
+    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`,
+        [...entries.map(([, value]) => value), runId, ...allowedStatuses]);
+    if (changes) await publishAgentRunEvent(runId, 'updated');
+    return changes;
 }
 
-function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
-    const run = db.prepare(`
+async function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
+    const run = await queryOne(`
         SELECT id, user_id, title, goal, status, updated_at, started_at, completed_at, last_heartbeat_at, error_message
         FROM agent_runs
         WHERE id = ?
-    `).get(runId);
+    `, [runId]);
     if (!run) return 0;
     return publishUserEvent(run.user_id, 'agent.run', {
         reason,
@@ -253,16 +255,17 @@ function publishAgentRunEvent(runId, reason = 'updated', extra = {}) {
     });
 }
 
-function getRunStatus(runId) {
-    return db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId)?.status || '';
+async function getRunStatus(runId) {
+    const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+    return row?.status || '';
 }
 
-function getRunUser(runId) {
-    return db.prepare("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL").get(runId);
+async function getRunUser(runId) {
+    return await queryOne("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL", [runId]);
 }
 
-function assertRunUserActive(user) {
-    const active = db.prepare("SELECT id FROM users WHERE id = ? AND COALESCE(status, 'active') != 'disabled' AND deleted_at IS NULL").get(user?.id);
+async function assertRunUserActive(user) {
+    const active = await queryOne("SELECT id FROM users WHERE id = ? AND COALESCE(status, 'active') != 'disabled' AND deleted_at IS NULL", [user?.id]);
     if (!active) {
         const err = new Error('任务所属账号已被禁用或删除。');
         err.code = 'AGENT_USER_REVOKED';
@@ -270,8 +273,8 @@ function assertRunUserActive(user) {
     }
 }
 
-function markRunError(runId, message) {
-    updateRun(runId, {
+async function markRunError(runId, message) {
+    await updateRun(runId, {
         status: 'error',
         error_message: message,
         completed_at: getBeijingTimestamp(),
@@ -283,7 +286,6 @@ function markRunError(runId, message) {
 function getAgentQueue() {
     if (!agentQueue) {
         agentQueue = createAgentQueue({
-            db,
             logger,
             instanceId: AGENT_INSTANCE_ID,
             maxConcurrent: getAgentMaxConcurrentRuns(),
@@ -299,10 +301,10 @@ function getAgentQueue() {
     return agentQueue;
 }
 
-function setRunMetadata(runId, patch = {}) {
-    const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
+async function setRunMetadata(runId, patch = {}) {
+    const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
     const current = parseJsonObject(row.metadata) || {};
-    updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
+    await updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
 }
 
 function stableWorkflowDelayKey(toolName, _step, input = {}) {
@@ -313,12 +315,12 @@ function stableWorkflowDelayKey(toolName, _step, input = {}) {
     return `${toolName}:standard:${hash}`;
 }
 
-function appendRunMetadataList(runId, key, item, limit = 20) {
-    const row = db.prepare('SELECT metadata FROM agent_runs WHERE id = ?').get(runId) || {};
+async function appendRunMetadataList(runId, key, item, limit = 20) {
+    const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
     const current = parseJsonObject(row.metadata) || {};
     const list = Array.isArray(current[key]) ? current[key].slice(-(limit - 1)) : [];
     list.push(item);
-    updateRun(runId, { metadata: JSON.stringify({ ...current, [key]: list }), updated_at: getBeijingTimestamp() });
+    await updateRun(runId, { metadata: JSON.stringify({ ...current, [key]: list }), updated_at: getBeijingTimestamp() });
 }
 
 function recordRunRetryReason(runId, input = {}) {
@@ -517,7 +519,7 @@ async function resumeAgentRun(runId, user) {
     const steps = await listSteps(run.id);
     const lastStep = (steps || []).length ? Math.max(...steps.map(step => Number(step.step_index || 0))) : 0;
     const failed = (steps || []).filter(step => step.status === 'error').slice(-3);
-    const resumeContext = buildAgentResumeContext(run.id);
+    const resumeContext = await buildAgentResumeContext(run.id);
     const previousMetadata = getRunMetadata(run);
     return await createAgentRun({
         user,
@@ -570,7 +572,7 @@ async function softDeleteAgentRun(runId, user, reason = '') {
         delete_reason: String(reason || '').trim().slice(0, 500),
         updated_at: now
     });
-    insertStep(runId, listSteps(runId).length + 1, {
+    await insertStep(runId, (await listSteps(runId)).length + 1, {
         type: 'control',
         title: '任务记录已移除',
         output: {
@@ -582,20 +584,20 @@ async function softDeleteAgentRun(runId, user, reason = '') {
     return await getRunForUser(runId, user, { includeDeleted: true });
 }
 
-function insertStep(runId, stepIndex, data = {}) {
+async function insertStep(runId, stepIndex, data = {}) {
     const now = getBeijingTimestamp();
     let safeStepIndex = Number.isInteger(stepIndex) && stepIndex > 0 ? stepIndex : null;
     if (safeStepIndex === null) {
-        const row = db.prepare('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?').get(runId);
+        const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
         safeStepIndex = row?.next_index || 1;
     }
-    const info = db.prepare(`
+    const changes = await execute(`
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
             status, duration_ms, started_at, completed_at, created_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
         runId,
         safeStepIndex,
         data.type || 'note',
@@ -609,9 +611,9 @@ function insertStep(runId, stepIndex, data = {}) {
         data.startedAt || now,
         data.completedAt || now,
         now
-    );
-    if (info.changes > 0) {
-        recordAgentCheckpoint(runId, {
+    ]);
+    if (changes > 0) {
+        await recordAgentCheckpoint(runId, {
             stepIndex: safeStepIndex,
             type: data.type || 'control',
             status: data.status || 'completed',
@@ -624,23 +626,23 @@ function insertStep(runId, stepIndex, data = {}) {
                 errorMessage: data.errorMessage || '',
                 durationMs: Number(data.durationMs) || 0
             },
-            createdAt: data.completedAt
+            createdAt: data.completedAt || now
         });
         recordAgentTraceSpan(runId, {
             type: data.type || 'note',
-            name: data.title || `执行步骤 ${stepIndex}`,
+            name: data.title || `执行步骤 ${safeStepIndex}`,
             input: data.input,
             output: data.output,
-            details: { stepIndex, toolName: data.toolName || '' },
+            details: { stepIndex: safeStepIndex, toolName: data.toolName || '' },
             status: data.status === 'error' ? 'error' : (data.status || 'completed'),
             errorMessage: data.errorMessage || '',
             durationMs: Number(data.durationMs) || 0,
-            startedAt: data.startedAt,
-            completedAt: data.completedAt
+            startedAt: data.startedAt || now,
+            completedAt: data.completedAt || now
         });
-        publishAgentRunEvent(runId, 'step', {
+        await publishAgentRunEvent(runId, 'step', {
             step: {
-                index: stepIndex,
+                stepIndex: safeStepIndex,
                 type: data.type || 'note',
                 status: data.status || 'success',
                 title: data.title || ''
@@ -653,7 +655,6 @@ function getAgentRuntimeDeps(signal = null) {
     return {
         agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
-        db,
         logger,
         assertRunNotCancelled,
         createAgentNotification,
@@ -706,14 +707,14 @@ async function runAgent(runId, user) {
             }
         };
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
-        const initialModelCfg = getRunnableModelForUser(run.model_id, user);
+        const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
         if (!initialModelCfg && !dagRun) throw new Error('No accessible model is available for this agent run.');
         // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
         if (initialModelCfg && routerStrategy !== 'fixed') {
             try {
-                const routed = chooseModel({
+                const routed = await chooseModel({
                     user,
                     strategy: routerStrategy,
                     hintModelId: run.model_id,
@@ -722,9 +723,10 @@ async function runAgent(runId, user) {
                 });
                 if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
                     modelCfg = routed.model;
-                    db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
-                        .run(modelCfg.id, getBeijingTimestamp(), runId);
-                    insertStep(runId, listSteps(runId).length + 1, {
+                    await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
+                        modelCfg.id, getBeijingTimestamp(), runId
+                    ]);
+                    await insertStep(runId, (await listSteps(runId)).length + 1, {
                         type: 'control',
                         title: `模型路由选择：${routerStrategy}`,
                         output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
@@ -759,7 +761,7 @@ async function runAgent(runId, user) {
             ...(Array.isArray(resumeContext.recentFailures) ? resumeContext.recentFailures : [])
         ].slice(-25);
         if (resumeContext.latestCheckpointId) {
-            insertStep(runId, listSteps(runId).length + 1, {
+            await insertStep(runId, (await listSteps(runId)).length + 1, {
                 type: 'control',
                 title: '已从持久化检查点恢复上下文',
                 output: {
@@ -769,7 +771,7 @@ async function runAgent(runId, user) {
                 }
             });
         }
-        const toolList = formatToolList(user, {
+        const toolList = await formatToolList(user, {
             toolPolicy: run.tool_policy,
             toolAllowlist: run.tool_allowlist
         });
@@ -778,7 +780,7 @@ async function runAgent(runId, user) {
         }
         assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
-        updateRun(runId, {
+        await updateRun(runId, {
             status: 'running',
             started_at: run.started_at || startedAt,
             last_heartbeat_at: startedAt,
@@ -806,7 +808,7 @@ async function runAgent(runId, user) {
         for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
-            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg);
             const plannerStartedAt = Date.now();
             const plannerSpanId = startAgentTraceSpan(runId, {
@@ -834,7 +836,7 @@ async function runAgent(runId, user) {
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
-            insertStep(runId, step, {
+            await insertStep(runId, step, {
                 type: 'plan',
                 title: plan.thought || 'Agent plan',
                 input: { goal: run.goal },
@@ -844,25 +846,25 @@ async function runAgent(runId, user) {
 
             if (plan.action === 'final' || !plan.tool) {
                 const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal: runController.signal });
-                updateRun(runId, {
+                await updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
                     completed_at: getBeijingTimestamp(),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
+                await createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
                 return;
             }
 
             const startedAt = Date.now();
             try {
-                assertRunUserActive(user);
+                await assertRunUserActive(user);
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
-                updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+                await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = findAgentToolByName(plan.tool, toolList);
-                if (maybePauseForApproval(run, selectedTool, plan.input || {})) return;
+                if (await maybePauseForApproval(run, selectedTool, plan.input || {})) return;
                 const toolContext = {
                     run,
                     modelCfg,
@@ -886,7 +888,7 @@ async function runAgent(runId, user) {
                     input: plan.input || {},
                     output: compactOutput
                 });
-                insertStep(runId, step, {
+                await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行完成：${plan.tool}`,
                     toolName: plan.tool,
@@ -902,7 +904,7 @@ async function runAgent(runId, user) {
                     input: plan.input || {},
                     error: toolErr.message
                 });
-                insertStep(runId, step, {
+                await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
@@ -918,7 +920,7 @@ async function runAgent(runId, user) {
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
         const limitMessage = `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
-        insertStep(runId, listSteps(runId).length + 1, {
+        await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'control',
             title: '已达到最大执行轮次',
             output: { maxSteps, message: limitMessage },
@@ -952,21 +954,22 @@ async function runAgent(runId, user) {
             const confidence = assessConfidence({ output: answer });
             if (!confidence.confident) {
                 try {
-                    const escalation = pickEscalationModel({
+                    const escalation = await pickEscalationModel({
                         user,
                         currentModel: modelCfg,
                         messages: [{ role: 'user', content: run.goal || '' }]
                     });
                     if (escalation) {
-                        insertStep(runId, listSteps(runId).length + 1, {
+                        await insertStep(runId, (await listSteps(runId)).length + 1, {
                             type: 'control',
                             title: '模型自动升级：auto-escalate',
                             output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
                         });
                         logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度较低，正在升级模型');
                         modelCfg = escalation;
-                        db.prepare('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?')
-                            .run(modelCfg.id, getBeijingTimestamp(), runId);
+                        await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
+                            modelCfg.id, getBeijingTimestamp(), runId
+                        ]);
                         answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
                     }
                 } catch (escErr) {
@@ -976,7 +979,7 @@ async function runAgent(runId, user) {
         }
         assertRunNotCancelled(runId);
         answer = `注意：${limitMessage}\n\n${answer}`;
-        updateRun(runId, {
+        await updateRun(runId, {
             status: 'completed_with_errors',
             final_answer: answer,
             error_message: limitMessage,
@@ -984,21 +987,21 @@ async function runAgent(runId, user) {
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
+        await createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
     } catch (e) {
         if (e.code === 'AGENT_RUN_CANCELLED') {
-            updateRun(runId, { updated_at: getBeijingTimestamp() });
+            await updateRun(runId, { updated_at: getBeijingTimestamp() });
             return;
         }
         if (e.code === 'AGENT_APPROVAL_REQUIRED') {
-            updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             return;
         }
         logger.error({ err: e.message, runId }, '智能体运行失败');
         if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId)) {
-            const currentStatus = getRunStatus(runId);
+            const currentStatus = await getRunStatus(runId);
             if (currentStatus !== 'cancelled' && currentStatus !== 'deleted') {
-                updateRun(runId, {
+                await updateRun(runId, {
                     status: 'cancelled',
                     error_message: e.message,
                     cancelled_at: getBeijingTimestamp(),
@@ -1008,42 +1011,42 @@ async function runAgent(runId, user) {
             }
             return;
         }
-        const retryRow = db.prepare('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?').get(runId);
+        const retryRow = await queryOne('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?', [runId]);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
             const resumeContext = buildAgentResumeContext(runId);
-            setRunMetadata(runId, { resumeContext });
+            await setRunMetadata(runId, { resumeContext });
             recordRunRetryReason(runId, {
                 attempt: retryCount + 1,
                 limit: retryLimit,
                 code: e.code || '',
                 error: e.message
             });
-            updateRun(runId, {
+            await updateRun(runId, {
                 status: 'queued',
                 error_message: e.message,
                 retry_count: retryCount + 1,
                 resume_from_step: Number(resumeContext.latestStepIndex || 0),
                 updated_at: getBeijingTimestamp()
             });
-            insertStep(runId, listSteps(runId).length + 1, {
+            await insertStep(runId, (await listSteps(runId)).length + 1, {
                 type: 'control',
                 title: `任务失败重试：${retryCount + 1}/${retryLimit}`,
                 output: { error: e.message }
             });
             // 重新拉取用户，避免复用运行开始时捕获的过期用户对象（运行中用户可能被禁用或修改）
-            enqueueAgentRun(runId, getRunUser(runId) || user);
+            enqueueAgentRun(runId, (await getRunUser(runId)) || user);
             return;
         }
-        updateRun(runId, {
+        await updateRun(runId, {
             status: 'error',
             error_message: e.message,
             completed_at: getBeijingTimestamp(),
             last_heartbeat_at: getBeijingTimestamp(),
             updated_at: getBeijingTimestamp()
         });
-        createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
+        await createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
     } finally {
         if (deadlineTimer) clearTimeout(deadlineTimer);
         if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
@@ -1055,18 +1058,17 @@ function enqueueAgentRun(runId, _user) {
     getAgentQueue().enqueueRun(runId);
 }
 
-function recoverAgentRuns() {
-    if (!db) return;
+async function recoverAgentRuns() {
     const now = getBeijingTimestamp();
     const cutoff = getBeijingTimestamp(new Date(Date.now() - (AGENT_STALE_RUNNING_MINUTES * 60 * 1000)));
-    const staleRunning = db.prepare(`
+    const staleRunning = await query(`
         SELECT id FROM agent_runs
         WHERE status = 'running'
           AND deleted_at IS NULL
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
-    `).all(cutoff);
-    staleRunning.forEach(run => {
-        const changed = updateRunCas(run.id, ['running'], {
+    `, [cutoff]);
+    for (const run of staleRunning) {
+        const changed = await updateRunCas(run.id, ['running'], {
             status: 'error',
             error_message: '服务已重启或心跳超时，任务已标记为失败。',
             completed_at: now,
@@ -1075,30 +1077,34 @@ function recoverAgentRuns() {
             locked_by: null,
             lock_expires_at: null
         });
-        if (!changed) return;
+        if (!changed) continue;
         const abortError = new Error('Run recovered as stale.');
         abortError.code = 'AGENT_RUN_CANCELLED';
         activeRunControllers.get(run.id)?.abort(abortError);
-        insertStep(run.id, listSteps(run.id).length + 1, {
+        await insertStep(run.id, (await listSteps(run.id)).length + 1, {
             type: 'control',
             title: 'Runtime recovery marked stale run',
             output: { status: 'error', reason: 'stale_running' }
         });
-    });
+    }
 
-    const recoveredQueued = getAgentQueue().recoverQueued(100);
-    logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时恢复完成');
+    const recoveredQueued = await getAgentQueue().recoverQueued(100);
+    if (recoveredQueued > 0 || staleRunning.length > 0) {
+        logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时异常任务恢复完成');
+    } else {
+        logger.debug({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时周期巡检完成');
+    }
 }
 
 function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
     if (agentRecoveryTimer) return agentRecoveryTimer;
     const safeInterval = Math.max(Number.parseInt(intervalMs, 10) || 60000, 30000);
     let running = false;
-    const tick = () => {
+    const tick = async () => {
         if (running) return;
         running = true;
         try {
-            recoverAgentRuns();
+            await recoverAgentRuns();
         } catch (error) {
             logger.warn({ err: error.message }, 'Periodic agent run recovery failed');
         } finally {
@@ -1119,34 +1125,34 @@ async function approveAgentTool(runId, user, approve = true) {
     const pending = metadata.pendingApproval || {};
     const now = getBeijingTimestamp();
     if (!approve) {
-        updateRun(runId, {
+        await updateRun(runId, {
             status: 'cancelled',
             error_message: `用户拒绝工具审批：${pending.tool || '-'}`,
             cancelled_at: now,
             completed_at: now,
             updated_at: now
         });
-        setRunMetadata(runId, { pendingApproval: null });
-        insertStep(runId, listSteps(runId).length + 1, {
+        await setRunMetadata(runId, { pendingApproval: null });
+        await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'approval',
             title: 'User rejected tool approval',
             toolName: pending.tool || '',
             output: { status: 'rejected' }
         });
-        createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
+        await createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
         return await getRunForUser(runId, user);
     }
     const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
     const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
     if (pending.key) approvedApprovalKeys.add(pending.key);
     else if (pending.tool) approvedTools.add(pending.tool);
-    setRunMetadata(runId, {
+    await setRunMetadata(runId, {
         pendingApproval: null,
         approvedTools: [...approvedTools],
         approvedApprovalKeys: [...approvedApprovalKeys]
     });
-    updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
-    insertStep(runId, listSteps(runId).length + 1, {
+    await updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
+    await insertStep(runId, (await listSteps(runId)).length + 1, {
         type: 'approval',
         title: 'User approved tool call',
         toolName: pending.tool || '',
@@ -1156,20 +1162,21 @@ async function approveAgentTool(runId, user, approve = true) {
     return await getRunForUser(runId, user);
 }
 
-function getAgentRuntimeStatus(user = null) {
-    return buildAgentRuntimeStatus({
+async function getAgentRuntimeStatus(user = null) {
+    const queueStatus = await getAgentQueue().getStatus();
+    return await buildAgentRuntimeStatus({
         maxConcurrent: getAgentMaxConcurrentRuns(),
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
-        queueStatus: getAgentQueue().getStatus(),
+        queueStatus,
         user
     });
 }
 
-function syncAgentRuntimeConcurrency() {
+async function syncAgentRuntimeConcurrency() {
     const queue = getAgentQueue();
     queue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
     queue.processQueue?.();
-    return queue.getStatus();
+    return await queue.getStatus();
 }
 
 configureAgentSchedules({
@@ -1241,14 +1248,14 @@ async function createAgentRun({
     modelRouter = 'fixed',
     dedupeKey = null
 }) {
-    assertRunUserActive(user);
+    await assertRunUserActive(user);
     const normalizedScheduleId = scheduleId === null || scheduleId === '' ? null : Number(scheduleId);
     if (normalizedScheduleId !== null && (!Number.isInteger(normalizedScheduleId) || normalizedScheduleId <= 0)) {
         const err = new Error('计划标识无效。');
         err.status = 400;
         throw err;
     }
-    if (normalizedScheduleId !== null && !db.prepare('SELECT id FROM agent_schedules WHERE id = ? AND user_id = ?').get(normalizedScheduleId, user.id)) {
+    if (normalizedScheduleId !== null && !(await queryOne('SELECT id FROM agent_schedules WHERE id = ? AND user_id = ?', [normalizedScheduleId, user.id]))) {
         const err = new Error('计划不存在或无权使用。');
         err.status = 403;
         throw err;
@@ -1260,7 +1267,7 @@ async function createAgentRun({
         throw err;
     }
     if (normalizedTemplateId !== null) {
-        const template = db.prepare('SELECT * FROM agent_templates WHERE id = ?').get(normalizedTemplateId);
+        const template = await queryOne('SELECT * FROM agent_templates WHERE id = ?', [normalizedTemplateId]);
         if (!assertTemplateAccess(template, user, false)) {
             const err = new Error('任务模板不存在或无权使用。');
             err.status = 403;
@@ -1269,7 +1276,7 @@ async function createAgentRun({
     }
     const normalizedDedupeKey = dedupeKey ? String(dedupeKey).trim().slice(0, 240) : null;
     if (normalizedDedupeKey) {
-        const existing = db.prepare('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
+        const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
         if (existing) return existing;
     }
     const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
@@ -1277,7 +1284,7 @@ async function createAgentRun({
     const normalizedRouter = normalizeRouterStrategy(modelRouter);
     const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
     const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
-        ? inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
+        ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
         : goal);
     const runId = createRunId();
     const now = getBeijingTimestamp();
@@ -1313,53 +1320,51 @@ async function createAgentRun({
             runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
         }
         assertWorkflowLlmNodesConfigured(runMetadata.dagSpec);
-        assertAgentWorkflowDependencies(runMetadata.dagSpec, user);
+        await assertAgentWorkflowDependencies(runMetadata.dagSpec, user);
     }
-    const modelCfg = getRunnableModelForUser(effectiveModelId, user);
+    const modelCfg = await getRunnableModelForUserAsync(effectiveModelId, user);
     if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');
-    const insert = db.prepare(`
-        INSERT INTO agent_runs (
-            id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
-            priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
-            retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
-            metadata, model_router, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
     try {
-        insert.run(
-        runId,
-        user.id,
-        sessionId || null,
-        modelCfg?.id || null,
-        normalizeAgentTitle(title, cleanGoal),
-        cleanGoal,
-        'queued',
-        normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
-        parentRunId || null,
-        normalizePriority(priority),
-        normalizedRunMode,
-        normalizedToolPolicy,
-        serializeToolAllowlist(toolAllowlist),
-        normalizeApprovalPolicy(approvalPolicy),
-        normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
-        normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
-        normalizePositiveInt(retryLimit, 1, 0, 5),
-        normalizePositiveInt(maxTokenBudget, 0, 0, 10000000),
-        normalizedTemplateId,
-        normalizedScheduleId,
-        normalizedDedupeKey,
-        serializeContextConfig(contextConfig),
-        normalizePositiveInt(resumeFromStep, 0, 0, 999),
-        JSON.stringify(runMetadata),
-        normalizedRouter,
-        now,
-        now
-        );
+        await execute(`
+            INSERT INTO agent_runs (
+                id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
+                priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
+                retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
+                metadata, model_router, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            runId,
+            user.id,
+            sessionId || null,
+            modelCfg?.id || null,
+            normalizeAgentTitle(title, cleanGoal),
+            cleanGoal,
+            'queued',
+            normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
+            parentRunId || null,
+            normalizePriority(priority),
+            normalizedRunMode,
+            normalizedToolPolicy,
+            serializeToolAllowlist(toolAllowlist),
+            normalizeApprovalPolicy(approvalPolicy),
+            normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
+            normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
+            normalizePositiveInt(retryLimit, 1, 0, 5),
+            normalizePositiveInt(maxTokenBudget, 0, 0, 10000000),
+            normalizedTemplateId,
+            normalizedScheduleId,
+            normalizedDedupeKey,
+            serializeContextConfig(contextConfig),
+            normalizePositiveInt(resumeFromStep, 0, 0, 999),
+            JSON.stringify(runMetadata),
+            normalizedRouter,
+            now,
+            now
+        ]);
     } catch (err) {
-        if (normalizedDedupeKey && String(err.code || '').includes('CONSTRAINT')) {
-            const { sql } = require('../../db/statements');
-            const existing = sql('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL').get(user.id, normalizedDedupeKey);
+        if (normalizedDedupeKey && (String(err.code || '').includes('CONSTRAINT') || String(err.code || '').includes('23505'))) {
+            const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
             if (existing) return existing;
         }
         throw err;

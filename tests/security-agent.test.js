@@ -1019,12 +1019,12 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     const tools = getBuiltInToolDefinitions(user);
     assert.equal(tools.some(tool => tool.name === 'rag.search'), true);
     assert.equal(tools.some(tool => tool.name === 'system.health'), false);
-    assert.equal(formatToolList(user).some(tool => tool.name === 'system.health'), false);
-    const limitedAdminTools = formatToolList({ id: 1, username: 'ops-admin', role: 'admin', unit: '' });
+    assert.equal((await formatToolList(user)).some(tool => tool.name === 'system.health'), false);
+    const limitedAdminTools = await formatToolList({ id: 1, username: 'ops-admin', role: 'admin', unit: '' });
     assert.equal(limitedAdminTools.some(tool => tool.name === 'system.health'), false);
-    const spoofedAdminNameTools = formatToolList({ id: 1, username: 'admin', role: 'user', unit: '' });
+    const spoofedAdminNameTools = await formatToolList({ id: 1, username: 'admin', role: 'user', unit: '' });
     assert.equal(spoofedAdminNameTools.some(tool => tool.name === 'system.health'), false);
-    const superAdminTools = formatToolList({ id: 1, username: 'admin', role: 'admin', unit: '' });
+    const superAdminTools = await formatToolList({ id: 1, username: 'admin', role: 'admin', unit: '' });
     const systemHealth = superAdminTools.find(tool => tool.name === 'system.health');
     assert.equal(systemHealth.admin, true);
     assert.equal(systemHealth.title, '系统健康');
@@ -1327,7 +1327,7 @@ test('agent runs can be cancelled and rerun from an existing run', async () => {
     await cancelAgentRun(previewRun.id, user);
     assert.equal((await listRuns(user, { limit: 30 })).data.some(item => item.id === previewRun.id), false);
     assert.equal((await listRuns(user, { limit: 30, includePreview: true })).data.some(item => item.id === previewRun.id), true);
-    assert.equal(listAgentNotifications(user, 50).some(item => item.run_id === previewRun.id), false);
+    assert.equal((await listAgentNotifications(user, 50)).some(item => item.run_id === previewRun.id), false);
 
     db.prepare(`
         INSERT INTO agent_steps (
@@ -1472,7 +1472,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     `).run(user.id, 'Enterprise Agent Model', 'http://127.0.0.1:65530/v1/chat/completions', `agent-enterprise-${suffix}`);
     const modelId = Number(modelInfo.lastInsertRowid);
 
-    const template = createAgentTemplate(user, {
+    const template = await createAgentTemplate(user, {
         name: '风险审查',
         goalTemplate: '检查项目风险并给出建议',
         runMode: 'audit',
@@ -1482,11 +1482,11 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
         maxSteps: 4
     });
     assert.equal(template.run_mode, 'audit');
-    assert.equal(listAgentTemplates(user).some(item => item.id === template.id), true);
+    assert.equal((await listAgentTemplates(user)).some(item => item.id === template.id), true);
 
     const nextDaily = computeNextScheduleRun('daily', '09:00', 1, '2026-05-16 10:00:00');
     assert.equal(nextDaily.startsWith('2026-05-17 09:00'), true);
-    const schedule = createAgentSchedule(user, {
+    const schedule = await createAgentSchedule(user, {
         name: '每日风险巡检',
         goal: '每天检查项目风险',
         modelId,
@@ -1499,7 +1499,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     });
     assert.equal(Boolean(schedule.next_run_at), true);
     assert.equal(JSON.parse(schedule.run_config).maxSteps, 0);
-    assert.equal(listAgentSchedules(user).some(item => item.id === schedule.id), true);
+    assert.equal((await listAgentSchedules(user)).some(item => item.id === schedule.id), true);
 
     const run = await runAgentScheduleNow(schedule.id, user);
     assert.equal(run.schedule_id, schedule.id);
@@ -1511,10 +1511,10 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     const freeRuns = (await listRuns(user, { limit: 30, runType: 'free' })).data;
     assert.equal(scheduledRuns.some(item => item.id === run.id), true);
     assert.equal(freeRuns.some(item => item.id === run.id), false);
-    const saved = saveAgentRunArtifact(run.id, user, { content: '风险结果摘要', title: '风险摘要' });
+    const saved = await saveAgentRunArtifact(run.id, user, { content: '风险结果摘要', title: '风险摘要' });
     assert.equal(saved.title, '风险摘要');
-    assert.equal(listAgentArtifacts(user).some(item => item.id === saved.id), true);
-    assert.equal(listAgentNotifications(user, 20).some(item => item.run_id === run.id), true);
+    assert.equal((await listAgentArtifacts(user)).some(item => item.id === saved.id), true);
+    assert.equal((await listAgentNotifications(user, 20)).some(item => item.run_id === run.id), true);
 
     const resumed = await resumeAgentRun(run.id, user);
     assert.equal(resumed.parent_run_id, run.id);
@@ -1821,21 +1821,21 @@ test('automation schedules validate Sunday, reject malformed payloads, and dedup
         computeNextScheduleRun('interval', '09:00', 1, '2026-05-16 10:00:00', '', 90),
         '2026-05-16 11:30:00'
     );
-    assert.throws(() => createAgentSchedule(user, {
+    await assert.rejects(async () => createAgentSchedule(user, {
         name: 'Invalid schedule',
         goal: 'Validate malformed schedule input',
         modelId,
         frequency: 'hourly',
         timeOfDay: '09:00'
     }), /周期无效/);
-    assert.throws(() => createAgentSchedule(user, {
+    await assert.rejects(async () => createAgentSchedule(user, {
         name: 'Invalid time',
         goal: 'Validate malformed schedule input',
         modelId,
         frequency: 'daily',
         timeOfDay: '25:99'
     }), /HH:MM/);
-    assert.throws(() => createAgentSchedule(user, {
+    await assert.rejects(async () => createAgentSchedule(user, {
         name: 'Too frequent schedule',
         goal: 'Reject unsafe minute interval',
         modelId,
@@ -1843,7 +1843,7 @@ test('automation schedules validate Sunday, reject malformed payloads, and dedup
         intervalMinutes: 4
     }), /5 到 1440 分钟/);
 
-    const intervalSchedule = createAgentSchedule(user, {
+    const intervalSchedule = await createAgentSchedule(user, {
         name: 'Frequent schedule',
         goal: 'Run several times each day',
         modelId,
@@ -1854,7 +1854,7 @@ test('automation schedules validate Sunday, reject malformed payloads, and dedup
     assert.equal(intervalSchedule.interval_minutes, 30);
     assert.equal(Boolean(intervalSchedule.next_run_at), true);
 
-    const schedule = createAgentSchedule(user, {
+    const schedule = await createAgentSchedule(user, {
         name: 'Idempotent schedule',
         goal: 'Run a guarded scheduled task',
         modelId,
@@ -1869,7 +1869,7 @@ test('automation schedules validate Sunday, reject malformed payloads, and dedup
     await cancelAgentRun(first.id, user);
 });
 
-test('revoked accounts cannot dispatch due automation schedules', () => {
+test('revoked accounts cannot dispatch due automation schedules', async () => {
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1880,6 +1880,6 @@ test('revoked accounts cannot dispatch due automation schedules', () => {
         INSERT INTO agent_schedules (user_id, name, goal, frequency, time_of_day, day_of_week, status, next_run_at, run_config, created_at, updated_at)
         VALUES (?, ?, ?, 'daily', '09:00', 1, 'active', datetime('now', '+8 hours', '-1 day'), '{}', datetime('now', '+8 hours'), datetime('now', '+8 hours'))
     `).run(userId, 'Revoked schedule', 'Should not dispatch after account revocation');
-    assert.deepEqual(runDueAgentSchedules(10), []);
+    assert.deepEqual(await runDueAgentSchedules(10), []);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_runs WHERE user_id = ?').get(userId).count, 0);
 });

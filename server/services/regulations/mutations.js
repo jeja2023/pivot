@@ -1,5 +1,8 @@
 const {
-    db,
+    query,
+    queryOne,
+    execute,
+    transaction,
     fs,
     path,
     clearDirSizeCache,
@@ -40,7 +43,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
         error.statusCode = 404;
         throw error;
     }
-    const doc = getRegulationDocumentById(normalizedDocId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(normalizedDocId, { includeArchived: true });
     if (!doc || doc.deleted_at) {
         const error = new Error('法规文档不存在或已归档');
         error.statusCode = 404;
@@ -70,15 +73,16 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
             providedSummary: metadata.summary || ''
         });
         const sourceFormat = getSafeRegulationExtension(file.originalname).replace(/^\./, '') || path.extname(file.originalname).replace(/^\./, '');
-        const tx = db.transaction(() => {
-            const versionInfo = db.prepare(`
+        const versionId = await transaction(async trx => {
+            const versionInfo = await trx.queryOne(`
                 INSERT INTO regulation_versions (
                     document_id, version_label, source_name, source_path, source_size,
                     source_hash, source_format, extracted_text, summary, article_count,
                     uploaded_by_user, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
+                RETURNING id
+            `, [
                 normalizedDocId,
                 versionLabel,
                 normalizeUploadedOriginalName(file.originalname),
@@ -92,20 +96,20 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                 userId || 0,
                 createdAt,
                 createdAt
-            );
-            const versionId = versionInfo.lastInsertRowid;
-            const insertArticle = db.prepare(`
-                INSERT INTO regulation_articles (
-                    document_id, version_id, sort_order, article_label,
-                    article_title, content, search_content, heading_path, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
+            ]);
+            const vId = versionInfo?.id;
             const orderToArticleId = new Map();
-            articles.forEach(article => {
-                const info = insertArticle.run(
+            for (const article of articles) {
+                const articleRow = await trx.queryOne(`
+                    INSERT INTO regulation_articles (
+                        document_id, version_id, sort_order, article_label,
+                        article_title, content, search_content, heading_path, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                `, [
                     normalizedDocId,
-                    versionId,
+                    vId,
                     article.sortOrder,
                     article.articleLabel,
                     article.articleTitle,
@@ -113,26 +117,25 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                     article.searchContent,
                     article.headingPath || '',
                     createdAt
-                );
-                orderToArticleId.set(article.sortOrder, info.lastInsertRowid);
-            });
+                ]);
+                orderToArticleId.set(article.sortOrder, articleRow?.id);
+            }
             // 抽取并落库条文间引用关系（条号引用对齐到本版本条文 id）
-            const links = extractRegulationLinks(articles, { documentId: normalizedDocId, versionId });
+            const links = extractRegulationLinks(articles, { documentId: normalizedDocId, versionId: vId });
             if (links.length) {
-                const insertLink = db.prepare(`
-                    INSERT INTO regulation_article_links (
-                        document_id, version_id, source_article_id, target_label,
-                        target_article_id, target_document_id, relation_type, confidence, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `);
-                links.forEach(link => {
+                for (const link of links) {
                     const sourceId = orderToArticleId.get(link.sourceOrder);
-                    if (!sourceId) return;
+                    if (!sourceId) continue;
                     const targetId = link.targetOrder ? orderToArticleId.get(link.targetOrder) || null : null;
-                    insertLink.run(
+                    await trx.execute(`
+                        INSERT INTO regulation_article_links (
+                            document_id, version_id, source_article_id, target_label,
+                            target_article_id, target_document_id, relation_type, confidence, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `, [
                         normalizedDocId,
-                        versionId,
+                        vId,
                         sourceId,
                         link.targetLabel || '',
                         targetId,
@@ -140,10 +143,10 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                         link.relationType || 'cite',
                         link.confidence || 0.7,
                         createdAt
-                    );
-                });
+                    ]);
+                }
             }
-            db.prepare(`
+            await trx.execute(`
                 UPDATE regulation_documents
                 SET title = ?,
                     summary = ?,
@@ -154,25 +157,27 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                     updated_by_user = ?,
                     updated_at = ?
                 WHERE id = ? AND deleted_at IS NULL
-            `).run(title, summary, versionId, articleCount, userId || 0, createdAt, normalizedDocId);
-            return versionId;
+            `, [title, summary, vId, articleCount, userId || 0, createdAt, normalizedDocId]);
+            return vId;
         });
-        const versionId = tx();
+
         // 后置任务：更新别名表，解析跨法引用回连，生成向量（均不在事务内，失败不影响入库）
         try {
-            saveRegulationAliases(normalizedDocId, title);
-            resolveRegulationCrossLinks(versionId);
+            await saveRegulationAliases(normalizedDocId, title);
+            await resolveRegulationCrossLinks(versionId);
         } catch (_err) {
             // 别名/跨法回连为增强能力，失败不阻断
         }
         // #2 异步生成条文向量（可选，失败降级为纯 BM25）
-        setImmediate(() => {
-            const insertedArticles = db.prepare('SELECT id, content FROM regulation_articles WHERE version_id = ? ORDER BY sort_order').all(versionId);
-            embedRegulationArticles(insertedArticles, { userId, source: 'regulations_import' }).catch(() => {});
+        setImmediate(async () => {
+            try {
+                const insertedArticles = await query('SELECT id, content FROM regulation_articles WHERE version_id = ? ORDER BY sort_order', [versionId]);
+                await embedRegulationArticles(insertedArticles, { userId, source: 'regulations_import' });
+            } catch (_err) {}
         });
         return {
-            document: getRegulationDocumentById(normalizedDocId, { includeArchived: true }),
-            version: getRegulationVersionById(versionId),
+            document: await getRegulationDocumentById(normalizedDocId, { includeArchived: true }),
+            version: await getRegulationVersionById(versionId),
             articles,
             summary
         };
@@ -195,7 +200,7 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
         metadata.title || deriveRegulationTitleFromText(preloadedText || '', file?.originalname || ''),
         120
     ) || '法规文档';
-    const info = db.prepare(`
+    const info = await queryOne(`
         INSERT INTO regulation_documents (
             title, category, issuing_body, jurisdiction,
             summary, status, current_version_id, version_count, article_count,
@@ -203,7 +208,8 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
             created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, 'active', NULL, 0, 0, ?, ?, NULL, 0, ?, ?)
-    `).run(
+        RETURNING id
+    `, [
         title,
         normalizeRegulationField(metadata.category, 120),
         normalizeRegulationField(metadata.issuingBody || metadata.issuing_body, 120),
@@ -213,8 +219,8 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
         userId || 0,
         now,
         now
-    );
-    const documentId = info.lastInsertRowid;
+    ]);
+    const documentId = info?.id;
     try {
         return await saveRegulationDocumentVersion({
             documentId,
@@ -225,15 +231,15 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
             preloadedText
         });
     } catch (error) {
-        db.prepare('DELETE FROM regulation_documents WHERE id = ?').run(documentId);
+        await execute('DELETE FROM regulation_documents WHERE id = ?', [documentId]);
         throw error;
     }
 }
 
-function updateRegulationDocument({ documentId, userId, patch = {} }) {
+async function updateRegulationDocument({ documentId, userId, patch = {} }) {
     const normalizedDocId = normalizeRegulationId(documentId);
     if (!normalizedDocId) return null;
-    const doc = getRegulationDocumentById(normalizedDocId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(normalizedDocId, { includeArchived: true });
     if (!doc || doc.deleted_at) return null;
     const hasVersionLabel = Object.prototype.hasOwnProperty.call(patch, 'versionLabel')
         || Object.prototype.hasOwnProperty.call(patch, 'version_label');
@@ -249,7 +255,7 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
         status: normalizeRegulationStatus(patch.status ?? doc.status)
     };
     const now = getBeijingTimestamp();
-    db.prepare(`
+    await execute(`
         UPDATE regulation_documents
         SET title = ?,
             category = ?,
@@ -260,7 +266,7 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
             updated_by_user = ?,
             updated_at = ?
         WHERE id = ? AND deleted_at IS NULL
-    `).run(
+    `, [
         next.title,
         next.category,
         next.issuing_body,
@@ -270,12 +276,11 @@ function updateRegulationDocument({ documentId, userId, patch = {} }) {
         userId || 0,
         now,
         normalizedDocId
-    );
+    ]);
     if (hasVersionLabel && doc.current_version_id) {
-        db.prepare('UPDATE regulation_versions SET version_label = ?, updated_at = ? WHERE id = ?')
-            .run(nextVersionLabel, now, doc.current_version_id);
+        await execute('UPDATE regulation_versions SET version_label = ?, updated_at = ? WHERE id = ?', [nextVersionLabel, now, doc.current_version_id]);
     }
-    return getRegulationDocumentById(normalizedDocId, { includeArchived: true });
+    return await getRegulationDocumentById(normalizedDocId, { includeArchived: true });
 }
 
 // #2 为条文生成向量（可选，失败不阻断）
@@ -290,16 +295,15 @@ async function embedRegulationArticles(articles, { userId = 0, source = 'regulat
         .filter(a => a && a.id && String(a.content || '').trim())
         .map(a => ({ id: a.id, text: String(a.content).trim().slice(0, REGULATION_EMBED_MAX_CHARS) }));
     if (!targets.length) return;
-    const updateEmbedding = db.prepare('UPDATE regulation_articles SET embedding = ? WHERE id = ?');
     for (let i = 0; i < targets.length; i += REGULATION_EMBED_BATCH_SIZE) {
         const batch = targets.slice(i, i + REGULATION_EMBED_BATCH_SIZE);
         try {
             const vectors = await generateEmbeddings(batch.map(t => t.text), null, null, userId, { source, timeoutMs: 30000 });
-            batch.forEach((t, idx) => {
+            for (let idx = 0; idx < batch.length; idx++) {
                 if (Array.isArray(vectors?.[idx])) {
-                    updateEmbedding.run(JSON.stringify(vectors[idx]), t.id);
+                    await execute('UPDATE regulation_articles SET embedding = ? WHERE id = ?', [JSON.stringify(vectors[idx]), batch[idx].id]);
                 }
-            });
+            }
         } catch (err) {
             // 向量生成失败不阻断导入，降级为纯 BM25 检索；服务/配置类错误重试无意义，直接停止
             console.warn('[regulations] 向量生成失败，降级为 BM25 检索:', err.message);
@@ -309,47 +313,45 @@ async function embedRegulationArticles(articles, { userId = 0, source = 'regulat
 }
 
 // #8 设置条文级状态（active/amended/repealed）与修订日期
-function setRegulationArticleStatus({ articleId, status, amendedDate = '' }) {
+async function setRegulationArticleStatus({ articleId, status, amendedDate = '' }) {
     const id = normalizeRegulationId(articleId);
     if (!id) return null;
     const safeStatus = ['active', 'amended', 'repealed'].includes(String(status)) ? status : 'active';
     const safeDate = normalizeRegulationDateValue(amendedDate) || normalizeRegulationField(amendedDate, 40);
-    db.prepare('UPDATE regulation_articles SET status = ?, amended_date = ? WHERE id = ?')
-        .run(safeStatus, safeStatus === 'active' ? '' : safeDate, id);
-    return db.prepare('SELECT id, status, amended_date FROM regulation_articles WHERE id = ?').get(id);
+    await execute('UPDATE regulation_articles SET status = ?, amended_date = ? WHERE id = ?', [safeStatus, safeStatus === 'active' ? '' : safeDate, id]);
+    return await queryOne('SELECT id, status, amended_date FROM regulation_articles WHERE id = ?', [id]);
 }
-
-// #10 条文批注 CRUD
 
 function deleteRegulationDocument({ documentId, userId }) {
     const normalizedDocId = normalizeRegulationId(documentId);
-    if (!normalizedDocId) return false;
-    const doc = getRegulationDocumentById(normalizedDocId, { includeArchived: true });
-    if (!doc || doc.deleted_at) return false;
-    const now = getBeijingTimestamp();
-    const changes = db.prepare(`
-        UPDATE regulation_documents
-        SET status = 'archived',
-            deleted_at = ?,
-            deleted_by_user = ?,
-            updated_by_user = ?,
-            updated_at = ?
-        WHERE id = ? AND deleted_at IS NULL
-    `).run(now, userId || 0, userId || 0, now, normalizedDocId).changes;
-    return changes > 0;
+    if (!normalizedDocId) return Promise.resolve(false);
+    return getRegulationDocumentById(normalizedDocId, { includeArchived: true }).then(async doc => {
+        if (!doc || doc.deleted_at) return false;
+        const now = getBeijingTimestamp();
+        const changes = await execute(`
+            UPDATE regulation_documents
+            SET status = 'archived',
+                deleted_at = ?,
+                deleted_by_user = ?,
+                updated_by_user = ?,
+                updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL
+        `, [now, userId || 0, userId || 0, now, normalizedDocId]);
+        return changes > 0;
+    });
 }
 
 // 按文件 sha256 查已存在的同源文档，用于导入时的重复提醒（非阻断）
-function findRegulationDuplicateByHash(hash) {
+async function findRegulationDuplicateByHash(hash) {
     if (!hash) return null;
-    const row = db.prepare(`
+    const row = await queryOne(`
         SELECT v.document_id, d.title
         FROM regulation_versions v
         JOIN regulation_documents d ON d.id = v.document_id
         WHERE v.source_hash = ? AND d.deleted_at IS NULL
         ORDER BY v.id DESC
         LIMIT 1
-    `).get(hash);
+    `, [hash]);
     return row ? { documentId: row.document_id, title: row.title } : null;
 }
 

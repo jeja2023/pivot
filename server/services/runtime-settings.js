@@ -1,5 +1,10 @@
-const { db } = require('../db/connection');
+const { execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const {
+    getAppSettingRow,
+    refreshAppSettingsCache,
+    setAppSettingAsync
+} = require('./app-settings');
 const {
     RUNTIME_SETTING_DEFINITION_BY_KEY,
     RUNTIME_SETTING_DEFINITIONS,
@@ -7,75 +12,13 @@ const {
     getRuntimeDefaultValue,
     normalizeRuntimeSettingValue
 } = require('./runtime-settings-defs');
-const RUNTIME_SETTINGS_CACHE_TTL_MS = Math.max(Number.parseInt(process.env.PIVOT_RUNTIME_SETTINGS_CACHE_TTL_MS || '1500', 10) || 1500, 100);
-let runtimeSettingsCache = {
-    expiresAt: 0,
-    rows: new Map()
-};
 
 function clearRuntimeConfigCache() {
-    runtimeSettingsCache = { expiresAt: 0, rows: new Map() };
-}
-
-function loadRuntimeSettingsRows() {
-    if (!db || RUNTIME_SETTING_DEFINITIONS.length === 0) return new Map();
-    const keys = RUNTIME_SETTING_DEFINITIONS.map(definition => definition.key);
-    const placeholders = keys.map(() => '?').join(',');
-    try {
-        const rows = db.prepare(`
-            SELECT key, value, updated_at, updated_by
-            FROM app_settings
-            WHERE key IN (${placeholders})
-            ORDER BY
-                key ASC,
-                CASE WHEN updated_at IS NULL OR updated_at = '' THEN 0 ELSE 1 END DESC,
-                updated_at DESC,
-                rowid DESC
-        `).all(...keys);
-        const byKey = new Map();
-        rows.forEach(row => {
-            if (!byKey.has(row.key)) byKey.set(row.key, row);
-        });
-        return byKey;
-    } catch (e) {
-        if (/no such table/i.test(e.message || '')) return new Map();
-        throw e;
-    }
-}
-
-function getCachedRuntimeRows() {
-    const now = Date.now();
-    if (runtimeSettingsCache.expiresAt > now) return runtimeSettingsCache.rows;
-    runtimeSettingsCache = {
-        expiresAt: now + RUNTIME_SETTINGS_CACHE_TTL_MS,
-        rows: loadRuntimeSettingsRows()
-    };
-    return runtimeSettingsCache.rows;
+    refreshAppSettingsCache().catch(() => {});
 }
 
 function getSettingRow(key) {
-    if (RUNTIME_SETTING_DEFINITION_BY_KEY[key]) {
-        return getCachedRuntimeRows().get(key) || null;
-    }
-    if (!db) return null;
-    try {
-        return db.prepare(`
-            SELECT key, value, updated_at, updated_by
-            FROM app_settings
-            WHERE key = ?
-            ORDER BY
-                CASE WHEN updated_at IS NULL OR updated_at = '' THEN 0 ELSE 1 END DESC,
-                updated_at DESC,
-                rowid DESC
-            LIMIT 1
-        `).get(key) || null;
-    } catch (e) {
-        if (/no such table/i.test(e.message || '')) return null;
-        throw e;
-    }
-}
-function isLegacyAppSettingsConflictError(error) {
-    return /ON CONFLICT clause/i.test(error?.message || '');
+    return getAppSettingRow(key);
 }
 
 function getRuntimeSettingValue(key) {
@@ -114,7 +57,7 @@ function buildRuntimeConfigSnapshot() {
     return { values, items };
 }
 
-function saveRuntimeConfig(updates = {}, userId = null) {
+async function saveRuntimeConfigAsync(updates = {}, userId = null) {
     const entries = [];
     for (const definition of RUNTIME_SETTING_DEFINITIONS) {
         const candidates = [definition.key, definition.prop];
@@ -130,48 +73,41 @@ function saveRuntimeConfig(updates = {}, userId = null) {
     }
 
     const now = getBeijingTimestamp();
-    let legacyAppSettingsMode = false;
-    let upsertStmt = null;
-    try {
-        upsertStmt = db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at, updated_by)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at,
-                updated_by = excluded.updated_by
-        `);
-    } catch (e) {
-        if (!isLegacyAppSettingsConflictError(e)) throw e;
-        legacyAppSettingsMode = true;
+    for (const entry of entries) {
+        await execute(
+            `INSERT INTO app_settings (key, value, updated_at, updated_by)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at,
+                updated_by = EXCLUDED.updated_by`,
+            [entry.key, String(entry.value), now, userId || null]
+        );
     }
-    const deleteLegacyRowsStmt = db.prepare('DELETE FROM app_settings WHERE key = ?');
-    const insertLegacyRowStmt = db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at, updated_by)
-        VALUES (?, ?, ?, ?)
-    `);
+    await refreshAppSettingsCache();
 
-    const writeEntry = (entry) => {
-        const args = [entry.key, String(entry.value), now, userId || null];
-        if (!legacyAppSettingsMode) {
-            try {
-                upsertStmt.run(...args);
-                return;
-            } catch (e) {
-                if (!isLegacyAppSettingsConflictError(e)) throw e;
-                legacyAppSettingsMode = true;
-            }
-        }
-        deleteLegacyRowsStmt.run(entry.key);
-        insertLegacyRowStmt.run(...args);
+    return {
+        changed: entries.map(entry => `${entry.key}=${entry.value}`),
+        config: buildRuntimeConfigSnapshot()
     };
+}
 
-    const transaction = db.transaction(() => {
-        entries.forEach(writeEntry);
-    });
-    transaction();
-    clearRuntimeConfigCache();
+function saveRuntimeConfig(updates = {}, userId = null) {
+    const entries = [];
+    for (const definition of RUNTIME_SETTING_DEFINITIONS) {
+        const candidates = [definition.key, definition.prop];
+        const rawKey = candidates.find(key => Object.prototype.hasOwnProperty.call(updates, key));
+        if (!rawKey) continue;
+        const normalized = normalizeRuntimeSettingValue(definition.key, updates[rawKey]);
+        if (normalized.error) return { error: normalized.error };
+        entries.push({ key: definition.key, value: normalized.value, label: definition.label });
+    }
 
+    if (entries.length === 0) {
+        return { changed: [], config: buildRuntimeConfigSnapshot() };
+    }
+
+    saveRuntimeConfigAsync(updates, userId).catch(() => {});
     return {
         changed: entries.map(entry => `${entry.key}=${entry.value}`),
         config: buildRuntimeConfigSnapshot()
@@ -274,5 +210,6 @@ module.exports = {
     getRagRuntimeConfig,
     getRuntimeSettingValue,
     getUploadRuntimeConfig,
-    saveRuntimeConfig
+    saveRuntimeConfig,
+    saveRuntimeConfigAsync
 };

@@ -1,10 +1,10 @@
-const { db } = require('../db');
+const { query } = require('../db/client');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
 const { queryKnowledgeGraph } = require('./knowledge-graph');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
-const { getRunnableModelForUser, getUserRunnableModels } = require('./models');
+const { getRunnableModelForUserAsync, getUserRunnableModelsAsync } = require('./models');
 const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
@@ -357,8 +357,9 @@ function getBuiltInToolDefinitions(user) {
     ].filter(tool => !tool.admin || adminOnly);
 }
 
-function getUserAccessibleModels(user) {
-    return getUserRunnableModels(user).map(model => ({
+async function getUserAccessibleModels(user) {
+    const models = await getUserRunnableModelsAsync(user);
+    return models.map(model => ({
         id: model.id,
         name: model.name,
         model_name: model.model_name,
@@ -371,11 +372,12 @@ function getUserAccessibleModels(user) {
     }));
 }
 
-function chooseAgentLlmModel(input = {}, user, context = {}) {
+async function chooseAgentLlmModel(input = {}, user, context = {}) {
     const requested = String(input.model || context.modelCfg?.id || context.run?.model_id || '').trim();
-    if (requested) return getRunnableModelForUser(requested, user);
-    const first = getUserRunnableModels(user).find(model => model.status !== 'usage_only');
-    return first ? getRunnableModelForUser(first.id, user) : null;
+    if (requested) return await getRunnableModelForUserAsync(requested, user);
+    const models = await getUserRunnableModelsAsync(user);
+    const first = models.find(model => model.status !== 'usage_only');
+    return first ? await getRunnableModelForUserAsync(first.id, user) : null;
 }
 
 function parseJsonOutputText(value) {
@@ -451,7 +453,7 @@ async function requestStructuredOutput({ modelCfg, messages, user, temperature, 
 async function executeAgentLlmNode(input = {}, user, context = {}) {
     const prompt = String(input.prompt || input.input || input.text || '').trim();
     if (!prompt) throw new Error('大模型节点需要填写提示词。');
-    const modelCfg = chooseAgentLlmModel(input, user, context);
+    const modelCfg = await chooseAgentLlmModel(input, user, context);
     if (!modelCfg) throw new Error('没有可用于大模型节点的模型，或当前用户无权访问指定模型。');
     const responseFormat = ['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
         ? String(input.responseFormat || input.response_format || 'markdown')
@@ -550,7 +552,7 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
     const role = Object.hasOwn(DELEGATE_ROLE_LABELS, input.role) ? input.role : 'custom';
     if (!task) throw new Error('委派智能体需要填写明确任务。');
     if (!agentName) throw new Error('委派智能体需要填写名称。');
-    const modelCfg = chooseAgentLlmModel(input, user, context);
+    const modelCfg = await chooseAgentLlmModel(input, user, context);
     if (!modelCfg) throw new Error('没有可用于委派智能体的模型，或当前用户无权访问指定模型。');
     const responseFormat = ['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
         ? String(input.responseFormat || input.response_format || 'markdown')
@@ -989,56 +991,56 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     }
 
     if (name === 'sessions.search') {
-        const query = String(input.query || '').trim();
-        if (!query) throw new Error('请填写检索关键词。');
-        const like = `%${query}%`;
+        const searchQuery = String(input.query || '').trim();
+        if (!searchQuery) throw new Error('请填写检索关键词。');
+        const like = `%${searchQuery}%`;
         const limit = parsePositiveInt(input.limit, 8, 20);
-        return db.prepare(`
-            SELECT m.id, m.session_id, s.title, m.role, substr(m.content, 1, 1200) AS content, m.created_at
+        return await query(`
+            SELECT m.id, m.session_id, s.title, m.role, substring(m.content from 1 for 1200) AS content, m.created_at
             FROM messages m
             JOIN sessions s ON s.id = m.session_id
             WHERE m.user_id = ? AND m.deleted_at IS NULL AND s.deleted_at IS NULL
               AND m.content LIKE ?
             ORDER BY m.created_at DESC
             LIMIT ?
-        `).all(user.id, like, limit);
+        `, [user.id, like, limit]);
     }
 
     if (name === 'sessions.recent') {
         const limit = parsePositiveInt(input.limit, 8, 20);
-        return db.prepare(`
+        return await query(`
             SELECT id, title, tags, is_pinned, is_archived, created_at, updated_at
             FROM sessions
             WHERE user_id = ? AND deleted_at IS NULL
             ORDER BY is_pinned DESC, updated_at DESC
             LIMIT ?
-        `).all(user.id, limit);
+        `, [user.id, limit]);
     }
 
     if (name === 'knowledge.list') {
         const limit = parsePositiveInt(input.limit, 20, 50);
-        return db.prepare(`
+        return await query(`
             SELECT id, name, status, is_enabled, chunk_count, indexed_chunks, progress, error_message, updated_at
             FROM knowledge_docs
             WHERE user_id = ? AND deleted_at IS NULL
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ?
-        `).all(user.id, limit);
+        `, [user.id, limit]);
     }
 
     if (name === 'knowledge.graph.query') {
-        const query = String(input.query || '').trim();
-        if (!query) throw new Error('请填写知识图谱查询问题。');
+        const graphQuery = String(input.query || '').trim();
+        if (!graphQuery) throw new Error('请填写知识图谱查询问题。');
         return queryKnowledgeGraph({
             userId: user.id,
-            query,
+            query: graphQuery,
             entityLimit: parsePositiveInt(input.entityLimit, 6, 10),
             relationLimit: parsePositiveInt(input.relationLimit, 12, 20)
         });
     }
 
     if (name === 'models.list') {
-        return getUserAccessibleModels(user);
+        return await getUserAccessibleModels(user);
     }
 
     if (name === 'viz.build_chart') {

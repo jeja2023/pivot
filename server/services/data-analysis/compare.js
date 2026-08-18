@@ -12,8 +12,8 @@ const {
 } = require('./shared');
 
 async function compareDatasets(userId, input = {}) {
-    const left = getDatasetForUser(userId, input.leftDatasetId);
-    const right = getDatasetForUser(userId, input.rightDatasetId);
+    const left = await getDatasetForUser(userId, input.leftDatasetId);
+    const right = await getDatasetForUser(userId, input.rightDatasetId);
     const leftKey = getColumn(left, input.leftKey);
     const rightKey = getColumn(right, input.rightKey);
     const compareField = String(input.compareField || '').trim();
@@ -126,7 +126,7 @@ async function compareDatasets(userId, input = {}) {
         duplicateRight,
         compareField: leftCompare ? leftCompare.name : ''
     };
-    recordArtifact({
+    await recordArtifact({
         userId,
         datasetId: left.id,
         type: 'comparison',

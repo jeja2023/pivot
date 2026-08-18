@@ -246,7 +246,7 @@ test('Agent 工具目录将数据库 MCP 工具归并为通用操作', () => {
     assert.equal(queryTool.input_schema.properties.sql.type, 'string');
 });
 
-test('工具包工具级治理会过滤已停用 MCP 工具', () => {
+test('工具包工具级治理会过滤已停用 MCP 工具', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -255,7 +255,7 @@ test('工具包工具级治理会过滤已停用 MCP 工具', () => {
     const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_tool_gov_${suffix}`, role: 'admin', unit: 'QA' };
     const serverId = 900000 + Math.floor(Math.random() * 10000);
     try {
-        upsertCapabilityPackage({
+        await upsertCapabilityPackage({
             type: 'database_connection',
             sourceRef: String(serverId),
             name: `Governed DB ${suffix}`,
@@ -264,14 +264,14 @@ test('工具包工具级治理会过滤已停用 MCP 工具', () => {
             config: { serverId, serverType: 'database', databaseType: 'sqlite' }
         });
         const packageKey = `database_connection:${serverId}`;
-        const updated = setCapabilityToolGovernance(packageKey, user, 'db.run_readonly_query', {
+        const updated = await setCapabilityToolGovernance(packageKey, user, 'db.run_readonly_query', {
             enabled: false,
             riskLevel: 'high',
             approvalRequired: true,
             usage: '仅审批后查询'
         });
         assert.equal(updated.governance.enabled, false);
-        const filtered = filterMcpToolsByCapability([
+        const filtered = await filterMcpToolsByCapability([
             { serverId, serverType: 'database', name: 'db.list_tables', fullName: `mcp.${serverId}.db.list_tables` },
             { serverId, serverType: 'database', name: 'db.run_readonly_query', fullName: `mcp.${serverId}.db.run_readonly_query` }
         ], user);
@@ -339,7 +339,7 @@ test('Agent 工具列表将数据库连接作为参数暴露，并路由通用 D
             await refreshMcpTools(db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId), user);
         }
 
-        const allTools = formatToolList(user);
+        const allTools = await formatToolList(user);
         const genericQueryTools = allTools.filter(tool => tool.name === 'db.run_readonly_query');
         assert.equal(genericQueryTools.length, 1);
         const queryTool = genericQueryTools[0];
@@ -355,7 +355,7 @@ test('Agent 工具列表将数据库连接作为参数暴露，并路由通用 D
         assert.equal(allTools.some(tool => tool.name === 'db.group_count'), true);
         assert.equal(allTools.some(tool => tool.name === 'db.count_tables'), true);
 
-        const scopedTools = formatToolList(user, {
+        const scopedTools = await formatToolList(user, {
             toolAllowlist: [`mcp.${prodServerId}.db.run_readonly_query`]
         });
         assert.deepEqual(scopedTools.map(tool => tool.name), ['db.run_readonly_query']);
@@ -780,7 +780,7 @@ test('超级管理员查看其他用户工具时返回所属用户信息', async
         assert.equal(listedTool.owner.displayName, '工具负责人');
         assert.equal(listedTool.owner.username, ownerUser.username);
 
-        const agentTool = formatToolList(superUser).find(item => item.name === `mcp.${serverId}.owner.lookup`);
+        const agentTool = (await formatToolList(superUser)).find(item => item.name === `mcp.${serverId}.owner.lookup`);
         assert.equal(agentTool.owner.displayName, '工具负责人');
         assert.equal(agentTool.owner.unit, '数据部');
     } finally {
@@ -1000,7 +1000,7 @@ test('desktop local read-only executor exposes authorized SQLite and report dire
         assert.equal(fullNames.includes('mcp.0.db.run_readonly_query'), true);
         assert.equal(toolsRes.body.tools.find(tool => tool.fullName === 'mcp.0.db.run_readonly_query').serverId, 0);
 
-        const agentTools = formatToolList(adminUser);
+        const agentTools = await formatToolList(adminUser);
         const genericQuery = agentTools.find(tool => tool.name === 'db.run_readonly_query');
         assert.equal(genericQuery?.databaseConnections.some(connection => connection.serverId === '0'), true);
         assert.equal(genericQuery?.input_schema.properties.connectionId.enum.includes('0'), true);
@@ -1138,7 +1138,7 @@ test('remote desktop bridge exposes authorized local MCP tools', async () => {
         assert.equal(localServerToolsRes.body.tools.some(tool => tool.fullName === 'mcp.0.reports.list_files'), true);
         assert.equal(localServerToolsRes.body.tools.some(tool => tool.fullName === 'mcp.0.db.run_readonly_query'), true);
 
-        const agentTools = formatToolList(user);
+        const agentTools = await formatToolList(user);
         const genericQuery = agentTools.find(tool => tool.name === 'db.run_readonly_query');
         assert.equal(genericQuery?.databaseConnections.some(connection => connection.serverId === '0'), true);
 

@@ -441,8 +441,8 @@ test('HTTP 指标暴露准确路由均值和 Prometheus 直方图桶', () => {
     assert.equal(bucketValue('+Inf'), 2);
 });
 
-test('监控知识分块数只包含当前可用的已索引分块', () => {
-    const before = getMonitorKnowledgeChunkCount();
+test('监控知识分块数只包含当前可用的已索引分块', async () => {
+    const before = await getMonitorKnowledgeChunkCount();
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -463,7 +463,7 @@ test('监控知识分块数只包含当前可用的已索引分块', () => {
         docIds.forEach((docId, index) => {
             insertChunk.run(docId, `chunk ${index}`, `chunk ${index}`, '[1,0]');
         });
-        assert.equal(getMonitorKnowledgeChunkCount() - before, 1);
+        assert.equal((await getMonitorKnowledgeChunkCount()) - before, 1);
     } finally {
         docIds.forEach(docId => db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId));
         docIds.forEach(docId => db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId));

@@ -9,7 +9,7 @@ const {
     normalizeToolPolicy
 } = require('./agent-validators');
 
-function formatToolList(user, options = {}) {
+async function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
     const allowed = allowlist.length ? new Set(allowlist) : null;
@@ -18,7 +18,8 @@ function formatToolList(user, options = {}) {
         if (allowed && !allowed.has(name) && !aliases.some(alias => allowed.has(alias))) return false;
         return true;
     };
-    const builtIns = filterBuiltInToolsByCapability(getBuiltInToolDefinitions(user), user).map(tool => ({
+    const builtInDefs = await filterBuiltInToolsByCapability(getBuiltInToolDefinitions(user), user);
+    const builtIns = builtInDefs.map(tool => ({
         name: tool.name,
         title: tool.title,
         description: tool.description,
@@ -33,7 +34,9 @@ function formatToolList(user, options = {}) {
     // 缓存的工具名（如 viz.build_chart）会与内置工具同名而在目录中重复。这里仅对系统内置 MCP 按裸工具名去重；
     // 外部第三方 MCP 即使短名相同，也保留完整 mcp.<id>.* 工具名，避免把语义/参数不同的工具误折叠。
     const builtinToolNames = new Set(builtIns.map(tool => tool.name));
-    const cachedMcpTools = filterMcpToolsByCapability(listCachedMcpTools(null, user), user)
+    const cachedTools = await listCachedMcpTools(null, user);
+    const filteredMcp = await filterMcpToolsByCapability(cachedTools, user);
+    const cachedMcpTools = filteredMcp
         .filter(tool => tool.serverType === 'external' || !builtinToolNames.has(String(tool.name || '')));
     const databaseTools = buildGenericDatabaseTools(cachedMcpTools)
         .map(tool => filterDatabaseToolForPolicy(tool, policy, allowed))

@@ -24,11 +24,11 @@ function createApprovalHelpers({
         return Boolean(tool.requiresApproval || tool.risk === 'high');
     }
 
-    function maybePauseForApproval(run, tool, input, approvalKey = '') {
+    async function maybePauseForApproval(run, tool, input, approvalKey = '') {
         const scopedKey = String(approvalKey || '').trim();
         if (!shouldPauseForApproval(run, tool, scopedKey)) return false;
         const now = getTimestamp();
-        setRunMetadata(run.id, {
+        await setRunMetadata(run.id, {
             pendingApproval: {
                 tool: tool.name,
                 key: scopedKey,
@@ -37,20 +37,21 @@ function createApprovalHelpers({
                 input
             }
         });
-        updateRun(run.id, {
+        await updateRun(run.id, {
             status: 'approval_required',
             error_message: `工具需要审批：${tool.title || tool.name}`,
             updated_at: now,
             last_heartbeat_at: now
         });
-        insertStep(run.id, listSteps(run.id).length + 1, {
+        const steps = await listSteps(run.id);
+        await insertStep(run.id, (steps || []).length + 1, {
             type: 'approval',
             title: `等待工具审批：${tool.title || tool.name}`,
             toolName: tool.name,
             input,
             output: { status: 'approval_required', tool: tool.name, key: scopedKey }
         });
-        createAgentNotification(run.user_id, run.id, 'approval', '任务需要审批', tool.title || tool.name);
+        await createAgentNotification(run.user_id, run.id, 'approval', '任务需要审批', tool.title || tool.name);
         return true;
     }
 

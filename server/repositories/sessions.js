@@ -100,21 +100,12 @@ function updateSessionTitle(sessionId, userId, title) {
 }
 
 async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, createdAt }) {
-    const { isPostgres } = require('../db/dialect');
-    if (isPostgres()) {
-        const row = await queryOne(`
-            INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            RETURNING id
-        `, [sessionId, userId, role, content, tokenCount, modelId || null, createdAt]);
-        return { changes: 1, lastInsertRowid: row ? row.id : null };
-    }
-    const { sql } = require('../db/statements');
-    const info = sql(`
+    const row = await queryOne(`
         INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(sessionId, userId, role, content, tokenCount, modelId || null, createdAt);
-    return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
+        RETURNING id
+    `, [sessionId, userId, role, content, tokenCount, modelId || null, createdAt]);
+    return { changes: 1, lastInsertRowid: row ? row.id : null };
 }
 
 function touchSession(sessionId, timestamp) {

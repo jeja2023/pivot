@@ -1,5 +1,4 @@
 const express = require('express');
-const { isPostgres } = require('../db/dialect');
 const { query, queryOne, execute } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
@@ -161,12 +160,14 @@ const fetchActiveAnnouncementRows = async (userId) => {
 
 const fetchPublicAnnouncementRows = async () => {
     const now = getBeijingTimestamp();
+    // show_on_login 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    const showOnLoginCondition = 'a.show_on_login = 1';
     return query(`
         SELECT a.*
         FROM announcements a
         WHERE a.deleted_at IS NULL
           AND a.status = 'published'
-          AND a.show_on_login = 1
+          AND ${showOnLoginCondition}
           AND a.target_type = 'all'
           AND (a.starts_at IS NULL OR a.starts_at <= ?)
           AND (a.ends_at IS NULL OR a.ends_at >= ?)
@@ -283,54 +284,28 @@ function createAnnouncementsRouter({
         if (payload.targetType !== 'all' && !payload.targetValue) return res.status(400).json({ error: '请填写公告投放范围' });
         if (!enforceAnnouncementAdminScope(req, res, payload)) return;
         const now = getBeijingTimestamp();
-        let insertedId;
-        if (isPostgres()) {
-            const resRow = await queryOne(`
-                INSERT INTO announcements
-                    (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING id
-            `, [
-                payload.title,
-                payload.content,
-                payload.type,
-                payload.priority,
-                payload.targetType,
-                payload.targetValue,
-                payload.requireAck,
-                payload.showOnLogin,
-                payload.startsAt,
-                payload.endsAt,
-                payload.status,
-                req.user.id,
-                now,
-                now
-            ]);
-            insertedId = resRow?.id;
-        } else {
-            const { db } = require('../db');
-            const info = db.prepare(`
-                INSERT INTO announcements
-                    (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-                payload.title,
-                payload.content,
-                payload.type,
-                payload.priority,
-                payload.targetType,
-                payload.targetValue,
-                payload.requireAck,
-                payload.showOnLogin,
-                payload.startsAt,
-                payload.endsAt,
-                payload.status,
-                req.user.id,
-                now,
-                now
-            );
-            insertedId = info.lastInsertRowid;
-        }
+        const resRow = await queryOne(`
+            INSERT INTO announcements
+                (title, content, type, priority, target_type, target_value, require_ack, show_on_login, starts_at, ends_at, status, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [
+            payload.title,
+            payload.content,
+            payload.type,
+            payload.priority,
+            payload.targetType,
+            payload.targetValue,
+            payload.requireAck,
+            payload.showOnLogin,
+            payload.startsAt,
+            payload.endsAt,
+            payload.status,
+            req.user.id,
+            now,
+            now
+        ]);
+        const insertedId = resRow?.id;
         logAction(req, '创建公告', `公告ID: ${insertedId}，标题: ${payload.title}，状态: ${payload.status}`);
         res.json({ success: true, id: insertedId });
     }));
