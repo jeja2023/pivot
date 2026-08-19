@@ -115,23 +115,6 @@ const TABLE_TOPOLOGY = [
 // JSONB 白名单（严禁首字符猜测）
 const JSONB_COLUMNS = {};
 
-// 布尔列白名单（仅 0/1 整型语义）
-const BOOLEAN_COLUMNS = {
-    users:                ['deleted_by_admin'],
-    sessions:             ['is_pinned', 'is_archived', 'deleted_by_user'],
-    messages:             ['is_summary', 'context_archived', 'deleted_by_user'],
-    models:               ['is_default'],
-    knowledge_docs:       ['is_enabled', 'deleted_by_user'],
-    attachments:          ['deleted_by_user'],
-    agent_eval_results:   ['passed'],
-    agent_runs:           ['deleted_by_user'],
-    regulation_documents: ['deleted_by_user'],
-    agent_approval_requests: ['callback_signature_required'],
-    mcp_servers:          [],
-    api_keys:             [],
-    api_call_logs:        ['stream'],
-};
-
 // 向量列白名单
 const VECTOR_COLUMNS = {
     knowledge_chunks: ['embedding'],

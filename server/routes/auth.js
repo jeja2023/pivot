@@ -15,7 +15,7 @@ const {
     CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS,
     CLEAR_CSRF_COOKIE_OPTIONS,
     generateCsrfToken,
-    resolveAuthenticatedUser,
+    resolveAuthenticatedUserAsync,
     hashRefreshToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
@@ -118,8 +118,8 @@ function createAuthRouter({
         }
     }));
 
-    router.get('/auth/me', (req, res) => {
-        const auth = resolveAuthenticatedUser(req);
+    router.get('/auth/me', asyncHandler(async (req, res) => {
+        const auth = await resolveAuthenticatedUserAsync(req);
         if (!auth.user) {
             return res.json({ authenticated: false, code: auth.code });
         }
@@ -132,7 +132,7 @@ function createAuthRouter({
             maxAge: ACCESS_COOKIE_OPTIONS.maxAge
         });
         res.json({ authenticated: true, user: auth.user, csrfToken });
-    });
+    }));
 
     router.post('/auth/logout', authMiddleware, asyncHandler(async (req, res) => {
         logAction(req, '用户退出', '退出登录');

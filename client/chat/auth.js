@@ -82,7 +82,9 @@ window.showApp = (options = {}) => {
     const displayName = currentUser.nickname || currentUser.username;
     if (userDisplay) {
         userDisplay.innerText = displayName;
-        userDisplay.title = displayName;
+        userDisplay.title = currentUser.nickname && currentUser.username && currentUser.nickname !== currentUser.username
+            ? `${currentUser.nickname} (${currentUser.username})`
+            : displayName;
     }
     
     const isSuperAdmin = isSuperAdminUser(currentUser);

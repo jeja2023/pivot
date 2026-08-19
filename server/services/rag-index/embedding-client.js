@@ -320,12 +320,12 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     return vectors;
 }
 
-function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source }) {
+async function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source }) {
     if (!userId) return;
     try {
         const model = String(httpConfig?.model || config?.http?.model || '').trim() || 'embedding';
         const url = String(httpConfig?.url || config?.http?.url || '').trim();
-        const usageModelId = getOrCreateEmbeddingUsageModel({
+        const usageModelId = await getOrCreateEmbeddingUsageModel({
             userId: config?.source?.url === 'user' || config?.source?.model === 'user' || config?.source?.apiKey === 'user' ? userId : null,
             url,
             model
@@ -353,7 +353,7 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
             httpConfig: targetHttpConfig,
             inputs: [text],
             source: options.source || 'rag_embedding'
-        });
+        }).catch(err => logger.warn({ err: err.message }, '异步记录 Embedding 用量异常'));
         return vector;
     }
 
@@ -377,7 +377,7 @@ async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, u
             httpConfig: targetHttpConfig,
             inputs: safeInputs,
             source: options.source || 'rag_embedding'
-        });
+        }).catch(err => logger.warn({ err: err.message }, '异步记录 Embedding 用量异常'));
         return vectors;
     }
 

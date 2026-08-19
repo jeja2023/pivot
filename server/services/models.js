@@ -223,11 +223,15 @@ const getModelDailyUsage = getModelDailyUsageAsync;
 // ──────────────────────────────────────────────────────────────────────────
 
 function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inputTokens = 0, outputTokens = 0) {
+    const uid = typeof userId === 'number' ? userId : Number.parseInt(userId, 10);
+    const mid = typeof modelId === 'number' ? modelId : Number.parseInt(modelId, 10);
+    if (!uid || Number.isNaN(uid) || !mid || Number.isNaN(mid)) return;
+
     const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens: tokenCount });
-    if (!userId || !modelId || usage.totalTokens <= 0) return;
+    if (usage.totalTokens <= 0) return;
     enqueueModelUsageEvent({
-        userId,
-        modelId,
+        userId: uid,
+        modelId: mid,
         source: String(source || 'api').slice(0, 40),
         tokenCount: usage.totalTokens,
         inputTokens: usage.inputTokens,

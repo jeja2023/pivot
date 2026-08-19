@@ -109,6 +109,23 @@ function pgEnqueue(queueName, item) {
     pgSchedule();
 }
 
+function sanitizeQueueValue(field, val) {
+    if (val === undefined || val === null) return null;
+    // 整型与计数列校验：严格防范 Object/Promise/NaN 传进 PostgreSQL BIGINT 列
+    if (/Id|Tokens|Count|durationMs/i.test(field)) {
+        if (typeof val === 'number') return Number.isFinite(val) ? Math.floor(val) : null;
+        if (typeof val === 'string') {
+            const parsed = parseInt(val, 10);
+            return Number.isNaN(parsed) ? null : parsed;
+        }
+        return null;
+    }
+    if (typeof val === 'object' && !(val instanceof Date)) {
+        try { return JSON.stringify(val); } catch (_) { return String(val); }
+    }
+    return val;
+}
+
 async function pgFlushQueue(queueName) {
     const spec = QUEUE_SPECS[queueName];
     const queue = pgQueues[queueName];
@@ -124,7 +141,7 @@ async function pgFlushQueue(queueName) {
             const placeholders = spec.fields.map(() => `$${paramIndex++}`);
             rowPlaceholders.push(`(${placeholders.join(', ')})`);
             for (const field of spec.fields) {
-                params.push(item[field] === undefined ? null : item[field]);
+                params.push(sanitizeQueueValue(field, item[field]));
             }
         }
 
@@ -134,8 +151,13 @@ async function pgFlushQueue(queueName) {
             const { getPgPool } = require('../db/pg-connection');
             await getPgPool().query(sql, params);
         } catch (err) {
-            // 失败的批次退回队首，指数退避后重试，避免丢日志
-            queue.unshift(...batch);
+            // 对严重不可恢复的数据格式错误（如 invalid input syntax）直接丢弃，其余网络/服务异常一律回退队首重试
+            const isDataCorruption = /invalid input syntax|character not in repertoire/i.test(err.message || '');
+            if (!isDataCorruption) {
+                queue.unshift(...batch);
+            } else {
+                logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生数据格式异常，已丢弃不可恢复批次');
+            }
             throw err;
         }
     }

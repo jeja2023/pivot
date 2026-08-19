@@ -108,7 +108,13 @@ function generateCsrfToken() {
 
 function generateAccessToken(user) {
     return jwt.sign(
-        { id: user.id, username: user.username, role: normalizeRole(user.role) },
+        {
+            id: user.id,
+            username: user.username,
+            nickname: user.nickname || '',
+            unit: user.unit || '',
+            role: normalizeRole(user.role)
+        },
         JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRES }
     );
@@ -174,6 +180,8 @@ function resolveAuthenticatedUser(req) {
                 user: withPermissionFlags({
                     id: decoded.id,
                     username: decoded.username,
+                    nickname: decoded.nickname || '',
+                    unit: decoded.unit || '',
                     role: decoded.role || 'user',
                     status: 'active'
                 }),
