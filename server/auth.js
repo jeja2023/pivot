@@ -383,5 +383,6 @@ module.exports = {
     getPasswordValidationMessage,
     hashRefreshToken,
     rotateRefreshToken,
-    generateRefreshToken
+    generateRefreshToken,
+    generateAccessToken
 };
