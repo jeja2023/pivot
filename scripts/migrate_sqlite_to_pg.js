@@ -211,6 +211,9 @@ async function migrateTable(tableConfig, client) {
 
     await client.query('BEGIN');
     try {
+        // 清理初始化时自动生成的初始种子数据（如默认 prompt 模板、默认模型等），避免主键冲突
+        await client.query(`DELETE FROM "${tableName}"`);
+
         while (migratedCount < totalCount) {
             let sql = `SELECT * FROM "${tableName}"`;
             const params = [];
@@ -338,6 +341,17 @@ async function main() {
         // 关闭外键约束检查，迁移完成后再开启
         // sessions.forked_from_message_id 等循环 FK 在数据全部导入后才能满足
         await client.query('SET session_replication_role = replica');
+
+        if (!startFromTable) {
+            const tablesRes = await client.query(
+                "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+            );
+            if (tablesRes.rows.length > 0) {
+                const tableList = tablesRes.rows.map(r => `"${r.tablename}"`).join(', ');
+                await client.query(`TRUNCATE TABLE ${tableList} CASCADE`);
+                console.log(`  🧹 已清空目标库初始种子数据 (${tablesRes.rows.length} 张表)，准备全量纯净导入...`);
+            }
+        }
 
         let startIdx = 0;
         if (startFromTable) {
