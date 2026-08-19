@@ -114,7 +114,7 @@ function executeFormatConversionTool(_server, name, input = {}) {
     if (name === 'format.extract_json') {
         const result = findJsonCandidate(input.text);
         if (!result) {
-            const err = new Error('No JSON object or array was found in the text.');
+            const err = new Error('文本中未找到合法的 JSON 对象或数组。');
             err.status = 400;
             throw err;
         }
@@ -127,7 +127,7 @@ function executeFormatConversionTool(_server, name, input = {}) {
         if (mode === 'upper') text = text.toUpperCase();
         return { type: 'format_normalized_text', text, charCount: text.length };
     }
-    throw new Error(`Unsupported format MCP tool: ${name}`);
+    throw new Error(`不支持的格式工具操作: ${name}`);
 }
 
 module.exports = {

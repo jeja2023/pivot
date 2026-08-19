@@ -156,7 +156,7 @@ async function loadSelectableModels() {
         apiFetch(`${API_BASE}/models?page=1&limit=100`, { headers: authHeaders() }),
         apiFetch(`${API_BASE}/settings`, { headers: authHeaders() })
     ]);
-    if (!modelRes.ok) throw new Error('Model list failed to load');
+    if (!modelRes.ok) throw new Error('加载可用模型列表失败');
 
     const { data = [] } = await modelRes.json();
     window._cachedModels = data;

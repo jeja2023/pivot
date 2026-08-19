@@ -122,7 +122,7 @@ async function writeTextToClipboard(text) {
     textArea.select();
     const success = document.execCommand('copy');
     textArea.remove();
-    if (!success) throw new Error('execCommand copy failed');
+    if (!success) throw new Error('执行命令复制失败');
 }
     window.chatDialogHelpers = { writeTextToClipboard };
 })();

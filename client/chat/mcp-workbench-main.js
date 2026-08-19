@@ -231,7 +231,7 @@ async function loadMcpServers() {
     const reportsService = mcpPersonalBuiltinServices.find(item => item.type === 'reports');
     const imService = mcpPersonalBuiltinServices.find(item => item.type === 'im');
 
-    // Merge database and directory local authorization actions into one unified UI entry
+    // 将数据库与目录本地授权操作合并为统一的 UI 入口
     const localDatabaseGrant = localAuthorizationStatus?.grants?.local_database?.authorized;
     const localDirectoryGrant = localAuthorizationStatus?.grants?.local_report_dir?.authorized;
     const isAnyAuthorized = localDatabaseGrant || localDirectoryGrant;

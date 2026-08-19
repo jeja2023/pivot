@@ -23,7 +23,7 @@ function getLatestVersionFromChangelog() {
     const changelog = readText('CHANGELOG.md').replace(/^\uFEFF/, '');
     const match = changelog.match(/^##\s*\[?v?(\d+\.\d+\.\d+)\]?\s*-/m);
     if (!match) {
-        throw new Error('Cannot find latest version heading in CHANGELOG.md');
+        throw new Error('在 CHANGELOG.md 中未找到最新版本标题');
     }
     return match[1];
 }
@@ -45,7 +45,7 @@ function syncPackageLock(version) {
 
 function replaceOrFail(text, pattern, replacement, label) {
     if (!pattern.test(text)) {
-        throw new Error(`Cannot update ${label}`);
+        throw new Error(`无法更新 ${label}`);
     }
     return text.replace(pattern, replacement);
 }
@@ -78,7 +78,7 @@ function main() {
     syncPackageJson(version);
     syncPackageLock(version);
     syncReadme(version);
-    console.log(`Synced project version to v${version} from CHANGELOG.md`);
+    console.log(`已根据 CHANGELOG.md 将项目版本同步至 v${version}`);
 }
 
 main();

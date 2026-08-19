@@ -1,3 +1,22 @@
+## [v0.1.1] - 2026-08-19
+
+### 全系统工程全量中文化重构、控制台日志汉化美化、Cookie 与 401 轮询优化及代码质量闭环
+
+- **全栈中文化重构与规范对齐（Localization & Standard Alignment）**：
+  - 依照《开发规范.md》第 8 节（注释、命名、提示与日志）标准，对全栈代码库（`server/`、`client/`、`scripts/`、`desktop/`）进行全面深度扫描与 100% 中文化改造。
+  - **后端异常与安全提示全面汉化**：重构出站安全沙箱（SSRF、私有 IP 拦截、域名白名单）、MCP 工具体系（数据分析、报表处理、即时通讯、文档解析、可视化输出）、数据库 SQL 语法与表/列白名单治理、模型转发与超时熔断、智能体 DAG 调度与运行中断等全部异常文本。
+  - **前端交互提示与控制台日志汉化**：全面汉化前端 Toast 提示、Confirm 确认弹窗、动态脚本加载失败提示、主工作区恢复失败捕获及控制台告警输出，消除残留英文与转义乱码。
+  - **代码注释与技术设计中文化**：重构关键技术路径的代码注释（内存缓存、上下文窗口 Token 预算、DuckDB/Parquet 流式导出、SSE 背压与长连接心跳等），提升代码可读性与可维护性。
+- **控制台日志中文化格式化与美化（Chinese Terminal Pretty Logging）**：
+  - 重构 `server/logger.js`，开发与运行环境下控制台实时输出自动转换为友好、直观的中文格式化排版（包含中文 HTTP 方法、路径、状态码文案、耗时与用户身份如 `[访客]` 等），大幅提升排查效率与开发体验。
+  - 保留 `logs/pivot.log` 原始高性能 JSON 结构化日志，确保与 ELK/Loki 等集中式日志分析平台 100% 兼容。
+- **认证 Cookie 清理与 Express v5 废弃 API 消除（Auth & Deprecation Fixes）**：
+  - 修复 `server/auth.js` 与 `server/routes/auth.js` 中 `res.clearCookie` 传递 `maxAge` 引起的 Express 废弃警告（`Express deprecated res.clearCookie: Passing "options.maxAge" is deprecated`），规范 Cookie 清除选项。
+  - 优化前端 `client/chat/app-workspaces.js` 与 `config.js` 的 401 拦截处理逻辑，确保在 Token 过期或未认证时立即清理失效凭据并彻底停止轮询，彻底杜绝 60 秒重复 401 轮询现象。
+- **代码质量与全量自动化校验闭环（Zero Lint & 100% Check Passed）**：
+  - 修复遗留的未定义变量与异步调用缺失（`getModelDailyUsageAsync`、`whereSql`、`Sqlite`、`datasetName` 等），实现 `npm run lint` **0 错误、0 警告**。
+  - CLI 检查工具链（`scripts/check_*.js`）全面汉化输出，`npm run check` 453 个 JS 文件与静态资产规范检查 **100% 通过**。
+
 ## [v0.1.0] - 2026-08-18
 
 ### 核心数据库纯 PostgreSQL 架构全面升级与全链路异步化、数据字典元数据注释与生产级核验保障

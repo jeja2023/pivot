@@ -58,7 +58,7 @@ function parseExtractorJson(text) {
             if (Array.isArray(parsed?.memories)) return parsed.memories;
             if (Array.isArray(parsed?.candidates)) return parsed.candidates;
         } catch (_err) {
-            // Try the next relaxed JSON boundary.
+            // 尝试下一个宽松 JSON 边界提取
         }
     }
     return [];

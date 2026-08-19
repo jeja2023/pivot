@@ -554,7 +554,7 @@ function openRegisteredApp(appId) {
     if (app.id === 'pdf-tools') {
         showPdfToolsAppFromRegistry()
             .catch(() => {
-                if (typeof showToast === 'function') showToast('PDF \u5de5\u5177\u52a0\u8f7d\u5931\u8d25', 'error');
+                if (typeof showToast === 'function') showToast('PDF 工具加载失败', 'error');
             });
     }
 }

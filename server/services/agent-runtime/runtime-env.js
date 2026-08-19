@@ -35,7 +35,7 @@ function withTimeout(operation, timeoutMs, label = 'operation', options = {}) {
             callback(value);
         };
         const onParentAbort = () => {
-            const reason = parentSignal.reason instanceof Error ? parentSignal.reason : new Error('Operation aborted.');
+            const reason = parentSignal.reason instanceof Error ? parentSignal.reason : new Error('操作已被中止。');
             if (!reason.code) reason.code = 'AGENT_RUN_CANCELLED';
             abortReason = reason;
             controller.abort(reason);

@@ -106,7 +106,7 @@ function copyReleaseArtifactsToDownloads(rawArgs) {
     for (const fileName of requiredArtifacts) {
         const source = path.join(electronOutputDir, fileName);
         if (!fs.existsSync(source)) {
-            throw new Error(`Expected desktop release artifact was not generated: ${source}`);
+            throw new Error(`未生成预期的桌面打包产物: ${source}`);
         }
         const target = path.join(downloadsDir, fileName);
         fs.copyFileSync(source, target);

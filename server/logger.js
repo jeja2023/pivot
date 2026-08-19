@@ -47,30 +47,44 @@ function scrubUrl(rawUrl) {
 
 // 构建输出流
 const streams = [];
-if (isProduction) {
-    // 生产环境：控制台输出原始 JSON (高性能)
-    streams.push({ stream: process.stdout });
-    // 同时写入文件
-    streams.push({ 
-        level: 'info',
-        stream: pino.destination({
-            dest: path.join(logDir, 'pivot.log'),
-            sync: false, // 异步写入，提升性能
-            mkdir: true
-        })
-    });
-} else {
-    // 开发环境：使用 pino-pretty 美化输出
+const consolePretty = process.env.CONSOLE_LOG_PRETTY === 'true' || 
+                      process.env.NODE_ENV !== 'production' ||
+                      (process.stdout.isTTY && process.env.LOG_FORMAT !== 'json');
+
+if (consolePretty) {
+    // 控制台终端：使用 pino-pretty 进行可读化单行输出
     streams.push({
         stream: require('pino-pretty')({
             colorize: true,
-            translateTime: 'HH:mm:ss',
+            translateTime: 'yyyy-mm-dd HH:MM:ss',
             ignore: 'pid,hostname,version,req,res,responseTime,reqId',
             singleLine: true,
-            messageFormat: '{msg}'
+            messageFormat: (log, messageKey) => {
+                const msg = log[messageKey] || '';
+                if (log.req) {
+                    const user = log.req.user === 'guest' ? '访客' : (log.req.user || '-');
+                    const status = log.res?.statusCode ? ` [状态: ${log.res.statusCode}]` : '';
+                    const duration = log.responseTime !== undefined ? ` [耗时: ${log.responseTime}ms]` : '';
+                    return `${log.req.method} ${log.req.url}${status}${duration} (用户: ${user})`;
+                }
+                return msg;
+            }
         })
     });
+} else {
+    // 容器/生产标准无终端环境：控制台输出原始 JSON (便于 ELK / 收集系统解析)
+    streams.push({ stream: process.stdout });
 }
+
+// 始终将结构化 JSON 日志异步写入文件
+streams.push({ 
+    level: 'info',
+    stream: pino.destination({
+        dest: path.join(logDir, 'pivot.log'),
+        sync: false, // 异步写入，提升性能
+        mkdir: true
+    })
+});
 
 const logger = pino({
     level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),

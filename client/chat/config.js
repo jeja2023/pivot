@@ -48,7 +48,7 @@ async function refreshAccessToken() {
         isRefreshing = true;
         try {
             const refreshRes = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST', credentials: 'same-origin' });
-            if (!refreshRes.ok) throw new Error('Refresh failed');
+            if (!refreshRes.ok) throw new Error('令牌刷新失败');
             const refreshData = await refreshRes.json().catch(() => ({}));
             if (refreshData.csrfToken) {
                 setCsrfToken(refreshData.csrfToken);
@@ -198,10 +198,10 @@ function handleUnauthorized() {
     currentSessionId = null;
     localStorage.removeItem('pivot_token');
     setCsrfToken('');
-    if (authFailureHandled) return;
-    authFailureHandled = true;
     if (window.closeAgentRealtime) window.closeAgentRealtime();
     if (window.stopAnnouncements) window.stopAnnouncements();
+    if (authFailureHandled) return;
+    authFailureHandled = true;
     if (window.showAuth) window.showAuth();
 }
 

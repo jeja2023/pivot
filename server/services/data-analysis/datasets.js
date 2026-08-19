@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('@e965/xlsx');
+const Sqlite = require('better-sqlite3');
 const { query, queryOne, execute } = require('../../db/client');
 const {
     logger,
@@ -243,8 +244,8 @@ async function importSqliteToParquet(sourcePath, parquetPath) {
         sqliteDb.close();
     }
 }
-// Store one uploaded file as the dataset source and generate Parquet, profile, and preview data.
-// Caller wraps this with withAnalysisSlot because DuckDB work is heavy.
+// 持久化上传文件作为数据集源，并生成 Parquet、画像与预览数据
+// 调用方已使用 withAnalysisSlot 包装以管理 DuckDB 计算负载
 async function ingestUpload({ datasetDir, file, ext }) {
     const sourceName = path.basename(file.originalname || `dataset${ext}`).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
     const sourcePath = resolveInside(datasetDir, sourceName);
@@ -394,7 +395,7 @@ async function softDeleteDataset(userId, datasetId) {
         SET deleted_at = ?, status = 'deleted', updated_at = ?
         WHERE id = ? AND user_id = ?
     `, [getBeijingTimestamp(), getBeijingTimestamp(), datasetId, userId]);
-    // Soft delete also removes dataset files and related artifacts to avoid DB and disk growth.
+    // 软删除同时清理数据集文件与关联产物，避免磁盘占用膨胀
     try {
         await purgeDatasetArtifacts(userId, datasetId);
         const datasetDir = resolveInside(datasetRoot, String(userId), datasetId);
@@ -466,7 +467,7 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
     });
 }
 
-// Build a dataset from in-memory rows for non-file sources such as database imports.
+// 从内存数据行构建数据集，用于数据库导入等非文件源
 async function createDatasetFromRows({ user, name, rows, sourceType = 'database' }) {
     ensureAnalysisDirs();
     const sourceRows = Array.isArray(rows) ? rows : [];
@@ -507,6 +508,7 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
     });
 
     const datasetId = analysisId('ds');
+    const datasetName = normalizeDatasetName('', name);
     const datasetDir = resolveInside(datasetRoot, String(user.id), datasetId);
     fs.mkdirSync(datasetDir, { recursive: true });
     let committed = false;

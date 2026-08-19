@@ -313,7 +313,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
                 structuredContent: result
             };
         }
-        throw new Error(`Unsupported database MCP method: ${method}`);
+        throw new Error(`不支持的数据库 MCP 方法: ${method}`);
     }
     if (getBuiltinServiceTypeFromUrl(server.base_url)) {
         if (method === 'tools/list') return { tools: listBuiltinMcpTools(server) };
@@ -328,7 +328,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
                 structuredContent: result
             };
         }
-        throw new Error(`Unsupported built-in MCP method: ${method}`);
+        throw new Error(`不支持的内置 MCP 方法: ${method}`);
     }
 
     const url = String(server.base_url || '').trim().replace(/\/+$/, '');
@@ -514,7 +514,7 @@ function formatMcpTool(row) {
 async function executeMcpTool(fullName, input, user, options = {}) {
     options.signal?.throwIfAborted?.();
     const match = String(fullName || '').match(/^mcp\.(\d+)\.(.+)$/);
-    if (!match) throw new Error('Invalid MCP tool name.');
+    if (!match) throw new Error('MCP 工具名称非法。');
     if (isLocalDeviceMcpServerId(match[1])) {
         const toolName = match[2];
         const serverType = getLocalDeviceMcpServerTypeForTool(toolName);
@@ -566,7 +566,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         }
     }
     const server = await getAccessibleMcpServer(Number(match[1]), user);
-    if (!server || server.status !== 'active') throw new Error('MCP server is not available.');
+    if (!server || server.status !== 'active') throw new Error('MCP 服务当前不可用。');
     if (!isSharedMcpToolAllowed(server, match[2])) {
         const err = new Error('共享工具仅允许执行只读数据库能力。');
         err.status = 403;

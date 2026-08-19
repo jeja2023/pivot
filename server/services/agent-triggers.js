@@ -475,8 +475,8 @@ async function pollDatabaseTrigger(trigger, executeTool) {
         return [];
     }
 
-    // Built-in/MCP database tools expose rows under structuredContent. Accept
-    // both shapes so a valid query cannot be mistaken for an empty result.
+    // 内置/MCP 数据库工具将数据行暴露于 structuredContent 下
+    // 兼容两种数据结构，避免有效查询被误判为空结果
     const structured = result?.structuredContent && typeof result.structuredContent === 'object'
         ? result.structuredContent
         : null;

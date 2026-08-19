@@ -49,7 +49,7 @@ function listDocumentTools() {
 function executeDocumentTool(_server, name, input = {}) {
     const text = textInput(input);
     if (!text.trim()) {
-        const err = new Error('Document text is required.');
+        const err = new Error('文档文本内容不能为空。');
         err.status = 400;
         throw err;
     }
@@ -111,7 +111,7 @@ function executeDocumentTool(_server, name, input = {}) {
             chunkCount: chunks.length
         };
     }
-    throw new Error(`Unsupported document MCP tool: ${name}`);
+    throw new Error(`不支持的文档工具操作: ${name}`);
 }
 
 module.exports = {

@@ -10,7 +10,7 @@ function read(relativePath) {
 function assertIncludes(file, marker) {
     const text = read(file);
     if (!text.includes(marker)) {
-        throw new Error(`${file} is missing required E2E marker: ${marker}`);
+        throw new Error(`${file} 缺少必需的 E2E 标记: ${marker}`);
     }
 }
 
@@ -22,7 +22,7 @@ function main() {
         'tests/e2e/smoke.spec.js'
     ];
     requiredFiles.forEach(file => {
-        if (!fs.existsSync(path.join(root, file))) throw new Error(`Missing E2E file: ${file}`);
+        if (!fs.existsSync(path.join(root, file))) throw new Error(`缺少 E2E 核心文件: ${file}`);
     });
 
     assertIncludes('tests/e2e/playwright.config.js', 'PIVOT_E2E_BASE_URL');
@@ -35,13 +35,13 @@ function main() {
     assertIncludes('client/chat/partials/scripts.html', '/chat/pivot-core.js');
     assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-history"');
     if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'node scripts/run_e2e_tests.js') {
-        throw new Error('package.json is missing test:e2e Playwright runner script');
+        throw new Error('package.json 缺少 test:e2e 测试运行脚本');
     }
     if (!manifest.devDependencies || !manifest.devDependencies['@playwright/test']) {
-        throw new Error('package.json is missing @playwright/test devDependency');
+        throw new Error('package.json 缺少 @playwright/test 依赖包');
     }
 
-    console.log('E2E smoke scaffold check passed.');
+    console.log('E2E 冒烟测试脚手架检查通过。');
 }
 
 main();

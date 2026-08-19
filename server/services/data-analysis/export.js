@@ -20,7 +20,7 @@ const {
     recordArtifact
 } = require('./shared');
 
-// \u7528 DuckDB \u76F4\u63A5\u628A parquet COPY \u6210\u4E34\u65F6 CSV\uFF08\u5E26\u8868\u5934\uFF09\uFF0C\u518D\u4EE5\u6D41\u5F0F\u65B9\u5F0F\u5728\u524D\u9762\u8865 UTF-8 BOM
+// 用 DuckDB 直接把 parquet COPY 成临时 CSV（带表头），再以流式方式在前面补 UTF-8 BOM
 // \u5199\u5165\u6700\u7EC8\u6587\u4EF6\uFF0C\u5168\u7A0B\u5E38\u91CF\u5185\u5B58\uFF0C\u907F\u514D\u628A\u6574\u8868\u884C\u8F7D\u5165 JS \u540E\u518D\u62FC\u5B57\u7B26\u4E32\u3002
 async function duckCopyToCsv(parquetPath, columns, targetPath) {
     const selectList = columns.length

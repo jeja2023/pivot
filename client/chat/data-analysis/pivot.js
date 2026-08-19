@@ -1,6 +1,6 @@
 (function () {
     const app = window.PivotDataAnalysis;
-    if (!app) throw new Error('PivotDataAnalysis context is not loaded');
+    if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, esc, fmtNumber, activeDataset } = app;
     const buildOptions = (...args) => app.buildOptions(...args);
     const setSelectOptions = (...args) => app.setSelectOptions(...args);

@@ -40,7 +40,7 @@ async function renderAttachmentTextPreview(content, url) {
     const response = await apiFetch(url, {
         headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
-    if (!response.ok) throw new Error(`Preview failed (${response.status})`);
+    if (!response.ok) throw new Error(`预览失败 (${response.status})`);
     const text = (await response.text()).slice(0, ATTACHMENT_TEXT_LIMIT);
     PivotSafeHtml.setHtml(content, `<pre class="attachment-preview-text">${escapePreviewHtml(text)}</pre>`);
 }

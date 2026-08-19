@@ -93,7 +93,7 @@ for (const filePath of collectFiles(rootDir)) {
 }
 
 if (failures.length > 0) {
-    console.error('Text integrity check failed. Possible encoding/mojibake issues:');
+    console.error('文本完整性检查失败，可能存在乱码或非标准编码:');
     failures.slice(0, 40).forEach(item => {
         console.error(`  ${item.file}:${item.line} ${item.rule} (${item.sample})`);
     });
@@ -101,4 +101,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log('Text integrity check passed.');
+console.log('文本完整性检查通过。');

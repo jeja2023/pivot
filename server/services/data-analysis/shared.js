@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DuckDBInstance } = require('@duckdb/node-api');
-const { query, queryOne, execute } = require('../../db/client');
+const { queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
 const { analysisSemaphore } = require('../concurrency');
@@ -55,7 +55,7 @@ function isPathInside(parent, target) {
 function resolveInside(parent, ...parts) {
     const target = path.resolve(parent, ...parts);
     if (!isPathInside(parent, target)) {
-        const err = new Error('Unsafe analysis file path.');
+        const err = new Error('不安全的数据分析文件路径。');
         err.status = 400;
         throw err;
     }
@@ -70,7 +70,7 @@ function toProjectRelative(targetPath) {
 function fromProjectRelative(relativePath) {
     const target = path.resolve(projectRoot, String(relativePath || ''));
     if (!isPathInside(projectRoot, target)) {
-        const err = new Error('Unsafe stored analysis path.');
+        const err = new Error('不安全的数据分析存储路径。');
         err.status = 400;
         throw err;
     }
@@ -150,10 +150,10 @@ function bestEffortRemove(targetPath, { recursive = false } = {}) {
     } catch (err) {
         const timer = setTimeout(() => {
             fs.promises.rm(targetPath, { force: true, recursive, maxRetries: 4, retryDelay: 150 })
-                .catch(cleanupErr => logger.warn({ err: cleanupErr.message, targetPath }, 'Analysis temporary file cleanup failed'));
+                .catch(cleanupErr => logger.warn({ err: cleanupErr.message, targetPath }, '数据分析临时文件清理失败'));
         }, 250);
         if (typeof timer.unref === 'function') timer.unref();
-        logger.warn({ err: err.message, targetPath }, 'Analysis temporary file cleanup deferred');
+        logger.warn({ err: err.message, targetPath }, '数据分析临时文件清理已推迟');
     }
 }
 

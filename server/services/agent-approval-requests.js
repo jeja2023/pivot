@@ -683,7 +683,7 @@ async function maybeSendApprovalIm(row, token, run, user) {
         const payload = buildImPayload(config, defaultPayload, user, { run, approval: formatRequest(row) });
         await sendIm(config, secret, payload, user);
     } catch (err) {
-        logger.warn({ err: err.message, requestId: row.id }, 'Failed to send workflow approval IM notification');
+        logger.warn({ err: err.message, requestId: row.id }, '发送工作流审批即时通知失败');
     }
 }
 
@@ -754,7 +754,7 @@ async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }
         return output;
     }
     if (existing && ['rejected', 'expired', 'cancelled'].includes(existing.status)) {
-        const err = new Error(`Workflow approval ${existing.status}.`);
+        const err = new Error(`工作流审批状态当前为 ${existing.status}，无法继续执行。`);
         err.code = 'AGENT_APPROVAL_REJECTED';
         throw err;
     }
@@ -1136,7 +1136,7 @@ async function runApprovalTimeouts(limit = 50) {
             if (row.request_type === 'delay') await completeDelayRequest(row);
             else await expireApprovalRequest(row);
         } catch (err) {
-            logger.warn({ err: err.message, requestId: row.id }, 'Approval timeout processing failed');
+            logger.warn({ err: err.message, requestId: row.id }, '审批超时状态处理失败');
         }
     }
     return rows.length;

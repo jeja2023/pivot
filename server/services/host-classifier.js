@@ -125,7 +125,7 @@ function getLocalHostnames({ requestHosts = [], publicUrl = process.env.PUBLIC_U
             }
         });
     } catch (e) {
-        // Conservative defaults above are enough when OS inspection is unavailable.
+        // 当无法直接检查操作系统时，采用上述保守默认值
     }
     addHostAlias(names, publicUrl);
     addHostAlias(names, process.env.PUBLIC_URL || '');

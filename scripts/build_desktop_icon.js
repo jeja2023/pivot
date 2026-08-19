@@ -185,7 +185,7 @@ async function writeIco(sourceBuffer, output) {
 async function main() {
     const sourcePath = sourceCandidates.find(candidate => fs.existsSync(candidate));
     if (!sourcePath) {
-        throw new Error('No PNG source found for icon generation.');
+        throw new Error('未找到用于生成图标的源 PNG 图像。');
     }
     const sourceBuffer = fs.readFileSync(sourcePath);
     const transparentSource = await makeTransparentSource(sourceBuffer);

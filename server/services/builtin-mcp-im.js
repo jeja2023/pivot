@@ -130,7 +130,7 @@ function listImTools() {
 function validateImTarget(config, target, targetType) {
     const value = String(target || config.defaultTarget || '').trim();
     if (!value) {
-        const err = new Error('IM target is required.');
+        const err = new Error('消息接收目标 IM target 为必填项。');
         err.status = 400;
         throw err;
     }
@@ -143,7 +143,7 @@ function validateImTarget(config, target, targetType) {
     if (config.allowedTargets.length) {
         const allowed = new Set(config.allowedTargets.map(item => item.toLowerCase()));
         if (!allowed.has(lower) && !allowed.has(`${targetType}:${lower}`)) {
-            const err = new Error('IM target is not in the allowed target list.');
+            const err = new Error('目标地址不在允许的通知目标白名单中。');
             err.status = 403;
             throw err;
         }
@@ -224,12 +224,12 @@ async function executeImTool(server, name, input = {}, user = null, options = {}
     const rawMessage = name === 'im.send_markdown' ? input.markdown : input.message;
     const message = String(rawMessage || '').slice(0, config.maxMessageLength);
     if (!message.trim()) {
-        const err = new Error('IM message content is required.');
+        const err = new Error('消息内容不能为空。');
         err.status = 400;
         throw err;
     }
     if (!['im.send_user_message', 'im.send_group_message', 'im.send_markdown'].includes(name)) {
-        throw new Error(`Unsupported IM MCP tool: ${name}`);
+        throw new Error(`不支持的即时消息工具操作: ${name}`);
     }
     const renderedPayload = buildImPayload(config, {
         source: 'pivot-mcp',

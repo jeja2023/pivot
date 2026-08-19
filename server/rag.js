@@ -371,7 +371,7 @@ ragRouter.put('/docs/:id/tags', authMiddleware, asyncHandler(async (req, res) =>
 
 ragRouter.delete('/docs/:id', authMiddleware, asyncHandler(async (req, res) => {
     const deleted = await deleteKnowledgeDocument({ docId: req.params.id, userId: req.user.id });
-    if (!deleted) return res.status(404).json({ error: 'Knowledge document not found or not owned' });
+    if (!deleted) return res.status(404).json({ error: '知识库文档不存在或无权限访问' });
     auditRagAction(req, '知识库文档删除', { docId: req.params.id, deleted });
     req.log?.info({ docId: req.params.id, deleted }, 'RAG 文档删除');
     res.json({ success: true });

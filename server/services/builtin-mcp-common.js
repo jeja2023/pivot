@@ -104,7 +104,7 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
     if (type === 'reports') {
         const config = normalizeReportConfig(payload.config || payload);
         if (config.roots.length === 0) {
-            const err = new Error('Please configure at least one report/data file directory.');
+            const err = new Error('请至少配置一个报表/数据文件目录。');
             err.status = 400;
             throw err;
         }
@@ -116,7 +116,7 @@ function normalizeBuiltinPayload(serviceType, payload = {}) {
     if (type === 'im') {
         const config = normalizeImConfig(payload.config || payload);
         if (!config.endpointUrl) {
-            const err = new Error('Please configure the LAN IM webhook/API endpoint.');
+            const err = new Error('请配置文件通知 Webhook/API 地址。');
             err.status = 400;
             throw err;
         }
@@ -202,7 +202,7 @@ async function getBuiltinConfigForServerAsync(serverId, { includeSecret = false 
 function getRequiredBuiltinConfig(server, expectedType) {
     const row = getBuiltinConfigForServer(server.id, { includeSecret: expectedType === 'im' });
     if (!row || row.service_type !== expectedType) {
-        const err = new Error('Built-in MCP configuration is missing or mismatched.');
+        const err = new Error('内置 MCP 配置缺失或类型不匹配。');
         err.status = 404;
         throw err;
     }
@@ -212,7 +212,7 @@ function getRequiredBuiltinConfig(server, expectedType) {
 async function getRequiredBuiltinConfigAsync(server, expectedType) {
     const row = await getBuiltinConfigForServerAsync(server.id, { includeSecret: expectedType === 'im' });
     if (!row || row.service_type !== expectedType) {
-        const err = new Error('Built-in MCP configuration is missing or mismatched.');
+        const err = new Error('内置 MCP 配置缺失或类型不匹配。');
         err.status = 404;
         throw err;
     }
@@ -259,7 +259,7 @@ function aggregateValues(values, aggregation) {
 
 function normalizeInputRows(rows, maxRows = 1000) {
     if (!Array.isArray(rows)) {
-        const err = new Error('rows must be an array of objects.');
+        const err = new Error('数据行必须为对象数组。');
         err.status = 400;
         throw err;
     }

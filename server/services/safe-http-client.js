@@ -23,7 +23,7 @@ function looksLikeMultipartPayload(data) {
 function assertJsonOnlyPayload(data, options = {}) {
     if (options.allowMultipart === true) return;
     if (looksLikeMultipartPayload(data)) {
-        const err = new Error('Multipart payloads must use the upload-specific client, not safe JSON HTTP helpers.');
+        const err = new Error('Multipart 上传请求必须使用专门的上传客户端，不可使用普通 JSON HTTP 请求封装。');
         err.code = 'MULTIPART_PAYLOAD_REJECTED';
         throw err;
     }

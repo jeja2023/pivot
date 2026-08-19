@@ -91,7 +91,7 @@ function getPublicSystemHealthSnapshot() {
     const checks = [];
     try {
         const { getPgPool } = require('../db/pg-connection');
-        if (!getPgPool()) throw new Error('PostgreSQL pool not initialized');
+        if (!getPgPool()) throw new Error('PostgreSQL 数据库连接池未初始化');
         checks.push({ name: 'database', status: 'ok' });
     } catch (_error) {
         checks.push({ name: 'database', status: 'error' });

@@ -1,6 +1,6 @@
 // Agent 运行可视化 Agent run visuals
 // Split from agent-run-renderers.js.
-// Agent run visual outputs, DAG graph, and progress helpers.
+// 智能体运行可视化产物、DAG 拓扑图与进度展示工具
 /* eslint-disable no-undef */
 function renderAgentRunVisualOutputs(dagNodes = [], steps = [], finalAnswer = '', runStatus = '') {
     if (isAgentRunActive(runStatus)) return '';

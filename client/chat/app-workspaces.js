@@ -1,10 +1,4 @@
 /* 智枢前端主程序 */
-/* exported handleUnauthorized */
-function handleUnauthorized() {
-    localStorage.removeItem('pivot_token');
-    if (typeof setCsrfToken === 'function') setCsrfToken('');
-    if (window.showAuth) window.showAuth();
-}
 
 // --- 输入框自适应 ---
 const userInput = document.getElementById('user-input');

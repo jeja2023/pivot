@@ -70,7 +70,7 @@ window.showApp = (options = {}) => {
     const restoreWorkspace = options.restoreWorkspace !== false;
     if (restoreWorkspace && window.restoreMainWorkspaceAfterLogin) {
         Promise.resolve(window.restoreMainWorkspaceAfterLogin()).catch(err => {
-            console.error('Workspace restore failed:', err);
+            console.error('恢复主工作区失败:', err);
             window.showMainWorkspace?.('chat');
         });
     } else if (window.showMainWorkspace) {
@@ -400,7 +400,7 @@ window.copyGeneratedKey = function() {
         navigator.clipboard.writeText(text).then(() => {
             showToast('密钥已复制到剪贴板');
         }).catch(err => {
-            console.error('Clipboard write failed:', err);
+            console.error('写入剪贴板失败:', err);
             fallbackCopyTextToClipboard(text);
         });
     } else {

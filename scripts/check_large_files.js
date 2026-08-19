@@ -20,8 +20,8 @@ function walk(dir) {
 
 walk(rootDir);
 if (failures.length) {
-    console.error('Large file check failed: source tree contains files over 50 MiB:');
+    console.error('大文件检查失败：源码树包含超过 50 MiB 的大文件:');
     failures.forEach(({ file, size }) => console.error(' - ' + file + ': ' + (size / 1024 / 1024).toFixed(1) + ' MiB'));
     process.exit(1);
 }
-console.log('Large file check passed.');
+console.log('大文件检查通过。');

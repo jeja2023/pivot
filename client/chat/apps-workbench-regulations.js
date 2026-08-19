@@ -27,7 +27,7 @@
                 script.dataset.loaded = 'true';
                 resolve();
             };
-            script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+            script.onerror = () => reject(new Error(`加载法规脚本失败: ${src}`));
             if (!existing) {
                 script.src = src;
                 document.head.appendChild(script);
@@ -43,7 +43,7 @@
                     await loadScriptOnce(src);
                 }
                 if (!window.PivotRegulations?.ready) {
-                    throw new Error('Regulations workbench failed to initialize');
+                    throw new Error('法规工作台初始化失败');
                 }
                 return window.PivotRegulations;
             })();

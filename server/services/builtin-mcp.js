@@ -42,7 +42,7 @@ function listBuiltinMcpTools(server) {
     if (type === 'data') return listDataProcessingTools();
     if (type === 'format') return listFormatConversionTools();
     if (type === 'im') return listImTools();
-    throw new Error('Unsupported built-in MCP server.');
+    throw new Error('不支持的内置 MCP 服务类型。');
 }
 
 async function executeBuiltinMcpTool(server, name, input = {}, user = null, options = {}) {
@@ -55,7 +55,7 @@ async function executeBuiltinMcpTool(server, name, input = {}, user = null, opti
     if (type === 'data') return executeDataProcessingTool(server, name, input);
     if (type === 'format') return executeFormatConversionTool(server, name, input);
     if (type === 'im') return executeImTool(server, name, input, user, options);
-    throw new Error('Unsupported built-in MCP server.');
+    throw new Error('不支持的内置 MCP 服务类型。');
 }
 
 module.exports = {

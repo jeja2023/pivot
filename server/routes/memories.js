@@ -145,11 +145,11 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
     router.put('/memories/status/bulk', authMiddleware, asyncHandler(async (req, res) => {
         const status = String(req.body?.status || MEMORY_STATUS.active);
         if (!Object.values(MEMORY_STATUS).includes(status)) {
-            return res.status(400).json({ error: 'invalid_memory_status' });
+            return res.status(400).json({ error: '记忆状态参数非法' });
         }
         const result = await updateMemoryStatuses(req.user.id, req.body?.ids || req.body?.memoryIds || [], status);
         if (typeof logAction === 'function') {
-            logAction(req, 'bulk update long-term memory status', `status: ${status}; count: ${result.updated}`);
+            logAction(req, '批量更新长期记忆状态', `status: ${status}; count: ${result.updated}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, ...result, summary });
@@ -161,7 +161,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             limit: req.body?.limit
         });
         if (typeof logAction === 'function') {
-            logAction(req, 'archive expired long-term memories', `archived: ${result.archived}`);
+            logAction(req, '归档过期长期记忆', `archived: ${result.archived}`);
         }
         const summary = await getMemoryQualitySummary(req.user.id);
         return res.json({
@@ -173,20 +173,20 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
 
     router.get('/memories/:id/source', authMiddleware, asyncHandler(async (req, res) => {
         const id = normalizeMemoryId(req.params.id);
-        if (!id) return res.status(400).json({ error: 'invalid_memory_id' });
+        if (!id) return res.status(400).json({ error: '记忆 ID 参数非法' });
         const source = await getMemorySource(req.user.id, id);
-        if (!source) return res.status(404).json({ error: 'memory_not_found' });
+        if (!source) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         return res.json({ success: true, ...source });
     }));
 
     router.put('/memories/:id', authMiddleware, asyncHandler(async (req, res) => {
         const id = normalizeMemoryId(req.params.id);
-        if (!id) return res.status(400).json({ error: 'invalid_memory_id' });
+        if (!id) return res.status(400).json({ error: '记忆 ID 参数非法' });
         try {
             const memory = await updateMemory(req.user.id, id, req.body || {}, { user: req.user });
-            if (!memory) return res.status(404).json({ error: 'memory_not_found' });
+            if (!memory) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
             if (typeof logAction === 'function') {
-                logAction(req, 'update long-term memory', `memoryId: ${id}`);
+                logAction(req, '更新长期记忆', `memoryId: ${id}`);
             }
             const summary = await getMemorySummary(req.user.id);
             return res.json({ success: true, memory, summary });
@@ -197,15 +197,15 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
 
     router.put('/memories/:id/status', authMiddleware, asyncHandler(async (req, res) => {
         const id = normalizeMemoryId(req.params.id);
-        if (!id) return res.status(400).json({ error: 'invalid_memory_id' });
+        if (!id) return res.status(400).json({ error: '记忆 ID 参数非法' });
         const status = String(req.body?.status || MEMORY_STATUS.active);
         if (!Object.values(MEMORY_STATUS).includes(status)) {
-            return res.status(400).json({ error: 'invalid_memory_status' });
+            return res.status(400).json({ error: '记忆状态参数非法' });
         }
         const changed = await updateMemoryStatus(req.user.id, id, status);
-        if (!changed) return res.status(404).json({ error: 'memory_not_found' });
+        if (!changed) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         if (typeof logAction === 'function') {
-            logAction(req, 'update long-term memory status', `memoryId: ${id}; status: ${status}`);
+            logAction(req, '更新长期记忆状态', `memoryId: ${id}; status: ${status}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, summary });
@@ -214,9 +214,9 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
     router.post('/memories/merge', authMiddleware, asyncHandler(async (req, res) => {
         try {
             const result = await mergeMemories(req.user.id, req.body?.targetId, req.body?.sourceId, { user: req.user });
-            if (!result) return res.status(404).json({ error: 'memory_not_found' });
+            if (!result) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
             if (typeof logAction === 'function') {
-                logAction(req, 'merge long-term memories', `targetId: ${req.body?.targetId}; sourceId: ${req.body?.sourceId}`);
+                logAction(req, '合并长期记忆', `targetId: ${req.body?.targetId}; sourceId: ${req.body?.sourceId}`);
             }
             const summary = await getMemorySummary(req.user.id);
             return res.json({ success: true, ...result, summary });
@@ -227,11 +227,11 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
 
     router.delete('/memories/:id', authMiddleware, asyncHandler(async (req, res) => {
         const id = normalizeMemoryId(req.params.id);
-        if (!id) return res.status(400).json({ error: 'invalid_memory_id' });
+        if (!id) return res.status(400).json({ error: '记忆 ID 参数非法' });
         const changed = await softDeleteMemory(req.user.id, id);
-        if (!changed) return res.status(404).json({ error: 'memory_not_found' });
+        if (!changed) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         if (typeof logAction === 'function') {
-            logAction(req, 'delete long-term memory', `memoryId: ${id}`);
+            logAction(req, '删除长期记忆', `memoryId: ${id}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, summary });

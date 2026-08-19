@@ -271,7 +271,7 @@ function normalizeFieldAllowlist(value) {
         try {
             return normalizeFieldAllowlist(JSON.parse(raw));
         } catch (e) {
-            // Fall through to line parsing.
+            // 回退到按行解析模式
         }
     }
     splitPolicyList(raw).forEach(item => {

@@ -1,7 +1,7 @@
 
 (function () {
     const app = window.PivotDataAnalysis;
-    if (!app) throw new Error('PivotDataAnalysis context is not loaded');
+    if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state } = app;
     const renderHeader = (...args) => app.renderHeader(...args);
     const renderOverview = (...args) => app.renderOverview(...args);

@@ -2,7 +2,7 @@ const { query, queryOne, execute } = require('../../db/client');
 const crypto = require('crypto');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
-const { getRunnableModelForUser, getRunnableModelForUserAsync } = require('../models');
+const { getRunnableModelForUserAsync } = require('../models');
 const { clampText, compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('../agent-tool-runtime');
 const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
@@ -352,18 +352,18 @@ async function cancelAgentRun(runId, user) {
     const now = getBeijingTimestamp();
     updateRun(runId, {
         status: 'cancelled',
-        error_message: 'Run cancelled by user.',
+        error_message: '智能体运行已被用户主动取消。',
         cancelled_at: now,
         completed_at: now,
         updated_at: now
     });
-    const abortError = new Error('Run cancelled by user.');
+    const abortError = new Error('智能体运行已被用户主动取消。');
     abortError.code = 'AGENT_RUN_CANCELLED';
     activeRunControllers.get(runId)?.abort(abortError);
     const steps = await listSteps(runId);
     insertStep(runId, (steps || []).length + 1, {
         type: 'control',
-        title: 'User cancelled run',
+        title: '用户主动取消运行',
         output: { status: 'cancelled' }
     });
     createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
@@ -694,7 +694,7 @@ async function runAgent(runId, user) {
         assertRunNotCancelled(runId);
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
         deadlineTimer = setTimeout(() => {
-            const error = new Error('Agent run timed out.');
+            const error = new Error('智能体运行超时。');
             error.code = 'AGENT_TIMEOUT';
             runController.abort(error);
         }, Math.max(deadline - Date.now(), 1));
@@ -708,7 +708,7 @@ async function runAgent(runId, user) {
         };
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
         const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
-        if (!initialModelCfg && !dagRun) throw new Error('No accessible model is available for this agent run.');
+        if (!initialModelCfg && !dagRun) throw new Error('当前智能体运行无可用的模型端点。');
         // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
         let modelCfg = initialModelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
@@ -1078,12 +1078,12 @@ async function recoverAgentRuns() {
             lock_expires_at: null
         });
         if (!changed) continue;
-        const abortError = new Error('Run recovered as stale.');
+        const abortError = new Error('停滞任务已恢复并标记终止。');
         abortError.code = 'AGENT_RUN_CANCELLED';
         activeRunControllers.get(run.id)?.abort(abortError);
         await insertStep(run.id, (await listSteps(run.id)).length + 1, {
             type: 'control',
-            title: 'Runtime recovery marked stale run',
+            title: '运行时恢复并标记停滞任务',
             output: { status: 'error', reason: 'stale_running' }
         });
     }
@@ -1106,7 +1106,7 @@ function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
         try {
             await recoverAgentRuns();
         } catch (error) {
-            logger.warn({ err: error.message }, 'Periodic agent run recovery failed');
+            logger.warn({ err: error.message }, '定时恢复停滞智能体任务失败');
         } finally {
             running = false;
         }

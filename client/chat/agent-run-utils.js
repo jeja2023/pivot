@@ -1,6 +1,6 @@
 // Agent 运行通用工具 Agent run utils
 // Split from agent-run-renderers.js.
-// Agent run shared labels and formatting helpers.
+// 智能体运行共享标签与格式化辅助工具
 /* eslint-disable no-undef */
 function ensureAgentRunTitleTooltip() {
     if (agentRunTitleTooltipEl?.isConnected) return agentRunTitleTooltipEl;

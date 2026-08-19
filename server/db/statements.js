@@ -10,12 +10,12 @@ const defaultCache = new Map();
 
 function normalizeSqlText(text) {
     if (typeof text !== 'string') {
-        const err = new Error('SQL statement text must be a string.');
+        const err = new Error('SQL 语句文本必须为字符串类型。');
         err.status = 500;
         throw err;
     }
     if (!text.trim()) {
-        const err = new Error('SQL statement text cannot be empty.');
+        const err = new Error('SQL 语句文本不能为空。');
         err.status = 500;
         throw err;
     }
@@ -25,7 +25,7 @@ function normalizeSqlText(text) {
 function prepareCached(cache, database, text) {
     const sqlText = normalizeSqlText(text);
     if (!database || typeof database.prepare !== 'function') {
-        const err = new Error('A better-sqlite3 compatible database is required.');
+        const err = new Error('需要提供兼容 better-sqlite3 的数据库实例。');
         err.status = 500;
         throw err;
     }

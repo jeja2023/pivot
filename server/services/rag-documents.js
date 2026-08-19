@@ -437,7 +437,7 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     const doc = normalizedDocId ? await getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
     if (!doc) {
-        const error = new Error('Knowledge document not found');
+        const error = new Error('未找到指定的知识库文档');
         error.statusCode = 404;
         throw error;
     }

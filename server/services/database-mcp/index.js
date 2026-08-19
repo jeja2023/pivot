@@ -67,7 +67,7 @@ async function getDatabaseConnectionForServerAsync(serverId, { includeSecret = f
 
 function listDatabaseMcpTools(server) {
     const connection = server?.database_connection || getDatabaseConnectionForServer(server.id);
-    if (!connection) throw new Error('Database MCP connection not found.');
+    if (!connection) throw new Error('未找到指定的数据库 MCP 连接配置。');
     return listDatabaseConnectionMcpTools(connection);
 }
 
@@ -80,7 +80,7 @@ function optionalRequire(packageName, installHint) {
         return require(packageName);
     } catch (e) {
         if (e.code === 'MODULE_NOT_FOUND') {
-            throw new Error(`${packageName} driver is not installed. ${installHint}`);
+            throw new Error(`${packageName} 驱动程序未安装。${installHint}`);
         }
         throw e;
     }
@@ -356,13 +356,13 @@ async function runRelationalTool(adapter, client, name, ctx) {
             fields: [input.groupBy || input.group_by]
         });
     }
-    throw new Error(`Unsupported database MCP tool: ${name}`);
+    throw new Error(`不支持的数据库 MCP 工具操作: ${name}`);
 }
 
 async function executeSqlTool(connection, name, input = {}) {
     const cfg = buildRelationalConnectionConfig(connection);
     const adapter = RELATIONAL_DIALECTS[cfg.database_type];
-    if (!adapter) throw new Error(`Unsupported database type: ${cfg.database_type}`);
+    if (!adapter) throw new Error(`不支持的数据库类型: ${cfg.database_type}`);
 
     const schema = String(input.schema || cfg.schema || '').trim();
     const table = String(input.table || '').trim();
@@ -430,7 +430,7 @@ async function executeMongoTool(connection, name, input = {}) {
                 const keys = stage && typeof stage === 'object' ? Object.keys(stage) : [];
                 return keys.some(key => ['$out', '$merge'].includes(key));
             });
-            if (blockedStage) throw new Error('MongoDB aggregation cannot use write stages such as $out or $merge.');
+            if (blockedStage) throw new Error('MongoDB 聚合操作禁止使用 $out 或 $merge 等写入阶段。');
             const rows = await database.collection(String(input.collection || '')).aggregate([...pipeline, { $limit: limit }]).toArray();
             return {
                 rows: maskSensitiveRows(rows, cfg),
@@ -442,7 +442,7 @@ async function executeMongoTool(connection, name, input = {}) {
                 })
             };
         }
-        throw new Error(`Unsupported database MCP tool: ${name}`);
+        throw new Error(`不支持的数据库 MCP 工具操作: ${name}`);
         } finally {
             await client.close();
         }
@@ -503,12 +503,12 @@ async function testDatabaseConnection(connection) {
             }
         })(), timeoutMs, testConnection, 'MongoDB connection test');
     }
-    throw new Error(`Unsupported database type: ${testConnection.database_type}`);
+    throw new Error(`不支持的数据库类型: ${testConnection.database_type}`);
 }
 
 async function executeDatabaseMcpTool(server, name, input = {}) {
     const connection = server?.database_connection || await getDatabaseConnectionForServerAsync(server.id, { includeSecret: true });
-    if (!connection) throw new Error('Database MCP connection not found.');
+    if (!connection) throw new Error('未找到指定的数据库 MCP 连接配置。');
     return executeDatabaseConnectionTool(connection, name, input);
 }
 

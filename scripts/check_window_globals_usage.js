@@ -166,16 +166,16 @@ for (const item of summary) {
 }
 
 if (violations.length === 0 && findings.length <= Number(baseline.total || 0)) {
-    console.log(`Window globals scan passed: ${findings.length}/${baseline.total} legacy assignment(s), no new window.* exposure.`);
+    console.log(`全局变量规范扫描通过：共 ${findings.length}/${baseline.total} 处受控全局变量，未引入新的 window.* 暴露。`);
     process.exit(0);
 }
 
-console.error(`Window globals scan failed: ${violations.length} new or expanded window.* exposure bucket(s).`);
+console.error(`全局变量规范扫描失败：发现 ${violations.length} 处未在白名单的全局变量。`);
 violations.slice(0, 30).forEach(item => {
     console.error(` - ${item.file}: window.${item.global} count ${item.count} > baseline ${item.allowed}; lines ${item.lines.join(', ')}`);
 });
 if (findings.length > Number(baseline.total || 0)) {
     console.error(` - Total assignments ${findings.length} > baseline ${baseline.total}.`);
 }
-console.error('Expose new APIs through window.Pivot.exposeModule(name, api, aliases) and read them via window.Pivot.modules.* where possible.');
+console.error('新 API 请通过 window.Pivot.exposeModule(name, api, aliases) 注册。');
 if (!reportOnly) process.exit(1);

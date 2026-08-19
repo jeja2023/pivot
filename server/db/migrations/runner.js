@@ -29,7 +29,7 @@ function recordMigration(db, id, description = '') {
 
 function runVersionedMigration(db, migration, options = {}) {
     if (!migration || !migration.id || typeof migration.up !== 'function') {
-        throw new Error('Invalid versioned migration: expected { id, up }');
+        throw new Error('无效的版本化迁移配置：缺少 id 或 up 函数');
     }
     ensureSchemaMigrationTable(db);
     if (hasMigration(db, migration.id)) return false;
@@ -79,11 +79,11 @@ async function recordPgMigration(client, id, description = '') {
 
 async function runPgVersionedMigration(client, migration, options = {}) {
     if (!migration || !migration.id) {
-        throw new Error('Invalid versioned migration: expected { id }');
+        throw new Error('无效的版本化迁移配置：缺少 id 标识');
     }
     const up = typeof migration.upPg === 'function' ? migration.upPg : migration.up;
     if (typeof up !== 'function') {
-        throw new Error(`Invalid versioned migration ${migration.id}: expected up or upPg`);
+        throw new Error(`版本化迁移 [${migration.id}] 无效：缺少 up 或 upPg 执行函数`);
     }
     await ensurePgMigrationTable(client);
     if (await hasPgMigration(client, migration.id)) return false;

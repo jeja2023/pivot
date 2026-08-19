@@ -1,7 +1,7 @@
 /* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.PivotRegulationsInternal;
-    if (!ns) throw new Error('Pivot regulations core is not loaded');
+    if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.eventsReady) return;
     with (ns) {
         async function ensureModuleReadiness() {

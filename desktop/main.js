@@ -319,7 +319,7 @@ function isTrustedMainRendererUrl(targetUrl) {
 function assertTrustedIpcSender(event) {
     const senderUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || '';
     if (!isTrustedMainRendererUrl(senderUrl)) {
-        const error = new Error('Blocked privileged desktop IPC from an untrusted renderer origin.');
+        const error = new Error('已拦截来自非受信渲染进程源的特权桌面 IPC 调用。');
         error.code = 'PIVOT_UNTRUSTED_RENDERER';
         throw error;
     }

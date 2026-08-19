@@ -89,7 +89,7 @@ function hasEnv(env, keys = []) {
 
 function normalizeProviderType(value) {
     const key = String(value || '').trim();
-    if (!PROVIDER_TYPES.has(key)) throw new Error(`Unsupported deployment provider type: ${value}`);
+    if (!PROVIDER_TYPES.has(key)) throw new Error(`不支持的部署服务商类型: ${value}`);
     return key;
 }
 
@@ -147,7 +147,7 @@ function createProviderPlaceholder(type, key) {
             if (provider.status === 'active' && provider.local) {
                 return { provider: provider.key, status: 'local-placeholder' };
             }
-            throw new Error(`${provider.interface} ${provider.key} is a provider placeholder and has no adapter yet.`);
+            throw new Error(`${provider.interface} ${provider.key} 为预留服务商占位符，暂未接入适配器。`);
         }
     };
 }

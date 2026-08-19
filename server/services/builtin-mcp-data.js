@@ -111,7 +111,7 @@ function executeDataProcessingTool(_server, name, input = {}) {
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
         const groupBy = String(input.groupBy || input.group_by || '').trim();
         if (!groupBy) {
-            const err = new Error('groupBy is required.');
+            const err = new Error('分组字段 groupBy 不能为空。');
             err.status = 400;
             throw err;
         }
@@ -146,7 +146,7 @@ function executeDataProcessingTool(_server, name, input = {}) {
         }, {}));
         return { type: 'data_normalized_rows', rowCount: normalized.length, rows: normalized };
     }
-    throw new Error(`Unsupported data MCP tool: ${name}`);
+    throw new Error(`不支持的数据工具操作: ${name}`);
 }
 
 module.exports = {

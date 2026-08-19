@@ -88,7 +88,7 @@ async function getUserEnterpriseContext(userId) {
             permissions: await listResourcePermissions({ subjectType: 'user', subjectId: safeUserId })
         };
     } catch (err) {
-        logger.warn({ err: err.message, userId: safeUserId }, 'Enterprise context lookup failed');
+        logger.warn({ err: err.message, userId: safeUserId }, '查询企业多租户上下文失败');
         return { organizations: [], teams: [], permissions: [] };
     }
 }

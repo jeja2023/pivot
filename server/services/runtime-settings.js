@@ -2,8 +2,7 @@ const { execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
     getAppSettingRow,
-    refreshAppSettingsCache,
-    setAppSettingAsync
+    refreshAppSettingsCache
 } = require('./app-settings');
 const {
     RUNTIME_SETTING_DEFINITION_BY_KEY,

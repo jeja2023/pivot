@@ -387,7 +387,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const description = String(req.body?.description || '').trim();
         const config = normalizeExternalServerConfig(req.body || {});
         const shared = isSuperAdmin(req.user) && (req.body?.shared === true || req.body?.user_id === null);
-        if (!name || !baseUrl) return res.status(400).json({ error: 'Name and Base URL are required.' });
+        if (!name || !baseUrl) return res.status(400).json({ error: '服务名称和基础 URL 为必填项。' });
         await assertSafeMcpOutboundUrl(baseUrl, req.user);
         if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
         const now = getBeijingTimestamp();
@@ -603,8 +603,8 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
         const existing = await getAccessibleMcpServer(req.params.id, req.user);
-        if (existing && existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
-        if (existing && existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'MCP server is read-only for this user.' });
+        if (existing && existing.user_id === null && !isSuperAdmin(req.user)) return res.status(403).json({ error: '当前用户对该公共 MCP 服务仅具有只读权限。' });
+        if (existing && existing.user_id !== null && existing.user_id !== req.user.id && !isSuperAdmin(req.user)) return res.status(403).json({ error: '当前用户对该 MCP 服务仅具有只读权限。' });
         if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
         if (String(existing.base_url || '').startsWith('pivot-db://')) return res.status(400).json({ error: '服务器可访问数据库请使用对应表单编辑。' });
         if (getBuiltinServiceTypeFromUrl(existing.base_url)) return res.status(400).json({ error: '系统工具预设请使用对应的系统服务表单编辑。' });
@@ -851,7 +851,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.post('/mcp/tools/call', authMiddleware, asyncHandler(async (req, res) => {
         const name = String(req.body?.name || '').trim();
-        if (!name) return res.status(400).json({ error: 'Tool name is required.' });
+        if (!name) return res.status(400).json({ error: '工具名称为必填项。' });
         if (name.startsWith('mcp.')) {
             const cachedList = await listCachedMcpTools(null, req.user);
             const cached = cachedList.find(tool => tool.fullName === name);
@@ -921,7 +921,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             }
             if (method === 'resources/read') {
                 if (params?.uri === 'pivot://system/health') {
-                    if (!isSuperAdmin(req.user)) throw new Error('Only admin super administrator can read system health.');
+                    if (!isSuperAdmin(req.user)) throw new Error('仅系统超级管理员可查看系统健康状态。');
                     return sendJsonRpc(res, id, {
                         contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(getSystemHealthSnapshot(), null, 2) }]
                     });

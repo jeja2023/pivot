@@ -149,7 +149,7 @@
 
     function registerModule(name, api = {}) {
         const key = String(name || '').trim();
-        if (!key) throw new Error('Pivot.registerModule requires a module name');
+        if (!key) throw new Error('Pivot.registerModule 必须指定模块名称');
         modules[key] = api;
         return api;
     }
@@ -217,7 +217,7 @@
             };
             script.onerror = () => {
                 scriptLoadPromises.delete(key);
-                reject(new Error(`Failed to load script: ${rawSrc}`));
+                reject(new Error(`加载脚本失败: ${rawSrc}`));
             };
             if (!existing) {
                 script.src = nextSrc;

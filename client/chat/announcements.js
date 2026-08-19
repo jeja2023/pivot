@@ -357,7 +357,7 @@
         } catch (e) {
             state.loginItems = [];
             renderLoginAnnouncements();
-            console.warn('Load login announcements failed:', e);
+            console.warn('加载登录公告失败:', e);
         }
     }
 
@@ -368,7 +368,7 @@
             state.items = data.data || [];
             renderAnnouncements();
         } catch (e) {
-            console.warn('Load announcements failed:', e);
+            console.warn('加载活跃公告失败:', e);
         }
     }
 

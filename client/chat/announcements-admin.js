@@ -7,7 +7,7 @@
     const STATUS_LABELS = Ann.STATUS_LABELS || {};
     const esc = Ann.esc || (value => String(value ?? ''));
     const formatDate = Ann.formatDate || (value => String(value ?? ''));
-    const apiJson = Ann.apiJson || (async () => { throw new Error('Announcements core not loaded'); });
+    const apiJson = Ann.apiJson || (async () => { throw new Error('公告核心模块未加载'); });
     const loadActiveAnnouncements = Ann.loadActiveAnnouncements || (async () => {});
     const loadLoginAnnouncements = Ann.loadLoginAnnouncements || (async () => {});
     const getFormPayload = () => ({

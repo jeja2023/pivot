@@ -545,7 +545,7 @@ async function copyAppsText(text) {
     textArea.select();
     const success = document.execCommand('copy');
     textArea.remove();
-    if (!success) throw new Error('copy failed');
+    if (!success) throw new Error('复制内容失败');
 }
 
 function buildOfficialWritingPrompt() {

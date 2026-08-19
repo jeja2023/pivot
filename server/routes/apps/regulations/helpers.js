@@ -46,7 +46,7 @@ function cleanupTempUpload(file) {
     try {
         fs.rmSync(file.path, { force: true });
     } catch (_err) {
-        // ignore cleanup errors for temp files
+        // 忽略临时文件清理阶段的非致命错误
     }
 }
 

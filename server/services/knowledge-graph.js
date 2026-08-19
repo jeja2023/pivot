@@ -654,6 +654,7 @@ async function listRelations({ userId, user = null, entityId = null, relationTyp
         where.push('r.source_doc_id = ?');
         params.push(safeDocId);
     }
+    const whereSql = where.join(' AND ');
     const data = await query(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
                d.name AS doc_name, c.content AS chunk_text

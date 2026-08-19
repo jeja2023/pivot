@@ -10,7 +10,10 @@ const {
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
-    LEGACY_REFRESH_COOKIE_OPTIONS,
+    CLEAR_COOKIE_OPTIONS,
+    CLEAR_REFRESH_COOKIE_OPTIONS,
+    CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS,
+    CLEAR_CSRF_COOKIE_OPTIONS,
     generateCsrfToken,
     resolveAuthenticatedUser,
     hashRefreshToken
@@ -69,7 +72,7 @@ function createAuthRouter({
             
             // 设置两个 Cookie
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
-            res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+            res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
@@ -98,7 +101,7 @@ function createAuthRouter({
         try {
             const data = await refreshTokens(refreshToken);
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
-            res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+            res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
@@ -109,8 +112,8 @@ function createAuthRouter({
             });
             res.json({ success: true, csrfToken });
         } catch (e) {
-            res.clearCookie(AUTH_COOKIE_NAME, ACCESS_COOKIE_OPTIONS);
-            res.clearCookie(REFRESH_COOKIE_NAME, REFRESH_COOKIE_OPTIONS);
+            res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+            res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
             res.status(401).json({ error: e.message, code: 'REFRESH_TOKEN_INVALID' });
         }
     }));
@@ -140,10 +143,10 @@ function createAuthRouter({
             await execute('DELETE FROM refresh_tokens WHERE token = ?', [hashRefreshToken(refreshToken)]);
         }
 
-        res.clearCookie(AUTH_COOKIE_NAME, { ...ACCESS_COOKIE_OPTIONS, maxAge: 0 });
-        res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
-        res.clearCookie(REFRESH_COOKIE_NAME, { ...LEGACY_REFRESH_COOKIE_OPTIONS, maxAge: 0 });
-        res.clearCookie(CSRF_COOKIE_NAME, { sameSite: 'lax', path: '/', secure: process.env.COOKIE_SECURE === 'true', maxAge: 0 });
+        res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+        res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
+        res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
+        res.clearCookie(CSRF_COOKIE_NAME, CLEAR_CSRF_COOKIE_OPTIONS);
         res.json({ success: true });
     }));
 

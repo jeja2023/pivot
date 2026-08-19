@@ -78,20 +78,20 @@ function findEndOfCentralDirectory(buffer) {
 
 function readZipEntries(buffer) {
     const eocdOffset = findEndOfCentralDirectory(buffer);
-    if (eocdOffset < 0) throw new Error('Invalid ZIP file: central directory not found');
+    if (eocdOffset < 0) throw new Error('无效的 ZIP 文件：未找到中央目录区');
 
     const entryCount = buffer.readUInt16LE(eocdOffset + 10);
-    if (entryCount > MAX_ZIP_ENTRIES) throw new Error('ZIP file has too many entries');
+    if (entryCount > MAX_ZIP_ENTRIES) throw new Error('ZIP 压缩包条目数超出安全上限');
     let offset = buffer.readUInt32LE(eocdOffset + 16);
     const entries = new Map();
     let totalUncompressedSize = 0;
 
     for (let i = 0; i < entryCount; i += 1) {
         if (offset < 0 || offset + 46 > buffer.length) {
-            throw new Error('Invalid ZIP file: central directory entry is out of bounds');
+            throw new Error('无效的 ZIP 文件：中央目录条目超出数据边界');
         }
         if (buffer.readUInt32LE(offset) !== 0x02014b50) {
-            throw new Error('Invalid ZIP file: central directory entry is corrupt');
+            throw new Error('无效的 ZIP 文件：中央目录条目损坏');
         }
 
         const flags = buffer.readUInt16LE(offset + 8);
@@ -105,27 +105,27 @@ function readZipEntries(buffer) {
         const nameStart = offset + 46;
         const entryEnd = nameStart + fileNameLength + extraLength + commentLength;
         if (entryEnd > buffer.length || localHeaderOffset + 30 > buffer.length) {
-            throw new Error('Invalid ZIP file: entry metadata is out of bounds');
+            throw new Error('无效的 ZIP 文件：条目元数据超出边界');
         }
         if (compressedSize > buffer.length || uncompressedSize > MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES) {
-            throw new Error('ZIP entry is too large');
+            throw new Error('ZIP 压缩包单条目解压体积超出限制');
         }
         totalUncompressedSize += uncompressedSize;
         if (totalUncompressedSize > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES) {
-            throw new Error('ZIP file expands to too much data');
+            throw new Error('ZIP 压缩包总解压体积超出安全上限');
         }
         const encoding = flags & 0x0800 ? 'utf8' : 'latin1';
         const fileName = buffer.toString(encoding, nameStart, nameStart + fileNameLength).replace(/\\/g, '/');
 
         if (buffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
-            throw new Error(`Invalid ZIP file: local header missing for ${fileName}`);
+            throw new Error(`无效的 ZIP 文件：缺少本地文件头: ${fileName}`);
         }
 
         const localNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
         const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
         const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
         if (dataStart > buffer.length || dataStart + compressedSize > buffer.length) {
-            throw new Error(`Invalid ZIP file: compressed data is out of bounds for ${fileName}`);
+            throw new Error(`无效的 ZIP 文件：压缩数据超出范围: ${fileName}`);
         }
         const compressedData = buffer.subarray(dataStart, dataStart + compressedSize);
 
@@ -140,7 +140,7 @@ function readZipEntries(buffer) {
             data = Buffer.alloc(0);
         }
         if (data.length > MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES) {
-            throw new Error(`ZIP entry inflated beyond limit for ${fileName}`);
+            throw new Error(`ZIP 条目解压后超出限制: ${fileName}`);
         }
 
         entries.set(fileName, data);
@@ -188,7 +188,7 @@ function parseOleDirectoryName(entry) {
 }
 
 function readOleStreams(buffer) {
-    if (!isOleFile(buffer)) throw new Error('Invalid OLE compound document');
+    if (!isOleFile(buffer)) throw new Error('无效的 OLE 复合文档');
 
     const sectorShift = buffer.readUInt16LE(30);
     const miniSectorShift = buffer.readUInt16LE(32);
@@ -230,7 +230,7 @@ function readOleStreams(buffer) {
     }
 
     const directory = readSectorChain(buffer, fat, firstDirectorySector, sectorSize);
-    if (directory.length < 128) throw new Error('OLE directory stream is empty');
+    if (directory.length < 128) throw new Error('OLE 目录流为空');
 
     const entries = [];
     for (let offset = 0; offset + 128 <= directory.length; offset += 128) {
@@ -311,7 +311,7 @@ async function extractPdfText(filePath, options = {}) {
         }
     }
 
-    throw new Error('Unsupported pdf-parse export shape');
+    throw new Error('不支持的 pdf-parse 导出格式');
 }
 
 async function renderPdfPages(filePath, options = {}) {
@@ -360,7 +360,7 @@ async function extractDocxText(filePath) {
 
 async function extractWordText(filePath, options = {}) {
     if (options.password) {
-        const error = new Error('Password-protected Word documents are not supported by the current parser');
+        const error = new Error('当前解析器不支持带密码保护的 Word 文档');
         error.code = 'PASSWORD_UNSUPPORTED';
         throw error;
     }
@@ -500,7 +500,7 @@ function extractAsciiRuns(buffer, minChars = 4) {
 async function extractDocBinaryText(filePath) {
     const streams = readOleStreams(await fs.promises.readFile(filePath));
     const wordDocument = streams.get('WordDocument');
-    if (!wordDocument) throw new Error('WordDocument stream not found');
+    if (!wordDocument) throw new Error('未找到 WordDocument 数据流');
 
     const tableStream = streams.get('1Table') || streams.get('0Table');
     let text = '';
@@ -564,7 +564,7 @@ function decodeXlsNumber(value) {
 async function extractXlsBinaryText(filePath) {
     const streams = readOleStreams(await fs.promises.readFile(filePath));
     const workbook = streams.get('Workbook') || streams.get('Book');
-    if (!workbook) throw new Error('Workbook stream not found');
+    if (!workbook) throw new Error('未找到 Workbook 数据流');
 
     const sharedStrings = [];
     const rows = [];
@@ -608,7 +608,7 @@ async function extractXlsBinaryText(filePath) {
                 rows.push({ row, col, value });
             }
         } catch (err) {
-            // Ignore malformed records and keep extracting the rest of the workbook.
+            // 忽略损坏记录，继续抽取工作簿其余数据
         }
 
         offset = dataEnd;
@@ -669,7 +669,7 @@ async function extractDocumentText(filePath, mimeType = '', originalName = '', o
 
 function truncateExtractedText(text, maxLength = 200000) {
     if (!text || text.length <= maxLength) return text || '';
-    return `${text.slice(0, maxLength)}\n\n[Document content is too long and was truncated to the first ${maxLength} characters]`;
+    return `${text.slice(0, maxLength)}\n\n[文档内容过长，已截断并保留前 ${maxLength} 个字符]`;
 }
 
 module.exports = {

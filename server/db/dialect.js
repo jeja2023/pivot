@@ -72,7 +72,7 @@ function fullTextMatch(table, _queryParam = '?') {
 function upsertConflict(conflictCols = [], updateCols = []) {
     const conflicts = conflictCols.map(col => String(col || '').trim()).filter(Boolean);
     const updates = updateCols.map(col => String(col || '').trim()).filter(Boolean);
-    if (!conflicts.length) throw new Error('upsertConflict requires conflict columns.');
+    if (!conflicts.length) throw new Error('upsertConflict 必须指定冲突主键或唯一约束列。');
     if (!updates.length) return `ON CONFLICT(${conflicts.join(', ')}) DO NOTHING`;
     const assignments = updates.map(col => `${col} = excluded.${col}`).join(', ');
     return `ON CONFLICT(${conflicts.join(', ')}) DO UPDATE SET ${assignments}`;

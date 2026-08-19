@@ -1,6 +1,6 @@
 (function () {
     const ns = window.PivotRegulationsInternal;
-    if (!ns) throw new Error('Pivot regulations core is not loaded');
+    if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsReadyPromise || (ns.actionsCoreReady && ns.actionsImportReady && ns.actionsAdvancedReady)) return;
     function loadScriptOnce(src) {
         if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
@@ -17,7 +17,7 @@
                 script.dataset.loaded = 'true';
                 resolve();
             };
-            script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+            script.onerror = () => reject(new Error(`加载法规脚本失败: ${src}`));
             if (!existing) {
                 script.src = src;
                 document.head.appendChild(script);

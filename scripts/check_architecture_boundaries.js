@@ -35,9 +35,9 @@ assert(exists('artifacts/release') || !exists('client/Pivot-Setup.exe'), 'releas
 ].forEach(relativePath => assert(exists(relativePath), relativePath + ' is missing after repository organization'));
 
 if (failures.length) {
-    console.error('Architecture boundary check failed:');
+    console.error('架构边界检查失败:');
     failures.forEach(message => console.error(' - ' + message));
     process.exit(1);
 }
 
-console.log('Architecture boundary check passed.');
+console.log('架构边界检查通过。');

@@ -99,7 +99,7 @@ function createAgentQueue({
               AND deleted_at IS NULL
         `, [lockExpiresAt(), now, now, runId, instanceId]);
         if (changes === 0) {
-            logger.warn({ runId, instanceId }, 'Agent run lock renewal skipped; lock owner or status changed');
+            logger.warn({ runId, instanceId }, '跳过智能体运行锁续期：持锁者或状态已变更');
         }
         return changes;
     }
@@ -116,7 +116,7 @@ function createAgentQueue({
             try {
                 await renewRunLock(runId);
             } catch (err) {
-                logger.warn({ err: err.message, runId }, 'Agent run lock renewal failed');
+                logger.warn({ err: err.message, runId }, '智能体运行锁续期失败');
             }
         }, lockRenewIntervalMs);
         timer.unref?.();
@@ -156,7 +156,7 @@ function createAgentQueue({
                 startLockRenewal(runId);
                 queuedHints.delete(runId);
                 runAgent(runId, user).catch(async err => {
-                    logger.error({ err: err.message, runId }, 'Agent run failed while protected by runtime lock');
+                    logger.error({ err: err.message, runId }, '智能体运行在运行时锁保护下发生异常');
                     await markRunError(runId, err.message);
                 }).finally(async () => {
                     activeRunIds.delete(runId);

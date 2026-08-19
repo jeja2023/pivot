@@ -277,4 +277,4 @@ if (!fencedThenTail.includes('code-block-wrap') || !fencedThenTail.includes('Tai
 const tableHtml = markdownSandbox.renderMarkdown('| A | B |\n| - | - |\n| 1 | 2 |');
 if (!tableHtml.includes('table-wrapper')) fail('rendered Markdown tables should use the local scroll wrapper');
 
-console.log(`Chat asset check passed (${partialFiles.length} partials, ${imports.length} style imports).`);
+console.log(`前端静态资源检查通过（${partialFiles.length} 个模板片段，${imports.length} 个样式导入）。`);

@@ -40,29 +40,29 @@ function assertHttpUpdatePolicy(url, options = {}) {
         && isLoopbackUpdateUrl(url);
 
     if (!allowConfiguredHttp && !allowLoopbackDevHttp) {
-        throw new Error('config.autoUpdate.url must use https unless config.autoUpdate.allowInsecureHttp=true or explicit loopback dev feeds are enabled.');
+        throw new Error('自动更新 URL 必须使用 HTTPS 协议，除非显式配置 allowInsecureHttp=true 或启用本地回环开发源。');
     }
     if (allowConfiguredHttp && !isLoopbackUpdateUrl(url) && allowedOrigins.length === 0) {
-        throw new Error('config.autoUpdate.allowedOrigins is required when config.autoUpdate.allowInsecureHttp=true for non-loopback http feeds.');
+        throw new Error('当对非回环地址启用 allowInsecureHttp=true 时，必须配置 allowedOrigins 来源白名单。');
     }
 }
 
 function normalizeUpdateFeedUrl(value, options = {}) {
     const raw = String(value || '').trim();
     if (!raw) {
-        if (options.required) throw new Error('config.autoUpdate.url is required.');
+        if (options.required) throw new Error('自动更新配置缺少必需的 url。');
         return '';
     }
 
     const url = new URL(raw);
     if (!['http:', 'https:'].includes(url.protocol)) {
-        throw new Error('config.autoUpdate.url must use http or https.');
+        throw new Error('自动更新 url 必须使用 http 或 https 协议。');
     }
 
     assertHttpUpdatePolicy(url, options);
 
     if (!isOriginAllowed(url, options.allowedOrigins)) {
-        throw new Error('config.autoUpdate.url origin is not in config.autoUpdate.allowedOrigins.');
+        throw new Error('自动更新 url 源地址未在 allowedOrigins 允许列表中。');
     }
 
     url.hash = '';

@@ -57,8 +57,8 @@ function createSseResponseWriter(res, options = {}) {
             res.write(chunk);
             lastActivityAt = Date.now();
             if (options.flush !== false) res.flush?.();
-            // Node.js response.write(false) means backpressure, not a broken connection.
-            // Keep the client registered; writableNeedDrain suppresses idle heartbeats.
+            // Node.js response.write 返回 false 表示背压排队，而非连接断开
+            // 保持客户端注册状态；writableNeedDrain 会抑制空闲心跳
             return true;
         } catch (error) {
             cleanup();

@@ -124,7 +124,7 @@ function isLoopbackHost(hostname) {
 // 校验主机名（含 DNS 解析后的 IP）不指向 loopback / link-local / 云元数据等敏感目标。
 // 不拦截普通局域网（RFC1918）地址，便于本机/内网模型与 MCP 服务接入。
 function buildUnsafeOutboundError() {
-    return new Error('Outbound URL points to a sensitive local, link-local, or metadata target.');
+    return new Error('出站 URL 指向敏感的本地、链路本地或云元数据地址。');
 }
 
 function assertSafeResolvedAddress(hostname, address, options = {}) {
@@ -201,7 +201,7 @@ async function assertSafeOutboundHost(hostname, options = {}) {
             allowExplicitLoopback
         }));
     } catch (e) {
-        throw new Error('Outbound URL resolves to a sensitive local, link-local, or metadata target.');
+        throw new Error('出站 URL 解析到敏感的本地、链路本地或云元数据地址。');
     }
 }
 
@@ -234,7 +234,7 @@ async function assertSafeMcpOutboundUrl(rawUrl, user = null) {
     const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MCP_URLS !== 'false' && isAdmin(user);
     const allowExplicitLoopback = allowPrivateForAdmin && isLoopbackHost(parsed.hostname);
     if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
-        throw new Error('Non-admin users cannot configure private or local MCP endpoints.');
+        throw new Error('非管理员用户不可配置私有或本地 MCP 服务端点。');
     }
     await assertSafeOutboundHost(parsed.hostname, {
         blockPrivate: !allowPrivateForAdmin,
@@ -255,22 +255,22 @@ function validateModelUrl(rawUrl, user) {
     try {
         parsed = new URL(String(rawUrl || '').trim());
     } catch (e) {
-        throw new Error('Model endpoint URL is invalid.');
+        throw new Error('模型端点 URL 地址格式非法。');
     }
 
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-        throw new Error('Model endpoint URL must use HTTP or HTTPS.');
+        throw new Error('模型端点 URL 必须使用 HTTP 或 HTTPS 协议。');
     }
     if (parsed.username || parsed.password) {
-        throw new Error('Model endpoint URL must not include username or password.');
+        throw new Error('模型端点 URL 不得包含用户名或密码凭据。');
     }
     if (!hostAllowedByList(parsed.hostname)) {
-        throw new Error('Model endpoint host is not in the allowlist.');
+        throw new Error('模型端点主机未在允许白名单中。');
     }
 
     const allowPrivateForAdmin = process.env.ALLOW_PRIVATE_MODEL_URLS !== 'false' && isAdmin(user);
     if (isPrivateHost(parsed.hostname) && !allowPrivateForAdmin) {
-        throw new Error('Non-admin users cannot configure private or local model endpoints.');
+        throw new Error('非管理员用户不可配置私有或本地模型端点。');
     }
 
     return parsed;
@@ -281,18 +281,18 @@ function validateMcpEndpointUrl(rawUrl) {
     try {
         parsed = new URL(String(rawUrl || '').trim());
     } catch (e) {
-        const err = new Error('MCP endpoint URL is invalid.');
+        const err = new Error('MCP 服务端点 URL 格式非法。');
         err.status = 400;
         throw err;
     }
 
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-        const err = new Error('MCP endpoint URL must use HTTP or HTTPS.');
+        const err = new Error('MCP 服务端点 URL 必须使用 HTTP 或 HTTPS 协议。');
         err.status = 400;
         throw err;
     }
     if (parsed.username || parsed.password) {
-        const err = new Error('MCP endpoint URL must not include username or password.');
+        const err = new Error('MCP 服务端点 URL 不得包含用户名或密码凭据。');
         err.status = 400;
         throw err;
     }

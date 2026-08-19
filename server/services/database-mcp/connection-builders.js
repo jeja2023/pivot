@@ -25,7 +25,7 @@ function resolveSafeSqlitePath(databaseName) {
     const target = path.resolve(String(databaseName || ''));
     const insideRoot = allowedSqliteRoots().some(root => target === root || target.startsWith(root + path.sep));
     if (!insideRoot) {
-        throw new Error('SQLite file must be inside MCP_SQLITE_ROOTS or the application data directory.');
+        throw new Error('SQLite 数据库文件必须位于 MCP_SQLITE_ROOTS 配置目录或应用数据目录内。');
     }
     return target;
 }

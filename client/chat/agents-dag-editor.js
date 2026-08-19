@@ -828,7 +828,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             syncFromJson: () => {
                 const parsed = readJson(textarea ? textarea.value : '');
                 if (!parsed) {
-                    if (typeof onChange === 'function') onChange({ error: 'invalid_json' });
+                    if (typeof onChange === 'function') onChange({ error: 'JSON 格式解析失败' });
                     return false;
                 }
                 spec = ensureDefaults(parsed);

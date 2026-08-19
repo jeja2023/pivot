@@ -35,7 +35,7 @@ async function normalizeUploadedImage(inputPath, outputPath) {
     const limits = getRuntimeImageLimits();
     const stats = await fs.promises.stat(inputPath);
     if (stats.size > limits.uploadMaxBytes) {
-        const err = new Error(`Image file is too large. Maximum is ${bytesToMb(limits.uploadMaxBytes)}MB.`);
+        const err = new Error(`图片文件过大，最大限制为 ${bytesToMb(limits.uploadMaxBytes)}MB。`);
         err.status = 413;
         throw err;
     }
@@ -48,7 +48,7 @@ async function normalizeUploadedImage(inputPath, outputPath) {
     const metadata = await image.metadata();
     const pixels = Number(metadata.width || 0) * Number(metadata.height || 0);
     if (!metadata.width || !metadata.height || pixels > MAX_IMAGE_INPUT_PIXELS) {
-        const err = new Error('Image dimensions are too large.');
+        const err = new Error('图片分辨率尺寸超出安全上限。');
         err.status = 413;
         throw err;
     }
@@ -76,7 +76,7 @@ async function normalizeUploadedImage(inputPath, outputPath) {
     }
 
     if (outputInfo && outputInfo.size > MAX_IMAGE_OUTPUT_BYTES) {
-        const err = new Error(`Compressed image is too large. Maximum is ${Math.round(MAX_IMAGE_OUTPUT_BYTES / 1024 / 1024)}MB.`);
+        const err = new Error(`压缩后的图片过大，最大限制为 ${Math.round(MAX_IMAGE_OUTPUT_BYTES / 1024 / 1024)}MB。`);
         err.status = 413;
         throw err;
     }

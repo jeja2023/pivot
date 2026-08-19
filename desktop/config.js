@@ -124,7 +124,7 @@ function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.
 function normalizeUpdatePath(value) {
     const raw = String(value || DEFAULT_AUTO_UPDATE.path).trim() || DEFAULT_AUTO_UPDATE.path;
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
-        throw new Error('config.autoUpdate.path must be a URL path, not a full URL.');
+        throw new Error('config.autoUpdate.path 必须为 URL 相对路径，而非完整 URL。');
     }
     return raw.startsWith('/') ? raw : '/' + raw;
 }

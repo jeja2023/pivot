@@ -44,14 +44,14 @@ function recordApiCallLog(req, modelCfg, messages, data = {}) {
 function normalizeEmbeddingInputItem(item) {
     if (typeof item === 'string') {
         const text = item.trim();
-        if (!text) throw new Error('input contains an empty string.');
+        if (!text) throw new Error('输入包含空字符串。');
         return text;
     }
     if (Array.isArray(item) && item.every(value => Number.isInteger(value))) {
-        if (item.length === 0) throw new Error('input contains an empty token array.');
+        if (item.length === 0) throw new Error('输入包含空的 Token 数组。');
         return item.join(' ');
     }
-    throw new Error('input must be a string, an array of strings, or token arrays.');
+    throw new Error('输入必须为字符串、字符串数组或 Token 数组。');
 }
 
 function normalizeEmbeddingInputs(input) {
@@ -60,13 +60,13 @@ function normalizeEmbeddingInputs(input) {
         : [normalizeEmbeddingInputItem(input)];
 
     if (inputs.length === 0) {
-        throw new Error('input must not be empty.');
+        throw new Error('输入内容不能为空。');
     }
     if (inputs.length > 128) {
-        throw new Error('input array is too large; maximum is 128 items.');
+        throw new Error('输入数组长度超限，最多支持 128 项。');
     }
     if (inputs.some(text => text.length > 100000)) {
-        throw new Error('input item is too large; maximum is 100000 characters.');
+        throw new Error('单项输入文本过长，最多支持 100000 字符。');
     }
     return inputs;
 }

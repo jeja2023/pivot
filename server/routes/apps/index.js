@@ -112,9 +112,9 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
     }
 
     if (modelCfg.daily_token_limit > 0) {
-        const usedToday = getModelDailyUsage(userId, modelCfg.id);
+        const usedToday = await getModelDailyUsageAsync(userId, modelCfg.id);
         if (usedToday >= modelCfg.daily_token_limit) {
-            return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
+            return res.status(429).json({ error: { message: '今日模型调用额度已用尽。', type: 'insufficient_quota' } });
         }
     }
 
@@ -615,9 +615,9 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
         // 配额检查。
         if (modelCfg.daily_token_limit > 0) {
-            const usedToday = getModelDailyUsage(userId, modelCfg.id);
+            const usedToday = await getModelDailyUsageAsync(userId, modelCfg.id);
             if (usedToday >= modelCfg.daily_token_limit) {
-                return res.status(429).json({ error: { message: 'Quota exceeded.', type: 'insufficient_quota' } });
+                return res.status(429).json({ error: { message: '今日模型调用额度已用尽。', type: 'insufficient_quota' } });
             }
         }
 

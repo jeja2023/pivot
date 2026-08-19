@@ -77,7 +77,7 @@ function listReportTools() {
 async function resolveReportFile(config, fileRef) {
     const raw = String(fileRef || '').trim();
     if (!raw) {
-        const err = new Error('Report file path is required.');
+        const err = new Error('报表文件路径为必填项。');
         err.status = 400;
         throw err;
     }
@@ -105,13 +105,13 @@ async function resolveReportFile(config, fileRef) {
             throw err;
         }
         if (stat.size > config.maxFileMb * 1024 * 1024) {
-            const err = new Error(`File exceeds configured max size of ${config.maxFileMb} MB.`);
+            const err = new Error(`文件大小超出配置的最大限制 ${config.maxFileMb} MB。`);
             err.status = 413;
             throw err;
         }
         return { root, target, relative: path.relative(root, target), ext, size: stat.size, updatedAt: stat.mtime.toISOString() };
     }
-    const err = new Error('Report file was not found under configured directories.');
+    const err = new Error('在已配置的报表目录中未找到指定文件。');
     err.status = 404;
     throw err;
 }
@@ -212,7 +212,7 @@ function matchesReportFilters(row, filters) {
 async function queryReportTable(config, input = {}) {
     const file = await resolveReportFile(config, input.path);
     if (!['csv', 'xls', 'xlsx'].includes(file.ext)) {
-        const err = new Error('reports.query_table supports CSV/XLS/XLSX files only.');
+        const err = new Error('reports.query_table 仅支持 CSV、XLS、XLSX 格式文件。');
         err.status = 400;
         throw err;
     }
@@ -295,7 +295,7 @@ async function executeReportConfigTool(config, name, input = {}) {
             onlyRightColumns: (right.columns || []).filter(col => !(left.columns || []).includes(col))
         };
     }
-    throw new Error(`Unsupported reports MCP tool: ${name}`);
+    throw new Error(`不支持的报表工具操作: ${name}`);
 }
 
 async function executeReportTool(server, name, input = {}) {

@@ -63,14 +63,14 @@ for (const file of walk(clientRoot)) {
 }
 
 if (findings.length === 0) {
-    console.log('Safe HTML scan passed: no raw HTML sinks outside PivotSafeHtml.');
+    console.log('安全 HTML 扫描通过：未发现 PivotSafeHtml 外部的裸 HTML 注入风险。');
     process.exit(0);
 }
 
-console.error(`Safe HTML scan failed: ${findings.length} raw HTML sink(s) found.`);
+console.error(`安全 HTML 扫描失败：发现 ${findings.length} 处未受保护的 HTML 赋值。`);
 findings.slice(0, 30).forEach(item => {
     console.error(` - ${item.file}:${item.line} ${item.text}`);
 });
 if (findings.length > 30) console.error(` - ... ${findings.length - 30} more`);
-console.error('Use PivotSafeHtml.setHtml(element, html), DOMPurify inside PivotSafeHtml, or DOM node builders.');
+console.error('请使用 PivotSafeHtml.setHtml(element, html) 或 DOM 构建器。');
 if (!reportOnly) process.exit(1);

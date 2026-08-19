@@ -8,14 +8,14 @@ function clampLimit(value, fallback = 100, max = 1000) {
 
 function assertReadonlySql(sql) {
     const text = String(sql || '').trim();
-    if (!text) throw new Error('SQL is required.');
+    if (!text) throw new Error('SQL 语句不能为空。');
     const withoutTrailingSemicolon = text.replace(/;\s*$/, '');
-    if (withoutTrailingSemicolon.includes(';')) throw new Error('Only one SQL statement is allowed.');
+    if (withoutTrailingSemicolon.includes(';')) throw new Error('仅允许执行单条 SQL 语句。');
     if (!/^(select|with|show|describe|desc|explain)\b/i.test(withoutTrailingSemicolon)) {
-        throw new Error('Only readonly SQL is allowed.');
+        throw new Error('仅允许执行只读 SQL 查询语句。');
     }
     if (/\b(insert|update|delete|drop|alter|create|truncate|merge|grant|revoke|replace|vacuum|attach|detach|copy|call|execute)\b/i.test(withoutTrailingSemicolon)) {
-        throw new Error('SQL contains a blocked write or administrative keyword.');
+        throw new Error('SQL 包含被禁止的写入或管理操作关键字。');
     }
     return withoutTrailingSemicolon;
 }
@@ -38,14 +38,14 @@ function assertSafeIdentifier(value) {
 
 function quoteIdentifier(identifier, quote = '"') {
     const value = String(identifier || '').trim();
-    if (!value) throw new Error('Identifier is required.');
+    if (!value) throw new Error('标识符不能为空。');
     assertSafeIdentifier(value);
     return `${quote}${value.replace(new RegExp(quote, 'g'), quote + quote)}${quote}`;
 }
 
 function quoteSqlIdentifierPart(identifier, dialect) {
     const value = String(identifier || '').trim();
-    if (!value) throw new Error('Identifier is required.');
+    if (!value) throw new Error('标识符不能为空。');
     assertSafeIdentifier(value);
     if (dialect === 'mysql') return `\`${value.replace(/`/g, '``')}\``;
     if (dialect === 'sqlserver') return `[${value.replace(/]/g, ']]')}]`;
@@ -62,16 +62,16 @@ function quoteSqlIdentifier(identifier, dialect) {
 function buildQualifiedTableName({ schema = '', table = '', dialect = 'postgres' }) {
     const cleanTable = String(table || '').trim();
     const cleanSchema = String(schema || '').trim();
-    if (!cleanTable) throw new Error('table is required.');
+    if (!cleanTable) throw new Error('数据表名称不能为空。');
     if (!cleanSchema || dialect === 'sqlite') return quoteSqlIdentifier(cleanTable, dialect);
     return `${quoteSqlIdentifier(cleanSchema, dialect)}.${quoteSqlIdentifier(cleanTable, dialect)}`;
 }
 
 function normalizeSqlAlias(value, fallback) {
     const alias = String(value || fallback || '').trim();
-    if (!alias) throw new Error('Alias is required.');
+    if (!alias) throw new Error('别名不能为空。');
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(alias)) {
-        const err = new Error('Alias must start with a letter or underscore and contain only letters, numbers, and underscores.');
+        const err = new Error('别名必须以字母或下划线开头，且仅包含字母、数字和下划线。');
         err.status = 400;
         throw err;
     }
@@ -86,8 +86,8 @@ function defaultSqlAlias(value, fallback) {
 function buildGroupCountSql(input = {}, dialect = 'postgres', fallbackSchema = '') {
     const table = String(input.table || '').trim();
     const groupBy = String(input.groupBy || input.group_by || '').trim();
-    if (!table) throw new Error('table is required.');
-    if (!groupBy) throw new Error('groupBy is required.');
+    if (!table) throw new Error('数据表名称不能为空。');
+    if (!groupBy) throw new Error('分组字段 groupBy 不能为空。');
     const limit = clampLimit(input.limit, 100);
     const schema = String(input.schema || fallbackSchema || '').trim();
     const countAlias = normalizeSqlAlias(input.countAlias || input.count_alias, 'count');

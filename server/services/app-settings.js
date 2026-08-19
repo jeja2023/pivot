@@ -1,7 +1,7 @@
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 
-// In-memory cache for fast synchronous reads across hot paths
+// 内存缓存：用于高频热路径的快速同步读取
 const settingsCache = new Map();
 let cacheLoaded = false;
 let cacheLoadingPromise = null;
@@ -15,7 +15,7 @@ async function refreshAppSettingsCache() {
         });
         cacheLoaded = true;
     } catch (e) {
-        // Table may not exist yet during initialization
+        // 系统初始化阶段表结构可能尚未就绪
     }
 }
 
@@ -27,7 +27,7 @@ function ensureCacheLoaded() {
     }
 }
 
-// Initial cache population trigger
+// 初始缓存加载触发器
 ensureCacheLoaded();
 
 function getAppSettingRow(key) {

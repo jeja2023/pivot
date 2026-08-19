@@ -267,7 +267,7 @@ async function deleteAgentSchedule(scheduleId, user) {
 }
 
 function ensureCreateAgentRun() {
-    if (typeof createAgentRunCallback !== 'function') throw new Error('Agent schedule runtime is not configured.');
+    if (typeof createAgentRunCallback !== 'function') throw new Error('智能体定时调度运行时未完成配置。');
     return createAgentRunCallback;
 }
 

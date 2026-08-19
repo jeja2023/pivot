@@ -231,7 +231,7 @@ function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
         if (articles.length) return articles;
     }
 
-    // Fallback to the RAG legal chunker only when local structure parsing fails.
+    // 仅当本地结构解析失败时回退到 RAG 法律分块器
     if (strategy === 'article') {
         try {
             const chunkSize = getChunkSizeForDocType('legal', 600);
@@ -244,7 +244,7 @@ function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
             const articles = articlesFromLegalChunks(Array.isArray(chunks) ? chunks : []);
             if (articles.length) return articles;
         } catch (_err) {
-            // Fall through to whole-document fallback.
+            // 回退到全篇文档保底处理
         }
     }
 

@@ -2,7 +2,7 @@ const { writeTextToClipboard } = window.chatDialogHelpers || {};
 window.copyMsg = async (btn) => {
     try {
         const body = btn.closest('.message-content')?.querySelector('.text-body');
-        if (!body) throw new Error('Message body not found');
+        if (!body) throw new Error('未找到消息正文');
         const temp = body.cloneNode(true);
         temp.querySelectorAll('.code-toolbar, .thought-summary').forEach(el => el.remove());
         const text = temp.innerText.trim();
@@ -10,7 +10,7 @@ window.copyMsg = async (btn) => {
         await writeTextToClipboard(text);
         showToast('内容已复制');
     } catch (e) {
-        console.error('Copy message failed:', e);
+        console.error('复制消息失败:', e);
         showToast('复制失败，请手动选择内容复制', 'error');
     }
 };

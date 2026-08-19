@@ -859,7 +859,7 @@ window.fetchEmbeddingModels = async () => {
         showToast(`成功获取 ${data.models.length} 个向量模型`, 'success');
     } catch (e) {
         showToast(e.message || '获取向量模型列表失败', 'error');
-        console.error('Fetch error:', e);
+        console.error('获取向量模型列表失败:', e);
     } finally {
         if (fetchBtn) fetchBtn.disabled = false;
     }
@@ -1012,7 +1012,7 @@ window.testEmbeddingConnection = async () => {
         }
     } catch (e) {
         showToast(e.message, 'error');
-        console.error('Test connection error:', e);
+        console.error('测试连接失败:', e);
     } finally {
         if (testBtn) testBtn.disabled = false;
     }

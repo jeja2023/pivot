@@ -20,7 +20,7 @@ function safeJson(value) {
     try {
         return JSON.stringify(value === undefined ? null : value);
     } catch (e) {
-        return JSON.stringify({ error: 'details_not_serializable' });
+        return JSON.stringify({ error: '详情数据无法序列化' });
     }
 }
 

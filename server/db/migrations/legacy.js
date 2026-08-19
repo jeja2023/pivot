@@ -61,9 +61,8 @@ const previewApiKey = (key) => {
 
 function runMigrations() {
     ensureMigrationTable();
-    // Historical compatibility migrations stay idempotent because LAN deployments
-    // may upgrade from different SQLite snapshots. New schema changes should use
-    // runSchemaMigration(...) with a stable id instead of extending this block.
+    // 历史兼容性迁移保持幂等设计，便于局域网环境从不同历史快照平滑升级。
+    // 新增 Schema 变更应使用 runSchemaMigration(...) 搭配稳定 ID。
     ensureColumn('users', 'nickname', 'TEXT');
     ensureColumn('users', 'unit', 'TEXT');
     ensureColumn('users', 'default_model_id', 'INTEGER');

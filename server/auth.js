@@ -48,6 +48,29 @@ const LEGACY_REFRESH_COOKIE_OPTIONS = {
     maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
 };
 
+const CLEAR_COOKIE_OPTIONS = {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.COOKIE_SECURE === 'true'
+};
+
+const CLEAR_REFRESH_COOKIE_OPTIONS = {
+    ...CLEAR_COOKIE_OPTIONS,
+    path: '/api/auth'
+};
+
+const CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS = {
+    ...CLEAR_COOKIE_OPTIONS,
+    path: '/api/auth/refresh'
+};
+
+const CLEAR_CSRF_COOKIE_OPTIONS = {
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.COOKIE_SECURE === 'true'
+};
+
 class UserInputError extends Error {
     constructor(message) {
         super(message);
@@ -108,7 +131,7 @@ async function generateRefreshToken(userId) {
 async function rotateRefreshToken(tokenHash, userId) {
     const changes = await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
     if (changes !== 1) {
-        throw new Error('Refresh token has already been used. Please sign in again.');
+        throw new Error('刷新令牌已被使用或已失效，请重新登录。');
     }
     return await generateRefreshToken(userId);
 }
@@ -344,9 +367,13 @@ module.exports = {
     AUTH_COOKIE_NAME, 
     REFRESH_COOKIE_NAME,
     CSRF_COOKIE_NAME,
-    ACCESS_COOKIE_OPTIONS,
+    ACCESS_COOKIE_OPTIONS, 
     REFRESH_COOKIE_OPTIONS,
     LEGACY_REFRESH_COOKIE_OPTIONS,
+    CLEAR_COOKIE_OPTIONS,
+    CLEAR_REFRESH_COOKIE_OPTIONS,
+    CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS,
+    CLEAR_CSRF_COOKIE_OPTIONS,
     generateCsrfToken,
     csrfMiddleware,
     hashApiKey,

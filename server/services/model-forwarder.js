@@ -22,8 +22,8 @@ async function forwardChatCompletion({
     timeout = DEFAULT_FORWARD_TIMEOUT_MS,
     signal = null
 } = {}) {
-    if (!modelCfg) throw new Error('forwardChatCompletion: modelCfg is required');
-    if (!url) throw new Error('forwardChatCompletion: url is required');
+    if (!modelCfg) throw new Error('模型转发失败：缺少必需的 modelCfg 配置');
+    if (!url) throw new Error('模型转发失败：缺少必需的 url 地址');
     await assertSafeModelRuntimeUrl(modelCfg, url, user);
     assertJsonOnlyPayload(data);
     const agents = createSafeModelHttpAgents(modelCfg, user);

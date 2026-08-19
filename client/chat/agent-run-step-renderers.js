@@ -1,6 +1,6 @@
 // Agent 运行步骤渲染器 Agent run step renderers
 // Split from agent-run-renderers.js.
-// Agent run step previews and structured output renderers.
+// 智能体运行步骤预览与结构化输出渲染器
 /* eslint-disable no-undef */
 function agentStepStructuredSummary(value) {
     const structured = unwrapAgentStructuredPayload(value);

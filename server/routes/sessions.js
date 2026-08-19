@@ -647,7 +647,7 @@ function createSessionsRouter({
             .slice(0, 200);
         const operation = ['add', 'remove', 'replace'].includes(req.body?.operation) ? req.body.operation : 'replace';
         const nextTags = normalizeTagList(req.body?.tags);
-        if (sessionIds.length === 0) return res.status(400).json({ error: 'sessionIds required' });
+        if (sessionIds.length === 0) return res.status(400).json({ error: '缺少必需的 sessionIds 参数' });
 
         const placeholders = sessionIds.map(() => '?').join(', ');
         const rows = await query(`
@@ -655,7 +655,7 @@ function createSessionsRouter({
             FROM sessions
             WHERE user_id = ? AND deleted_at IS NULL AND id IN (${placeholders})
         `, [req.user.id, ...sessionIds]);
-        if (rows.length === 0) return res.status(404).json({ error: 'No matching sessions found' });
+        if (rows.length === 0) return res.status(404).json({ error: '未找到匹配的会话记录' });
 
         const now = getBeijingTimestamp();
         await transaction(async trx => {
@@ -671,7 +671,7 @@ function createSessionsRouter({
     router.post('/sessions/tags/rename', authMiddleware, asyncHandler(async (req, res) => {
         const fromTag = String(req.body?.fromTag || '').trim();
         const toTag = String(req.body?.toTag || '').trim();
-        if (!fromTag || !toTag) return res.status(400).json({ error: 'fromTag and toTag required' });
+        if (!fromTag || !toTag) return res.status(400).json({ error: '缺少必需的 fromTag 或 toTag 参数' });
         if (fromTag === toTag) return res.json({ success: true, affected: 0, fromTag, toTag });
 
         const rows = await query(`
@@ -694,7 +694,7 @@ function createSessionsRouter({
 
     router.post('/sessions/tags/remove', authMiddleware, asyncHandler(async (req, res) => {
         const tag = String(req.body?.tag || '').trim();
-        if (!tag) return res.status(400).json({ error: 'tag required' });
+        if (!tag) return res.status(400).json({ error: '缺少必需的 tag 标签参数' });
         const rows = await query(`
             SELECT id, tags
             FROM sessions
