@@ -24,6 +24,9 @@
   - 在 `server/rag.js` 中全面激活 `auditRagAction` 与 `enqueueAuditLog`，完整覆盖知识库文档上传/启停/删除/批量重建/重试、知识集合管理与共享授权、标签管理、向量测试、召回反馈以及知识图谱实体/关系维护的全流程审计日志。
 - **会话列表长标题与完整日期防重叠布局 (Sidebar Long Title & Full Date Auto Layout)**：
   - 在 `client/chat/styles/base/sidebar.css` 中重构 `.session-side` 为自适应弹性宽度（`flex: 0 0 auto; min-width: 42px; max-width: 86px;`），使得长日期（如 `2026/08/19`）能够自适应展开，超长标题自动在剩余宽度中截断省略，两者互不遮挡。
+- **审计报表导出功能补齐 (Audit Report CSV Export)**：
+  - 在 `server/routes/admin-stats.js` 中新增 `/api/stats/report/export` 接口，支持按部门、用户、预设时间周期与自定义起止日期筛选，导出包含概况元数据、每日 Token 趋势、用户消耗排行与部门消耗对比的结构化 CSV 报表，并记录操作审计日志。
+  - 在 `client/chat/partials/settings/report.html`、`client/chat/styles/stats-monitor/stats-report.css`、`client/chat/stats.js` 与 `client/chat/app/main.js` 中新增「导出报表」按钮、样式与事件绑定，通过 `Pivot.exposeModule` 安全暴露 `exportReport`。
 - **PostgreSQL 备份 pg_dump 自动探测与 Schema 范围保护 (PostgreSQL Backup Auto-Discovery & Schema Isolation)**：
   - 在 `server/services/maintenance.js` 中增强 `getPgDumpBin()`：未显式配置环境变量时，自动按常见安装路径（`C:\Program Files\PostgreSQL\18\bin\pg_dump.exe` 及 17/16/15 等）扫描定位 `pg_dump.exe`，避免 Windows 环境因未配置全局 PATH 导致的 `spawn pg_dump ENOENT` 报错。
   - 在备份参数中显式限定 `--schema=public`（可通过 `DB_BACKUP_SCHEMA` 配置），确保稳定备份系统业务库，不受测试环境临时 Schema 的权限干扰。

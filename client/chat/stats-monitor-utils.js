@@ -134,6 +134,7 @@ const ROUTE_NAME_MAP = {
     '/api/stats/details': '个人用量明细',
     '/api/stats/trend': '个人用量趋势',
     '/api/stats/report': '报表分析数据',
+    '/api/stats/report/export': '导出审计报表 CSV',
     '/api/stats/monitor-summary': '系统实时监控数据',
     '/api/stats/ops-summary': '运营后台汇总数据',
     

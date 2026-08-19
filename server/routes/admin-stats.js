@@ -613,6 +613,113 @@ function createAdminStatsRouter({
         res.json({ trend, byUser, byUnit, units });
     }));
 
+    router.get('/report/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const { unit, username, days = 30, start, end } = req.query;
+        const innerConditions = [];
+        const innerParams = [];
+        const outerConditions = [];
+        const outerParams = [];
+
+        let rangeDesc = '';
+        if (start || end) {
+            rangeDesc = `${start || '最早'} 至 ${end || '最新'}`;
+            const { conditions, params } = buildDateRangeConditions(
+                start ? `${String(start)} 00:00:00` : null,
+                end ? getBeijingDateExclusiveEnd(String(end)) : null
+            );
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
+        } else {
+            const safeDays = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
+            rangeDesc = `近 ${safeDays} 天`;
+            const { conditions, params } = buildDateRangeConditions(getBeijingDaysAgoStart(safeDays), null);
+            innerConditions.push(...conditions);
+            innerParams.push(...params);
+        }
+
+        if (unit) {
+            outerConditions.push('u.unit = ?');
+            outerParams.push(unit);
+        }
+        if (username) {
+            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
+            outerParams.push(`%${username}%`);
+        }
+
+        const innerWhere = innerConditions.join(' AND ');
+        const outerWhere = outerConditions.length ? `WHERE ${outerConditions.join(' AND ')}` : '';
+        const unionParams = [...innerParams, ...innerParams];
+        const dayExpr = dateGroupExpr('usage.created_at');
+
+        const trend = await query(
+            `SELECT ${dayExpr} as day, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY ${dayExpr} ORDER BY day`,
+            [...unionParams, ...outerParams]
+        );
+
+        const byUser = await query(
+            `SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY u.id, u.username, u.deleted_username, u.nickname, u.unit ORDER BY tokens DESC`,
+            [...unionParams, ...outerParams]
+        );
+
+        const byUnit = await query(
+            `SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
+             FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
+             ${outerWhere}
+             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC`,
+            [...unionParams, ...outerParams]
+        );
+
+        let csv = '\uFEFF';
+        csv += '# 审计报表导出汇总\n';
+        csv += `导出时间,${getBeijingTimestamp()}\n`;
+        csv += `统计范围,${rangeDesc}\n`;
+        csv += `部门筛选,${unit || '全部部门'}\n`;
+        csv += `用户筛选,${username || '全部用户'}\n\n`;
+
+        csv += '# 一、Token 每日使用趋势\n';
+        csv += '日期,Token消耗量\n';
+        trend.forEach(row => {
+            csv += `${escapeCsvCell(row.day)},${row.tokens || 0}\n`;
+        });
+        if (trend.length === 0) csv += '暂无数据,0\n';
+        csv += '\n';
+
+        csv += '# 二、用户消耗排行\n';
+        csv += '排名,用户名,显示名,部门,Token消耗量\n';
+        byUser.forEach((row, idx) => {
+            csv += [
+                idx + 1,
+                row.username,
+                row.nickname || row.username || '',
+                row.unit || '未分配',
+                row.tokens || 0
+            ].map(escapeCsvCell).join(',') + '\n';
+        });
+        if (byUser.length === 0) csv += '暂无数据,,,,0\n';
+        csv += '\n';
+
+        csv += '# 三、部门消耗对比\n';
+        csv += '部门,Token消耗量\n';
+        byUnit.forEach(row => {
+            csv += [
+                row.unit || '未分配',
+                row.tokens || 0
+            ].map(escapeCsvCell).join(',') + '\n';
+        });
+        if (byUnit.length === 0) csv += '暂无数据,0\n';
+
+        logAction(req, '导出审计报表', `导出范围: ${rangeDesc}, 部门: ${unit || '全部'}, 用户: ${username || '全部'}`);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=audit_report.csv');
+        res.send(csv);
+    }));
+
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
         if (canViewAll) {

@@ -58,7 +58,8 @@
     white-space: nowrap;
 }
 #report-query-btn,
-#report-reset-btn {
+#report-reset-btn,
+#report-export-btn {
     height: 32px !important;
     padding: 0 14px;
     font-size: 0.78rem;

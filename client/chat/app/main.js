@@ -278,6 +278,7 @@ bind('api-access-toggle', () => window.updateApiAccessSetting?.(), 'change');
 
 // 审计与导出
 bind('logs-export-btn', () => window.exportLogs());
+bind('report-export-btn', () => window.exportReport?.());
 bind('stats-export-btn', () => window.exportStats());
 bind('details-export-btn', () => window.exportDetails());
 

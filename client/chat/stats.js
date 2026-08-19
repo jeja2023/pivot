@@ -360,7 +360,31 @@ window.loadReport = async function() {
     } catch (e) {
         showToast('加载报表失败', 'error');
     }
+};
+
+function exportReport() {
+    window.bindReportDateFilters?.();
+    window.syncReportDateFilters?.();
+    const unit = document.getElementById('report-unit')?.value || '';
+    const username = document.getElementById('report-username')?.value || '';
+    const period = document.getElementById('report-days')?.value || '30';
+    const start = document.getElementById('report-start')?.value || '';
+    const end = document.getElementById('report-end')?.value || '';
+    const params = new URLSearchParams({ unit, username });
+    if (period === 'custom') {
+        if (!start || !end) return showToast('请选择自定义开始和结束日期', 'error');
+        if (start > end) return showToast('开始日期不能晚于结束日期', 'error');
+        params.set('start', start);
+        params.set('end', end);
+    } else {
+        params.set('days', period);
+    }
+    downloadFileByFetch(`${API_BASE}/stats/report/export?${params.toString()}`, 'audit_report.csv');
 }
+
+window.Pivot?.exposeModule?.('chat.stats', {
+    exportReport
+}, ['exportReport']);
 
 window.syncReportDateFilters = function() {
     const period = document.getElementById('report-days')?.value || '30';
