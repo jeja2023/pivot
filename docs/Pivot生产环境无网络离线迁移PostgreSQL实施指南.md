@@ -80,10 +80,12 @@
 
 ### 1. 数据库镜像拉取与插件离线包制作
 
-推荐直接拉取官方经过完整安全认证、已内置编译好 `vector` 与 `pg_trgm` 插件的官方镜像：
+`pgvector/pgvector:pg16` 是 pgvector 官方基于官方 `postgres:16` 镜像打包发布的**完整 PostgreSQL 16 数据库镜像**（内置预编译好了 `pgvector` 与 `pg_trgm` 扩展），**它本身就是一个完整的 PostgreSQL 数据库系统**，无需额外再下载 PostgreSQL。
+
+推荐直接拉取该官方镜像：
 
 ```bash
-# 1. 拉取包含 pgvector 的 PostgreSQL 16 生产镜像
+# 1. 拉取包含 pgvector 的完整 PostgreSQL 16 生产数据库镜像
 docker pull pgvector/pgvector:pg16
 
 # 2. 导出为离线 tar 镜像包
