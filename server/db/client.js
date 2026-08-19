@@ -18,11 +18,114 @@
 const { getPgPool } = require('./pg-connection');
 
 /**
- * 将 ? 占位符转换为 PostgreSQL 的 $1, $2, ... 格式
+ * 将普通 SQL 语境中的 ? 占位符转换为 PostgreSQL 的 $1, $2, ... 格式。
+ * 字符串、标识符、美元引用和注释中的问号必须原样保留。
  */
 function toPostgresParams(sql) {
-    let idx = 0;
-    return sql.replace(/\?/g, () => `$${++idx}`);
+    const source = String(sql);
+    let result = '';
+    let parameterIndex = 0;
+    let state = 'normal';
+    let dollarTag = '';
+    let blockCommentDepth = 0;
+
+    for (let index = 0; index < source.length; index += 1) {
+        const current = source[index];
+        const next = source[index + 1];
+
+        if (state === 'single-quote') {
+            result += current;
+            if (current === '\\' && next) {
+                result += next;
+                index += 1;
+            } else if (current === "'" && next === "'") {
+                result += next;
+                index += 1;
+            } else if (current === "'") {
+                state = 'normal';
+            }
+            continue;
+        }
+
+        if (state === 'double-quote') {
+            result += current;
+            if (current === '"' && next === '"') {
+                result += next;
+                index += 1;
+            } else if (current === '"') {
+                state = 'normal';
+            }
+            continue;
+        }
+
+        if (state === 'line-comment') {
+            result += current;
+            if (current === '\n' || current === '\r') state = 'normal';
+            continue;
+        }
+
+        if (state === 'block-comment') {
+            if (current === '/' && next === '*') {
+                result += '/*';
+                blockCommentDepth += 1;
+                index += 1;
+            } else if (current === '*' && next === '/') {
+                result += '*/';
+                blockCommentDepth -= 1;
+                index += 1;
+                if (blockCommentDepth === 0) state = 'normal';
+            } else {
+                result += current;
+            }
+            continue;
+        }
+
+        if (state === 'dollar-quote') {
+            if (source.startsWith(dollarTag, index)) {
+                result += dollarTag;
+                index += dollarTag.length - 1;
+                state = 'normal';
+                dollarTag = '';
+            } else {
+                result += current;
+            }
+            continue;
+        }
+
+        if (current === "'") {
+            result += current;
+            state = 'single-quote';
+        } else if (current === '"') {
+            result += current;
+            state = 'double-quote';
+        } else if (current === '-' && next === '-') {
+            result += '--';
+            state = 'line-comment';
+            index += 1;
+        } else if (current === '/' && next === '*') {
+            result += '/*';
+            state = 'block-comment';
+            blockCommentDepth = 1;
+            index += 1;
+        } else if (current === '$') {
+            const match = source.slice(index).match(/^(\$\$|\$[A-Za-z_][A-Za-z0-9_]*\$)/);
+            if (match) {
+                dollarTag = match[1];
+                result += dollarTag;
+                index += dollarTag.length - 1;
+                state = 'dollar-quote';
+            } else {
+                result += current;
+            }
+        } else if (current === '?') {
+            parameterIndex += 1;
+            result += `$${parameterIndex}`;
+        } else {
+            result += current;
+        }
+    }
+
+    return result;
 }
 
 /**

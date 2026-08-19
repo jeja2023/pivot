@@ -27,7 +27,7 @@ function createTriggersRouter({ triggerLimiter, logAction } = {}) {
         }
         let result = null;
         try {
-            result = dispatchWebhookTrigger(token, payload, { sourceIp: req.ip });
+            result = await dispatchWebhookTrigger(token, payload, { sourceIp: req.ip });
         } catch (err) {
             const status = Number(err.status) || 500;
             logger.warn({ err: err.message, sourceIp: req.ip }, '入站 Webhook 触发失败');

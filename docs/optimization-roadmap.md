@@ -29,6 +29,11 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.1.3 (2026-08-19) 完成 PostgreSQL 运维备份、E2E 环境隔离、异步生命周期等待、GPU 容错与跨平台启动优化：接入原生 `pg_dump` 自定义格式热备份引擎，支持超时、环境变量凭据隔离与按天数/版本轮转清理；PostgreSQL 参数占位符引入词法状态机；E2E 测试实现独立 Schema、随机端口与服务隔离；修复 Webhook 异步分发等待与 Electron 本地服务 `initPromise` 初始化等待；GPU 显存水位增加递增校验与安全回退；移除 Windows 专有 `chcp` 前缀支持跨平台/Docker 启动。新增 18 项专项回归，全量 Node 测试 476/476、`npm run check` 与 ESLint 100% 通过。
+- v0.1.2 (2026-08-19) 完成 PostgreSQL DDL 幂等与普通用户权限（42501）容错、请求日志真实用户身份提取、全栈中英文错误断言对齐与死代码精简。全量 Node 测试 472/472 100% 通过。
+- v0.1.1 (2026-08-19) 完成全系统工程全量中文化重构、控制台日志汉化美化、Cookie 与 401 轮询优化及代码质量闭环。453 个 JS 文件检查与 ESLint 0 错误 0 警告。
+- v0.1.0 (2026-08-18) 完成核心数据库纯 PostgreSQL 架构全面升级与全链路异步化、79 张表原生中文注释字典与生产级核验保障。
+- v0.0.269 (2026-08-18) 完成生产环境 PostgreSQL 双模式迁移全栈就绪、全链路数据访问层异步化改造与元数据字典注释系统。
 - v0.0.268 (2026-08-17) 完成聊天输入区能力聚合、文件夹上传与工具白名单精细化过滤：输入区操作栏统一收口至「+」悬浮菜单与二级抽屉式面板；附件支持整文件夹层级上传及输入框拖拽/剪贴板原生粘贴；知识库面板内置健康度检查与范围筛选；工具库支持模型自动选择与手动白名单勾选，前后端打通精确工具授权。Node 回归 467/467、ESLint 与 E2E 冒烟测试通过。
 - v0.0.259 (2026-08-09) 完善富文本校对节点的模型选择和输入输出契约：向导统一展示当前账号可用模型，明确处理无模型和失效模型状态；`records` 支持上游结构化结果、JSON 和模板变量，字段说明与数值边界完整；运行时兼容 `model`/`modelId`/`model_id`，报告标题贯通摘要与产物，输出 Schema 覆盖统计、逐条问题、产物和警告。全量 Node 452/452、`npm run check` 与 `npm run lint` 通过。
 - v0.0.258 (2026-08-08) 完成自动化工作流编辑、执行轮次和共享权限界面收口：资产中心可独立编辑工作流名称与简介，标准/深度/审查模式自动轮次统一为 30/60/50 并由前后端共同限制；工作流、工具库和知识库分享统一使用单位展开个人的目标树，单位联动个人、全选/全不选横向排列且保存时去除重复个人授权。新增共享目标树公共脚本、元数据测试和 CSS 优先级回归断言；全量 Node 447/447、安全智能体 52/52、Chat asset check 与 ESLint 通过。
@@ -88,9 +93,11 @@ This document records optimization work that is intentionally staged instead of 
 - Permission capability payloads now expose policy object types, data classification levels, and organization/team placeholders.
 - Deployment profile payloads describe SQLite WAL single-node defaults, provider contract status, and the Postgres/object-storage/distributed-queue/distributed-lock prerequisites for multi-node mode.
 - CI 使用 `npm run audit:policy` 拦截新增 high/critical 依赖告警；豁免必须登记理由与复查日期，到期自动失效，上游已有修复版本时一律不接受豁免（`tests/audit-policy.test.js` 覆盖该机制）。生产依赖当前无豁免项。
-- CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件）。
-- E2E smoke coverage has a runnable Playwright path through `npm run test:e2e`; `npm run check:e2e-smoke` keeps the E2E config, spec, dependency, and runner script present in lightweight checks.
+- CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件，476 项测试 100% 全部通过）。
+- E2E smoke coverage has a runnable Playwright path through `npm run test:e2e`；`npm run check:e2e-smoke` 保持脚手架检查。支持 `PIVOT_E2E_ISOLATED=true` 启用独立 PostgreSQL Schema、临时目录与随机端口隔离运行。
 - 内置工具库（Built-in MCP）的分发层、格式转换、数据处理与报表目录授权边界已有回归覆盖（`tests/security-builtin-mcp.test.js`），含路径穿越、非白名单扩展名与 CSV 编码断言。
+- 数据库持久化全面支持 PostgreSQL 生产级连接池、79 表元数据字典、参数占位符安全词法转换与原生 `pg_dump`（自定义格式、超时控制、环境变量凭据脱敏、版本/保留天数轮转）热备份体系。
+- 系统 GPU 显存监控具备严格的水位递增校验与安全默认值回退（`normalizeGpuThresholds`），确保动态 AI 并发削峰填谷稳定运行。
 
 ## Next Architecture Milestones
 
@@ -106,11 +113,11 @@ This document records optimization work that is intentionally staged instead of 
    - ⬜ 按集合的检索预设（法律、法规、公文、数据分析）未开始。
    - ⬜ 检索诊断尚未进入管理员可观测视图，目前仅在调试弹窗内可见。
 
-3. Enterprise persistence path — ⏸ 有意暂缓
-   - 判断依据：当前定位为私有化内网单机部署，SQLite WAL 足够支撑；在真正需要多节点前提前投入不划算。
-   - ⬜ 先实现持久化适配器，再引入 PostgreSQL 承载会话、审计日志、智能体运行与可观测事件。
-   - ⬜ 多节点部署前把上传与生成产物迁到对象存储适配器后面。
-   - ⬜ 启用多实例时，用分布式提供者替换进程内锁与队列。
+3. Enterprise persistence path — ✅ 已完成
+   - ✅ 生产环境全面升级至纯 PostgreSQL（PostgreSQL 14+/16+/17+），全链路 Repository 异步 Promise API 改造完成。
+   - ✅ 79 张核心业务表原生中文元数据注释字典（`server/db/schema/comments.js`）及 `pgvector` / `pg_trgm` 扩展安装支持。
+   - ✅ 原生 `pg_dump` 自定义格式热备份、超时控制、进程环境变量脱敏注入及按保留期与版本轮转清理完成。
+   - ⬜ 跨多节点集群部署时，引入对象存储适配器与分布式任务队列/锁提供者。
 
 4. Permission expansion — ⬜ 未开始
    - ⬜ 为模型、知识库集合、工具库服务与智能体工作流增加组织/团队归属表。

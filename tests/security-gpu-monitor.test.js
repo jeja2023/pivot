@@ -5,7 +5,7 @@ const Module = require('node:module');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadGpuMonitorHarness({ configuredMax = 2, initialMax = 2, execOutputs = [] } = {}) {
+function loadGpuMonitorHarness({ configuredMax = 2, initialMax = 2, execOutputs = [], env = {} } = {}) {
     const filename = path.resolve(__dirname, '../server/services/gpu-monitor.js');
     const source = fs.readFileSync(filename, 'utf8');
     const module = { exports: {} };
@@ -82,7 +82,8 @@ function loadGpuMonitorHarness({ configuredMax = 2, initialMax = 2, execOutputs 
                 GPU_VRAM_CRITICAL_THRESHOLD: '0.95',
                 GPU_VRAM_REJECT_THRESHOLD: '0.97',
                 GPU_VRAM_RECOVER_THRESHOLD: '0.8',
-                GPU_MONITOR_INTERVAL_MS: '15000'
+                GPU_MONITOR_INTERVAL_MS: '15000',
+                ...env
             }
         },
         setInterval(fn, delay) {
@@ -142,4 +143,20 @@ test('gpu monitor caps adaptive recovery at the saved global concurrency', async
     assert.equal(state.configuredMaxConcurrent, 2);
     assert.equal(state.maxConcurrentCap, 2);
     assert.equal(getMaxConcurrent(), 2);
+});
+
+test('gpu monitor falls back when configured threshold bands overlap', () => {
+    const { gpuMonitor } = loadGpuMonitorHarness({
+        env: {
+            GPU_VRAM_SAFE_THRESHOLD: '0.95',
+            GPU_VRAM_CRITICAL_THRESHOLD: '0.95',
+            GPU_VRAM_REJECT_THRESHOLD: '0.95'
+        }
+    });
+
+    const status = gpuMonitor.getGpuMonitorStatus();
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(status.thresholds)),
+        { safe: 0.85, critical: 0.95, reject: 0.97, recover: 0.9 }
+    );
 });

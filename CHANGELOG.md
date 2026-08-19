@@ -1,3 +1,36 @@
+## [v0.1.3] - 2026-08-19
+
+### PostgreSQL 运维备份与语法加固、E2E 环境隔离、Webhook 与 Electron 初始化异步等待修复、GPU 阈值容错与跨平台启动优化
+
+- **Webhook 异步触发等待修复 (Webhook Dispatch Await Fix)**：
+  - 修复 `server/routes/triggers.js` 中入站 Webhook 触发路由 `/workflow/:token` 缺少 `await` 的缺陷，在响应 HTTP 202 及记录操作审计前显式 `await dispatchWebhookTrigger(...)`。
+  - 确保工作流运行记录（`runId`）创建并进入调度队列后再返回结果，消除异步时序竞争与误报成功的风险。
+- **Electron 本地服务初始化等待修复 (Electron Local Server Init Lifecycle Fix)**：
+  - 修复 `desktop/main.js` 中桌面客户端在嵌入式启动本地 Node.js 后端时未等待异步初始化完成的问题。
+  - 引入 `desktop/local-server.js` 中的 `resolveInitializedServer` 辅助模块，显式 `await serverModule.initPromise`，保证在读取 HTTP 服务器实例与监听端口前完成 PostgreSQL 架构及底层连接初始化，杜绝启动阶段偶发的 `缺少 HTTP 服务器实例` 崩溃。
+- **PostgreSQL 参数占位符安全转换 (PostgreSQL Placeholder Lexical State Machine)**：
+  - 重构 `server/db/client.js` 中的 `toPostgresParams` 函数，构建完整的 SQL 词法状态机。
+  - 精确识别并跳过单引号文本（含转义与单引号自转义）、双引号标识符、单行注释（`--`）、块注释（`/* ... */` 及多层嵌套块注释）和 PostgreSQL Dollar 引用（`$$` 与 `$tag$`），仅在可执行 SQL 表达式中将 `?` 替换为 `$1, $2, ...`，彻底避免参数占位符误伤字符串或注释中的问号。
+- **E2E 独立 Schema、随机端口与服务隔离 (E2E Test Environment Isolation)**：
+  - 增强 `tests/e2e/playwright.config.js` 与 `scripts/run_e2e_tests.js`，支持 `PIVOT_E2E_ISOLATED=true`。
+  - 自动分配唯一的 PostgreSQL 独立测试 Schema（`pivot_e2e_*`）、临时数据隔离目录与空闲随机端口（`PIVOT_PORT=0`），禁用 `reuseExistingServer`，确保 Playwright E2E 测试环境与本地正在运行的开发或生产服务 100% 互不干扰，并在测试结束后自动执行 Schema 与临时目录的资源清理。
+- **PostgreSQL pg_dump 备份、超时与轮转清理 (PostgreSQL pg_dump Backup Engine & Retention)**：
+  - 重构 `server/services/maintenance.js` 与 `scripts/backup_db.js`，全面接入 PostgreSQL 原生 `pg_dump` 自定义格式（`--format=custom --no-owner --no-privileges`）备份引擎，替换旧单机 SQLite 备份逻辑。
+  - 引入 `PG_DUMP_BIN`、`PG_DUMP_TIMEOUT_MS`（默认 15 分钟）与安全环境变量隔离注入（基于 `DATABASE_URL` 解析提取 `PGHOST`、`PGPORT`、`PGDATABASE`、`PGUSER`、`PGPASSWORD` 与 SSL 参数，避免命令行参数泄露凭据）。
+  - 支持按保留天数（`DB_BACKUP_RETENTION_DAYS`）与版本数量（`DB_BACKUP_MAX_VERSIONS`）自动轮转清理 `pivot_backup_*.dump` 与历史备份文件，备份失败时自动清理无效文件并安全回滚。
+- **PostgreSQL ANALYZE 运维替代旧 SQLite VACUUM 配置 (PostgreSQL Maintenance Alignment)**：
+  - 清理 `server/services/maintenance.js` 中已废弃的 SQLite 增量清理配置 `getIncrementalVacuumPages`。
+  - 统一收敛为 PostgreSQL 推荐的 `ANALYZE` 统计信息采集与执行计划优化，消除历史遗留参数对运维监控的混淆。
+- **跨平台 npm 启动脚本修复 (Cross-Platform npm Scripts)**：
+  - 修复 `package.json` 中的 `start` 与 `dev` 脚本，移除专用于 Windows cmd 的 `chcp 65001 >nul &&` 前缀。
+  - 统一为标准且跨平台的 `node server/index.js` 和 `nodemon --ignore client server/index.js`，保证在 Linux、macOS 和 Docker 容器环境下的兼容性与开箱即用体验。
+- **GPU 显存阈值校验与安全默认值回退 (GPU VRAM Threshold Validation & Fallback)**：
+  - 在 `server/services/gpu-monitor.js` 中新增 `normalizeGpuThresholds`，严格校验显存警戒水位与恢复水位的递增约束关系（`safe < critical < reject` 且 `recover < reject`）。
+  - 当外部环境变量配置非法、乱序或超出范围（0~1）时输出友好中文告警日志并自动回退到安全的系统默认值（85% / 95% / 97% / 90%），防止 GPU 监控异常导致 AI 并发控制失效。
+- **专项回归测试闭环 (18 项专项测试 100% 通过，全量 476/476 项测试通过)**：
+  - 新增与扩展 `tests/triggers-route.test.js`、`tests/db-postgres-contracts.test.js`、`tests/security-gpu-monitor.test.js`、`tests/server-lifecycle.test.js` 等专项回归测试套件。
+  - 18 项专项测试全部通过，全量自动化测试套件通过数提升至 476/476（100% 通过，0 失败，0 告警）。
+
 ## [v0.1.2] - 2026-08-19
 
 ### PostgreSQL 生产就绪与启动权限容错强化、日志用户身份修复、全量测试套件 100% 通过与死代码精简

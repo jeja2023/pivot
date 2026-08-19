@@ -9,7 +9,23 @@ const {
     normalizeUpdateFeedUrl
 } = require('../desktop/update-policy');
 const { normalizeAutoUpdate, normalizeConfig, normalizeUpdatePath, resolveUpdateUrlFromRemote } = require('../desktop/config');
+const { resolveInitializedServer } = require('../desktop/local-server');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
+
+test('desktop local mode waits for server initialization before resolving', async () => {
+    let resolveInit;
+    const server = { listening: true };
+    const pending = resolveInitializedServer({
+        initPromise: new Promise(resolve => { resolveInit = resolve; })
+    });
+    let settled = false;
+    pending.finally(() => { settled = true; });
+
+    await Promise.resolve();
+    assert.equal(settled, false);
+    resolveInit({ server });
+    assert.equal(await pending, server);
+});
 
 test('desktop update policy requires https for remote feeds', () => {
     assert.equal(

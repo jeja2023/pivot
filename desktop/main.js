@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { loadDesktopConfig } = require('./config');
+const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 
@@ -278,8 +279,7 @@ function waitForServer(server) {
 async function startLocalServer() {
     await configureLocalEnvironment();
     const exported = require('../server/index.js');
-    pivotServer = exported.server;
-    if (!pivotServer) throw new Error('Pivot 服务启动失败：缺少 HTTP 服务器实例。');
+    pivotServer = await resolveInitializedServer(exported);
     const port = await waitForServer(pivotServer);
     return 'http://127.0.0.1:' + port + '/';
 }

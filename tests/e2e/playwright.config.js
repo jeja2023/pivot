@@ -13,7 +13,7 @@ module.exports = {
     webServer: process.env.PIVOT_E2E_SKIP_WEBSERVER === 'true' ? undefined : {
         command: 'npm run start',
         url: baseURL,
-        reuseExistingServer: true,
+        reuseExistingServer: process.env.PIVOT_E2E_ISOLATED !== 'true',
         timeout: 60_000
     }
 };

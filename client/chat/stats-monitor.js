@@ -143,7 +143,7 @@ window.loadMonitorSummary = async function(options = {}) {
                 ['API 日志清理', `${formatMaintenanceTime(maintenance.apiCallLogCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`],
                 ['令牌清理', `${formatMaintenanceTime(maintenance.refreshTokenCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`],
                 ['数据库备份', `${formatMaintenanceTime(maintenance.backup?.lastSuccessAt)} / ${formatBytes(maintenance.backup?.lastSizeBytes || 0)}`],
-                ['SQLite 优化', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
+                ['PostgreSQL 统计信息', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
             ].map(([label, value]) => `<div class="monitor-row">
                 <span>${escapeHtml(label)}</span>
                 <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>

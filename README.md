@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.2-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.3-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,7 +11,7 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.2
+## 最新版本：0.1.3
 
 （详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)）
 
@@ -342,39 +342,64 @@ AUDIT_LOG_RETENTION_DAYS=180
 API_CALL_LOG_RETENTION_DAYS=30
 STORAGE_GC_RETENTION_DAYS=30
 STORAGE_GC_BATCH_SIZE=100
-SQLITE_INCREMENTAL_VACUUM_PAGES=200
 DB_BACKUP_DIR=
 DB_BACKUP_RETENTION_DAYS=7
 DB_BACKUP_MAX_VERSIONS=7
+PG_DUMP_BIN=pg_dump
+PG_DUMP_TIMEOUT_MS=900000
 
 # 本机 GPU 动态保护，仅代表 Pivot 所在服务器
 GPU_MONITOR_INTERVAL_MS=15000
 GPU_CONCURRENT_MIN=1
 GPU_CONCURRENT_MAX=4
+GPU_VRAM_SAFE_THRESHOLD=0.85
+GPU_VRAM_CRITICAL_THRESHOLD=0.95
 GPU_VRAM_REJECT_THRESHOLD=0.97
+GPU_VRAM_RECOVER_THRESHOLD=0.90
 ```
 
-## 验证命令
+## 验证与运维命令
+
+代码规范与语法检查：
 
 ```bash
 npm run check
 npm run lint
-node tests/security.test.js
 ```
 
-完整验证：
+全量自动化测试（476 项测试）：
+
+```bash
+npm run test:all
+```
+
+完整流水线验证（包含检查、代码规范与全量测试）：
 
 ```bash
 npm run verify
+# 或直接运行
+npm test
 ```
 
-数据库初始化 smoke test：
+E2E 端到端隔离测试（Playwright，支持独立 Schema 与随机端口）：
+
+```bash
+npm run test:e2e
+```
+
+PostgreSQL 数据库热备份（基于 `pg_dump` 自定义格式，支持超时与版本轮转清理）：
+
+```bash
+npm run backup
+```
+
+数据库初始化验证：
 
 ```bash
 node -e "require('./server/db'); console.log('db init ok')"
 ```
 
-外部链路配置体检（默认只读 `.env` 和 SQLite 配置，不请求外部服务）：
+外部链路配置体检（默认只读 `.env` 配置，不请求外部服务）：
 
 ```bash
 npm run check:external
@@ -422,4 +447,4 @@ npm run check:external -- --live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.2
+**当前版本**：v0.1.3

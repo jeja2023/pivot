@@ -3,7 +3,25 @@ const test = require('node:test');
 
 const dialect = require('../server/db/dialect');
 const pgSchema = require('../server/db/schema/pg');
+const { toPostgresParams } = require('../server/db/client');
 const { normalizePgTimestamp } = require('../server/db/pg-connection');
+
+test('PostgreSQL placeholder conversion skips quoted text and comments', () => {
+    const sql = [
+        `SELECT ?, '?', "?", $$?$$, $body$?$body$`,
+        `FROM example -- ignored ?`,
+        `WHERE value = ? /* outer ? /* nested ? */ still ignored ? */ AND note = E'escaped \\'? text'`
+    ].join('\n');
+
+    assert.strictEqual(
+        toPostgresParams(sql),
+        [
+            `SELECT $1, '?', "?", $$?$$, $body$?$body$`,
+            `FROM example -- ignored ?`,
+            `WHERE value = $2 /* outer ? /* nested ? */ still ignored ? */ AND note = E'escaped \\'? text'`
+        ].join('\n')
+    );
+});
 
 test('dialect helpers produce valid PostgreSQL SQL expressions', () => {
     assert.strictEqual(dialect.nowExpr(), "now() AT TIME ZONE 'Asia/Shanghai'");

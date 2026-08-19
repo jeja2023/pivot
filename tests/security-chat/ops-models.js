@@ -449,7 +449,7 @@ test('维护任务会记录清理和优化状态', async () => {
         assert.ok(status.apiCallLogCleanup.lastSuccessAt);
         assert.ok(status.refreshTokenCleanup.lastSuccessAt);
         assert.ok(status.optimize.lastSuccessAt);
-        assert.equal(status.optimize.vacuumPages, 200);
+        assert.equal(status.optimize.operation, 'ANALYZE');
     } finally {
         db.prepare('DELETE FROM audit_logs WHERE action = ?').run(`MAINT_AUDIT_${suffix}`);
         db.prepare('DELETE FROM api_call_logs WHERE user_id = ?').run(userInfo.lastInsertRowid);
@@ -464,18 +464,26 @@ test('数据库备份任务创建热备份并清理旧版本', async () => {
     fs.mkdirSync(backupDir, { recursive: true });
     try {
         for (let i = 0; i < 3; i += 1) {
-            const oldPath = path.join(backupDir, `chat_backup_old_${i}.db`);
+            const oldPath = path.join(backupDir, `pivot_backup_old_${i}.dump`);
             fs.writeFileSync(oldPath, `old-${i}`);
             const oldTime = Date.now() - (10 + i) * 24 * 60 * 60 * 1000;
             fs.utimesSync(oldPath, oldTime / 1000, oldTime / 1000);
         }
 
-        const result = await backupDatabase({ backupDir, retentionDays: 7, maxVersions: 2 });
-        assert.deepEqual(result, { skipped: true, reason: 'postgres_mode' });
+        const result = await backupDatabase({
+            backupDir,
+            retentionDays: 7,
+            maxVersions: 2,
+            dumpRunner: async ({ backupPath }) => fs.writeFileSync(backupPath, 'postgres-custom-dump')
+        });
+        assert.match(path.basename(result.path), /^pivot_backup_.+\.dump$/);
+        assert.ok(result.sizeBytes > 0);
+        assert.equal(result.deletedFiles, 3);
+        assert.equal(result.remainingFiles, 1);
 
         const cleanup = cleanupOldBackups({ backupDir, retentionDays: 7, maxVersions: 1 });
-        assert.equal(cleanup.deletedFiles, 3);
-        assert.equal(cleanup.remainingFiles, 0);
+        assert.equal(cleanup.deletedFiles, 0);
+        assert.equal(cleanup.remainingFiles, 1);
     } finally {
         fs.rmSync(backupDir, { recursive: true, force: true });
     }

@@ -9,14 +9,39 @@ const { getGlobalAiConcurrencyConfig } = require('./runtime-settings');
 const parseRatio = (value, fallback) => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed > 1 ? parsed / 100 : parsed;
+    const ratio = parsed > 1 ? parsed / 100 : parsed;
+    return ratio > 0 && ratio <= 1 ? ratio : fallback;
 };
 
+const DEFAULT_GPU_THRESHOLDS = Object.freeze({
+    safe: 0.85,
+    critical: 0.95,
+    reject: 0.97,
+    recover: 0.9
+});
+
+function normalizeGpuThresholds(env = process.env) {
+    const thresholds = {
+        safe: parseRatio(env.GPU_VRAM_SAFE_THRESHOLD, DEFAULT_GPU_THRESHOLDS.safe),
+        critical: parseRatio(env.GPU_VRAM_CRITICAL_THRESHOLD, DEFAULT_GPU_THRESHOLDS.critical),
+        reject: parseRatio(env.GPU_VRAM_REJECT_THRESHOLD, DEFAULT_GPU_THRESHOLDS.reject),
+        recover: parseRatio(env.GPU_VRAM_RECOVER_THRESHOLD, DEFAULT_GPU_THRESHOLDS.recover)
+    };
+    if (thresholds.safe < thresholds.critical
+        && thresholds.critical < thresholds.reject
+        && thresholds.recover < thresholds.reject) {
+        return thresholds;
+    }
+    logger.warn({ thresholds, defaults: DEFAULT_GPU_THRESHOLDS }, 'GPU 显存阈值顺序无效，已回退到安全默认值');
+    return { ...DEFAULT_GPU_THRESHOLDS };
+}
+
 const MONITOR_INTERVAL = parsePositiveInt(process.env.GPU_MONITOR_INTERVAL_MS, 15000);
-const VRAM_SAFE_THRESHOLD = parseRatio(process.env.GPU_VRAM_SAFE_THRESHOLD, 0.85);
-const VRAM_CRITICAL_THRESHOLD = parseRatio(process.env.GPU_VRAM_CRITICAL_THRESHOLD, 0.95);
-const VRAM_REJECT_THRESHOLD = parseRatio(process.env.GPU_VRAM_REJECT_THRESHOLD, 0.97);
-const VRAM_RECOVER_THRESHOLD = parseRatio(process.env.GPU_VRAM_RECOVER_THRESHOLD, Math.min(0.9, VRAM_SAFE_THRESHOLD));
+const gpuThresholds = normalizeGpuThresholds();
+const VRAM_SAFE_THRESHOLD = gpuThresholds.safe;
+const VRAM_CRITICAL_THRESHOLD = gpuThresholds.critical;
+const VRAM_REJECT_THRESHOLD = gpuThresholds.reject;
+const VRAM_RECOVER_THRESHOLD = gpuThresholds.recover;
 const MAX_CONCURRENT_CAP = parsePositiveInt(process.env.GPU_CONCURRENT_MAX, 12);
 const MIN_CONCURRENT_CAP = parsePositiveInt(process.env.GPU_CONCURRENT_MIN, 2);
 
@@ -179,5 +204,6 @@ function getGpuMonitorStatus() {
 module.exports = {
     startGpuMonitor,
     refreshGpuStatus,
-    getGpuMonitorStatus
+    getGpuMonitorStatus,
+    normalizeGpuThresholds
 };

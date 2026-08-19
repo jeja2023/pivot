@@ -1,11 +1,12 @@
 /* Automated maintenance service */
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const { dataDir } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-const { parsePositiveInt, parseNonNegativeInt } = require('../number');
+const { parsePositiveInt } = require('../number');
 const { cleanupSoftDeletedStorage } = require('./storage-gc');
 const { cleanupAnalysisWorkspace } = require('./data-analysis');
 const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing/cleanup');
@@ -53,7 +54,7 @@ const maintenanceState = {
         lastRunAt: null,
         lastSuccessAt: null,
         lastError: '',
-        vacuumPages: 200
+        operation: 'ANALYZE'
     },
     backup: {
         lastRunAt: null,
@@ -82,10 +83,6 @@ function getStorageGcRetentionDays() {
     return parsePositiveInt(process.env.STORAGE_GC_RETENTION_DAYS || '30', 30);
 }
 
-function getIncrementalVacuumPages() {
-    return parseNonNegativeInt(process.env.SQLITE_INCREMENTAL_VACUUM_PAGES || '200', 200);
-}
-
 function getBackupRetentionDays() {
     return parsePositiveInt(process.env.DB_BACKUP_RETENTION_DAYS || '7', 7);
 }
@@ -100,16 +97,25 @@ function getBackupDir() {
         : path.join(dataDir, 'backups');
 }
 
+function getPgDumpBin() {
+    return String(process.env.PG_DUMP_BIN || 'pg_dump').trim() || 'pg_dump';
+}
+
+function getPgDumpTimeoutMs() {
+    return parsePositiveInt(process.env.PG_DUMP_TIMEOUT_MS || '900000', 900000);
+}
+
 function toBackupTimestamp(date = new Date()) {
     const base = getBeijingTimestamp(date).replace(' ', '_').replace(/:/g, '-');
     return `${base}-${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
 function _buildBackupPath(backupDir) {
-    let backupPath = path.join(backupDir, `chat_backup_${toBackupTimestamp()}.db`);
+    const timestamp = toBackupTimestamp();
+    let backupPath = path.join(backupDir, `pivot_backup_${timestamp}.dump`);
     let suffix = 1;
     while (fs.existsSync(backupPath)) {
-        backupPath = path.join(backupDir, `chat_backup_${toBackupTimestamp()}_${suffix}.db`);
+        backupPath = path.join(backupDir, `pivot_backup_${timestamp}_${suffix}.dump`);
         suffix += 1;
     }
     return backupPath;
@@ -118,7 +124,7 @@ function _buildBackupPath(backupDir) {
 function listManagedBackupFiles(backupDir = getBackupDir()) {
     if (!fs.existsSync(backupDir)) return [];
     return fs.readdirSync(backupDir, { withFileTypes: true })
-        .filter(item => item.isFile() && /^chat_backup_.+\.db$/.test(item.name))
+        .filter(item => item.isFile() && /^(?:pivot_backup_.+\.dump|chat_backup_.+\.db)$/.test(item.name))
         .map(item => {
             const fullPath = path.join(backupDir, item.name);
             const stat = fs.statSync(fullPath);
@@ -253,7 +259,6 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
 
 async function optimizeDatabase() {
     maintenanceState.optimize.lastRunAt = getBeijingTimestamp();
-    maintenanceState.optimize.vacuumPages = getIncrementalVacuumPages();
     try {
         await execute('ANALYZE');
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
@@ -266,8 +271,142 @@ async function optimizeDatabase() {
     }
 }
 
-async function backupDatabase(_options = {}) {
-    return { skipped: true, reason: 'postgres_mode' };
+function buildPgDumpEnvironment(databaseUrl) {
+    let parsed;
+    try {
+        parsed = new URL(databaseUrl);
+    } catch (_error) {
+        throw new Error('DATABASE_URL 不是有效的 PostgreSQL 连接地址');
+    }
+    if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+        throw new Error('DATABASE_URL 必须使用 postgres:// 或 postgresql:// 协议');
+    }
+
+    const databaseName = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    if (!parsed.hostname || !databaseName) {
+        throw new Error('DATABASE_URL 必须包含 PostgreSQL 主机和数据库名');
+    }
+
+    const env = { ...process.env };
+    delete env.DATABASE_URL;
+    delete env.TEST_DATABASE_URL;
+    env.PGHOST = parsed.hostname;
+    env.PGPORT = parsed.port || '5432';
+    env.PGDATABASE = databaseName;
+    if (parsed.username) env.PGUSER = decodeURIComponent(parsed.username);
+    if (parsed.password) env.PGPASSWORD = decodeURIComponent(parsed.password);
+
+    const optionMap = {
+        sslmode: 'PGSSLMODE',
+        sslcert: 'PGSSLCERT',
+        sslkey: 'PGSSLKEY',
+        sslrootcert: 'PGSSLROOTCERT',
+        sslcrl: 'PGSSLCRL',
+        target_session_attrs: 'PGTARGETSESSIONATTRS'
+    };
+    Object.entries(optionMap).forEach(([parameter, envName]) => {
+        const value = parsed.searchParams.get(parameter);
+        if (value) env[envName] = value;
+    });
+    return env;
+}
+
+function runPgDump({ backupPath, databaseUrl, pgDumpBin = getPgDumpBin(), timeoutMs = getPgDumpTimeoutMs() }) {
+    if (!databaseUrl) throw new Error('DATABASE_URL 未配置，无法执行 PostgreSQL 备份');
+    const env = buildPgDumpEnvironment(databaseUrl);
+    const args = [
+        '--format=custom',
+        '--no-owner',
+        '--no-privileges',
+        `--file=${backupPath}`
+    ];
+
+    return new Promise((resolve, reject) => {
+        const child = spawn(pgDumpBin, args, {
+            env,
+            windowsHide: true,
+            stdio: ['ignore', 'ignore', 'pipe']
+        });
+        let stderr = '';
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            child.kill();
+        }, timeoutMs);
+        timer.unref?.();
+
+        child.stderr.on('data', chunk => {
+            if (stderr.length < 8192) stderr += chunk.toString('utf8');
+        });
+        child.once('error', error => {
+            clearTimeout(timer);
+            reject(error);
+        });
+        child.once('close', code => {
+            clearTimeout(timer);
+            if (timedOut) {
+                reject(new Error(`pg_dump 执行超时（${timeoutMs}ms）`));
+            } else if (code !== 0) {
+                reject(new Error(`pg_dump 执行失败（退出码 ${code}）：${stderr.trim() || '无错误输出'}`));
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+async function backupDatabase(options = {}) {
+    if (maintenanceState.backup.running) return { skipped: true, reason: 'backup_running' };
+
+    const backupDir = path.resolve(options.backupDir || getBackupDir());
+    const retentionDays = options.retentionDays || getBackupRetentionDays();
+    const maxVersions = options.maxVersions || getBackupMaxVersions();
+    const backupPath = _buildBackupPath(backupDir);
+    const dumpRunner = options.dumpRunner || runPgDump;
+
+    maintenanceState.backup.running = true;
+    maintenanceState.backup.lastRunAt = getBeijingTimestamp();
+    maintenanceState.backup.retentionDays = retentionDays;
+    maintenanceState.backup.maxVersions = maxVersions;
+    maintenanceState.backup.backupDir = backupDir;
+
+    try {
+        fs.mkdirSync(backupDir, { recursive: true });
+        await dumpRunner({
+            backupPath,
+            databaseUrl: options.databaseUrl || process.env.DATABASE_URL,
+            pgDumpBin: options.pgDumpBin || getPgDumpBin(),
+            timeoutMs: options.timeoutMs || getPgDumpTimeoutMs()
+        });
+        const stat = fs.statSync(backupPath);
+        if (!stat.isFile() || stat.size <= 0) throw new Error('pg_dump 未生成有效的备份文件');
+
+        const cleanup = cleanupOldBackups({ backupDir, retentionDays, maxVersions });
+        maintenanceState.backup.lastSuccessAt = getBeijingTimestamp();
+        maintenanceState.backup.lastError = '';
+        maintenanceState.backup.lastPath = backupPath;
+        maintenanceState.backup.lastSizeBytes = stat.size;
+        maintenanceState.backup.lastDeletedFiles = cleanup.deletedFiles;
+        maintenanceState.backup.totalDeletedFiles += cleanup.deletedFiles;
+        logger.info({ backupPath, sizeBytes: stat.size, deletedFiles: cleanup.deletedFiles }, 'PostgreSQL 数据库备份完成');
+        return {
+            path: backupPath,
+            sizeBytes: stat.size,
+            deletedFiles: cleanup.deletedFiles,
+            remainingFiles: cleanup.remainingFiles
+        };
+    } catch (error) {
+        maintenanceState.backup.lastError = error.message;
+        try {
+            if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+        } catch (cleanupError) {
+            logger.warn({ err: cleanupError.message, backupPath }, '失败的数据库备份文件清理失败');
+        }
+        logger.error({ err: error.message }, 'PostgreSQL 数据库备份失败');
+        throw error;
+    } finally {
+        maintenanceState.backup.running = false;
+    }
 }
 
 function getMaintenanceStatus() {
@@ -351,9 +490,12 @@ module.exports = {
     getAuditLogRetentionDays,
     getApiCallLogRetentionDays,
     getStorageGcRetentionDays,
-    getIncrementalVacuumPages,
     getBackupRetentionDays,
     getBackupMaxVersions,
     getBackupDir,
+    getPgDumpBin,
+    getPgDumpTimeoutMs,
+    buildPgDumpEnvironment,
+    runPgDump,
     getMaintenanceStatus
 };
