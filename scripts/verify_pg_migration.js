@@ -60,10 +60,10 @@ async function verify() {
 
     for (const table of VERIFY_TABLES) {
         try {
-            const sqRow = sqlite.prepare(`SELECT COUNT(*) AS c FROM "${table}"`).get();
-            const sqCount = sqRow ? sqRow.c : 0;
+            const tableCheck = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+            const sqCount = tableCheck ? (sqlite.prepare(`SELECT COUNT(*) AS c FROM "${table}"`).get()?.c || 0) : 0;
             const pgRes = await client.query(`SELECT COUNT(*) AS c FROM "${table}"`);
-            const pgCount = parseInt(pgRes.rows[0].c, 10);
+            const pgCount = parseInt(pgRes.rows[0]?.c || '0', 10);
             const diff = pgCount - sqCount;
             const status = diff === 0 ? '✅ 一致' : `❌ 差 ${diff}`;
             if (diff !== 0) hasError = true;
@@ -85,6 +85,11 @@ async function verify() {
     ];
     for (const { table, col } of hashTargets) {
         try {
+            const tableCheck = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+            if (!tableCheck) {
+                console.log(`  ⏩ ${table}.${col}: SQLite 中无此表，跳过`);
+                continue;
+            }
             const sqRows = sqlite.prepare(`SELECT "${col}" FROM "${table}" ORDER BY id ASC`).all();
             if (sqRows.length === 0) { console.log(`  ⏩ ${table}.${col}: 空表，跳过`); continue; }
             const sqHash = crypto.createHash('sha256')
