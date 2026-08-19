@@ -195,8 +195,15 @@ async function migrateTable(tableConfig, client) {
     const tableCols = colInfo.map(c => c.name);
     const safeBatch = Math.max(10, Math.min(1000, Math.floor(60000 / tableCols.length)));
 
+    // 查询 PostgreSQL 目标表列类型
+    const pgColsRes = await client.query(`
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = current_schema() AND table_name = $1
+    `, [tableName]);
+    const pgColTypes = Object.fromEntries(pgColsRes.rows.map(r => [r.column_name, String(r.data_type).toLowerCase()]));
+
     const jsonCols = new Set(JSONB_COLUMNS[tableName] || []);
-    const boolCols = new Set(BOOLEAN_COLUMNS[tableName] || []);
     const vecCols  = new Set(VECTOR_COLUMNS[tableName] || []);
 
     let lastId = null;
@@ -227,10 +234,11 @@ async function migrateTable(tableConfig, client) {
                 const rowPH = [];
                 for (const col of columns) {
                     let val = row[col];
+                    const pgType = pgColTypes[col] || '';
 
-                    // 1. JSONB 白名单转换
-                    if (jsonCols.has(col)) {
-                        if (val === null || val === undefined) {
+                    // 1. JSONB 白名单与自动转换
+                    if (jsonCols.has(col) || pgType === 'jsonb' || pgType === 'json') {
+                        if (val === null || val === undefined || val === '') {
                             val = null;
                         } else if (typeof val === 'string') {
                             try { val = JSON.stringify(JSON.parse(val)); }
@@ -242,21 +250,47 @@ async function migrateTable(tableConfig, client) {
                         }
                     }
 
-                    // 2. Boolean 转换（仅 0/1 整型）
-                    if (boolCols.has(col) && val !== null && val !== undefined) {
-                        val = (val === 1 || val === '1' || val === true);
+                    // 2. 整型与数值类型转换（防止 SQLite 存放的 false/true 触发 invalid input syntax for type bigint）
+                    if (pgType.includes('int') || pgType.includes('numeric') || pgType.includes('double') || pgType.includes('real')) {
+                        if (val === false || val === 'false') {
+                            val = 0;
+                        } else if (val === true || val === 'true') {
+                            val = 1;
+                        } else if (typeof val === 'string' && val.trim() === '') {
+                            val = null;
+                        } else if (typeof val === 'boolean') {
+                            val = val ? 1 : 0;
+                        } else if (val !== null && val !== undefined && !Number.isNaN(Number(val))) {
+                            val = Number(val);
+                        }
                     }
 
-                    // 3. Vector 格式化
-                    if (vecCols.has(col)) {
+                    // 3. 布尔类型转换（如果目标表列为 PG 原生 boolean）
+                    if (pgType === 'boolean') {
+                        if (val === null || val === undefined || val === '') {
+                            val = null;
+                        } else {
+                            val = (val === 1 || val === '1' || val === true || val === 'true');
+                        }
+                    }
+
+                    // 4. 时间戳类型转换
+                    if (pgType.includes('time') || pgType === 'date') {
+                        if (val === null || val === undefined || val === '' || val === 'null' || val === 'undefined') {
+                            val = null;
+                        }
+                    }
+
+                    // 5. Vector 格式化
+                    if (vecCols.has(col) || pgType === 'vector') {
                         if (val === null || val === undefined || val === '' || val === '[]') {
-                            val = null; // 空值或空数组统一置 NULL
+                            val = null;
                         } else if (typeof val === 'string' && val.trim().startsWith('[')) {
-                            // 已合法，保持
+                            // 已合法
                         } else if (Array.isArray(val) && val.length > 0) {
                             val = `[${val.join(',')}]`;
                         } else {
-                            val = null; // 其他非法格式静默置 NULL
+                            val = null;
                         }
                     }
 
