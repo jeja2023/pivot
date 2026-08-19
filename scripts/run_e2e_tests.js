@@ -32,9 +32,13 @@ function runNodeScript(args, env) {
 }
 
 async function main() {
-    const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+    const databaseUrl = String(
+        process.env.TEST_DATABASE_URL
+        || process.env.DATABASE_URL
+        || (process.env.CI ? 'postgres://postgres:password@localhost:5432/pivot_test' : '')
+    ).trim();
     if (!databaseUrl) {
-        throw new Error('Playwright E2E tests require TEST_DATABASE_URL or DATABASE_URL');
+        throw new Error('Playwright E2E 测试需要配置 TEST_DATABASE_URL 或 DATABASE_URL 环境变量（CI 或本地测试库示例：postgres://postgres:password@localhost:5432/pivot_test）');
     }
 
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-e2e-tests-'));

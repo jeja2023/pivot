@@ -9,6 +9,22 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pivot_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -34,4 +50,7 @@ jobs:
 
       # 顺序运行全部测试套件，与本地 npm test 口径保持一致
       - name: All test suites
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+          DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
         run: npm run test:all
