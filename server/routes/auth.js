@@ -134,13 +134,21 @@ function createAuthRouter({
         res.json({ authenticated: true, user: auth.user, csrfToken });
     }));
 
-    router.post('/auth/logout', authMiddleware, asyncHandler(async (req, res) => {
-        logAction(req, '用户退出', '退出登录');
+    router.post('/auth/logout', asyncHandler(async (req, res) => {
+        try {
+            const auth = await resolveAuthenticatedUserAsync(req);
+            if (auth?.user) {
+                req.user = auth.user;
+                logAction(req, '用户退出', '退出登录');
+            }
+        } catch (_) {}
         
         // 尝试从 Cookie 中获取并删除数据库中的 Refresh Token
         const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
         if (refreshToken) {
-            await execute('DELETE FROM refresh_tokens WHERE token = ?', [hashRefreshToken(refreshToken)]);
+            try {
+                await execute('DELETE FROM refresh_tokens WHERE token = ?', [hashRefreshToken(refreshToken)]);
+            } catch (_) {}
         }
 
         res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);

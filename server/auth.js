@@ -355,7 +355,7 @@ async function authMiddleware(req, res, next) {
 function csrfMiddleware(req, res, next) {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) return next();
-    if (['/auth/login', '/auth/register', '/auth/refresh'].includes(req.path)) return next();
+    if (['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'].includes(req.path)) return next();
     const cookieToken = getCookie(req, CSRF_COOKIE_NAME);
     const headerToken = req.headers['x-csrf-token'];
     if (!cookieToken || !headerToken || cookieToken !== headerToken) {

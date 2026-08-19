@@ -342,7 +342,7 @@ function createSessionsRouter({
                 : result.reason === 'too_many'
                     ? '当前压缩任务较多，请稍后重试'
                     : '当前会话暂时没有可压缩的早期上下文';
-        logAction(req, '手动压缩上下文', `会话ID: ${req.params.id}，结果: ${result.compressed ? 'compressed' : 'skipped'}`);
+        logAction(req, '手动压缩上下文', `会话ID: ${req.params.id}，结果: ${result.compressed ? '已压缩' : '已跳过'}`);
         res.json({
             success: true,
             compressed: Boolean(result.compressed),

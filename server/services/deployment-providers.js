@@ -2,23 +2,23 @@ const PROVIDER_TYPES = new Set(['database', 'objectStorage', 'queue', 'lock']);
 
 const PROVIDER_REGISTRY = {
     database: {
-        sqlite: {
-            key: 'sqlite',
-            label: 'SQLite WAL',
-            interface: 'DatabaseProvider',
-            local: true,
-            multiNodeReady: false,
-            status: 'active',
-            capabilities: ['single_node', 'wal']
-        },
         postgres: {
             key: 'postgres',
             label: 'PostgreSQL',
             interface: 'DatabaseProvider',
             local: false,
             multiNodeReady: true,
-            status: 'planned',
+            status: 'active',
             capabilities: ['multi_node', 'transactional']
+        },
+        sqlite: {
+            key: 'sqlite',
+            label: 'SQLite (Legacy)',
+            interface: 'DatabaseProvider',
+            local: true,
+            multiNodeReady: false,
+            status: 'deprecated',
+            capabilities: ['single_node']
         }
     },
     objectStorage: {
@@ -111,7 +111,7 @@ function providerFor(type, key) {
 
 function resolveProviderKey(type, env = process.env) {
     if (type === 'database') {
-        return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'sqlite').trim().toLowerCase() || 'sqlite';
+        return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() || 'postgres';
     }
     if (type === 'objectStorage') {
         return hasEnv(env, ['PIVOT_OBJECT_STORAGE_URL', 'S3_BUCKET', 'AWS_S3_BUCKET']) ? 's3_compatible' : 'local_fs';
@@ -144,7 +144,7 @@ function createProviderPlaceholder(type, key) {
     return {
         ...provider,
         createClient() {
-            if (provider.status === 'active' && provider.local) {
+            if (provider.local) {
                 return { provider: provider.key, status: 'local-placeholder' };
             }
             throw new Error(`${provider.interface} ${provider.key} 为预留服务商占位符，暂未接入适配器。`);

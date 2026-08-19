@@ -95,7 +95,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
     router.post('/memories/jobs/retry', authMiddleware, asyncHandler(async (req, res) => {
         const result = await retryFailedMemoryExtractionJobs(req.user.id, req.body?.jobIds || req.body?.ids || []);
         if (typeof logAction === 'function') {
-            logAction(req, 'retry long-term memory jobs', `queued: ${result.queued}`);
+            logAction(req, '重试长期记忆提取任务', `已入队数量: ${result.queued}`);
         }
         const jobsData = await listMemoryExtractionJobs(req.user.id, { limit: 20 });
         return res.json({ success: true, ...result, jobs: jobsData });
@@ -107,7 +107,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             limit: req.body?.limit
         });
         if (typeof logAction === 'function') {
-            logAction(req, 'cleanup long-term memory jobs', `deleted: ${result.deleted}`);
+            logAction(req, '清理长期记忆任务', `已删除数量: ${result.deleted}`);
         }
         const jobsData = await listMemoryExtractionJobs(req.user.id, { limit: 20 });
         return res.json({
@@ -132,7 +132,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         const enabled = req.body?.enabled !== false;
         const finalEnabled = await setLongTermMemoryEnabled(req.user.id, enabled);
         if (typeof logAction === 'function') {
-            logAction(req, 'update long-term memory setting', finalEnabled ? 'enabled' : 'disabled');
+            logAction(req, '更新长期记忆设置', finalEnabled ? '开启长期记忆' : '关闭长期记忆');
         }
         const summary = await getMemorySummary(req.user.id);
         res.json({
@@ -149,7 +149,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         }
         const result = await updateMemoryStatuses(req.user.id, req.body?.ids || req.body?.memoryIds || [], status);
         if (typeof logAction === 'function') {
-            logAction(req, '批量更新长期记忆状态', `status: ${status}; count: ${result.updated}`);
+            logAction(req, '批量更新长期记忆状态', `状态: ${status}，更新数量: ${result.updated}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, ...result, summary });
@@ -161,7 +161,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             limit: req.body?.limit
         });
         if (typeof logAction === 'function') {
-            logAction(req, '归档过期长期记忆', `archived: ${result.archived}`);
+            logAction(req, '归档过期长期记忆', `归档数量: ${result.archived}`);
         }
         const summary = await getMemoryQualitySummary(req.user.id);
         return res.json({
@@ -186,7 +186,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             const memory = await updateMemory(req.user.id, id, req.body || {}, { user: req.user });
             if (!memory) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
             if (typeof logAction === 'function') {
-                logAction(req, '更新长期记忆', `memoryId: ${id}`);
+                logAction(req, '更新长期记忆', `记忆ID: ${id}`);
             }
             const summary = await getMemorySummary(req.user.id);
             return res.json({ success: true, memory, summary });
@@ -205,7 +205,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         const changed = await updateMemoryStatus(req.user.id, id, status);
         if (!changed) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         if (typeof logAction === 'function') {
-            logAction(req, '更新长期记忆状态', `memoryId: ${id}; status: ${status}`);
+            logAction(req, '更新长期记忆状态', `记忆ID: ${id}，状态: ${status}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, summary });
@@ -216,7 +216,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             const result = await mergeMemories(req.user.id, req.body?.targetId, req.body?.sourceId, { user: req.user });
             if (!result) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
             if (typeof logAction === 'function') {
-                logAction(req, '合并长期记忆', `targetId: ${req.body?.targetId}; sourceId: ${req.body?.sourceId}`);
+                logAction(req, '合并长期记忆', `目标记忆ID: ${req.body?.targetId}，源记忆ID: ${req.body?.sourceId}`);
             }
             const summary = await getMemorySummary(req.user.id);
             return res.json({ success: true, ...result, summary });
@@ -231,7 +231,7 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         const changed = await softDeleteMemory(req.user.id, id);
         if (!changed) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         if (typeof logAction === 'function') {
-            logAction(req, '删除长期记忆', `memoryId: ${id}`);
+            logAction(req, '删除长期记忆', `记忆ID: ${id}`);
         }
         const summary = await getMemorySummary(req.user.id);
         return res.json({ success: true, summary });

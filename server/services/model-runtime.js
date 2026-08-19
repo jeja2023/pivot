@@ -3,7 +3,6 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { assertSafeModelRuntimeUrl, createSafeModelHttpAgents } = require('./model-adapter');
 const { ConcurrencySemaphore, ConcurrencyLimitError } = require('./concurrency');
-const { recordSlowModelResponse } = require('./observability');
 const { parsePositiveInt } = require('../number');
 const { getModelEndpointRuntimeConfig } = require('./runtime-settings');
 const { safeJsonGet } = require('./safe-http-client');
@@ -201,7 +200,6 @@ function recordModelSuccess(modelCfg, latencyMs) {
     runtime.lastError = '';
     runtime.lastLatencyMs = Number.isFinite(latencyMs) ? latencyMs : runtime.lastLatencyMs;
     runtime.lastSuccessAt = getBeijingTimestamp();
-    recordSlowModelResponse(modelCfg, latencyMs);
 }
 
 function recordModelFailure(modelCfg, err) {

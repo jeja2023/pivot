@@ -264,7 +264,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         const value = toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, req.body?.memory_threshold ?? req.body?.threshold);
         await setAppSettingAsync(MEMORY_CONFIG_KEYS.threshold, value, { updatedBy: req.user.id });
 
-        logAction(req, 'UPDATE_MEMORY_THRESHOLD', `${MEMORY_CONFIG_KEYS.threshold}=${value}`);
+        logAction(req, '修改长期记忆相似度阈值', `${MEMORY_CONFIG_KEYS.threshold}=${value}`);
         const settings = getSettings();
         res.json({
             success: true,
@@ -302,7 +302,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         invalidateMonitorSummaryCache();
 
         if (result.changed.length > 0) {
-            logAction(req, 'UPDATE_RUNTIME_SETTINGS', result.changed.join('；'));
+            logAction(req, '修改系统运行配置', result.changed.join('；'));
         }
 
         res.json({

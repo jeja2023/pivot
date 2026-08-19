@@ -1,3 +1,34 @@
+## [v0.1.4] - 2026-08-19
+
+### 认证退出与空会话体验优化、可观测性与系统监控布局增强、全链路审计中文化与 PostgreSQL 自动备份加固
+
+- **退出登录单次生效流程修复 (Single-Click Logout Flow Fix)**：
+  - 在 `server/auth.js` 中将 `/auth/logout` 纳入 `csrfMiddleware` 豁免白名单，解决登出时 CSRF 校验不同步导致的登出拦截。
+  - 在 `server/routes/auth.js` 中优化 `/auth/logout` 路由鉴权逻辑，即便 Access Token 已过期也能安全销毁 Refresh Token、彻底清理所有鉴权 Cookie 并返回成功响应。
+  - 在 `client/chat/auth.js` 中将 `window.logout` 改为异步函数，确保 `await` 登出请求执行完成后再清空本地存储并刷新页面，彻底解决需要点击两次退出的问题。
+- **空会话静默初始化体验优化 (Quiet Empty Session Initialization)**：
+  - 优化 `client/chat/engine-sessions.js` 中的 `selectSession` 逻辑，在初始加载恢复模式下若未查询到有效历史会话或会话列表为空，静默重置当前会话 UI 状态，杜绝向用户弹出误导性的“加载用户会话失败”错误提示。
+- **慢查询与异常告警单行呈现与时间戳展示 (Single-Line Observability Rows with Timestamps)**：
+  - 在 `client/chat/stats-monitor.js` 中为每条慢查询与异常告警记录增加时间戳（`formatDateToCN(item.created_at)`）展示，悬停可查看完整时间详情。
+  - 在 `client/chat/styles/stats-monitor/stats-system-monitor.css` 中重构告警条目为紧凑的单行流式 Flex 布局，左侧整合事件标题、类型徽标、严重等级与来源，右侧整合执行耗时与发生时间，极大提升排查与可读性。
+- **可观测性告警排除大模型正常推理耗时 (LLM Generation Slow Query Exclusion)**：
+  - 在 `server/services/observability.js` 与 `server/services/model-runtime.js` 中默认关闭大模型正常推理耗时向慢查询与异常告警的记录，并在可观测性事件列表中默认过滤“模型端点慢响应”，消除大模型长文本输出对系统慢查询告警的干扰。
+- **系统监控面板全量对齐 PostgreSQL 与标签截断修复 (PostgreSQL Health Monitor Alignment & Label Truncation Fix)**：
+  - 在 `server/routes/admin-stats.js` 中彻底清理历史单机 SQLite 文件（`chat.db`）扫描，存储统计全面采用 PostgreSQL 真实库大小（`pg_database_size`）。
+  - 将部署服务商与可观测性慢 SQL 来源默认值统一对齐为 `postgres` / `postgresql`。
+  - 修复 `client/chat/styles/stats-monitor/stats-system-monitor.css` 与 `stats-monitor-common.css` 中监控项网格列宽，由固定 96px 改为自适应 `auto minmax(0, 1fr)`，彻底修复“PostgreSQL 统计”标签被截断为 `PostgreSQL 统...` 的样式缺陷。
+- **系统审计日志与操作详情全面中文化 (Full Chinese Localization for Audit Logs & Details)**：
+  - 重构 `server/routes/memories.js`、`server/routes/settings.js`、`server/routes/sessions.js` 中长期记忆任务调度、系统配置修改、上下文压缩等模块的遗留英文操作标识（如 `retry long-term memory jobs`、`UPDATE_RUNTIME_SETTINGS`、`compressed` 等），统一为规范中文。
+  - 在 `server/audit-actions.js` 中完善操作映射字典与结构化详情格式化工具，实现所有历史与新增操作在审计日志界面的纯中文友好展示。
+- **全模块操作审计日志补齐 (Comprehensive Module Audit Logging)**：
+  - 在 `server/rag.js` 中全面激活 `auditRagAction` 与 `enqueueAuditLog`，完整覆盖知识库文档上传/启停/删除/批量重建/重试、知识集合管理与共享授权、标签管理、向量测试、召回反馈以及知识图谱实体/关系维护的全流程审计日志。
+- **会话列表长标题与完整日期防重叠布局 (Sidebar Long Title & Full Date Auto Layout)**：
+  - 在 `client/chat/styles/base/sidebar.css` 中重构 `.session-side` 为自适应弹性宽度（`flex: 0 0 auto; min-width: 42px; max-width: 86px;`），使得长日期（如 `2026/08/19`）能够自适应展开，超长标题自动在剩余宽度中截断省略，两者互不遮挡。
+- **PostgreSQL 备份 pg_dump 自动探测与 Schema 范围保护 (PostgreSQL Backup Auto-Discovery & Schema Isolation)**：
+  - 在 `server/services/maintenance.js` 中增强 `getPgDumpBin()`：未显式配置环境变量时，自动按常见安装路径（`C:\Program Files\PostgreSQL\18\bin\pg_dump.exe` 及 17/16/15 等）扫描定位 `pg_dump.exe`，避免 Windows 环境因未配置全局 PATH 导致的 `spawn pg_dump ENOENT` 报错。
+  - 在备份参数中显式限定 `--schema=public`（可通过 `DB_BACKUP_SCHEMA` 配置），确保稳定备份系统业务库，不受测试环境临时 Schema 的权限干扰。
+  - 在 `.env.example` 中补充了 `PG_DUMP_BIN`、`DB_BACKUP_SCHEMA`、`DB_BACKUP_RETENTION_DAYS`、`GPU_MONITOR_INTERVAL_MS` 等完整配置说明。
+
 ## [v0.1.3] - 2026-08-19
 
 ### PostgreSQL 运维备份与语法加固、E2E 环境隔离、Webhook 与 Electron 初始化异步等待修复、GPU 阈值容错与跨平台启动优化

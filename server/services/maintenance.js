@@ -98,7 +98,28 @@ function getBackupDir() {
 }
 
 function getPgDumpBin() {
-    return String(process.env.PG_DUMP_BIN || 'pg_dump').trim() || 'pg_dump';
+    const configured = String(process.env.PG_DUMP_BIN || '').trim();
+    if (configured) return configured;
+    if (process.platform === 'win32') {
+        const commonWinPaths = [
+            'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe',
+            'C:\\Program Files\\PostgreSQL\\17\\bin\\pg_dump.exe',
+            'C:\\Program Files\\PostgreSQL\\16\\bin\\pg_dump.exe',
+            'C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dump.exe',
+            'C:\\Program Files\\PostgreSQL\\14\\bin\\pg_dump.exe',
+            'C:\\Program Files (x86)\\PostgreSQL\\18\\bin\\pg_dump.exe',
+            'C:\\Program Files (x86)\\PostgreSQL\\17\\bin\\pg_dump.exe',
+            'C:\\Program Files (x86)\\PostgreSQL\\16\\bin\\pg_dump.exe'
+        ];
+        for (const binPath of commonWinPaths) {
+            try {
+                if (fs.existsSync(binPath)) return binPath;
+            } catch (e) {
+                // ignore
+            }
+        }
+    }
+    return 'pg_dump';
 }
 
 function getPgDumpTimeoutMs() {
@@ -314,10 +335,12 @@ function buildPgDumpEnvironment(databaseUrl) {
 function runPgDump({ backupPath, databaseUrl, pgDumpBin = getPgDumpBin(), timeoutMs = getPgDumpTimeoutMs() }) {
     if (!databaseUrl) throw new Error('DATABASE_URL 未配置，无法执行 PostgreSQL 备份');
     const env = buildPgDumpEnvironment(databaseUrl);
+    const schema = String(process.env.DB_BACKUP_SCHEMA || 'public').trim() || 'public';
     const args = [
         '--format=custom',
         '--no-owner',
         '--no-privileges',
+        `--schema=${schema}`,
         `--file=${backupPath}`
     ];
 
@@ -340,7 +363,14 @@ function runPgDump({ backupPath, databaseUrl, pgDumpBin = getPgDumpBin(), timeou
         });
         child.once('error', error => {
             clearTimeout(timer);
-            reject(error);
+            if (error.code === 'ENOENT') {
+                const hint = process.platform === 'win32'
+                    ? '未找到 pg_dump 可执行程序。请确保已安装 PostgreSQL 客户端工具，并在 .env 中配置 PG_DUMP_BIN 路径（例如 PG_DUMP_BIN="C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe"）或将其加入系统 PATH 环境变量。'
+                    : '未找到 pg_dump 可执行程序。请安装 postgresql-client 软件包或在 .env 中配置 PG_DUMP_BIN。';
+                reject(new Error(`${hint}（原始错误: ${error.message}）`));
+            } else {
+                reject(error);
+            }
         });
         child.once('close', code => {
             clearTimeout(timer);

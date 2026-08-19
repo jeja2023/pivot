@@ -1,13 +1,13 @@
 /* 知识库与 RAG API 门面 */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { query, queryOne, execute } = require('./db/client');
+const { query, queryOne } = require('./db/client');
 const { groupConcat } = require('./db/dialect');
 const { authMiddleware } = require('./auth');
 const { asyncHandler, getClientIp } = require('./http');
-const { getBeijingTimestamp } = require('./time');
 const { createKnowledgeUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware } = require('./upload');
 const { clearRagCacheForUser } = require('./services/rag-cache');
+const { enqueueAuditLog } = require('./services/db-write-queue');
 const {
     batchDeleteKnowledgeDocuments,
     batchReindexKnowledgeDocuments,
@@ -73,14 +73,22 @@ const debugQueryLimiter = rateLimit({
 const upload = createKnowledgeUploadMiddleware();
 
 function auditRagAction(req, action, details) {
-    execute('INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp) VALUES (?, ?, ?, ?, ?)', [
-        req.user?.id || null,
-        normalizeAuditAction(action),
-        JSON.stringify(details || {}),
-        getClientIp(req),
-        getBeijingTimestamp()
-    ]).catch(e => {
-        req.log?.warn({ err: e.message, action }, 'RAG 审计日志写入失败');
+    const userId = req.user?.id || null;
+    const ip = getClientIp(req);
+    const serializedDetails = typeof details === 'string'
+        ? details
+        : (() => {
+            try {
+                return JSON.stringify(details);
+            } catch (_) {
+                return String(details ?? '');
+            }
+        })();
+    enqueueAuditLog({
+        userId,
+        action: normalizeAuditAction(action),
+        details: serializedDetails,
+        ip
     });
 }
 

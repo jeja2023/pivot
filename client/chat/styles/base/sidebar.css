@@ -371,13 +371,15 @@ body.pivot-desktop-runtime .desktop-app-menu {
 }
 .session-side {
     position: relative;
-    flex: 0 0 46px;
-    width: 46px;
-    min-width: 46px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 42px;
+    max-width: 86px;
     height: 22px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex-shrink: 0;
 }
 .session-list-time {
     color: #94a3b8;
@@ -385,6 +387,7 @@ body.pivot-desktop-runtime .desktop-app-menu {
     font-weight: 500;
     line-height: 1;
     white-space: nowrap;
+    text-align: right;
     transition: opacity 0.14s ease;
 }
 .session-item:hover .session-list-time {

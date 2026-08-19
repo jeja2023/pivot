@@ -166,7 +166,7 @@ function recordSlowSql(sql, durationMs, params = []) {
     try {
         return recordObservabilityEvent({
             type: 'sql',
-            source: 'sqlite',
+            source: 'postgresql',
             durationMs,
             thresholdMs: SLOW_SQL_MS,
             message: '慢 SQL 执行',
@@ -181,6 +181,7 @@ function recordSlowSql(sql, durationMs, params = []) {
 }
 
 function recordSlowModelResponse(modelCfg, durationMs, details = {}) {
+    if (process.env.PIVOT_RECORD_SLOW_MODEL !== 'true') return null;
     if (durationMs < SLOW_MODEL_MS) return null;
     return recordObservabilityEvent({
         type: 'model',
@@ -220,7 +221,7 @@ async function listObservabilityEvents(options = {}) {
     const limit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 50, 1), 200);
     const type = EVENT_TYPES.has(options.type) ? options.type : '';
     const status = EVENT_STATUSES.has(options.status) ? options.status : '';
-    let sql = 'SELECT * FROM observability_events WHERE 1=1';
+    let sql = "SELECT * FROM observability_events WHERE message != '模型端点慢响应'";
     const params = [];
     if (type) {
         sql += ' AND type = ?';

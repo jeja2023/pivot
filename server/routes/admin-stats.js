@@ -2,7 +2,6 @@
 const express = require('express');
 const path = require('path');
 const os = require('os');
-const fs = require('fs');
 const { query, queryOne } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getHttpMetricsSnapshot, getRagMetricsSnapshot } = require('../metrics');
@@ -283,23 +282,13 @@ function createAdminStatsRouter({
         const activeUsersCount = Number(activeUsersRow?.count || 0);
 
         // 获取存储统计
-        const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '../../data');
         let dbSize = 0;
         try {
             const dbSizeRow = await queryOne('SELECT pg_database_size(current_database()) AS db_size');
             if (dbSizeRow && dbSizeRow.db_size) {
                 dbSize = Number(dbSizeRow.db_size) || 0;
             }
-        } catch(e) {
-            const dbFile = path.join(dataDir, 'chat.db');
-            try {
-                if (fs.existsSync(dbFile)) {
-                    dbSize += fs.statSync(dbFile).size;
-                    const walFile = dbFile + '-wal';
-                    if (fs.existsSync(walFile)) dbSize += fs.statSync(walFile).size;
-                }
-            } catch(err) {}
-        }
+        } catch (_) {}
 
         const uploadsDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
             ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -386,7 +375,7 @@ function createAdminStatsRouter({
                     used: os.totalmem() - os.freemem()
                 },
                 disk: {
-                    path: diskHealth.path || dataDir,
+                    path: diskHealth.path || uploadsDir,
                     total: diskHealth.total || 0,
                     free: diskHealth.free || 0,
                     used: Math.max(0, Number(diskHealth.total || 0) - Number(diskHealth.free || 0)),

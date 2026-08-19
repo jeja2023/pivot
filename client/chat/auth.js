@@ -186,14 +186,18 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     } catch (e) { showToast(e.message, 'error'); }
 });
 
-window.logout = () => {
+window.logout = async () => {
     if (window.closeAgentRealtime) window.closeAgentRealtime();
     if (window.stopAnnouncements) window.stopAnnouncements();
-    apiFetch(API_BASE + '/auth/logout', {
-        method: 'POST'
-    }).catch(() => {});
+    try {
+        await apiFetch(API_BASE + '/auth/logout', {
+            method: 'POST'
+        });
+    } catch (_) {}
     localStorage.removeItem('pivot_token');
+    sessionStorage.clear();
     setCsrfToken('');
+    currentUser = null;
     location.reload();
 };
 

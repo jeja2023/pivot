@@ -38,9 +38,15 @@ async function selectSession(id, title, options = {}) {
     try {
         const res = await apiFetch(API_BASE + `/sessions/${id}?messageLimit=60`);
         if (!res.ok) {
-            if (options.restore) {
+            if (options.restore || res.status === 404) {
                 currentSessionId = null;
                 window.persistActiveChatSession?.('');
+                const titleEl = document.getElementById('current-title');
+                if (titleEl) titleEl.innerText = '请选择或新建对话';
+                const msgEl = document.getElementById('message-container');
+                if (msgEl) PivotSafeHtml.setHtml(msgEl, '');
+                if (!options.restore) showToast('会话不存在或已被删除', 'warning');
+                return;
             }
             showToast('加载会话失败，请稍后重试', 'error');
             return;
@@ -51,6 +57,9 @@ async function selectSession(id, title, options = {}) {
         if (options.restore) {
             currentSessionId = null;
             window.persistActiveChatSession?.('');
+            const titleEl = document.getElementById('current-title');
+            if (titleEl) titleEl.innerText = '请选择或新建对话';
+            return;
         }
         showToast('加载会话失败，请稍后重试', 'error');
         return;

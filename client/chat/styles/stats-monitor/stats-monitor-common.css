@@ -80,7 +80,11 @@
 #monitor-resource-list .monitor-row span,
 #monitor-health-maintenance-list .monitor-row span,
 #monitor-rag-storage-list .monitor-row span {
-    width: auto; flex: 0 0 auto;
+    width: auto;
+    flex: 0 0 auto;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
 }
 #monitor-resource-list .monitor-row > strong,
 #monitor-resource-list .monitor-row > div,

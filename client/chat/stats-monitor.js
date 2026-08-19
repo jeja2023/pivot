@@ -143,7 +143,7 @@ window.loadMonitorSummary = async function(options = {}) {
                 ['API 日志清理', `${formatMaintenanceTime(maintenance.apiCallLogCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`],
                 ['令牌清理', `${formatMaintenanceTime(maintenance.refreshTokenCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`],
                 ['数据库备份', `${formatMaintenanceTime(maintenance.backup?.lastSuccessAt)} / ${formatBytes(maintenance.backup?.lastSizeBytes || 0)}`],
-                ['PostgreSQL 统计信息', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
+                ['PostgreSQL 统计', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
             ].map(([label, value]) => `<div class="monitor-row">
                 <span>${escapeHtml(label)}</span>
                 <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
@@ -231,22 +231,26 @@ window.loadMonitorSummary = async function(options = {}) {
                 const severityLabel = observabilitySeverityLabels[item.severity] || item.severity || '-';
                 const title = item.message || item.source || '异常事件';
                 const source = item.source || item.details?.modelName || item.details?.route || item.details?.query || '';
+                const timeFormatted = item.created_at ? formatDateToCN(item.created_at) : '-';
                 const severityClass = item.severity === 'critical' ? ' is-critical' : item.severity === 'info' ? ' is-info' : ' is-warning';
                 return `
                 <div class="monitor-observability-row${severityClass}">
-                    <div class="monitor-observability-main" title="${escapeHtml([typeLabel, severityLabel, source, item.message].filter(Boolean).join(' · '))}">
-                        <div class="monitor-observability-title">
-                            <strong>${escapeHtml(title)}</strong>
-                            <span class="monitor-observability-badges">
-                                <span>${escapeHtml(typeLabel)}</span>
-                                <span>${escapeHtml(severityLabel)}</span>
-                            </span>
-                        </div>
-                        ${source ? `<small>${escapeHtml(source)}</small>` : ''}
+                    <div class="monitor-observability-item-left" title="${escapeHtml([title, source, typeLabel, severityLabel, timeFormatted].filter(Boolean).join(' · '))}">
+                        <strong class="monitor-observability-item-title">${escapeHtml(title)}</strong>
+                        <span class="monitor-observability-badges">
+                            <span class="badge-type">${escapeHtml(typeLabel)}</span>
+                            <span class="badge-severity">${escapeHtml(severityLabel)}</span>
+                        </span>
+                        ${source && source !== title ? `<span class="monitor-observability-item-source" title="${escapeHtml(source)}">${escapeHtml(source)}</span>` : ''}
                     </div>
-                    <div class="monitor-observability-duration" title="${formatMetricNumber(item.duration_ms, 1)} ms">
-                        <strong>${escapeHtml(formatObservabilityDuration(item.duration_ms))}</strong>
-                        <small>耗时</small>
+                    <div class="monitor-observability-item-right">
+                        <span class="monitor-observability-item-duration" title="耗时: ${formatMetricNumber(item.duration_ms, 1)} ms">
+                            <strong>${escapeHtml(formatObservabilityDuration(item.duration_ms))}</strong>
+                            <small>耗时</small>
+                        </span>
+                        <span class="monitor-observability-item-time" title="发生时间: ${escapeHtml(timeFormatted)}">
+                            ${escapeHtml(timeFormatted)}
+                        </span>
                     </div>
                 </div>
             `;

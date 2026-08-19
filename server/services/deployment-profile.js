@@ -12,7 +12,7 @@ function hasEnv(env, keys = []) {
 
 function getDeploymentProfile(env = process.env) {
     const requestedMode = normalizeDeploymentMode(env.PIVOT_DEPLOYMENT_MODE || env.DEPLOYMENT_MODE);
-    const databaseProvider = String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'sqlite').trim().toLowerCase() || 'sqlite';
+    const databaseProvider = String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() || 'postgres';
     const objectStorageConfigured = hasEnv(env, ['PIVOT_OBJECT_STORAGE_URL', 'S3_BUCKET', 'AWS_S3_BUCKET']);
     const queueConfigured = hasEnv(env, ['PIVOT_QUEUE_URL', 'REDIS_URL', 'RABBITMQ_URL']);
     const lockConfigured = hasEnv(env, ['PIVOT_LOCK_URL', 'REDIS_URL', 'ETCD_ENDPOINTS']);
@@ -23,16 +23,13 @@ function getDeploymentProfile(env = process.env) {
     if (requestedMode !== 'single_node' && !multiNodeReady) {
         warnings.push('multi_node_requires_postgres_object_storage_distributed_queue_and_lock');
     }
-    if (databaseProvider === 'sqlite' && requestedMode !== 'single_node') {
-        warnings.push('sqlite_wal_is_supported_for_single_node_only');
-    }
 
     return {
         requestedMode,
         effectiveMode: multiNodeReady ? requestedMode : 'single_node',
         database: {
             provider: databaseProvider,
-            walRecommended: databaseProvider === 'sqlite',
+            walRecommended: false,
             multiNodeReady: databaseProvider !== 'sqlite',
             adapterRequiredForMultiNode: databaseProvider === 'sqlite'
         },
