@@ -48,6 +48,8 @@ async function main() {
     const setupScript = path.join(root, 'scripts', 'setup_pg_test_db.js');
     const env = {
         ...process.env,
+        TZ: 'Asia/Shanghai',
+        PG_TIMEZONE: 'Asia/Shanghai',
         DATA_DIR: path.join(testRoot, 'data'),
         PIVOT_UPLOAD_DIR: path.join(testRoot, 'uploads'),
         PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),

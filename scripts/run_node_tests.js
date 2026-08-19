@@ -35,6 +35,8 @@ const testSchema = `pivot_test_${process.pid}_${Date.now().toString(36)}`;
 
 const env = {
     ...process.env,
+    TZ: 'Asia/Shanghai',
+    PG_TIMEZONE: 'Asia/Shanghai',
     DATA_DIR: path.join(testRoot, 'data'),
     PIVOT_UPLOAD_DIR: path.join(testRoot, 'uploads'),
     PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),
