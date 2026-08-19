@@ -141,6 +141,7 @@ const VECTOR_COLUMNS = {
 
 // ── 序列重置：兼容 SERIAL 与 GENERATED ALWAYS AS IDENTITY ─────────────
 async function resetSequence(client, tableName, pkName) {
+    if (!pkName || pkName === 'rowid') return;
     try {
         const seqRes = await client.query(
             'SELECT pg_get_serial_sequence($1, $2) AS seq_name',
@@ -155,16 +156,25 @@ async function resetSequence(client, tableName, pkName) {
             console.log(`   🔢 SERIAL 序列已重置`);
             return;
         }
-        // IDENTITY 列
-        const maxRes = await client.query(`SELECT MAX("${pkName}") AS m FROM "${tableName}"`);
-        const maxVal = maxRes.rows[0]?.m;
-        if (maxVal !== null && maxVal !== undefined) {
-            const next = BigInt(maxVal) + 1n;
-            await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN "${pkName}" RESTART WITH ${next}`);
-            console.log(`   🔢 IDENTITY 序列已重置为 ${next}`);
+
+        // 检查是否为 IDENTITY 列
+        const idColRes = await client.query(`
+            SELECT attidentity 
+            FROM pg_attribute 
+            WHERE attrelid = $1::regclass AND attname = $2
+        `, [tableName, pkName]).catch(() => ({ rows: [] }));
+        const isIdentity = Boolean(idColRes.rows[0]?.attidentity);
+        if (isIdentity) {
+            const maxRes = await client.query(`SELECT MAX("${pkName}") AS m FROM "${tableName}"`);
+            const maxVal = maxRes.rows[0]?.m;
+            if (maxVal !== null && maxVal !== undefined) {
+                const next = BigInt(maxVal) + 1n;
+                await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN "${pkName}" RESTART WITH ${next}`);
+                console.log(`   🔢 IDENTITY 序列已重置为 ${next}`);
+            }
         }
     } catch (_) {
-        // VARCHAR/UUID 主键无序列，正常跳过
+        // 无序列，正常跳过
     }
 }
 
@@ -189,7 +199,7 @@ async function migrateTable(tableConfig, client) {
 
     const colInfo = sqlite.prepare(`PRAGMA table_info("${tableName}")`).all();
     const pkInfo  = colInfo.find(c => c.pk === 1);
-    const pkName  = tableConfig.pkOverride || (pkInfo ? pkInfo.name : 'rowid');
+    const pkName  = tableConfig.pkOverride || (pkInfo ? pkInfo.name : 'id');
 
     // 动态批次防爆
     const tableCols = colInfo.map(c => c.name);
@@ -206,7 +216,7 @@ async function migrateTable(tableConfig, client) {
     const jsonCols = new Set(JSONB_COLUMNS[tableName] || []);
     const vecCols  = new Set(VECTOR_COLUMNS[tableName] || []);
 
-    let lastId = null;
+    let lastRowId = 0;
     let migratedCount = 0;
 
     await client.query('BEGIN');
@@ -215,19 +225,19 @@ async function migrateTable(tableConfig, client) {
         await client.query(`DELETE FROM "${tableName}"`);
 
         while (migratedCount < totalCount) {
-            let sql = `SELECT * FROM "${tableName}"`;
+            let sql = `SELECT *, rowid AS _sqlite_rowid_ FROM "${tableName}"`;
             const params = [];
-            if (lastId !== null) {
-                sql += ` WHERE "${pkName}" > ?`;
-                params.push(lastId);
+            if (lastRowId > 0) {
+                sql += ` WHERE rowid > ?`;
+                params.push(lastRowId);
             }
-            sql += ` ORDER BY "${pkName}" ASC LIMIT ?`;
+            sql += ` ORDER BY rowid ASC LIMIT ?`;
             params.push(safeBatch);
 
             const rows = sqlite.prepare(sql).all(...params);
             if (rows.length === 0) break;
 
-            const columns      = Object.keys(rows[0]);
+            const columns      = Object.keys(rows[0]).filter(c => c !== '_sqlite_rowid_');
             const colsFmt      = columns.map(c => `"${c}"`).join(', ');
             const allPlaceholders = [];
             const flatParams   = [];
@@ -246,7 +256,7 @@ async function migrateTable(tableConfig, client) {
                         } else if (typeof val === 'string') {
                             try { val = JSON.stringify(JSON.parse(val)); }
                             catch (e) {
-                                throw new Error(`[${tableName}][${col}] pk=${row[pkName]} JSON 损坏: ${String(val).slice(0, 100)}`);
+                                throw new Error(`[${tableName}][${col}] JSON 损坏: ${String(val).slice(0, 100)}`);
                             }
                         } else if (typeof val === 'object') {
                             val = JSON.stringify(val);
@@ -301,7 +311,7 @@ async function migrateTable(tableConfig, client) {
                     rowPH.push(`$${paramIdx++}`);
                 }
                 allPlaceholders.push(`(${rowPH.join(', ')})`);
-                lastId = row[pkName];
+                lastRowId = row._sqlite_rowid_;
             }
 
             const insertSql = `INSERT INTO "${tableName}" (${colsFmt}) OVERRIDING SYSTEM VALUE VALUES ${allPlaceholders.join(', ')}`;
@@ -311,8 +321,8 @@ async function migrateTable(tableConfig, client) {
             process.stdout.write(`\r   ├─ ${migratedCount}/${totalCount} (${Math.round(migratedCount / totalCount * 100)}%)`);
         }
 
-        await resetSequence(client, tableName, pkName);
         await client.query('COMMIT');
+        await resetSequence(client, tableName, pkName);
         console.log(`\n   ✅ 完成 (${migratedCount} 行)`);
     } catch (err) {
         await client.query('ROLLBACK');
