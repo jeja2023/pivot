@@ -9,8 +9,11 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// PostgreSQL 模式：db 为 null，所有数据库查询通过 server/db/client.js 进行
-const db = null;
+// PostgreSQL runtime 不暴露同步 db。测试启动器可显式开启同步兼容 facade，
+// 让遗留测试夹具逐步迁移到 PG，而不把 better-sqlite3 带回生产路径。
+const db = process.env.PIVOT_TEST_DB_SYNC === 'postgres'
+    ? require('./test-sync-db').createTestDb()
+    : null;
 const dbPath = null;
 
 module.exports = { db, dataDir, dbPath };

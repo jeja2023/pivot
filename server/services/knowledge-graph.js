@@ -852,9 +852,9 @@ async function getGraphContextForQuery(userId, queryText, options = {}) {
     };
 }
 
-function queryKnowledgeGraph({ userId, user = null, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT, scope = {} }) {
-    const entities = findQueryEntities(userId, query, entityLimit, { scope, user });
-    const graphContext = getGraphContextForQuery(userId, query, { entityLimit, relationLimit, scope, user });
+async function queryKnowledgeGraph({ userId, user = null, query, entityLimit = GRAPH_CONTEXT_ENTITY_LIMIT, relationLimit = GRAPH_CONTEXT_RELATION_LIMIT, scope = {} }) {
+    const entities = await findQueryEntities(userId, query, entityLimit, { scope, user });
+    const graphContext = await getGraphContextForQuery(userId, query, { entityLimit, relationLimit, scope, user });
     const paths = graphContext.relations.map(row => ({
         relationId: row.id,
         source: row.source_name,
@@ -992,7 +992,7 @@ async function deleteRelation({ userId, relationId }) {
     const result = await execute("UPDATE knowledge_relations SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?", [
         getBeijingTimestamp(), relationId, userId
     ]);
-    return (result?.rowCount || result?.changes || 0) > 0;
+    return Number(result || 0) > 0;
 }
 
 async function confirmRelation({ userId, relationId }) {

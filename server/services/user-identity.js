@@ -6,14 +6,6 @@ function allocateDeletedUsername(userId) {
     return `${DELETED_USERNAME_PREFIX}${userId}`;
 }
 
-async function archiveDeletedUsername(dbOrUserId, userIdIfDb) {
-    const userId = typeof dbOrUserId === 'number' || typeof dbOrUserId === 'string' ? dbOrUserId : userIdIfDb;
-    return await archiveDeletedUsernameAsync(userId);
-}
-
-/**
- * 异步版本：通过 client.js 异步接口执行。
- */
 async function archiveDeletedUsernameAsync(userId, _db = null) {
     const user = await queryOne(
         'SELECT id, username, deleted_username, deleted_at FROM users WHERE id = ?',
@@ -47,6 +39,5 @@ async function archiveDeletedUsernameAsync(userId, _db = null) {
 module.exports = {
     DELETED_USERNAME_PREFIX,
     allocateDeletedUsername,
-    archiveDeletedUsername,
     archiveDeletedUsernameAsync
 };

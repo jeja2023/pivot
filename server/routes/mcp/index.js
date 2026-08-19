@@ -17,7 +17,7 @@ const {
     listCachedMcpTools,
     listMcpServers,
     getMcpServerShareOptions,
-    normalizeServerRow,
+    normalizeServerRowAsync,
     refreshMcpTools,
     updateMcpServerSharing
 } = require('../../services/mcp-client');
@@ -43,7 +43,7 @@ const {
     BUILTIN_MCP_PREFIXES,
     executeBuiltinMcpTool,
     getBuiltinServiceTypeFromUrl,
-    getBuiltinConfigForServer,
+    getBuiltinConfigForServerAsync,
     normalizeBuiltinPayload
 } = require('../../services/builtin-mcp');
 const { isSuperAdmin } = require('../../permissions');
@@ -155,7 +155,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             const server = await updateMcpServerSharing(req.params.id, req.user, req.body || {});
             if (!server) return res.status(404).json({ error: '工具服务不存在或无权管理共享设置' });
             logAction(req, '更新工具服务共享设置', `${server.name}: ${server.scope}`);
-            return res.json({ success: true, server: normalizeServerRow(server) });
+            return res.json({ success: true, server: await normalizeServerRowAsync(server) });
         } catch (error) {
             return res.status(error.status || 400).json({ error: error.message });
         }
@@ -398,7 +398,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         `, [shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now]);
         logAction(req, '新增工具服务', `${name}: ${baseUrl}`);
         const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [row?.id]);
-        res.status(201).json({ success: true, server: normalizeServerRow(created) });
+        res.status(201).json({ success: true, server: await normalizeServerRowAsync(created) });
     }));
 
     router.post('/mcp/database-connections', authMiddleware, asyncHandler(async (req, res) => {
@@ -441,7 +441,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         });
         logAction(req, '新增数据库工具服务', `${name}: ${connection.database_type}`);
         const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
-        res.status(201).json({ success: true, server: normalizeServerRow(created) });
+        res.status(201).json({ success: true, server: await normalizeServerRowAsync(created) });
     }));
 
     router.post('/mcp/builtin-services', authMiddleware, asyncHandler(async (req, res) => {
@@ -483,7 +483,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         });
         logAction(req, '新增系统工具服务', `${name}: ${service.serviceType}`);
         const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
-        res.status(201).json({ success: true, server: normalizeServerRow(created) });
+        res.status(201).json({ success: true, server: await normalizeServerRowAsync(created) });
     }));
 
     router.post('/mcp/system-services/:type/ensure', authMiddleware, asyncHandler(async (req, res) => {
@@ -499,7 +499,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [serverId]);
         res.status(existing ? 200 : 201).json({
             success: true,
-            server: normalizeServerRow(created),
+            server: await normalizeServerRowAsync(created),
             tools
         });
     }));
@@ -550,7 +550,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         });
         logAction(req, '修改系统工具服务', `${name}: ${service.serviceType}`);
         const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
-        res.json({ success: true, server: normalizeServerRow(updated) });
+        res.json({ success: true, server: await normalizeServerRowAsync(updated) });
     }));
 
     router.put('/mcp/database-connections/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -598,7 +598,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         });
         logAction(req, '修改数据库工具服务', `${name}: ${connection.database_type}`);
         const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
-        res.json({ success: true, server: normalizeServerRow(updated) });
+        res.json({ success: true, server: await normalizeServerRowAsync(updated) });
     }));
 
     router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -629,7 +629,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         `, [name, baseUrl, nextApiKey, description, JSON.stringify(config), status, getBeijingTimestamp(), existing.id]);
         logAction(req, '修改工具服务', `${name}: ${baseUrl}`);
         const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
-        res.json({ success: true, server: normalizeServerRow(updated) });
+        res.json({ success: true, server: await normalizeServerRowAsync(updated) });
     }));
 
     router.patch('/mcp/servers/:id/status', authMiddleware, asyncHandler(async (req, res) => {
@@ -647,7 +647,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
         logAction(req, status === 'paused' ? '停用工具服务' : '启用工具服务', existing.name);
         const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
-        res.json({ success: true, server: normalizeServerRow(updated) });
+        res.json({ success: true, server: await normalizeServerRowAsync(updated) });
     }));
 
     router.delete('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -746,6 +746,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
             }
         }
         if (builtinType === 'reports') {
+            const builtinConfig = await getBuiltinConfigForServerAsync(server.id);
             try {
                 const result = await executeBuiltinMcpTool(server, 'reports.list_files', {
                     limit: Math.min(Math.max(Number(req.body?.limit || 8), 1), 20)
@@ -756,12 +757,12 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                     readableFiles: Array.isArray(result.files) ? result.files.length : Number(result.count || 0),
                     previewFiles: result.files || result.rows || [],
                     diagnostics: {
-                        roots: getBuiltinConfigForServer(server.id)?.config?.roots || [],
+                        roots: builtinConfig?.config?.roots || [],
                         hint: '如果预览为空，请确认 Pivot 服务进程对目录有读取权限。'
                     }
                 });
             } catch (err) {
-                const config = getBuiltinConfigForServer(server.id)?.config || {};
+                const config = builtinConfig?.config || {};
                 const roots = Array.isArray(config.roots) ? config.roots : [];
                 const status = Number(err?.status || err?.statusCode || 0) || 400;
                 return res.status(status).json({
@@ -941,7 +942,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/admin/mcp/servers', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const rows = await query("SELECT * FROM mcp_servers WHERE status != 'deleted' ORDER BY created_at DESC");
-        res.json({ data: rows.map(normalizeServerRow) });
+        res.json({ data: await Promise.all(rows.map(normalizeServerRowAsync)) });
     }));
 
     return router;

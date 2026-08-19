@@ -70,6 +70,8 @@ function getPgPool() {
         }
         applyPgTypeParsers();
         const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '60000', 10);
+        const testSchema = String(process.env.PG_TEST_SCHEMA || '').trim();
+        const safeTestSchema = /^[a-z_][a-z0-9_]{0,62}$/i.test(testSchema) ? testSchema : '';
         pgPool = new Pool({
             connectionString,
             max: parseInt(process.env.PG_POOL_MAX || '10', 10),
@@ -77,7 +79,7 @@ function getPgPool() {
             connectionTimeoutMillis: parseInt(process.env.PG_CONNECT_TIMEOUT_MS || '5000', 10),
             statement_timeout: statementTimeout > 0 ? statementTimeout : undefined,
             // 连接级会话参数：确保 timestamptz 文本输出即北京时间
-            options: `-c timezone=${PG_TIMEZONE}`,
+            options: `-c timezone=${PG_TIMEZONE}${safeTestSchema ? ` -c search_path=\"${safeTestSchema}\",public` : ''}`,
         });
         pgPool.on('error', (err) => {
             logger.error({ err: err.message }, '[PG] 连接池后台错误');

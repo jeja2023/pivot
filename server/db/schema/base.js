@@ -1449,6 +1449,9 @@ function sqliteFtsSql() {
 }
 
 function initSchema() {
+    if (!db || typeof db.exec !== 'function') {
+        throw new Error('[DB] 当前版本已切换为 PostgreSQL-only；SQLite initSchema 仅允许历史旧库升级工具显式注入 SQLite 连接后调用。');
+    }
     applyLegacySchemaPreflight();
     db.exec(baseTablesSql());
     db.exec(baseIndexesSql());

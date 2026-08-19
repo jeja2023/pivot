@@ -1,10 +1,10 @@
 /**
  * server/db/migrations/runner.js
- * 版本化迁移执行器（支持 SQLite 同步 + PostgreSQL 异步）
+ * 版本化迁移执行器（PostgreSQL + legacy SQLite test helpers）
  */
 const { getBeijingTimestamp } = require('../../time');
 
-// ── SQLite 同步实现 ────────────────────────────────────────────────────────
+// ── Legacy SQLite helpers ─────────────────────────────────────────────────
 
 function ensureSchemaMigrationTable(db) {
     db.exec(`

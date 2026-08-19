@@ -3,8 +3,22 @@
  * 数据库初始化入口（PostgreSQL）
  */
 const { db, dataDir, dbPath } = require('./connection');
+const { refreshUserSettingsCache } = require('../services/user-settings');
 
 const stmts = {};
+
+// Keep the small synchronous statement surface available to legacy tests while
+// production PostgreSQL callers use the async client/repositories directly.
+if (db?.prepare && process.env.PIVOT_TEST_DB_SYNC === 'postgres') {
+    stmts.getMessages = db.prepare(`
+        SELECT m.*, COALESCE(md.name, md.model_name, '') AS model_name, md.model_name AS model_api_name
+        FROM messages m
+        LEFT JOIN models md ON md.id = m.model_id
+        WHERE m.session_id = ? AND m.user_id = ? AND m.deleted_at IS NULL
+        ORDER BY m.id ASC
+    `);
+    stmts.getMessagesForContext = stmts.getMessages;
+}
 
 /**
  * PostgreSQL 模式异步初始化
@@ -20,6 +34,7 @@ async function initPostgresDatabase() {
     await initSchemaPg();
     await runMigrationsPg();
     await runSeedsPg();
+    await refreshUserSettingsCache();
 
     const ensureSetting = (key, value) => ensureAppSettingAsync(key, value);
     await ensureSetting('rag_enabled', 'true');
@@ -40,4 +55,3 @@ async function initPostgresDatabase() {
 }
 
 module.exports = { db, dataDir, dbPath, stmts, initPostgresDatabase };
-

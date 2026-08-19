@@ -23,7 +23,7 @@ test('process handlers log rejections and flush before fatal exit', () => {
 
     registerProcessErrorHandlers({
         logger,
-        flushAllSqliteWrites() { calls.push(['flush']); },
+        flushAllWrites() { calls.push(['flush']); },
         processRef,
         setTimeoutFn(callback, delay) { scheduled = { callback, delay }; return timer; }
     });

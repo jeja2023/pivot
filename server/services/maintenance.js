@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { db, dataDir } = require('../db');
+const { dataDir } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { parsePositiveInt, parseNonNegativeInt } = require('../number');
@@ -105,7 +105,7 @@ function toBackupTimestamp(date = new Date()) {
     return `${base}-${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
-function buildBackupPath(backupDir) {
+function _buildBackupPath(backupDir) {
     let backupPath = path.join(backupDir, `chat_backup_${toBackupTimestamp()}.db`);
     let suffix = 1;
     while (fs.existsSync(backupPath)) {
@@ -173,7 +173,7 @@ async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
     maintenanceState.auditCleanup.lastRunAt = getBeijingTimestamp();
     try {
         const res = await execute("DELETE FROM audit_logs WHERE timestamp < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)", [String(days)]);
-        const changes = res?.rowCount || res?.changes || 0;
+        const changes = Number(res || 0);
         maintenanceState.auditCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.auditCleanup.lastError = '';
         maintenanceState.auditCleanup.lastChanges = changes;
@@ -194,7 +194,7 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
     maintenanceState.apiCallLogCleanup.retentionDays = days;
     try {
         const res = await execute("DELETE FROM api_call_logs WHERE created_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)", [String(days)]);
-        const changes = res?.rowCount || res?.changes || 0;
+        const changes = Number(res || 0);
         maintenanceState.apiCallLogCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.apiCallLogCleanup.lastError = '';
         maintenanceState.apiCallLogCleanup.lastChanges = changes;
@@ -214,7 +214,7 @@ async function cleanupExpiredRefreshTokens() {
     maintenanceState.refreshTokenCleanup.lastRunAt = getBeijingTimestamp();
     try {
         const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai')");
-        const changes = res?.rowCount || res?.changes || 0;
+        const changes = Number(res || 0);
         maintenanceState.refreshTokenCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.refreshTokenCleanup.lastError = '';
         maintenanceState.refreshTokenCleanup.lastChanges = changes;
@@ -253,77 +253,21 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
 
 async function optimizeDatabase() {
     maintenanceState.optimize.lastRunAt = getBeijingTimestamp();
-    const vacuumPages = getIncrementalVacuumPages();
-    maintenanceState.optimize.vacuumPages = vacuumPages;
+    maintenanceState.optimize.vacuumPages = getIncrementalVacuumPages();
     try {
-        if (db) {
-            db.exec('PRAGMA optimize;');
-            if (vacuumPages > 0) {
-                db.exec(`PRAGMA incremental_vacuum(${vacuumPages});`);
-            }
-        }
+        await execute('ANALYZE');
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.optimize.lastError = '';
         return true;
     } catch (e) {
         maintenanceState.optimize.lastError = e.message;
-        logger.error({ err: e.message }, 'SQLite 优化失败');
+        logger.error({ err: e.message }, '数据库优化失败');
         return false;
     }
 }
 
-async function backupDatabase(options = {}) {
-    if (!db) {
-        return { skipped: true, reason: 'postgres_mode' };
-    }
-    if (maintenanceState.backup.running) {
-        logger.warn('数据库备份已跳过：另一个备份任务仍在运行');
-        return { skipped: true, reason: 'running' };
-    }
-
-    const backupDir = options.backupDir || getBackupDir();
-    const retentionDays = options.retentionDays || getBackupRetentionDays();
-    const maxVersions = options.maxVersions || getBackupMaxVersions();
-    maintenanceState.backup.lastRunAt = getBeijingTimestamp();
-    maintenanceState.backup.retentionDays = retentionDays;
-    maintenanceState.backup.maxVersions = maxVersions;
-    maintenanceState.backup.backupDir = backupDir;
-    maintenanceState.backup.running = true;
-
-    try {
-        fs.mkdirSync(backupDir, { recursive: true });
-        const backupPath = buildBackupPath(backupDir);
-        await db.backup(backupPath);
-        const stat = fs.statSync(backupPath);
-        const cleanup = cleanupOldBackups({ backupDir, retentionDays, maxVersions });
-
-        maintenanceState.backup.lastSuccessAt = getBeijingTimestamp();
-        maintenanceState.backup.lastError = '';
-        maintenanceState.backup.lastPath = backupPath;
-        maintenanceState.backup.lastSizeBytes = stat.size;
-        maintenanceState.backup.lastDeletedFiles = cleanup.deletedFiles;
-        maintenanceState.backup.totalDeletedFiles += cleanup.deletedFiles;
-
-        logger.info({
-            backupPath,
-            sizeBytes: stat.size,
-            deletedFiles: cleanup.deletedFiles,
-            retentionDays,
-            maxVersions
-        }, 'SQLite 数据库备份完成');
-
-        return {
-            backupPath,
-            sizeBytes: stat.size,
-            cleanup
-        };
-    } catch (e) {
-        maintenanceState.backup.lastError = e.message;
-        logger.error({ err: e.message }, 'SQLite 数据库备份失败');
-        return null;
-    } finally {
-        maintenanceState.backup.running = false;
-    }
+async function backupDatabase(_options = {}) {
+    return { skipped: true, reason: 'postgres_mode' };
 }
 
 function getMaintenanceStatus() {

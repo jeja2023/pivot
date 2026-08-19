@@ -3,13 +3,18 @@ const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
 
-function registerProcessErrorHandlers({ logger, flushAllSqliteWrites, processRef = process, setTimeoutFn = setTimeout }) {
+function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
 
     const fatalExit = (reason, err) => {
         logger.fatal({ err }, reason);
         try {
-            flushAllSqliteWrites();
+            const flushResult = typeof flushAllWrites === 'function' ? flushAllWrites() : null;
+            if (flushResult && typeof flushResult.catch === 'function') {
+                flushResult.catch(flushErr => {
+                    logger.warn({ err: flushErr }, '致命退出时刷新写队列失败');
+                });
+            }
         } catch (flushErr) {
             logger.warn({ err: flushErr }, '致命退出时刷新写队列失败');
         }

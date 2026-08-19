@@ -8,7 +8,7 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./agent-workflows');
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
-const { getBuiltinConfigForServer, isPathInside } = require('./builtin-mcp-common');
+const { getBuiltinConfigForServerAsync, isPathInside } = require('./builtin-mcp-common');
 
 const TRIGGER_TYPES = new Set(['webhook', 'file', 'database']);
 const TRIGGER_STATUSES = new Set(['active', 'paused']);
@@ -43,6 +43,7 @@ function generateTriggerToken() {
 }
 
 function parseJson(value, fallback = {}) {
+    if (value && typeof value === 'object') return value;
     try {
         const parsed = JSON.parse(value || '');
         return parsed && typeof parsed === 'object' ? parsed : fallback;
@@ -368,7 +369,7 @@ async function dispatchWebhookTrigger(token, payload = {}, meta = {}) {
 async function assertDirectoryWithinReportRoots(directory, userId) {
     const target = path.resolve(directory);
     // 报表目录配置存放在 mcp_builtin_configs，服务归属限定为本人或全局服务。
-    // service_type 存在多个历史别名，统一交给 getBuiltinConfigForServer 归一化后再判断
+    // service_type 存在多个历史别名，统一交给 getBuiltinConfigForServerAsync 归一化后再判断
     const servers = await query(`
         SELECT c.mcp_server_id
         FROM mcp_builtin_configs c
@@ -376,8 +377,8 @@ async function assertDirectoryWithinReportRoots(directory, userId) {
         WHERE c.status != 'deleted' AND s.status = 'active'
           AND (s.user_id = ? OR s.user_id IS NULL)
     `, [userId]);
-    const roots = servers
-        .map(item => getBuiltinConfigForServer(item.mcp_server_id))
+    const configs = await Promise.all(servers.map(item => getBuiltinConfigForServerAsync(item.mcp_server_id)));
+    const roots = configs
         .filter(config => config?.service_type === 'reports')
         .flatMap(config => config.config?.roots || [])
         .map(root => path.resolve(root));

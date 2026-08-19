@@ -71,7 +71,7 @@ test('数据分析支持上传 SQLite 文件生成数据集', async () => {
         assert.deepEqual(detail.previewRows[0], { c_1: '华东', c_2: '120' });
         assert.deepEqual(detail.previewRows[1], { c_1: '华南', c_2: '180' });
 
-        const summary = getDatasetSummary(userId);
+        const summary = await getDatasetSummary(userId);
         assert.equal(summary.count, 1);
         assert.equal(summary.rowCount, 2);
     } finally {

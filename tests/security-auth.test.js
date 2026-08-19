@@ -38,6 +38,7 @@ const {
     uploadRoot,
     withPermissionFlags
 } = require('./security-helpers');
+const { refreshAppSettingsCache } = require('../server/services/app-settings');
 
 test('seed repair restores built-in admin role and login status', () => {
     const admin = db.prepare('SELECT id, role, status, deleted_at, nickname, unit FROM users WHERE username = ?').get('admin');
@@ -236,7 +237,7 @@ test('apiFetch returns to login when refresh token is no longer valid', async ()
     sandbox.window.showAuth = () => { showAuthCount += 1; };
     sandbox.window.closeAgentRealtime = () => { closedRealtimeCount += 1; };
 
-    await assert.rejects(() => sandbox.apiFetch('/api/sessions'), /Refresh failed/);
+    await assert.rejects(() => sandbox.apiFetch('/api/sessions'), /Refresh failed|令牌刷新失败/);
 
     assert.deepEqual(calls.map(call => call.url), ['/api/sessions', '/api/auth/refresh']);
     assert.equal(showAuthCount, 1);
@@ -252,11 +253,11 @@ test('outbound URL guard blocks sensitive SSRF targets', async () => {
 
     await assert.rejects(
         assertSafeOutboundUrl('http://169.254.169.254/latest/meta-data', { role: 'admin' }),
-        /sensitive local|metadata target/
+        /sensitive local|metadata target|敏感的本地|云元数据/
     );
     await assert.rejects(
         assertSafeOutboundUrl('http://localhost:11434/v1', { role: 'admin' }),
-        /sensitive local|metadata target/
+        /sensitive local|metadata target|敏感的本地|云元数据/
     );
 });
 
@@ -289,7 +290,7 @@ test('safe outbound lookup rejects private resolved addresses during HTTP reques
                 resolve(address);
             });
         }),
-        /sensitive local|metadata target/
+        /sensitive local|metadata target|敏感的本地|云元数据/
     );
 });
 
@@ -1051,7 +1052,7 @@ test('api access disabled blocks api key creation', async () => {
     };
 
     try {
-        setApiAccessSetting(false, user.id);
+        await setApiAccessSetting(false, user.id);
         await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
             body: { name: 'blocked-key' },
             user
@@ -1072,6 +1073,7 @@ test('api access disabled blocks api key creation', async () => {
         } else {
             db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
         }
+        await refreshAppSettingsCache();
         db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
         assert.equal(getApiAccessSetting(), previousValue);
@@ -1101,23 +1103,23 @@ test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the fi
     assert.match(res.body.error, /文件内容/);
     assert.equal(fs.existsSync(badPath), false);
 });
-test('refresh tokens are hashed at rest and rotated once', () => {
+test('refresh tokens are hashed at rest and rotated once', async () => {
     const { hashRefreshToken, login, refreshTokens, register } = require('../server/auth');
     const suffix = Date.now().toString(36);
     const username = `refresh_hash_${suffix}`;
     const password = 'Pivot-Test-123!';
-    const user = register(username, password, 'Refresh Token Test', 'QA');
+    const user = await register(username, password, 'Refresh Token Test', 'QA');
     try {
-        const signedIn = login(username, password);
+        const signedIn = await login(username, password);
         const stored = db.prepare('SELECT token FROM refresh_tokens WHERE user_id = ?').get(user.id);
         assert.ok(stored);
         assert.equal(stored.token, hashRefreshToken(signedIn.refreshToken));
         assert.notEqual(stored.token, signedIn.refreshToken);
 
-        const rotated = refreshTokens(signedIn.refreshToken);
+        const rotated = await refreshTokens(signedIn.refreshToken);
         assert.equal(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken)), undefined);
         assert.ok(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(rotated.refreshToken)));
-        assert.throws(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
+        await assert.rejects(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
     } finally {
         db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);

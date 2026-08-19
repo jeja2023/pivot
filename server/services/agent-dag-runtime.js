@@ -271,7 +271,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         attempted = attempt;
-        deps.assertRunNotCancelled(run.id);
+        await deps.assertRunNotCancelled(run.id);
         try {
             const remainingRunMs = Math.max(deadline - Date.now(), 1);
             const nodeOwnsDeadline = policy.timeoutMs < remainingRunMs;
@@ -359,7 +359,7 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
     const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
     const childStack = [...stack, workflowId];
     while ([...states.values()].some(state => state.status === 'pending')) {
-        deps.assertRunNotCancelled(run.id);
+        await deps.assertRunNotCancelled(run.id);
         const ready = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'pending'
             && node.dependsOn.every(dep => ['completed', 'continued_error', 'error', 'skipped'].includes(states.get(dep)?.status)));
         if (!ready.length) throw new Error(`子工作流“${resolved.workflow.name}”执行停滞。`);
@@ -497,7 +497,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
 
     while ([...states.values()].some(state => state.status === 'pending')) {
         assertRunWithinBudget();
-        deps.assertRunNotCancelled(run.id);
+        await deps.assertRunNotCancelled(run.id);
         const readyNodes = dagSpec.nodes.filter(node => {
             const state = states.get(node.id);
             if (state?.status !== 'pending') return false;
@@ -665,7 +665,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     })
                 };
                 const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, executionContext }, deps);
-                deps.assertRunNotCancelled(run.id);
+                await deps.assertRunNotCancelled(run.id);
                 if (!result.ok) {
                     result.error.dagAttempt = result.attempt;
                     result.error.dagDurationMs = result.durationMs;

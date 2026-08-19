@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 987,
+  "total": 807,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -13,6 +13,10 @@
     },
     {
       "file": "scripts/diff_schema_sqlite_pg.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/index.js",
       "count": 1
     },
     {
@@ -40,116 +44,16 @@
       "count": 6
     },
     {
-      "file": "server/llm.js",
-      "count": 5
-    },
-    {
-      "file": "server/metrics.js",
-      "count": 2
-    },
-    {
-      "file": "server/routes/openai/helpers.js",
+      "file": "server/db/test-sync-db.js",
       "count": 1
     },
     {
-      "file": "server/routes/prompts.js",
-      "count": 6
-    },
-    {
-      "file": "server/services/agent-model.js",
-      "count": 2
-    },
-    {
-      "file": "server/services/agent-queue.js",
-      "count": 5
-    },
-    {
-      "file": "server/services/agent-tools.js",
-      "count": 3
-    },
-    {
-      "file": "server/services/agent-workflows.js",
-      "count": 13
-    },
-    {
-      "file": "server/services/app-settings.js",
-      "count": 6
-    },
-    {
-      "file": "server/services/chat-vision.js",
+      "file": "server/db/test-sync-worker.js",
       "count": 1
-    },
-    {
-      "file": "server/services/compliance-package.js",
-      "count": 4
-    },
-    {
-      "file": "server/services/data-analysis/datasets.js",
-      "count": 8
-    },
-    {
-      "file": "server/services/data-analysis/shared.js",
-      "count": 2
-    },
-    {
-      "file": "server/services/document-processing/cleanup.js",
-      "count": 2
-    },
-    {
-      "file": "server/services/document-processing/exporters/index.js",
-      "count": 2
-    },
-    {
-      "file": "server/services/document-processing/files.js",
-      "count": 5
-    },
-    {
-      "file": "server/services/document-processing/jobs.js",
-      "count": 39
-    },
-    {
-      "file": "server/services/enterprise-access.js",
-      "count": 2
-    },
-    {
-      "file": "server/services/knowledge-graph.js",
-      "count": 36
-    },
-    {
-      "file": "server/services/maintenance.js",
-      "count": 3
-    },
-    {
-      "file": "server/services/model-runtime.js",
-      "count": 1
-    },
-    {
-      "file": "server/services/models.js",
-      "count": 10
-    },
-    {
-      "file": "server/services/rag-index/index.js",
-      "count": 7
-    },
-    {
-      "file": "server/services/runtime-settings.js",
-      "count": 5
-    },
-    {
-      "file": "server/services/sqlite-write-queue.js",
-      "count": 4
-    },
-    {
-      "file": "server/services/storage-gc.js",
-      "count": 7
-    },
-    {
-      "file": "server/services/user-identity.js",
-      "count": 3
     },
     {
       "file": "tests/agent-runtime-lifecycle.test.js",
-      "count": 7
+      "count": 16
     },
     {
       "file": "tests/agent-trace-contracts.test.js",
@@ -165,11 +69,11 @@
     },
     {
       "file": "tests/db-migration-snapshots.test.js",
-      "count": 22
+      "count": 15
     },
     {
       "file": "tests/document-processing.test.js",
-      "count": 30
+      "count": 27
     },
     {
       "file": "tests/enterprise-deployment.test.js",
@@ -233,7 +137,7 @@
     },
     {
       "file": "tests/security-rag-debug-history.test.js",
-      "count": 1
+      "count": 3
     },
     {
       "file": "tests/security-rag/core.js",

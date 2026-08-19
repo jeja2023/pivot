@@ -19,6 +19,7 @@ const zlib = require('node:zlib');
 const Sqlite = require('better-sqlite3');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-security-suite-please-do-not-use';
+process.env.PIVOT_DB_WRITE_QUEUE_DISABLED = process.env.PIVOT_DB_WRITE_QUEUE_DISABLED || 'true';
 
 const generatedTestDataDir = !process.env.DATA_DIR;
 
@@ -31,8 +32,6 @@ const generatedTestUploadDir = !process.env.PIVOT_UPLOAD_DIR && !process.env.UPL
 if (generatedTestUploadDir) {
     process.env.PIVOT_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-security-uploads-'));
 }
-
-process.env.PIVOT_SQLITE_WRITE_QUEUE_SYNC = process.env.PIVOT_SQLITE_WRITE_QUEUE_SYNC || 'true';
 
 const {
     assertSafeOutboundUrl,
@@ -471,7 +470,7 @@ test.after(async () => {
         removeTestPath(process.env.PIVOT_UPLOAD_DIR, { recursive: true });
     }
     if (generatedTestDataDir && process.env.DATA_DIR) {
-        db.close();
+        if (db && typeof db.close === 'function') db.close();
         removeTestPath(process.env.DATA_DIR, { recursive: true });
     }
 });

@@ -1,22 +1,14 @@
 /**
  * server/services/db-write-queue.js
- * 高频日志写入队列（SQLite / PostgreSQL 双模式门面）
+ * 高频日志写入队列（PostgreSQL）
  *
  * 审计日志、API 调用日志、MCP 调用日志、模型用量事件都是「高频、可容忍毫秒级
  * 延迟、不可阻塞主链路」的写入。本模块把它们缓冲成批，攒批落库。
- *
- * 模式路由：
- *  - SQLite：委托给 services/sqlite-write-queue.js（同步事务，行为保持不变）
- *  - PostgreSQL：本模块内的异步实现，多行 VALUES 批量 INSERT
- *
- * 对外 API 与 sqlite-write-queue.js 完全一致，调用方无需感知方言。
- * 注意 flushAllSqliteWrites() 在 PG 模式下返回 Promise：进程退出路径若需
- * 确保落库，应改用 await flushAllWrites()。
  */
 const { logger } = require('../logger');
 
 // ──────────────────────────────────────────────────────────────────────────
-// 队列定义（两种方言共用的列映射）
+// 队列定义
 // ──────────────────────────────────────────────────────────────────────────
 
 const QUEUE_SPECS = {
@@ -59,16 +51,17 @@ const QUEUE_SPECS = {
 const DEFAULT_FLUSH_INTERVAL_MS = 250;
 const DEFAULT_MAX_BATCH_SIZE = 100;
 const DEFAULT_MAX_QUEUE_SIZE = 5000;
+const QUEUE_DISABLED = /^(1|true|yes)$/i.test(String(process.env.PIVOT_DB_WRITE_QUEUE_DISABLED || ''));
 
 const QUEUE_LIMITS = {
-    auditLogs: Number.parseInt(process.env.PIVOT_SQLITE_AUDIT_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
-    apiCallLogs: Number.parseInt(process.env.PIVOT_SQLITE_API_LOG_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
-    mcpCallLogs: Number.parseInt(process.env.PIVOT_SQLITE_MCP_LOG_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
-    modelUsageEvents: Number.parseInt(process.env.PIVOT_SQLITE_USAGE_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
+    auditLogs: Number.parseInt(process.env.PIVOT_DB_AUDIT_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
+    apiCallLogs: Number.parseInt(process.env.PIVOT_DB_API_LOG_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
+    mcpCallLogs: Number.parseInt(process.env.PIVOT_DB_MCP_LOG_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
+    modelUsageEvents: Number.parseInt(process.env.PIVOT_DB_USAGE_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
 };
 
-const FLUSH_INTERVAL_MS = Number.parseInt(process.env.PIVOT_SQLITE_WRITE_FLUSH_MS, 10) || DEFAULT_FLUSH_INTERVAL_MS;
-const MAX_BATCH_SIZE = Number.parseInt(process.env.PIVOT_SQLITE_WRITE_BATCH_SIZE, 10) || DEFAULT_MAX_BATCH_SIZE;
+const FLUSH_INTERVAL_MS = Number.parseInt(process.env.PIVOT_DB_WRITE_FLUSH_MS, 10) || DEFAULT_FLUSH_INTERVAL_MS;
+const MAX_BATCH_SIZE = Number.parseInt(process.env.PIVOT_DB_WRITE_BATCH_SIZE, 10) || DEFAULT_MAX_BATCH_SIZE;
 
 // PG 单条语句绑定参数上限 65535，按列数换算每批安全行数
 function safeBatchRows(columnCount) {
@@ -93,6 +86,7 @@ const PG_MAX_RETRY_DELAY_MS = Math.max(PG_BASE_RETRY_DELAY_MS * 16, 1000);
 let pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
 
 function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
+    if (QUEUE_DISABLED) return;
     if (pgFlushTimer) return;
     pgFlushTimer = setTimeout(() => {
         pgFlushTimer = null;
@@ -104,6 +98,7 @@ function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
 }
 
 function pgEnqueue(queueName, item) {
+    if (QUEUE_DISABLED) return;
     const queue = pgQueues[queueName];
     if (!queue) throw new Error(`未知数据库写入队列： ${queueName}`);
     if (queue.length >= QUEUE_LIMITS[queueName]) {
@@ -147,6 +142,7 @@ async function pgFlushQueue(queueName) {
 }
 
 async function pgFlush() {
+    if (QUEUE_DISABLED) return;
     if (pgFlushing) return pgFlushing;
 
     pgFlushing = (async () => {
@@ -175,6 +171,7 @@ async function pgFlush() {
 }
 
 async function pgFlushAll() {
+    if (QUEUE_DISABLED) return;
     if (pgFlushTimer) {
         clearTimeout(pgFlushTimer);
         pgFlushTimer = null;
@@ -205,7 +202,6 @@ function pgQueueStatus() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// 模式路由（SQLite 侧懒加载，避免 PG 模式下触发 db.prepare 于 null）
 function enqueueAuditLog(item) {
     return pgEnqueue('auditLogs', item);
 }
@@ -231,7 +227,7 @@ function flushWriteQueue() {
 
 /**
  * 刷空全部队列。
- * PG 模式返回 Promise —— 需要确保落库的调用方应 await。
+ * 返回 Promise —— 需要确保落库的调用方应 await。
  */
 function flushAllWrites() {
     return pgFlushAll();
@@ -254,15 +250,11 @@ module.exports = {
     flushWriteQueue,
     getPendingModelUsageTotal,
     getQueueStatus,
-    // 向后兼容别名
-    flushAllSqliteWrites: flushAllWrites,
-    flushSqliteWriteQueue: flushWriteQueue,
 };
 
-// PostgreSQL 模式下退出前落库
+// 退出前落库
 process.once('beforeExit', () => {
     pgFlushAll().catch(err => {
         logger.warn({ err: err.message }, '[PG] 退出时写入队列刷新失败');
     });
 });
-

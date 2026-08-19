@@ -67,10 +67,10 @@ test('内置工具分发层按 URL 前缀识别全部服务类型', () => {
 
 test('内置工具分发层拒绝未知服务类型', async () => {
     const server = { base_url: 'https://example.test/mcp' };
-    assert.throws(() => listBuiltinMcpTools(server), /Unsupported built-in MCP server/);
+    assert.throws(() => listBuiltinMcpTools(server), /Unsupported built-in MCP server|不支持的内置 MCP 服务类型/);
     await assert.rejects(
         () => executeBuiltinMcpTool(server, 'format.to_json', { value: 1 }),
-        /Unsupported built-in MCP server/
+        /Unsupported built-in MCP server|不支持的内置 MCP 服务类型/
     );
 });
 
@@ -120,7 +120,7 @@ test('JSON 提取工具能从混杂文本中取出首个 JSON 并在缺失时报
 test('格式转换工具拒绝未知工具名', () => {
     assert.throws(
         () => executeFormatConversionTool(null, 'format.unknown_tool', {}),
-        /Unsupported format MCP tool/
+        /Unsupported format MCP tool|不支持的格式.*工具/
     );
 });
 

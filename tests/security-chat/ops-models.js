@@ -32,6 +32,7 @@ const {
     setApiAccessSetting,
     test
 } = require('../security-helpers');
+const { refreshAppSettingsCache } = require('../../server/services/app-settings');
 const {
     applyCompletionNoThinkSoftSwitch,
     applyCompletionThinkingControls,
@@ -272,7 +273,7 @@ test('聊天重新生成标记只接受显式 true 值', () => {
     assert.equal(normalizeRegenerateFlag('false'), false);
 });
 
-test('模型用量事件会计入每日模型配额用量', () => {
+test('模型用量事件会计入每日模型配额用量', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -285,7 +286,7 @@ test('模型用量事件会计入每日模型配额用量', () => {
 
     try {
         recordModelTokenUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid, 123, 'openai_api_key');
-        assert.equal(getModelDailyUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid), 123);
+        assert.equal(await getModelDailyUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid), 123);
     } finally {
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
@@ -470,27 +471,11 @@ test('数据库备份任务创建热备份并清理旧版本', async () => {
         }
 
         const result = await backupDatabase({ backupDir, retentionDays: 7, maxVersions: 2 });
-        assert.ok(result?.backupPath);
-        assert.ok(fs.existsSync(result.backupPath));
-        assert.ok(result.sizeBytes > 0);
-        assert.equal(result.cleanup.deletedFiles, 3);
-
-        const firstBackup = result.backupPath;
-        const firstTime = Date.now() - 1000;
-        fs.utimesSync(firstBackup, firstTime / 1000, firstTime / 1000);
-        const second = await backupDatabase({ backupDir, retentionDays: 7, maxVersions: 1 });
-        assert.ok(second?.backupPath);
-        assert.equal(fs.existsSync(second.backupPath), true);
-        assert.equal(fs.existsSync(firstBackup), false);
+        assert.deepEqual(result, { skipped: true, reason: 'postgres_mode' });
 
         const cleanup = cleanupOldBackups({ backupDir, retentionDays: 7, maxVersions: 1 });
-        assert.ok(cleanup.remainingFiles <= 1);
-
-        const status = getMaintenanceStatus();
-        assert.ok(status.backup.lastSuccessAt);
-        assert.equal(status.backup.backupDir, backupDir);
-        assert.equal(status.backup.retentionDays, 7);
-        assert.equal(status.backup.maxVersions, 1);
+        assert.equal(cleanup.deletedFiles, 3);
+        assert.equal(cleanup.remainingFiles, 0);
     } finally {
         fs.rmSync(backupDir, { recursive: true, force: true });
     }
@@ -1159,7 +1144,7 @@ test('api access disabled blocks openai router at the router level', async () =>
     };
 
     try {
-        setApiAccessSetting(false, user.id);
+        await setApiAccessSetting(false, user.id);
         await new Promise((resolve, reject) => {
             const originalJson = res.json.bind(res);
             res.json = (body) => {
@@ -1187,6 +1172,7 @@ test('api access disabled blocks openai router at the router level', async () =>
         } else {
             db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
         }
+        await refreshAppSettingsCache();
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
         assert.equal(getApiAccessSetting(), previousValue);
     }

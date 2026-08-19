@@ -66,12 +66,12 @@ function request(server, { method = 'GET', path, token, body } = {}) {
     });
 }
 
-function createTestUser(label, unit) {
+async function createTestUser(label, unit) {
     const suffix = `${process.pid.toString(36)}${Date.now().toString(36).slice(-7)}${Math.random().toString(36).slice(2, 5)}`;
     const username = `http_${String(label).slice(0, 10)}_${suffix}`;
     const password = 'Password123';
-    const user = register(username, password, `${label} HTTP user`, unit, 'user');
-    const session = login(username, password);
+    const user = await register(username, password, `${label} HTTP user`, unit, 'user');
+    const session = await login(username, password);
     return { ...user, accessToken: session.accessToken };
 }
 
@@ -84,8 +84,8 @@ function cleanupUsers(userIds) {
 }
 
 test('shared RAG recipients can list resources but cannot mutate documents or collections', async () => {
-    const owner = createTestUser('rag_owner', 'QA');
-    const receiver = createTestUser('rag_receiver', 'QA');
+    const owner = await createTestUser('rag_owner', 'QA');
+    const receiver = await createTestUser('rag_receiver', 'QA');
     const now = getBeijingTimestamp();
     const collectionInfo = sql(`
         INSERT INTO knowledge_collections (
@@ -167,8 +167,8 @@ test('shared RAG recipients can list resources but cannot mutate documents or co
 });
 
 test('shared MCP recipients can list servers and readonly tools but cannot edit or call writes', async () => {
-    const owner = createTestUser('mcp_owner', 'QA');
-    const receiver = createTestUser('mcp_receiver', 'QA');
+    const owner = await createTestUser('mcp_owner', 'QA');
+    const receiver = await createTestUser('mcp_receiver', 'QA');
     const now = getBeijingTimestamp();
     const serverInfo = sql(`
         INSERT INTO mcp_servers (

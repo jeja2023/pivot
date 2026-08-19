@@ -191,13 +191,12 @@ async function buildComplianceAuditPackage({ escapeCsvCell, generatedAt, filters
                COALESCE(SUM(usage.input_tokens), 0) AS input_tokens,
                COALESCE(SUM(usage.output_tokens), 0) AS output_tokens,
                COALESCE(SUM(usage.token_count), 0) AS total_tokens,
-               ROUND(
+               ROUND((
                    (
                        COALESCE(SUM(usage.input_tokens), 0) * COALESCE(md.input_price_per_million, 0)
                        + COALESCE(SUM(usage.output_tokens), 0) * COALESCE(md.output_price_per_million, 0)
-                   ) / 1000000.0,
-                   6
-               ) AS estimated_cost
+                   ) / 1000000.0
+               )::numeric, 6) AS estimated_cost
         FROM models md
         LEFT JOIN (
             SELECT user_id, model_id, role, token_count,

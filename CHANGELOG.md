@@ -1,3 +1,24 @@
+## [v0.1.2] - 2026-08-19
+
+### PostgreSQL 生产就绪与启动权限容错强化、日志用户身份修复、全量测试套件 100% 通过与死代码精简
+
+- **PostgreSQL DDL 初始化幂等与属主权限（42501）容错强化**：
+  - 重构 `server/db/schema/pg.js` 中的 `pivot_json_extract` 容错 JSON 提取函数，采用 `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_proc ...) THEN CREATE FUNCTION ...` 幂等结构，规避普通应用账号在 `CREATE OR REPLACE` 时触发的属主校验拦截（`42501: 必须是函数 pivot_json_extract 的属主`）。
+  - 移除非必要的严格事务包围，对建表、补遗留列、外键、索引、注释等各个 DDL 执行阶段细化错误捕获（跳过 42501 非属主警告及 42P07/42701 已存在异常），确保以普通应用用户连接时服务依然能够安全、稳定启动。
+  - 新增 `scripts/fix_pg_ownership.js` 工具脚本，支持一键将 PostgreSQL 数据库中的表、序列、函数及 Schema 属主批量转移至应用用户。
+- **请求日志序列化器与用户认证身份提取修复**：
+  - 修复 `server/logger.js` 中的 `serializers.req` 提取逻辑，从 `req.user || req.raw?.user` 提取真实登录用户名，彻底修复所有已认证请求日志误标为 `(用户: 访客)` 的问题。
+  - 优化控制台单行输出格式，支持保留业务主动记录的自定义详细日志消息（如模型测试成功输出）。
+- **全量测试套件 100% 通过（472/472）与纯异步稳定性闭环**：
+  - 扩展全栈中英文错误断言兼容（`model-forwarder.js`、`enterprise-deployment.test.js`、`security-builtin-mcp.test.js`、`security-desktop-update.test.js`、`access-database.js`）。
+  - 全面引入高频异步日志写队列的显式落库等待机制（`flushAllWrites()`），消除测试环境下并发读取日志表的时序竞争。
+  - 修复智能体 DAG 与运行时生命周期状态机：`updateRun` 引入 `canTransitionAgentRunStatus` CAS 重试保护，`cancelAgentRun` 补齐关键操作的 `await` 与 AbortController 中断状态校验，`runAgent` 执行前后双重检验 `TERMINAL_STATUSES` 终态保护，避免并发取消/完成被假错误覆盖。
+  - 修复文档处理（`document-processing`）PDF 异步拆分、合并、旋转、删页、重排的输出注册与 `touchProgress` 进度回调，避免异步回调冲刷覆盖已达 `succeeded` 的终态任务。
+- **代码库清理与死代码精简（Dead Code Elimination）**：
+  - 彻底删除已无任何引用的原型文件 `server/db/schema/enterprise-pg.js`。
+  - 精简 `server/services/maintenance.js` 中遗留的 SQLite `db.exec` / `db.backup` 历史死代码分支，统一收敛至标准的 PostgreSQL `ANALYZE` 统计更新。
+  - 规范 `.env` 与 `.env.example`，清理冗余无用的 `DB_CLIENT` 声明以及底部的重复注释，统一以 `DATABASE_URL` 为核心连接配置。
+
 ## [v0.1.1] - 2026-08-19
 
 ### 全系统工程全量中文化重构、控制台日志汉化美化、Cookie 与 401 轮询优化及代码质量闭环

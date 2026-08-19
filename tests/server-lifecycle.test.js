@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startHttpServer } = require('../server/server');
 
-test('HTTP lifecycle starts the app and flushes writes on shutdown', () => {
+test('HTTP lifecycle starts the app and flushes writes on shutdown', async () => {
     const events = new Map();
     const processRef = {
         on(name, handler) { events.set(name, handler); },
@@ -26,13 +26,14 @@ test('HTTP lifecycle starts the app and flushes writes on shutdown', () => {
         logger,
         version: 'test',
         scheduleMaintenanceTasks() { calls.push(['maintenance']); },
-        flushAllSqliteWrites() { calls.push(['flush']); },
+        flushAllWrites() { calls.push(['flush']); },
         processRef
     });
 
     assert.equal(lifecycle.server, fakeServer);
     assert.deepEqual(calls.slice(0, 3), [['listen', 3210], ['info', { port: 3210, url: 'http://localhost:3210', version: 'test' }], ['maintenance']]);
     events.get('SIGTERM')();
+    await Promise.resolve();
     assert.deepEqual(calls.slice(-2), [['close'], ['flush']]);
     assert.equal(processRef.exitCode, 0);
 });

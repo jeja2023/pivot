@@ -2,7 +2,30 @@ const crypto = require('crypto');
 const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
-const { archiveDeletedUsername } = require('../../services/user-identity');
+
+function archiveDeletedUsernameInSqlite(database, userId) {
+    const normalizedUserId = Number.parseInt(userId, 10);
+    if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return false;
+    const user = database.prepare(
+        'SELECT id, username, deleted_username, deleted_at FROM users WHERE id = ?'
+    ).get(normalizedUserId);
+    if (!user || !user.deleted_at) return false;
+
+    const deletedUsername = String(user.deleted_username || user.username || '').trim();
+    const base = `@deleted:${normalizedUserId}`;
+    let candidate = base;
+    let suffix = 0;
+
+    while (database.prepare('SELECT COUNT(*) AS count FROM users WHERE username = ? AND id != ?').get(candidate, normalizedUserId)?.count > 0) {
+        suffix += 1;
+        candidate = `${base}:${suffix}`;
+    }
+
+    const result = database.prepare(
+        'UPDATE users SET username = ?, deleted_username = ? WHERE id = ? AND deleted_at IS NOT NULL'
+    ).run(candidate, deletedUsername, normalizedUserId);
+    return Number(result?.changes || 0) > 0;
+}
 
 const migrations = [
     {
@@ -59,7 +82,7 @@ const migrations = [
                 WHERE deleted_at IS NOT NULL AND username != 'admin'
                 ORDER BY id ASC
             `).all();
-            deletedUsers.forEach(user => archiveDeletedUsername(db, user.id));
+            deletedUsers.forEach(user => archiveDeletedUsernameInSqlite(db, user.id));
         }
     },
     {

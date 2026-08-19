@@ -464,7 +464,7 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null) 
         SELECT
             COUNT(*) AS doc_count,
             COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
-            COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at)), '') AS doc_version
+            COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version
         FROM knowledge_docs
         ${accessJoin}
         WHERE 1 = 1 ${ownerFilter}
@@ -474,8 +474,8 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null) 
           ${scopeFilter.sql}
           ${accessFilter}
     `, (user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]))) || {};
-    const entityVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at), \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]);
-    const relationVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at), \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]);
+    const entityVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]);
+    const relationVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]);
     const graph = {
         entity_version: entityVersionRow?.entity_version || '',
         relation_version: relationVersionRow?.relation_version || ''

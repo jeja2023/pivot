@@ -1,10 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const Sqlite = require('better-sqlite3');
-
 const { db } = require('../server/db');
 const { createAgentQueue } = require('../server/services/agent-queue');
-const { recoverAgentRuns } = require('../server/services/agent-runtime');
+const { getAgentQueue, recoverAgentRuns } = require('../server/services/agent-runtime');
 const {
     canTransitionAgentRunStatus,
     transitionAgentRunStatus
@@ -88,28 +86,23 @@ test('runtime recovery leaves stale awaiting approval runs suspended', async () 
 });
 
 test('an awaiting approval run releases its queue slot to the next run', async () => {
-    const queueDb = new Sqlite(':memory:');
-    queueDb.exec([
-        'CREATE TABLE agent_runs (',
-        '    id TEXT PRIMARY KEY,',
-        '    user_id INTEGER NOT NULL,',
-        '    status TEXT NOT NULL,',
-        '    priority INTEGER DEFAULT 0,',
-        '    created_at TEXT NOT NULL,',
-        '    updated_at TEXT,',
-        '    started_at TEXT,',
-        '    last_heartbeat_at TEXT,',
-        '    locked_by TEXT,',
-        '    lock_expires_at TEXT,',
-        '    deleted_at TEXT',
-        ')'
+    const suffix = `${process.pid}-${Date.now()}`;
+    const insertUser = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', ?, 'QA', 'user', 'active', datetime('now', '+8 hours'))
+    `);
+    const users = [
+        { id: Number(insertUser.run(`queue_owner_${suffix}`, 'Queue owner').lastInsertRowid) },
+        { id: Number(insertUser.run(`queue_next_${suffix}`, 'Queue next').lastInsertRowid) }
+    ];
+    const approvalRunId = `approval-run-${suffix}`;
+    const nextRunId = `next-run-${suffix}`;
+    const insertQueued = db.prepare([
+        'INSERT INTO agent_runs (id, user_id, title, goal, status, priority, created_at)',
+        "VALUES (?, ?, ?, ?, 'queued', ?, ?)"
     ].join('\n'));
-    const insertQueued = queueDb.prepare([
-        'INSERT INTO agent_runs (id, user_id, status, priority, created_at)',
-        "VALUES (?, ?, 'queued', ?, ?)"
-    ].join('\n'));
-    insertQueued.run('approval-run', 1, 10, '2026-08-06 10:00:00');
-    insertQueued.run('next-run', 2, 0, '2026-08-06 10:00:01');
+    insertQueued.run(approvalRunId, users[0].id, 'Approval run', 'Wait for approval', 10, '2026-08-06 10:00:00');
+    insertQueued.run(nextRunId, users[1].id, 'Next run', 'Acquire released slot', 0, '2026-08-06 10:00:01');
 
     let releaseNextRun;
     let notifyNextStarted;
@@ -121,16 +114,18 @@ test('an awaiting approval run releases its queue slot to the next run', async (
     });
     const started = [];
     const queue = createAgentQueue({
-        db: queueDb,
         logger: { info() {}, warn() {}, error() {} },
-        instanceId: 'queue-slot-test',
+        instanceId: `queue-slot-test-${suffix}`,
         maxConcurrent: 1,
         maxConcurrentPerUser: 1,
-        getRunUser: runId => ({ id: runId === 'approval-run' ? 1 : 2, username: runId }),
+        getRunUser: runId => ({
+            id: runId === approvalRunId ? users[0].id : users[1].id,
+            username: runId
+        }),
         runAgent: async runId => {
             started.push(runId);
-            if (runId === 'approval-run') {
-                queueDb.prepare([
+            if (runId === approvalRunId) {
+                db.prepare([
                     "UPDATE agent_runs SET status = 'awaiting_approval',",
                     'locked_by = NULL, lock_expires_at = NULL WHERE id = ?'
                 ].join('\n')).run(runId);
@@ -139,21 +134,24 @@ test('an awaiting approval run releases its queue slot to the next run', async (
 
             notifyNextStarted();
             await holdNextRun;
-            queueDb.prepare("UPDATE agent_runs SET status = 'completed' WHERE id = ?").run(runId);
+            db.prepare("UPDATE agent_runs SET status = 'completed' WHERE id = ?").run(runId);
         },
         markRunError: runId => {
-            queueDb.prepare("UPDATE agent_runs SET status = 'error' WHERE id = ?").run(runId);
+            db.prepare("UPDATE agent_runs SET status = 'error' WHERE id = ?").run(runId);
         },
         getTimestamp: () => '2026-08-06 10:00:02'
     });
+    const globalQueue = getAgentQueue();
+    const previousMax = globalQueue.getStatus().maxConcurrent;
+    globalQueue.updateMaxConcurrent(0);
 
     try {
-        queue.processQueue();
-        await waitFor(nextStarted, 'next queued run did not acquire the released slot');
+        await queue.processQueue();
+        await waitFor(nextStarted, 'next queued run did not acquire the released slot', 10000);
 
-        assert.deepEqual(started, ['approval-run', 'next-run']);
-        assert.equal(queueDb.prepare('SELECT status FROM agent_runs WHERE id = ?').get('approval-run').status, 'awaiting_approval');
-        assert.equal(queueDb.prepare('SELECT status FROM agent_runs WHERE id = ?').get('next-run').status, 'running');
+        assert.deepEqual(started, [approvalRunId, nextRunId]);
+        assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(approvalRunId).status, 'awaiting_approval');
+        assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(nextRunId).status, 'running');
         assert.equal(queue.getStatus().active, 1);
         assert.equal(queue.getStatus().queued, 0);
     } finally {
@@ -167,6 +165,8 @@ test('an awaiting approval run releases its queue slot to the next run', async (
         });
         await waitFor(drained, 'agent queue did not drain after the test');
         await new Promise(resolve => setImmediate(resolve));
-        queueDb.close();
+        globalQueue.updateMaxConcurrent(previousMax);
+        db.prepare('DELETE FROM agent_runs WHERE id IN (?, ?)').run(approvalRunId, nextRunId);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(users[0].id, users[1].id);
     }
 });

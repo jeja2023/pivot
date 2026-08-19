@@ -1,8 +1,8 @@
 /**
  * server/db/schema.js
- * Schema 初始化统一出口（双方言）
+ * Schema 初始化出口（PostgreSQL runtime）
  *
- * PG 侧采用懒加载：SQLite 模式下不加载 pg 驱动与 PG 转换器。
+ * base.js 中的 SQLite 方言 DDL 仍作为 PG 转换器的源文本，也用于历史旧库测试。
  */
 const { initSchema, baseTablesSql, baseIndexesSql, sqliteFtsSql } = require('./schema/base');
 
@@ -15,7 +15,7 @@ function buildPgSchemaStatements() {
 }
 
 module.exports = {
-    // SQLite
+    // Legacy SQLite schema source/helpers
     initSchema,
     baseTablesSql,
     baseIndexesSql,

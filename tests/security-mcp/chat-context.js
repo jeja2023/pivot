@@ -19,6 +19,7 @@ const {
     test
 } = require('../security-helpers');
 const { appendMcpContextForFinalAnswer } = require('../../server/services/chat-context-assembler');
+const { flushAllWrites } = require('../../server/services/db-write-queue');
 
 test('聊天 MCP 意图过滤不会为普通数据查询暴露可视化工具', () => {
     const tools = [
@@ -511,6 +512,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
         assert.match(runningEvent.message, /执行只读 SQL/);
         assert.equal(doneEvent.actionName, '执行只读 SQL');
 
+        await flushAllWrites();
         const callLog = db.prepare(`
             SELECT source, status, tool_name, input_preview, output_preview
             FROM mcp_call_logs
@@ -550,6 +552,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
         const tableCountRunning = tableCountEvents.find(event => event.type === 'mcp' && event.status === 'running');
         assert.equal(tableCountRunning.actionName, '统计数据表数量');
         assert.equal(tableCountRunning.toolName, 'db.count_tables');
+        await flushAllWrites();
         const fallbackLog = db.prepare(`
             SELECT source, status, tool_name, input_preview, output_preview
             FROM mcp_call_logs
@@ -585,6 +588,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
         assert.match(shortNameContext, new RegExp(`工具: ${countTablesToolName.replace(/\./g, '\\.')}`));
         assert.match(shortNameContext, /"total": 1/);
         assert.deepEqual(shortNameEvents.filter(event => event.type === 'mcp').map(event => event.status), ['planning', 'running', 'done']);
+        await flushAllWrites();
         const shortNameLog = db.prepare(`
             SELECT source, status, tool_name, output_preview
             FROM mcp_call_logs

@@ -7,14 +7,14 @@ const {
     recordRagDebugQuery
 } = require('../server/services/rag-debug-history');
 
-test('RAG debug history records query diagnostics for the current user', () => {
+test('RAG debug history records query diagnostics for the current user', async () => {
     const username = `rag-debug-${Date.now()}`;
     const userId = db.prepare(`
         INSERT INTO users (username, password_hash, role, status)
         VALUES (?, 'hash', 'user', 'active')
     `).run(username).lastInsertRowid;
 
-    const row = recordRagDebugQuery({
+    const row = await recordRagDebugQuery({
         userId,
         query: 'How does Pivot retrieve knowledge?',
         scope: { collectionId: 7, tag: 'ops' },
@@ -34,11 +34,13 @@ test('RAG debug history records query diagnostics for the current user', () => {
     });
     assert.ok(row.id);
 
-    const history = listRagDebugQueries(userId, { limit: 5 });
+    const history = await listRagDebugQueries(userId, { limit: 5 });
     assert.equal(history.length, 1);
     assert.equal(history[0].matchedCount, 1);
     assert.equal(history[0].candidateCount, 9);
     assert.deepEqual(history[0].selectedChunkIds, [11]);
     assert.equal(history[0].scores[0].source, 'doc-a');
     assert.equal(history[0].queue.pending, 2);
+    db.prepare('DELETE FROM rag_debug_queries WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 });

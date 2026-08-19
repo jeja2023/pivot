@@ -1,4 +1,4 @@
-const { app, appConfig, appVersion, logger, flushAllSqliteWrites } = require('./app');
+const { app, appConfig, appVersion, logger, flushAllWrites } = require('./app');
 const {
     registerProcessErrorHandlers,
     createMaintenanceScheduler,
@@ -9,7 +9,7 @@ const { startMaintenanceTasks } = require('./services/maintenance');
 
 const { initPostgresDatabase } = require('./db');
 
-registerProcessErrorHandlers({ logger, flushAllSqliteWrites });
+registerProcessErrorHandlers({ logger, flushAllWrites });
 
 async function init() {
     await initPostgresDatabase();
@@ -27,7 +27,7 @@ async function init() {
         logger,
         version: appVersion,
         scheduleMaintenanceTasks,
-        flushAllSqliteWrites
+        flushAllWrites
     });
 
     return { server };

@@ -17,7 +17,7 @@ const {
     withTimeoutHelper
 } = require('../security-helpers');
 
-test('模型成本辅助函数和合规包会生成可审计导出', () => {
+test('模型成本辅助函数和合规包会生成可审计导出', async () => {
     assert.equal(calculateUsageCost({
         inputTokens: 1000000,
         outputTokens: 500000,
@@ -49,7 +49,7 @@ test('模型成本辅助函数和合规包会生成可审计导出', () => {
         .run(userId, `COMPLIANCE_${suffix}`, 'export package test');
 
     try {
-        const archive = buildComplianceAuditPackage({
+        const archive = await buildComplianceAuditPackage({
             db,
             escapeCsvCell: value => `"${String(value ?? '').replace(/"/g, '""')}"`,
             generatedAt: '2026-05-16 00:00:00',
@@ -78,7 +78,7 @@ test('readZipEntries 会拒绝声明膨胀过大的条目', () => {
         data: Buffer.from('<w:t>small</w:t>'),
         declaredUncompressedSize: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1
     });
-    assert.throws(() => readZipEntries(zip), /too large|too much data/);
+    assert.throws(() => readZipEntries(zip), /too large|too much data|超出限制/);
 });
 
 test('聊天标题辅助函数会净化生成标题并保护自定义标题', () => {

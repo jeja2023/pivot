@@ -38,6 +38,7 @@ const CORRUPT_TITLE_RUN_RE = new RegExp(`[?${REPLACEMENT_CHAR}]{3,}`);
 const CORRUPT_TITLE_COUNT_RE = new RegExp(`[?${REPLACEMENT_CHAR}]`, 'g');
 
 function parseJsonObject(text) {
+    if (text && typeof text === 'object' && !Array.isArray(text)) return text;
     const raw = String(text || '').trim();
     if (!raw) return null;
     try {

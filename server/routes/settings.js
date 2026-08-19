@@ -18,6 +18,10 @@ const {
     toRagSettingValue
 } = require('../services/rag-config');
 const {
+    deleteUserSettingAsync,
+    setUserSettingAsync
+} = require('../services/user-settings');
+const {
     MEMORY_CONFIG_KEYS,
     getMemoryConfig,
     toMemorySettingValue
@@ -29,7 +33,7 @@ const {
 const {
     buildRuntimeConfigSnapshot,
     getUploadRuntimeConfig,
-    saveRuntimeConfig
+    saveRuntimeConfigAsync
 } = require('../services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../services/concurrency');
 const { getModelEndpointRuntimeStatus, syncConfiguredRuntimes } = require('../services/model-runtime');
@@ -128,18 +132,11 @@ async function saveUserEmbeddingSettings(req, updates) {
         }
         if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
         if (key !== RAG_CONFIG_KEYS.embeddingApiKey && !value) {
-            await execute('DELETE FROM user_settings WHERE user_id = ? AND key = ?', [req.user.id, key]);
+            await deleteUserSettingAsync(req.user.id, key);
             changed.push(`${key}=<fallback>`);
             continue;
         }
-        // Upsert: INSERT ... ON CONFLICT DO UPDATE（SQLite & PG 均支持，由 client.js 统一处理）
-        await execute(`
-            INSERT INTO user_settings (user_id, key, value, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at
-        `, [req.user.id, key, value, now]);
+        await setUserSettingAsync(req.user.id, key, value, { updatedAt: now });
         changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
     }
 
@@ -282,7 +279,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (!isSuperAdmin(req.user)) {
             return res.status(403).json({ error: '只有 admin 权限层级可以修改全局参数。' });
         }
-        const result = saveRuntimeConfig(req.body || {}, req.user?.id || null);
+        const result = await saveRuntimeConfigAsync(req.body || {}, req.user?.id || null);
         if (result.error) return res.status(400).json({ error: result.error });
 
         let modelEndpointRuntime = [];

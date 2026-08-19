@@ -4,15 +4,15 @@ const { assert, test } = require('../security-helpers');
 const { forwardChatCompletion, DEFAULT_FORWARD_TIMEOUT_MS } = require('../../server/services/model-forwarder');
 
 test('forwardChatCompletion 缺少 modelCfg 或 url 时直接抛错', async () => {
-    await assert.rejects(() => forwardChatCompletion({ url: 'https://model.example/v1/chat/completions' }), /modelCfg is required/);
-    await assert.rejects(() => forwardChatCompletion({ modelCfg: { id: 1, user_id: null } }), /url is required/);
+    await assert.rejects(() => forwardChatCompletion({ url: 'https://model.example/v1/chat/completions' }), /modelCfg is required|缺少必需的 modelCfg/);
+    await assert.rejects(() => forwardChatCompletion({ modelCfg: { id: 1, user_id: null } }), /url is required|缺少必需的 url/);
 });
 
 test('forwardChatCompletion 在发请求前对非法协议 URL 做安全校验并拒绝', async () => {
     // ftp 协议会在 validateModelUrl 阶段被拒，证明安全校验先于 axios 发起。
     await assert.rejects(
         () => forwardChatCompletion({ modelCfg: { id: 1, user_id: null }, url: 'ftp://evil.example/x' }),
-        /HTTP or HTTPS/
+        /HTTP or HTTPS|必须使用 HTTP 或 HTTPS/
     );
 });
 
@@ -24,7 +24,7 @@ test('safe HTTP helpers reject multipart-like payloads by default', () => {
     const { assertJsonOnlyPayload } = require('../../server/services/safe-http-client');
     assert.throws(
         () => assertJsonOnlyPayload({ getBoundary() { return 'boundary'; } }),
-        /Multipart payloads must use the upload-specific client/
+        /Multipart payloads must use the upload-specific client|Multipart 上传请求必须使用专门的上传客户端/
     );
 });
 
@@ -36,6 +36,6 @@ test('forwardChatCompletion rejects multipart-like payloads before axios dispatc
             data: { getBoundary() { return 'boundary'; } },
             headers: {}
         }),
-        /Multipart payloads must use the upload-specific client/
+        /Multipart payloads must use the upload-specific client|Multipart 上传请求必须使用专门的上传客户端/
     );
 });

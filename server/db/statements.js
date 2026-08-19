@@ -47,7 +47,7 @@ function createStatementCache(database) {
  * 在 PG 模式下调用会抛出错误，提示使用 client.js。
  */
 function sql(text) {
-    if (isPostgres()) {
+    if (isPostgres() && process.env.PIVOT_TEST_DB_SYNC !== 'postgres') {
         throw new Error(
             `[DB] sql() 在 PostgreSQL 模式下不可用。请将调用方改为使用 server/db/client.js 的异步 API：\n` +
             `  query()、queryOne()、execute()、transaction()\n` +

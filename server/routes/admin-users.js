@@ -98,7 +98,7 @@ function createAdminUsersRouter({
             return res.status(403).json({ error: '只有 admin 权限层级可以创建 manager 账号' });
         }
         try {
-            const user = register(username, password, nickname, unit, role);
+            const user = await register(username, password, nickname, unit, role);
             logAction(req, '创建用户', `创建账号: ${user.username}，角色: ${user.role}`);
             res.json({ success: true, user });
         } catch (e) {

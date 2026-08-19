@@ -242,7 +242,7 @@ test('RAG 文档删除为软删除并保持可审计', async () => {
     }
 });
 
-test('软删除存储清理会清除过期文件和 RAG 分块', () => {
+test('软删除存储清理会清除过期文件和 RAG 分块', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -278,7 +278,7 @@ test('软删除存储清理会清除过期文件和 RAG 分块', () => {
         assert.equal(fs.existsSync(knowledgePath), true);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts WHERE rowid = ?').get(chunkInfo.lastInsertRowid).count, 1);
 
-        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
         assert.equal(result.attachmentRows, 1);
         assert.equal(result.knowledgeDocRows, 1);
         assert.equal(fs.existsSync(attachmentPath), false);
@@ -310,7 +310,7 @@ test('软删除存储清理会清除过期文件和 RAG 分块', () => {
     }
 });
 
-test('软删除存储清理会清除过期消息和消息 FTS 行', () => {
+test('软删除存储清理会清除过期消息和消息 FTS 行', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -328,7 +328,7 @@ test('软删除存储清理会清除过期消息和消息 FTS 行', () => {
 
     try {
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 1);
-        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
         assert.equal(result.messageRows, 1);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages WHERE id = ?').get(messageInfo.lastInsertRowid).count, 0);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 0);
@@ -339,7 +339,7 @@ test('软删除存储清理会清除过期消息和消息 FTS 行', () => {
     }
 });
 
-test('软删除存储清理会保留仍在保留期内的文件', () => {
+test('软删除存储清理会保留仍在保留期内的文件', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -356,7 +356,7 @@ test('软删除存储清理会保留仍在保留期内的文件', () => {
     `).run(userId, null, 'recent-attachment.txt', toProjectRelativePath(attachmentPath), 'text/plain', 17);
 
     try {
-        const result = cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
         assert.equal(result.attachmentRows, 0);
         assert.equal(fs.existsSync(attachmentPath), true);
         const attachment = db.prepare('SELECT file_path FROM attachments WHERE id = ?').get(attachmentInfo.lastInsertRowid);

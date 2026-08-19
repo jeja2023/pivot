@@ -22,6 +22,7 @@ const {
     setCapabilityToolGovernance,
     upsertCapabilityPackage
 } = require('../../server/services/capability-market');
+const { flushAllWrites } = require('../../server/services/db-write-queue');
 
 test('admin tool policy routes manage only global tool packages', async () => {
     const suffix = Date.now().toString(36);
@@ -429,6 +430,7 @@ test('Agent 工具列表将数据库连接作为参数暴露，并路由通用 D
             : JSON.stringify(detail.dagNodes[0].output);
         assert.match(dagOutputText, /prod-alpha/);
         assert.doesNotMatch(dagOutputText, /test-only/);
+        await flushAllWrites();
         const callLog = db.prepare(`
             SELECT server_id, tool_name, source, input_preview, output_preview
             FROM mcp_call_logs
@@ -1056,9 +1058,10 @@ test('desktop local read-only executor exposes authorized SQLite and report dire
                 },
                 user: adminUser
             }, makeRes()),
-            /Only readonly SQL is allowed/
+            /Only readonly SQL is allowed|仅允许执行只读 SQL/
         );
 
+        await flushAllWrites();
         const callLog = db.prepare(`
             SELECT server_id, tool_name, source, input_preview, output_preview
             FROM mcp_call_logs
@@ -1177,6 +1180,7 @@ test('remote desktop bridge exposes authorized local MCP tools', async () => {
         assert.equal(callRes.statusCode, 200);
         assert.equal(callRes.body.result.structuredContent.files[0].path, '0:sales.csv');
 
+        await flushAllWrites();
         const callLog = db.prepare(`
             SELECT server_id, tool_name, source, output_preview
             FROM mcp_call_logs

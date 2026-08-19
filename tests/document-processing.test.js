@@ -29,11 +29,12 @@ const httpOcr = require('../server/services/document-processing/ocr/adapters/htt
 const { normalizeEngine } = require('../server/services/document-processing/ocr');
 const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/document-processing/constants');
 const { createOcrRouter } = require('../server/routes/apps/ocr');
+const { deleteAppSettingAsync, refreshAppSettingsCache, setAppSettingAsync } = require('../server/services/app-settings');
 
-async function waitForDocumentJob(userId, jobId, timeoutMs = 5000) {
+async function waitForDocumentJob(userId, jobId, timeoutMs = 15000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-        const detail = getJobDetail({ userId, jobId });
+        const detail = await getJobDetail({ userId, jobId });
         if (detail && !['queued', 'processing'].includes(detail.job.status)) return detail;
         await new Promise(resolve => setTimeout(resolve, 25));
     }
@@ -153,16 +154,16 @@ test('文档处理底座会登记文件、生成任务和受控输出', async ()
         assert.ok(detail.outputs.some(output => output.outputType === 'json'));
 
         const output = detail.outputs.find(item => item.outputType === 'txt');
-        const download = getOutputDownload({ userId, outputId: output.id });
+        const download = await getOutputDownload({ userId, outputId: output.id });
         assert.ok(download.filePath.startsWith(documentRoot));
         assert.equal(fs.existsSync(download.filePath), true);
         assert.match(fs.readFileSync(download.filePath, 'utf8'), /第二行用于导出验证/);
 
         const htmlOutput = await createJobExport({ userId, jobId: detail.job.id, format: 'html' });
         assert.equal(htmlOutput.outputType, 'html');
-        assert.ok(getOutputDownload({ userId, outputId: htmlOutput.id }).filePath.startsWith(documentRoot));
+        assert.ok((await getOutputDownload({ userId, outputId: htmlOutput.id })).filePath.startsWith(documentRoot));
 
-        const reviewed = savePageReview({
+        const reviewed = await savePageReview({
             userId,
             pageId: detail.pages[0].id,
             revisedText: '人工修订后的识别文本',
@@ -213,9 +214,9 @@ test('文档处理任务删除会清理任务记录和受控文件', async () =>
         assert.equal(fs.existsSync(storedPath), true);
         assert.equal(fs.existsSync(outputPath), true);
 
-        const deleted = deleteJob({ userId, jobId: detail.job.id, sourceModule: 'document_processing' });
+        const deleted = await deleteJob({ userId, jobId: detail.job.id, sourceModule: 'document_processing' });
         assert.equal(deleted.id, detail.job.id);
-        assert.equal(getJobDetail({ userId, jobId: detail.job.id }), null);
+        assert.equal(await getJobDetail({ userId, jobId: detail.job.id }), null);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM document_jobs WHERE id = ?').get(detail.job.id).count, 0);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM document_outputs WHERE job_id = ?').get(detail.job.id).count, 0);
         assert.ok(db.prepare('SELECT deleted_at FROM document_files WHERE id = ?').get(detail.file.id).deleted_at);
@@ -316,7 +317,8 @@ test('HTTP OCR adapter calls external service and normalizes result blocks', asy
     const previousUrl = process.env.OCR_SERVICE_URL;
     const key = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
     const rows = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').all(key);
-    db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+    await deleteAppSettingAsync(key);
+    await refreshAppSettingsCache();
     const previousHealthTimeout = process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
     const imagePath = path.join(uploadRoot, `http-ocr-${Date.now()}.png`);
     fs.writeFileSync(imagePath, Buffer.from('fake-image'));
@@ -347,6 +349,7 @@ test('HTTP OCR adapter calls external service and normalizes result blocks', asy
     const address = server.address();
     try {
         process.env.OCR_SERVICE_URL = `http://127.0.0.1:${address.port}`;
+        await setAppSettingAsync(key, process.env.OCR_SERVICE_URL);
         process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = '1000';
         const status = await httpOcr.checkAvailability();
         assert.equal(status.available, true);
@@ -362,11 +365,14 @@ test('HTTP OCR adapter calls external service and normalizes result blocks', asy
         else process.env.OCR_SERVICE_URL = previousUrl;
         if (previousHealthTimeout === undefined) delete process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS;
         else process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = previousHealthTimeout;
-        db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
-        rows.forEach(row => {
-            db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
-                .run(row.key, row.value, row.updated_at, row.updated_by);
-        });
+        await deleteAppSettingAsync(key);
+        for (const row of rows) {
+            await setAppSettingAsync(row.key, row.value, {
+                updatedAt: row.updated_at,
+                updatedBy: row.updated_by
+            });
+        }
+        await refreshAppSettingsCache();
         await new Promise(resolve => server.close(resolve));
         removeTestPath(imagePath);
     }
@@ -453,9 +459,13 @@ test('PDF tools split outputs can be downloaded as one archive', async () => {
         });
         const detail = await waitForDocumentJob(userId, initial.job.id);
         assert.equal(detail.job.status, 'succeeded');
-        assert.equal(detail.outputs.filter(output => output.outputType === 'split_pdf').length, 2);
+        assert.equal(
+            detail.outputs.filter(output => output.outputType === 'split_pdf').length,
+            2,
+            JSON.stringify({ config: detail.job.config, result: detail.job.result, outputs: detail.outputs })
+        );
 
-        const archive = getJobOutputsArchive({ userId, jobId: detail.job.id, sourceModule: 'pdf_tools' });
+        const archive = await getJobOutputsArchive({ userId, jobId: detail.job.id, sourceModule: 'pdf_tools' });
         assert.ok(Buffer.isBuffer(archive.buffer));
         assert.equal(archive.mimeType, 'application/zip');
         assert.match(archive.fileName, /全部输出\.zip$/);
@@ -498,7 +508,7 @@ test('PDF tools merge multiple PDFs into one output', async () => {
         assert.equal(detail.job.status, 'succeeded');
         assert.ok(detail.outputs.some(output => output.outputType === 'merged_pdf'));
         const output = detail.outputs.find(item => item.outputType === 'merged_pdf');
-        const download = getOutputDownload({ userId, outputId: output.id });
+        const download = await getOutputDownload({ userId, outputId: output.id });
         assert.ok(download.filePath.startsWith(documentRoot));
         const merged = await PDFDocument.load(fs.readFileSync(download.filePath));
         assert.equal(merged.getPageCount(), 2);

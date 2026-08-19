@@ -1,24 +1,35 @@
 /**
  * server/db/migrate.js
- * 数据库迁移编排入口（SQLite 同步 + PostgreSQL 异步双模式）
+ * 数据库迁移编排入口（PostgreSQL）
+ *
+ * SQLite 同步迁移函数仅服务于历史快照测试/一次性旧库升级，不再属于应用运行模式。
  */
 const { logger } = require('../logger');
 
-// ── SQLite 同步模式 ────────────────────────────────────────────────────────
+function requireLegacySqliteDb() {
+    const { db } = require('./connection');
+    if (!db || typeof db.prepare !== 'function') {
+        throw new Error('[DB] 当前版本已切换为 PostgreSQL-only；SQLite 迁移入口仅允许历史旧库升级工具显式注入 SQLite 连接后调用。');
+    }
+    return db;
+}
+
+// ── Legacy SQLite upgrade helpers ─────────────────────────────────────────
 
 function recordMigration(key, value = 'done') {
+    requireLegacySqliteDb();
     const legacyMigrations = require('./migrations/legacy');
     return legacyMigrations.recordMigration(key, value);
 }
 
 function ensureMigrationTable() {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const { ensureSchemaMigrationTable } = require('./migrations/runner');
     ensureSchemaMigrationTable(db);
 }
 
 function recordSchemaMigration(id, description = '') {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const { recordMigration: recordVersionedMigration } = require('./migrations/runner');
     ensureMigrationTable();
     recordVersionedMigration(db, id, description);
@@ -26,7 +37,7 @@ function recordSchemaMigration(id, description = '') {
 }
 
 function runSchemaMigration(id, description, fn) {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const { hasMigration, recordMigration: recordVersionedMigration } = require('./migrations/runner');
     ensureMigrationTable();
     if (hasMigration(db, id)) return false;
@@ -41,7 +52,7 @@ function runSchemaMigration(id, description, fn) {
 }
 
 function runMigrations() {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const legacyMigrations = require('./migrations/legacy');
     const versionedMigrations = require('./migrations');
     const { runVersionedMigrations } = require('./migrations/runner');

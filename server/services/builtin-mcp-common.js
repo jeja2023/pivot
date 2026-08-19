@@ -10,10 +10,6 @@
 const path = require('path');
 const { decryptSecret, validateMcpEndpointUrl } = require('../security');
 
-function appDb() {
-    return require('../db').db;
-}
-
 const BUILTIN_MCP_PREFIXES = {
     reports: 'pivot-reports://',
     visualization: 'pivot-visualization://',
@@ -31,6 +27,7 @@ const DEFAULT_MAX_MESSAGE_LENGTH = 2000;
 const IM_TIMEOUT_MS = 15000;
 
 function parseJson(value, fallback = {}) {
+    if (value && typeof value === 'object') return value;
     try {
         return value ? JSON.parse(value) : fallback;
     } catch (e) {
@@ -155,15 +152,6 @@ function isInternalMcpUrl(baseUrl = '') {
         url.startsWith(BUILTIN_MCP_PREFIXES.im);
 }
 
-function getBuiltinConfigRow(serverId) {
-    const database = appDb();
-    if (!database) return null;
-    return database.prepare(`
-        SELECT * FROM mcp_builtin_configs
-        WHERE mcp_server_id = ? AND status != 'deleted'
-    `).get(serverId) || null;
-}
-
 function normalizeBuiltinConfigRow(row, { includeSecret = false } = {}) {
     if (!row) return null;
     const serviceType = normalizeServiceType(row.service_type);
@@ -185,11 +173,6 @@ function normalizeBuiltinConfigRow(row, { includeSecret = false } = {}) {
     };
 }
 
-function getBuiltinConfigForServer(serverId, { includeSecret = false } = {}) {
-    const row = getBuiltinConfigRow(serverId);
-    return normalizeBuiltinConfigRow(row, { includeSecret });
-}
-
 async function getBuiltinConfigForServerAsync(serverId, { includeSecret = false } = {}) {
     const { queryOne } = require('../db/client');
     const row = await queryOne(`
@@ -197,16 +180,6 @@ async function getBuiltinConfigForServerAsync(serverId, { includeSecret = false 
         WHERE mcp_server_id = ? AND status != 'deleted'
     `, [serverId]);
     return normalizeBuiltinConfigRow(row, { includeSecret });
-}
-
-function getRequiredBuiltinConfig(server, expectedType) {
-    const row = getBuiltinConfigForServer(server.id, { includeSecret: expectedType === 'im' });
-    if (!row || row.service_type !== expectedType) {
-        const err = new Error('内置 MCP 配置缺失或类型不匹配。');
-        err.status = 404;
-        throw err;
-    }
-    return row;
 }
 
 async function getRequiredBuiltinConfigAsync(server, expectedType) {
@@ -338,11 +311,8 @@ module.exports = {
     normalizeBuiltinPayload,
     getBuiltinServiceTypeFromUrl,
     isInternalMcpUrl,
-    getBuiltinConfigRow,
-    getBuiltinConfigForServer,
     getBuiltinConfigForServerAsync,
     normalizeBuiltinConfigRow,
-    getRequiredBuiltinConfig,
     getRequiredBuiltinConfigAsync,
     isPathInside,
     getExtension,

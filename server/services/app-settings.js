@@ -6,7 +6,7 @@ const settingsCache = new Map();
 let cacheLoaded = false;
 let cacheLoadingPromise = null;
 
-async function refreshAppSettingsCache() {
+async function loadAppSettingsCache() {
     try {
         const rows = await query('SELECT key, value, updated_at, updated_by FROM app_settings ORDER BY key ASC');
         settingsCache.clear();
@@ -19,9 +19,15 @@ async function refreshAppSettingsCache() {
     }
 }
 
+async function refreshAppSettingsCache() {
+    const pending = cacheLoadingPromise;
+    if (pending) await pending.catch(() => {});
+    await loadAppSettingsCache();
+}
+
 function ensureCacheLoaded() {
     if (!cacheLoaded && !cacheLoadingPromise) {
-        cacheLoadingPromise = refreshAppSettingsCache().finally(() => {
+        cacheLoadingPromise = loadAppSettingsCache().finally(() => {
             cacheLoadingPromise = null;
         });
     }
@@ -81,6 +87,8 @@ async function ensureAppSettingAsync(key, value, options = {}) {
 }
 
 async function setAppSettingAsync(key, value, options = {}) {
+    const pending = cacheLoadingPromise;
+    if (pending) await pending.catch(() => {});
     const updatedAt = options.updatedAt || getBeijingTimestamp();
     const row = await queryOne(
         `INSERT INTO app_settings (key, value, updated_at, updated_by)

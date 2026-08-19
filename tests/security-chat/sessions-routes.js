@@ -65,7 +65,8 @@ test('getContext 返回模型上下文前会压缩超过阈值的历史', async 
             id: null,
             url: `http://127.0.0.1:${port}`,
             model_name: 'fake-summary-model',
-            api_key: ''
+            api_key: '',
+            context_window_tokens: 32000
         });
         const rows = db.prepare('SELECT * FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC').all(sessionId, userId);
         const meta = buildContextMeta(rows);

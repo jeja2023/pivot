@@ -1,10 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const { isPrivateHost } = require('../../security');
-
-function appDb() {
-    return require('../../db').db;
-}
 const { isAdmin } = require('../../permissions');
 
 const {
@@ -46,16 +42,6 @@ const {
 } = require('./connection-builders');
 
 
-function getDatabaseConnectionForServer(serverId, { includeSecret = false } = {}) {
-    const database = appDb();
-    if (!database) return null;
-    const row = database.prepare(`
-        SELECT * FROM mcp_database_connections
-        WHERE mcp_server_id = ? AND status != 'deleted'
-    `).get(serverId);
-    return normalizeDatabaseConnection(row, { includeSecret });
-}
-
 async function getDatabaseConnectionForServerAsync(serverId, { includeSecret = false } = {}) {
     const { queryOne } = require('../../db/client');
     const row = await queryOne(`
@@ -65,8 +51,8 @@ async function getDatabaseConnectionForServerAsync(serverId, { includeSecret = f
     return normalizeDatabaseConnection(row, { includeSecret });
 }
 
-function listDatabaseMcpTools(server) {
-    const connection = server?.database_connection || getDatabaseConnectionForServer(server.id);
+async function listDatabaseMcpTools(server) {
+    const connection = server?.database_connection || await getDatabaseConnectionForServerAsync(server.id);
     if (!connection) throw new Error('未找到指定的数据库 MCP 连接配置。');
     return listDatabaseConnectionMcpTools(connection);
 }
@@ -587,7 +573,6 @@ module.exports = {
     executeDatabaseMcpTool,
     executeDatabaseConnectionTool,
     buildDatabaseTestConnectionConfig,
-    getDatabaseConnectionForServer,
     getDatabaseConnectionForServerAsync,
     listDatabaseConnectionMcpTools,
     listDatabaseMcpTools,

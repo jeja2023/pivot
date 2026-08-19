@@ -2,8 +2,9 @@
  * HTTP server lifecycle. App assembly stays in index.js until the bootstrap
  * migration is complete; this module owns listening and graceful shutdown.
  */
-function startHttpServer({ app, port, logger, version, scheduleMaintenanceTasks, flushAllSqliteWrites, processRef = process }) {
+function startHttpServer({ app, port, logger, version, scheduleMaintenanceTasks, flushAllWrites, processRef = process }) {
     let shuttingDown = false;
+    let exitStarted = false;
     const server = app.listen(port, () => {
         logger.info({ port, url: 'http://localhost:' + port, version }, 'Pivot AI（智枢）服务已启动');
         if (typeof scheduleMaintenanceTasks === 'function') scheduleMaintenanceTasks();
@@ -13,16 +14,28 @@ function startHttpServer({ app, port, logger, version, scheduleMaintenanceTasks,
         if (shuttingDown) return;
         shuttingDown = true;
         logger.info({ signal }, '进程退出，正在关闭 HTTP 服务');
-        const exitWithCode = (code) => {
+        const exitWithCode = async (code) => {
+            if (exitStarted) return;
+            exitStarted = true;
             try {
-                if (typeof flushAllSqliteWrites === 'function') flushAllSqliteWrites();
+                if (typeof flushAllWrites === 'function') await flushAllWrites();
             } catch (err) {
-                logger.warn({ err }, '关闭服务时 SQLite 写入队列刷新失败');
+                logger.warn({ err }, '关闭服务时数据库写入队列刷新失败');
             }
             processRef.exit(code);
         };
-        server.close(() => exitWithCode(0));
-        setTimeout(() => exitWithCode(1), 5000).unref();
+        server.close(() => {
+            exitWithCode(0).catch(err => {
+                logger.warn({ err }, '关闭服务时数据库写入队列刷新失败');
+                processRef.exit(1);
+            });
+        });
+        setTimeout(() => {
+            exitWithCode(1).catch(err => {
+                logger.warn({ err }, '强制关闭服务时数据库写入队列刷新失败');
+                processRef.exit(1);
+            });
+        }, 5000).unref();
     };
 
     processRef.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

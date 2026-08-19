@@ -62,15 +62,10 @@ const {
     updateEntity
 } = require('../security-helpers');
 
-function loadDbModuleWithConnection(relativePath, database) {
+function withDbModuleConnection(relativePath, database, callback) {
     const filename = path.resolve(__dirname, '../..', relativePath);
     const connectionPath = path.resolve(__dirname, '../..', 'server', 'db', 'connection.js');
     const savedConnection = require.cache[connectionPath];
-    const dbModule = new Module(connectionPath);
-    dbModule.filename = connectionPath;
-    dbModule.loaded = true;
-    dbModule.exports = { db: database };
-
     const removed = [];
     Object.keys(require.cache).forEach(key => {
         const normalized = key.replace(/\\/g, '/');
@@ -80,9 +75,13 @@ function loadDbModuleWithConnection(relativePath, database) {
         }
     });
 
+    const dbModule = new Module(connectionPath);
+    dbModule.filename = connectionPath;
+    dbModule.loaded = true;
+    dbModule.exports = { db: database };
     require.cache[connectionPath] = dbModule;
     try {
-        return require(filename);
+        return callback(require(filename));
     } finally {
         delete require.cache[connectionPath];
         if (savedConnection) require.cache[connectionPath] = savedConnection;
@@ -136,10 +135,12 @@ test('旧版知识库文档表缺少 collection_id 时数据库初始化可完�
         );
     `);
     try {
-        const { initSchema } = loadDbModuleWithConnection('server/db/schema.js', legacyDb);
-        assert.doesNotThrow(() => initSchema());
-        const { runMigrations } = loadDbModuleWithConnection('server/db/migrate.js', legacyDb);
-        assert.doesNotThrow(() => runMigrations());
+        withDbModuleConnection('server/db/schema.js', legacyDb, ({ initSchema }) => {
+            assert.doesNotThrow(() => initSchema());
+        });
+        withDbModuleConnection('server/db/migrate.js', legacyDb, ({ runMigrations }) => {
+            assert.doesNotThrow(() => runMigrations());
+        });
         const cols = legacyDb.prepare('PRAGMA table_info(knowledge_docs)').all().map(col => col.name);
         assert.equal(cols.includes('collection_id'), true);
     } finally {
@@ -291,22 +292,22 @@ test('知识图谱会索引并丰富检索上下文，同时支持整理操作',
         assert.ok(indexed.entities >= 3);
         assert.ok(indexed.relations >= 2);
 
-        const summary = getGraphSummary(userId);
+        const summary = await getGraphSummary(userId);
         assert.ok(summary.entities >= 3);
         assert.ok(summary.relations >= 2);
 
-        const entities = listEntities({ userId, query: 'Pivot平台' });
+        const entities = await listEntities({ userId, query: 'Pivot平台' });
         const pivot = entities.data.find(entity => entity.name === 'Pivot平台');
         assert.ok(pivot);
 
-        const graph = getEntityGraph({ userId, entityId: pivot.id });
+        const graph = await getEntityGraph({ userId, entityId: pivot.id });
         assert.ok(graph.relations.some(row => row.relation_type === 'responsible_for' || row.relation_type === 'depends_on'));
 
-        const context = getGraphContextForQuery(userId, 'Pivot平台由谁负责');
+        const context = await getGraphContextForQuery(userId, 'Pivot平台由谁负责');
         assert.match(context.context, /运维中心/);
         assert.match(context.context, /参考知识图谱/);
 
-        const updated = updateEntity({
+        const updated = await updateEntity({
             userId,
             entityId: pivot.id,
             patch: { name: 'Pivot平台', type: 'system', description: '核心业务平台' }
@@ -314,13 +315,13 @@ test('知识图谱会索引并丰富检索上下文，同时支持整理操作',
         assert.equal(updated.type, 'system');
         assert.equal(updated.description, '核心业务平台');
 
-        const relations = listRelations({ userId, entityId: pivot.id });
+        const relations = await listRelations({ userId, entityId: pivot.id });
         assert.ok(relations.data.length > 0);
-        assert.equal(deleteRelation({ userId, relationId: relations.data[0].id }), true);
+        assert.equal(await deleteRelation({ userId, relationId: relations.data[0].id }), true);
 
-        const pivotAlias = listEntities({ userId, query: 'Pivot' }).data.find(entity => entity.name === 'Pivot');
+        const pivotAlias = (await listEntities({ userId, query: 'Pivot' })).data.find(entity => entity.name === 'Pivot');
         if (pivotAlias) {
-            const merged = mergeEntities({ userId, sourceEntityId: pivotAlias.id, targetEntityId: pivot.id });
+            const merged = await mergeEntities({ userId, sourceEntityId: pivotAlias.id, targetEntityId: pivot.id });
             assert.ok(merged.center.id === pivot.id);
         }
     } finally {
@@ -361,32 +362,32 @@ test('知识图谱会治理低可信关系并支持确认、质量摘要和图�
         assert.ok(indexed.entities >= 4);
         assert.ok(indexed.relations >= 2);
 
-        const pendingBefore = listRelations({ userId, status: 'pending' });
+        const pendingBefore = await listRelations({ userId, status: 'pending' });
         assert.ok(pendingBefore.data.some(row => row.relation_type === 'related_to'));
-        const summary = getGraphSummary(userId);
+        const summary = await getGraphSummary(userId);
         assert.ok(Number.isInteger(summary.quality.qualityScore));
         assert.ok(summary.pendingRelations >= 1);
         assert.ok(Array.isArray(summary.suggestions));
 
-        const confirmed = confirmRelation({ userId, relationId: pendingBefore.data[0].id });
+        const confirmed = await confirmRelation({ userId, relationId: pendingBefore.data[0].id });
         assert.equal(confirmed.status, 'active');
         assert.ok(confirmed.confidence >= 0.6);
-        assert.ok(!confirmRelation({ userId, relationId: pendingBefore.data[0].id }));
+        assert.ok(!await confirmRelation({ userId, relationId: pendingBefore.data[0].id }));
 
-        const activeRelations = listRelations({ userId, status: 'active', minConfidence: 0.6, docId });
+        const activeRelations = await listRelations({ userId, status: 'active', minConfidence: 0.6, docId });
         assert.ok(activeRelations.data.some(row => row.id === confirmed.id));
         assert.ok(activeRelations.data.every(row => row.status === 'active' && row.confidence >= 0.6));
 
-        const beta = listEntities({ userId, query: 'Beta平台' }).data.find(entity => entity.name === 'Beta平台');
+        const beta = (await listEntities({ userId, query: 'Beta平台' })).data.find(entity => entity.name === 'Beta平台');
         assert.ok(beta);
-        const filteredGraph = getEntityGraph({ userId, entityId: beta.id, status: 'all', relationType: 'responsible_for' });
+        const filteredGraph = await getEntityGraph({ userId, entityId: beta.id, status: 'all', relationType: 'responsible_for' });
         assert.ok(filteredGraph.relations.every(row => row.relation_type === 'responsible_for'));
 
-        const queryResult = queryKnowledgeGraph({ userId, query: 'Beta平台由谁负责' });
+        const queryResult = await queryKnowledgeGraph({ userId, query: 'Beta平台由谁负责' });
         assert.ok(queryResult.paths.some(path => path.relationType === 'responsible_for'));
         assert.ok(queryResult.context.includes('Beta平台'));
 
-        const duplicateSuggestions = suggestDuplicateEntities(userId, 10);
+        const duplicateSuggestions = await suggestDuplicateEntities(userId, 10);
         assert.ok(Array.isArray(duplicateSuggestions));
     } finally {
         db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
@@ -416,7 +417,7 @@ test('RAG 指标会分别报告检索命中率和缓存命中率', () => {
     assert.equal(cacheHits / retrievals, 0.5);
 });
 
-test('HTTP 指标暴露准确路由均值和 Prometheus 直方图桶', () => {
+test('HTTP 指标暴露准确路由均值和 Prometheus 直方图桶', async () => {
     const route = `/metrics-test-${Date.now()}`;
     recordHttpRequest('GET', route, '200', 0.01);
     recordHttpRequest('GET', route, '200', 0.2);
@@ -427,7 +428,7 @@ test('HTTP 指标暴露准确路由均值和 Prometheus 直方图桶', () => {
     assert.equal(routeRow.requests, 2);
     assert.equal(Math.round(routeRow.avgLatencyMs), 105);
 
-    const metrics = renderPrometheusMetrics();
+    const metrics = await renderPrometheusMetrics();
     const bucketValue = (le) => {
         const escapedRoute = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const escapedLe = String(le).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

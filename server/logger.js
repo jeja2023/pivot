@@ -65,7 +65,9 @@ if (consolePretty) {
                     const user = log.req.user === 'guest' ? '访客' : (log.req.user || '-');
                     const status = log.res?.statusCode ? ` [状态: ${log.res.statusCode}]` : '';
                     const duration = log.responseTime !== undefined ? ` [耗时: ${log.responseTime}ms]` : '';
-                    return `${log.req.method} ${log.req.url}${status}${duration} (用户: ${user})`;
+                    const isDefaultReqMsg = !msg || msg.endsWith(' - 完成') || msg.startsWith('request completed') || msg.startsWith('request errored');
+                    const extraMsg = isDefaultReqMsg ? '' : ` - ${msg}`;
+                    return `${log.req.method} ${log.req.url}${status}${duration} (用户: ${user})${extraMsg}`;
                 }
                 return msg;
             }
@@ -131,13 +133,17 @@ const httpLogger = pinoHttp({
     customErrorMessage: (req, res, err) => `${req.method} ${scrubUrl(req.url)} ${res.statusCode} - 失败: ${err.message}`,
     // 序列化配置
     serializers: {
-        req: (req) => ({
-            id: req.id,
-            method: req.method,
-            url: scrubUrl(req.url),
-            ip: getClientIp(req) || 'unknown',
-            user: req.raw?.user ? req.raw.user.username : 'guest'
-        }),
+        req: (req) => {
+            const userObj = req.user || req.raw?.user;
+            const username = typeof userObj === 'string' ? userObj : (userObj?.username || userObj?.nickname || '');
+            return {
+                id: req.id,
+                method: req.method,
+                url: scrubUrl(req.url),
+                ip: getClientIp(req) || 'unknown',
+                user: username || 'guest'
+            };
+        },
         res: (res) => ({
             statusCode: res.statusCode
         })

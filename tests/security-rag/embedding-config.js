@@ -25,8 +25,10 @@ const {
     setApiAccessSetting,
     toRagSettingValue
 } = require('../security-helpers');
+const { refreshAppSettingsCache } = require('../../server/services/app-settings');
+const { refreshUserSettingsCacheForUser } = require('../../server/services/user-settings');
 
-test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', () => {
+test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', async () => {
     const previousEnv = {
         mode: process.env.EMBEDDING_MODE,
         url: process.env.EMBEDDING_API_URL,
@@ -56,6 +58,7 @@ test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', () => {
         upsert.run(RAG_CONFIG_KEYS.embeddingApiUrl, 'http://settings.example/v1/embeddings');
         upsert.run(RAG_CONFIG_KEYS.embeddingApiKey, toRagSettingValue(RAG_CONFIG_KEYS.embeddingApiKey, 'settings-key'));
         upsert.run(RAG_CONFIG_KEYS.embeddingModel, 'settings-model');
+        await refreshAppSettingsCache();
 
         const config = getEmbeddingConfig();
         assert.equal(config.mode, 'http');
@@ -89,10 +92,11 @@ test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', () => {
         process.env.EMBEDDING_API_URL = previousEnv.url;
         process.env.EMBEDDING_API_KEY = previousEnv.key;
         process.env.EMBEDDING_MODEL = previousEnv.model;
+        await refreshAppSettingsCache();
     }
 });
 
-test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', () => {
+test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -127,6 +131,8 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', () =
         upsertUser.run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.embeddingApiUrl, 'https://user.example/v1');
         upsertUser.run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.embeddingApiKey, toRagSettingValue(RAG_CONFIG_KEYS.embeddingApiKey, 'user-key'));
         upsertUser.run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.embeddingModel, 'user-model');
+        await refreshAppSettingsCache();
+        await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
 
         const personal = getEmbeddingConfig(userInfo.lastInsertRowid);
         assert.equal(personal.http.url, 'https://user.example/v1');
@@ -140,6 +146,7 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', () =
         assert.equal(Object.prototype.hasOwnProperty.call(publicPersonal, 'apiKey'), false);
 
         db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userInfo.lastInsertRowid);
+        await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
         const fallback = getEmbeddingConfig(userInfo.lastInsertRowid);
         assert.equal(fallback.http.url, 'https://system.example/v1');
         assert.equal(fallback.http.apiKey, 'system-key');
@@ -163,6 +170,8 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', () =
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
+        await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
     }
 });
 
@@ -380,6 +389,7 @@ test('RAG 文档索引使用更长嵌入超时和批量调用', async () => {
         upsert.run(RAG_CONFIG_KEYS.embeddingMode, 'http');
         upsert.run(RAG_CONFIG_KEYS.embeddingApiUrl, 'https://embedding.example/v1');
         upsert.run(RAG_CONFIG_KEYS.embeddingModel, 'batch-embedding');
+        await refreshAppSettingsCache();
 
         const chunkCount = await indexDocumentChunks(
             docInfo.lastInsertRowid,
@@ -410,6 +420,7 @@ test('RAG 文档索引使用更长嵌入超时和批量调用', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
     }
 });
 
@@ -417,8 +428,8 @@ test('OpenAI 嵌入辅助函数会规范化请求和响应', () => {
     assert.deepEqual(normalizeEmbeddingInputs('hello'), ['hello']);
     assert.deepEqual(normalizeEmbeddingInputs(['hello', 'world']), ['hello', 'world']);
     assert.deepEqual(normalizeEmbeddingInputs([[1, 2, 3]]), ['1 2 3']);
-    assert.throws(() => normalizeEmbeddingInputs(''), /empty string/);
-    assert.throws(() => normalizeEmbeddingInputs([{}]), /input must/);
+    assert.throws(() => normalizeEmbeddingInputs(''), /empty string|空字符串/);
+    assert.throws(() => normalizeEmbeddingInputs([{}]), /input must|输入/);
 
     const response = buildEmbeddingResponse({
         vectors: [[0.1, 0.2], [0.3, 0.4]],
@@ -511,7 +522,7 @@ test('api access setting can be read and updated by admin settings', async () =>
     const adminSettingsRoute = router.stack.find(layer => layer.route?.path === '/admin/settings' && layer.route?.methods?.put);
 
     try {
-        setApiAccessSetting(false, adminUser.id);
+        await setApiAccessSetting(false, adminUser.id);
 
         const readRes = {
             statusCode: 200,
@@ -546,6 +557,7 @@ test('api access setting can be read and updated by admin settings', async () =>
         } else {
             db.prepare('DELETE FROM app_settings WHERE key = ?').run('api_access_enabled');
         }
+        await refreshAppSettingsCache();
         assert.equal(getApiAccessSetting(), previousValue);
     }
 });

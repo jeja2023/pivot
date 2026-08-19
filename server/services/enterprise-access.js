@@ -15,6 +15,7 @@ function normalizeSubjectType(value) {
 }
 
 function parseJson(value, fallback) {
+    if (value && typeof value === 'object') return value;
     try {
         return JSON.parse(value || '');
     } catch (_err) {

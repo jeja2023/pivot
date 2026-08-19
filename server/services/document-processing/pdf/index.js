@@ -119,12 +119,12 @@ async function loadPdf(file, config = {}) {
     });
 }
 
-function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf' }) {
+async function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf' }) {
     const diskName = `${jobId}-${sanitizeOutputName(outputType)}-${crypto.randomUUID()}${extension}`;
     const targetPath = buildManagedPath(outputsRoot, userId, diskName);
     fs.writeFileSync(targetPath, Buffer.from(bytes));
     const fileName = `${baseName(sourceName)}-${suffix}${extension}`;
-    return serializeOutput(registerOutput({
+    return serializeOutput(await registerOutput({
         userId,
         fileId,
         jobId,
@@ -147,7 +147,7 @@ async function splitPdf({ job, file, config, onProgress }) {
         const [page] = await target.copyPages(source, [indexes[i]]);
         target.addPage(page);
         const bytes = await target.save();
-        outputs.push(writeBinaryOutput({
+        outputs.push(await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -156,7 +156,7 @@ async function splitPdf({ job, file, config, onProgress }) {
             outputType: 'split_pdf',
             bytes
         }));
-        onProgress?.(20 + Math.floor(((i + 1) / indexes.length) * 70), { processedPages: i + 1 });
+        if (onProgress) await onProgress(20 + Math.floor(((i + 1) / indexes.length) * 70), { processedPages: i + 1 });
     }
     return { outputs, processedPages: indexes.length };
 }
@@ -172,12 +172,12 @@ async function mergePdf({ job, file, files, config, onProgress }) {
         const copied = await target.copyPages(source, indexes);
         copied.forEach(page => target.addPage(page));
         copiedPages += copied.length;
-        onProgress?.(15 + Math.floor(((i + 1) / pdfFiles.length) * 70), { processedFiles: i + 1, processedPages: copiedPages });
+        if (onProgress) await onProgress(15 + Math.floor(((i + 1) / pdfFiles.length) * 70), { processedFiles: i + 1, processedPages: copiedPages });
     }
     if (copiedPages === 0) throw new Error('未找到可合并的 PDF 页面。');
     const bytes = await target.save();
     return {
-        outputs: [writeBinaryOutput({
+        outputs: [await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -207,10 +207,10 @@ async function rotatePdf({ job, file, config, onProgress }) {
         }
         target.addPage(page);
     });
-    onProgress?.(90, { processedPages: copied.length });
+    if (onProgress) await onProgress(90, { processedPages: copied.length });
     const bytes = await target.save();
     return {
-        outputs: [writeBinaryOutput({
+        outputs: [await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -234,10 +234,10 @@ async function deletePdfPages({ job, file, config, onProgress }) {
     const target = await PDFDocument.create();
     const copied = await target.copyPages(source, keep);
     copied.forEach(page => target.addPage(page));
-    onProgress?.(90, { processedPages: copied.length, removedPages: selected.size });
+    if (onProgress) await onProgress(90, { processedPages: copied.length, removedPages: selected.size });
     const bytes = await target.save();
     return {
-        outputs: [writeBinaryOutput({
+        outputs: [await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -259,10 +259,10 @@ async function reorderPdf({ job, file, config, onProgress }) {
     const target = await PDFDocument.create();
     const copied = await target.copyPages(source, order);
     copied.forEach(page => target.addPage(page));
-    onProgress?.(90, { processedPages: copied.length });
+    if (onProgress) await onProgress(90, { processedPages: copied.length });
     const bytes = await target.save();
     return {
-        outputs: [writeBinaryOutput({
+        outputs: [await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -306,10 +306,10 @@ async function pdfToImages({ job, file, config, onProgress }) {
         }
     });
     if (!rendered.length) throw new Error('PDF 页面渲染失败，请确认文件未加密且格式正确。');
-    const outputs = rendered.map((page, index) => {
-        onProgress?.(20 + Math.floor(((index + 1) / rendered.length) * 70), { processedPages: index + 1 });
+    const outputs = await Promise.all(rendered.map(async (page, index) => {
+        if (onProgress) await onProgress(20 + Math.floor(((index + 1) / rendered.length) * 70), { processedPages: index + 1 });
         const filePath = resolveStoredDocumentPath(page.imagePath);
-        return serializeOutput(registerOutput({
+        return serializeOutput(await registerOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -318,7 +318,7 @@ async function pdfToImages({ job, file, config, onProgress }) {
             fileName: `${baseName(file.original_name)}-第${page.pageNumber}页.png`,
             mimeType: 'image/png'
         }));
-    });
+    }));
     return { outputs, processedPages: rendered.length };
 }
 
@@ -343,11 +343,11 @@ async function imagesToPdf({ job, file, files, onProgress }) {
             : await pdf.embedPng(image.bytes);
         const page = pdf.addPage([embedded.width, embedded.height]);
         page.drawImage(embedded, { x: 0, y: 0, width: embedded.width, height: embedded.height });
-        onProgress?.(15 + Math.floor(((i + 1) / imageFiles.length) * 75), { processedFiles: i + 1 });
+        if (onProgress) await onProgress(15 + Math.floor(((i + 1) / imageFiles.length) * 75), { processedFiles: i + 1 });
     }
     const bytes = await pdf.save();
     return {
-        outputs: [writeBinaryOutput({
+        outputs: [await writeBinaryOutput({
             userId: job.user_id,
             fileId: file.id,
             jobId: job.id,
@@ -459,7 +459,7 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
     }
 
     const bytes = await pdf.save();
-    return writeBinaryOutput({
+    return await writeBinaryOutput({
         userId,
         fileId: file.id,
         jobId: job.id,

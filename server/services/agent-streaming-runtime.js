@@ -26,12 +26,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             { role: 'system', content: systemPrompt },
             { role: 'user', content: run.goal || '' }
         ];
-        let lastStep = deps.listSteps(runId).length;
+        let lastStep = (await deps.listSteps(runId)).length;
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         for (let step = lastStep + 1; step <= lastStep + maxSteps; step += 1) {
             assertRunWithinBudget();
-            assertRunNotCancelled(runId);
-            deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+            await assertRunNotCancelled(runId);
+            await deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
             const modelSpanId = deps.startAgentTraceSpan?.(runId, {
                 type: 'model',
@@ -89,7 +89,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             });
             recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
             roundsUsed += 1;
-            deps.insertStep(runId, step, {
+            await deps.insertStep(runId, step, {
                 type: 'plan',
                 title: result?.hasToolCalls ? `流式工具计划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '工具'}` : '流式最终答案',
                 input: { goal: run.goal },
@@ -103,14 +103,14 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
 
             if (!result?.hasToolCalls) {
                 const answer = result?.content || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
-                deps.updateRun(runId, {
+                await deps.updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
                     completed_at: getBeijingTimestamp(),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                deps.createAgentNotification(user.id, runId, 'completed', '任务运行已完成', deps.getAgentRunTitle(run));
+                await deps.createAgentNotification(user.id, runId, 'completed', '任务运行已完成', deps.getAgentRunTitle(run));
                 return { completed: true, roundsUsed };
             }
 
@@ -120,12 +120,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             // 逐个执行模型请求的工具调用，并把结果追加回对话。
             for (const call of result.toolCalls) {
                 assertRunWithinBudget();
-                assertRunNotCancelled(runId);
+                await assertRunNotCancelled(runId);
                 const selectedTool = findAgentToolByName(call.name, toolList);
                 if (!selectedTool) {
                     const message = `工具不可用或无权访问：${call.name || '-'}`;
                     conversation.push(buildToolResultMessage(call.id, { error: message }));
-                    deps.insertStep(runId, deps.listSteps(runId).length + 1, {
+                    await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
                         type: 'tool',
                         title: `工具不可用：${call.name || '-'}`,
                         toolName: call.name || '',
@@ -136,7 +136,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     });
                     continue;
                 }
-                if (deps.maybePauseForApproval(run, selectedTool, call.arguments || {})) {
+                if (await deps.maybePauseForApproval(run, selectedTool, call.arguments || {})) {
                     // 保持运行处于待审批状态；审批通过后由恢复流程继续。
                     return { completed: true, roundsUsed };
                 }
@@ -163,7 +163,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     );
                     const compactOutput = compactToolOutputForModel(output, modelCfg);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput });
-                    deps.insertStep(runId, deps.listSteps(runId).length + 1, {
+                    await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
                         type: 'tool',
                         title: `工具执行完成：${call.name}`,
                         toolName: call.name,
@@ -179,7 +179,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 } catch (toolErr) {
                     if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(toolErr.code)) throw toolErr;
                     observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
-                    deps.insertStep(runId, deps.listSteps(runId).length + 1, {
+                    await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
                         type: 'tool',
                         title: `工具执行失败：${call.name}`,
                         toolName: call.name,
@@ -204,7 +204,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(streamErr.code)) throw streamErr;
         // 流式调用异常时记录控制步骤，并继续使用 JSON 规划。
         deps.logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，已回退到 JSON 规划器');
-        deps.insertStep(runId, deps.listSteps(runId).length + 1, {
+        await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
             type: 'control',
             title: '流式工具调用兜底',
             output: { error: streamErr.message }

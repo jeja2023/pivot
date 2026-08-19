@@ -113,7 +113,7 @@ const {
     withTimeout
 } = require('./runtime-env');
 const { getAgentRunTitle, getRunMetadata } = require('./metadata');
-const { assertAgentRunStatusTransition } = require('./state-machine');
+const { assertAgentRunStatusTransition, canTransitionAgentRunStatus, TERMINAL_STATUSES } = require('./state-machine');
 const {
     ensureAgentTrace,
     finishAgentTraceSpan,
@@ -155,7 +155,7 @@ const { shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers(
 
 
 
-async function updateRun(runId, fields = {}) {
+async function updateRun(runId, fields = {}, maxRetries = 3) {
     const allowed = [
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
@@ -168,39 +168,49 @@ async function updateRun(runId, fields = {}) {
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (entries.length === 0) return 0;
     const statusEntry = entries.find(([key]) => key === 'status');
-    let currentStatus = '';
-    if (statusEntry) {
-        const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
-        currentStatus = row?.status || '';
-        assertAgentRunStatusTransition(currentStatus, statusEntry[1], { runId });
-    }
-    const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    const where = statusEntry ? 'WHERE id = ? AND status = ?' : 'WHERE id = ?';
-    const params = [...entries.map(([, value]) => value), runId];
-    if (statusEntry) params.push(currentStatus);
-    const changes = await execute(`UPDATE agent_runs SET ${set} ${where}`, params);
-    if (statusEntry && changes === 0) {
+    const targetStatus = statusEntry ? statusEntry[1] : null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        let currentStatus = '';
+        if (statusEntry) {
+            const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+            currentStatus = row?.status || '';
+            assertAgentRunStatusTransition(currentStatus, targetStatus, { runId });
+        }
+        const set = entries.map(([key]) => `${key} = ?`).join(', ');
+        const where = statusEntry ? 'WHERE id = ? AND status = ?' : 'WHERE id = ?';
+        const params = [...entries.map(([, value]) => value), runId];
+        if (statusEntry) params.push(currentStatus);
+        const changes = await execute(`UPDATE agent_runs SET ${set} ${where}`, params);
+        if (changes > 0) {
+            if (entries.some(([key]) => [
+                'status',
+                'final_answer',
+                'error_message',
+                'completed_at',
+                'cancelled_at',
+                'deleted_at',
+                'last_heartbeat_at'
+            ].includes(key))) {
+                await publishAgentRunEvent(runId, 'updated');
+            }
+            return changes;
+        }
+        if (!statusEntry) return 0;
+
         const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
         const latestStatus = row?.status || '';
-        if (latestStatus !== statusEntry[1]) {
+        if (latestStatus === targetStatus) {
+            return 1;
+        }
+        if (!canTransitionAgentRunStatus(latestStatus, targetStatus)) {
             const error = new Error(`Agent run status changed concurrently: ${currentStatus || '<missing>'} -> ${latestStatus || '<missing>'}`);
             error.code = 'AGENT_STATUS_CONFLICT';
             error.runId = runId;
             throw error;
         }
     }
-    if (changes > 0 && entries.some(([key]) => [
-        'status',
-        'final_answer',
-        'error_message',
-        'completed_at',
-        'cancelled_at',
-        'deleted_at',
-        'last_heartbeat_at'
-    ].includes(key))) {
-        await publishAgentRunEvent(runId, 'updated');
-    }
-    return changes;
+    return 0;
 }
 
 async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
@@ -334,7 +344,7 @@ function recordRunRetryReason(runId, input = {}) {
 }
 
 function isRunCancelled(runId) {
-    return getRunStatus(runId) === 'cancelled';
+    return activeRunControllers.get(runId)?.signal?.aborted === true;
 }
 
 function assertRunNotCancelled(runId) {
@@ -350,7 +360,7 @@ async function cancelAgentRun(runId, user) {
     if (!run) return null;
     if (!ACTIVE_STATUSES.has(run.status)) return run;
     const now = getBeijingTimestamp();
-    updateRun(runId, {
+    await updateRun(runId, {
         status: 'cancelled',
         error_message: '智能体运行已被用户主动取消。',
         cancelled_at: now,
@@ -361,12 +371,12 @@ async function cancelAgentRun(runId, user) {
     abortError.code = 'AGENT_RUN_CANCELLED';
     activeRunControllers.get(runId)?.abort(abortError);
     const steps = await listSteps(runId);
-    insertStep(runId, (steps || []).length + 1, {
+    await insertStep(runId, (steps || []).length + 1, {
         type: 'control',
         title: '用户主动取消运行',
         output: { status: 'cancelled' }
     });
-    createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
+    await createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
     return await getRunForUser(runId, user);
 }
 
@@ -685,7 +695,7 @@ async function runAgent(runId, user) {
         assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
         if (!run) throw new Error('任务不存在。');
-        if (run.deleted_at) return;
+        if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
         ensureAgentTrace(run, {
             runMode: run.run_mode,
             modelRouter: run.model_router,
@@ -1039,6 +1049,8 @@ async function runAgent(runId, user) {
             enqueueAgentRun(runId, (await getRunUser(runId)) || user);
             return;
         }
+        const currentStatus = await getRunStatus(runId);
+        if (TERMINAL_STATUSES.has(currentStatus)) return;
         await updateRun(runId, {
             status: 'error',
             error_message: e.message,
@@ -1402,6 +1414,7 @@ module.exports = {
     listAgentWorkflowVersions,
     listAgentWorkflows,
     getAgentMetrics,
+    getAgentQueue,
     getAgentRuntimeStatus,
     syncAgentRuntimeConcurrency,
     normalizeAgentGoal,

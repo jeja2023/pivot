@@ -63,10 +63,10 @@ test('deployment providers expose multi-node placeholders', () => {
 
 test('enterprise provider and access helpers normalize extension inputs', () => {
     assert.equal(normalizeProviderType('queue'), 'queue');
-    assert.throws(() => normalizeProviderType('unknown'), /Unsupported/);
+    assert.throws(() => normalizeProviderType('unknown'), /Unsupported|不支持/);
     assert.equal(providerFor('database', 'mysql').status, 'planned');
     assert.equal(createProviderPlaceholder('database', 'sqlite').createClient().status, 'local-placeholder');
-    assert.throws(() => createProviderPlaceholder('queue', 'distributed').createClient(), /placeholder/);
+    assert.throws(() => createProviderPlaceholder('queue', 'distributed').createClient(), /placeholder|预留服务商占位符|占位符/);
     assert.equal(normalizeResourceType('mcp-tool'), 'mcp_tool');
     assert.equal(normalizeSubjectType('team'), 'team');
 });

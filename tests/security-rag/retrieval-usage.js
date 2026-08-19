@@ -16,6 +16,9 @@ const {
 } = require('../security-helpers');
 const { buildRagCacheScope } = require('../../server/services/rag-index');
 const { getKnowledgeQualityReport } = require('../../server/services/rag-documents');
+const { refreshAppSettingsCache } = require('../../server/services/app-settings');
+const { flushAllWrites } = require('../../server/services/db-write-queue');
+const { refreshUserSettingsCacheForUser } = require('../../server/services/user-settings');
 
 test('RAG 索引会拒绝空文档，而不是标记为就绪', async () => {
     await assert.rejects(
@@ -53,6 +56,7 @@ test('RAG 索引在向量服务失败时保留关键词分片', async () => {
         upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingMode, 'http');
         upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingApiUrl, 'http://127.0.0.1:9/v1');
         upsertUserSetting.run(userId, RAG_CONFIG_KEYS.embeddingModel, 'broken-embedding');
+        await refreshUserSettingsCacheForUser(userId);
 
         const chunkCount = await indexDocumentChunks(
             docInfo.lastInsertRowid,
@@ -70,6 +74,7 @@ test('RAG 索引在向量服务失败时保留关键词分片', async () => {
     } finally {
         axios.post = originalPost;
         db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        await refreshUserSettingsCacheForUser(userId);
         db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -88,15 +93,17 @@ test('RAG 汇总会返回个人检索配置', async () => {
     `).run(userInfo.lastInsertRowid, RAG_CONFIG_KEYS.topK, '7');
 
     try {
+        await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
         const summary = await getKnowledgeDocumentSummaryForUser(userInfo.lastInsertRowid);
         assert.equal(summary.config.topK, 7);
     } finally {
         db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userInfo.lastInsertRowid);
+        await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
     }
 });
 
-test('令牌统计会平衡总量并跟踪嵌入用量模型', () => {
+test('令牌统计会平衡总量并跟踪嵌入用量模型', async () => {
     assert.deepEqual(normalizeTokenUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 20 }), {
         inputTokens: 10,
         outputTokens: 10,
@@ -118,18 +125,19 @@ test('令牌统计会平衡总量并跟踪嵌入用量模型', () => {
     let modelId;
 
     try {
-        modelId = getOrCreateEmbeddingUsageModel({
+        modelId = await getOrCreateEmbeddingUsageModel({
             userId,
             url: 'https://embedding-usage.example/v1',
             model: 'bge-test'
         });
-        const sameModelId = getOrCreateEmbeddingUsageModel({
+        const sameModelId = await getOrCreateEmbeddingUsageModel({
             userId,
             url: 'https://embedding-usage.example/v1',
             model: 'bge-test'
         });
         assert.equal(sameModelId, modelId);
         recordModelTokenUsage(userId, modelId, 30, 'rag_embedding', 10, 0);
+        await flushAllWrites();
         const event = db.prepare('SELECT token_count, input_tokens, output_tokens FROM model_usage_events WHERE user_id = ? AND model_id = ?').get(userId, modelId);
         assert.deepEqual(event, { token_count: 30, input_tokens: 10, output_tokens: 20 });
         const model = db.prepare('SELECT status, name FROM models WHERE id = ?').get(modelId);
@@ -185,6 +193,7 @@ test('可用模型路由包含已配置的嵌入模型', async () => {
     upsert.run(RAG_CONFIG_KEYS.embeddingModel, 'bge-m3');
 
     try {
+        await refreshAppSettingsCache();
         const handlers = route.route.stack.map(item => item.handle);
         const req = {};
         let payload = null;
@@ -225,10 +234,11 @@ test('可用模型路由包含已配置的嵌入模型', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
     }
 });
 
-test('RAG cache scope changes when knowledge version changes', () => {
+test('RAG cache scope changes when knowledge version changes', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -250,14 +260,14 @@ test('RAG cache scope changes when knowledge version changes', () => {
     `).run(userId, docInfo.lastInsertRowid, 'scope-tag');
 
     try {
-        const first = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
-        const scoped = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { collectionId: collectionInfo.lastInsertRowid });
+        const first = await buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
+        const scoped = await buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { collectionId: collectionInfo.lastInsertRowid });
         assert.notEqual(first, scoped);
         assert.match(scoped, new RegExp(`scope=collections:${collectionInfo.lastInsertRowid}`));
-        const tagged = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { tagNames: ['scope-tag'] });
+        const tagged = await buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 }, { tagNames: ['scope-tag'] });
         assert.match(tagged, /scope=tags:scope-tag/);
         db.prepare('UPDATE knowledge_docs SET updated_at = ? WHERE id = ?').run('2026-01-02 00:00:00', docInfo.lastInsertRowid);
-        const second = buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
+        const second = await buildRagCacheScope(userId, { topK: 3, candidateLimit: 80, scoreThreshold: 0.4 });
         assert.notEqual(first, second);
         assert.match(second, /d=1/);
         assert.match(second, /h=2/);

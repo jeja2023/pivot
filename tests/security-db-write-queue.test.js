@@ -6,30 +6,24 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 function loadQueueModule({ failTimes = 1, flushMs = 5 } = {}) {
-    const filename = path.resolve(__dirname, '../server/services/sqlite-write-queue.js');
+    const filename = path.resolve(__dirname, '../server/services/db-write-queue.js');
     const source = fs.readFileSync(filename, 'utf8');
     const module = { exports: {} };
     const localRequire = Module.createRequire(filename);
     const scheduledDelays = [];
     const timers = [];
     const loggerWarnings = [];
+    const pgQueries = [];
     let auditLogFailures = failTimes;
 
-    const fakeDb = {
-        prepare(sql) {
-            const isAuditLogInsert = sql.includes('INSERT INTO audit_logs');
-            return {
-                run() {
-                    if (isAuditLogInsert && auditLogFailures > 0) {
-                        auditLogFailures -= 1;
-                        throw new Error('database is locked');
-                    }
-                    return { changes: 1 };
-                }
-            };
-        },
-        transaction(fn) {
-            return (items) => fn(items);
+    const fakePool = {
+        async query(sql, params) {
+            pgQueries.push({ sql, params });
+            if (sql.includes('INSERT INTO "audit_logs"') && auditLogFailures > 0) {
+                auditLogFailures -= 1;
+                throw new Error('temporary pg failure');
+            }
+            return { rowCount: 1, rows: [] };
         }
     };
 
@@ -55,15 +49,15 @@ function loadQueueModule({ failTimes = 1, flushMs = 5 } = {}) {
     const sandboxProcess = {
         env: {
             ...process.env,
-            PIVOT_SQLITE_WRITE_QUEUE_SYNC: '',
-            PIVOT_SQLITE_WRITE_FLUSH_MS: String(flushMs),
-            PIVOT_SQLITE_WRITE_BATCH_SIZE: '1'
+            PIVOT_DB_WRITE_QUEUE_DISABLED: '',
+            PIVOT_DB_WRITE_FLUSH_MS: String(flushMs),
+            PIVOT_DB_WRITE_BATCH_SIZE: '1'
         },
         once() {}
     };
 
     const requireWithMock = (request) => {
-        if (request === '../db') return { db: fakeDb };
+        if (request === '../db/pg-connection') return { getPgPool: () => fakePool };
         if (request === '../logger') return { logger: { warn: (...args) => loggerWarnings.push(args) } };
         return localRequire(request);
     };
@@ -83,21 +77,26 @@ function loadQueueModule({ failTimes = 1, flushMs = 5 } = {}) {
         clearInterval: () => {}
     }, { filename });
 
-    return { queue: module.exports, scheduledDelays, timers, loggerWarnings };
+    return { queue: module.exports, scheduledDelays, timers, loggerWarnings, pgQueries };
 }
 
-function drainTimers(timers, limit = 20) {
-    for (let i = 0; i < limit; i += 1) {
-        const timer = timers.find(item => !item.executed && !item.cleared);
-        if (!timer) return;
-        timer.executed = true;
-        timer.fn();
-    }
-    throw new Error('timer drain limit exceeded');
+async function settleAsyncWork() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 }
 
-test('sqlite write queue retries a failed batch without a new enqueue', () => {
-    const { queue, scheduledDelays, timers, loggerWarnings } = loadQueueModule({ failTimes: 1, flushMs: 5 });
+async function runNextTimer(timers) {
+    const timer = timers.find(item => !item.executed && !item.cleared);
+    if (!timer) return false;
+    timer.executed = true;
+    timer.fn();
+    await settleAsyncWork();
+    return true;
+}
+
+test('postgres write queue retries a failed batch without a new enqueue', async () => {
+    const { queue, scheduledDelays, timers, loggerWarnings, pgQueries } = loadQueueModule({ failTimes: 1, flushMs: 5 });
 
     queue.enqueueAuditLog({
         userId: 1,
@@ -107,10 +106,14 @@ test('sqlite write queue retries a failed batch without a new enqueue', () => {
         timestamp: '2026-06-26 10:00:00'
     });
 
-    drainTimers(timers);
-
-    assert.equal(queue.getQueueStatus().auditLogs, 0);
+    await runNextTimer(timers);
+    assert.equal(queue.getQueueStatus().auditLogs, 1);
     assert.ok(scheduledDelays.length >= 2);
     assert.ok(scheduledDelays[1] > scheduledDelays[0]);
     assert.ok(loggerWarnings.length >= 1);
+
+    await runNextTimer(timers);
+
+    assert.equal(queue.getQueueStatus().auditLogs, 0);
+    assert.equal(pgQueries.filter(item => item.sql.includes('INSERT INTO "audit_logs"')).length, 2);
 });

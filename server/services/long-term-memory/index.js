@@ -4,6 +4,10 @@ const { logger } = require('../../logger');
 const { KeyedConcurrencyGuard } = require('../concurrency');
 const { getAccessibleModelAsync } = require('../models');
 const { generateEmbedding, cosineSimilarity } = require('../rag-index');
+const {
+    getUserSettingValueAsync,
+    setUserSettingAsync
+} = require('../user-settings');
 
 const {
     MEMORY_SETTING_KEY,
@@ -60,20 +64,14 @@ async function getMemoryRow(userId, memoryId, options = {}) {
 }
 
 async function isLongTermMemoryEnabled(userId) {
-    const row = await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [userId, MEMORY_SETTING_KEY]);
-    if (!row) return true;
-    return row.value !== 'false';
+    const value = await getUserSettingValueAsync(userId, MEMORY_SETTING_KEY);
+    if (value === undefined) return true;
+    return value !== 'false';
 }
 
 async function setLongTermMemoryEnabled(userId, enabled) {
     const value = enabled ? 'true' : 'false';
-    await execute(`
-        INSERT INTO user_settings (user_id, key, value, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at
-    `, [userId, MEMORY_SETTING_KEY, value, getBeijingTimestamp()]);
+    await setUserSettingAsync(userId, MEMORY_SETTING_KEY, value, { updatedAt: getBeijingTimestamp() });
     return await isLongTermMemoryEnabled(userId);
 }
 

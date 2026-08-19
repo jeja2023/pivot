@@ -10,13 +10,13 @@ const {
 const { safeJsonPost } = require('./safe-http-client');
 const {
     executeDatabaseMcpTool,
-    getDatabaseConnectionForServer,
+    getDatabaseConnectionForServerAsync,
     listDatabaseMcpTools,
     normalizeDatabaseConnection
 } = require('./database-mcp');
 const {
     executeBuiltinMcpTool,
-    getBuiltinConfigForServer,
+    getBuiltinConfigForServerAsync,
     getBuiltinServiceTypeFromUrl,
     isInternalMcpUrl,
     listBuiltinMcpTools
@@ -152,8 +152,6 @@ function normalizeServerRow(row) {
             status: row.db_conn_status,
             updated_at: row.db_conn_updated_at
         }, { includeSecret: false });
-    } else if (String(row.base_url || '').startsWith('pivot-db://')) {
-        databaseConnection = getDatabaseConnectionForServer(row.id);
     }
 
     const builtinType = getBuiltinServiceTypeFromUrl(row.base_url);
@@ -168,8 +166,6 @@ function normalizeServerRow(row) {
             status: row.builtin_status,
             updated_at: row.builtin_updated_at
         }, { includeSecret: false });
-    } else if (builtinType) {
-        builtinConfig = getBuiltinConfigForServer(row.id);
     }
 
     return {
@@ -194,6 +190,24 @@ function normalizeServerRow(row) {
         database_connection: databaseConnection,
         builtin_config: builtinConfig
     };
+}
+
+async function normalizeServerRowAsync(row) {
+    const normalized = normalizeServerRow(row);
+    if (!normalized) return null;
+
+    if (!normalized.database_connection && String(row.base_url || '').startsWith('pivot-db://')) {
+        normalized.database_connection = await getDatabaseConnectionForServerAsync(row.id);
+        normalized.server_type = 'database';
+    }
+
+    const builtinType = getBuiltinServiceTypeFromUrl(row.base_url);
+    if (!normalized.builtin_config && builtinType) {
+        normalized.builtin_config = await getBuiltinConfigForServerAsync(row.id);
+        normalized.server_type = builtinType;
+    }
+
+    return normalized;
 }
 
 async function getAccessibleMcpServer(serverId, user) {
@@ -269,7 +283,7 @@ async function getMcpServerShareOptions(serverId, user) {
     `, [serverId]);
     if (!row || (Number(row.user_id) !== Number(user?.id) && !isSuperAdmin(user))) return null;
     return {
-        server: normalizeServerRow(row),
+        server: await normalizeServerRowAsync(row),
         ...(await listShareTargets(user, { excludeUserId: row.user_id })),
         supportsSharing: String(row.base_url || '').startsWith('pivot-db://')
     };
@@ -301,7 +315,7 @@ async function updateMcpServerSharing(serverId, user, body = {}) {
 async function callMcpJsonRpc(server, method, params = {}, user = null, options = {}) {
     options.signal?.throwIfAborted?.();
     if (String(server.base_url || '').startsWith('pivot-db://')) {
-        if (method === 'tools/list') return { tools: listDatabaseMcpTools(server) };
+        if (method === 'tools/list') return { tools: await listDatabaseMcpTools(server) };
         if (method === 'tools/call') {
             const result = await executeDatabaseMcpTool(server, params?.name, params?.arguments || {});
             options.signal?.throwIfAborted?.();
@@ -624,6 +638,7 @@ module.exports = {
     getMcpServerShareOptions,
     updateMcpServerSharing,
     normalizeServerRow,
+    normalizeServerRowAsync,
     recordMcpCallLog,
     refreshMcpTools
 };

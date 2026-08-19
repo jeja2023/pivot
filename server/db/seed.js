@@ -1,6 +1,8 @@
 /**
  * server/db/seed.js
- * 数据库初始数据填充（SQLite 同步 + PostgreSQL 异步双模式）
+ * 数据库初始数据填充（PostgreSQL）
+ *
+ * SQLite 同步 seed 仅服务于历史测试夹具，不再属于应用运行模式。
  */
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -51,10 +53,18 @@ function logInitialAdminCredential(credential) {
     logger.warn({ username: 'admin', credentialPath }, '系统初始化：已创建随机管理员密码，请读取该一次性文件后尽快修改密码并删除文件');
 }
 
-// ── SQLite 同步 seed ──────────────────────────────────────────────────────
+function requireLegacySqliteDb() {
+    const { db } = require('./connection');
+    if (!db || typeof db.prepare !== 'function') {
+        throw new Error('[DB] 当前版本已切换为 PostgreSQL-only；SQLite seed 入口仅允许历史测试夹具显式注入 SQLite 连接后调用。');
+    }
+    return db;
+}
+
+// ── Legacy SQLite seed helpers ───────────────────────────────────────────
 
 function createInitialAdminAccount() {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const { recordMigration } = require('./migrate');
     const credential = buildInitialAdminCredential();
     db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -64,7 +74,7 @@ function createInitialAdminAccount() {
 }
 
 function ensureBuiltInAdminAccount() {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
     const { recordMigration } = require('./migrate');
     const admin = db.prepare('SELECT id, role, status, deleted_at FROM users WHERE username = ?').get('admin');
     if (!admin) { createInitialAdminAccount(); return; }
@@ -81,7 +91,7 @@ function ensureBuiltInAdminAccount() {
 }
 
 function runSeeds() {
-    const { db } = require('./connection');
+    const db = requireLegacySqliteDb();
 
     const promptCount = db.prepare('SELECT COUNT(*) as count FROM prompts').get().count;
     if (promptCount === 0) {

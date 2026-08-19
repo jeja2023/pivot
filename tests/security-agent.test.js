@@ -1060,8 +1060,12 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
 test('agent model calls wait for global model queue instead of failing immediately', async () => {
     const axios = require('axios');
     const originalPost = axios.post;
-    await aiSemaphore.acquire();
-    let releasedGlobal = false;
+    const acquiredSlots = [];
+    const maxConcurrent = aiSemaphore.getStatus().max;
+    for (let index = 0; index < maxConcurrent; index += 1) {
+        await aiSemaphore.acquire();
+        acquiredSlots.push(true);
+    }
     let called = false;
     axios.post = async () => {
         called = true;
@@ -1077,13 +1081,16 @@ test('agent model calls wait for global model queue instead of failing immediate
         await new Promise(resolve => setTimeout(resolve, 20));
         assert.equal(called, false);
         aiSemaphore.release();
-        releasedGlobal = true;
+        acquiredSlots.pop();
         const result = await pending;
         assert.equal(result, 'queued ok');
         assert.equal(called, true);
     } finally {
         axios.post = originalPost;
-        if (!releasedGlobal) aiSemaphore.release();
+        while (acquiredSlots.length > 0) {
+            aiSemaphore.release();
+            acquiredSlots.pop();
+        }
     }
 });
 
@@ -1247,7 +1254,12 @@ test('工作流交付节点未完成时不使用数据库行数冒充最终结�
 });
 
 test('agent runs can be cancelled and rerun from an existing run', async () => {
-    const suffix = Date.now();
+    const { getAgentQueue } = require('../server/services/agent-runtime');
+    const globalQueue = getAgentQueue();
+    const previousMax = globalQueue.getStatus().maxConcurrent;
+    globalQueue.updateMaxConcurrent(0);
+    try {
+        const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
@@ -1417,6 +1429,10 @@ test('agent runs can be cancelled and rerun from an existing run', async () => {
     const adminAudit = await listDeletedRunsForAdmin({ id: 1, username: 'admin', role: 'admin', unit: '' }, 20);
     assert.equal(adminAudit.some(item => item.id === run.id && item.deleted_by_user === user.id), true);
 
+    } finally {
+        globalQueue.updateMaxConcurrent(previousMax);
+    }
+
     assert.throws(() => normalizeAgentGoal('短'), /更明确/);
 });
 
@@ -1444,13 +1460,13 @@ test('agent model visibility excludes other users private models', async () => {
 
     const privateId = Number(privateModel.lastInsertRowid);
     const globalId = Number(globalModel.lastInsertRowid);
-    assert.equal(getRunnableModelForUser(privateId, owner)?.id, privateId);
-    assert.equal(getRunnableModelForUser(privateId, other), null);
-    assert.equal(getRunnableModelForUser(privateId, superAdmin), null);
-    assert.equal(getRunnableModelForUser(globalId, other)?.id, globalId);
-    assert.equal(getUserRunnableModels(owner).some(model => model.id === privateId), true);
-    assert.equal(getUserRunnableModels(other).some(model => model.id === privateId), false);
-    assert.equal(getUserRunnableModels(superAdmin).some(model => model.id === privateId), false);
+    assert.equal((await getRunnableModelForUser(privateId, owner))?.id, privateId);
+    assert.equal(await getRunnableModelForUser(privateId, other), null);
+    assert.equal(await getRunnableModelForUser(privateId, superAdmin), null);
+    assert.equal((await getRunnableModelForUser(globalId, other))?.id, globalId);
+    assert.equal((await getUserRunnableModels(owner)).some(model => model.id === privateId), true);
+    assert.equal((await getUserRunnableModels(other)).some(model => model.id === privateId), false);
+    assert.equal((await getUserRunnableModels(superAdmin)).some(model => model.id === privateId), false);
     await assert.rejects(async () => await createAgentRun({
         user: superAdmin,
         goal: '检查其他用户私有模型是否可用于自动化',
@@ -1552,6 +1568,10 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
 });
 
 test('DAG final answer uses the terminal node output without an implicit summary call', async () => {
+    const { getAgentQueue } = require('../server/services/agent-runtime');
+    const globalQueue = getAgentQueue();
+    const previousMax = globalQueue.getStatus().maxConcurrent;
+    globalQueue.updateMaxConcurrent(0);
     const axios = require('axios');
     const originalPost = axios.post;
     const suffix = Date.now().toString(36);
@@ -1663,6 +1683,7 @@ test('DAG final answer uses the terminal node output without an implicit summary
         assert.match(toolOnlyDetail.run.final_answer, /工作流执行完成/);
         assert.equal(callCount, 1);
     } finally {
+        globalQueue.updateMaxConcurrent(previousMax);
         axios.post = originalPost;
         [runId, toolOnlyRunId].forEach(id => {
             db.prepare('DELETE FROM agent_notifications WHERE run_id = ?').run(id);

@@ -161,21 +161,31 @@ const PG_FULLTEXT_INDEXES = [
  */
 const PG_HELPER_FUNCTIONS = [
     `
-    CREATE OR REPLACE FUNCTION pivot_json_extract(payload text, path text[])
-    RETURNS text
-    LANGUAGE plpgsql
-    IMMUTABLE
-    PARALLEL SAFE
-    AS $fn$
+    DO $$
     BEGIN
-        IF payload IS NULL OR payload = '' THEN
-            RETURN NULL;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON p.pronamespace = n.oid
+            WHERE p.proname = 'pivot_json_extract'
+              AND n.nspname = current_schema()
+        ) THEN
+            CREATE FUNCTION pivot_json_extract(payload text, path text[])
+            RETURNS text
+            LANGUAGE plpgsql
+            IMMUTABLE
+            PARALLEL SAFE
+            AS $fn$
+            BEGIN
+                IF payload IS NULL OR payload = '' THEN
+                    RETURN NULL;
+                END IF;
+                RETURN payload::jsonb #>> path;
+            EXCEPTION WHEN others THEN
+                RETURN NULL;
+            END
+            $fn$;
         END IF;
-        RETURN payload::jsonb #>> path;
-    EXCEPTION WHEN others THEN
-        RETURN NULL;
-    END
-    $fn$`,
+    END $$;`,
 ];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -230,29 +240,51 @@ async function initSchemaPg() {
             }
         }
 
-        await client.query('BEGIN');
-
         for (const sql of plan.helperFunctions) {
-            await client.query(sql);
+            try {
+                await client.query(sql);
+            } catch (err) {
+                if (err.code === '42501' || String(err.message).includes('pivot_json_extract')) {
+                    logger.warn({ err: err.message }, '[PG] 函数已存在且非属主，跳过函数更新');
+                } else {
+                    throw err;
+                }
+            }
         }
 
         for (const sql of plan.tables) {
             try {
                 await client.query(sql);
             } catch (err) {
-                throw new Error(`[PG Schema] 建表失败: ${err.message}\nDDL: ${sql.slice(0, 400)}`);
+                if (err.code === '42501' || err.code === '42P07' || String(err.message).includes('already exists')) {
+                    logger.warn({ err: err.message }, '[PG] 表已存在或权限受限，跳过建表');
+                } else {
+                    throw new Error(`[PG Schema] 建表失败: ${err.message}\nDDL: ${sql.slice(0, 400)}`);
+                }
             }
         }
 
         for (const sql of plan.residualColumns) {
-            await client.query(sql);
+            try {
+                await client.query(sql);
+            } catch (err) {
+                if (err.code === '42501' || err.code === '42701') {
+                    logger.warn({ sql, err: err.message }, '[PG] 当前用户非表属主或列已存在，跳过遗留列补齐');
+                } else {
+                    throw err;
+                }
+            }
         }
 
         for (const sql of plan.foreignKeys) {
             try {
                 await client.query(sql);
             } catch (err) {
-                throw new Error(`[PG Schema] 外键补建失败: ${err.message}\nSQL: ${sql.trim().slice(0, 300)}`);
+                if (err.code === '42501' || err.code === '42710') {
+                    logger.warn({ sql: sql.trim().slice(0, 200), err: err.message }, '[PG] 当前用户非表属主或外键已存在，跳过外键补建');
+                } else {
+                    throw new Error(`[PG Schema] 外键补建失败: ${err.message}\nSQL: ${sql.trim().slice(0, 300)}`);
+                }
             }
         }
 
@@ -260,7 +292,11 @@ async function initSchemaPg() {
             try {
                 await client.query(sql);
             } catch (err) {
-                throw new Error(`[PG Schema] 建索引失败: ${err.message}\nSQL: ${sql.slice(0, 300)}`);
+                if (err.code === '42501' || err.code === '42P07') {
+                    logger.warn({ sql: sql.slice(0, 200), err: err.message }, '[PG] 当前用户非属主或索引已存在，跳过索引补建');
+                } else {
+                    throw new Error(`[PG Schema] 建索引失败: ${err.message}\nSQL: ${sql.slice(0, 300)}`);
+                }
             }
         }
 
@@ -272,20 +308,14 @@ async function initSchemaPg() {
             }
         }
 
-        await client.query('COMMIT');
-    } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
-        client.release();
-        throw err;
-    }
-
-    // 全文索引依赖 pg_trgm，扩展缺失时降级跳过而非中断启动
-    try {
+        // 全文索引依赖 pg_trgm，扩展缺失或非属主时降级跳过而非中断启动
         for (const sql of plan.fulltextIndexes) {
-            await client.query(sql);
+            try {
+                await client.query(sql);
+            } catch (err) {
+                logger.warn({ err: err.message }, '[PG] pg_trgm 全文索引创建失败，全文检索将退化为顺序扫描');
+            }
         }
-    } catch (err) {
-        logger.warn({ err: err.message }, '[PG] pg_trgm 全文索引创建失败，全文检索将退化为顺序扫描');
     } finally {
         client.release();
     }

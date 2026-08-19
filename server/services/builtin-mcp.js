@@ -17,7 +17,7 @@ const {
     normalizeBuiltinPayload,
     getBuiltinServiceTypeFromUrl,
     isInternalMcpUrl,
-    getBuiltinConfigForServer,
+    getBuiltinConfigForServerAsync,
     buildTableBlock
 } = require('./builtin-mcp-common');
 const { listReportTools, executeReportTool } = require('./builtin-mcp-reports');
@@ -63,7 +63,7 @@ module.exports = {
     buildChartSpec,
     buildTableBlock,
     executeBuiltinMcpTool,
-    getBuiltinConfigForServer,
+    getBuiltinConfigForServerAsync,
     getBuiltinServiceTypeFromUrl,
     isInternalMcpUrl,
     listBuiltinMcpTools,

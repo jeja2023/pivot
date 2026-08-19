@@ -77,7 +77,7 @@ test('内置即时消息 MCP 校验目标白名单并发送局域网 webhook 载
                 body: { name: `mcp.${serverId}.im.send_user_message`, input: { target: 'mallory', message: 'nope' } },
                 user: adminUser
             }, { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } }),
-            /allowed target/
+            /allowed target|允许的通知目标/
         );
     } finally {
         await new Promise(resolve => server.close(resolve));

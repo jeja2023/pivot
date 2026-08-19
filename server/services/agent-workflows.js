@@ -384,7 +384,7 @@ async function updateAgentWorkflowSharing(workflowId, user, body = {}) {
         SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [share.scope, share.allowedUnits, share.allowedUserIds, now, current.id, user.id]);
-    if ((updateResult?.rowCount || updateResult?.changes || 0) === 0) return null;
+    if (Number(updateResult || 0) === 0) return null;
     return await getAgentWorkflowForUser(current.id, user);
 }
 

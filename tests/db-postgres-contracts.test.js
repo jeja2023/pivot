@@ -1,34 +1,24 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-// 1. Dialect Helper Contract Tests
 const dialect = require('../server/db/dialect');
 const pgSchema = require('../server/db/schema/pg');
 const { normalizePgTimestamp } = require('../server/db/pg-connection');
 
-test('dialect helpers produce valid SQLite SQL expressions', () => {
-    // nowExpr
-    assert.strictEqual(dialect.nowExpr(), "datetime('now', '+8 hours')");
-
-    // nowOffsetExpr
-    assert.strictEqual(dialect.nowOffsetExpr('-180 days'), "datetime('now', '+8 hours', '-180 days')");
-
-    // jsonExtract
-    assert.strictEqual(dialect.jsonExtract('context_config', '$.model'), "json_extract(context_config, '$.model')");
-
-    // jsonValid
-    assert.strictEqual(dialect.jsonValid('context_config'), "json_valid(context_config)");
-
-    // orderNocase
-    assert.strictEqual(dialect.orderNocase('t.tag'), 't.tag COLLATE NOCASE');
-
-    // likeOperator
-    assert.strictEqual(dialect.likeOperator(), 'LIKE');
-
-    // fullTextMatch
-    assert.strictEqual(dialect.fullTextMatch('messages_fts'), 'messages_fts MATCH ?');
-
-    // upsertConflict
+test('dialect helpers produce valid PostgreSQL SQL expressions', () => {
+    assert.strictEqual(dialect.nowExpr(), "now() AT TIME ZONE 'Asia/Shanghai'");
+    assert.strictEqual(
+        dialect.nowOffsetExpr('-180 days'),
+        "((now() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '180 days')"
+    );
+    assert.strictEqual(dialect.jsonExtract('context_config', '$.model'), "pivot_json_extract(context_config, '{model}')");
+    assert.strictEqual(dialect.jsonValid('context_config'), 'TRUE');
+    assert.strictEqual(dialect.orderNocase('t.tag'), 'lower(t.tag)');
+    assert.strictEqual(dialect.likeOperator(), 'ILIKE');
+    assert.strictEqual(
+        dialect.fullTextMatch('messages_fts'),
+        "to_tsvector('simple', messages_fts) @@ plainto_tsquery('simple', ?)"
+    );
     assert.strictEqual(
         dialect.upsertConflict(['user_id', 'key'], ['value', 'updated_at']),
         'ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
@@ -72,7 +62,7 @@ test('dynamic PostgreSQL schema generator produces complete 79-table DDL matchin
     assert.ok(plan.comments.some(c => c.includes('COMMENT ON COLUMN "messages"."content"')), 'Must generate messages.content column comment');
 });
 
-test('db-write-queue exports correct dual-mode write queue methods', async () => {
+test('db-write-queue exports PostgreSQL write queue methods', async () => {
     const {
         enqueueAuditLog,
         enqueueApiCallLog,

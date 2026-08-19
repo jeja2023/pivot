@@ -11,11 +11,16 @@ const {
     getGlobalContextRuntimeConfig,
     getGlobalSamplingRuntimeConfig,
     getUploadRuntimeConfig,
-    saveRuntimeConfig
+    saveRuntimeConfigAsync
 } = require('../../server/services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
 const { syncAgentRuntimeConcurrency } = require('../../server/services/agent-runtime');
-const { ensureAppSetting, getAppSettingRow, getAppSettingsMap, setAppSetting } = require('../../server/services/app-settings');
+const {
+    getAppSettingRow,
+    getAppSettingsMap,
+    refreshAppSettingsCache,
+    setAppSettingAsync
+} = require('../../server/services/app-settings');
 
 function createJsonResponse() {
     return {
@@ -91,7 +96,7 @@ test('validateModelTokenSettings 关系校验：输入/输出上限须小于上�
     assert.ok(!validateModelTokenSettings({ max_input_tokens: 40000 }).error);
 });
 
-test('运行时上下文默认值可从设置页保存并影响上下文预算', () => {
+test('运行时上下文默认值可从设置页保存并影响上下文预算', async () => {
     const keys = [
         RUNTIME_SETTING_KEYS.modelContextWindowTokens,
         RUNTIME_SETTING_KEYS.contextReservedOutputTokens,
@@ -99,7 +104,7 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
     ];
     const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
     try {
-        const saved = saveRuntimeConfig({
+        const saved = await saveRuntimeConfigAsync({
             model_context_window_tokens: '64K',
             context_reserved_output_tokens: '4K',
             memory_threshold: '32K'
@@ -129,12 +134,13 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
         syncGlobalAiConcurrencySettings();
         syncAgentRuntimeConcurrency();
     }
 });
 
-test('运行时采样默认值可从设置页保存并回读', () => {
+test('运行时采样默认值可从设置页保存并回读', async () => {
     const keys = [
         RUNTIME_SETTING_KEYS.samplingTemperature,
         RUNTIME_SETTING_KEYS.samplingTopP,
@@ -143,7 +149,7 @@ test('运行时采样默认值可从设置页保存并回读', () => {
     ];
     const previousRows = keys.map(key => db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key));
     try {
-        const saved = saveRuntimeConfig({
+        const saved = await saveRuntimeConfigAsync({
             sampling_temperature: 0.35,
             sampling_top_p: 0.92,
             sampling_presence_penalty: -0.3,
@@ -170,6 +176,7 @@ test('运行时采样默认值可从设置页保存并回读', () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
     }
 });
 
@@ -281,6 +288,7 @@ test('管理员运行时设置接口可保存并发配置', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
         syncGlobalAiConcurrencySettings();
         syncAgentRuntimeConcurrency();
     }
@@ -352,57 +360,46 @@ test('全局运行时资源参数可通过设置接口保存', async () => {
                 db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
             }
         });
+        await refreshAppSettingsCache();
         syncGlobalAiConcurrencySettings();
         syncAgentRuntimeConcurrency();
     }
 });
 
-test('runtime settings save path handles legacy app_settings rows and syncs endpoint runtimes', () => {
+test('runtime settings save path awaits PostgreSQL upserts and syncs endpoint runtimes', () => {
     const runtimeSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'services', 'runtime-settings.js'), 'utf8');
     const settingsRoute = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'routes', 'settings.js'), 'utf8');
 
-    assert.match(runtimeSettings, /ORDER BY[\s\S]*updated_at DESC,[\s\S]*rowid DESC[\s\S]*LIMIT 1/);
-    assert.match(runtimeSettings, /function isLegacyAppSettingsConflictError\(error\)/);
-    assert.match(runtimeSettings, /legacyAppSettingsMode = true/);
-    assert.match(runtimeSettings, /DELETE FROM app_settings WHERE key = \?/);
+    assert.match(runtimeSettings, /async function saveRuntimeConfigAsync\(updates = \{\}, userId = null\)/);
+    assert.match(runtimeSettings, /ON CONFLICT \(key\) DO UPDATE SET/);
+    assert.match(settingsRoute, /const result = await saveRuntimeConfigAsync\(req\.body \|\| \{\}, req\.user\?\.id \|\| null\);/);
     assert.match(settingsRoute, /const \{ getModelEndpointRuntimeStatus, syncConfiguredRuntimes \} = require\('\.\.\/services\/model-runtime'\);/);
     assert.match(settingsRoute, /globalAiConcurrency = syncGlobalAiConcurrencySettings\(\);\s*syncConfiguredRuntimes\(\);\s*modelEndpointRuntime = getModelEndpointRuntimeStatus\(\);/);
     assert.match(settingsRoute, /invalidateMonitorSummaryCache\(\);/);
 });
 
-test('app_settings helper supports legacy production table without key uniqueness', () => {
-    const backupTable = `app_settings_backup_${Date.now()}`;
+test('app_settings helper keeps one PostgreSQL row per setting key', async () => {
     const key = RUNTIME_SETTING_KEYS.maxConcurrentAiRequests;
-    let renamed = false;
+    const previous = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key);
     try {
-        db.exec(`ALTER TABLE app_settings RENAME TO ${backupTable}`);
-        renamed = true;
-        db.exec(`
-            CREATE TABLE app_settings (
-                key TEXT,
-                value TEXT NOT NULL,
-                updated_at DATETIME,
-                updated_by INTEGER
-            )
-        `);
-
-        ensureAppSetting(key, '1', { updatedAt: '2026-01-01 00:00:00' });
-        ensureAppSetting(key, '9', { updatedAt: '2026-01-04 00:00:00' });
-        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_settings WHERE key = ?').get(key).count, 1);
-        assert.equal(getAppSettingRow(key).value, '1');
-
-        db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
-            .run(key, '2', '2026-01-02 00:00:00', null);
-        db.prepare('INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)')
-            .run(key, '3', '2026-01-02 00:00:00', null);
-        assert.equal(getAppSettingRow(key).value, '3');
-        assert.equal(getAppSettingsMap()[key].value, '3');
-
-        setAppSetting(key, '4', { updatedAt: '2026-01-03 00:00:00', updatedBy: 1 });
+        await setAppSettingAsync(key, '1', { updatedAt: '2026-01-01 00:00:00' });
+        await setAppSettingAsync(key, '4', { updatedAt: '2026-01-03 00:00:00', updatedBy: 1 });
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_settings WHERE key = ?').get(key).count, 1);
         assert.equal(getAppSettingRow(key).value, '4');
+        assert.equal(getAppSettingsMap()[key].value, '4');
     } finally {
-        db.exec('DROP TABLE IF EXISTS app_settings');
-        if (renamed) db.exec(`ALTER TABLE ${backupTable} RENAME TO app_settings`);
+        if (previous) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previous.key, previous.value, previous.updated_at, previous.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        }
+        await refreshAppSettingsCache();
     }
 });

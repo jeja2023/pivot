@@ -18,7 +18,7 @@ test('desktop update policy requires https for remote feeds', () => {
     );
     assert.throws(
         () => assertAllowedUpdateFeedUrl('http://updates.example.com/pivot'),
-        /must use https/
+        /must use https|必须使用 HTTPS/
     );
 });
 
@@ -31,7 +31,7 @@ test('desktop update policy allows explicit loopback dev feeds only', () => {
     );
     assert.throws(
         () => assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases'),
-        /must use https/
+        /must use https|必须使用 HTTPS/
     );
 });
 
@@ -51,7 +51,7 @@ test('desktop update policy enforces allowed origins', () => {
             url: 'https://evil.example.com/pivot',
             allowedOrigins: ['https://updates.example.com']
         }),
-        /not in config\.autoUpdate\.allowedOrigins/
+        /not in config\.autoUpdate\.allowedOrigins|未在 allowedOrigins 允许列表中|不在配置的自动更新来源白名单/
     );
 });
 
@@ -79,7 +79,7 @@ test('desktop update path rejects full URLs', () => {
     );
     assert.throws(
         () => normalizeUpdatePath('https://updates.example.com/pivot/'),
-        /must be a URL path/
+        /must be a URL path|必须为 URL 相对路径|必须是 URL 路径/
     );
 });
 
@@ -95,14 +95,14 @@ test('desktop update policy allows explicit LAN HTTP feeds with origin whitelist
         () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
             allowInsecureHttp: true
         }),
-        /allowedOrigins is required/
+        /allowedOrigins is required|必须配置 allowedOrigins/
     );
     assert.throws(
         () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
             allowInsecureHttp: true,
             allowedOrigins: ['http://other.lan:3000']
         }),
-        /not in config\.autoUpdate\.allowedOrigins/
+        /not in config\.autoUpdate\.allowedOrigins|未在 allowedOrigins 允许列表中|不在配置的自动更新来源白名单/
     );
 });
 

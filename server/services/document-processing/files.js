@@ -29,6 +29,7 @@ function normalizeJson(value, fallback = {}) {
 }
 
 function parseJson(value, fallback = {}) {
+    if (value && typeof value === 'object') return value;
     try {
         return value ? JSON.parse(value) : fallback;
     } catch (_err) {

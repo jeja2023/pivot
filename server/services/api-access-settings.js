@@ -1,4 +1,4 @@
-const { getAppSettingValue, setAppSetting } = require('./app-settings');
+const { getAppSettingValue, setAppSettingAsync } = require('./app-settings');
 
 const API_ACCESS_SETTING_KEY = 'api_access_enabled';
 
@@ -12,9 +12,9 @@ function getApiAccessSetting() {
     return process.env.API_ACCESS_ENABLED !== 'false';
 }
 
-function setApiAccessSetting(enabled, updatedBy) {
+async function setApiAccessSetting(enabled, updatedBy) {
     const value = enabled ? 'true' : 'false';
-    setAppSetting(API_ACCESS_SETTING_KEY, value, { updatedBy: updatedBy || null });
+    await setAppSettingAsync(API_ACCESS_SETTING_KEY, value, { updatedBy: updatedBy || null });
     return getApiAccessSetting();
 }
 

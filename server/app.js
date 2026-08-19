@@ -37,7 +37,7 @@ const {
 } = require('./services/dir-size-cache');
 const {
     enqueueAuditLog,
-    flushAllSqliteWrites
+    flushAllWrites
 } = require('./services/db-write-queue');
 const appConfig = validateConfig();
 const appVersion = getAppVersion();
@@ -597,5 +597,5 @@ app.use((err, req, res, _next) => {
     });
 });
 
-module.exports = { app, appConfig, appVersion, logger, flushAllSqliteWrites };
+module.exports = { app, appConfig, appVersion, logger, flushAllWrites };
 

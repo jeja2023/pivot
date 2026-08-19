@@ -5,10 +5,6 @@ const {
     getSafeOutboundOptionsForUser
 } = require('../../security');
 
-function appDb() {
-    return require('../../db').db;
-}
-
 // 数据库出站 SSRF 守卫：解析 DNS 后校验真实 IP，拦截 loopback / link-local / 云元数据等敏感目标，
 // 默认仅管理员可连接内网（RFC1918）数据库（受 MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN 控制）。
 function databaseOutboundOptions(user) {
@@ -38,21 +34,6 @@ async function assertSafeDatabaseHost(host, user) {
 // 为关系型驱动构造安全 lookup 钩子，连接握手阶段对解析出的 IP 再次校验，阻断 DNS rebinding。
 function databaseSafeLookup(user) {
     return createSafeLookup(databaseOutboundOptions(user));
-}
-
-// 连接执行阶段无法获取请求用户，按连接归属者（user_id）的管理员身份套用同一内网放行策略，
-// 与配置入库时的校验语义保持一致；查不到归属者时按普通用户（不放行内网）处理。
-function getConnectionOwner(connection = {}) {
-    // 测试连接路径无 user_id，可直接附带已校验的请求用户（_owner）。
-    if (connection._owner) return connection._owner;
-    if (!connection.user_id) return null;
-    try {
-        const database = appDb();
-        if (!database) return null;
-        return database.prepare('SELECT id, username, role, status FROM users WHERE id = ?').get(connection.user_id) || null;
-    } catch (e) {
-        return null;
-    }
 }
 
 async function getConnectionOwnerAsync(connection = {}) {
@@ -334,7 +315,6 @@ module.exports = {
     databaseOutboundOptions,
     assertSafeDatabaseHost,
     databaseSafeLookup,
-    getConnectionOwner,
     getConnectionOwnerAsync,
     createDatabaseMcpError,
     databaseConnectionDiagnostics,

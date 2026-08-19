@@ -1,6 +1,10 @@
 const { getAppSettingValue } = require('./app-settings');
 const { decryptSecret, encryptSecret } = require('../security');
 const { getRagLimits } = require('./resource-limits');
+const {
+    getUserSettingValue,
+    getUserSettingValueAsync
+} = require('./user-settings');
 
 const RAG_CONFIG_KEYS = {
     scoreThreshold: 'rag_score_threshold',
@@ -32,31 +36,6 @@ function clampInteger(value, fallback, min, max) {
 
 function getSettingValue(key) {
     return getAppSettingValue(key);
-}
-
-function getUserSettingValue(userId, key) {
-    const normalizedUserId = Number.parseInt(userId, 10);
-    if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return undefined;
-    const database = require('../db').db;
-    if (!database) return undefined;
-    try {
-        const row = database.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(normalizedUserId, key);
-        return row?.value;
-    } catch (e) {
-        return undefined;
-    }
-}
-
-async function getUserSettingValueAsync(userId, key) {
-    const normalizedUserId = Number.parseInt(userId, 10);
-    if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return undefined;
-    const { queryOne } = require('../db/client');
-    try {
-        const row = await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [normalizedUserId, key]);
-        return row?.value;
-    } catch (e) {
-        return undefined;
-    }
 }
 
 function normalizeEmbeddingMode(_value) {

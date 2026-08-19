@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const Sqlite = require('better-sqlite3');
+const Module = require('node:module');
 
 const migrations = require('../server/db/migrations');
 const { runVersionedMigrations } = require('../server/db/migrations/runner');
@@ -34,6 +35,35 @@ function clearServerDbModules() {
             delete require.cache[key];
         }
     });
+}
+
+function withDbModuleConnection(relativePath, database, callback) {
+    const filename = path.resolve(__dirname, '..', relativePath);
+    const connectionPath = path.resolve(__dirname, '..', 'server', 'db', 'connection.js');
+    const savedConnection = require.cache[connectionPath];
+    const removed = [];
+    Object.keys(require.cache).forEach(key => {
+        const normalized = key.replace(/\\/g, '/');
+        if (normalized.includes('/server/db/')) {
+            removed.push([key, require.cache[key]]);
+            delete require.cache[key];
+        }
+    });
+
+    const dbModule = new Module(connectionPath);
+    dbModule.filename = connectionPath;
+    dbModule.loaded = true;
+    dbModule.exports = { db: database };
+    require.cache[connectionPath] = dbModule;
+    try {
+        return callback(require(filename));
+    } finally {
+        delete require.cache[connectionPath];
+        if (savedConnection) require.cache[connectionPath] = savedConnection;
+        removed.forEach(([key, entry]) => {
+            require.cache[key] = entry;
+        });
+    }
 }
 
 test('versioned migrations upgrade legacy RAG chunk snapshots idempotently', () => {
@@ -142,6 +172,19 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
             content TEXT NOT NULL,
             created_at DATETIME
         );
+        CREATE TABLE attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            file_path TEXT,
+            created_at DATETIME
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT,
+            timestamp DATETIME
+        );
         CREATE TABLE knowledge_docs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -158,20 +201,19 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
         INSERT INTO knowledge_docs (id, user_id, name, status, created_at) VALUES (1, 1, 'legacy-doc', 'ready', '2024-01-01 00:00:00');
     `);
     legacyDb.prepare('INSERT INTO knowledge_chunks (doc_id, content) VALUES (?, ?)').run(1, legacyText);
-    legacyDb.close();
 
     try {
         process.env.DATA_DIR = dataDir;
-        clearServerDbModules();
-        const booted = require('../server/db');
-        const row = booted.db.prepare('SELECT search_content FROM knowledge_chunks WHERE id = 1').get();
+        withDbModuleConnection('server/db/schema.js', legacyDb, ({ initSchema }) => initSchema());
+        withDbModuleConnection('server/db/migrate.js', legacyDb, ({ runMigrations }) => runMigrations());
+        const row = legacyDb.prepare('SELECT search_content FROM knowledge_chunks WHERE id = 1').get();
         assert.match(row.search_content, /legacy/);
         assert.match(row.search_content, /\u4e2d\u6587/);
-        assert.ok(booted.db.prepare('SELECT id FROM schema_migrations WHERE id = ?').get(migrationId));
-        assert.equal(booted.db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, 1);
-        booted.db.close();
+        assert.ok(legacyDb.prepare('SELECT id FROM schema_migrations WHERE id = ?').get(migrationId));
+        assert.equal(legacyDb.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, 1);
     } finally {
         clearServerDbModules();
+        legacyDb.close();
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
         removeDir(dataDir);
@@ -199,6 +241,33 @@ test('database boot migrates legacy automation columns before creating dependent
             status TEXT DEFAULT 'queued',
             created_at DATETIME
         );
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            title TEXT,
+            created_at DATETIME
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME
+        );
+        CREATE TABLE attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            file_path TEXT,
+            created_at DATETIME
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT,
+            timestamp DATETIME
+        );
         CREATE TABLE agent_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -209,16 +278,15 @@ test('database boot migrates legacy automation columns before creating dependent
             deleted_at DATETIME
         );
     `);
-    legacyDb.close();
 
     try {
         process.env.DATA_DIR = dataDir;
-        clearServerDbModules();
-        const booted = require('../server/db');
-        const runColumns = booted.db.prepare('PRAGMA table_info(agent_runs)').all().map(column => column.name);
-        const scheduleColumns = booted.db.prepare('PRAGMA table_info(agent_schedules)').all().map(column => column.name);
-        const runIndexes = booted.db.prepare('PRAGMA index_list(agent_runs)').all().map(index => index.name);
-        const scheduleIndexes = booted.db.prepare('PRAGMA index_list(agent_schedules)').all().map(index => index.name);
+        withDbModuleConnection('server/db/schema.js', legacyDb, ({ initSchema }) => initSchema());
+        withDbModuleConnection('server/db/migrate.js', legacyDb, ({ runMigrations }) => runMigrations());
+        const runColumns = legacyDb.prepare('PRAGMA table_info(agent_runs)').all().map(column => column.name);
+        const scheduleColumns = legacyDb.prepare('PRAGMA table_info(agent_schedules)').all().map(column => column.name);
+        const runIndexes = legacyDb.prepare('PRAGMA index_list(agent_runs)').all().map(index => index.name);
+        const scheduleIndexes = legacyDb.prepare('PRAGMA index_list(agent_schedules)').all().map(index => index.name);
 
         assert.ok(runColumns.includes('dedupe_key'));
         assert.ok(scheduleColumns.includes('claim_token'));
@@ -228,9 +296,9 @@ test('database boot migrates legacy automation columns before creating dependent
         assert.ok(scheduleColumns.includes('cron_expression'));
         assert.ok(runIndexes.includes('idx_agent_runs_user_dedupe'));
         assert.ok(scheduleIndexes.includes('idx_agent_schedules_dispatch'));
-        booted.db.close();
     } finally {
         clearServerDbModules();
+        legacyDb.close();
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
         removeDir(dataDir);

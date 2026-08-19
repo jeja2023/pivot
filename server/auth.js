@@ -329,6 +329,7 @@ async function authMiddleware(req, res, next) {
 
         if (auth.user) {
             req.user = auth.user;
+            if (req.raw) req.raw.user = auth.user;
             if (auth.apiKeyData) {
                 req.isApiKey = true;
                 req.apiKeyId = auth.apiKeyData.id;

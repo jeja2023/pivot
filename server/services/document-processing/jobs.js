@@ -237,7 +237,7 @@ async function isCancelled(jobId) {
 
 async function touchProgress(jobId, progress, resultPatch = null) {
     const row = await getJobRow(jobId);
-    if (!row || row.status === JOB_STATUSES.CANCELLED) return null;
+    if (!row || [JOB_STATUSES.CANCELLED, JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW].includes(row.status)) return null;
     const result = resultPatch ? { ...parseJson(row.result_json, {}), ...resultPatch } : parseJson(row.result_json, {});
     return await setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result });
 }

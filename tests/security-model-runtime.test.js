@@ -58,7 +58,13 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
         exports: module.exports,
         require: (request) => {
             if (request === 'axios') return axios;
-            if (request === '../db') return { db: fakeDb };
+            if (request === '../db/client') {
+                return {
+                    query: async (sql) => fakeDb.prepare(sql).all(),
+                    queryOne: async (sql) => fakeDb.prepare(sql).get(),
+                    execute: async (sql) => fakeDb.prepare(sql).run().changes
+                };
+            }
             if (request === '../logger') return { logger: { info() {}, warn() {}, error() {} } };
             if (request === '../time') return { getBeijingTimestamp: () => '2026-06-26 00:00:00' };
             if (request === './model-adapter') {
@@ -184,15 +190,16 @@ test('model runtime starts monitor loop with setTimeout only', async () => {
     assert.equal(setTimeoutCalls.length, 1);
 });
 
-test('model runtime uses runtime default concurrency when model endpoint does not override it', () => {
+test('model runtime uses runtime default concurrency when model endpoint does not override it', async () => {
     const { runtime } = loadModelRuntimeHarness({ defaultConcurrency: 2, modelMaxConcurrent: 0 });
+    await runtime.refreshAllEndpointMonitors();
     const status = runtime.getModelEndpointRuntimeStatus();
     assert.equal(status.length, 1);
     assert.equal(status[0].configuredMaxConcurrent, 2);
     assert.equal(status[0].concurrency.max, 2);
 });
 
-test('model runtime keeps shared endpoint at saved runtime concurrency when one model has a lower override', () => {
+test('model runtime keeps shared endpoint at saved runtime concurrency when one model has a lower override', async () => {
     const { runtime } = loadModelRuntimeHarness({
         defaultConcurrency: 2,
         models: [
@@ -216,6 +223,7 @@ test('model runtime keeps shared endpoint at saved runtime concurrency when one 
             }
         ]
     });
+    await runtime.refreshAllEndpointMonitors();
     const status = runtime.getModelEndpointRuntimeStatus();
     assert.equal(status.length, 1);
     assert.equal(status[0].models.length, 2);
@@ -248,6 +256,7 @@ test('model runtime request path preserves shared endpoint max while active rows
         models: activeModels
     });
 
+    await runtime.refreshAllEndpointMonitors();
     const initialStatus = runtime.getModelEndpointRuntimeStatus();
     assert.equal(initialStatus[0].concurrency.max, 2);
     assert.equal(getSemaphores()[0].maxConcurrent, 2);

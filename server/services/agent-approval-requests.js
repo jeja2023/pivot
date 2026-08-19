@@ -830,7 +830,7 @@ async function completeDelayRequest(row, { enqueue = true } = {}) {
     const changes = await execute(`
         UPDATE agent_approval_requests
         SET status = 'completed', decided_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
+        WHERE id = ? AND status = 'pending' AND updated_at IS NOT DISTINCT FROM ?
     `, [now, now, row.id, row.updated_at]);
     if (!changes) return buildDelayOutput((await getRequestById(row.id)) || row);
     const updated = (await getRequestById(row.id)) || row;
@@ -936,7 +936,7 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
             UPDATE agent_approval_requests
             SET status = 'rejected', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
                 callback_token_hash = NULL, callback_nonce = ''
-            WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+            WHERE id = ? AND status = 'pending' AND updated_at IS NOT DISTINCT FROM ? AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
         `, [JSON.stringify(decisions), now, actor?.id || null, now, row.id, row.updated_at, row.decisions_json]);
         if (!changes) return formatRequest(await getRequestById(row.id), actor);
         const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval', 'running'], {
@@ -965,7 +965,7 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
         await execute(`
             UPDATE agent_approval_requests
             SET decisions_json = ?, updated_at = ?
-            WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+            WHERE id = ? AND status = 'pending' AND updated_at IS NOT DISTINCT FROM ? AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
         `, [JSON.stringify(decisions), now, row.id, row.updated_at, row.decisions_json]);
         return formatRequest(await getRequestById(row.id), actor);
     }
@@ -975,7 +975,7 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
             UPDATE agent_approval_requests
             SET current_level = current_level + 1, decisions_json = ?, updated_at = ?,
                 callback_token_hash = ?, callback_token_hint = ?, callback_nonce = ?
-            WHERE id = ? AND status = 'pending' AND current_level = ? AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+            WHERE id = ? AND status = 'pending' AND current_level = ? AND updated_at IS NOT DISTINCT FROM ? AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
         `, [JSON.stringify(decisions), now, hashToken(token), token.slice(-8), createCallbackNonce(), row.id, current, row.updated_at, row.decisions_json]);
         if (!changes) return formatRequest(await getRequestById(row.id), actor);
         const updated = await getRequestById(row.id);
@@ -993,7 +993,7 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
         UPDATE agent_approval_requests
         SET status = 'approved', decisions_json = ?, decided_at = ?, decided_by = ?, updated_at = ?,
             callback_token_hash = NULL, callback_nonce = ''
-        WHERE id = ? AND status = 'pending' AND current_level = ? AND COALESCE(updated_at, '') = COALESCE(?, '') AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
+        WHERE id = ? AND status = 'pending' AND current_level = ? AND updated_at IS NOT DISTINCT FROM ? AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
     `, [JSON.stringify(decisions), now, actor?.id || null, now, row.id, current, row.updated_at, row.decisions_json]);
     if (!changes) return formatRequest(await getRequestById(row.id), actor);
     const updated = await getRequestById(row.id);
@@ -1090,7 +1090,7 @@ async function expireApprovalRequest(row) {
     const changes = await execute(`
         UPDATE agent_approval_requests
         SET status = 'expired', decided_at = ?, updated_at = ?, callback_token_hash = NULL, callback_nonce = ''
-        WHERE id = ? AND status = 'pending' AND COALESCE(updated_at, '') = COALESCE(?, '')
+        WHERE id = ? AND status = 'pending' AND updated_at IS NOT DISTINCT FROM ?
     `, [now, now, row.id, row.updated_at]);
     if (!changes) return formatRequest(await getRequestById(row.id));
     const runChanged = await updateRunRecordCas(row.run_id, ['awaiting_approval'], {

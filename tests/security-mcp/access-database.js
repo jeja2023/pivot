@@ -16,7 +16,7 @@ const {
 test('MCP 出站防护阻止普通用户访问回环地址，并允许管理员访问回环地址', async () => {
     await assert.rejects(
         assertSafeMcpOutboundUrl('http://127.0.0.1:3001/rpc', { role: 'user' }),
-        /private or local MCP endpoints|sensitive local|metadata target/
+        /private or local MCP endpoints|sensitive local|metadata target|非管理员用户不可配置私有或本地|敏感的本地|云元数据/
     );
     await assert.doesNotReject(
         assertSafeMcpOutboundUrl('http://127.0.0.1:3001/rpc', { role: 'admin' })
@@ -231,7 +231,7 @@ test('数据库 MCP 预设暴露 SQLite 只读工具并拒绝写入', async () =
         const writeRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
         await assert.rejects(
             runExpressHandlers(callRoute.route.stack.map(layer => layer.handle), writeReq, writeRes),
-            /Only readonly SQL|blocked write/
+            /Only readonly SQL|blocked write|只允许执行只读 SQL|仅允许执行只读 SQL/
         );
     } finally {
         if (serverId) {
@@ -342,7 +342,7 @@ test('MCP outbound policy normalizes IPv4-mapped IPv6 literals', async () => {
     for (const host of ['127.0.0.1', '10.0.0.1', '169.254.169.254']) {
         await assert.rejects(
             assertSafeMcpOutboundUrl(`http://[::ffff:${host}]:3001/rpc`, { role: 'user' }),
-            /private or local MCP endpoints|sensitive local|metadata target/
+            /private or local MCP endpoints|sensitive local|metadata target|非管理员用户不可配置私有或本地|敏感的本地|云元数据/
         );
     }
 });
