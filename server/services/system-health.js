@@ -13,7 +13,7 @@ function checkDatabase() {
         const pool = getPgPool();
         return {
             status: pool ? 'ok' : 'degraded',
-            message: pool ? 'PostgreSQL pool connected' : 'PostgreSQL pool not initialized'
+            message: pool ? 'PostgreSQL 连接池运行正常' : 'PostgreSQL 连接池未初始化'
         };
     } catch (e) {
         return { status: 'error', message: e.message };
@@ -27,7 +27,7 @@ function checkWritableDirectory(label, dir) {
         fs.mkdirSync(resolved, { recursive: true });
         fs.writeFileSync(probe, 'ok');
         fs.unlinkSync(probe);
-        return { label, path: resolved, status: 'ok', message: 'Writable' };
+        return { label, path: resolved, status: 'ok', message: '目录正常可写' };
     } catch (e) {
         try {
             if (fs.existsSync(probe)) fs.unlinkSync(probe);
@@ -76,7 +76,7 @@ function checkDiskUsage(dir) {
         usedRatio: 0,
         freeBytes: null,
         totalBytes: null,
-        message: 'Disk statfs not supported on this platform'
+        message: '当前运行平台不支持 statfs 磁盘探针'
     };
 }
 

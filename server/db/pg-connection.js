@@ -69,11 +69,13 @@ function getPgPool() {
             throw new Error('[PG] DATABASE_URL 未配置，无法初始化 PostgreSQL 连接池');
         }
         applyPgTypeParsers();
+        const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '60000', 10);
         pgPool = new Pool({
             connectionString,
             max: parseInt(process.env.PG_POOL_MAX || '10', 10),
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             connectionTimeoutMillis: parseInt(process.env.PG_CONNECT_TIMEOUT_MS || '5000', 10),
+            statement_timeout: statementTimeout > 0 ? statementTimeout : undefined,
             // 连接级会话参数：确保 timestamptz 文本输出即北京时间
             options: `-c timezone=${PG_TIMEZONE}`,
         });

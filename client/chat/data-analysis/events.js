@@ -84,14 +84,12 @@
                 'data-analysis-history-dataset'
             ].includes(event.target?.id)) {
                 const targetDatasetId = event.target.value;
-                console.log('[data-analysis] 数据集选择', { selectId: event.target.id, targetDatasetId });
                 try {
                     await loadDatasetDetail(targetDatasetId);
                 } catch (e) {
                     console.error('[data-analysis] loadDatasetDetail 失败', e);
                     toast(e && e.message ? e.message : '加载数据集详情失败', 'error');
                 }
-                console.log('[data-analysis] 加载后 state.activeId =', state.activeId, '；activeDataset =', app.activeDataset());
                 const activeTabEl = document.querySelector('.data-analysis-tab.active');
                 const activeTabName = activeTabEl?.dataset.dataAnalysisTab;
                 if (activeTabName === 'history') loadArtifacts();
