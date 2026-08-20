@@ -232,7 +232,7 @@
                         </div>
                     </section>
                     <section id="data-analysis-ai-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 12px;">
+                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 8px;">
                             <span>分析数据集</span>
                             <select id="data-analysis-ai-dataset" class="form-input"></select>
                         </div>
