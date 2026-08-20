@@ -109,16 +109,27 @@ function pgEnqueue(queueName, item) {
     pgSchedule();
 }
 
+const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast/i;
+
 function sanitizeQueueValue(field, val) {
     if (val === undefined || val === null) return null;
-    // 整型与计数列校验：严格防范 Object/Promise/NaN 传进 PostgreSQL BIGINT 列
+    // 整型与主外键列校验：严格防范 Object/Promise/NaN/无效字符传进 PostgreSQL BIGINT/INTEGER 列
     if (/Id|Tokens|Count|durationMs/i.test(field)) {
-        if (typeof val === 'number') return Number.isFinite(val) ? Math.floor(val) : null;
+        if (typeof val === 'number') {
+            return Number.isFinite(val) ? (field.endsWith('Id') ? (val > 0 ? Math.floor(val) : null) : Math.floor(val)) : null;
+        }
         if (typeof val === 'string') {
             const parsed = parseInt(val, 10);
-            return Number.isNaN(parsed) ? null : parsed;
+            return Number.isNaN(parsed) ? null : (field.endsWith('Id') ? (parsed > 0 ? parsed : null) : parsed);
         }
         return null;
+    }
+    if (field === 'action') {
+        const str = String(val || '').trim();
+        return str || '系统操作';
+    }
+    if (field === 'stream') {
+        return val === true || val === 1 || val === '1' ? 1 : 0;
     }
     if (typeof val === 'object' && !(val instanceof Date)) {
         try { return JSON.stringify(val); } catch (_) { return String(val); }
@@ -151,14 +162,35 @@ async function pgFlushQueue(queueName) {
             const { getPgPool } = require('../db/pg-connection');
             await getPgPool().query(sql, params);
         } catch (err) {
-            // 对严重不可恢复的数据格式错误（如 invalid input syntax）直接丢弃，其余网络/服务异常一律回退队首重试
-            const isDataCorruption = /invalid input syntax|character not in repertoire/i.test(err.message || '');
-            if (!isDataCorruption) {
-                queue.unshift(...batch);
+            const isUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(err.message || '');
+            // 如果是多条记录批量写入失败，先降级尝试单行逐条插入，避免 1 条脏数据阻塞整批 50 条正常日志
+            if (batch.length > 1) {
+                const { getPgPool } = require('../db/pg-connection');
+                const pool = getPgPool();
+                const singleSql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES (${spec.fields.map((_, i) => `$${i + 1}`).join(', ')})`;
+                for (const item of batch) {
+                    try {
+                        const singleParams = spec.fields.map(f => sanitizeQueueValue(f, item[f]));
+                        await pool.query(singleSql, singleParams);
+                    } catch (singleErr) {
+                        const singleUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(singleErr.message || '');
+                        if (singleUnrecoverable) {
+                            logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
+                        } else {
+                            // 临时数据库连接异常，单条放回队首并抛出重试
+                            queue.unshift(item);
+                            throw singleErr;
+                        }
+                    }
+                }
             } else {
-                logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生数据格式异常，已丢弃不可恢复批次');
+                if (isUnrecoverable) {
+                    logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
+                } else {
+                    queue.unshift(...batch);
+                    throw err;
+                }
             }
-            throw err;
         }
     }
 }
@@ -169,21 +201,25 @@ async function pgFlush() {
 
     pgFlushing = (async () => {
         try {
+            let hasError = false;
             for (const queueName of Object.keys(pgQueues)) {
                 if (pgQueues[queueName].length === 0) continue;
                 try {
                     await pgFlushQueue(queueName);
                 } catch (err) {
+                    hasError = true;
                     logger.warn(
                         { err: err.message, queueName, pending: pgQueues[queueName].length },
                         '[PG] 写入队列刷新失败，稍后重试'
                     );
-                    pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
-                    pgSchedule(pgRetryDelayMs);
-                    return;
                 }
             }
-            pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
+            if (hasError) {
+                pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
+                pgSchedule(pgRetryDelayMs);
+            } else {
+                pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
+            }
         } finally {
             pgFlushing = null;
         }
